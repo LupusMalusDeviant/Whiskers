@@ -163,11 +163,19 @@ builder.Services.AddMcpServer()
 // MudBlazor
 builder.Services.AddMudServices();
 
-// Authentication - Google OAuth
+// Authentication - Google OAuth (or full bypass for trusted LAN-only deployments)
+var authDisabled = builder.Configuration.GetValue<bool>("Auth:Disabled");
 var googleAuthSection = builder.Configuration.GetSection(GoogleAuthSettings.SectionName);
 var googleClientId = googleAuthSection["ClientId"];
 
-if (!string.IsNullOrWhiteSpace(googleClientId))
+if (authDisabled)
+{
+    // No real auth — every request is signed in as a local user.
+    // ONLY safe on a trusted private network. Set via Auth__Disabled=true env var.
+    builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+        .AddCookie(options => { options.LoginPath = "/login"; });
+}
+else if (!string.IsNullOrWhiteSpace(googleClientId))
 {
     builder.Services.AddAuthentication(options =>
     {
@@ -245,6 +253,24 @@ if (!app.Environment.IsDevelopment())
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.UseAuthentication();
+
+// Auth bypass for trusted LAN deployments — inject a synthetic authenticated
+// principal so [Authorize]-protected pages render without a login flow.
+if (authDisabled)
+{
+    app.Use(async (ctx, next) =>
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.Name, "local"),
+            new Claim(ClaimTypes.Email, "local@serverwatch.local"),
+            new Claim(ClaimTypes.NameIdentifier, "local-user"),
+        }, authenticationType: "AuthDisabled");
+        ctx.User = new ClaimsPrincipal(identity);
+        await next();
+    });
+}
+
 app.UseMiddleware<ServerWatch.Mcp.McpBearerAuthMiddleware>();
 app.UseAuthorization();
 
