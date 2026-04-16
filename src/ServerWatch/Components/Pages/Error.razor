@@ -1,0 +1,36 @@
+﻿@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Fehler</PageTitle>
+
+<h1 class="text-danger">Fehler.</h1>
+<h2 class="text-danger">Bei der Verarbeitung Ihrer Anfrage ist ein Fehler aufgetreten.</h2>
+
+@if (ShowRequestId)
+{
+    <p>
+        <strong>Anfragen-ID:</strong> <code>@RequestId</code>
+    </p>
+}
+
+<h3>Entwicklungsmodus</h3>
+<p>
+    Der Wechsel zur <strong>Entwicklungs</strong>umgebung zeigt detailliertere Informationen über den aufgetretenen Fehler an.
+</p>
+<p>
+    <strong>Die Entwicklungsumgebung sollte für bereitgestellte Anwendungen nicht aktiviert werden.</strong>
+    Sie kann dazu führen, dass sensible Informationen aus Ausnahmen an Endbenutzer angezeigt werden.
+    Für lokales Debugging aktivieren Sie die <strong>Entwicklungs</strong>umgebung, indem Sie die Umgebungsvariable <strong>ASPNETCORE_ENVIRONMENT</strong> auf <strong>Development</strong> setzen
+    und die App neu starten.
+</p>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

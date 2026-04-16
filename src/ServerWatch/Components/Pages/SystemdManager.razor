@@ -1,0 +1,162 @@
+@page "/services/{ServerId}"
+@attribute [Authorize]
+@inject ServerWatch.Services.Server.SystemdService SystemdService
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Dienste - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.MiscellaneousServices" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Systemdienste</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Systemd-Units starten, stoppen und überwachen</MudText>
+        </div>
+        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
+        <MudSpacer />
+        <MudTextField @bind-Value="_filter" Placeholder="Filtern..." Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" />
+    </MudStack>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="@FilteredServices" Dense="true" Hover="true" Striped="true" Elevation="2"
+              FixedHeader="true" Height="calc(100vh - 250px)">
+        <HeaderContent>
+            <MudTh>Dienst</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>Aktiviert</MudTh>
+            <MudTh>Beschreibung</MudTh>
+            <MudTh>Aktionen</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><MudText Style="font-family: monospace;">@context.Name</MudText></MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@GetStateColor(context.ActiveState, context.SubState)"
+                         Variant="Variant.Filled">
+                    @context.ActiveState/@context.SubState
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Enabled ? Color.Success : Color.Default)"
+                         Variant="Variant.Text">
+                    @(context.Enabled ? "aktiviert" : "deaktiviert")
+                </MudChip>
+            </MudTd>
+            <MudTd><MudText Typo="Typo.body2">@context.Description</MudText></MudTd>
+            <MudTd>
+                @if (context.ActiveState == "active")
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
+                                   Title="Stoppen" OnClick="@(() => ManageService(context.Name, "stop"))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
+                                   Title="Neustarten" OnClick="@(() => ManageService(context.Name, "restart"))" />
+                }
+                else
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                   Title="Starten" OnClick="@(() => ManageService(context.Name, "start"))" />
+                }
+                <MudIconButton Icon="@Icons.Material.Filled.Article" Size="Size.Small" Color="Color.Default"
+                               Title="Protokoll" OnClick="@(() => ShowJournal(context.Name))" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@if (_journalService != null)
+{
+    <MudDialog Visible="_showJournal" VisibleChanged="@(v => _showJournal = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
+        <TitleContent>Protokoll: @_journalService</TitleContent>
+        <DialogContent>
+            <MudPaper Style="max-height: 500px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; padding: 16px; background: #0d1117;">
+                @_journalContent
+            </MudPaper>
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showJournal = false)">Schließen</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    [Parameter] public string ServerId { get; set; } = "";
+
+    private string _serverName = "";
+    private bool _loading = true;
+    private string _filter = "";
+    private List<ServerWatch.Services.Server.SystemdUnit> _services = new();
+    private string? _journalService;
+    private string _journalContent = "";
+    private bool _showJournal;
+
+    private IEnumerable<ServerWatch.Services.Server.SystemdUnit> FilteredServices =>
+        string.IsNullOrEmpty(_filter)
+            ? _services
+            : _services.Where(s => s.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                                   || s.Description.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var server = ServerConfigService.GetServer(ServerId);
+        _serverName = server?.Name ?? ServerId;
+        await LoadServices();
+    }
+
+    private async Task LoadServices()
+    {
+        _loading = true;
+        try { _services = await SystemdService.ListServicesAsync(ServerId); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        _loading = false;
+    }
+
+    private async Task ManageService(string name, string action)
+    {
+        try
+        {
+            var result = action switch
+            {
+                "start" => await SystemdService.StartAsync(ServerId, name),
+                "stop" => await SystemdService.StopAsync(ServerId, name),
+                "restart" => await SystemdService.RestartAsync(ServerId, name),
+                _ => throw new ArgumentException($"Unknown action: {action}")
+            };
+            Snackbar.Add(result.Success ? $"{name}: {action} erfolgreich" : $"{name}: {result.Error}",
+                result.Success ? Severity.Success : Severity.Error);
+            await LoadServices();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task ShowJournal(string name)
+    {
+        try
+        {
+            _journalContent = await SystemdService.GetJournalAsync(ServerId, name);
+            _journalService = name;
+            _showJournal = true;
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static Color GetStateColor(string active, string sub) => active switch
+    {
+        "active" when sub == "running" => Color.Success,
+        "active" => Color.Info,
+        "failed" => Color.Error,
+        _ => Color.Default
+    };
+}

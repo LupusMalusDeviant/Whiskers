@@ -1,0 +1,17 @@
+{
+  "name": "ServerWatch",
+  "short_name": "ServerWatch",
+  "description": "Docker Container & Server Management",
+  "start_url": "/serverwatch/",
+  "scope": "/serverwatch/",
+  "display": "standalone",
+  "background_color": "#0a0a1a",
+  "theme_color": "#60a5fa",
+  "icons": [
+    {
+      "src": "favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

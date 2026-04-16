@@ -1,0 +1,334 @@
+@page "/servers"
+@attribute [Authorize]
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.Docker.DockerConnectionManager ConnectionManager
+@inject ServerWatch.Services.Tailscale.TailscaleService TailscaleService
+@inject ISnackbar Snackbar
+
+<PageTitle>Server - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Serververwaltung</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Server hinzufügen, konfigurieren und verwalten</MudText>
+        </div>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="ShowAddDialog">Server hinzufügen</MudButton>
+    </MudStack>
+</div>
+
+<MudTable Items="@_servers" Dense="true" Hover="true" Striped="true" Elevation="2">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Host</MudTh>
+        <MudTh>Typ</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Aktionen</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>
+            @context.Name
+            @if (context.IsDefault)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" Class="ml-2">Standard</MudChip>
+            }
+            @if (context.VpnType != ServerWatch.Models.VpnType.None)
+            {
+                <MudTooltip Text="@(context.VpnNote ?? $"Nur über {context.VpnType} erreichbar")">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined" Class="ml-2">
+                        <MudIcon Icon="@Icons.Material.Filled.VpnLock" Size="Size.Small" Class="mr-1" />@context.VpnType
+                    </MudChip>
+                </MudTooltip>
+            }
+        </MudTd>
+        <MudTd Style="font-family: monospace;">
+            @switch (context.ConnectionType)
+            {
+                case ServerWatch.Models.ConnectionType.Local:
+                    @context.SocketPath
+                    break;
+                case ServerWatch.Models.ConnectionType.TCP:
+                    @($"{context.TcpHost}:{context.TcpPort}")
+                    break;
+                case ServerWatch.Models.ConnectionType.SSH:
+                    @($"{context.SshUser}@@@{context.SshHost}:{context.SshPort}")
+                    break;
+            }
+        </MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     Color="@(context.ConnectionType == ServerWatch.Models.ConnectionType.SSH ? Color.Warning : context.ConnectionType == ServerWatch.Models.ConnectionType.TCP ? Color.Info : Color.Success)">
+                @context.ConnectionType
+            </MudChip>
+        </MudTd>
+        <MudTd>
+            @if (_testResults.TryGetValue(context.Id, out var result))
+            {
+                @if (result.Success)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">
+                        @result.ContainerCount Container
+                    </MudChip>
+                }
+                else
+                {
+                    <MudTooltip Text="@result.Error">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">Fehler</MudChip>
+                    </MudTooltip>
+                }
+            }
+            else if (_testing.Contains(context.Id))
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            }
+        </MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.NetworkCheck" Size="Size.Small" Color="Color.Primary"
+                           OnClick="@(() => TestConnection(context))" Title="Verbindung testen" />
+            @if (!context.IsDefault)
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Default"
+                               OnClick="@(() => EditServer(context))" Title="Bearbeiten" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => DeleteServer(context))" Title="Löschen" />
+            }
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@if (_showDialog)
+{
+    <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+        <TitleContent>@(_editingServer == null ? "Server hinzufügen" : "Server bearbeiten")</TitleContent>
+        <DialogContent>
+            <MudTextField @bind-Value="_form.Name" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect @bind-Value="_form.ConnectionType" Label="Verbindungstyp" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="ServerWatch.Models.ConnectionType.TCP">TCP (Docker Remote API)</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.ConnectionType.SSH">SSH Tunnel</MudSelectItem>
+            </MudSelect>
+
+            @if (_form.ConnectionType == ServerWatch.Models.ConnectionType.TCP)
+            {
+                <MudTextField @bind-Value="_form.TcpHost" Label="Host (Domain / IPv4 / IPv6)" Variant="Variant.Outlined" Class="mb-3" />
+                <MudNumericField @bind-Value="_form.TcpPort" Label="Port" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
+                <MudSwitch @bind-Value="_form.TcpUseTls" Label="TLS verwenden" Color="Color.Primary" />
+            }
+            else if (_form.ConnectionType == ServerWatch.Models.ConnectionType.SSH)
+            {
+                <MudTextField @bind-Value="_form.SshHost" Label="Host (Domain / IPv4 / IPv6)" Variant="Variant.Outlined" Class="mb-3" />
+                <MudNumericField @bind-Value="_form.SshPort" Label="SSH-Port" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
+                <MudTextField @bind-Value="_form.SshUser" Label="SSH-Benutzer" Variant="Variant.Outlined" Class="mb-3" />
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Key"
+                               HtmlTag="label" for="ssh-key-upload">
+                        @(_sshKeyFileName ?? "SSH-Schlüssel hochladen")
+                    </MudButton>
+                    <InputFile id="ssh-key-upload" OnChange="OnSshKeyFileChanged" style="display:none;" />
+                </MudStack>
+            }
+
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">VPN-Konfiguration</MudText>
+            <MudSelect @bind-Value="_form.VpnType" Label="VPN-Typ" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="ServerWatch.Models.VpnType.None">Kein VPN</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.VpnType.Tailscale">Tailscale</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.VpnType.WireGuard">WireGuard</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.VpnType.OpenVPN">OpenVPN</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.VpnType.Other">Sonstige</MudSelectItem>
+            </MudSelect>
+            @if (_form.VpnType == ServerWatch.Models.VpnType.Tailscale)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
+                    <MudTextField @bind-Value="_form.TailscaleIP" Label="Tailscale-IP (100.x.x.x)"
+                                  Variant="Variant.Outlined" Style="font-family: monospace;" />
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               OnClick="LoadTailscaleDevices" StartIcon="@Icons.Material.Filled.Refresh">
+                        Aus Tailnet
+                    </MudButton>
+                </MudStack>
+                @if (_tailscaleDevices.Any())
+                {
+                    <MudSelect T="string" Label="Gerät aus Tailnet wählen" Variant="Variant.Outlined" Class="mb-3"
+                               ValueChanged="@((string ip) => { _form.TailscaleIP = ip; if (string.IsNullOrEmpty(_form.SshHost)) _form.SshHost = ip; })">
+                        @foreach (var d in _tailscaleDevices.Where(d => d.Online))
+                        {
+                            <MudSelectItem Value="@d.TailscaleIP">@d.Hostname (@d.TailscaleIP) — @d.OS</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                <MudTextField @bind-Value="_form.VpnNote" Label="Hinweis (optional)"
+                              Variant="Variant.Outlined" Class="mb-3" />
+                <MudAlert Severity="Severity.Info" Dense="true">
+                    SSH-Verbindung wird automatisch über die Tailscale-IP geroutet.
+                </MudAlert>
+            }
+            else if (_form.VpnType != ServerWatch.Models.VpnType.None)
+            {
+                <MudTextField @bind-Value="_form.VpnNote" Label="Hinweis (z.B. 'Nur über VPN erreichbar')"
+                              Variant="Variant.Outlined" Class="mb-3" />
+                <MudAlert Severity="Severity.Info" Dense="true">
+                    Dieser Server ist nur über @_form.VpnType erreichbar. Stelle sicher, dass der VPN-Client aktiv ist.
+                </MudAlert>
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveServer"
+                       Disabled="@string.IsNullOrWhiteSpace(_form.Name)">Speichern</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private bool _showDialog;
+    private ServerWatch.Models.ServerConfig? _editingServer;
+    private ServerWatch.Models.ServerConfig _form = new();
+    private string? _sshKeyFileName;
+    private byte[]? _sshKeyData;
+    private HashSet<string> _testing = new();
+    private Dictionary<string, TestResult> _testResults = new();
+    private List<ServerWatch.Services.Tailscale.TailscaleDevice> _tailscaleDevices = new();
+
+    protected override void OnInitialized()
+    {
+        _servers = ServerConfigService.GetServers();
+    }
+
+    private void ShowAddDialog()
+    {
+        _editingServer = null;
+        _form = new ServerWatch.Models.ServerConfig { ConnectionType = ServerWatch.Models.ConnectionType.TCP };
+        _sshKeyFileName = null;
+        _sshKeyData = null;
+        _showDialog = true;
+    }
+
+    private void EditServer(ServerWatch.Models.ServerConfig server)
+    {
+        _editingServer = server;
+        _form = new ServerWatch.Models.ServerConfig
+        {
+            Id = server.Id,
+            Name = server.Name,
+            ConnectionType = server.ConnectionType,
+            TcpHost = server.TcpHost,
+            TcpPort = server.TcpPort,
+            TcpUseTls = server.TcpUseTls,
+            SshHost = server.SshHost,
+            SshPort = server.SshPort,
+            SshUser = server.SshUser,
+            SshKeyFileName = server.SshKeyFileName,
+            VpnType = server.VpnType,
+            VpnNote = server.VpnNote,
+            TailscaleIP = server.TailscaleIP
+        };
+        _sshKeyFileName = server.SshKeyFileName;
+        _sshKeyData = null;
+        _showDialog = true;
+    }
+
+    private async Task SaveServer()
+    {
+        if (_editingServer != null)
+        {
+            _form.Id = _editingServer.Id;
+            _form.IsDefault = _editingServer.IsDefault;
+            _form.Enabled = _editingServer.Enabled;
+
+            if (_sshKeyData != null && _sshKeyFileName != null)
+                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+
+            await ServerConfigService.UpdateServerAsync(_form);
+            ConnectionManager.InvalidateClient(_form.Id);
+            Snackbar.Add($"{_form.Name} aktualisiert", Severity.Success);
+        }
+        else
+        {
+            await ServerConfigService.AddServerAsync(_form);
+
+            if (_sshKeyData != null && _sshKeyFileName != null)
+                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+
+            Snackbar.Add($"{_form.Name} hinzugefügt", Severity.Success);
+        }
+
+        _servers = ServerConfigService.GetServers();
+        _showDialog = false;
+    }
+
+    private async Task DeleteServer(ServerWatch.Models.ServerConfig server)
+    {
+        try
+        {
+            ConnectionManager.InvalidateClient(server.Id);
+            await ServerConfigService.RemoveServerAsync(server.Id);
+            _servers = ServerConfigService.GetServers();
+            Snackbar.Add($"{server.Name} entfernt", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task TestConnection(ServerWatch.Models.ServerConfig server)
+    {
+        _testing.Add(server.Id);
+        _testResults.Remove(server.Id);
+        StateHasChanged();
+
+        try
+        {
+            var client = await ConnectionManager.GetClientAsync(server.Id);
+            var containers = await client.Containers.ListContainersAsync(
+                new Docker.DotNet.Models.ContainersListParameters { All = true });
+            _testResults[server.Id] = new TestResult { Success = true, ContainerCount = containers.Count };
+        }
+        catch (Exception ex)
+        {
+            _testResults[server.Id] = new TestResult { Success = false, Error = ex.Message };
+        }
+        finally
+        {
+            _testing.Remove(server.Id);
+        }
+    }
+
+    private async Task OnSshKeyFileChanged(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var ms = new MemoryStream();
+        await file.OpenReadStream(maxAllowedSize: 1024 * 100).CopyToAsync(ms);
+        _sshKeyData = ms.ToArray();
+        _sshKeyFileName = file.Name;
+    }
+
+    private async Task LoadTailscaleDevices()
+    {
+        try
+        {
+            _tailscaleDevices = await TailscaleService.GetDevicesAsync();
+            if (!_tailscaleDevices.Any())
+                Snackbar.Add("Keine Tailscale-Geräte gefunden. Ist Tailscale verbunden?", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Tailscale-Fehler: {ex.Message}", Severity.Error);
+            _tailscaleDevices = new();
+        }
+    }
+
+    private class TestResult
+    {
+        public bool Success { get; set; }
+        public int ContainerCount { get; set; }
+        public string? Error { get; set; }
+    }
+}

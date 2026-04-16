@@ -1,0 +1,74 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="0" Dense="true">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
+                       Edge="Edge.Start" OnClick="ToggleDrawer" Class="d-md-none" />
+        <MudSpacer />
+        <AuthorizeView>
+            <Authorized>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: rgba(255,255,255,0.6);">
+                    @context.User.Identity?.Name
+                </MudChip>
+                <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit"
+                               Href="logout" Title="Abmelden" Style="color: rgba(255,255,255,0.4);" />
+            </Authorized>
+        </AuthorizeView>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="0" Variant="@DrawerVariant.Responsive"
+               ClipMode="DrawerClipMode.Always" Breakpoint="Breakpoint.Md">
+        <NavMenu />
+    </MudDrawer>
+
+    <MudMainContent Style="padding-top: 68px;">
+        <div class="pa-4 pa-md-6" style="max-width: 1600px;">
+            @Body
+        </div>
+    </MudMainContent>
+
+    <ServerWatch.Components.Shared.AiChat />
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#f97316",
+            Secondary = "#fb923c",
+            AppbarBackground = "#09090b"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#f97316",
+            Secondary = "#fb923c",
+            Tertiary = "#22c55e",
+            Info = "#3b82f6",
+            Success = "#22c55e",
+            Warning = "#f59e0b",
+            Error = "#ef4444",
+            AppbarBackground = "#09090b",
+            Background = "#09090b",
+            Surface = "#111113",
+            DrawerBackground = "#09090b",
+            TextPrimary = "#e4e4e7",
+            TextSecondary = "#a1a1aa",
+            ActionDefault = "#a1a1aa",
+            DrawerText = "#a1a1aa",
+            DrawerIcon = "#71717a",
+            TableStriped = "#0c0c0e",
+            Divider = "#27272a",
+            LinesDefault = "#27272a"
+        }
+    };
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+}

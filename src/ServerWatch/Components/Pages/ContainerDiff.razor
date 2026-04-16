@@ -1,0 +1,180 @@
+@page "/diff"
+@attribute [Authorize]
+@inject IDockerService DockerService
+@inject ISnackbar Snackbar
+
+<PageTitle>Container-Vergleich - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Compare" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Container-Vergleich</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Konfiguration und Umgebung zweier Container vergleichen</MudText>
+        </div>
+    </MudStack>
+</div>
+
+<MudStack Row="true" Spacing="2" Class="mb-4" AlignItems="AlignItems.End">
+    <MudSelect T="string" Value="@_leftId" ValueChanged="OnLeftChanged" Label="Container A" Variant="Variant.Outlined" Dense="true" Style="min-width: 250px;">
+        @foreach (var c in _containers)
+        {
+            <MudSelectItem Value="@c.Id">@c.Name (@c.Image)</MudSelectItem>
+        }
+    </MudSelect>
+    <MudIcon Icon="@Icons.Material.Filled.CompareArrows" Style="color: var(--sw-text-muted);" />
+    <MudSelect T="string" Value="@_rightId" ValueChanged="OnRightChanged" Label="Container B" Variant="Variant.Outlined" Dense="true" Style="min-width: 250px;">
+        @foreach (var c in _containers)
+        {
+            <MudSelectItem Value="@c.Id">@c.Name (@c.Image)</MudSelectItem>
+        }
+    </MudSelect>
+</MudStack>
+
+@if (_left != null && _right != null)
+{
+    <MudTable Items="@_diffRows" Dense="true" Hover="true" Striped="true" Elevation="0" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh Style="width: 180px;">Eigenschaft</MudTh>
+            <MudTh>@_left.Name</MudTh>
+            <MudTh>@_right.Name</MudTh>
+            <MudTh Style="width: 80px;"></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><strong>@context.Property</strong></MudTd>
+            <MudTd><code style="word-break: break-all; font-size: 0.8rem;">@context.LeftValue</code></MudTd>
+            <MudTd><code style="word-break: break-all; font-size: 0.8rem;">@context.RightValue</code></MudTd>
+            <MudTd>
+                @if (context.IsDifferent)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">Diff</MudChip>
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Style="color: var(--sw-accent-green);" />
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+
+    <MudStack Row="true" Class="mt-3" Spacing="2">
+        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@_diffRows.Count(r => r.IsDifferent) Unterschiede</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Success">@_diffRows.Count(r => !r.IsDifferent) Gleich</MudChip>
+    </MudStack>
+}
+else if (_left != null || _right != null)
+{
+    <MudAlert Severity="Severity.Info">Wähle zwei Container aus um sie zu vergleichen.</MudAlert>
+}
+
+@code {
+    private List<ServerWatch.Models.ContainerInfo> _containers = new();
+    private string? _leftId;
+    private string? _rightId;
+    private ServerWatch.Models.ContainerInfo? _left;
+    private ServerWatch.Models.ContainerInfo? _right;
+    private List<KeyValuePair<string, string>>? _leftEnv;
+    private List<KeyValuePair<string, string>>? _rightEnv;
+    private List<DiffRow> _diffRows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _containers = (await DockerService.ListAllContainersAsync(all: true)).ToList();
+    }
+
+    private async Task OnLeftChanged(string id)
+    {
+        _leftId = id;
+        _left = _containers.FirstOrDefault(c => c.Id == id);
+        if (_left != null)
+            _leftEnv = await DockerService.GetContainerEnvAsync(_left.Id);
+        await BuildDiff();
+    }
+
+    private async Task OnRightChanged(string id)
+    {
+        _rightId = id;
+        _right = _containers.FirstOrDefault(c => c.Id == id);
+        if (_right != null)
+            _rightEnv = await DockerService.GetContainerEnvAsync(_right.Id);
+        await BuildDiff();
+    }
+
+    private Task BuildDiff()
+    {
+        _diffRows.Clear();
+        if (_left == null || _right == null) return Task.CompletedTask;
+
+        // Basic properties
+        AddRow("Image", _left.Image, _right.Image);
+        AddRow("State", _left.State, _right.State);
+        AddRow("Health", _left.HealthStatus, _right.HealthStatus);
+        AddRow("Projekt", _left.ComposeProject, _right.ComposeProject);
+        AddRow("Server", _left.ServerName, _right.ServerName);
+        AddRow("Ports", string.Join(", ", _left.Ports.Select(p => p.ToString())), string.Join(", ", _right.Ports.Select(p => p.ToString())));
+        AddRow("DB-Typ", _left.DatabaseType.ToString(), _right.DatabaseType.ToString());
+
+        // Env vars diff
+        if (_leftEnv != null && _rightEnv != null)
+        {
+            var allKeys = _leftEnv.Select(e => e.Key).Union(_rightEnv.Select(e => e.Key)).Distinct().OrderBy(k => k);
+            foreach (var key in allKeys)
+            {
+                // Skip system/runtime vars
+                if (key is "PATH" or "HOME" or "HOSTNAME") continue;
+                if (key.StartsWith("PHP") || key.StartsWith("GOSU") || key.StartsWith("GPG")) continue;
+
+                var leftVal = _leftEnv.FirstOrDefault(e => e.Key == key).Value ?? "(nicht gesetzt)";
+                var rightVal = _rightEnv.FirstOrDefault(e => e.Key == key).Value ?? "(nicht gesetzt)";
+
+                // Mask sensitive values
+                var isSensitive = new[] { "KEY", "SECRET", "PASSWORD", "TOKEN" }.Any(kw => key.Contains(kw, StringComparison.OrdinalIgnoreCase));
+                if (isSensitive)
+                {
+                    var same = leftVal == rightVal;
+                    leftVal = leftVal == "(nicht gesetzt)" ? leftVal : "••••••••";
+                    rightVal = rightVal == "(nicht gesetzt)" ? rightVal : "••••••••";
+                    AddRow($"ENV: {key}", leftVal, rightVal, !same);
+                }
+                else
+                {
+                    AddRow($"ENV: {key}", leftVal, rightVal);
+                }
+            }
+        }
+
+        // Labels diff
+        var allLabels = _left.Labels.Keys.Union(_right.Labels.Keys).Distinct()
+            .Where(k => !k.StartsWith("com.docker.compose.config-hash"))
+            .OrderBy(k => k);
+        foreach (var key in allLabels)
+        {
+            var leftVal = _left.Labels.GetValueOrDefault(key, "(nicht gesetzt)");
+            var rightVal = _right.Labels.GetValueOrDefault(key, "(nicht gesetzt)");
+            AddRow($"Label: {key}", leftVal, rightVal);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void AddRow(string prop, string leftVal, string rightVal, bool? forceDiff = null)
+    {
+        _diffRows.Add(new DiffRow
+        {
+            Property = prop,
+            LeftValue = leftVal,
+            RightValue = rightVal,
+            IsDifferent = forceDiff ?? !string.Equals(leftVal, rightVal, StringComparison.Ordinal)
+        });
+    }
+
+    private class DiffRow
+    {
+        public string Property { get; set; } = "";
+        public string LeftValue { get; set; } = "";
+        public string RightValue { get; set; } = "";
+        public bool IsDifferent { get; set; }
+    }
+}

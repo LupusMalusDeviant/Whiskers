@@ -1,0 +1,225 @@
+@page "/logs"
+@attribute [Authorize]
+@inject ServerWatch.Services.LogMonitor.LogSearchService SearchService
+@inject ServerWatch.Services.LogMonitor.LogMonitorService MonitorService
+@inject IDockerService DockerService
+@inject ISnackbar Snackbar
+
+<PageTitle>Log-Suche - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Search" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Log-Suche & Alerts</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Container-Logs durchsuchen und Warnungen einrichten</MudText>
+        </div>
+    </MudStack>
+</div>
+
+@* Search Section *@
+<MudPaper Class="pa-4 mb-4" Elevation="0">
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End" Class="mb-3">
+        <MudTextField @bind-Value="_searchPattern" Label="Suchbegriff / Regex" Variant="Variant.Outlined"
+                      Dense="true" Style="flex: 1; font-family: 'JetBrains Mono', monospace;"
+                      Placeholder="ERROR|Exception|OOM" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" />
+        <MudSwitch @bind-Value="_isRegex" Label="Regex" Color="Color.Primary" />
+        <MudSelect T="string" @bind-Value="_searchContainer" Label="Container" Variant="Variant.Outlined"
+                   Dense="true" Clearable="true" Style="min-width: 200px;">
+            @foreach (var c in _containers)
+            {
+                <MudSelectItem Value="@c.Name">@c.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Search"
+                   StartIcon="@Icons.Material.Filled.Search" Disabled="@(_searching || string.IsNullOrWhiteSpace(_searchPattern))">
+            @if (_searching) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+            Suchen
+        </MudButton>
+    </MudStack>
+
+    @if (_results != null)
+    {
+        <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">
+            @_results.Count Treffer@(_results.Count >= 200 ? " (Limit erreicht)" : "")
+        </MudText>
+        <MudTable Items="@_results" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="400px" Elevation="0">
+            <HeaderContent>
+                <MudTh Style="width: 180px;">Container</MudTh>
+                <MudTh>Log-Zeile</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.ContainerName</MudChip>
+                </MudTd>
+                <MudTd>
+                    <code style="font-size: 0.8rem; word-break: break-all;">@context.Line</code>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@* Alert Rules *@
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Alert-Regeln</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="ShowCreateRule">Regel erstellen</MudButton>
+</MudStack>
+
+@if (!_rules.Any())
+{
+    <MudAlert Severity="Severity.Info" Dense="true">Keine Alert-Regeln. Erstelle eine Regel um bei bestimmten Log-Patterns benachrichtigt zu werden.</MudAlert>
+}
+else
+{
+    <MudTable Items="@_rules" Dense="true" Hover="true" Striped="true" Elevation="0">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Pattern</MudTh>
+            <MudTh>Container</MudTh>
+            <MudTh>Severity</MudTh>
+            <MudTh>Ausgelöst</MudTh>
+            <MudTh>Aktionen</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><strong>@context.Name</strong></MudTd>
+            <MudTd><code>@context.Pattern</code> @if (context.IsRegex) { <MudChip T="string" Size="Size.Small" Variant="Variant.Text">Regex</MudChip> }</MudTd>
+            <MudTd>@(context.ContainerName ?? "Alle")</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Color="@GetSeverityColor(context.Severity)">@context.Severity</MudChip></MudTd>
+            <MudTd>@context.TriggerCount×@(context.LastTriggered != null ? $" ({context.LastTriggered.Value.ToLocalTime():dd.MM. HH:mm})" : "")</MudTd>
+            <MudTd>
+                <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
+                           ValueChanged="@((bool v) => ToggleRule(context, v))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                               OnClick="@(() => DeleteRule(context))" Title="Löschen" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@* Create Rule Dialog *@
+@if (_showRuleDialog)
+{
+    <MudDialog Visible="_showRuleDialog" VisibleChanged="@(v => _showRuleDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+        <TitleContent>Alert-Regel erstellen</TitleContent>
+        <DialogContent>
+            <MudTextField @bind-Value="_ruleName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
+            <MudTextField @bind-Value="_rulePattern" Label="Pattern" Variant="Variant.Outlined" Class="mb-3"
+                          Style="font-family: 'JetBrains Mono', monospace;" Placeholder="ERROR|Exception|fatal" />
+            <MudSwitch @bind-Value="_ruleIsRegex" Label="Regex-Pattern" Color="Color.Primary" Class="mb-3" />
+            <MudSelect T="string" @bind-Value="_ruleContainer" Label="Container (leer = alle)" Variant="Variant.Outlined"
+                       Class="mb-3" Clearable="true">
+                @foreach (var c in _containers)
+                {
+                    <MudSelectItem Value="@c.Name">@c.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_ruleSeverity" Label="Severity" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="@("info")">Info</MudSelectItem>
+                <MudSelectItem Value="@("warning")">Warning</MudSelectItem>
+                <MudSelectItem Value="@("error")">Error</MudSelectItem>
+                <MudSelectItem Value="@("critical")">Critical</MudSelectItem>
+            </MudSelect>
+            <MudNumericField T="int" @bind-Value="_ruleCooldown" Label="Cooldown (Minuten)" Variant="Variant.Outlined"
+                             Min="1" Max="1440" />
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showRuleDialog = false)">Abbrechen</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateRule"
+                       Disabled="@(string.IsNullOrWhiteSpace(_ruleName) || string.IsNullOrWhiteSpace(_rulePattern))">Erstellen</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private List<ServerWatch.Models.ContainerInfo> _containers = new();
+    private List<ServerWatch.Services.LogMonitor.LogSearchResult>? _results;
+    private List<ServerWatch.Models.LogAlertRuleEntity> _rules = new();
+    private string _searchPattern = "";
+    private string? _searchContainer;
+    private bool _isRegex;
+    private bool _searching;
+
+    // Rule form
+    private bool _showRuleDialog;
+    private string _ruleName = "";
+    private string _rulePattern = "";
+    private bool _ruleIsRegex;
+    private string? _ruleContainer;
+    private string _ruleSeverity = "error";
+    private int _ruleCooldown = 10;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _containers = (await DockerService.ListAllContainersAsync(all: false)).ToList();
+        _rules = await MonitorService.GetRulesAsync();
+    }
+
+    private async Task Search()
+    {
+        _searching = true;
+        try
+        {
+            _results = await SearchService.SearchAsync(_searchPattern, _isRegex, _searchContainer);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Suchfehler: {ex.Message}", Severity.Error);
+        }
+        finally { _searching = false; }
+    }
+
+    private async Task ShowCreateRule()
+    {
+        _ruleName = ""; _rulePattern = ""; _ruleIsRegex = false; _ruleContainer = null;
+        _ruleSeverity = "error"; _ruleCooldown = 10;
+        _showRuleDialog = true;
+    }
+
+    private async Task CreateRule()
+    {
+        try
+        {
+            await MonitorService.CreateRuleAsync(new ServerWatch.Models.LogAlertRuleEntity
+            {
+                Name = _ruleName,
+                Pattern = _rulePattern,
+                IsRegex = _ruleIsRegex,
+                ContainerName = _ruleContainer,
+                Severity = _ruleSeverity,
+                CooldownMinutes = _ruleCooldown
+            });
+            Snackbar.Add($"Regel '{_ruleName}' erstellt.", Severity.Success);
+            _showRuleDialog = false;
+            _rules = await MonitorService.GetRulesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task ToggleRule(ServerWatch.Models.LogAlertRuleEntity rule, bool enabled)
+    {
+        await MonitorService.ToggleRuleAsync(rule.RuleId, enabled);
+        _rules = await MonitorService.GetRulesAsync();
+    }
+
+    private async Task DeleteRule(ServerWatch.Models.LogAlertRuleEntity rule)
+    {
+        await MonitorService.DeleteRuleAsync(rule.RuleId);
+        Snackbar.Add("Regel gelöscht.", Severity.Success);
+        _rules = await MonitorService.GetRulesAsync();
+    }
+
+    private static Color GetSeverityColor(string severity) => severity switch
+    {
+        "critical" => Color.Error,
+        "error" => Color.Error,
+        "warning" => Color.Warning,
+        "info" => Color.Info,
+        _ => Color.Default
+    };
+}

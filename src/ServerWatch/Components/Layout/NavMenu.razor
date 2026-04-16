@@ -1,0 +1,100 @@
+<div class="sw-sidebar-logo">
+    <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="6" width="24" height="16" rx="3" stroke="#f97316" stroke-width="1.5" fill="rgba(249,115,22,0.08)" />
+        <path d="M6 16 L10 12 L13 14 L18 9 L22 13" stroke="#f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+        <circle cx="10" cy="12" r="1.2" fill="#22c55e" />
+        <circle cx="18" cy="9" r="1.2" fill="#fb923c" />
+        <line x1="8" y1="3" x2="8" y2="6" stroke="#71717a" stroke-width="1.2" stroke-linecap="round" />
+        <line x1="14" y1="2" x2="14" y2="6" stroke="#71717a" stroke-width="1.2" stroke-linecap="round" />
+        <line x1="20" y1="3" x2="20" y2="6" stroke="#71717a" stroke-width="1.2" stroke-linecap="round" />
+    </svg>
+    <span class="sw-gradient-text sw-logo-text">ServerWatch</span>
+</div>
+
+<MudNavMenu>
+    @* Gruppe: Übersicht *@
+    <MudNavGroup Title="Übersicht" Icon="@Icons.Material.Filled.SpaceDashboard" Expanded="true">
+        <MudNavLink Href="" Match="NavLinkMatch.All"
+                    Icon="@Icons.Material.Filled.Dashboard">
+            Dashboard
+        </MudNavLink>
+        <MudNavLink Href="health"
+                    Icon="@Icons.Material.Filled.MonitorHeart">
+            Statusberichte
+        </MudNavLink>
+        <MudNavLink Href="logs"
+                    Icon="@Icons.Material.Filled.Search">
+            Log-Suche
+        </MudNavLink>
+        <MudNavLink Href="graph"
+                    Icon="@Icons.Material.Filled.Hub">
+            Topologie
+        </MudNavLink>
+    </MudNavGroup>
+
+    <div class="sw-nav-divider"></div>
+
+    @* Gruppe: Deployment *@
+    <MudNavGroup Title="Deployment" Icon="@Icons.Material.Filled.RocketLaunch" Expanded="true">
+        <MudNavLink Href="deploy"
+                    Icon="@Icons.Material.Filled.RocketLaunch">
+            Bereitstellen
+        </MudNavLink>
+        <MudNavLink Href="compose"
+                    Icon="@Icons.Material.Filled.EditNote">
+            Compose Editor
+        </MudNavLink>
+        <MudNavLink Href="apps"
+                    Icon="@Icons.Material.Filled.Apps">
+            App Store
+        </MudNavLink>
+    </MudNavGroup>
+
+    <div class="sw-nav-divider"></div>
+
+    @* Gruppe: Infrastruktur *@
+    <MudNavGroup Title="Infrastruktur" Icon="@Icons.Material.Filled.Storage" Expanded="true">
+        <MudNavLink Href="servers"
+                    Icon="@Icons.Material.Filled.Storage">
+            Server
+        </MudNavLink>
+        <MudNavLink Href="coolify"
+                    Icon="@Icons.Material.Filled.Cloud">
+            Coolify
+        </MudNavLink>
+        <MudNavLink Href="networks"
+                    Icon="@Icons.Material.Filled.Hub">
+            Netzwerke
+        </MudNavLink>
+        <MudNavLink Href="backups"
+                    Icon="@Icons.Material.Filled.Backup">
+            Backups
+        </MudNavLink>
+    </MudNavGroup>
+
+    <div class="sw-nav-divider"></div>
+
+    @* Gruppe: Automatisierung *@
+    <MudNavGroup Title="Automatisierung" Icon="@Icons.Material.Filled.AutoMode" Expanded="true">
+        <MudNavLink Href="tasks"
+                    Icon="@Icons.Material.Filled.Schedule">
+            Geplante Tasks
+        </MudNavLink>
+        <MudNavLink Href="webhooks"
+                    Icon="@Icons.Material.Filled.Webhook">
+            Webhooks
+        </MudNavLink>
+        <MudNavLink Href="diff"
+                    Icon="@Icons.Material.Filled.Compare">
+            Vergleichen
+        </MudNavLink>
+        <MudNavLink Href="audit-log"
+                    Icon="@Icons.Material.Filled.History">
+            Audit-Protokoll
+        </MudNavLink>
+        <MudNavLink Href="settings"
+                    Icon="@Icons.Material.Filled.Settings">
+            Einstellungen
+        </MudNavLink>
+    </MudNavGroup>
+</MudNavMenu>

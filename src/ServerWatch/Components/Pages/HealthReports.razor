@@ -1,0 +1,116 @@
+@page "/health"
+@attribute [Authorize]
+@inject IHealthStore HealthStore
+@inject IDockerService DockerService
+
+<PageTitle>Statusberichte - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Statusberichte</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Health-Checks und Verfügbarkeitshistorie</MudText>
+        </div>
+    </MudStack>
+</div>
+
+<MudGrid>
+    <MudItem xs="12" md="4">
+        <MudSelect T="string" @bind-Value="_selectedContainerId" Label="Container" Variant="Variant.Outlined"
+                   Dense="true" Class="mb-4">
+            <MudSelectItem T="string" Value="@("all")">Alle Container</MudSelectItem>
+            @foreach (var c in _containers)
+            {
+                <MudSelectItem T="string" Value="@c.Id">@c.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudSelect T="int" @bind-Value="_hoursWindow" Label="Zeitfenster" Variant="Variant.Outlined" Dense="true">
+            <MudSelectItem T="int" Value="1">Letzte Stunde</MudSelectItem>
+            <MudSelectItem T="int" Value="6">Letzte 6 Stunden</MudSelectItem>
+            <MudSelectItem T="int" Value="12">Letzte 12 Stunden</MudSelectItem>
+            <MudSelectItem T="int" Value="24">Letzte 24 Stunden</MudSelectItem>
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadRecords"
+                   StartIcon="@Icons.Material.Filled.Refresh" Class="mt-1">
+            Aktualisieren
+        </MudButton>
+    </MudItem>
+</MudGrid>
+
+<MudTable Items="@_records" Dense="true" Hover="true" Striped="true" Elevation="2" Class="mt-4">
+    <HeaderContent>
+        <MudTh>Zeitstempel</MudTh>
+        <MudTh>Container</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Zustand</MudTh>
+        <MudTh>Exit-Code</MudTh>
+        <MudTh>OOM</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>
+            <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                @context.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            </MudText>
+        </MudTd>
+        <MudTd>@context.ContainerName</MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)" Variant="Variant.Filled">
+                @context.State
+            </MudChip>
+        </MudTd>
+        <MudTd>
+            <HealthBadge Status="@context.HealthStatus" />
+        </MudTd>
+        <MudTd>@(context.ExitCode?.ToString() ?? "-")</MudTd>
+        <MudTd>
+            @if (context.OomKilled)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Error" Size="Size.Small" />
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Class="pa-4">Noch keine Zustandsdaten vorhanden. Der Monitor sammelt alle 30 Sekunden Daten.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<ContainerInfo> _containers = new();
+    private List<HealthRecord> _records = new();
+    private string _selectedContainerId = "all";
+    private int _hoursWindow = 24;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _containers = (await DockerService.ListContainersAsync()).ToList();
+        LoadRecords();
+    }
+
+    private void LoadRecords()
+    {
+        var window = TimeSpan.FromHours(_hoursWindow);
+        if (_selectedContainerId == "all")
+        {
+            _records = HealthStore.GetAllRecords(window).ToList();
+        }
+        else
+        {
+            _records = HealthStore.GetHistory(_selectedContainerId, window).ToList();
+        }
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "running" => Color.Success,
+        "exited" => Color.Error,
+        "paused" => Color.Warning,
+        _ => Color.Default
+    };
+}

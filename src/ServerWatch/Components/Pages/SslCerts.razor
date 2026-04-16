@@ -1,0 +1,113 @@
+@page "/ssl/{ServerId}"
+@attribute [Authorize]
+@inject ServerWatch.Services.Server.SslCertService SslCertService
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>SSL-Zertifikate - ServerWatch</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
+    <MudText Typo="Typo.h5">SSL-Zertifikate</MudText>
+    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
+    <MudSpacer />
+    <MudButton StartIcon="@Icons.Material.Filled.Autorenew" Color="Color.Primary" Variant="Variant.Filled"
+               OnClick="RenewAll" Disabled="@_renewing">Alle erneuern</MudButton>
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="@_certs" Dense="true" Hover="true" Striped="true" Elevation="2">
+        <HeaderContent>
+            <MudTh>Zertifikat</MudTh>
+            <MudTh>Domains</MudTh>
+            <MudTh>Läuft ab</MudTh>
+            <MudTh>Tage verbleibend</MudTh>
+            <MudTh>Aktionen</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><MudText Style="font-family: monospace;">@context.CertName</MudText></MudTd>
+            <MudTd>
+                @foreach (var d in context.Domains)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@d</MudChip>
+                }
+            </MudTd>
+            <MudTd>@context.ExpiresAt.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.DaysUntilExpiry <= 7 ? Color.Error : context.IsExpiringSoon ? Color.Warning : Color.Success)"
+                         Variant="Variant.Filled">
+                    @context.DaysUntilExpiry Tage
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
+                           StartIcon="@Icons.Material.Filled.Autorenew"
+                           OnClick="@(() => RenewCert(context.CertName))" Disabled="@_renewing">
+                    Erneuern
+                </MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-4">Keine SSL-Zertifikate gefunden. Ist certbot installiert?</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    [Parameter] public string ServerId { get; set; } = "";
+
+    private string _serverName = "";
+    private bool _loading = true;
+    private bool _renewing;
+    private List<ServerWatch.Services.Server.SslCertificate> _certs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var server = ServerConfigService.GetServer(ServerId);
+        _serverName = server?.Name ?? ServerId;
+        await LoadCerts();
+    }
+
+    private async Task LoadCerts()
+    {
+        _loading = true;
+        try { _certs = await SslCertService.ListCertificatesAsync(ServerId); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        _loading = false;
+    }
+
+    private async Task RenewCert(string certName)
+    {
+        _renewing = true;
+        try
+        {
+            var result = await SslCertService.RenewAsync(ServerId, certName);
+            Snackbar.Add(result.Success ? $"{certName} erneuert" : $"Fehler: {result.Error}",
+                result.Success ? Severity.Success : Severity.Error);
+            await LoadCerts();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        _renewing = false;
+    }
+
+    private async Task RenewAll()
+    {
+        _renewing = true;
+        try
+        {
+            var result = await SslCertService.RenewAllAsync(ServerId);
+            Snackbar.Add(result.Success ? "Alle Zertifikate erneuert" : $"Fehler: {result.Error}",
+                result.Success ? Severity.Success : Severity.Error);
+            await LoadCerts();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        _renewing = false;
+    }
+}

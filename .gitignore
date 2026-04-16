@@ -1,0 +1,41 @@
+## .NET
+bin/
+obj/
+publish/
+out/
+*.user
+*.suo
+*.cache
+.vs/
+
+## IDE
+.idea/
+.vscode/
+*.swp
+*~
+.claude/
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Secrets & local config
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+.mcp.json
+
+## Runtime data
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+## Deploy artifacts
+docker-compose.deploy.yml
+docker-compose.override.yml
+
+## Internal notes (keep TODO.md public as project status)
+.plan.md

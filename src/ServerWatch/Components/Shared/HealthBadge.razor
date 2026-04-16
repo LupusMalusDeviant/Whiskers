@@ -1,0 +1,15 @@
+<MudChip T="string" Size="Size.Small" Color="@GetColor()" Variant="Variant.Filled">
+    @Status
+</MudChip>
+
+@code {
+    [Parameter] public string Status { get; set; } = "none";
+
+    private Color GetColor() => Status?.ToLower() switch
+    {
+        "healthy" => Color.Success,
+        "unhealthy" => Color.Error,
+        "starting" => Color.Warning,
+        _ => Color.Default
+    };
+}

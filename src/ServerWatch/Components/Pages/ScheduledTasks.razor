@@ -1,0 +1,318 @@
+@page "/tasks"
+@attribute [Authorize]
+@inject ServerWatch.Services.Scheduler.SchedulerService Scheduler
+@inject IDockerService DockerService
+@inject ISnackbar Snackbar
+
+<PageTitle>Geplante Tasks - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Geplante Tasks</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Automatische Container-Aktionen planen und verwalten</MudText>
+        </div>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="ShowCreateDialog">Task erstellen</MudButton>
+    </MudStack>
+</div>
+
+@* Stats Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <div class="sw-stat-card" style="text-align: center;">
+            <div class="sw-stat-value" style="color: var(--sw-accent-blue);">@_tasks.Count</div>
+            <div class="sw-stat-label">Gesamt</div>
+        </div>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <div class="sw-stat-card" style="text-align: center;">
+            <div class="sw-stat-value" style="color: var(--sw-accent-green);">@_tasks.Count(t => t.Enabled)</div>
+            <div class="sw-stat-label">Aktiv</div>
+        </div>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <div class="sw-stat-card" style="text-align: center;">
+            <div class="sw-stat-value" style="color: var(--sw-accent-green);">@_tasks.Count(t => t.LastSuccess)</div>
+            <div class="sw-stat-label">Letzter Lauf OK</div>
+        </div>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <div class="sw-stat-card" style="text-align: center;">
+            <div class="sw-stat-value" style="color: var(--sw-accent-red);">@_tasks.Count(t => !t.LastSuccess && t.LastRun != null)</div>
+            <div class="sw-stat-label">Fehlgeschlagen</div>
+        </div>
+    </MudItem>
+</MudGrid>
+
+@* Task List *@
+@if (!_tasks.Any())
+{
+    <MudAlert Severity="Severity.Info">Noch keine geplanten Tasks. Erstelle einen neuen Task!</MudAlert>
+}
+else
+{
+    <MudTable Items="@_tasks" Dense="true" Hover="true" Striped="true" Elevation="0">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Typ</MudTh>
+            <MudTh>Zeitplan</MudTh>
+            <MudTh>Ziel</MudTh>
+            <MudTh>Nächster Lauf</MudTh>
+            <MudTh>Letzter Lauf</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>Aktionen</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><strong>@context.Name</strong></MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.TaskType)" Variant="Variant.Outlined">
+                    @GetTypeLabel(context.TaskType)
+                </MudChip>
+            </MudTd>
+            <MudTd><code>@context.CronExpression</code></MudTd>
+            <MudTd><code>@(context.TargetName ?? context.TargetId ?? "-")</code></MudTd>
+            <MudTd>
+                @if (context.NextRun != null)
+                {
+                    <MudText Typo="Typo.body2">@context.NextRun.Value.ToLocalTime().ToString("dd.MM. HH:mm")</MudText>
+                }
+            </MudTd>
+            <MudTd>
+                @if (context.LastRun != null)
+                {
+                    <MudText Typo="Typo.body2">@context.LastRun.Value.ToLocalTime().ToString("dd.MM. HH:mm")</MudText>
+                }
+            </MudTd>
+            <MudTd>
+                @if (context.LastRun == null)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted);">Noch nie</MudChip>
+                }
+                else if (context.LastSuccess)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                }
+                else
+                {
+                    <MudTooltip Text="@context.LastResult">
+                        <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+                    </MudTooltip>
+                }
+            </MudTd>
+            <MudTd>
+                <MudStack Row="true" Spacing="0">
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
+                                   OnClick="@(() => RunNow(context))" Title="Jetzt ausführen" />
+                    <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
+                               ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => DeleteTask(context))" Title="Löschen" />
+                </MudStack>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@* Run History *@
+@if (_history.Any())
+{
+    <MudText Typo="Typo.subtitle1" Class="mt-6 mb-2" Style="font-weight: 600;">Letzte Ausführungen</MudText>
+    <MudTable Items="@_history" Dense="true" Hover="true" Striped="true" Elevation="0">
+        <HeaderContent>
+            <MudTh>Task</MudTh>
+            <MudTh>Typ</MudTh>
+            <MudTh>Gestartet</MudTh>
+            <MudTh>Dauer</MudTh>
+            <MudTh>Ergebnis</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.TaskName</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text">@GetTypeLabel(context.TaskType)</MudChip></MudTd>
+            <MudTd>@context.StartedAt.ToLocalTime().ToString("dd.MM. HH:mm:ss")</MudTd>
+            <MudTd>@((context.CompletedAt ?? context.StartedAt).Subtract(context.StartedAt).TotalSeconds.ToString("F1"))s</MudTd>
+            <MudTd>
+                @if (context.Success)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                    @if (!string.IsNullOrEmpty(context.Output))
+                    {
+                        <MudTooltip Text="@context.Output"><MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" Style="color: var(--sw-text-muted);" /></MudTooltip>
+                    }
+                }
+                else
+                {
+                    <MudTooltip Text="@context.Error">
+                        <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+                    </MudTooltip>
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@* Create Dialog *@
+@if (_showDialog)
+{
+    <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+        <TitleContent>Task erstellen</TitleContent>
+        <DialogContent>
+            <MudTextField @bind-Value="_formName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect T="ServerWatch.Models.ScheduledTaskType" @bind-Value="_formType" Label="Typ" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="ServerWatch.Models.ScheduledTaskType.ContainerRestart">Container-Neustart</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.ScheduledTaskType.DbBackup">Datenbank-Backup</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.ScheduledTaskType.VolumeBackup">Volume-Backup</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.ScheduledTaskType.CustomCommand">Befehl ausführen</MudSelectItem>
+                <MudSelectItem Value="ServerWatch.Models.ScheduledTaskType.Cleanup">Docker Cleanup</MudSelectItem>
+            </MudSelect>
+
+            @if (_formType is ScheduledTaskType.ContainerRestart or ScheduledTaskType.DbBackup)
+            {
+                <MudSelect T="string" @bind-Value="_formTargetId" Label="Container" Variant="Variant.Outlined" Class="mb-3">
+                    @foreach (var c in _containers.Where(c => _formType == ScheduledTaskType.DbBackup ? c.IsDatabase : true))
+                    {
+                        <MudSelectItem Value="@c.Name">@c.Name (@c.Image)</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            else if (_formType == ScheduledTaskType.VolumeBackup)
+            {
+                <MudTextField @bind-Value="_formTargetId" Label="Volume-Name" Variant="Variant.Outlined" Class="mb-3" />
+            }
+            else if (_formType == ScheduledTaskType.CustomCommand)
+            {
+                <MudTextField @bind-Value="_formCommand" Label="Befehl" Variant="Variant.Outlined" Class="mb-3"
+                              Style="font-family: 'JetBrains Mono', monospace;" Placeholder="docker system prune -f" />
+            }
+
+            <MudTextField @bind-Value="_formCron" Label="Cron-Zeitplan" Variant="Variant.Outlined" Class="mb-3"
+                          Style="font-family: 'JetBrains Mono', monospace;"
+                          HelperText="Format: Min Std Tag Monat Wochentag (z.B. 0 2 * * * = täglich 02:00)" />
+
+            <MudStack Row="true" Spacing="1" Class="mb-3">
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 2 * * *")">Täglich 02:00</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 */6 * * *")">Alle 6h</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 3 * * 0")">Sonntag 03:00</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 0 1 * *")">Monatlich</MudButton>
+            </MudStack>
+
+            @if (_formType is ScheduledTaskType.DbBackup or ScheduledTaskType.VolumeBackup)
+            {
+                <MudNumericField T="int" @bind-Value="_formMaxBackups" Label="Max. Backups behalten (0 = unbegrenzt)"
+                                 Variant="Variant.Outlined" Min="0" Max="100" />
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateTask"
+                       Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formCron))">Erstellen</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private List<ServerWatch.Models.ScheduledTaskEntity> _tasks = new();
+    private List<ServerWatch.Models.TaskRunHistoryEntity> _history = new();
+    private List<ServerWatch.Models.ContainerInfo> _containers = new();
+    private bool _showDialog;
+
+    // Form
+    private string _formName = "";
+    private ScheduledTaskType _formType = ScheduledTaskType.ContainerRestart;
+    private string _formTargetId = "";
+    private string _formCron = "0 2 * * *";
+    private string _formCommand = "";
+    private int _formMaxBackups = 7;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _tasks = await Scheduler.GetTasksAsync();
+        _history = await Scheduler.GetHistoryAsync(limit: 20);
+    }
+
+    private async Task ShowCreateDialog()
+    {
+        _formName = ""; _formTargetId = ""; _formCron = "0 2 * * *"; _formCommand = ""; _formMaxBackups = 7;
+        _containers = (await DockerService.ListAllContainersAsync()).ToList();
+        _showDialog = true;
+    }
+
+    private async Task CreateTask()
+    {
+        try
+        {
+            var config = new Dictionary<string, string>();
+            if (_formMaxBackups > 0) config["maxBackups"] = _formMaxBackups.ToString();
+            if (!string.IsNullOrEmpty(_formCommand)) config["command"] = _formCommand;
+
+            await Scheduler.CreateTaskAsync(new ServerWatch.Models.ScheduledTaskEntity
+            {
+                Name = _formName,
+                CronExpression = _formCron,
+                TaskType = _formType,
+                TargetId = _formTargetId,
+                TargetName = _formTargetId,
+                Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null
+            });
+            Snackbar.Add($"Task '{_formName}' erstellt.", Severity.Success);
+            _showDialog = false;
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RunNow(ServerWatch.Models.ScheduledTaskEntity task)
+    {
+        Snackbar.Add($"Task '{task.Name}' wird ausgeführt...", Severity.Info);
+        var (success, output) = await Scheduler.RunNowAsync(task.TaskId);
+        Snackbar.Add(success ? $"Erfolgreich: {output}" : $"Fehler: {output}",
+            success ? Severity.Success : Severity.Error);
+        await LoadData();
+    }
+
+    private async Task ToggleEnabled(ServerWatch.Models.ScheduledTaskEntity task, bool enabled)
+    {
+        task.Enabled = enabled;
+        await Scheduler.UpdateTaskAsync(task);
+        await LoadData();
+    }
+
+    private async Task DeleteTask(ServerWatch.Models.ScheduledTaskEntity task)
+    {
+        await Scheduler.DeleteTaskAsync(task.TaskId);
+        Snackbar.Add($"Task '{task.Name}' gelöscht.", Severity.Success);
+        await LoadData();
+    }
+
+    private static Color GetTypeColor(ScheduledTaskType type) => type switch
+    {
+        ScheduledTaskType.ContainerRestart => Color.Primary,
+        ScheduledTaskType.DbBackup => Color.Warning,
+        ScheduledTaskType.VolumeBackup => Color.Info,
+        ScheduledTaskType.CustomCommand => Color.Tertiary,
+        ScheduledTaskType.Cleanup => Color.Default,
+        _ => Color.Default
+    };
+
+    private static string GetTypeLabel(ScheduledTaskType type) => type switch
+    {
+        ScheduledTaskType.ContainerRestart => "Neustart",
+        ScheduledTaskType.DbBackup => "DB-Backup",
+        ScheduledTaskType.VolumeBackup => "Volume-Backup",
+        ScheduledTaskType.CustomCommand => "Befehl",
+        ScheduledTaskType.Cleanup => "Cleanup",
+        _ => type.ToString()
+    };
+}

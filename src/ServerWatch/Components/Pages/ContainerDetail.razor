@@ -1,0 +1,1624 @@
+@page "/container/{ContainerId}"
+@page "/container/{ServerId}/{ContainerId}"
+@attribute [Authorize]
+@inject IDockerService DockerService
+@inject IHealthStore HealthStore
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ITerminalSessionManager SessionManager
+@inject MetricsQueryService MetricsQuery
+@inject IHostCommandExecutor HostCommandExecutor
+@inject ServerWatch.Services.Database.IDatabaseService DatabaseService
+@implements IAsyncDisposable
+
+<PageTitle>@(_container?.Name ?? "Container") - ServerWatch</PageTitle>
+
+@if (_container == null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    @* Header *@
+    <div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="GoBack" />
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.ViewInAr" Size="Size.Large" />
+        </div>
+        <MudText Typo="Typo.h5">@_container.Name</MudText>
+        <MudChip T="string" Size="Size.Small" Color="@GetStateColor(_container.State)" Variant="Variant.Filled">
+            @_container.State
+        </MudChip>
+        <HealthBadge Status="@_container.HealthStatus" />
+        <MudSpacer />
+        @if (_container.State == "running")
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Stop" OnClick="Stop">Stoppen</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="Restart">Neustarten</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start">Starten</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Delete" OnClick="Remove">Entfernen</MudButton>
+        }
+    </MudStack>
+    </div>
+
+    <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+        @* Overview Tab *@
+        <MudTabPanel Text="Übersicht" Icon="@Icons.Material.Filled.Info">
+            <MudSimpleTable Striped="true" Dense="true">
+                <tbody>
+                    <tr><td><strong>ID</strong></td><td style="font-family: monospace;">@_container.Id</td></tr>
+                    <tr><td><strong>Name</strong></td><td>@_container.Name</td></tr>
+                    <tr><td><strong>Image</strong></td><td>@_container.Image</td></tr>
+                    <tr><td><strong>Status</strong></td><td>@_container.Status</td></tr>
+                    <tr><td><strong>Erstellt</strong></td><td>@_container.Created.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td></tr>
+                    <tr>
+                        <td><strong>Ports</strong></td>
+                        <td>@(string.Join(", ", _container.Ports.Select(p => p.ToString())))</td>
+                    </tr>
+                    @if (_container.Labels.Any())
+                    {
+                        <tr>
+                            <td><strong>Labels (Bezeichner)</strong></td>
+                            <td>
+                                @foreach (var (k, v) in _container.Labels.Take(10))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@k=@v</MudChip>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudTabPanel>
+
+        @* Stats Tab *@
+        <MudTabPanel Text="Statistiken" Icon="@Icons.Material.Filled.BarChart">
+            @if (_stats != null)
+            {
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-4" Elevation="1">
+                            <MudText Typo="Typo.subtitle1">CPU-Auslastung</MudText>
+                            <MudText Typo="Typo.h3" Color="Color.Primary">@_stats.CpuPercent.ToString("F2")%</MudText>
+                            <ResourceGauge Value="@_stats.CpuPercent" />
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-4" Elevation="1">
+                            <MudText Typo="Typo.subtitle1">Speicherauslastung</MudText>
+                            <MudText Typo="Typo.h3" Color="Color.Secondary">
+                                @FormatBytes(_stats.MemoryUsageBytes)
+                            </MudText>
+                            <MudText Typo="Typo.body2">von @FormatBytes(_stats.MemoryLimitBytes) (@_stats.MemoryPercent.ToString("F1")%)</MudText>
+                            <ResourceGauge Value="@_stats.MemoryPercent" />
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-4" Elevation="1">
+                            <MudText Typo="Typo.subtitle1">Netzwerk-I/O</MudText>
+                            <MudText>RX: @FormatBytes(_stats.NetworkRxBytes)</MudText>
+                            <MudText>TX: @FormatBytes(_stats.NetworkTxBytes)</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-4" Elevation="1">
+                            <MudText Typo="Typo.subtitle1">Datenträger-I/O</MudText>
+                            <MudText>Lesen: @FormatBytes(_stats.BlockReadBytes)</MudText>
+                            <MudText>Schreiben: @FormatBytes(_stats.BlockWriteBytes)</MudText>
+                        </MudPaper>
+                    </MudItem>
+                </MudGrid>
+
+                @* Historical Charts *@
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-4 mb-2" Spacing="2">
+                    <MudText Typo="Typo.subtitle1">Verlauf</MudText>
+                    <MudSelect T="string" Value="_chartPeriod" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               Style="max-width: 120px;" Label="Zeitraum" ValueChanged="@((string v) => { _chartPeriod = v; _ = LoadChartData(); })">
+                        <MudSelectItem Value="@("1h")">1 Stunde</MudSelectItem>
+                        <MudSelectItem Value="@("6h")">6 Stunden</MudSelectItem>
+                        <MudSelectItem Value="@("24h")">24 Stunden</MudSelectItem>
+                        <MudSelectItem Value="@("7d")">7 Tage</MudSelectItem>
+                    </MudSelect>
+                </MudStack>
+
+                @if (_cpuHistory.Count > 0)
+                {
+                    <MudGrid>
+                        <MudItem xs="12" md="6">
+                            <MudPaper Class="pa-4" Elevation="1">
+                                <MudText Typo="Typo.subtitle2" Class="mb-2">CPU-Verlauf</MudText>
+                                <ApexCharts.ApexChart TItem="MetricPoint" Height="250"
+                                           Options="@_cpuChartOptions">
+                                    <ApexCharts.ApexPointSeries TItem="MetricPoint"
+                                                     Items="_cpuHistory"
+                                                     SeriesType="ApexCharts.SeriesType.Area"
+                                                     XValue="@(p => p.Timestamp)"
+                                                     YValue="@(p => (decimal)p.Value)"
+                                                     Name="CPU %" />
+                                </ApexCharts.ApexChart>
+                            </MudPaper>
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudPaper Class="pa-4" Elevation="1">
+                                <MudText Typo="Typo.subtitle2" Class="mb-2">Speicher-Verlauf</MudText>
+                                <ApexCharts.ApexChart TItem="MetricPoint" Height="250"
+                                           Options="@_memChartOptions">
+                                    <ApexCharts.ApexPointSeries TItem="MetricPoint"
+                                                     Items="_memHistory"
+                                                     SeriesType="ApexCharts.SeriesType.Area"
+                                                     XValue="@(p => p.Timestamp)"
+                                                     YValue="@(p => (decimal)p.Value)"
+                                                     Name="Speicher %" />
+                                </ApexCharts.ApexChart>
+                            </MudPaper>
+                        </MudItem>
+                    </MudGrid>
+                }
+                else
+                {
+                    <MudText Color="Color.Secondary" Class="mt-2">Noch keine historischen Daten vorhanden.</MudText>
+                }
+            }
+            else
+            {
+                <MudText Color="Color.Secondary">Statistiken sind nur für laufende Container verfügbar.</MudText>
+            }
+        </MudTabPanel>
+
+        @* Logs Tab *@
+        <MudTabPanel Text="Logs" Icon="@Icons.Material.Filled.Article">
+            <LogViewer ContainerId="@ContainerId" Height="calc(100vh - 320px)" />
+        </MudTabPanel>
+
+        @* Health Tab *@
+        <MudTabPanel Text="Zustand" Icon="@Icons.Material.Filled.MonitorHeart">
+            @{ var records = HealthStore.GetHistory(ContainerId); }
+            <MudTable Items="@records" Dense="true" Hover="true" Striped="true">
+                <HeaderContent>
+                    <MudTh>Zeitstempel</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Zustand</MudTh>
+                    <MudTh>Exit-Code</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd Style="font-family: monospace;">@context.Timestamp.ToLocalTime().ToString("HH:mm:ss")</MudTd>
+                    <MudTd>@context.State</MudTd>
+                    <MudTd><HealthBadge Status="@context.HealthStatus" /></MudTd>
+                    <MudTd>@(context.ExitCode?.ToString() ?? "-")</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Class="pa-4">Noch keine Zustandsdaten für diesen Container vorhanden.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudTabPanel>
+
+        @* Terminal Tab - inline *@
+        <MudTabPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
+            @if (_container.State != "running")
+            {
+                <MudAlert Severity="Severity.Warning">Terminal ist nur für laufende Container verfügbar.</MudAlert>
+            }
+            else if (!string.IsNullOrEmpty(_termError))
+            {
+                <MudAlert Severity="Severity.Error">@_termError</MudAlert>
+            }
+            else
+            {
+                <div id="container-terminal" style="height: calc(100vh - 280px); min-height: 400px; width: 100%;"></div>
+            }
+        </MudTabPanel>
+
+        @* Environment Variables Tab *@
+        <MudTabPanel Text="Umgebungsvariablen" Icon="@Icons.Material.Filled.Code">
+            @if (!_envLoaded)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+            }
+            else
+            {
+                @* Read-only: Running container env vars (values always masked) *@
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Laufende Container-Variablen</MudText>
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                    Sensible Werte (Keys, Secrets, Passwörter) sind aus Sicherheitsgründen maskiert.
+                </MudAlert>
+                <MudTextField Value="@_envSearch" ValueChanged="@((string v) => _envSearch = v)"
+                              Label="Suchen..." Variant="Variant.Outlined" Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true"
+                              Class="mb-3" Style="max-width: 400px;" />
+                <MudTable Items="@FilteredContainerEnv" Dense="true" Hover="true" Striped="true"
+                          FixedHeader="true" Height="300px" Class="mb-6">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<KeyValuePair<string,string>, object>(x => x.Key)">Variable</MudTableSortLabel></MudTh>
+                        <MudTh>Wert</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Variable"><code>@context.Key</code></MudTd>
+                        <MudTd DataLabel="Wert">
+                            @if (IsSensitiveKey(context.Key))
+                            {
+                                <code style="color: #888;">••••••••</code>
+                                <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Style="vertical-align: middle; color: #888; margin-left: 4px;" />
+                            }
+                            else
+                            {
+                                <code style="word-break: break-all;">@context.Value</code>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+
+                @* Editable: .env file (only for compose containers) *@
+                @if (_composeWorkingDir != null)
+                {
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">.env-Datei</MudText>
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                        Änderungen an der .env-Datei erfordern einen Container-Neustart (kurze Downtime).
+                        <br /><code>@_composeWorkingDir/.env</code>
+                    </MudAlert>
+
+                    @if (_dotEnvError != null)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">@_dotEnvError</MudAlert>
+                    }
+
+                    @for (var i = 0; i < _dotEnvEntries.Count; i++)
+                    {
+                        var idx = i;
+                        var entry = _dotEnvEntries[idx];
+                        <MudStack Row="true" Class="mb-2" AlignItems="AlignItems.Center">
+                            <MudTextField @bind-Value="entry.Key" Label="Key" Variant="Variant.Outlined"
+                                          Dense="true" Style="max-width: 280px; font-family: monospace;"
+                                          ReadOnly="@(!entry.IsNew)" />
+                            @if (entry.IsSensitive)
+                            {
+                                @* Sensitive key: always masked, edit to overwrite *@
+                                @if (entry.IsNew || entry.IsEditing)
+                                {
+                                    <MudTextField @bind-Value="entry.Value" Label="@(entry.IsNew ? "Wert" : "Neuer Wert")"
+                                                  Variant="Variant.Outlined" Dense="true"
+                                                  Style="font-family: monospace;"
+                                                  InputType="@(entry.ShowValue ? InputType.Text : InputType.Password)"
+                                                  Adornment="Adornment.End"
+                                                  AdornmentIcon="@(entry.ShowValue ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                                  OnAdornmentClick="@(() => entry.ShowValue = !entry.ShowValue)"
+                                                  Placeholder="@(entry.IsEditing ? "Neuen Wert eingeben..." : "")" />
+                                    @if (entry.IsEditing && !entry.IsNew)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Warning" Size="Size.Small"
+                                                       OnClick="@(() => { entry.IsEditing = false; entry.Value = ""; })"
+                                                       Title="Änderung verwerfen" />
+                                    }
+                                }
+                                else
+                                {
+                                    <MudTextField Value="@("••••••••")" Label="Wert (gespeichert)" Variant="Variant.Outlined"
+                                                  Dense="true" Style="font-family: monospace; color: #888;" ReadOnly="true" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" Size="Size.Small"
+                                                   OnClick="@(() => { entry.IsEditing = true; entry.Value = ""; })"
+                                                   Title="Wert ändern" />
+                                }
+                            }
+                            else
+                            {
+                                @* Non-sensitive key: normal editable field, show value *@
+                                @if (entry.IsNew)
+                                {
+                                    <MudTextField @bind-Value="entry.Value" Label="Wert" Variant="Variant.Outlined"
+                                                  Dense="true" Style="font-family: monospace;" />
+                                }
+                                else
+                                {
+                                    <MudTextField Value="@entry.OriginalValue"
+                                                  ValueChanged="@((string v) => { entry.Value = v; entry.IsEditing = true; entry.OriginalValue = v; })"
+                                                  Label="Wert" Variant="Variant.Outlined"
+                                                  Dense="true" Style="font-family: monospace;" />
+                                }
+                            }
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                           OnClick="@(() => _dotEnvEntries.RemoveAt(idx))" Title="Variable entfernen" />
+                        </MudStack>
+                    }
+
+                    <MudStack Row="true" Class="mt-3" Spacing="2">
+                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                   OnClick="@(() => _dotEnvEntries.Add(new EnvEntry { IsNew = true, IsSensitive = false }))">Variable hinzufügen</MudButton>
+                        <MudSpacer />
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_envSaving"
+                                   StartIcon="@Icons.Material.Filled.Save" OnClick="SaveEnvAndRestart">
+                            @if (_envSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                            Speichern & Neu starten
+                        </MudButton>
+                    </MudStack>
+                }
+                else
+                {
+                    <MudDivider Class="my-4" />
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        Kein Docker-Compose-Projekt erkannt – .env-Datei kann nicht bearbeitet werden.
+                    </MudAlert>
+                }
+            }
+        </MudTabPanel>
+
+        @* Database Tab - only visible for database containers *@
+        @if (_container.IsDatabase)
+        {
+            <MudTabPanel Text="Datenbank" Icon="@Icons.Material.Filled.Storage">
+                @if (!_dbLoaded)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+                }
+                else
+                {
+                    @* Header Bar *@
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Spacing="2">
+                        <MudChip T="string" Color="Color.Info" Size="Size.Small" Style="font-weight: 600;">
+                            @ServerWatch.Services.Database.DatabaseDetector.GetLabel(_container.DatabaseType)
+                        </MudChip>
+                        @if (_dbCreds != null)
+                        {
+                            <MudText Typo="Typo.body2" Style="color: var(--sw-text-muted);">
+                                <code>@_dbCreds.User</code>
+                            </MudText>
+                        }
+                        <MudSpacer />
+                        @if (_dbDatabases.Any())
+                        {
+                            <MudSelect T="string" Value="@_dbSelectedDatabase" ValueChanged="OnDatabaseChanged"
+                                       Label="Datenbank" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;">
+                                @foreach (var db in _dbDatabases)
+                                {
+                                    <MudSelectItem Value="@db">@db</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                    </MudStack>
+
+                    @* Quick Actions Row *@
+                    <MudGrid Class="mb-4">
+                        <MudItem xs="6" sm="3">
+                            <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="BackupDatabase">
+                                @if (_dbBackingUp)
+                                {
+                                    <MudProgressCircular Size="Size.Medium" Indeterminate="true" Color="Color.Warning" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.Backup" Color="Color.Warning" Size="Size.Large" />
+                                }
+                                <div class="sw-stat-label">DB-Backup</div>
+                            </div>
+                        </MudItem>
+                        <MudItem xs="6" sm="3">
+                            <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowMigrationPanel">
+                                <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" Size="Size.Large" />
+                                <div class="sw-stat-label">Migrationen</div>
+                            </div>
+                        </MudItem>
+                        <MudItem xs="6" sm="3">
+                            <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowSeedPanel">
+                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" Size="Size.Large" />
+                                <div class="sw-stat-label">Seed / Import</div>
+                            </div>
+                        </MudItem>
+                        <MudItem xs="6" sm="3">
+                            <div class="sw-stat-card" style="text-align: center;">
+                                <div class="sw-stat-value" style="color: var(--sw-accent-blue);">@_dbTables.Count</div>
+                                <div class="sw-stat-label">Tabellen</div>
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+
+                    @* Visual Query Builder *@
+                    <MudPaper Class="pa-4 mb-4" Elevation="0">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="1">
+                            <MudIcon Icon="@Icons.Material.Filled.BuildCircle" Style="color: var(--sw-accent-purple);" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Query Builder</MudText>
+                        </MudStack>
+
+                        @* Row 1+2: Action + Table *@
+                        <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
+                            <MudSelect T="string" @bind-Value="_qbAction" Label="Aktion" Variant="Variant.Outlined"
+                                       Dense="true" Style="max-width: 160px;">
+                                <MudSelectItem Value="@("SELECT")">SELECT</MudSelectItem>
+                                <MudSelectItem Value="@("COUNT")">COUNT</MudSelectItem>
+                                <MudSelectItem Value="@("INSERT")">INSERT</MudSelectItem>
+                                <MudSelectItem Value="@("UPDATE")">UPDATE</MudSelectItem>
+                                <MudSelectItem Value="@("DELETE")">DELETE</MudSelectItem>
+                            </MudSelect>
+                            <MudSelect T="string" Value="@_qbTable" ValueChanged="OnQbTableChanged"
+                                       Label="Tabelle" Variant="Variant.Outlined" Dense="true" Style="min-width: 200px;">
+                                @foreach (var t in _dbTables)
+                                {
+                                    <MudSelectItem Value="@t.Name">@t.Name (@t.RowCount)</MudSelectItem>
+                                }
+                            </MudSelect>
+                            @if (_qbAction == "SELECT")
+                            {
+                                <MudNumericField T="int" @bind-Value="_qbLimit" Label="LIMIT" Variant="Variant.Outlined"
+                                                 Dense="true" Min="1" Max="10000" Style="max-width: 100px;" />
+                            }
+                        </MudStack>
+
+                        @* Row 3: Context-dependent fields *@
+                        @if (_qbAction == "SELECT" && _qbTableColumns.Any())
+                        {
+                            <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
+                                <MudTextField @bind-Value="_qbColumnsText" Label="Spalten (kommagetrennt, leer = alle)"
+                                              Variant="Variant.Outlined" Dense="true" Style="min-width: 220px; font-family: 'JetBrains Mono', monospace;"
+                                              Placeholder="@(string.Join(", ", _qbTableColumns.Take(3)) + ", ...")" />
+                                <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
+                                              Dense="true" Placeholder="z.B. id = 1" Style="flex: 1; font-family: 'JetBrains Mono', monospace;" />
+                                <MudSelect T="string" @bind-Value="_qbOrderBy" Label="ORDER BY" Variant="Variant.Outlined"
+                                           Dense="true" Clearable="true" Style="min-width: 160px;">
+                                    @foreach (var col in _qbTableColumns)
+                                    {
+                                        <MudSelectItem Value="@col">@col</MudSelectItem>
+                                    }
+                                </MudSelect>
+                                @if (!string.IsNullOrEmpty(_qbOrderBy))
+                                {
+                                    <MudToggleIconButton @bind-Toggled="_qbOrderDesc"
+                                                         Icon="@Icons.Material.Filled.ArrowUpward" ToggledIcon="@Icons.Material.Filled.ArrowDownward"
+                                                         Title="@(_qbOrderDesc ? "DESC" : "ASC")" Size="Size.Small" />
+                                }
+                            </MudStack>
+                        }
+                        else if (_qbAction == "COUNT")
+                        {
+                            <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
+                                          Dense="true" Placeholder="z.B. status = 'active'" Class="mb-3"
+                                          Style="font-family: 'JetBrains Mono', monospace;" />
+                        }
+                        else if (_qbAction == "INSERT" && _qbTableColumns.Any())
+                        {
+                            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">Werte für neue Zeile:</MudText>
+                            <MudGrid Class="mb-3">
+                                @for (var i = 0; i < _qbSetFields.Count; i++)
+                                {
+                                    var idx = i;
+                                    <MudItem xs="6" sm="4" md="3">
+                                        <MudTextField Value="@_qbSetFields[idx].Value"
+                                                      ValueChanged="@((string v) => { var f = _qbSetFields[idx]; _qbSetFields[idx] = (f.Key, v); })"
+                                                      Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined" Dense="true"
+                                                      Style="font-family: 'JetBrains Mono', monospace;" />
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        }
+                        else if (_qbAction == "UPDATE" && _qbTableColumns.Any())
+                        {
+                            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">SET-Werte (leer = unverändert):</MudText>
+                            <MudGrid Class="mb-2">
+                                @for (var i = 0; i < _qbSetFields.Count; i++)
+                                {
+                                    var idx = i;
+                                    <MudItem xs="6" sm="4" md="3">
+                                        <MudTextField Value="@_qbSetFields[idx].Value"
+                                                      ValueChanged="@((string v) => { var f = _qbSetFields[idx]; _qbSetFields[idx] = (f.Key, v); })"
+                                                      Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined" Dense="true"
+                                                      Style="font-family: 'JetBrains Mono', monospace;" />
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                            <MudTextField @bind-Value="_qbWhere" Label="WHERE (Pflicht!)" Variant="Variant.Outlined"
+                                          Dense="true" Placeholder="z.B. id = 42" Class="mb-3"
+                                          Style="font-family: 'JetBrains Mono', monospace;" />
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                                UPDATE ohne WHERE ändert ALLE Zeilen! WHERE ist Pflicht.
+                            </MudAlert>
+                        }
+                        else if (_qbAction == "DELETE")
+                        {
+                            <MudTextField @bind-Value="_qbWhere" Label="WHERE (Pflicht!)" Variant="Variant.Outlined"
+                                          Dense="true" Placeholder="z.B. id = 42" Class="mb-3"
+                                          Style="font-family: 'JetBrains Mono', monospace;" />
+                            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+                                DELETE ohne WHERE löscht ALLE Zeilen! WHERE ist Pflicht.
+                            </MudAlert>
+                        }
+
+                        @* Row 4: Preview + Execute *@
+                        @{ var generatedSql = BuildQueryFromBuilder(); }
+                        @if (!string.IsNullOrEmpty(generatedSql))
+                        {
+                            <MudPaper Class="pa-2 mb-3" Elevation="0" Style="background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid var(--sw-glass-border);">
+                                <code style="font-size: 0.8rem; color: var(--sw-accent-purple); word-break: break-all;">@generatedSql</code>
+                            </MudPaper>
+                        }
+
+                        <MudStack Row="true" Spacing="2">
+                            <MudButton Variant="Variant.Filled" Color="@(_qbAction is "DELETE" or "UPDATE" ? Color.Error : Color.Primary)"
+                                       StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="ExecuteBuilderQuery"
+                                       Disabled="@(string.IsNullOrEmpty(_qbTable) || _dbExecuting || ((_qbAction is "DELETE" or "UPDATE") && string.IsNullOrWhiteSpace(_qbWhere)))">
+                                @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+                                Ausführen
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Edit"
+                                       OnClick="CopyBuilderToEditor"
+                                       Disabled="@(string.IsNullOrEmpty(generatedSql))">
+                                Im Editor öffnen
+                            </MudButton>
+                        </MudStack>
+                    </MudPaper>
+
+                    @* Migration Panel *@
+                    @if (_showMigration)
+                    {
+                        <MudPaper Class="pa-4 mb-4" Elevation="0">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                                <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" />
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Migrationen</MudText>
+                                <MudSpacer />
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                               OnClick="@(() => _showMigration = false)" />
+                            </MudStack>
+                            <MudStack Row="true" Spacing="2" Class="mb-3">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunMigration"
+                                           Disabled="@_dbMigrating">
+                                    @if (_dbMigrating) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+                                    Migration ausführen
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Undo" OnClick="RollbackMigration"
+                                           Disabled="@_dbMigrating">Rollback</MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.List" OnClick="CheckMigrationStatus">Status</MudButton>
+                            </MudStack>
+                            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" HtmlTag="label"
+                                           for="migration-upload" StartIcon="@Icons.Material.Filled.Upload">
+                                    @(_migrationFileName ?? "SQL-Datei hochladen")
+                                </MudButton>
+                                <InputFile id="migration-upload" OnChange="OnMigrationFileSelected" style="display:none;"
+                                           accept=".sql,.dump" />
+                                @if (_migrationFileName != null)
+                                {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                                               OnClick="ExecuteMigrationFile" Disabled="@_dbMigrating"
+                                               StartIcon="@Icons.Material.Filled.PlayArrow">Datei ausführen</MudButton>
+                                }
+                            </MudStack>
+                            @if (!string.IsNullOrEmpty(_migrationOutput))
+                            {
+                                <MudAlert Severity="@(_migrationSuccess ? Severity.Success : Severity.Error)" Dense="true" Class="mt-3">
+                                    <pre style="white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; margin: 0;">@_migrationOutput</pre>
+                                </MudAlert>
+                            }
+                        </MudPaper>
+                    }
+
+                    @* Seed Panel *@
+                    @if (_showSeed)
+                    {
+                        <MudPaper Class="pa-4 mb-4" Elevation="0">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" />
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Seed / Import</MudText>
+                                <MudSpacer />
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                               OnClick="@(() => _showSeed = false)" />
+                            </MudStack>
+                            <MudStack Spacing="2">
+                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                                    <MudButton Variant="Variant.Outlined" HtmlTag="label" for="seed-upload"
+                                               StartIcon="@Icons.Material.Filled.Upload">
+                                        @(_seedFileName ?? "SQL / CSV / JSON hochladen")
+                                    </MudButton>
+                                    <InputFile id="seed-upload" OnChange="OnSeedFileSelected" style="display:none;"
+                                               accept=".sql,.csv,.json,.dump,.gz" />
+                                    @if (_seedFileName != null)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info">@_seedFileName</MudChip>
+                                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small"
+                                                   OnClick="ExecuteSeedFile" Disabled="@_dbSeeding"
+                                                   StartIcon="@Icons.Material.Filled.PlayArrow">
+                                            @if (_dbSeeding) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+                                            Importieren
+                                        </MudButton>
+                                    }
+                                </MudStack>
+                                @if (!string.IsNullOrEmpty(_seedOutput))
+                                {
+                                    <MudAlert Severity="@(_seedSuccess ? Severity.Success : Severity.Error)" Dense="true">
+                                        <pre style="white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; margin: 0;">@_seedOutput</pre>
+                                    </MudAlert>
+                                }
+                            </MudStack>
+                        </MudPaper>
+                    }
+
+                    @* Tabellen-Browser — Klickbar *@
+                    @if (_dbTables.Any())
+                    {
+                        <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600;">Tabellen</MudText>
+                        <MudGrid Class="mb-4">
+                            @foreach (var table in _dbTables)
+                            {
+                                <MudItem xs="6" sm="4" md="3">
+                                    <MudPaper Class="pa-3" Elevation="0"
+                                              Style="@($"cursor: pointer; border: 1px solid {(_dbSelectedTable == table.Name ? "var(--sw-accent-blue)" : "var(--sw-glass-border)")}; border-radius: 10px; transition: all 0.2s;")"
+                                              @onclick="@(() => SelectTable(table.Name))">
+                                        <MudStack Spacing="1">
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                                <MudIcon Icon="@Icons.Material.Filled.TableChart" Size="Size.Small"
+                                                         Style="@($"color: {(_dbSelectedTable == table.Name ? "var(--sw-accent-blue)" : "var(--sw-text-muted)") };")" />
+                                                <MudText Typo="Typo.body2" Style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+                                                    @table.Name
+                                                </MudText>
+                                            </MudStack>
+                                            <MudStack Row="true" Spacing="2">
+                                                <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
+                                                    @table.RowCount Zeilen
+                                                </MudText>
+                                                @if (!string.IsNullOrEmpty(table.Size) && table.Size != "0")
+                                                {
+                                                    <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
+                                                        @table.Size
+                                                    </MudText>
+                                                }
+                                            </MudStack>
+                                        </MudStack>
+                                    </MudPaper>
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    }
+
+                    @* Tabelle ausgewählt — Quick-Buttons + Schema *@
+                    @if (_dbSelectedTable != null)
+                    {
+                        <MudPaper Class="pa-4 mb-4" Elevation="0">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
+                                <MudIcon Icon="@Icons.Material.Filled.TableChart" Color="Color.Primary" />
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+                                    <code>@_dbSelectedTable</code>
+                                </MudText>
+                                <MudSpacer />
+                                <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Visibility"
+                                           OnClick="@(() => QuickQuery($"SELECT * FROM {_dbSelectedTable} LIMIT 50"))">
+                                    Vorschau (50)
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Tag"
+                                           OnClick="@(() => QuickQuery($"SELECT COUNT(*) AS total FROM {_dbSelectedTable}"))">
+                                    COUNT
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Download"
+                                           OnClick="@(() => QuickQuery($"SELECT * FROM {_dbSelectedTable}"))">
+                                    Alle + CSV
+                                </MudButton>
+                            </MudStack>
+
+                            @* Schema *@
+                            @if (_dbColumns.Any())
+                            {
+                                <MudTable Items="@_dbColumns" Dense="true" Hover="true" Striped="true" Elevation="0">
+                                    <HeaderContent>
+                                        <MudTh>Spalte</MudTh>
+                                        <MudTh>Typ</MudTh>
+                                        <MudTh>Nullable</MudTh>
+                                        <MudTh>Default</MudTh>
+                                        <MudTh Style="width: 50px;"></MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd>
+                                            <code style="font-weight: 500;">@context.Name</code>
+                                            @if (context.PrimaryKey)
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Small" Color="Color.Warning"
+                                                         Style="vertical-align: middle; margin-left: 4px;" />
+                                            }
+                                        </MudTd>
+                                        <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="font-family: monospace;">@context.Type</MudChip></MudTd>
+                                        <MudTd>
+                                            @if (context.Nullable)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">NULL</MudChip>
+                                            }
+                                            else
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">NOT NULL</MudChip>
+                                            }
+                                        </MudTd>
+                                        <MudTd><code style="color: var(--sw-text-muted);">@(context.Default ?? "-")</code></MudTd>
+                                        <MudTd>
+                                            <MudIconButton Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small"
+                                                           Title="@($"SELECT * FROM {_dbSelectedTable} WHERE {context.Name} = ... LIMIT 50")"
+                                                           OnClick="@(() => { _dbQuery = $"SELECT * FROM {_dbSelectedTable} WHERE {context.Name} = '' LIMIT 50"; })" />
+                                        </MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                        </MudPaper>
+                    }
+
+                    @* Query Editor — Collapsible *@
+                    <MudExpansionPanels Class="mb-4">
+                        <MudExpansionPanel Text="Query-Editor" Icon="@Icons.Material.Filled.Code"
+                                           IsInitiallyExpanded="@(_dbResult != null || !string.IsNullOrEmpty(_dbQuery))">
+                            <MudTextField @bind-Value="_dbQuery" Label="SQL / Befehl" Variant="Variant.Outlined"
+                                          Lines="4" Class="mb-2 sw-query-editor"
+                                          Placeholder="@(_container.DatabaseType == ServerWatch.Models.DatabaseType.Redis ? "GET key" : "SELECT * FROM ... LIMIT 10")" />
+                            <MudStack Row="true" Spacing="2">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQuery"
+                                           StartIcon="@Icons.Material.Filled.PlayArrow"
+                                           Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting)">
+                                    @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                                    Ausführen
+                                </MudButton>
+                                @if (_dbResult is { Success: true, Columns.Count: > 0 })
+                                {
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.Download"
+                                               OnClick="DownloadCsv">CSV herunterladen</MudButton>
+                                }
+                            </MudStack>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+
+                    @* Query Result *@
+                    @if (_dbResult != null)
+                    {
+                        @if (!_dbResult.Success)
+                        {
+                            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_dbResult.Error</MudAlert>
+                        }
+                        else if (_dbResult.Columns.Any())
+                        {
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="2">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
+                                    @_dbResult.RowCount Zeilen
+                                </MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted);">
+                                    @(_dbResult.DurationMs.ToString("F0"))ms
+                                </MudChip>
+                                <MudSpacer />
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Download"
+                                           OnClick="DownloadCsv">CSV</MudButton>
+                            </MudStack>
+                            <MudTable Items="@_dbResult.Rows" Dense="true" Hover="true" Striped="true"
+                                      FixedHeader="true" Height="350px" Elevation="0">
+                                <HeaderContent>
+                                    @foreach (var col in _dbResult.Columns)
+                                    {
+                                        <MudTh>@col</MudTh>
+                                    }
+                                </HeaderContent>
+                                <RowTemplate>
+                                    @foreach (var cell in context)
+                                    {
+                                        <MudTd Style="font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">@cell</MudTd>
+                                    }
+                                </RowTemplate>
+                            </MudTable>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Success" Dense="true">
+                                Query ausgeführt (@(_dbResult.DurationMs.ToString("F0"))ms, @_dbResult.RowCount Zeilen betroffen)
+                            </MudAlert>
+                        }
+                    }
+                }
+            </MudTabPanel>
+        }
+    </MudTabs>
+}
+
+@code {
+    [Parameter] public string ContainerId { get; set; } = string.Empty;
+    [Parameter] public string ServerId { get; set; } = "";
+
+    private ContainerInfo? _container;
+    private ContainerStats? _stats;
+    private Timer? _refreshTimer;
+    private int _activeTab;
+    private int _lastActiveTab = -1;
+
+    // Chart state
+    private string _chartPeriod = "1h";
+    private List<MetricPoint> _cpuHistory = new();
+    private List<MetricPoint> _memHistory = new();
+    private ApexCharts.ApexChartOptions<MetricPoint> _cpuChartOptions = CreateChartOptions("#2196F3");
+    private ApexCharts.ApexChartOptions<MetricPoint> _memChartOptions = CreateChartOptions("#9C27B0");
+
+    // Terminal state
+    private ServerWatch.Services.Terminal.TerminalSession? _termSession;
+    private DotNetObjectReference<ContainerDetail>? _dotNetRef;
+    private CancellationTokenSource? _termCts;
+    private string _termError = string.Empty;
+    private bool _termInitialized;
+
+    // Env vars state
+    private bool _envLoaded;
+    private bool _envSaving;
+    private string _envSearch = "";
+    private List<KeyValuePair<string, string>> _containerEnv = new();
+    private List<EnvEntry> _dotEnvEntries = new();
+    private string? _composeWorkingDir;
+    private string? _dotEnvError;
+
+    // Database state
+    private bool _dbLoaded;
+    private bool _dbExecuting;
+    private bool _dbBackingUp;
+    private bool _dbMigrating;
+    private bool _dbSeeding;
+    private bool _showMigration;
+    private bool _showSeed;
+    private string _dbQuery = "";
+    private string? _dbSelectedDatabase;
+    private string? _dbSelectedTable;
+    private ServerWatch.Models.DatabaseCredentials? _dbCreds;
+    private ServerWatch.Models.QueryResult? _dbResult;
+    private List<string> _dbDatabases = new();
+    private List<ServerWatch.Models.TableInfo> _dbTables = new();
+    private List<ServerWatch.Models.ColumnInfo> _dbColumns = new();
+
+    // Query Builder state
+    private string _qbAction = "SELECT";
+    private string? _qbTable;
+    private List<string> _qbTableColumns = new();
+    private string _qbColumnsText = "";
+    private string _qbWhere = "";
+    private string? _qbOrderBy;
+    private bool _qbOrderDesc;
+    private int _qbLimit = 50;
+    private List<(string Key, string Value)> _qbSetFields = new();
+
+    // Migration/Seed state
+    private string? _migrationFileName;
+    private byte[]? _migrationFileData;
+    private string? _migrationOutput;
+    private bool _migrationSuccess;
+    private string? _seedFileName;
+    private byte[]? _seedFileData;
+    private string? _seedOutput;
+    private bool _seedSuccess;
+
+    private IEnumerable<KeyValuePair<string, string>> FilteredContainerEnv =>
+        string.IsNullOrWhiteSpace(_envSearch)
+            ? _containerEnv
+            : _containerEnv.Where(e => e.Key.Contains(_envSearch, StringComparison.OrdinalIgnoreCase));
+
+    // Keywords that indicate a sensitive env var (case-insensitive match on key)
+    private static readonly string[] SensitiveKeywords = [
+        "KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL", "AUTH",
+        "PRIVATE", "API_KEY", "APIKEY", "ACCESS_KEY", "PASSPHRASE"
+    ];
+
+    private static bool IsSensitiveKey(string key) =>
+        SensitiveKeywords.Any(kw => key.Contains(kw, StringComparison.OrdinalIgnoreCase));
+
+    private static string MaskOrShowValue(string value, bool sensitive) =>
+        string.IsNullOrEmpty(value) ? "(leer)" : sensitive ? "••••••••" : value;
+
+    private class EnvEntry
+    {
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+        public string OriginalValue { get; set; } = ""; // stored server-side, never shown for sensitive keys
+        public bool IsNew { get; set; }
+        public bool IsEditing { get; set; }
+        public bool ShowValue { get; set; }
+        public bool IsSensitive { get; set; }
+
+        /// <summary>Returns the effective value to write: new value if edited, otherwise original.</summary>
+        public string EffectiveValue => IsEditing || IsNew ? Value : OriginalValue;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadContainer();
+        _ = LoadChartData();
+        _refreshTimer = new Timer(async _ =>
+        {
+            // Only refresh stats when NOT on terminal tab to avoid interference
+            if (_activeTab != 4)
+            {
+                await LoadContainer();
+                await InvokeAsync(StateHasChanged);
+            }
+        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Initialize terminal when tab is switched to terminal (index 4)
+        if (_activeTab == 4 && !_termInitialized && _container?.State == "running")
+        {
+            _termInitialized = true;
+            await InitTerminal();
+        }
+
+        // Load env vars when tab is switched to env (index 5)
+        if (_activeTab == 5 && !_envLoaded)
+        {
+            await LoadEnvVars();
+            await InvokeAsync(StateHasChanged);
+        }
+
+        // Load database info when tab is switched to database (index 6, only for DB containers)
+        if (_activeTab == 6 && _container?.IsDatabase == true && !_dbLoaded)
+        {
+            await LoadDatabaseInfo();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task InitTerminal()
+    {
+        try
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            _termCts = new CancellationTokenSource();
+
+            await JS.InvokeVoidAsync("ServerWatch.Terminal.create", "container-terminal", _dotNetRef);
+
+            _termSession = SessionManager.CreateSession(ContainerId, _resolvedServerId);
+
+            _ = ReadTermStreamAsync(_termSession.Process.StandardOutput, _termCts.Token);
+            _ = ReadTermStreamAsync(_termSession.Process.StandardError, _termCts.Token);
+        }
+        catch (Exception ex)
+        {
+            _termError = $"Fehler beim Initialisieren des Terminals: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ReadTermStreamAsync(System.IO.StreamReader reader, CancellationToken ct)
+    {
+        var buffer = new char[4096];
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length);
+                if (bytesRead == 0) break;
+                var text = new string(buffer, 0, bytesRead);
+                await InvokeAsync(async () =>
+                {
+                    await JS.InvokeVoidAsync("ServerWatch.Terminal.write", "container-terminal", text);
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch { }
+    }
+
+    [JSInvokable]
+    public async Task OnTerminalInput(string data)
+    {
+        if (_termSession is { IsRunning: true })
+        {
+            await _termSession.WriteAsync(data);
+        }
+    }
+
+    private string? _resolvedServerId => string.IsNullOrEmpty(ServerId) ? null : ServerId;
+
+    private void GoBack()
+    {
+        // Use JS history.back() to properly navigate back within the SPA
+        _ = JS.InvokeVoidAsync("history.back");
+    }
+
+    private async Task LoadContainer()
+    {
+        try
+        {
+            var containers = await DockerService.ListContainersAsync(serverId: _resolvedServerId);
+            _container = containers.FirstOrDefault(c => c.Id == ContainerId);
+            if (_container?.State == "running")
+            {
+                _stats = await DockerService.GetContainerStatsAsync(ContainerId, _resolvedServerId);
+            }
+            else
+            {
+                _stats = null;
+            }
+        }
+        catch { }
+    }
+
+    private async Task Start()
+    {
+        try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Gestartet", Severity.Success); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        await LoadContainer();
+    }
+
+    private async Task Stop()
+    {
+        try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Gestoppt", Severity.Success); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        await LoadContainer();
+    }
+
+    private async Task Restart()
+    {
+        try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Neugestartet", Severity.Success); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        await LoadContainer();
+    }
+
+    private async Task Remove()
+    {
+        try
+        {
+            await DockerService.RemoveContainerAsync(ContainerId, force: true, serverId: _resolvedServerId);
+            Snackbar.Add("Entfernt", Severity.Success);
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static MudBlazor.Color GetStateColor(string state) => state switch
+    {
+        "running" => MudBlazor.Color.Success,
+        "exited" => MudBlazor.Color.Error,
+        "paused" => MudBlazor.Color.Warning,
+        _ => MudBlazor.Color.Default
+    };
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1073741824 => $"{bytes / 1073741824.0:F1} GB",
+        >= 1048576 => $"{bytes / 1048576.0:F1} MB",
+        >= 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes} B"
+    };
+
+    private async Task LoadChartData()
+    {
+        try
+        {
+            var sid = string.IsNullOrEmpty(ServerId) || ServerId == "local" ? "local" : ServerId;
+            var period = _chartPeriod switch
+            {
+                "1h" => TimeSpan.FromHours(1),
+                "6h" => TimeSpan.FromHours(6),
+                "24h" => TimeSpan.FromHours(24),
+                "7d" => TimeSpan.FromDays(7),
+                _ => TimeSpan.FromHours(1)
+            };
+            _cpuHistory = await MetricsQuery.GetContainerCpuHistoryAsync(ContainerId, sid, period);
+            _memHistory = await MetricsQuery.GetContainerMemoryHistoryAsync(ContainerId, sid, period);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { }
+    }
+
+    private static ApexCharts.ApexChartOptions<MetricPoint> CreateChartOptions(string color)
+    {
+        return new ApexCharts.ApexChartOptions<MetricPoint>
+        {
+            Chart = new ApexCharts.Chart
+            {
+                Background = "transparent",
+                Toolbar = new ApexCharts.Toolbar { Show = false },
+                Sparkline = new ApexCharts.ChartSparkline { Enabled = false },
+                Zoom = new ApexCharts.Zoom { Enabled = true }
+            },
+            Theme = new ApexCharts.Theme { Mode = ApexCharts.Mode.Dark },
+            Stroke = new ApexCharts.Stroke { Curve = ApexCharts.Curve.Smooth, Width = 2 },
+            Fill = new ApexCharts.Fill { Opacity = new List<double> { 0.15 }, Type = new List<ApexCharts.FillType> { ApexCharts.FillType.Solid } },
+            Colors = new List<string> { color },
+            Xaxis = new ApexCharts.XAxis { Type = ApexCharts.XAxisType.Datetime },
+            Yaxis = new List<ApexCharts.YAxis>
+            {
+                new ApexCharts.YAxis
+                {
+                    Min = 0,
+                    Max = 100,
+                    Labels = new ApexCharts.YAxisLabels { Formatter = "function(v) { return v.toFixed(0) + '%' }" }
+                }
+            },
+            Tooltip = new ApexCharts.Tooltip { X = new ApexCharts.TooltipX { Format = "HH:mm:ss" } },
+            Grid = new ApexCharts.Grid { BorderColor = "#333" }
+        };
+    }
+
+    private async Task LoadEnvVars()
+    {
+        try
+        {
+            // 1. Get running container env vars
+            _containerEnv = await DockerService.GetContainerEnvAsync(ContainerId, _resolvedServerId);
+
+            // 2. Detect compose working dir from labels
+            _composeWorkingDir = null;
+            if (_container?.Labels.TryGetValue("com.docker.compose.project.working_dir", out var workDir) == true)
+            {
+                _composeWorkingDir = workDir;
+            }
+            else if (_container?.ComposeProject is { } project && project != "Standalone")
+            {
+                // Fallback: check standard deployment path
+                var sid = _resolvedServerId ?? "local";
+                var checkResult = await HostCommandExecutor.ExecuteAsync(sid,
+                    $"test -f /opt/deployments/{project}/docker-compose.yml && echo /opt/deployments/{project}",
+                    TimeSpan.FromSeconds(5));
+                if (checkResult.Success && !string.IsNullOrWhiteSpace(checkResult.Output))
+                    _composeWorkingDir = checkResult.Output.Trim();
+            }
+
+            // 3. Load .env file if compose project found
+            if (_composeWorkingDir != null)
+            {
+                var sid = _resolvedServerId ?? "local";
+                var result = await HostCommandExecutor.ExecuteAsync(sid,
+                    $"cat {_composeWorkingDir}/.env 2>/dev/null",
+                    TimeSpan.FromSeconds(5));
+
+                _dotEnvEntries.Clear();
+                _dotEnvError = null;
+
+                if (result.Success && !string.IsNullOrWhiteSpace(result.Output))
+                {
+                    foreach (var line in result.Output.Split('\n'))
+                    {
+                        var trimmed = line.Trim();
+                        if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#'))
+                            continue;
+
+                        var idx = trimmed.IndexOf('=');
+                        if (idx > 0)
+                        {
+                            var key = trimmed[..idx];
+                            var val = trimmed[(idx + 1)..];
+                            _dotEnvEntries.Add(new EnvEntry
+                            {
+                                Key = key,
+                                Value = "",
+                                OriginalValue = val,
+                                IsNew = false,
+                                IsEditing = false,
+                                IsSensitive = IsSensitiveKey(key)
+                            });
+                        }
+                    }
+                }
+                else
+                {
+                    _dotEnvError = "Keine .env-Datei gefunden. Sie können eine neue erstellen.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Laden der Umgebungsvariablen: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _envLoaded = true;
+        }
+    }
+
+    private async Task SaveEnvAndRestart()
+    {
+        if (_composeWorkingDir == null) return;
+        _envSaving = true;
+
+        try
+        {
+            var sid = _resolvedServerId ?? "local";
+
+            // Build .env content
+            var sb = new System.Text.StringBuilder();
+            foreach (var entry in _dotEnvEntries)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Key))
+                    sb.AppendLine($"{entry.Key}={entry.EffectiveValue}");
+            }
+
+            // Write .env file via base64 to avoid escaping issues
+            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+            var writeResult = await HostCommandExecutor.ExecuteAsync(sid,
+                $"echo '{b64}' | base64 -d > {_composeWorkingDir}/.env",
+                TimeSpan.FromSeconds(10));
+
+            if (!writeResult.Success)
+            {
+                Snackbar.Add($"Fehler beim Schreiben: {writeResult.Error}", Severity.Error);
+                return;
+            }
+
+            // Restart via docker compose
+            var restartResult = await HostCommandExecutor.ExecuteAsync(sid,
+                $"cd {_composeWorkingDir} && docker compose up -d 2>&1",
+                TimeSpan.FromMinutes(2));
+
+            if (restartResult.Success)
+            {
+                Snackbar.Add("Umgebungsvariablen gespeichert und Container neu gestartet.", Severity.Success);
+                // Reload env vars and container state
+                _envLoaded = false;
+                await LoadContainer();
+                await LoadEnvVars();
+            }
+            else
+            {
+                Snackbar.Add($"Fehler beim Neustart: {restartResult.Output}\n{restartResult.Error}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _envSaving = false;
+        }
+    }
+
+    // === CSV Download ===
+
+    private async Task DownloadCsv()
+    {
+        if (_dbResult == null || !_dbResult.Columns.Any()) return;
+
+        var sb = new System.Text.StringBuilder();
+
+        // Header
+        sb.AppendLine(string.Join(",", _dbResult.Columns.Select(EscapeCsvField)));
+
+        // Rows — no limit
+        foreach (var row in _dbResult.Rows)
+        {
+            sb.AppendLine(string.Join(",", row.Select(EscapeCsvField)));
+        }
+
+        var csv = sb.ToString();
+        var fileName = $"query_{(_dbSelectedDatabase ?? "db")}_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+
+        // Trigger download via JS
+        await JS.InvokeVoidAsync("ServerWatch.downloadCsv", fileName, csv);
+    }
+
+    private static string EscapeCsvField(string field)
+    {
+        if (string.IsNullOrEmpty(field)) return "\"\"";
+        if (field.Contains(',') || field.Contains('"') || field.Contains('\n') || field.Contains('\r'))
+            return $"\"{field.Replace("\"", "\"\"")}\"";
+        return field;
+    }
+
+    // === Database Methods ===
+
+    private async Task LoadDatabaseInfo()
+    {
+        try
+        {
+            // Get env vars to extract credentials
+            var env = await DockerService.GetContainerEnvAsync(ContainerId, _resolvedServerId);
+            _dbCreds = ServerWatch.Services.Database.DatabaseDetector.ExtractCredentials(env, _container!.DatabaseType);
+            _dbSelectedDatabase = _dbCreds.Database;
+
+            // Load database list
+            _dbDatabases = await DatabaseService.GetDatabasesAsync(ContainerId, _container.DatabaseType, _dbCreds, _resolvedServerId);
+
+            // Load tables for default database
+            if (!string.IsNullOrEmpty(_dbSelectedDatabase))
+                _dbTables = await DatabaseService.GetTablesAsync(ContainerId, _dbSelectedDatabase, _container.DatabaseType, _dbCreds, _resolvedServerId);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Laden der Datenbank-Info: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _dbLoaded = true;
+        }
+    }
+
+    private async Task OnDatabaseChanged(string database)
+    {
+        _dbSelectedDatabase = database;
+        _dbTables.Clear();
+        _dbColumns.Clear();
+        _dbSelectedTable = null;
+
+        if (_dbCreds != null && _container != null)
+        {
+            _dbCreds.Database = database;
+            _dbTables = await DatabaseService.GetTablesAsync(ContainerId, database, _container.DatabaseType, _dbCreds, _resolvedServerId);
+        }
+    }
+
+    private async Task OnTableClick(TableRowClickEventArgs<ServerWatch.Models.TableInfo> args)
+    {
+        await SelectTable(args.Item?.Name);
+    }
+
+    private async Task SelectTable(string? tableName)
+    {
+        _dbSelectedTable = tableName;
+        _dbColumns.Clear();
+        if (_dbSelectedTable != null && _dbCreds != null && _container != null && _dbSelectedDatabase != null)
+        {
+            _dbColumns = await DatabaseService.GetSchemaAsync(ContainerId, _dbSelectedDatabase, _dbSelectedTable, _container.DatabaseType, _dbCreds, _resolvedServerId);
+        }
+    }
+
+    private async Task QuickQuery(string query)
+    {
+        _dbQuery = query;
+        await ExecuteQuery();
+    }
+
+    private void ShowMigrationPanel() { _showMigration = !_showMigration; _showSeed = false; }
+    private void ShowSeedPanel() { _showSeed = !_showSeed; _showMigration = false; }
+
+    // === Query Builder ===
+
+    private async Task OnQbTableChanged(string? table)
+    {
+        _qbTable = table;
+        _qbTableColumns.Clear();
+        _qbSetFields.Clear();
+        _qbColumnsText = "";
+        _qbWhere = "";
+        _qbOrderBy = null;
+
+        if (table != null && _dbCreds != null && _container != null && _dbSelectedDatabase != null)
+        {
+            var schema = await DatabaseService.GetSchemaAsync(ContainerId, _dbSelectedDatabase, table, _container.DatabaseType, _dbCreds, _resolvedServerId);
+            _qbTableColumns = schema.Select(c => c.Name).ToList();
+            _qbSetFields = schema.Select(c => (c.Name, "")).ToList();
+        }
+    }
+
+    private string? BuildQueryFromBuilder()
+    {
+        if (string.IsNullOrEmpty(_qbTable)) return null;
+
+        var where = !string.IsNullOrWhiteSpace(_qbWhere) ? $" WHERE {_qbWhere}" : "";
+        var orderBy = !string.IsNullOrEmpty(_qbOrderBy) ? $" ORDER BY {_qbOrderBy} {(_qbOrderDesc ? "DESC" : "ASC")}" : "";
+
+        return _qbAction switch
+        {
+            "SELECT" => $"SELECT {(!string.IsNullOrWhiteSpace(_qbColumnsText) ? _qbColumnsText.Trim() : "*")} FROM {_qbTable}{where}{orderBy} LIMIT {_qbLimit}",
+            "COUNT" => $"SELECT COUNT(*) AS total FROM {_qbTable}{where}",
+            "INSERT" => BuildInsertSql(),
+            "UPDATE" => BuildUpdateSql(where),
+            "DELETE" => $"DELETE FROM {_qbTable}{where}",
+            _ => null
+        };
+    }
+
+    private string? BuildInsertSql()
+    {
+        var filled = _qbSetFields.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
+        if (!filled.Any()) return null;
+        var cols = string.Join(", ", filled.Select(f => f.Key));
+        var vals = string.Join(", ", filled.Select(f => $"'{f.Value.Replace("'", "''")}'"));
+        return $"INSERT INTO {_qbTable} ({cols}) VALUES ({vals})";
+    }
+
+    private string? BuildUpdateSql(string where)
+    {
+        var filled = _qbSetFields.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
+        if (!filled.Any()) return null;
+        var sets = string.Join(", ", filled.Select(f => $"{f.Key} = '{f.Value.Replace("'", "''")}'"));
+        return $"UPDATE {_qbTable} SET {sets}{where}";
+    }
+
+    private async Task ExecuteBuilderQuery()
+    {
+        var sql = BuildQueryFromBuilder();
+        if (string.IsNullOrEmpty(sql)) return;
+        _dbQuery = sql;
+        await ExecuteQuery();
+    }
+
+    private void CopyBuilderToEditor()
+    {
+        var sql = BuildQueryFromBuilder();
+        if (!string.IsNullOrEmpty(sql))
+            _dbQuery = sql;
+    }
+
+    private async Task RunMigration()
+    {
+        if (_container == null || _dbCreds == null) return;
+        _dbMigrating = true; _migrationOutput = null;
+        try
+        {
+            // Detect framework from companion container (Laravel: artisan, Rails: rake, .NET: ef)
+            var sid = _resolvedServerId;
+            var project = _container.ComposeProject;
+            // Try artisan migrate (Laravel)
+            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, sid, TimeSpan.FromMinutes(2));
+            if (!result.StdOut.Contains("NO_ARTISAN"))
+            {
+                _migrationOutput = result.StdOut; _migrationSuccess = result.ExitCode == 0;
+            }
+            else
+            {
+                // Fallback: plain SQL via psql/mysql
+                _migrationOutput = "Kein Framework erkannt. Nutze die SQL-Datei Upload-Funktion.";
+                _migrationSuccess = false;
+            }
+        }
+        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
+        finally { _dbMigrating = false; }
+    }
+
+    private async Task RollbackMigration()
+    {
+        if (_container == null) return;
+        _dbMigrating = true; _migrationOutput = null;
+        try
+        {
+            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, _resolvedServerId, TimeSpan.FromMinutes(2));
+            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? "Kein Framework erkannt." : result.StdOut;
+            _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
+        }
+        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
+        finally { _dbMigrating = false; }
+    }
+
+    private async Task CheckMigrationStatus()
+    {
+        if (_container == null) return;
+        _dbMigrating = true; _migrationOutput = null;
+        try
+        {
+            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, _resolvedServerId, TimeSpan.FromMinutes(1));
+            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? "Kein Framework erkannt." : result.StdOut;
+            _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
+        }
+        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
+        finally { _dbMigrating = false; }
+    }
+
+    private async Task OnMigrationFileSelected(InputFileChangeEventArgs e)
+    {
+        using var ms = new System.IO.MemoryStream();
+        await e.File.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024).CopyToAsync(ms);
+        _migrationFileData = ms.ToArray();
+        _migrationFileName = e.File.Name;
+    }
+
+    private async Task ExecuteMigrationFile()
+    {
+        if (_migrationFileData == null || _container == null || _dbCreds == null) return;
+        _dbMigrating = true; _migrationOutput = null;
+        try
+        {
+            var b64 = Convert.ToBase64String(_migrationFileData);
+            var db = _dbSelectedDatabase ?? _dbCreds.Database;
+            var cmd = _container.DatabaseType switch
+            {
+                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | psql -U {_dbCreds.User} -d {db} 2>&1",
+                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | mysql -u {_dbCreds.User} -p{_dbCreds.Password} {db} 2>&1",
+                _ => "echo 'Nicht unterstützt'"
+            };
+            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", cmd }, _resolvedServerId, TimeSpan.FromMinutes(5));
+            _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? "Erfolgreich ausgeführt." : result.StdOut;
+            _migrationSuccess = result.ExitCode == 0;
+            if (_migrationSuccess) await LoadDatabaseInfo();
+        }
+        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
+        finally { _dbMigrating = false; }
+    }
+
+    private async Task OnSeedFileSelected(InputFileChangeEventArgs e)
+    {
+        using var ms = new System.IO.MemoryStream();
+        await e.File.OpenReadStream(maxAllowedSize: 100 * 1024 * 1024).CopyToAsync(ms);
+        _seedFileData = ms.ToArray();
+        _seedFileName = e.File.Name;
+    }
+
+    private async Task ExecuteSeedFile()
+    {
+        if (_seedFileData == null || _container == null || _dbCreds == null) return;
+        _dbSeeding = true; _seedOutput = null;
+        try
+        {
+            var b64 = Convert.ToBase64String(_seedFileData);
+            var db = _dbSelectedDatabase ?? _dbCreds.Database;
+            var ext = System.IO.Path.GetExtension(_seedFileName)?.ToLower();
+            var cmd = (_container.DatabaseType, ext) switch
+            {
+                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | psql -U {_dbCreds.User} -d {db} 2>&1",
+                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && psql -U {_dbCreds.User} -d {db} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV-Import: Bitte Tabellennamen im Query-Editor angeben'",
+                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | mysql -u {_dbCreds.User} -p{_dbCreds.Password} {db} 2>&1",
+                (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {db} --file /tmp/seed.json 2>&1",
+                _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... Dateiformat {ext} wird für {_container.DatabaseType} unterstützt via SQL-Pipe'"
+            };
+            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", cmd }, _resolvedServerId, TimeSpan.FromMinutes(5));
+            _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? "Erfolgreich importiert." : result.StdOut;
+            _seedSuccess = result.ExitCode == 0;
+            if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }
+        }
+        catch (Exception ex) { _seedOutput = ex.Message; _seedSuccess = false; }
+        finally { _dbSeeding = false; }
+    }
+
+    private async Task ExecuteQuery()
+    {
+        if (string.IsNullOrWhiteSpace(_dbQuery) || _dbCreds == null || _container == null) return;
+        _dbExecuting = true;
+        _dbResult = null;
+
+        try
+        {
+            var creds = new ServerWatch.Models.DatabaseCredentials
+            {
+                User = _dbCreds.User,
+                Password = _dbCreds.Password,
+                Database = _dbSelectedDatabase ?? _dbCreds.Database
+            };
+            _dbResult = await DatabaseService.ExecuteQueryAsync(ContainerId, _dbQuery, _container.DatabaseType, creds, _resolvedServerId);
+        }
+        catch (Exception ex)
+        {
+            _dbResult = new ServerWatch.Models.QueryResult { Error = ex.Message };
+        }
+        finally
+        {
+            _dbExecuting = false;
+        }
+    }
+
+    private async Task BackupDatabase()
+    {
+        if (_dbCreds == null || _container == null) return;
+        _dbBackingUp = true;
+
+        try
+        {
+            var db = _dbSelectedDatabase ?? _dbCreds.Database;
+            var (success, filePath, size, error) = await DatabaseService.BackupDatabaseAsync(
+                ContainerId, db, _container.DatabaseType, _dbCreds, _resolvedServerId);
+
+            if (success)
+                Snackbar.Add($"Backup erstellt: {filePath} ({size / 1024}KB)", Severity.Success);
+            else
+                Snackbar.Add($"Backup fehlgeschlagen: {error}", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _dbBackingUp = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _refreshTimer?.Dispose();
+        _termCts?.Cancel();
+        try
+        {
+            if (_termSession != null)
+                await SessionManager.DestroySession(_termSession.SessionId);
+            await JS.InvokeVoidAsync("ServerWatch.Terminal.dispose", "container-terminal");
+        }
+        catch { }
+        _dotNetRef?.Dispose();
+        _termCts?.Dispose();
+    }
+}

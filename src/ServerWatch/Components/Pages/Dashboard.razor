@@ -1,0 +1,526 @@
+@page "/"
+@attribute [Authorize]
+@inject IDockerService DockerService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject ServerWatch.Services.ImageUpdate.ImageUpdateStore ImageUpdateStore
+@inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfig
+@inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
+@implements IDisposable
+
+<PageTitle>Dashboard - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Dashboard" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Container-Übersicht</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Echtzeit-Status aller Server und Container</MudText>
+        </div>
+    </MudStack>
+</div>
+
+@* Summary Cards *@
+<MudGrid Class="mb-4">
+    <MudItem xs="12" sm="6" md="3">
+        <div class="sw-stat-card sw-orange">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Filled.Dns" Class="sw-stat-icon mr-3" />
+                <div>
+                    <div class="sw-stat-value">@_containers.Count</div>
+                    <div class="sw-stat-label">Gesamt</div>
+                </div>
+            </MudStack>
+        </div>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <div class="sw-stat-card sw-green">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Filled.PlayCircle" Class="sw-stat-icon mr-3" />
+                <div>
+                    <div class="sw-stat-value">@_containers.Count(c => c.State == "running")</div>
+                    <div class="sw-stat-label">Laufend</div>
+                </div>
+            </MudStack>
+        </div>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <div class="sw-stat-card sw-red">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Filled.StopCircle" Class="sw-stat-icon mr-3" />
+                <div>
+                    <div class="sw-stat-value">@_containers.Count(c => c.State == "exited")</div>
+                    <div class="sw-stat-label">Gestoppt</div>
+                </div>
+            </MudStack>
+        </div>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <div class="sw-stat-card sw-amber">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Filled.Warning" Class="sw-stat-icon mr-3" />
+                <div>
+                    <div class="sw-stat-value">@_containers.Count(c => c.HealthStatus == "unhealthy")</div>
+                    <div class="sw-stat-label">Fehlerhaft</div>
+                </div>
+            </MudStack>
+        </div>
+    </MudItem>
+    @if (CoolifyConfig.IsEnabled)
+    {
+        <MudItem xs="12" sm="6" md="3">
+            <div class="sw-stat-card sw-orange" style="cursor: pointer;" @onclick='() => Nav.NavigateTo("coolify")'>
+                <MudStack Row="true" AlignItems="AlignItems.Center">
+                    <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="sw-stat-icon mr-3" />
+                    <div>
+                        <div class="sw-stat-value">@_coolifyRunning / @_coolifyTotal</div>
+                        <div class="sw-stat-label">Coolify Apps</div>
+                    </div>
+                </MudStack>
+            </div>
+        </MudItem>
+    }
+</MudGrid>
+
+@* Grouped Container Tables *@
+@foreach (var serverGroup in _grouped)
+{
+    <div class="sw-server-header">
+        <MudIconButton Icon="@(_expandedServers.Contains(serverGroup.ServerId) ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                       Size="Size.Small" OnClick="@(() => ToggleServerExpand(serverGroup.ServerId))" />
+        <span class="sw-pulse-dot sw-green" style="@(GetServerReachable(serverGroup.ServerId) ? "" : "background: var(--sw-accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.5);")"></span>
+        <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
+        <MudText Typo="Typo.h6" Style="font-weight: 600;">@serverGroup.ServerName</MudText>
+        @if (_serverInfos.TryGetValue(serverGroup.ServerId, out var sInfoHeader) && sInfoHeader.IsReachable)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="ml-2">
+                @sInfoHeader.OperatingSystem — @sInfoHeader.CpuCount Kerne — @FormatBytes(sInfoHeader.MemoryTotalBytes) RAM
+            </MudText>
+        }
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
+                       Href="@($"server-terminal/{serverGroup.ServerId}")" Title="SSH Terminal" />
+        <MudIconButton Icon="@Icons.Material.Filled.Security" Size="Size.Small" Color="Color.Warning"
+                       Href="@($"firewall/{serverGroup.ServerId}")" Title="Firewall / Ports" />
+        <MudIconButton Icon="@Icons.Material.Filled.Web" Size="Size.Small" Color="Color.Info"
+                       Href="@($"nginx/{serverGroup.ServerId}")" Title="Nginx-Seiten" />
+        <MudIconButton Icon="@Icons.Material.Filled.MiscellaneousServices" Size="Size.Small" Color="Color.Default"
+                       Href="@($"services/{serverGroup.ServerId}")" Title="Systemdienste" />
+        <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Success"
+                       Href="@($"ssl/{serverGroup.ServerId}")" Title="SSL-Zertifikate" />
+    </div>
+
+    @if (_expandedServers.Contains(serverGroup.ServerId) && _serverInfos.TryGetValue(serverGroup.ServerId, out var sInfo) && sInfo.IsReachable)
+    {
+        <div class="sw-server-info-panel">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" md="3">
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">OS</MudText>
+                        <MudText Typo="Typo.body2">@sInfo.OperatingSystem</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">Kernel</MudText>
+                        <MudText Typo="Typo.body2">@sInfo.KernelVersion</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">Docker</MudText>
+                        <MudText Typo="Typo.body2">@sInfo.DockerVersion (@sInfo.Architecture)</MudText>
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Host</MudText>
+                        <MudText Typo="Typo.body2" Style="font-family: monospace;">@sInfo.IpAddress</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">Container</MudText>
+                        <MudText Typo="Typo.body2">@sInfo.ContainersRunning laufend / @sInfo.ContainersTotal gesamt</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">Images</MudText>
+                        <MudText Typo="Typo.body2">@sInfo.ImagesCount</MudText>
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">CPU (@sInfo.CpuCount Kerne)</MudText>
+                        <ResourceGauge Value="@sInfo.CpuUsagePercent" />
+                        <MudText Typo="Typo.body2">@sInfo.CpuUsagePercent.ToString("F1")% genutzt</MudText>
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Speicher</MudText>
+                        <ResourceGauge Value="@sInfo.MemoryUsedPercent" />
+                        <MudText Typo="Typo.body2">@FormatBytes(sInfo.MemoryUsedBytes) / @FormatBytes(sInfo.MemoryTotalBytes)</MudText>
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+        </div>
+    }
+
+    @foreach (var projectGroup in serverGroup.Projects)
+    {
+        <div class="sw-project-label">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" />
+            @projectGroup.Project
+        </div>
+
+        <MudTable Items="@projectGroup.Containers" Dense="true" Hover="true" Striped="true" Loading="@_loading"
+                  LoadingProgressColor="Color.Primary" Elevation="2" Class="mb-4">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Image</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Zustand</MudTh>
+                <MudTh Style="width: 150px;">CPU</MudTh>
+                <MudTh Style="width: 150px;">Speicher</MudTh>
+                <MudTh>Statustext</MudTh>
+                <MudTh>Aktionen</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudLink Href="@($"container/{context.ServerId}/{context.Id}")">@context.Name</MudLink>
+                        @if (HasUpdate(context))
+                        {
+                            <MudTooltip Text="@GetUpdateTooltip(context)">
+                                <MudIcon Icon="@Icons.Material.Filled.SystemUpdateAlt" Color="Color.Warning" Size="Size.Small" />
+                            </MudTooltip>
+                        }
+                    </MudStack>
+                </MudTd>
+                <MudTd>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                        @TruncateImage(context.Image)
+                    </MudText>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="@GetStateColor(context.State)" Variant="Variant.Filled">
+                        @context.State
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <HealthBadge Status="@context.HealthStatus" />
+                </MudTd>
+                <MudTd>
+                    @if (context.LatestStats != null)
+                    {
+                        <ResourceGauge Value="@context.LatestStats.CpuPercent" />
+                        <MudText Typo="Typo.caption">@context.LatestStats.CpuPercent.ToString("F1")%</MudText>
+                    }
+                </MudTd>
+                <MudTd>
+                    @if (context.LatestStats != null)
+                    {
+                        <ResourceGauge Value="@context.LatestStats.MemoryPercent" />
+                        <MudText Typo="Typo.caption">@FormatBytes(context.LatestStats.MemoryUsageBytes) / @FormatBytes(context.LatestStats.MemoryLimitBytes)</MudText>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudText Typo="Typo.body2">@context.Status</MudText>
+                </MudTd>
+                <MudTd>
+                    @if (context.State == "running")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
+                                       Title="Stoppen" OnClick="@(() => StopContainer(context))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
+                                       Title="Neustarten" OnClick="@(() => RestartContainer(context))" />
+                        @if (HasUpdate(context))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.SystemUpdateAlt" Size="Size.Small" Color="Color.Warning"
+                                           Title="Image aktualisieren" OnClick="@(() => UpdateContainer(context))" />
+                        }
+                    }
+                    else
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                       Title="Starten" OnClick="@(() => StartContainer(context))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       Title="Entfernen" OnClick="@(() => RemoveContainer(context))" />
+                    }
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4">Keine Container in diesem Projekt gefunden.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    }
+}
+
+@if (!_loading && !_containers.Any())
+{
+    <MudText Class="pa-4">Keine Container gefunden. Bitte sicherstellen, dass Docker läuft und der Socket erreichbar ist.</MudText>
+}
+
+@code {
+    private List<ContainerInfo> _containers = new();
+    private List<ServerGroupViewModel> _grouped = new();
+    private Dictionary<string, ServerSystemInfo> _serverInfos = new();
+    private HashSet<string> _expandedServers = new();
+    private bool _loading = true;
+    private Timer? _refreshTimer;
+    private int _refreshCount;
+    private int _coolifyTotal;
+    private int _coolifyRunning;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Phase 1: Load container list fast (no stats yet)
+        await LoadContainerList();
+        _loading = false;
+        StateHasChanged();
+
+        // Phase 2: Load stats in background, update incrementally
+        _ = Task.Run(async () =>
+        {
+            await LoadStats();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        // Phase 3: Load server info in background
+        _ = Task.Run(async () =>
+        {
+            try { _serverInfos = await DockerService.GetAllServerSystemInfoAsync(); }
+            catch { }
+            await InvokeAsync(StateHasChanged);
+        });
+
+        // Phase 4: Load Coolify summary in background
+        if (CoolifyConfig.IsEnabled)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var apps = await CoolifyService.ListApplicationsAsync();
+                    _coolifyTotal = apps.Count;
+                    _coolifyRunning = apps.Count(a => a.DisplayStatus == "running");
+                }
+                catch { }
+                await InvokeAsync(StateHasChanged);
+            });
+        }
+
+        // Periodic refresh
+        _refreshTimer = new Timer(async _ =>
+        {
+            await RefreshAll();
+            await InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task LoadContainerList()
+    {
+        try
+        {
+            var containers = await DockerService.ListAllContainersAsync();
+            _containers = containers.ToList();
+            RebuildGrouping();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Laden der Container: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadStats()
+    {
+        var running = _containers.Where(c => c.State == "running").ToList();
+        // Fetch stats in parallel batches of 10 to avoid overwhelming the daemon
+        const int batchSize = 10;
+        for (int i = 0; i < running.Count; i += batchSize)
+        {
+            var batch = running.Skip(i).Take(batchSize);
+            await Task.WhenAll(batch.Select(async c =>
+            {
+                c.LatestStats = await DockerService.GetContainerStatsAsync(c.Id, c.ServerId);
+            }));
+            // Update UI after each batch
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RefreshAll()
+    {
+        try
+        {
+            var containers = await DockerService.ListAllContainersAsync();
+            _containers = containers.ToList();
+
+            // Stats in parallel (cached results return instantly)
+            await Task.WhenAll(_containers
+                .Where(c => c.State == "running")
+                .Select(async c =>
+                {
+                    c.LatestStats = await DockerService.GetContainerStatsAsync(c.Id, c.ServerId);
+                }));
+
+            RebuildGrouping();
+
+            // Server info every 6th cycle (~30s)
+            _refreshCount++;
+            if (_refreshCount % 6 == 0)
+            {
+                try { _serverInfos = await DockerService.GetAllServerSystemInfoAsync(); }
+                catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Refresh failed");
+        }
+    }
+
+    [Inject] private ILogger<Dashboard>? _logger { get; set; }
+
+    private void RebuildGrouping()
+    {
+        _grouped = _containers
+            .GroupBy(c => new { c.ServerId, c.ServerName })
+            .OrderBy(g => g.Key.ServerName)
+            .Select(serverGroup => new ServerGroupViewModel
+            {
+                ServerId = serverGroup.Key.ServerId,
+                ServerName = serverGroup.Key.ServerName,
+                Projects = serverGroup
+                    .GroupBy(c => c.ComposeProject)
+                    .OrderBy(g => g.Key)
+                    .Select(projectGroup => new ProjectGroupViewModel
+                    {
+                        Project = projectGroup.Key,
+                        Containers = projectGroup.OrderBy(c => c.Name).ToList()
+                    })
+                    .ToList()
+            })
+            .ToList();
+    }
+
+    private async Task StartContainer(ContainerInfo container)
+    {
+        try
+        {
+            await DockerService.StartContainerAsync(container.Id, container.ServerId);
+            Snackbar.Add($"{container.Name} gestartet", Severity.Success);
+            await RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Starten von {container.Name}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task StopContainer(ContainerInfo container)
+    {
+        try
+        {
+            await DockerService.StopContainerAsync(container.Id, container.ServerId);
+            Snackbar.Add($"{container.Name} gestoppt", Severity.Success);
+            await RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Stoppen von {container.Name}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RestartContainer(ContainerInfo container)
+    {
+        try
+        {
+            await DockerService.RestartContainerAsync(container.Id, container.ServerId);
+            Snackbar.Add($"{container.Name} neugestartet", Severity.Success);
+            await RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Neustarten von {container.Name}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RemoveContainer(ContainerInfo container)
+    {
+        try
+        {
+            await DockerService.RemoveContainerAsync(container.Id, force: true, serverId: container.ServerId);
+            Snackbar.Add($"{container.Name} entfernt", Severity.Success);
+            await RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Entfernen von {container.Name}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private bool HasUpdate(ContainerInfo c)
+        => ImageUpdateStore.Get(c.Id, c.ServerId)?.UpdateAvailable == true;
+
+    private string GetUpdateTooltip(ContainerInfo c)
+    {
+        var info = ImageUpdateStore.Get(c.Id, c.ServerId);
+        if (info == null) return "";
+        var local = info.LocalDigest.Length > 19 ? info.LocalDigest[..19] : info.LocalDigest;
+        var remote = info.RemoteDigest.Length > 19 ? info.RemoteDigest[..19] : info.RemoteDigest;
+        return $"Update verfügbar: {info.Image} — Lokal: {local}… → Remote: {remote}…";
+    }
+
+    private async Task UpdateContainer(ContainerInfo container)
+    {
+        try
+        {
+            Snackbar.Add($"{container.Name} wird aktualisiert...", Severity.Info);
+            var progress = new Progress<string>(msg => Snackbar.Add(msg, Severity.Info));
+            await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
+            ImageUpdateStore.Remove(container.Id, container.ServerId);
+            Snackbar.Add($"{container.Name} erfolgreich aktualisiert!", Severity.Success);
+            await RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Aktualisieren von {container.Name}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static Color GetStateColor(string state) => state switch
+    {
+        "running" => Color.Success,
+        "exited" => Color.Error,
+        "paused" => Color.Warning,
+        "restarting" => Color.Info,
+        _ => Color.Default
+    };
+
+    private static string TruncateImage(string image) =>
+        image.Length > 40 ? image[..37] + "..." : image;
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1073741824 => $"{bytes / 1073741824.0:F1} GB",
+        >= 1048576 => $"{bytes / 1048576.0:F1} MB",
+        >= 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes} B"
+    };
+
+    private bool GetServerReachable(string serverId)
+        => _serverInfos.TryGetValue(serverId, out var info) && info.IsReachable;
+
+    private void ToggleServerExpand(string serverId)
+    {
+        if (!_expandedServers.Remove(serverId))
+            _expandedServers.Add(serverId);
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+
+    private class ServerGroupViewModel
+    {
+        public string ServerId { get; set; } = string.Empty;
+        public string ServerName { get; set; } = string.Empty;
+        public List<ProjectGroupViewModel> Projects { get; set; } = new();
+    }
+
+    private class ProjectGroupViewModel
+    {
+        public string Project { get; set; } = string.Empty;
+        public List<ContainerInfo> Containers { get; set; } = new();
+    }
+}

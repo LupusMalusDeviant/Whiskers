@@ -1,0 +1,357 @@
+@page "/apps"
+@attribute [Authorize]
+@inject ServerWatch.Services.Templates.TemplateService TemplateService
+@inject ServerWatch.Services.Server.IHostCommandExecutor Executor
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject IDockerService DockerService
+@inject ISnackbar Snackbar
+
+<PageTitle>App Store - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Apps" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">App Store</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@TemplateService.GetTemplates().Count Apps verfügbar</MudText>
+        </div>
+        <MudSpacer />
+        <MudTextField @bind-Value="_search" Placeholder="Suchen..." Variant="Variant.Outlined" Dense="true"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Immediate="true" Style="max-width: 280px;" />
+    </MudStack>
+</div>
+
+@* Category Filter Chips *@
+<MudStack Row="true" Spacing="1" Class="mb-4" Style="flex-wrap: wrap;">
+    <MudChip T="string" Size="Size.Small" OnClick="@(() => _categoryFilter = null)"
+             Color="@(_categoryFilter == null ? Color.Primary : Color.Default)"
+             Variant="@(_categoryFilter == null ? Variant.Filled : Variant.Outlined)">Alle</MudChip>
+    @foreach (var cat in TemplateService.GetCategories())
+    {
+        var c = cat;
+        <MudChip T="string" Size="Size.Small" OnClick="@(() => _categoryFilter = c)"
+                 Color="@(_categoryFilter == c ? Color.Primary : Color.Default)"
+                 Variant="@(_categoryFilter == c ? Variant.Filled : Variant.Outlined)">@c</MudChip>
+    }
+</MudStack>
+
+@* Template Grid *@
+@* Installed Apps *@
+@if (_installedApps.Any() && string.IsNullOrWhiteSpace(_search) && _categoryFilter == null)
+{
+    <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600; color: var(--sw-accent-primary);">
+        Installiert (@_installedApps.Count)
+    </MudText>
+    <MudGrid Class="mb-4">
+        @foreach (var app in _installedApps)
+        {
+            <MudItem xs="12" sm="6" md="4" lg="3">
+                <MudPaper Class="pa-4" Elevation="0" Style="height: 100%; border: 1px solid var(--sw-accent-primary-soft); border-radius: 12px;">
+                    <MudStack Spacing="1">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <span class="sw-pulse-dot sw-green"></span>
+                            <MudText Typo="Typo.body1" Style="font-weight: 600;">@app.Project</MudText>
+                        </MudStack>
+                        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
+                            @app.ContainerCount Container · @app.ServerName
+                        </MudText>
+                        @foreach (var c in app.Containers.Take(3))
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="font-size: 0.7rem;">
+                                @c.Name — @c.Image
+                            </MudChip>
+                        }
+                        @if (app.Containers.Count > 3)
+                        {
+                            <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">+@(app.Containers.Count - 3) weitere</MudText>
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+    <MudDivider Class="mb-4" />
+}
+
+@* Template Store *@
+<MudGrid>
+    @foreach (var group in FilteredTemplates.GroupBy(t => t.Category))
+    {
+        <MudItem xs="12">
+            <MudText Typo="Typo.subtitle1" Class="mb-2 mt-2" Style="font-weight: 600; color: var(--sw-text-secondary);">@group.Key</MudText>
+        </MudItem>
+        @foreach (var tmpl in group)
+        {
+            <MudItem xs="12" sm="6" md="4" lg="3">
+                <MudPaper Class="pa-4" Elevation="0" Style="cursor: pointer; height: 100%; border: 1px solid var(--sw-glass-border); border-radius: 12px; transition: all 0.2s;"
+                          @onclick="@(() => SelectTemplate(tmpl))">
+                    <MudStack Spacing="2">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudIcon Icon="@GetIcon(tmpl.Icon)" Size="Size.Large" Style="color: var(--sw-accent-primary);" />
+                            <MudText Typo="Typo.h6" Style="font-weight: 600;">@tmpl.Name</MudText>
+                        </MudStack>
+                        <MudText Typo="Typo.body2" Style="color: var(--sw-text-secondary);">@tmpl.Description</MudText>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted); font-size: 0.7rem;">@tmpl.Category</MudChip>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        }
+    }
+</MudGrid>
+
+@if (!FilteredTemplates.Any())
+{
+    <MudAlert Severity="Severity.Info" Class="mt-4">Keine Apps gefunden für "@_search".</MudAlert>
+}
+
+@* Deploy Dialog *@
+@if (_selectedTemplate != null)
+{
+    <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+        <TitleContent>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@GetIcon(_selectedTemplate.Icon)" Color="Color.Primary" />
+                <span>@_selectedTemplate.Name deployen</span>
+            </MudStack>
+        </TitleContent>
+        <DialogContent>
+            <MudTextField @bind-Value="_deployProjectName" Label="Projektname" Variant="Variant.Outlined" Class="mb-3"
+                          Placeholder="my-app" />
+
+            @* Server Selection *@
+            <MudSelect T="string" @bind-Value="_deployServerId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var srv in _servers)
+                {
+                    <MudSelectItem Value="@srv.Id">@srv.Name @(srv.VpnType != ServerWatch.Models.VpnType.None ? $"({srv.VpnType})" : "")</MudSelectItem>
+                }
+            </MudSelect>
+
+            @foreach (var key in _deployVars.Keys.ToList())
+            {
+                var k = key;
+                var isRequired = _selectedTemplate.RequiredEnvVars.Contains(k);
+                var isPort = k.Contains("PORT", StringComparison.OrdinalIgnoreCase);
+                <MudTextField Value="@_deployVars[k]" ValueChanged="@((string v) => { _deployVars[k] = v; if (isPort) CheckPortConflicts(); })"
+                              Label="@k" Variant="Variant.Outlined" Dense="true" Class="mb-2"
+                              Style="font-family: 'JetBrains Mono', monospace;"
+                              InputType="@(k.Contains("PASSWORD") || k.Contains("SECRET") || k.Contains("TOKEN") ? InputType.Password : InputType.Text)"
+                              Required="@isRequired"
+                              Error="@(isPort && _portConflicts.ContainsKey(k))"
+                              ErrorText="@(_portConflicts.GetValueOrDefault(k))" />
+            }
+
+            @if (_portConflicts.Any())
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                    Port-Konflikte erkannt! Bitte andere Ports wählen.
+                </MudAlert>
+            }
+
+            @if (_deploying)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" />
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showDialog = false)" Disabled="@_deploying">Abbrechen</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployTemplate"
+                       Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName) || _portConflicts.Any())">
+                Deployen auf @(_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local")
+            </MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private ServerWatch.Models.AppTemplate? _selectedTemplate;
+    private bool _showDialog;
+    private bool _deploying;
+    private string _deployProjectName = "";
+    private string _deployServerId = "local";
+    private string _search = "";
+    private string? _categoryFilter;
+    private Dictionary<string, string> _deployVars = new();
+    private Dictionary<string, string> _portConflicts = new();
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private HashSet<int> _usedPorts = new();
+    private List<InstalledApp> _installedApps = new();
+
+    private class InstalledApp
+    {
+        public string Project { get; set; } = "";
+        public string ServerName { get; set; } = "";
+        public int ContainerCount { get; set; }
+        public List<ServerWatch.Models.ContainerInfo> Containers { get; set; } = new();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var containers = await DockerService.ListAllContainersAsync(all: true);
+            _installedApps = containers
+                .Where(c => c.ComposeProject != "Standalone")
+                .GroupBy(c => new { c.ComposeProject, c.ServerName })
+                .Select(g => new InstalledApp
+                {
+                    Project = g.Key.ComposeProject,
+                    ServerName = g.Key.ServerName,
+                    ContainerCount = g.Count(),
+                    Containers = g.ToList()
+                })
+                .OrderBy(a => a.Project)
+                .ToList();
+        }
+        catch { }
+    }
+
+    private IEnumerable<ServerWatch.Models.AppTemplate> FilteredTemplates
+    {
+        get
+        {
+            var templates = TemplateService.GetTemplates().AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(_categoryFilter))
+                templates = templates.Where(t => t.Category == _categoryFilter);
+            if (!string.IsNullOrWhiteSpace(_search))
+                templates = templates.Where(t =>
+                    t.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    t.Description.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    t.Category.Contains(_search, StringComparison.OrdinalIgnoreCase));
+            return templates;
+        }
+    }
+
+    private async Task SelectTemplate(ServerWatch.Models.AppTemplate tmpl)
+    {
+        _selectedTemplate = tmpl;
+        _deployProjectName = tmpl.Id;
+        _deployVars = new Dictionary<string, string>(tmpl.EnvDefaults);
+        foreach (var req in tmpl.RequiredEnvVars)
+            if (!_deployVars.ContainsKey(req)) _deployVars[req] = "";
+        _portConflicts.Clear();
+
+        // Load servers
+        _servers = ServerConfigService.GetEnabledServers();
+        _deployServerId = _servers.FirstOrDefault()?.Id ?? "local";
+
+        // Load used ports for conflict detection
+        await LoadUsedPorts();
+        CheckPortConflicts();
+
+        _showDialog = true;
+    }
+
+    private async Task LoadUsedPorts()
+    {
+        _usedPorts.Clear();
+        try
+        {
+            var containers = await DockerService.ListContainersAsync(all: false, serverId: _deployServerId == "local" ? null : _deployServerId);
+            foreach (var c in containers)
+            {
+                foreach (var p in c.Ports.Where(p => p.PublicPort > 0))
+                    _usedPorts.Add(p.PublicPort);
+            }
+        }
+        catch { }
+    }
+
+    private void CheckPortConflicts()
+    {
+        _portConflicts.Clear();
+        foreach (var (key, value) in _deployVars)
+        {
+            if (!key.Contains("PORT", StringComparison.OrdinalIgnoreCase)) continue;
+            if (int.TryParse(value, out var port) && _usedPorts.Contains(port))
+            {
+                _portConflicts[key] = $"Port {port} ist bereits belegt!";
+            }
+        }
+    }
+
+    private async Task DeployTemplate()
+    {
+        if (_selectedTemplate == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
+
+        // Check required vars
+        foreach (var req in _selectedTemplate.RequiredEnvVars)
+        {
+            if (string.IsNullOrWhiteSpace(_deployVars.GetValueOrDefault(req)))
+            {
+                Snackbar.Add($"Pflichtfeld: {req}", Severity.Warning);
+                return;
+            }
+        }
+
+        if (_portConflicts.Any())
+        {
+            Snackbar.Add("Port-Konflikte beheben!", Severity.Warning);
+            return;
+        }
+
+        _deploying = true;
+        try
+        {
+            // Replace placeholders in compose content
+            var yaml = _selectedTemplate.ComposeContent;
+            yaml = yaml.Replace("{PROJECT}", _deployProjectName);
+            foreach (var (key, value) in _deployVars)
+                yaml = yaml.Replace($"{{{key}}}", value);
+
+            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(yaml));
+            var dir = $"/opt/deployments/{_deployProjectName}";
+
+            var result = await Executor.ExecuteAsync(_deployServerId,
+                $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+                TimeSpan.FromMinutes(5));
+
+            if (result.Success)
+            {
+                Snackbar.Add($"'{_selectedTemplate.Name}' erfolgreich deployed auf {_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"}!", Severity.Success);
+                _showDialog = false;
+            }
+            else
+            {
+                Snackbar.Add($"Fehler: {result.Output}\n{result.Error}", Severity.Error);
+            }
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        finally { _deploying = false; }
+    }
+
+    private static string GetIcon(string iconName) => iconName switch
+    {
+        "Storage" => Icons.Material.Filled.Storage,
+        "Speed" => Icons.Material.Filled.Speed,
+        "Language" => Icons.Material.Filled.Language,
+        "Code" => Icons.Material.Filled.Code,
+        "MonitorHeart" => Icons.Material.Filled.MonitorHeart,
+        "AccountTree" => Icons.Material.Filled.AccountTree,
+        "CloudQueue" => Icons.Material.Filled.CloudQueue,
+        "Cloud" => Icons.Material.Filled.Cloud,
+        "Web" => Icons.Material.Filled.Web,
+        "Edit" => Icons.Material.Filled.Edit,
+        "Lock" => Icons.Material.Filled.Lock,
+        "Router" => Icons.Material.Filled.Router,
+        "Share" => Icons.Material.Filled.Share,
+        "Search" => Icons.Material.Filled.Search,
+        "Timeline" => Icons.Material.Filled.Timeline,
+        "BuildCircle" => Icons.Material.Filled.BuildCircle,
+        "CloudUpload" => Icons.Material.Filled.CloudUpload,
+        "BarChart" => Icons.Material.Filled.BarChart,
+        "QueryStats" => Icons.Material.Filled.QueryStats,
+        "Dashboard" => Icons.Material.Filled.Dashboard,
+        "SmartToy" => Icons.Material.Filled.SmartToy,
+        "Folder" => Icons.Material.Filled.Folder,
+        "Chat" => Icons.Material.Filled.Chat,
+        "Forum" => Icons.Material.Filled.Forum,
+        "VpnKey" => Icons.Material.Filled.VpnKey,
+        "Shield" => Icons.Material.Filled.Shield,
+        "Analytics" => Icons.Material.Filled.Analytics,
+        "TrendingUp" => Icons.Material.Filled.TrendingUp,
+        _ => Icons.Material.Filled.Widgets
+    };
+}

@@ -1,0 +1,31 @@
+services:
+  serverwatch:
+    build: .
+    container_name: serverwatch
+    pid: host
+    privileged: true
+    ports:
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-5100}:8080"
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - serverwatch-data:/app/data
+      - /proc:/host_proc:ro
+    environment:
+      - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}
+      - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-}
+      - GoogleAuth__AllowedEmails__0=${GOOGLE_ADMIN_EMAIL:-}
+      - Auth__Disabled=${AUTH_DISABLED:-false}
+      - Mattermost__WebhookUrl=${MATTERMOST_WEBHOOK_URL:-}
+      - Mattermost__Enabled=${MATTERMOST_ENABLED:-false}
+      - PathBase=${PATH_BASE:-}
+      - AiChat__Enabled=${AICHAT_ENABLED:-false}
+      - AiChat__ApiKey=${AICHAT_API_KEY:-}
+      - AiChat__ApiUrl=${AICHAT_API_URL:-}
+      - AiChat__Model=${AICHAT_MODEL:-}
+      - AiChat__Provider=${AICHAT_PROVIDER:-openai}
+    restart: unless-stopped
+
+volumes:
+  serverwatch-data:

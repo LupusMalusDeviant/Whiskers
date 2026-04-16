@@ -1,0 +1,226 @@
+using System.Diagnostics;
+using ServerWatch.Models;
+using ServerWatch.Services.Docker;
+
+namespace ServerWatch.Services.Database;
+
+public class DatabaseService : IDatabaseService
+{
+    private readonly IDockerService _docker;
+    private readonly ILogger<DatabaseService> _logger;
+
+    public DatabaseService(IDockerService docker, ILogger<DatabaseService> logger)
+    {
+        _docker = docker;
+        _logger = logger;
+    }
+
+    public async Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    {
+        var sw = Stopwatch.StartNew();
+        var cmd = BuildQueryCommand(dbType, creds, query);
+        var (stdout, stderr, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId, TimeSpan.FromSeconds(30));
+        sw.Stop();
+
+        if (exitCode != 0)
+            return new QueryResult { Error = stderr.Trim(), DurationMs = sw.Elapsed.TotalMilliseconds };
+
+        return ParseQueryResult(stdout, dbType, sw.Elapsed.TotalMilliseconds);
+    }
+
+    public async Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    {
+        var cmd = dbType switch
+        {
+            DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname" },
+            DatabaseType.MySQL => BuildMysqlCmd(creds, "-e", "SHOW DATABASES"),
+            DatabaseType.MongoDB => new[] { "mongosh", "--quiet", "--eval", "db.adminCommand('listDatabases').databases.forEach(d => print(d.name))" },
+            DatabaseType.Redis => new[] { "redis-cli", "CONFIG", "GET", "databases" },
+            DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "-p", creds.Password, "SHOW DATABASES YIELD name RETURN name" },
+            _ => Array.Empty<string>()
+        };
+
+        if (cmd.Length == 0) return new();
+
+        var (stdout, _, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId);
+        if (exitCode != 0) return new();
+
+        return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("+-") && !l.StartsWith("Database") && !l.StartsWith("databases"))
+            .Select(l => l.Trim('|', ' '))
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .ToList();
+    }
+
+    public async Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    {
+        var cmd = dbType switch
+        {
+            DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", database, "-t", "-A", "-c",
+                "SELECT t.tablename, pg_size_pretty(pg_total_relation_size('public.' || t.tablename)), COALESCE(s.n_live_tup, 0) FROM pg_tables t LEFT JOIN pg_stat_user_tables s ON t.tablename = s.relname WHERE t.schemaname = 'public' ORDER BY t.tablename" },
+            DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", database, "-e", "SELECT TABLE_NAME, TABLE_ROWS, ROUND(((DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024), 2) AS 'Size_MB' FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME"),
+            DatabaseType.MongoDB => new[] { "mongosh", "--quiet", database, "--eval", "db.getCollectionNames().forEach(c => { var s = db[c].stats(); print(c + '|' + s.count + '|' + s.size) })" },
+            _ => Array.Empty<string>()
+        };
+
+        if (cmd.Length == 0) return new();
+
+        var (stdout, _, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId);
+        if (exitCode != 0) return new();
+
+        var tables = new List<TableInfo>();
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.StartsWith("+-") || line.StartsWith("TABLE") || string.IsNullOrWhiteSpace(line)) continue;
+            var parts = line.Split('|');
+            if (parts.Length >= 1)
+            {
+                tables.Add(new TableInfo
+                {
+                    Name = parts[0].Trim(),
+                    RowCount = parts.Length > 1 && long.TryParse(parts[1].Trim(), out var rc) ? rc : 0,
+                    Size = parts.Length > 2 ? parts[2].Trim() : ""
+                });
+            }
+        }
+        return tables;
+    }
+
+    public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    {
+        var cmd = dbType switch
+        {
+            DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", database, "-t", "-A", "-c",
+                $"SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = '{table}') pk ON c.column_name = pk.column_name WHERE c.table_name = '{table}' AND c.table_schema = 'public' ORDER BY c.ordinal_position" },
+            DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", database, "-e", $"DESCRIBE `{table}`"),
+            _ => Array.Empty<string>()
+        };
+
+        if (cmd.Length == 0) return new();
+
+        var (stdout, _, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId);
+        if (exitCode != 0) return new();
+
+        var columns = new List<ColumnInfo>();
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.StartsWith("+-") || line.StartsWith("Field") || string.IsNullOrWhiteSpace(line)) continue;
+            var parts = line.Split('|').Select(p => p.Trim()).ToArray();
+            if (parts.Length >= 2)
+            {
+                columns.Add(new ColumnInfo
+                {
+                    Name = parts[0],
+                    Type = parts[1],
+                    Nullable = parts.Length > 2 && parts[2].Contains("YES", StringComparison.OrdinalIgnoreCase),
+                    Default = parts.Length > 3 && !string.IsNullOrWhiteSpace(parts[3]) ? parts[3] : null,
+                    PrimaryKey = parts.Length > 4 && parts[4]?.Contains("YES", StringComparison.OrdinalIgnoreCase) == true
+                });
+            }
+        }
+        return columns;
+    }
+
+    public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    {
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        var fileName = $"{database}_{timestamp}.sql";
+        var backupPath = $"/tmp/{fileName}";
+
+        var cmd = dbType switch
+        {
+            DatabaseType.PostgreSQL => new[] { "sh", "-c", $"pg_dump -U {creds.User} {database} > {backupPath}" },
+            DatabaseType.MySQL => new[] { "sh", "-c", $"mysqldump -u {creds.User} -p{creds.Password} {database} > {backupPath}" },
+            DatabaseType.MongoDB => new[] { "sh", "-c", $"mongodump --db {database} --archive={backupPath}.gz --gzip" },
+            _ => Array.Empty<string>()
+        };
+
+        if (cmd.Length == 0)
+            return (false, "", 0, $"Backup wird für {dbType} nicht unterstützt.");
+
+        var (stdout, stderr, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId, TimeSpan.FromMinutes(5));
+
+        if (exitCode != 0)
+            return (false, "", 0, stderr.Trim());
+
+        // Get file size
+        var (sizeOut, _, _) = await _docker.ExecInContainerAsync(containerId, new[] { "stat", "-c", "%s", dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath }, serverId);
+        long.TryParse(sizeOut.Trim(), out var size);
+
+        return (true, dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath, size, "");
+    }
+
+    private static string[] BuildQueryCommand(DatabaseType dbType, DatabaseCredentials creds, string query) => dbType switch
+    {
+        DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", creds.Database, "-c", query },
+        DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", creds.Database, "-e", query),
+        DatabaseType.MongoDB => new[] { "mongosh", "--quiet", creds.Database, "--eval", query },
+        DatabaseType.Redis => new[] { "redis-cli" }.Concat(query.Split(' ')).ToArray(),
+        DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "-p", creds.Password, query },
+        _ => new[] { "echo", "Unsupported database type" }
+    };
+
+    private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs)
+    {
+        var cmd = new List<string> { "mysql", "-u", creds.User };
+        if (!string.IsNullOrEmpty(creds.Password))
+            cmd.Add($"-p{creds.Password}");
+        cmd.AddRange(extraArgs);
+        return cmd.ToArray();
+    }
+
+    private static QueryResult ParseQueryResult(string output, DatabaseType dbType, double durationMs)
+    {
+        var result = new QueryResult { DurationMs = durationMs };
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        if (lines.Length == 0)
+        {
+            result.RowCount = 0;
+            return result;
+        }
+
+        // PostgreSQL with -c outputs a table with headers
+        // MySQL outputs tab-separated with headers
+        // MongoDB outputs JSON
+        // Redis outputs plain text
+        if (dbType == DatabaseType.Redis || dbType == DatabaseType.MongoDB)
+        {
+            // Plain text output — single column
+            result.Columns.Add("Ergebnis");
+            foreach (var line in lines)
+                result.Rows.Add(new List<string> { line });
+            result.RowCount = result.Rows.Count;
+            return result;
+        }
+
+        // Tab/pipe-separated table output
+        bool headerParsed = false;
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            // Skip separator lines (postgres: ----+----, mysql: +----+)
+            if (trimmed.StartsWith("--") || trimmed.StartsWith("+-") || trimmed.StartsWith("(") || string.IsNullOrWhiteSpace(trimmed))
+                continue;
+
+            // Split by | (postgres) or \t (mysql)
+            var cells = trimmed.Contains('|')
+                ? trimmed.Split('|').Select(c => c.Trim()).ToList()
+                : trimmed.Split('\t').Select(c => c.Trim()).ToList();
+
+            if (!headerParsed)
+            {
+                result.Columns = cells;
+                headerParsed = true;
+            }
+            else
+            {
+                result.Rows.Add(cells);
+            }
+        }
+
+        result.RowCount = result.Rows.Count;
+        return result;
+    }
+}

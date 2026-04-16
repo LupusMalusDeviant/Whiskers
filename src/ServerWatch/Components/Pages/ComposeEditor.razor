@@ -1,0 +1,238 @@
+@page "/compose"
+@attribute [Authorize]
+@inject IDockerService DockerService
+@inject ServerWatch.Services.Server.IHostCommandExecutor Executor
+@inject ISnackbar Snackbar
+
+<PageTitle>Compose Editor - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.EditNote" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Compose Editor</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Docker Compose-Dateien bearbeiten und deployen</MudText>
+        </div>
+        <MudSpacer />
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddService">Service hinzufügen</MudButton>
+    </MudStack>
+</div>
+
+<MudGrid>
+    @* Left: Service Cards *@
+    <MudItem xs="12" md="5">
+        @if (!_services.Any())
+        {
+            <MudAlert Severity="Severity.Info">Füge Services hinzu um eine Compose-Datei zu erstellen.</MudAlert>
+        }
+        @foreach (var svc in _services)
+        {
+            var s = svc;
+            <MudPaper Class="pa-3 mb-3" Elevation="0"
+                      Style="@($"cursor: pointer; border: 1px solid {(_selectedService == s ? "var(--sw-accent-blue)" : "var(--sw-glass-border)")}; border-radius: 10px;")"
+                      @onclick="@(() => _selectedService = s)">
+                <MudStack Row="true" AlignItems="AlignItems.Center">
+                    <MudIcon Icon="@Icons.Material.Filled.Widgets" Size="Size.Small"
+                             Style="@($"color: {(_selectedService == s ? "var(--sw-accent-blue)" : "var(--sw-text-muted)") };")" />
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2" Style="font-weight: 600;">@(string.IsNullOrEmpty(s.Name) ? "(unbenannt)" : s.Name)</MudText>
+                        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">@(string.IsNullOrEmpty(s.Image) ? "kein Image" : s.Image)</MudText>
+                    </MudStack>
+                    <MudSpacer />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => _services.Remove(s))" OnClickStopPropagation="true" />
+                </MudStack>
+            </MudPaper>
+        }
+    </MudItem>
+
+    @* Right: Selected Service Form *@
+    <MudItem xs="12" md="7">
+        @if (_selectedService != null)
+        {
+            var svc = _selectedService;
+            <MudPaper Class="pa-4" Elevation="0">
+                <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight: 600;">
+                    Service: @(string.IsNullOrEmpty(svc.Name) ? "(neu)" : svc.Name)
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="6">
+                        <MudTextField @bind-Value="svc.Name" Label="Service-Name" Variant="Variant.Outlined" Dense="true" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTextField @bind-Value="svc.Image" Label="Image" Variant="Variant.Outlined" Dense="true"
+                                      Placeholder="nginx:latest" Style="font-family: monospace;" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="svc.Ports" Label="Ports (kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                                      Placeholder="8080:80, 8443:443" Style="font-family: monospace;" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="svc.EnvVars" Label="Umgebungsvariablen (KEY=VALUE, kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                                      Placeholder="DB_HOST=db, DB_PORT=5432" Style="font-family: monospace;" Lines="2" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="svc.Volumes" Label="Volumes (kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                                      Placeholder="data:/app/data, ./config:/etc/config" Style="font-family: monospace;" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudSelect T="string" @bind-Value="svc.RestartPolicy" Label="Restart" Variant="Variant.Outlined" Dense="true">
+                            <MudSelectItem Value="@("unless-stopped")">unless-stopped</MudSelectItem>
+                            <MudSelectItem Value="@("always")">always</MudSelectItem>
+                            <MudSelectItem Value="@("on-failure")">on-failure</MudSelectItem>
+                            <MudSelectItem Value="@("no")">no</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTextField @bind-Value="svc.DependsOn" Label="Depends On (kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                                      Placeholder="db, redis" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTextField @bind-Value="svc.Network" Label="Netzwerk" Variant="Variant.Outlined" Dense="true"
+                                      Placeholder="app-network" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info">Wähle einen Service links aus oder erstelle einen neuen.</MudAlert>
+        }
+    </MudItem>
+</MudGrid>
+
+@* Generated YAML + Deploy *@
+@if (_services.Any())
+{
+    <MudDivider Class="my-4" />
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Generierte docker-compose.yml</MudText>
+        <MudSpacer />
+        <MudTextField @bind-Value="_projectName" Label="Projektname" Variant="Variant.Outlined" Dense="true"
+                      Style="max-width: 200px;" Placeholder="my-app" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch"
+                   OnClick="Deploy" Disabled="@(_deploying || string.IsNullOrWhiteSpace(_projectName))">
+            @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+            Deployen
+        </MudButton>
+    </MudStack>
+    <MudPaper Class="pa-3" Elevation="0" Style="background: rgba(0,0,0,0.3); border-radius: 8px;">
+        <pre style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--sw-accent-green); margin: 0; white-space: pre-wrap;">@GenerateYaml()</pre>
+    </MudPaper>
+}
+
+@code {
+    private List<ComposeService> _services = new();
+    private ComposeService? _selectedService;
+    private string _projectName = "";
+    private bool _deploying;
+
+    private void AddService()
+    {
+        var svc = new ComposeService { Name = $"service{_services.Count + 1}" };
+        _services.Add(svc);
+        _selectedService = svc;
+    }
+
+    private string GenerateYaml()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("services:");
+
+        var allNetworks = new HashSet<string>();
+
+        foreach (var svc in _services.Where(s => !string.IsNullOrEmpty(s.Name) && !string.IsNullOrEmpty(s.Image)))
+        {
+            sb.AppendLine($"  {svc.Name}:");
+            sb.AppendLine($"    image: {svc.Image}");
+            sb.AppendLine($"    container_name: {_projectName}-{svc.Name}");
+
+            if (!string.IsNullOrEmpty(svc.Ports))
+            {
+                sb.AppendLine("    ports:");
+                foreach (var p in svc.Ports.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                    sb.AppendLine($"      - \"{p}\"");
+            }
+
+            if (!string.IsNullOrEmpty(svc.EnvVars))
+            {
+                sb.AppendLine("    environment:");
+                foreach (var e in svc.EnvVars.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                    sb.AppendLine($"      - {e}");
+            }
+
+            if (!string.IsNullOrEmpty(svc.Volumes))
+            {
+                sb.AppendLine("    volumes:");
+                foreach (var v in svc.Volumes.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                    sb.AppendLine($"      - {v}");
+            }
+
+            if (!string.IsNullOrEmpty(svc.DependsOn))
+            {
+                sb.AppendLine("    depends_on:");
+                foreach (var d in svc.DependsOn.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                    sb.AppendLine($"      - {d}");
+            }
+
+            if (!string.IsNullOrEmpty(svc.Network))
+            {
+                sb.AppendLine("    networks:");
+                sb.AppendLine($"      - {svc.Network}");
+                allNetworks.Add(svc.Network);
+            }
+
+            sb.AppendLine($"    restart: {svc.RestartPolicy}");
+            sb.AppendLine();
+        }
+
+        if (allNetworks.Any())
+        {
+            sb.AppendLine("networks:");
+            foreach (var n in allNetworks)
+            {
+                sb.AppendLine($"  {n}:");
+                sb.AppendLine("    driver: bridge");
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private async Task Deploy()
+    {
+        if (string.IsNullOrWhiteSpace(_projectName)) return;
+        _deploying = true;
+        try
+        {
+            var yaml = GenerateYaml();
+            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(yaml));
+            var dir = $"/opt/deployments/{_projectName}";
+
+            var result = await Executor.ExecuteAsync("local",
+                $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+                TimeSpan.FromMinutes(5));
+
+            if (result.Success)
+                Snackbar.Add($"Deployment '{_projectName}' erfolgreich!\n{result.Output}", Severity.Success);
+            else
+                Snackbar.Add($"Fehler: {result.Output}\n{result.Error}", Severity.Error);
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        finally { _deploying = false; }
+    }
+
+    private class ComposeService
+    {
+        public string Name { get; set; } = "";
+        public string Image { get; set; } = "";
+        public string Ports { get; set; } = "";
+        public string EnvVars { get; set; } = "";
+        public string Volumes { get; set; } = "";
+        public string RestartPolicy { get; set; } = "unless-stopped";
+        public string DependsOn { get; set; } = "";
+        public string Network { get; set; } = "";
+    }
+}

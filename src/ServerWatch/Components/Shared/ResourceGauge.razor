@@ -1,0 +1,15 @@
+@* A progress bar that changes color at thresholds *@
+
+<MudProgressLinear Value="@Value" Max="100" Color="@GetColor()" Class="my-1" Rounded="true"
+                   Size="Size.Small" />
+
+@code {
+    [Parameter] public double Value { get; set; }
+
+    private Color GetColor() => Value switch
+    {
+        >= 85 => Color.Error,
+        >= 60 => Color.Warning,
+        _ => Color.Success
+    };
+}
