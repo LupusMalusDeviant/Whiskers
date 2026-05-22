@@ -11,7 +11,6 @@
 @inject ServerWatch.Services.Auth.RoleService RoleService
 @inject ServerWatch.Services.Vault.VaultService VaultService
 @inject ServerWatch.Services.Mcp.McpPermissionService McpPermissionService
-@inject ServerWatch.Services.Tailscale.TailscaleService TailscaleService
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfigService
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyApiService
 @inject ISnackbar Snackbar
@@ -89,81 +88,6 @@
                            StartIcon="@Icons.Material.Filled.Send" Disabled="@(!MatrixOptions.CurrentValue.Enabled)">
                     Testbenachrichtigung senden
                 </MudButton>
-            </MudItem>
-        </MudGrid>
-    </MudExpansionPanel>
-
-    @* Tailscale VPN *@
-    <MudExpansionPanel Text="Tailscale VPN" Icon="@Icons.Material.Filled.VpnLock">
-        <MudGrid>
-            <MudItem xs="12">
-                @if (_tailscaleStatus == null)
-                {
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="LoadTailscaleStatus"
-                               StartIcon="@Icons.Material.Filled.Refresh">Status laden</MudButton>
-                }
-                else if (!_tailscaleStatus.Running)
-                {
-                    <MudAlert Severity="Severity.Warning">Tailscale-Daemon läuft nicht. Ist Tailscale im Container installiert?</MudAlert>
-                }
-                else if (!_tailscaleStatus.Authenticated)
-                {
-                    <MudAlert Severity="Severity.Info" Class="mb-3">Tailscale ist nicht verbunden. Auth-Key eingeben:</MudAlert>
-                    <MudStack Row="true" Spacing="2">
-                        <MudTextField @bind-Value="_tailscaleAuthKey" Label="Auth-Key" Variant="Variant.Outlined"
-                                      InputType="InputType.Password" Style="flex: 1;" />
-                        <MudTextField @bind-Value="_tailscaleHostname" Label="Hostname (optional)" Variant="Variant.Outlined"
-                                      Placeholder="serverwatch" Style="max-width: 200px;" />
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConnectTailscale"
-                                   Disabled="@(string.IsNullOrWhiteSpace(_tailscaleAuthKey) || _tailscaleConnecting)">
-                            @if (_tailscaleConnecting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                            Verbinden
-                        </MudButton>
-                    </MudStack>
-                }
-                else
-                {
-                    <MudStack Spacing="2">
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                            <MudChip T="string" Color="Color.Success" Size="Size.Small">Verbunden</MudChip>
-                            <MudText>
-                                <strong>@_tailscaleStatus.Hostname</strong> — @_tailscaleStatus.OwnIP
-                                @if (!string.IsNullOrEmpty(_tailscaleStatus.TailnetName))
-                                {
-                                    <span style="color: #888;"> (@_tailscaleStatus.TailnetName)</span>
-                                }
-                            </MudText>
-                            <MudSpacer />
-                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
-                                       OnClick="DisconnectTailscale">Trennen</MudButton>
-                            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
-                                           OnClick="LoadTailscaleStatus" Title="Aktualisieren" />
-                        </MudStack>
-                        @if (_tailscaleStatus.Devices.Any(d => !d.Self))
-                        {
-                            <MudText Typo="Typo.subtitle2" Class="mt-2">Geräte im Tailnet:</MudText>
-                            <MudTable Items="@_tailscaleStatus.Devices.Where(d => !d.Self)" Dense="true" Hover="true">
-                                <HeaderContent>
-                                    <MudTh>Hostname</MudTh>
-                                    <MudTh>IP</MudTh>
-                                    <MudTh>OS</MudTh>
-                                    <MudTh>Status</MudTh>
-                                </HeaderContent>
-                                <RowTemplate>
-                                    <MudTd><code>@context.Hostname</code></MudTd>
-                                    <MudTd Style="font-family: monospace;">@context.TailscaleIP</MudTd>
-                                    <MudTd>@context.OS</MudTd>
-                                    <MudTd>
-                                        <MudChip T="string" Size="Size.Small"
-                                                 Color="@(context.Online ? Color.Success : Color.Default)">
-                                            @(context.Online ? "Online" : "Offline")
-                                        </MudChip>
-                                    </MudTd>
-                                </RowTemplate>
-                            </MudTable>
-                        }
-                    </MudStack>
-                }
             </MudItem>
         </MudGrid>
     </MudExpansionPanel>
@@ -754,60 +678,6 @@
         {
             _testingCoolify = false;
         }
-    }
-
-    // Tailscale
-    private ServerWatch.Services.Tailscale.TailscaleStatus? _tailscaleStatus;
-    private string _tailscaleAuthKey = "";
-    private string _tailscaleHostname = "serverwatch";
-    private bool _tailscaleConnecting;
-
-    private async Task LoadTailscaleStatus()
-    {
-        try
-        {
-            _tailscaleStatus = await TailscaleService.GetStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Tailscale-Fehler: {ex.Message}", Severity.Error);
-        }
-    }
-
-    private async Task ConnectTailscale()
-    {
-        _tailscaleConnecting = true;
-        try
-        {
-            var (success, message) = await TailscaleService.ConnectAsync(
-                _tailscaleAuthKey, string.IsNullOrWhiteSpace(_tailscaleHostname) ? null : _tailscaleHostname);
-
-            if (success)
-            {
-                Snackbar.Add(message, Severity.Success);
-                _tailscaleAuthKey = "";
-                await LoadTailscaleStatus();
-            }
-            else
-            {
-                Snackbar.Add(message, Severity.Error);
-            }
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _tailscaleConnecting = false;
-        }
-    }
-
-    private async Task DisconnectTailscale()
-    {
-        var (success, message) = await TailscaleService.DisconnectAsync();
-        Snackbar.Add(message, success ? Severity.Success : Severity.Error);
-        await LoadTailscaleStatus();
     }
 
     // === Roles ===

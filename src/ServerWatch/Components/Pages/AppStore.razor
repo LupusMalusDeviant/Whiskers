@@ -125,7 +125,7 @@
             <MudSelect T="string" @bind-Value="_deployServerId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
                 @foreach (var srv in _servers)
                 {
-                    <MudSelectItem Value="@srv.Id">@srv.Name @(srv.VpnType != ServerWatch.Models.VpnType.None ? $"({srv.VpnType})" : "")</MudSelectItem>
+                    <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
                 }
             </MudSelect>
 

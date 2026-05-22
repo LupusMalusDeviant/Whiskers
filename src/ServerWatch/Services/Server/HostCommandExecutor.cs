@@ -59,9 +59,7 @@ public class HostCommandExecutor : IHostCommandExecutor
         if (string.IsNullOrWhiteSpace(keyPath))
             return new CommandResult { ExitCode = -1, Error = "SSH key not found for server" };
 
-        // Use Tailscale IP when VPN is configured
-        var effectiveHost = server.EffectiveSshHost ?? server.SshHost;
-        var sshArgs = $"-o StrictHostKeyChecking=no -o ConnectTimeout=10 -p {server.SshPort} -i \"{keyPath}\" {server.SshUser}@{effectiveHost} {command}";
+        var sshArgs = $"-o StrictHostKeyChecking=no -o ConnectTimeout=10 -p {server.SshPort} -i \"{keyPath}\" {server.SshUser}@{server.SshHost} {command}";
 
         _logger.LogDebug("Executing SSH command on {Host}: {Command}", server.SshHost, command);
 

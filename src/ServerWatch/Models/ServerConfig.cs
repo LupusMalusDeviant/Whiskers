@@ -7,15 +7,6 @@ public enum ConnectionType
     SSH
 }
 
-public enum VpnType
-{
-    None,
-    Tailscale,
-    WireGuard,
-    OpenVPN,
-    Other
-}
-
 public class ServerConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
@@ -38,16 +29,6 @@ public class ServerConfig
 
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; } = true;
-
-    // VPN
-    public VpnType VpnType { get; set; } = VpnType.None;
-    public string? VpnNote { get; set; }
-    public string? TailscaleIP { get; set; } // 100.x.x.x — used when VpnType == Tailscale
-
-    /// <summary>Effective SSH host — prefers TailscaleIP when VPN is Tailscale.</summary>
-    public string? EffectiveSshHost => VpnType == VpnType.Tailscale && !string.IsNullOrEmpty(TailscaleIP)
-        ? TailscaleIP
-        : SshHost;
 }
 
 public class ServerConfigData

@@ -30,6 +30,27 @@ public class SshTunnelManager : IDisposable
         var localPort = GetAvailablePort();
         var keyPath = _serverConfig.GetSshKeyPath(server);
 
+        // Validate the key is present and readable by THIS process before spawning ssh, so a
+        // permission/ownership problem surfaces as a clear, actionable error instead of a generic
+        // "connection failed" (ssh would silently die and the tunnel port would just be dead).
+        if (!string.IsNullOrEmpty(server.SshKeyFileName))
+        {
+            if (keyPath == null)
+                throw new InvalidOperationException(
+                    $"SSH key '{server.SshKeyFileName}' for server '{server.Name}' was not found in the ssh-keys directory. Re-upload the key for this server.");
+
+            try
+            {
+                using var _ = File.OpenRead(keyPath);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                throw new InvalidOperationException(
+                    $"SSH key for server '{server.Name}' exists ({keyPath}) but is not readable by the ServerWatch process. " +
+                    $"Fix its ownership/permissions (the key must be owned by the app user with mode 600). Underlying error: {ex.Message}");
+            }
+        }
+
         var args = $"-N -L {localPort}:/var/run/docker.sock {server.SshUser}@{server.SshHost} -p {server.SshPort} -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ConnectTimeout=10";
         if (!string.IsNullOrEmpty(keyPath))
             args = $"-i {keyPath} " + args;

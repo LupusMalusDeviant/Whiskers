@@ -136,9 +136,6 @@ builder.Services.AddHttpClient<ServerWatch.Services.AiChat.AiChatService>();
 builder.Services.AddSingleton<ServerWatch.Services.AiChat.AiChatService>();
 builder.Services.AddSingleton<ServerWatch.Services.AiChat.ChatHistoryStore>();
 
-// Tailscale VPN
-builder.Services.AddSingleton<ServerWatch.Services.Tailscale.TailscaleService>();
-
 // Audit log
 builder.Services.AddSingleton<ServerWatch.Services.AuditLog.IAuditLogService, ServerWatch.Services.AuditLog.AuditLogService>();
 

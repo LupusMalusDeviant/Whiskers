@@ -38,7 +38,7 @@ public class ConfigExportService
             Servers = _serverConfig.GetServers().Select(s => new
             {
                 s.Name, s.ConnectionType, s.TcpHost, s.TcpPort, s.SshHost, s.SshPort, s.SshUser,
-                s.VpnType, s.VpnNote, s.TailscaleIP, s.IsDefault, s.Enabled
+                s.IsDefault, s.Enabled
             }),
             Roles = _roleService.GetRoleData(),
             McpPermissions = new

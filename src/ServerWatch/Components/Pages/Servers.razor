@@ -2,7 +2,6 @@
 @attribute [Authorize]
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ServerWatch.Services.Docker.DockerConnectionManager ConnectionManager
-@inject ServerWatch.Services.Tailscale.TailscaleService TailscaleService
 @inject ISnackbar Snackbar
 
 <PageTitle>Server - ServerWatch</PageTitle>
@@ -36,14 +35,6 @@
             @if (context.IsDefault)
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" Class="ml-2">Standard</MudChip>
-            }
-            @if (context.VpnType != ServerWatch.Models.VpnType.None)
-            {
-                <MudTooltip Text="@(context.VpnNote ?? $"Nur über {context.VpnType} erreichbar")">
-                    <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined" Class="ml-2">
-                        <MudIcon Icon="@Icons.Material.Filled.VpnLock" Size="Size.Small" Class="mr-1" />@context.VpnType
-                    </MudChip>
-                </MudTooltip>
             }
         </MudTd>
         <MudTd Style="font-family: monospace;">
@@ -132,50 +123,6 @@
                     <InputFile id="ssh-key-upload" OnChange="OnSshKeyFileChanged" style="display:none;" />
                 </MudStack>
             }
-
-            <MudDivider Class="my-3" />
-            <MudText Typo="Typo.subtitle2" Class="mb-2">VPN-Konfiguration</MudText>
-            <MudSelect @bind-Value="_form.VpnType" Label="VPN-Typ" Variant="Variant.Outlined" Class="mb-3">
-                <MudSelectItem Value="ServerWatch.Models.VpnType.None">Kein VPN</MudSelectItem>
-                <MudSelectItem Value="ServerWatch.Models.VpnType.Tailscale">Tailscale</MudSelectItem>
-                <MudSelectItem Value="ServerWatch.Models.VpnType.WireGuard">WireGuard</MudSelectItem>
-                <MudSelectItem Value="ServerWatch.Models.VpnType.OpenVPN">OpenVPN</MudSelectItem>
-                <MudSelectItem Value="ServerWatch.Models.VpnType.Other">Sonstige</MudSelectItem>
-            </MudSelect>
-            @if (_form.VpnType == ServerWatch.Models.VpnType.Tailscale)
-            {
-                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
-                    <MudTextField @bind-Value="_form.TailscaleIP" Label="Tailscale-IP (100.x.x.x)"
-                                  Variant="Variant.Outlined" Style="font-family: monospace;" />
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
-                               OnClick="LoadTailscaleDevices" StartIcon="@Icons.Material.Filled.Refresh">
-                        Aus Tailnet
-                    </MudButton>
-                </MudStack>
-                @if (_tailscaleDevices.Any())
-                {
-                    <MudSelect T="string" Label="Gerät aus Tailnet wählen" Variant="Variant.Outlined" Class="mb-3"
-                               ValueChanged="@((string ip) => { _form.TailscaleIP = ip; if (string.IsNullOrEmpty(_form.SshHost)) _form.SshHost = ip; })">
-                        @foreach (var d in _tailscaleDevices.Where(d => d.Online))
-                        {
-                            <MudSelectItem Value="@d.TailscaleIP">@d.Hostname (@d.TailscaleIP) — @d.OS</MudSelectItem>
-                        }
-                    </MudSelect>
-                }
-                <MudTextField @bind-Value="_form.VpnNote" Label="Hinweis (optional)"
-                              Variant="Variant.Outlined" Class="mb-3" />
-                <MudAlert Severity="Severity.Info" Dense="true">
-                    SSH-Verbindung wird automatisch über die Tailscale-IP geroutet.
-                </MudAlert>
-            }
-            else if (_form.VpnType != ServerWatch.Models.VpnType.None)
-            {
-                <MudTextField @bind-Value="_form.VpnNote" Label="Hinweis (z.B. 'Nur über VPN erreichbar')"
-                              Variant="Variant.Outlined" Class="mb-3" />
-                <MudAlert Severity="Severity.Info" Dense="true">
-                    Dieser Server ist nur über @_form.VpnType erreichbar. Stelle sicher, dass der VPN-Client aktiv ist.
-                </MudAlert>
-            }
         </DialogContent>
         <DialogActions>
             <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
@@ -194,7 +141,6 @@
     private byte[]? _sshKeyData;
     private HashSet<string> _testing = new();
     private Dictionary<string, TestResult> _testResults = new();
-    private List<ServerWatch.Services.Tailscale.TailscaleDevice> _tailscaleDevices = new();
 
     protected override void OnInitialized()
     {
@@ -225,9 +171,6 @@
             SshPort = server.SshPort,
             SshUser = server.SshUser,
             SshKeyFileName = server.SshKeyFileName,
-            VpnType = server.VpnType,
-            VpnNote = server.VpnNote,
-            TailscaleIP = server.TailscaleIP
         };
         _sshKeyFileName = server.SshKeyFileName;
         _sshKeyData = null;
@@ -308,21 +251,6 @@
         await file.OpenReadStream(maxAllowedSize: 1024 * 100).CopyToAsync(ms);
         _sshKeyData = ms.ToArray();
         _sshKeyFileName = file.Name;
-    }
-
-    private async Task LoadTailscaleDevices()
-    {
-        try
-        {
-            _tailscaleDevices = await TailscaleService.GetDevicesAsync();
-            if (!_tailscaleDevices.Any())
-                Snackbar.Add("Keine Tailscale-Geräte gefunden. Ist Tailscale verbunden?", Severity.Warning);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Tailscale-Fehler: {ex.Message}", Severity.Error);
-            _tailscaleDevices = new();
-        }
     }
 
     private class TestResult

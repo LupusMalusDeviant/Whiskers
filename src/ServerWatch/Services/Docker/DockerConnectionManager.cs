@@ -88,22 +88,7 @@ public class DockerConnectionManager : IDisposable
 
             case ConnectionType.SSH:
             {
-                // For Tailscale VPN servers, create a temporary config with the Tailscale IP
-                var tunnelServer = server;
-                if (server.VpnType == VpnType.Tailscale && !string.IsNullOrEmpty(server.TailscaleIP))
-                {
-                    tunnelServer = new Models.ServerConfig
-                    {
-                        Id = server.Id,
-                        Name = server.Name,
-                        ConnectionType = server.ConnectionType,
-                        SshHost = server.TailscaleIP, // Use Tailscale IP
-                        SshPort = server.SshPort,
-                        SshUser = server.SshUser,
-                        SshKeyFileName = server.SshKeyFileName
-                    };
-                }
-                var localPort = await _sshTunnelManager.EstablishTunnelAsync(tunnelServer);
+                var localPort = await _sshTunnelManager.EstablishTunnelAsync(server);
                 return new DockerClientConfiguration(new Uri($"http://127.0.0.1:{localPort}")).CreateClient();
             }
 

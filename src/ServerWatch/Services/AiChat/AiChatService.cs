@@ -120,14 +120,14 @@ public class AiChatService
         - /deploy — Bereitstellen: Einzelne Container oder Docker Compose deployen
         - /compose — Compose Editor: Visueller Editor für docker-compose.yml
         - /apps — App Store: 30+ vorkonfigurierte Templates (PostgreSQL, MySQL, Redis, Nginx, WordPress, Grafana, n8n, etc.)
-        - /servers — Server-Verwaltung: Mehrere Server (SSH, TCP, Tailscale VPN) verwalten
+        - /servers — Server-Verwaltung: Mehrere Server (SSH, TCP) verwalten
         - /networks — Docker-Netzwerke anzeigen, erstellen, löschen
         - /backups — Volume-Backups erstellen und wiederherstellen
         - /tasks — Geplante Tasks: Cron-basierte automatische Backups, Container-Neustarts, Cleanup
         - /webhooks — CI/CD Webhooks: URL für GitHub/GitLab Deployments erstellen
         - /diff — Container-Vergleich: Zwei Container side-by-side vergleichen (Image, Env-Vars, Ports, Labels)
         - /audit-log — Audit-Protokoll: Alle Aktionen nachverfolgen
-        - /settings — Einstellungen: Mattermost, Matrix, Tailscale VPN, Benutzerrollen, Secret Vault, MCP-Keys, Coolify
+        - /settings — Einstellungen: Mattermost, Matrix, Benutzerrollen, Secret Vault, MCP-Keys, Coolify
 
         AKTUELLE INFRASTRUKTUR:
         {CONTEXT}
