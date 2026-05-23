@@ -80,6 +80,7 @@ public class MattermostNotificationService : INotificationService
         "oom_killed" => $":boom: **OOM Killed** | `{evt.ContainerName}` was killed due to memory limits.\n> Image: `{evt.Image}`",
         "restart_loop" => $":arrows_counterclockwise: **Restart Loop** | `{evt.ContainerName}` has restarted {evt.RestartCount} times in {evt.WindowMinutes} minutes.\n> Image: `{evt.Image}`",
         "image_update" => $":arrows_counterclockwise: **Image Update Available** | `{evt.ContainerName}` has a newer image version for `{evt.ImageName}`\n> {evt.ImageInfo}",
+        "cve_finding" => $":shield: **CVE Findings** | {evt.ImageName} for {evt.ContainerName}\n> {evt.ImageInfo}",
         _ => $":information_source: **{evt.EventType}** | `{evt.ContainerName}`\n> Image: `{evt.Image}`"
     };
 }

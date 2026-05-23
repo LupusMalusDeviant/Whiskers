@@ -20,6 +20,7 @@ using ServerWatch.Services.Terminal;
 using ServerWatch.Services.Auth;
 using ServerWatch.Services.ServerConfig;
 using ServerWatch.Services.ImageUpdate;
+using ServerWatch.Services.Cve;
 using ServerWatch.Services.Mcp;
 using ServerWatch.Services.Coolify;
 using Microsoft.AspNetCore.DataProtection;
@@ -71,6 +72,15 @@ builder.Services.AddHttpClient<RegistryClient>();
 builder.Services.AddSingleton<ImageUpdateStore>();
 builder.Services.AddSingleton<RegistryClient>();
 builder.Services.AddHostedService<ImageUpdateChecker>();
+
+// CVE monitoring (containers via Trivy + OS via apt)
+builder.Services.Configure<CveMonitorSettings>(builder.Configuration.GetSection(CveMonitorSettings.SectionName));
+builder.Services.AddSingleton<CveFindingsStore>();
+builder.Services.AddSingleton<OsCveScanner>();
+builder.Services.AddSingleton<TrivyScanner>();
+// Registered as Singleton AND HostedService — same instance — so UI can trigger manual scans.
+builder.Services.AddSingleton<CveMonitorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CveMonitorService>());
 
 // Auth whitelist + roles
 builder.Services.AddSingleton<WhitelistService>();
@@ -155,7 +165,8 @@ builder.Services.AddMcpServer()
     .WithTools<NetworkTools>()
     .WithTools<DatabaseTools>()
     .WithTools<SchedulerTools>()
-    .WithTools<LogTools>();
+    .WithTools<LogTools>()
+    .WithTools<CveTools>();
 
 // MudBlazor
 builder.Services.AddMudServices();

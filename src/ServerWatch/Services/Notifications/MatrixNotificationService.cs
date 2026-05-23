@@ -103,6 +103,10 @@ public class MatrixNotificationService : INotificationService
             $"📦 Image Update Available | {evt.ContainerName} has a newer image version for {evt.ImageName}. {evt.ImageInfo}",
             $"📦 <strong>Image Update Available</strong> | <code>{evt.ContainerName}</code> has a newer image version for <code>{evt.ImageName}</code><br/>{evt.ImageInfo}"
         ),
+        "cve_finding" => (
+            $"🛡️ CVE Findings | {evt.ImageName} for {evt.ContainerName}. {evt.ImageInfo}",
+            $"🛡️ <strong>CVE Findings</strong> | {evt.ImageName} for {evt.ContainerName}<br/>{evt.ImageInfo}"
+        ),
         _ => (
             $"ℹ️ {evt.EventType} | {evt.ContainerName}. Image: {evt.Image}",
             $"ℹ️ <strong>{evt.EventType}</strong> | <code>{evt.ContainerName}</code><br/>Image: <code>{evt.Image}</code>"

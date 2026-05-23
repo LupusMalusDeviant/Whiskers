@@ -14,6 +14,9 @@
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfigService
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyApiService
 @inject ISnackbar Snackbar
+@inject IOptionsMonitor<ServerWatch.Configuration.CveMonitorSettings> CveSettings
+@inject ServerWatch.Services.Cve.CveFindingsStore CveStore
+@inject ServerWatch.Services.Cve.CveMonitorService CveMonitor
 
 <PageTitle>Einstellungen - ServerWatch</PageTitle>
 
@@ -118,6 +121,69 @@
     </MudExpansionPanel>
 
     @* Terminal *@
+    @* CVE-Monitor *@
+    <MudExpansionPanel Text="CVE-Monitor" Icon="@Icons.Material.Filled.Security">
+        @{
+            var cveCfg = CveSettings.CurrentValue;
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@(cveCfg.Enabled ? Color.Success : Color.Default)"
+                             Variant="Variant.Outlined">
+                        @(cveCfg.Enabled ? "Aktiv" : "Deaktiviert")
+                    </MudChip>
+                    @if (CveStore.IsScanning)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> Scan läuft
+                        </MudChip>
+                    }
+                    @if (CveStore.LastScanAt is { } lsa)
+                    {
+                        <MudText Typo="Typo.body2" Style="color:#888;">
+                            Letzter Scan: @lsa.ToString("yyyy-MM-dd HH:mm 'UTC'")
+                        </MudText>
+                    }
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               Href="cves" StartIcon="@Icons.Material.Filled.OpenInNew">
+                        Zu /cves
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerCveScan"
+                               Disabled="@(CveStore.IsScanning || !cveCfg.Enabled)">
+                        Jetzt scannen
+                    </MudButton>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12">
+                <MudAlert Severity="MudBlazor.Severity.Info" Dense="true">
+                    Konfiguration aus <code>appsettings.json</code> Sektion <code>CveMonitor</code> — Änderungen werden automatisch übernommen (kein Neustart nötig).
+                </MudAlert>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudList T="string" Dense="true">
+                    <MudListItem T="string">Enabled: <strong>@cveCfg.Enabled</strong></MudListItem>
+                    <MudListItem T="string">CheckIntervalHours: <strong>@cveCfg.CheckIntervalHours</strong></MudListItem>
+                    <MudListItem T="string">ScanContainers: <strong>@cveCfg.ScanContainers</strong></MudListItem>
+                    <MudListItem T="string">ScanOs: <strong>@cveCfg.ScanOs</strong></MudListItem>
+                    <MudListItem T="string">EnableOsCveIds: <strong>@cveCfg.EnableOsCveIds</strong></MudListItem>
+                </MudList>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudList T="string" Dense="true">
+                    <MudListItem T="string">TrivyImage: <code>@cveCfg.TrivyImage</code></MudListItem>
+                    <MudListItem T="string">NotifyOnFinding: <strong>@cveCfg.NotifyOnFinding</strong></MudListItem>
+                    <MudListItem T="string">NotifySeverity: <strong>@cveCfg.NotifySeverity</strong></MudListItem>
+                    <MudListItem T="string">MaxConcurrentScans: <strong>@cveCfg.MaxConcurrentScans</strong></MudListItem>
+                    <MudListItem T="string">OsChangelogTimeoutSeconds: <strong>@cveCfg.OsChangelogTimeoutSeconds</strong></MudListItem>
+                </MudList>
+            </MudItem>
+        </MudGrid>
+    </MudExpansionPanel>
+
     <MudExpansionPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
         <MudGrid>
             <MudItem xs="12">
@@ -717,5 +783,19 @@
         {
             Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
         }
+    }
+
+    // === CVE Monitor ===
+
+    private Task TriggerCveScan()
+    {
+        if (CveStore.IsScanning) return Task.CompletedTask;
+        Snackbar.Add("CVE-Scan gestartet — kann beim ersten Lauf mehrere Minuten dauern (Trivy-DB-Download).", MudBlazor.Severity.Info);
+        _ = Task.Run(async () =>
+        {
+            try { await CveMonitor.RunOneCycleAsync(); }
+            catch (Exception ex) { Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}"); }
+        });
+        return Task.CompletedTask;
     }
 }

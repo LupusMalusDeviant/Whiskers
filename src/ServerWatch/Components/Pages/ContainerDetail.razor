@@ -10,6 +10,8 @@
 @inject MetricsQueryService MetricsQuery
 @inject IHostCommandExecutor HostCommandExecutor
 @inject ServerWatch.Services.Database.IDatabaseService DatabaseService
+@inject ServerWatch.Services.Cve.CveFindingsStore CveStore
+@using ServerWatch.Models.Cve
 @implements IAsyncDisposable
 
 <PageTitle>@(_container?.Name ?? "Container") - ServerWatch</PageTitle>
@@ -818,6 +820,70 @@ else
                 }
             </MudTabPanel>
         }
+
+        <MudTabPanel Text="CVEs" Icon="@Icons.Material.Filled.Security">
+            @{
+                var cveResult = CveStore.Get(ServerId, ContainerId);
+            }
+            @if (cveResult == null)
+            {
+                <MudAlert Severity="MudBlazor.Severity.Info">
+                    Noch kein CVE-Scan für diesen Container — der CVE-Monitor muss aktiviert sein und mindestens einmal gelaufen sein.
+                </MudAlert>
+            }
+            else if (!string.IsNullOrEmpty(cveResult.Error))
+            {
+                <MudAlert Severity="MudBlazor.Severity.Warning">Scan-Fehler: @cveResult.Error</MudAlert>
+            }
+            else if (cveResult.Findings.Count == 0)
+            {
+                <MudAlert Severity="MudBlazor.Severity.Success">Keine CVE-Findings im Image.</MudAlert>
+            }
+            else
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="2">
+                    <MudText Typo="Typo.body2">@cveResult.Findings.Count Findings</MudText>
+                    <MudText Typo="Typo.body2" Style="color:#888;">
+                        Scan: @cveResult.ScannedAt.ToString("yyyy-MM-dd HH:mm 'UTC'")
+                    </MudText>
+                </MudStack>
+                <MudTable Items="@cveResult.Findings.OrderByDescending(f => f.Severity).ThenBy(f => f.CveId)" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>Severity</MudTh>
+                        <MudTh>CVE-ID</MudTh>
+                        <MudTh>Paket</MudTh>
+                        <MudTh>Installiert → Fix</MudTh>
+                        <MudTh>Titel</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>
+                            <MudChip T="string" Size="Size.Small"
+                                     Color="@(context.Severity == CveSeverity.Critical ? Color.Error : context.Severity == CveSeverity.High ? Color.Warning : context.Severity == CveSeverity.Medium ? Color.Info : Color.Default)">
+                                @context.Severity
+                            </MudChip>
+                        </MudTd>
+                        <MudTd Style="font-family:monospace;">
+                            @if (!string.IsNullOrEmpty(context.Reference))
+                            {
+                                <MudLink Href="@context.Reference" Target="_blank">@context.CveId</MudLink>
+                            }
+                            else
+                            {
+                                @context.CveId
+                            }
+                        </MudTd>
+                        <MudTd Style="font-family:monospace;">@context.Package</MudTd>
+                        <MudTd Style="font-family:monospace; font-size:0.85em;">
+                            @(context.InstalledVersion ?? "?") → @(string.IsNullOrEmpty(context.FixedVersion) ? "(no fix)" : context.FixedVersion)
+                        </MudTd>
+                        <MudTd>@(context.Title is { Length: > 80 } t ? t[..80] + "…" : context.Title)</MudTd>
+                    </RowTemplate>
+                    <PagerContent>
+                        <MudTablePager PageSizeOptions="new int[]{ 25, 50, 100 }" />
+                    </PagerContent>
+                </MudTable>
+            }
+        </MudTabPanel>
     </MudTabs>
 }
 

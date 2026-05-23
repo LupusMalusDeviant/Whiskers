@@ -6,6 +6,7 @@
 @inject ServerWatch.Services.ImageUpdate.ImageUpdateStore ImageUpdateStore
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfig
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
+@inject ServerWatch.Services.Cve.CveFindingsStore CveStore
 @implements IDisposable
 
 <PageTitle>Dashboard - ServerWatch</PageTitle>
@@ -98,6 +99,19 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="ml-2">
                 @sInfoHeader.OperatingSystem — @sInfoHeader.CpuCount Kerne — @FormatBytes(sInfoHeader.MemoryTotalBytes) RAM
             </MudText>
+            var cveSum = CveStore.SummarizeServer(serverGroup.ServerId);
+            if (cveSum.CriticalCount + cveSum.HighCount > 0)
+            {
+                <MudTooltip Text="@($"{cveSum.CriticalCount} Critical, {cveSum.HighCount} High, {cveSum.MediumCount} Medium, {cveSum.LowCount} Low — klick zu /cves")">
+                    <MudLink Href="cves" Underline="Underline.None">
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@(cveSum.CriticalCount > 0 ? Color.Error : Color.Warning)"
+                                 Icon="@Icons.Material.Filled.Security" Class="ml-2">
+                            @(cveSum.CriticalCount + cveSum.HighCount) CVE@(cveSum.CriticalCount + cveSum.HighCount > 1 ? "s" : "")
+                        </MudChip>
+                    </MudLink>
+                </MudTooltip>
+            }
         }
         <MudSpacer />
         <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"

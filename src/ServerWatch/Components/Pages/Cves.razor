@@ -1,0 +1,255 @@
+@page "/cves"
+@using Microsoft.Extensions.Options
+@using ServerWatch.Configuration
+@using ServerWatch.Models.Cve
+@using ServerWatch.Services.Cve
+@using ServerWatch.Services.ServerConfig
+@inject CveFindingsStore Store
+@inject ServerConfigService ServerConfig
+@inject CveMonitorService Monitor
+@inject IOptionsMonitor<CveMonitorSettings> SettingsMonitor
+@inject ISnackbar Snackbar
+
+<PageTitle>CVE-Monitor — ServerWatch</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
+        <MudIcon Icon="@Icons.Material.Filled.Security" Size="Size.Large" />
+        <MudText Typo="Typo.h5">CVE-Monitor</MudText>
+        <MudSpacer />
+
+        @if (!SettingsMonitor.CurrentValue.Enabled)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.PauseCircle">
+                Monitor deaktiviert (Enabled=false in appsettings)
+            </MudChip>
+        }
+        @if (Store.IsScanning)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> Scan läuft …
+            </MudChip>
+        }
+        @if (Store.LastScanAt is { } lastScan)
+        {
+            <MudText Typo="Typo.body2" Style="color:#888;">
+                Letzter Scan: @lastScan.ToString("yyyy-MM-dd HH:mm 'UTC'")
+            </MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Style="color:#888;">Noch kein Scan abgeschlossen</MudText>
+        }
+
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh" OnClick="@(() => StateHasChanged())">
+            Aktualisieren
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerScan"
+                   Disabled="@(Store.IsScanning || !SettingsMonitor.CurrentValue.Enabled)">
+            Jetzt scannen
+        </MudButton>
+    </MudStack>
+
+    @* Per-server overview cards *@
+    <MudGrid Spacing="2" Class="mb-4">
+        @foreach (var srv in _servers)
+        {
+            var sum = Store.SummarizeServer(srv.Id);
+            <MudItem xs="12" sm="6" md="4" lg="3">
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle2">@srv.Name</MudText>
+                    </MudStack>
+                    @if (sum.TotalCount == 0)
+                    {
+                        <MudText Typo="Typo.body2" Style="color:#888;" Class="mt-1">Keine Findings</MudText>
+                    }
+                    else
+                    {
+                        <MudStack Row="true" Spacing="1" Class="mt-2" Wrap="Wrap.Wrap">
+                            @if (sum.CriticalCount > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error">C: @sum.CriticalCount</MudChip>
+                            }
+                            @if (sum.HighCount > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">H: @sum.HighCount</MudChip>
+                            }
+                            @if (sum.MediumCount > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">M: @sum.MediumCount</MudChip>
+                            }
+                            @if (sum.LowCount > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">L: @sum.LowCount</MudChip>
+                            }
+                        </MudStack>
+                    }
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+
+    @* Filter row *@
+    <MudPaper Class="pa-3 mb-3" Outlined="true">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" @bind-Value="_filterServerId" Label="Server" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">Alle</MudSelectItem>
+                    @foreach (var s in _servers)
+                    {
+                        <MudSelectItem T="string" Value="@s.Id">@s.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" @bind-Value="_filterMinSeverity" Label="Min. Severity" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">Alle</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Critical")">Critical</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("High")">High +</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Medium")">Medium +</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Low")">Low +</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" @bind-Value="_filterSource" Label="Quelle" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">Beide</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Os")">OS</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Container")">Container</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_filterSearch" Label="Suche (CVE-ID, Paket, Container, Titel)"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @* Findings table *@
+    <MudTable Items="@FilteredFindings()" Hover="true" Dense="true" Striped="true" Class="mt-3">
+        <HeaderContent>
+            <MudTh>Severity</MudTh>
+            <MudTh>CVE-ID</MudTh>
+            <MudTh>Server</MudTh>
+            <MudTh>Quelle / Container</MudTh>
+            <MudTh>Paket</MudTh>
+            <MudTh>Installiert → Fix</MudTh>
+            <MudTh>Titel</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@SeverityColor(context.Severity)">@context.Severity</MudChip>
+            </MudTd>
+            <MudTd Style="font-family:monospace;">
+                @if (!string.IsNullOrEmpty(context.Reference))
+                {
+                    <MudLink Href="@context.Reference" Target="_blank">@context.CveId</MudLink>
+                }
+                else
+                {
+                    @context.CveId
+                }
+            </MudTd>
+            <MudTd>@ServerName(context.ServerId)</MudTd>
+            <MudTd>
+                @if (context.Source == CveSource.Os)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">OS</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">
+                        @(context.ContainerName ?? context.ContainerId ?? "")
+                    </MudChip>
+                }
+            </MudTd>
+            <MudTd Style="font-family:monospace;">@context.Package</MudTd>
+            <MudTd Style="font-family:monospace; font-size:0.85em;">
+                @(context.InstalledVersion ?? "?") → @(string.IsNullOrEmpty(context.FixedVersion) ? "(no fix)" : context.FixedVersion)
+            </MudTd>
+            <MudTd>@TruncateTitle(context.Title)</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2">Keine Findings (oder Filter passt nichts).</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[]{ 25, 50, 100, 250 }" />
+        </PagerContent>
+    </MudTable>
+</MudContainer>
+
+@code {
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private string _filterServerId = "";
+    private string _filterMinSeverity = "";
+    private string _filterSource = "";
+    private string _filterSearch = "";
+
+    protected override void OnInitialized()
+    {
+        _servers = ServerConfig.GetServers();
+    }
+
+    private IEnumerable<CveFinding> AllFindings()
+        => Store.GetAll().SelectMany(r => r.Findings);
+
+    private IEnumerable<CveFinding> FilteredFindings()
+    {
+        IEnumerable<CveFinding> q = AllFindings();
+
+        if (!string.IsNullOrEmpty(_filterServerId))
+            q = q.Where(f => f.ServerId == _filterServerId);
+
+        if (!string.IsNullOrEmpty(_filterMinSeverity)
+            && Enum.TryParse<CveSeverity>(_filterMinSeverity, true, out var minSev))
+            q = q.Where(f => f.Severity >= minSev);
+
+        if (!string.IsNullOrEmpty(_filterSource)
+            && Enum.TryParse<CveSource>(_filterSource, true, out var src))
+            q = q.Where(f => f.Source == src);
+
+        if (!string.IsNullOrWhiteSpace(_filterSearch))
+        {
+            var needle = _filterSearch.Trim();
+            q = q.Where(f =>
+                (f.CveId?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (f.Package?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (f.ContainerName?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (f.Title?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        return q.OrderByDescending(f => f.Severity).ThenBy(f => f.CveId);
+    }
+
+    private string ServerName(string serverId) =>
+        _servers.FirstOrDefault(s => s.Id == serverId)?.Name ?? serverId;
+
+    private static string? TruncateTitle(string? title) =>
+        title is null ? null : (title.Length <= 80 ? title : title[..80] + "…");
+
+    private static Color SeverityColor(CveSeverity s) => s switch
+    {
+        CveSeverity.Critical => Color.Error,
+        CveSeverity.High => Color.Warning,
+        CveSeverity.Medium => Color.Info,
+        CveSeverity.Low => Color.Default,
+        _ => Color.Default
+    };
+
+    private Task TriggerScan()
+    {
+        if (Store.IsScanning) return Task.CompletedTask;
+        Snackbar.Add("CVE-Scan gestartet — kann beim ersten Lauf mehrere Minuten dauern (Trivy-DB-Download).", Severity.Info);
+        // Fire-and-forget — UI stays responsive. User refreshes when done.
+        _ = Task.Run(async () =>
+        {
+            try { await Monitor.RunOneCycleAsync(); }
+            catch (Exception ex) { Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}"); }
+        });
+        return Task.CompletedTask;
+    }
+}
