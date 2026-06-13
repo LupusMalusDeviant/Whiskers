@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Net.Http;
+using System.Net.Sockets;
 using Docker.DotNet;
 using ServerWatch.Models;
 using ServerWatch.Services.ServerConfig;
@@ -11,6 +13,11 @@ public class DockerConnectionManager : IDisposable
     private readonly SshTunnelManager _sshTunnelManager;
     private readonly ILogger<DockerConnectionManager> _logger;
     private readonly ConcurrentDictionary<string, DockerClient> _clients = new();
+
+    // Serializes client/tunnel creation per server so concurrent callers (the several background
+    // pollers) can't each spawn a tunnel for the same server at once — that would leak orphaned
+    // ssh processes and waste local ports.
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
 
     public DockerConnectionManager(
         ServerConfigService serverConfig,
@@ -35,12 +42,85 @@ public class DockerConnectionManager : IDisposable
         if (server == null)
             throw new InvalidOperationException($"Server '{serverId ?? "default"}' not found");
 
-        if (_clients.TryGetValue(server.Id, out var existing))
-            return existing;
+        // Fast path: a cached client whose underlying transport is still alive.
+        if (TryGetLiveClient(server, out var live))
+            return live!;
 
-        var client = await CreateClientAsync(server);
-        _clients[server.Id] = client;
-        return client;
+        // Slow path: build (or rebuild) the client under a per-server lock so we never create two
+        // tunnels for the same server concurrently.
+        var gate = _locks.GetOrAdd(server.Id, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
+        {
+            // Re-check under the lock — another caller may have just built it.
+            if (TryGetLiveClient(server, out var live2))
+                return live2!;
+
+            // Tear down any stale client + dead tunnel before rebuilding.
+            InvalidateClient(server.Id);
+
+            var client = await CreateClientAsync(server);
+            _clients[server.Id] = client;
+            return client;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Returns a cached client only if its transport is still usable. For SSH servers the client
+    /// points at a local SSH-tunnel port; if that tunnel has died (network blip, remote sshd
+    /// restart, keepalive timeout) the cached client is pinned to a dead port and every call fails
+    /// with "connection refused" forever. Treating a dead tunnel as "not live" forces a rebuild on
+    /// the next call, so the app self-heals within one poll cycle instead of needing a restart.
+    /// </summary>
+    private bool TryGetLiveClient(Models.ServerConfig server, out DockerClient? client)
+    {
+        if (_clients.TryGetValue(server.Id, out client))
+        {
+            if (server.ConnectionType != ConnectionType.SSH || _sshTunnelManager.IsTunnelActive(server.Id))
+                return true;
+            _logger.LogWarning("SSH tunnel for '{ServerName}' is no longer alive; connection will be rebuilt", server.Name);
+        }
+        client = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Runs a Docker operation and, if it fails with a transport-level error (a dead tunnel that
+    /// died mid-flight, a half-open connection the liveness check couldn't catch), invalidates the
+    /// connection and retries exactly once against a freshly established tunnel.
+    /// </summary>
+    public async Task<T> ExecuteAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation)
+    {
+        var client = await GetClientAsync(serverId);
+        try
+        {
+            return await operation(client);
+        }
+        catch (Exception ex) when (IsConnectionFailure(ex))
+        {
+            var id = serverId
+                ?? _serverConfig.GetDefaultServer()?.Id
+                ?? throw new InvalidOperationException("No default server configured");
+            _logger.LogWarning(ex,
+                "Docker operation on '{ServerId}' failed with a connection error; rebuilding tunnel and retrying once", id);
+            InvalidateClient(id);
+            client = await GetClientAsync(serverId);
+            return await operation(client);
+        }
+    }
+
+    private static bool IsConnectionFailure(Exception ex)
+    {
+        for (Exception? e = ex; e != null; e = e.InnerException)
+        {
+            if (e is SocketException or HttpRequestException or TimeoutException or IOException)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>

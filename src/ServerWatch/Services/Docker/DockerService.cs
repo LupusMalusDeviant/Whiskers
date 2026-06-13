@@ -31,13 +31,12 @@ public class DockerService : IDockerService
 
     public async Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null)
     {
-        var client = await GetClient(serverId);
         var server = serverId != null
             ? _serverConfigService.GetServer(serverId)
             : _serverConfigService.GetDefaultServer();
 
-        var containers = await client.Containers.ListContainersAsync(
-            new ContainersListParameters { All = all });
+        var containers = await _connectionManager.ExecuteAsync(serverId, c =>
+            c.Containers.ListContainersAsync(new ContainersListParameters { All = all }));
 
         return containers.Select(c => new ContainerInfo
         {
@@ -303,9 +302,11 @@ public class DockerService : IDockerService
 
         try
         {
+            // Probe reachability through the retrying executor so a tunnel that died between polls
+            // is rebuilt on this very call instead of reporting the server as unreachable.
+            var (sysInfo, version) = await _connectionManager.ExecuteAsync(serverId, async c =>
+                (await c.System.GetSystemInfoAsync(), await c.System.GetVersionAsync()));
             var client = await GetClient(serverId);
-            var sysInfo = await client.System.GetSystemInfoAsync();
-            var version = await client.System.GetVersionAsync();
 
             info.OperatingSystem = sysInfo.OperatingSystem ?? "";
             info.OsVersion = sysInfo.OSVersion ?? "";

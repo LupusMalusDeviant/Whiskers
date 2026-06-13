@@ -51,7 +51,17 @@ public class SshTunnelManager : IDisposable
             }
         }
 
-        var args = $"-N -L {localPort}:/var/run/docker.sock {server.SshUser}@{server.SshHost} -p {server.SshPort} -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ConnectTimeout=10";
+        // Options chosen so a broken tunnel dies fast and cleanly instead of lingering as a dead
+        // forward:
+        //   ExitOnForwardFailure  — if the local forward can't be bound, ssh exits immediately
+        //                           (surfaces as a clear error rather than a silently dead port).
+        //   ServerAliveInterval/CountMax — probe the peer every 15s, give up after 3 misses (~45s)
+        //                           so a half-dead connection terminates and gets rebuilt.
+        //   TCPKeepAlive          — detect dropped peers even when the link is idle.
+        //   BatchMode             — never block on an interactive prompt (would hang forever).
+        var args = $"-N -L {localPort}:/var/run/docker.sock {server.SshUser}@{server.SshHost} -p {server.SshPort} " +
+                   "-o StrictHostKeyChecking=no -o BatchMode=yes -o ExitOnForwardFailure=yes " +
+                   "-o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -o ConnectTimeout=10";
         if (!string.IsNullOrEmpty(keyPath))
             args = $"-i {keyPath} " + args;
 
@@ -69,12 +79,15 @@ public class SshTunnelManager : IDisposable
 
         process.Start();
 
-        // Wait briefly for the tunnel to establish
-        await Task.Delay(1500);
-
-        if (process.HasExited)
+        // Wait until the forwarded port actually accepts connections (up to ~10s) rather than
+        // guessing with a fixed delay — a slow handshake would otherwise leave us with a client
+        // pointed at a port that isn't listening yet.
+        var ready = await WaitForPortAsync(localPort, process, TimeSpan.FromSeconds(10));
+        if (!ready)
         {
-            var error = await process.StandardError.ReadToEndAsync();
+            string error = process.HasExited ? await process.StandardError.ReadToEndAsync() : "tunnel did not open the local port in time";
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            process.Dispose();
             throw new InvalidOperationException($"SSH tunnel failed for {server.Name}: {error}");
         }
 
@@ -97,6 +110,33 @@ public class SshTunnelManager : IDisposable
     public bool IsTunnelActive(string serverId)
     {
         return _tunnels.TryGetValue(serverId, out var tunnel) && tunnel.IsAlive;
+    }
+
+    /// <summary>
+    /// Polls the local forward port until it accepts a TCP connection, the ssh process exits, or the
+    /// timeout elapses. Returns true only when the port is actually listening.
+    /// </summary>
+    private static async Task<bool> WaitForPortAsync(int port, Process process, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (process.HasExited)
+                return false;
+
+            try
+            {
+                using var client = new TcpClient();
+                using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+                await client.ConnectAsync(IPAddress.Loopback, port, cts.Token);
+                return true;
+            }
+            catch
+            {
+                await Task.Delay(200);
+            }
+        }
+        return false;
     }
 
     private static int GetAvailablePort()
