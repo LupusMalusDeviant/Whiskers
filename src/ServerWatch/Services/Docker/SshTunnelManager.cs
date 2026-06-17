@@ -59,23 +59,38 @@ public class SshTunnelManager : IDisposable
         //                           so a half-dead connection terminates and gets rebuilt.
         //   TCPKeepAlive          — detect dropped peers even when the link is idle.
         //   BatchMode             — never block on an interactive prompt (would hang forever).
-        var args = $"-N -L {localPort}:/var/run/docker.sock {server.SshUser}@{server.SshHost} -p {server.SshPort} " +
-                   "-o StrictHostKeyChecking=no -o BatchMode=yes -o ExitOnForwardFailure=yes " +
-                   "-o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -o ConnectTimeout=10";
+        var args = new List<string>();
         if (!string.IsNullOrEmpty(keyPath))
-            args = $"-i {keyPath} " + args;
-
-        var process = new Process
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "ssh",
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            }
+            args.Add("-i");
+            args.Add(keyPath);
+        }
+        args.AddRange(new[]
+        {
+            "-N",
+            "-L", $"{localPort}:/var/run/docker.sock",
+            $"{server.SshUser}@{server.SshHost}",
+            "-p", server.SshPort.ToString(),
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "BatchMode=yes",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=3",
+            "-o", "TCPKeepAlive=yes",
+            "-o", "ConnectTimeout=10",
+        });
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = "ssh",
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true
         };
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+
+        var process = new Process { StartInfo = psi };
 
         process.Start();
 

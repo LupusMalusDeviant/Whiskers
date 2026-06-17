@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using ServerWatch.Configuration;
 using ServerWatch.Models.Cve;
 using ServerWatch.Services.Server;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Cve;
 
@@ -135,7 +136,7 @@ public class OsCveScanner
         // then sort -u for de-dup. Tail-cap to a reasonable line count to handle huge
         // changelogs.
         var cmd =
-            $"apt-get changelog {ShellQuote(pkg)} 2>/dev/null | head -c 200000 | " +
+            $"apt-get changelog {ShellUtils.Quote(pkg)} 2>/dev/null | head -c 200000 | " +
             "grep -oE 'CVE-[0-9]{4}-[0-9]+' | sort -u || true";
         var exec = await _executor.ExecuteAsync(
             serverId, cmd, TimeSpan.FromSeconds(timeoutSec), ct);
@@ -173,7 +174,6 @@ public class OsCveScanner
         };
     }
 
-    private static string ShellQuote(string s) => "'" + s.Replace("'", "'\\''") + "'";
     private static string Truncate(string? s, int max)
         => string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
 

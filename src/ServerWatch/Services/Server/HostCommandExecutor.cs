@@ -11,6 +11,11 @@ public class HostCommandExecutor : IHostCommandExecutor
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
+    // Directory holding SSH connection-multiplexing control sockets. Reusing a master connection
+    // across calls avoids a fresh TCP+auth handshake on every command (hundreds of ms each).
+    private static readonly string ControlDir =
+        Path.Combine(Path.GetTempPath(), "serverwatch-ssh");
+
     public HostCommandExecutor(ServerConfigService serverConfigService, ILogger<HostCommandExecutor> logger)
     {
         _serverConfigService = serverConfigService;
@@ -40,12 +45,15 @@ public class HostCommandExecutor : IHostCommandExecutor
 
     private async Task<CommandResult> ExecuteLocalAsync(string command, TimeSpan timeout, CancellationToken ct)
     {
-        // Use nsenter to break out of the container's namespaces into the host
-        var nsenterArgs = $"-t 1 -m -u -i -n -p -- sh -c \"{EscapeForShell(command)}\"";
+        // Break out of the container's namespaces into the host, then hand the command verbatim to a
+        // shell as a single argument. Passing it as one argv element (not a concatenated string) means
+        // .NET does no word-splitting and the shell sees exactly what the caller wrote — pipes,
+        // quotes, $vars and && all behave as intended.
+        var args = new[] { "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command };
 
         _logger.LogDebug("Executing local command via nsenter: {Command}", command);
 
-        return await RunProcessAsync("nsenter", nsenterArgs, timeout, ct);
+        return await RunProcessAsync("nsenter", args, timeout, ct);
     }
 
     private async Task<CommandResult> ExecuteSshAsync(Models.ServerConfig server, string command, TimeSpan timeout, CancellationToken ct)
@@ -59,24 +67,42 @@ public class HostCommandExecutor : IHostCommandExecutor
         if (string.IsNullOrWhiteSpace(keyPath))
             return new CommandResult { ExitCode = -1, Error = "SSH key not found for server" };
 
-        var sshArgs = $"-o StrictHostKeyChecking=no -o ConnectTimeout=10 -p {server.SshPort} -i \"{keyPath}\" {server.SshUser}@{server.SshHost} {command}";
+        try { Directory.CreateDirectory(ControlDir); } catch { /* best effort; ssh falls back to no mux */ }
+
+        var args = new List<string>
+        {
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ConnectTimeout=10",
+            // Connection multiplexing: the first call opens a master, subsequent calls within
+            // ControlPersist reuse it. %C is a safe hash of host/port/user, so no escaping concerns.
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPersist=60s",
+            "-o", $"ControlPath={Path.Combine(ControlDir, "cm-%C")}",
+            "-p", server.SshPort.ToString(),
+            "-i", keyPath,
+            $"{server.SshUser}@{server.SshHost}",
+            // The command is a single argv element: ssh forwards it verbatim to the remote login
+            // shell, so a full shell command string (pipes, redirects, &&) works as written.
+            command
+        };
 
         _logger.LogDebug("Executing SSH command on {Host}: {Command}", server.SshHost, command);
 
-        return await RunProcessAsync("ssh", sshArgs, timeout, ct);
+        return await RunProcessAsync("ssh", args, timeout, ct);
     }
 
-    private async Task<CommandResult> RunProcessAsync(string fileName, string arguments, TimeSpan timeout, CancellationToken ct)
+    private async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct)
     {
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
-            Arguments = arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        foreach (var arg in arguments)
+            psi.ArgumentList.Add(arg);
 
         using var process = new Process { StartInfo = psi };
 
@@ -106,7 +132,7 @@ public class HostCommandExecutor : IHostCommandExecutor
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // Timed out (not externally cancelled)
-                _logger.LogWarning("Command timed out after {Timeout}: {FileName} {Arguments}", timeout, fileName, arguments);
+                _logger.LogWarning("Command timed out after {Timeout}: {FileName} {Arguments}", timeout, fileName, string.Join(' ', psi.ArgumentList));
                 try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
                 return new CommandResult { ExitCode = -1, Error = $"Command timed out after {timeout.TotalSeconds}s" };
             }
@@ -116,11 +142,5 @@ public class HostCommandExecutor : IHostCommandExecutor
             _logger.LogError(ex, "Failed to start process {FileName}", fileName);
             return new CommandResult { ExitCode = -1, Error = ex.Message };
         }
-    }
-
-    private static string EscapeForShell(string command)
-    {
-        // Escape double quotes within the command so it can be passed via sh -c "..."
-        return command.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 }

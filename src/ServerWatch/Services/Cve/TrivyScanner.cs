@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using ServerWatch.Configuration;
 using ServerWatch.Models.Cve;
 using ServerWatch.Services.Server;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Cve;
 
@@ -58,7 +59,7 @@ public class TrivyScanner
         var cmd =
             $"docker run --rm -v {CacheVolume}:/root/.cache/trivy {trivyImage} " +
             $"image --format json --quiet --no-progress --timeout 8m " +
-            ShellQuote(image);
+            ShellUtils.Quote(image);
 
         // First scan on a server downloads the Trivy DB (~600 MB compressed) so allow
         // up to 10 minutes. Subsequent scans usually finish in seconds.
@@ -135,9 +136,6 @@ public class TrivyScanner
         "LOW" => CveSeverity.Low,
         _ => CveSeverity.Unknown
     };
-
-    /// <summary>POSIX shell single-quote escaping for an image reference.</summary>
-    private static string ShellQuote(string s) => "'" + s.Replace("'", "'\\''") + "'";
 
     private static string Truncate(string? s, int max)
     {

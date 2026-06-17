@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Terminal;
 
@@ -14,85 +15,80 @@ public class TerminalSession : IAsyncDisposable
     public void Start(string shell, string? containerId = null)
     {
         string fileName;
-        string arguments;
+        string[] args;
 
         if (!string.IsNullOrEmpty(containerId))
         {
             // Use 'script' to allocate a PTY inside docker exec
             // This gives us proper interactive shell with prompt, colors, etc.
             fileName = "docker";
-            arguments = $"exec -i {containerId} script -qc \"{shell} -i\" /dev/null";
+            args = new[] { "exec", "-i", containerId, "script", "-qc", $"{shell} -i", "/dev/null" };
         }
         else
         {
             // nsenter into the host PID namespace to get a real host shell
             // (ServerWatch runs as a container with pid:host and privileged)
             fileName = "nsenter";
-            arguments = $"-t 1 -m -u -i -n -p -- {shell} -i -l";
+            args = new[] { "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", shell, "-i", "-l" };
         }
 
-        Process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            }
-        };
-        Process.StartInfo.Environment["TERM"] = "xterm-256color";
-        Process.Start();
+        StartProcess(fileName, args);
     }
 
     public void StartSsh(string host, int port, string user, string? keyPath)
     {
-        var args = $"-tt -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p {port}";
-        if (!string.IsNullOrEmpty(keyPath))
-            args += $" -i {keyPath}";
-        args += $" {user}@{host}";
+        var args = SshBaseArgs(port, keyPath);
+        args.Add($"{user}@{host}");
 
-        Process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "ssh",
-                Arguments = args,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            }
-        };
-        Process.StartInfo.Environment["TERM"] = "xterm-256color";
-        Process.Start();
+        StartProcess("ssh", args);
     }
 
     public void StartSshDockerExec(string host, int port, string user, string? keyPath, string containerId)
     {
-        // SSH into remote host, then docker exec into the container
-        var args = $"-tt -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p {port}";
-        if (!string.IsNullOrEmpty(keyPath))
-            args += $" -i {keyPath}";
-        args += $" {user}@{host} docker exec -it {containerId} /bin/sh -c 'command -v bash >/dev/null && exec bash -l || exec sh'";
+        // SSH into remote host, then docker exec into the container. The remote command is built as a
+        // single argv element and quoted for the *remote* shell — ssh forwards it verbatim, so the
+        // inner quoting (and the container id) survive intact regardless of special characters.
+        var args = SshBaseArgs(port, keyPath);
+        args.Add($"{user}@{host}");
+        args.Add(
+            $"docker exec -it {ShellUtils.Quote(containerId)} /bin/sh -c " +
+            ShellUtils.Quote("command -v bash >/dev/null && exec bash -l || exec sh"));
 
-        Process = new Process
+        StartProcess("ssh", args);
+    }
+
+    private static List<string> SshBaseArgs(int port, string? keyPath)
+    {
+        var args = new List<string>
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "ssh",
-                Arguments = args,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            }
+            "-tt",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ServerAliveInterval=30",
+            "-p", port.ToString(),
         };
+        if (!string.IsNullOrEmpty(keyPath))
+        {
+            args.Add("-i");
+            args.Add(keyPath);
+        }
+        return args;
+    }
+
+    private void StartProcess(string fileName, IEnumerable<string> args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+
+        Process = new Process { StartInfo = psi };
         Process.StartInfo.Environment["TERM"] = "xterm-256color";
         Process.Start();
     }

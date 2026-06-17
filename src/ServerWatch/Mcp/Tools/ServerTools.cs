@@ -4,6 +4,7 @@ using ServerWatch.Services.Docker;
 using ServerWatch.Services.Server;
 using ServerWatch.Services.ServerConfig;
 using ServerWatch.Services.Mcp;
+using ServerWatch.Utils;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -72,7 +73,8 @@ public class ServerTools
         McpPermissionService permissionService,
         IHostCommandExecutor executor,
         [Description("Server ID")] string serverId,
-        [Description("Shell command to execute")] string command)
+        [Description("Shell command to execute")] string command,
+        [Description("Timeout in seconds (default 30, max 600)")] int timeoutSeconds = 30)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_command");
         if (denied != null) return denied;
@@ -81,13 +83,19 @@ public class ServerTools
         if (string.IsNullOrWhiteSpace(command))
             return "Command is required.";
 
-        var result = await executor.ExecuteAsync(serverId, command, TimeSpan.FromSeconds(30));
+        if (timeoutSeconds <= 0 || timeoutSeconds > 600)
+            timeoutSeconds = 30;
+
+        // Cap per-stream output so a chatty command can't blow up the model context.
+        const int maxStreamChars = 50_000;
+
+        var result = await executor.ExecuteAsync(serverId, command, TimeSpan.FromSeconds(timeoutSeconds));
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Exit code: {result.ExitCode}");
         if (!string.IsNullOrEmpty(result.Output))
-            sb.AppendLine($"Output:\n{result.Output}");
+            sb.AppendLine($"Output:\n{ShellUtils.Truncate(result.Output, maxStreamChars)}");
         if (!string.IsNullOrEmpty(result.Error))
-            sb.AppendLine($"Errors:\n{result.Error}");
+            sb.AppendLine($"Errors:\n{ShellUtils.Truncate(result.Error, maxStreamChars)}");
         return sb.ToString();
     }
 
