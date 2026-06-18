@@ -125,6 +125,27 @@ public static class McpPermissionLevels
         ["restart_coolify_application"] = Write,
         ["deploy_coolify_by_tag"] = Write,
         ["set_coolify_env_var"] = Write,
+
+        // Cloud (provider-agnostic) read tools
+        ["list_cloud_servers"] = Read,
+        ["cloud_status"] = Read,
+        ["cloud_metrics"] = Read,
+
+        // Cloud (provider-agnostic) write tools
+        ["cloud_power_on"] = Write,
+        ["cloud_shutdown"] = Write,
+        ["cloud_reboot"] = Write,
+        ["cloud_hard_reset"] = Write,
+        ["cloud_create_snapshot"] = Write,
+
+        // Hetzner-only extras
+        ["hetzner_list_snapshots"] = Read,
+        ["hetzner_enable_rescue"] = Write,
+        ["hetzner_disable_rescue"] = Write,
+        ["hetzner_enable_backups"] = Write,
+        ["hetzner_disable_backups"] = Write,
+        ["hetzner_change_server_type"] = Write,
+        ["hetzner_delete_snapshot"] = Write,
     };
 
     public static readonly Dictionary<string, string> ToolCategories = new()
@@ -194,5 +215,22 @@ public static class McpPermissionLevels
         ["restart_coolify_application"] = "Coolify",
         ["deploy_coolify_by_tag"] = "Coolify",
         ["set_coolify_env_var"] = "Coolify",
+
+        // Cloud (Hetzner/Hostinger)
+        ["list_cloud_servers"] = "Cloud",
+        ["cloud_status"] = "Cloud",
+        ["cloud_metrics"] = "Cloud",
+        ["cloud_power_on"] = "Cloud",
+        ["cloud_shutdown"] = "Cloud",
+        ["cloud_reboot"] = "Cloud",
+        ["cloud_hard_reset"] = "Cloud",
+        ["cloud_create_snapshot"] = "Cloud",
+        ["hetzner_list_snapshots"] = "Cloud",
+        ["hetzner_enable_rescue"] = "Cloud",
+        ["hetzner_disable_rescue"] = "Cloud",
+        ["hetzner_enable_backups"] = "Cloud",
+        ["hetzner_disable_backups"] = "Cloud",
+        ["hetzner_change_server_type"] = "Cloud",
+        ["hetzner_delete_snapshot"] = "Cloud",
     };
 }
