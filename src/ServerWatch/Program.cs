@@ -23,6 +23,7 @@ using ServerWatch.Services.ImageUpdate;
 using ServerWatch.Services.Cve;
 using ServerWatch.Services.Mcp;
 using ServerWatch.Services.Coolify;
+using ServerWatch.Services.Hetzner;
 using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -99,6 +100,10 @@ builder.Services.AddSingleton<ServerWatch.Services.Vault.VaultService>();
 builder.Services.AddSingleton<CoolifyConfigService>();
 builder.Services.AddHttpClient<ICoolifyService, CoolifyApiService>();
 
+// Hetzner Cloud integration
+builder.Services.AddSingleton<HetznerConfigService>();
+builder.Services.AddHttpClient<IHetznerService, HetznerApiService>();
+
 // Host command execution + server management
 builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
 builder.Services.AddSingleton<FirewallService>();
@@ -162,6 +167,7 @@ builder.Services.AddMcpServer()
     .WithTools<ServerTools>()
     .WithTools<MonitoringTools>()
     .WithTools<CoolifyTools>()
+    .WithTools<HetznerTools>()
     .WithTools<NetworkTools>()
     .WithTools<DatabaseTools>()
     .WithTools<SchedulerTools>()
@@ -425,6 +431,9 @@ await mcpPermissionService.InitializeAsync();
 
 var coolifyConfigService = app.Services.GetRequiredService<CoolifyConfigService>();
 await coolifyConfigService.InitializeAsync();
+
+var hetznerConfigService = app.Services.GetRequiredService<HetznerConfigService>();
+await hetznerConfigService.InitializeAsync();
 
 // Ensure SQLite database and tables are created (including new tables on existing DBs)
 using (var scope = app.Services.CreateScope())
