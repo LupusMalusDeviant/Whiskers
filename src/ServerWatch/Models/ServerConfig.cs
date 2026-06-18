@@ -7,6 +7,13 @@ public enum ConnectionType
     SSH
 }
 
+public enum CloudProvider
+{
+    None,
+    Hetzner,
+    Hostinger
+}
+
 public class ServerConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
@@ -26,6 +33,12 @@ public class ServerConfig
     public int SshPort { get; set; } = 22;
     public string? SshUser { get; set; }
     public string? SshKeyFileName { get; set; }
+
+    // Cloud provider control (out-of-band power/snapshot via provider API).
+    // The API key is per-server: Hetzner tokens are per-project and Hostinger keys per-account,
+    // so each server carries the credential for whatever account/project it lives in.
+    public CloudProvider CloudProvider { get; set; } = CloudProvider.None;
+    public string? CloudApiKey { get; set; }
 
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; } = true;

@@ -13,8 +13,6 @@
 @inject ServerWatch.Services.Mcp.McpPermissionService McpPermissionService
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfigService
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyApiService
-@inject ServerWatch.Services.Hetzner.HetznerConfigService HetznerConfigService
-@inject ServerWatch.Services.Hetzner.IHetznerService HetznerApiService
 @inject ISnackbar Snackbar
 @inject IOptionsMonitor<ServerWatch.Configuration.CveMonitorSettings> CveSettings
 @inject ServerWatch.Services.Cve.CveFindingsStore CveStore
@@ -338,40 +336,7 @@
         </MudGrid>
     </MudExpansionPanel>
 
-    @* Hetzner Cloud *@
-    <MudExpansionPanel Text="Hetzner-Cloud-Integration" Icon="@Icons.Material.Filled.CloudQueue">
-        <MudGrid>
-            <MudItem xs="12">
-                <MudSwitch T="bool" @bind-Value="_hetznerEnabled" Color="Color.Primary"
-                           Label="Hetzner-Integration aktivieren" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudTextField @bind-Value="_hetznerApiToken" Label="API-Token"
-                              Variant="Variant.Outlined" InputType="InputType.Password"
-                              HelperText="@(_hetznerHasToken ? "Ein Token ist gespeichert — Feld leer lassen, um es beizubehalten." : "Token aus Hetzner Cloud Console → Security → API Tokens. Read&Write für Steueraktionen.")" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudNumericField @bind-Value="_hetznerPollingInterval" Label="Abfrageintervall (Sekunden)"
-                                 Variant="Variant.Outlined" Min="15" Max="600" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudNumericField @bind-Value="_hetznerTrafficWarn" Label="Traffic-Warnschwelle (%)"
-                                 Variant="Variant.Outlined" Min="50" Max="100" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudStack Row="true" Spacing="2">
-                    <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveHetznerSettings"
-                               StartIcon="@Icons.Material.Filled.Save" Disabled="@_savingHetzner">
-                        @(_savingHetzner ? "Wird gespeichert..." : "Hetzner-Einstellungen speichern")
-                    </MudButton>
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="TestHetznerConnection"
-                               StartIcon="@Icons.Material.Filled.NetworkCheck" Disabled="@_testingHetzner">
-                        @(_testingHetzner ? "Teste..." : "Verbindung testen")
-                    </MudButton>
-                </MudStack>
-            </MudItem>
-        </MudGrid>
-    </MudExpansionPanel>
+    @* Cloud-Provider (Hetzner/Hostinger) credentials are configured per server under "Server". *@
 
     @* User Roles *@
     <MudExpansionPanel Text="Benutzerrollen" Icon="@Icons.Material.Filled.AdminPanelSettings">
@@ -564,15 +529,6 @@
     private bool _savingCoolify;
     private bool _testingCoolify;
 
-    // Hetzner
-    private bool _hetznerEnabled;
-    private string _hetznerApiToken = "";
-    private bool _hetznerHasToken;
-    private int _hetznerPollingInterval = 60;
-    private int _hetznerTrafficWarn = 80;
-    private bool _savingHetzner;
-    private bool _testingHetzner;
-
     protected override void OnInitialized()
     {
         var data = WhitelistService.GetWhitelist();
@@ -589,14 +545,6 @@
         _coolifyApiUrl = coolifySettings.ApiUrl;
         _coolifyApiToken = coolifySettings.ApiToken;
         _coolifyPollingInterval = coolifySettings.PollingIntervalSeconds;
-
-        // Hetzner — never prefill the token field; show a hint if one is stored
-        var hetznerSettings = HetznerConfigService.GetSettings();
-        _hetznerEnabled = hetznerSettings.Enabled;
-        _hetznerPollingInterval = hetznerSettings.PollingIntervalSeconds;
-        _hetznerTrafficWarn = hetznerSettings.TrafficWarnPercent;
-        _hetznerHasToken = HetznerConfigService.HasToken;
-        _hetznerApiToken = "";
 
         // Roles — merge whitelisted users that aren't in roles yet
         _roleEntries = RoleService.GetRoleData().Roles;
@@ -797,64 +745,6 @@
         finally
         {
             _testingCoolify = false;
-        }
-    }
-
-    private async Task SaveHetznerSettings()
-    {
-        _savingHetzner = true;
-        try
-        {
-            await HetznerConfigService.SaveAsync(new ServerWatch.Configuration.HetznerSettings
-            {
-                Enabled = _hetznerEnabled,
-                ApiToken = _hetznerApiToken?.Trim() ?? "", // empty = keep existing token
-                PollingIntervalSeconds = _hetznerPollingInterval,
-                TrafficWarnPercent = _hetznerTrafficWarn
-            });
-            _hetznerHasToken = HetznerConfigService.HasToken;
-            _hetznerApiToken = "";
-            Snackbar.Add("Hetzner-Einstellungen gespeichert. Änderungen gelten sofort.", Severity.Success);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Fehler beim Speichern: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _savingHetzner = false;
-        }
-    }
-
-    private async Task TestHetznerConnection()
-    {
-        _testingHetzner = true;
-        try
-        {
-            // Persist current values first so the service uses them (empty token keeps the stored one)
-            await HetznerConfigService.SaveAsync(new ServerWatch.Configuration.HetznerSettings
-            {
-                Enabled = true,
-                ApiToken = _hetznerApiToken?.Trim() ?? "",
-                PollingIntervalSeconds = _hetznerPollingInterval,
-                TrafficWarnPercent = _hetznerTrafficWarn
-            });
-            _hetznerHasToken = HetznerConfigService.HasToken;
-            _hetznerApiToken = "";
-
-            var success = await HetznerApiService.TestConnectionAsync();
-            if (success)
-                Snackbar.Add("Verbindung zu Hetzner erfolgreich!", Severity.Success);
-            else
-                Snackbar.Add("Verbindung fehlgeschlagen. Bitte Token prüfen.", Severity.Error);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Verbindungsfehler: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _testingHetzner = false;
         }
     }
 

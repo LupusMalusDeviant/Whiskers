@@ -123,6 +123,23 @@
                     <InputFile id="ssh-key-upload" OnChange="OnSshKeyFileChanged" style="display:none;" />
                 </MudStack>
             }
+
+            @if (_form.ConnectionType != ServerWatch.Models.ConnectionType.Local)
+            {
+                <MudDivider Class="my-3" />
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Cloud-Provider (Power/Snapshot via API, out-of-band)</MudText>
+                <MudSelect @bind-Value="_form.CloudProvider" Label="Provider" Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="ServerWatch.Models.CloudProvider.None">Keiner</MudSelectItem>
+                    <MudSelectItem Value="ServerWatch.Models.CloudProvider.Hetzner">Hetzner Cloud</MudSelectItem>
+                    <MudSelectItem Value="ServerWatch.Models.CloudProvider.Hostinger">Hostinger VPS</MudSelectItem>
+                </MudSelect>
+                @if (_form.CloudProvider != ServerWatch.Models.CloudProvider.None)
+                {
+                    <MudTextField @bind-Value="_cloudApiKey" Label="API-Key" Variant="Variant.Outlined"
+                                  InputType="InputType.Password" Class="mb-1"
+                                  HelperText="@(_hasCloudKey ? "Ein Key ist gespeichert — leer lassen, um ihn beizubehalten." : "API-Token des Providers (Hetzner: Projekt-Token; Hostinger: API-Token). Matching erfolgt über die Server-IP.")" />
+                }
+            }
         </DialogContent>
         <DialogActions>
             <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
@@ -139,6 +156,8 @@
     private ServerWatch.Models.ServerConfig _form = new();
     private string? _sshKeyFileName;
     private byte[]? _sshKeyData;
+    private string _cloudApiKey = "";
+    private bool _hasCloudKey;
     private HashSet<string> _testing = new();
     private Dictionary<string, TestResult> _testResults = new();
 
@@ -153,6 +172,8 @@
         _form = new ServerWatch.Models.ServerConfig { ConnectionType = ServerWatch.Models.ConnectionType.TCP };
         _sshKeyFileName = null;
         _sshKeyData = null;
+        _cloudApiKey = "";
+        _hasCloudKey = false;
         _showDialog = true;
     }
 
@@ -171,14 +192,26 @@
             SshPort = server.SshPort,
             SshUser = server.SshUser,
             SshKeyFileName = server.SshKeyFileName,
+            CloudProvider = server.CloudProvider,
+            CloudApiKey = server.CloudApiKey,
         };
         _sshKeyFileName = server.SshKeyFileName;
         _sshKeyData = null;
+        _cloudApiKey = "";                                  // never prefill the secret
+        _hasCloudKey = !string.IsNullOrWhiteSpace(server.CloudApiKey);
         _showDialog = true;
     }
 
     private async Task SaveServer()
     {
+        // Resolve the cloud API key: blank field = keep the existing one; clearing the provider clears the key.
+        if (_form.CloudProvider == ServerWatch.Models.CloudProvider.None)
+            _form.CloudApiKey = null;
+        else if (!string.IsNullOrWhiteSpace(_cloudApiKey))
+            _form.CloudApiKey = _cloudApiKey.Trim();
+        else
+            _form.CloudApiKey = _editingServer?.CloudApiKey;   // keep existing (null for new server)
+
         if (_editingServer != null)
         {
             _form.Id = _editingServer.Id;
