@@ -247,7 +247,8 @@ else
             options.UsePkce = true;
             options.SaveTokens = true;
             options.GetClaimsFromUserInfoEndpoint = true;
-            options.RequireHttpsMetadata = oidcSection.GetValue("RequireHttpsMetadata", true);
+            var oidcRequireHttps = oidcSection.GetValue("RequireHttpsMetadata", true);
+            options.RequireHttpsMetadata = oidcRequireHttps;
             // Relative paths — combined with UsePathBase + forwarded headers they resolve to
             // {PathBase}/signin-oidc etc. Register that full URL as the redirect URI at the IdP.
             options.CallbackPath = "/signin-oidc";
@@ -259,6 +260,13 @@ else
             options.ResponseMode = "query";
             options.NonceCookie.SameSite = SameSiteMode.Lax;
             options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+            if (!oidcRequireHttps)
+            {
+                // Plain-HTTP LAN: these cookies must NOT be Secure, otherwise the browser stores
+                // but never sends them back over http → "Correlation failed" on the callback.
+                options.NonceCookie.SecurePolicy = CookieSecurePolicy.None;
+                options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.None;
+            }
 
             options.Scope.Clear();
             foreach (var s in (oidcSection["Scopes"] ?? "openid profile email")
