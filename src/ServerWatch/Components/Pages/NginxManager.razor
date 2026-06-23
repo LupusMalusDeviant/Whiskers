@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager Nav
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Nginx - ServerWatch</PageTitle>
 
@@ -15,8 +16,11 @@
     <MudSpacer />
     <MudButton StartIcon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Variant="Variant.Outlined"
                OnClick="TestConfig">Konfiguration testen</MudButton>
-    <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Info" Variant="Variant.Outlined"
-               OnClick="ReloadNginx" Class="ml-2">Neu laden</MudButton>
+    @if (_role >= AppRole.Admin)
+    {
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Info" Variant="Variant.Outlined"
+                   OnClick="ReloadNginx" Class="ml-2">Neu laden</MudButton>
+    }
 </MudStack>
 
 @if (_loading)
@@ -29,8 +33,11 @@ else if (_editingSite != null)
         <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => _editingSite = null)" />
         <MudText Typo="Typo.h6">@_editingSite</MudText>
         <MudSpacer />
-        <MudButton StartIcon="@Icons.Material.Filled.Save" Color="Color.Primary" Variant="Variant.Filled"
-                   OnClick="SaveConfig" Disabled="@_saving">Speichern & Neu laden</MudButton>
+        @if (_role >= AppRole.Admin)
+        {
+            <MudButton StartIcon="@Icons.Material.Filled.Save" Color="Color.Primary" Variant="Variant.Filled"
+                       OnClick="SaveConfig" Disabled="@_saving">Speichern & Neu laden</MudButton>
+        }
     </MudStack>
     <MudTextField @bind-Value="_editContent" Lines="30" Variant="Variant.Outlined"
                   Style="font-family: monospace; font-size: 13px;" FullWidth="true" />
@@ -58,15 +65,18 @@ else
                 </MudChip>
             </MudTd>
             <MudTd>
-                @if (context.Enabled)
+                @if (_role >= AppRole.Admin)
                 {
-                    <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Text"
-                               OnClick="@(() => ToggleSite(context.Name, false))">Deaktivieren</MudButton>
-                }
-                else
-                {
-                    <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Text"
-                               OnClick="@(() => ToggleSite(context.Name, true))">Aktivieren</MudButton>
+                    @if (context.Enabled)
+                    {
+                        <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Text"
+                                   OnClick="@(() => ToggleSite(context.Name, false))">Deaktivieren</MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Text"
+                                   OnClick="@(() => ToggleSite(context.Name, true))">Aktivieren</MudButton>
+                    }
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
                                OnClick="@(() => EditSite(context.Name))" />
@@ -84,9 +94,21 @@ else
     private List<ServerWatch.Services.Server.NginxSite> _sites = new();
     private string? _editingSite;
     private string _editContent = "";
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         var server = ServerConfigService.GetServer(ServerId);
         _serverName = server?.Name ?? ServerId;
         await LoadSites();
@@ -112,7 +134,14 @@ else
 
     private async Task SaveConfig()
     {
+        if (!Require(AppRole.Admin)) return;
         if (_editingSite == null) return;
+
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Konfiguration speichern", $"Konfiguration für '{_editingSite}' speichern und Nginx neu laden? Fehlerhafte Konfiguration kann die ausgelieferten Seiten stören.",
+            yesText: "Speichern & Neu laden", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+
         _saving = true;
         try
         {
@@ -132,6 +161,8 @@ else
 
     private async Task ToggleSite(string name, bool enable)
     {
+        if (!Require(AppRole.Admin)) return;
+
         try
         {
             var result = enable
@@ -157,8 +188,14 @@ else
 
     private async Task ReloadNginx()
     {
-        var result = await NginxService.ReloadAsync(ServerId);
-        Snackbar.Add(result.Success ? "Nginx neu geladen" : $"Neu laden fehlgeschlagen: {result.Error}",
-            result.Success ? Severity.Success : Severity.Error);
+        if (!Require(AppRole.Admin)) return;
+
+        try
+        {
+            var result = await NginxService.ReloadAsync(ServerId);
+            Snackbar.Add(result.Success ? "Nginx neu geladen" : $"Neu laden fehlgeschlagen: {result.Error}",
+                result.Success ? Severity.Success : Severity.Error);
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
     }
 }

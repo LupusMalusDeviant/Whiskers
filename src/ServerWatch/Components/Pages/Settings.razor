@@ -9,6 +9,7 @@
 @inject ServerWatch.Services.Notifications.MatrixNotificationService MatrixService
 @inject WhitelistService WhitelistService
 @inject ServerWatch.Services.Auth.RoleService RoleService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 @inject ServerWatch.Services.Vault.VaultService VaultService
 @inject ServerWatch.Services.Mcp.McpPermissionService McpPermissionService
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfigService
@@ -32,6 +33,14 @@
     </MudStack>
 </div>
 
+@if (_role < AppRole.Admin)
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4">
+        Kein Zugriff — diese Seite erfordert Administratorrechte. Deine Rolle: @_role.
+    </MudAlert>
+}
+else
+{
 <MudExpansionPanels MultiExpansion="true">
     @* Mattermost *@
     <MudExpansionPanel Text="Mattermost-Benachrichtigungen" Icon="@Icons.Material.Filled.Notifications"
@@ -496,8 +505,10 @@
         </MudGrid>
     </MudExpansionPanel>
 </MudExpansionPanels>
+}
 
 @code {
+    private AppRole _role = AppRole.Viewer;
     private bool _whitelistEnabled;
     private List<string> _whitelistEmails = new();
     private string _newEmail = "";
@@ -529,8 +540,13 @@
     private bool _savingCoolify;
     private bool _testingCoolify;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        // Settings holds whitelist, roles, vault secrets and MCP keys — Admin only.
+        // Non-admins get an access-denied panel and we skip loading sensitive data into the circuit.
+        _role = await CurrentUser.GetRoleAsync();
+        if (_role < AppRole.Admin) return;
+
         var data = WhitelistService.GetWhitelist();
         _whitelistEnabled = data.Enabled;
         _whitelistEmails = data.Emails;

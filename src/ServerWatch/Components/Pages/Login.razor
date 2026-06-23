@@ -19,11 +19,28 @@
                 </MudAlert>
             }
 
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
-                       FullWidth="true" Href="login-google"
-                       StartIcon="@Icons.Material.Filled.Login">
-                Mit Google anmelden
-            </MudButton>
+            @if (_googleEnabled)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                           FullWidth="true" Href="login-google"
+                           StartIcon="@Icons.Material.Filled.Login">
+                    Mit Google anmelden
+                </MudButton>
+            }
+            @if (_oidcEnabled)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Large"
+                           FullWidth="true" Href="login-oidc" Class="@(_googleEnabled ? "mt-3" : "")"
+                           StartIcon="@Icons.Material.Filled.VpnKey">
+                    Mit @_oidcName anmelden
+                </MudButton>
+            }
+            @if (!_googleEnabled && !_oidcEnabled)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mud-width-full">
+                    Kein Login-Anbieter konfiguriert. Bitte Google oder OIDC in der Konfiguration aktivieren.
+                </MudAlert>
+            }
         </div>
     </MudPaper>
 </MudContainer>
@@ -32,6 +49,10 @@
     [SupplyParameterFromQuery(Name = "error")]
     private string? _error { get; set; }
 
+    private bool _googleEnabled;
+    private bool _oidcEnabled;
+    private string _oidcName = "SSO";
+
     protected override void OnInitialized()
     {
         // When auth is disabled for LAN deployments, there is no login flow —
@@ -39,6 +60,11 @@
         if (Config.GetValue<bool>("Auth:Disabled"))
         {
             Nav.NavigateTo("/", forceLoad: false);
+            return;
         }
+
+        _googleEnabled = !string.IsNullOrWhiteSpace(Config["GoogleAuth:ClientId"]);
+        _oidcEnabled = Config.GetValue<bool>("Oidc:Enabled") && !string.IsNullOrWhiteSpace(Config["Oidc:Authority"]);
+        _oidcName = string.IsNullOrWhiteSpace(Config["Oidc:DisplayName"]) ? "SSO" : Config["Oidc:DisplayName"]!;
     }
 }

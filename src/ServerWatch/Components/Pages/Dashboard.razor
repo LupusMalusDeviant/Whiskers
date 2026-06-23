@@ -2,6 +2,8 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 @inject NavigationManager Nav
 @inject ServerWatch.Services.ImageUpdate.ImageUpdateStore ImageUpdateStore
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfig
@@ -232,22 +234,31 @@
                 <MudTd>
                     @if (context.State == "running")
                     {
-                        <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                       Title="Stoppen" OnClick="@(() => StopContainer(context))" />
-                        <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                       Title="Neustarten" OnClick="@(() => RestartContainer(context))" />
-                        @if (HasUpdate(context))
+                        @if (_role >= AppRole.Operator)
                         {
-                            <MudIconButton Icon="@Icons.Material.Filled.SystemUpdateAlt" Size="Size.Small" Color="Color.Warning"
-                                           Title="Image aktualisieren" OnClick="@(() => UpdateContainer(context))" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
+                                           Title="Stoppen" OnClick="@(() => StopContainer(context))" />
+                            <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
+                                           Title="Neustarten" OnClick="@(() => RestartContainer(context))" />
+                            @if (HasUpdate(context))
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.SystemUpdateAlt" Size="Size.Small" Color="Color.Warning"
+                                               Title="Image aktualisieren" OnClick="@(() => UpdateContainer(context))" />
+                            }
                         }
                     }
                     else
                     {
-                        <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                       Title="Starten" OnClick="@(() => StartContainer(context))" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                       Title="Entfernen" OnClick="@(() => RemoveContainer(context))" />
+                        @if (_role >= AppRole.Operator)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                           Title="Starten" OnClick="@(() => StartContainer(context))" />
+                        }
+                        @if (_role >= AppRole.Admin)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                           Title="Entfernen" OnClick="@(() => RemoveContainer(context))" />
+                        }
                     }
                 </MudTd>
             </RowTemplate>
@@ -273,9 +284,24 @@
     private int _refreshCount;
     private int _coolifyTotal;
     private int _coolifyRunning;
+    private AppRole _role = AppRole.Viewer;
+
+    // Guards a write/destructive handler. Returns false (and warns) if the user lacks the role —
+    // defense in depth, since hiding the button is not by itself authorization.
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
+
         // Phase 1: Load container list fast (no stats yet)
         await LoadContainerList();
         _loading = false;
@@ -408,6 +434,7 @@
 
     private async Task StartContainer(ContainerInfo container)
     {
+        if (!Require(AppRole.Operator)) return;
         try
         {
             await DockerService.StartContainerAsync(container.Id, container.ServerId);
@@ -422,6 +449,7 @@
 
     private async Task StopContainer(ContainerInfo container)
     {
+        if (!Require(AppRole.Operator)) return;
         try
         {
             await DockerService.StopContainerAsync(container.Id, container.ServerId);
@@ -436,6 +464,7 @@
 
     private async Task RestartContainer(ContainerInfo container)
     {
+        if (!Require(AppRole.Operator)) return;
         try
         {
             await DockerService.RestartContainerAsync(container.Id, container.ServerId);
@@ -450,6 +479,12 @@
 
     private async Task RemoveContainer(ContainerInfo container)
     {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Container entfernen",
+            $"Container '{container.Name}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.",
+            yesText: "Entfernen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         try
         {
             await DockerService.RemoveContainerAsync(container.Id, force: true, serverId: container.ServerId);
@@ -476,6 +511,7 @@
 
     private async Task UpdateContainer(ContainerInfo container)
     {
+        if (!Require(AppRole.Operator)) return;
         try
         {
             Snackbar.Add($"{container.Name} wird aktualisiert...", Severity.Info);

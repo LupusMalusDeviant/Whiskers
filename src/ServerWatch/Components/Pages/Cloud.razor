@@ -4,6 +4,8 @@
 @using ServerWatch.Models.Cloud
 @inject ServerWatch.Services.Cloud.CloudControlService CloudControl
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Cloud - ServerWatch</PageTitle>
 
@@ -58,22 +60,25 @@
             }
         </MudTd>
         <MudTd>
-            @if (context.Status == "running")
+            @if (_role >= AppRole.Admin)
             {
-                <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                               Title="Neustarten" OnClick="@(() => Act(context, "reboot"))" Disabled="@_busy" />
-                <MudIconButton Icon="@Icons.Material.Filled.PowerSettingsNew" Size="Size.Small" Color="Color.Warning"
-                               Title="Herunterfahren" OnClick="@(() => Act(context, "shutdown"))" Disabled="@_busy" />
-                <MudIconButton Icon="@Icons.Material.Filled.FlashOn" Size="Size.Small" Color="Color.Error"
-                               Title="Hard Reset" OnClick="@(() => Act(context, "reset"))" Disabled="@_busy" />
+                @if (context.Status == "running")
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
+                                   Title="Neustarten" OnClick="@(() => Act(context, "reboot"))" Disabled="@_busy" />
+                    <MudIconButton Icon="@Icons.Material.Filled.PowerSettingsNew" Size="Size.Small" Color="Color.Warning"
+                                   Title="Herunterfahren" OnClick="@(() => Act(context, "shutdown"))" Disabled="@_busy" />
+                    <MudIconButton Icon="@Icons.Material.Filled.FlashOn" Size="Size.Small" Color="Color.Error"
+                                   Title="Hard-Reset (erzwungener Neustart)" OnClick="@(() => Act(context, "reset"))" Disabled="@_busy" />
+                }
+                else
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                   Title="Einschalten" OnClick="@(() => Act(context, "poweron"))" Disabled="@_busy" />
+                }
+                <MudIconButton Icon="@Icons.Material.Filled.PhotoCamera" Size="Size.Small" Color="Color.Primary"
+                               Title="Snapshot erstellen" OnClick="@(() => Act(context, "snapshot"))" Disabled="@_busy" />
             }
-            else
-            {
-                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                               Title="Einschalten" OnClick="@(() => Act(context, "poweron"))" Disabled="@_busy" />
-            }
-            <MudIconButton Icon="@Icons.Material.Filled.PhotoCamera" Size="Size.Small" Color="Color.Primary"
-                           Title="Snapshot erstellen" OnClick="@(() => Act(context, "snapshot"))" Disabled="@_busy" />
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
@@ -85,8 +90,23 @@
     private List<CloudServerInfo> _servers = new();
     private bool _loading = true;
     private bool _busy;
+    private AppRole _role = AppRole.Viewer;
 
-    protected override async Task OnInitializedAsync() => await LoadAll();
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
+        await LoadAll();
+    }
 
     private async Task LoadAll()
     {
@@ -98,6 +118,23 @@
 
     private async Task Act(CloudServerInfo s, string action)
     {
+        if (!Require(AppRole.Admin)) return;
+
+        // Confirm out-of-band power actions that interrupt the running server.
+        var confirmPrompt = action switch
+        {
+            "reboot" => $"Server '{s.ServerWatchName}' neustarten? Laufende Dienste werden unterbrochen.",
+            "shutdown" => $"Server '{s.ServerWatchName}' herunterfahren? Der Server ist danach offline.",
+            "reset" => $"Hard-Reset für '{s.ServerWatchName}'? Erzwungener Neustart ohne sauberes Herunterfahren — Datenverlust möglich.",
+            _ => null
+        };
+        if (confirmPrompt != null)
+        {
+            var confirmed = await DialogService.ShowMessageBoxAsync(
+                "Aktion bestätigen", confirmPrompt, yesText: "Ausführen", cancelText: "Abbrechen");
+            if (confirmed != true) return;
+        }
+
         _busy = true;
         try
         {

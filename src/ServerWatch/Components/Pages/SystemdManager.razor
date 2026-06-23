@@ -3,7 +3,9 @@
 @inject ServerWatch.Services.Server.SystemdService SystemdService
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @inject NavigationManager Nav
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Dienste - ServerWatch</PageTitle>
 
@@ -57,17 +59,20 @@ else
             </MudTd>
             <MudTd><MudText Typo="Typo.body2">@context.Description</MudText></MudTd>
             <MudTd>
-                @if (context.ActiveState == "active")
+                @if (_role >= AppRole.Admin)
                 {
-                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                   Title="Stoppen" OnClick="@(() => ManageService(context.Name, "stop"))" />
-                    <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                   Title="Neustarten" OnClick="@(() => ManageService(context.Name, "restart"))" />
-                }
-                else
-                {
-                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                   Title="Starten" OnClick="@(() => ManageService(context.Name, "start"))" />
+                    @if (context.ActiveState == "active")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
+                                       Title="Stoppen" OnClick="@(() => ManageService(context.Name, "stop"))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
+                                       Title="Neustarten" OnClick="@(() => ManageService(context.Name, "restart"))" />
+                    }
+                    else
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                       Title="Starten" OnClick="@(() => ManageService(context.Name, "start"))" />
+                    }
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.Article" Size="Size.Small" Color="Color.Default"
                                Title="Protokoll" OnClick="@(() => ShowJournal(context.Name))" />
@@ -101,6 +106,17 @@ else
     private string? _journalService;
     private string _journalContent = "";
     private bool _showJournal;
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     private IEnumerable<ServerWatch.Services.Server.SystemdUnit> FilteredServices =>
         string.IsNullOrEmpty(_filter)
@@ -110,6 +126,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         var server = ServerConfigService.GetServer(ServerId);
         _serverName = server?.Name ?? ServerId;
         await LoadServices();
@@ -125,6 +142,22 @@ else
 
     private async Task ManageService(string name, string action)
     {
+        if (!Require(AppRole.Admin)) return;
+
+        // Confirm actions that interrupt a running service.
+        var confirmPrompt = action switch
+        {
+            "stop" => $"Dienst '{name}' stoppen? Der Dienst und alle abhängigen Funktionen werden beendet.",
+            "restart" => $"Dienst '{name}' neustarten? Der Dienst wird kurzzeitig unterbrochen.",
+            _ => null
+        };
+        if (confirmPrompt != null)
+        {
+            var confirmed = await DialogService.ShowMessageBoxAsync(
+                "Aktion bestätigen", confirmPrompt, yesText: "Ausführen", cancelText: "Abbrechen");
+            if (confirmed != true) return;
+        }
+
         try
         {
             var result = action switch
@@ -138,7 +171,7 @@ else
                 result.Success ? Severity.Success : Severity.Error);
             await LoadServices();
         }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
     }
 
     private async Task ShowJournal(string name)

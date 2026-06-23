@@ -87,6 +87,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<CveMonitorService>
 // Auth whitelist + roles
 builder.Services.AddSingleton<WhitelistService>();
 builder.Services.AddSingleton<ServerWatch.Services.Auth.RoleService>();
+// Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
+builder.Services.AddScoped<ServerWatch.Services.Auth.CurrentUserService>();
 
 // Notification prefs per container
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.ContainerNotificationPrefsService>();
@@ -180,10 +182,29 @@ builder.Services.AddMcpServer()
 // MudBlazor
 builder.Services.AddMudServices();
 
-// Authentication - Google OAuth (or full bypass for trusted LAN-only deployments)
+// Authentication — cookie session + optional federated providers (Google and/or generic OIDC),
+// or full bypass for trusted LAN-only deployments.
 var authDisabled = builder.Configuration.GetValue<bool>("Auth:Disabled");
 var googleAuthSection = builder.Configuration.GetSection(GoogleAuthSettings.SectionName);
 var googleClientId = googleAuthSection["ClientId"];
+
+builder.Services.Configure<OidcSettings>(builder.Configuration.GetSection(OidcSettings.SectionName));
+var oidcSection = builder.Configuration.GetSection(OidcSettings.SectionName);
+var oidcEnabled = oidcSection.GetValue<bool>("Enabled") && !string.IsNullOrWhiteSpace(oidcSection["Authority"]);
+
+// Shared gate: after a provider authenticates the user, enforce the email whitelist before issuing
+// the local cookie. Used by both Google and OIDC (both deliver a TicketReceivedContext).
+Task WhitelistGate(Microsoft.AspNetCore.Authentication.TicketReceivedContext context)
+{
+    var whitelist = context.HttpContext.RequestServices.GetRequiredService<WhitelistService>();
+    var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
+    if (!whitelist.IsEmailAllowed(email))
+    {
+        context.Response.Redirect(configuredPathBase + "/login?error=unauthorized");
+        context.HandleResponse();
+    }
+    return Task.CompletedTask;
+}
 
 if (authDisabled)
 {
@@ -192,45 +213,61 @@ if (authDisabled)
     builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(options => { options.LoginPath = "/login"; });
 }
-else if (!string.IsNullOrWhiteSpace(googleClientId))
-{
-    builder.Services.AddAuthentication(options =>
-    {
-        options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = GoogleDefaults.AuthenticationScheme;
-    })
-    .AddCookie(options =>
-    {
-        options.LoginPath = "/login";
-        options.LogoutPath = "/logout";
-        options.ExpireTimeSpan = TimeSpan.FromHours(24);
-    })
-    .AddGoogle(options =>
-    {
-        options.ClientId = googleClientId!;
-        options.ClientSecret = googleAuthSection["ClientSecret"] ?? "";
-        options.Events.OnTicketReceived = context =>
-        {
-            var whitelist = context.HttpContext.RequestServices.GetRequiredService<WhitelistService>();
-            var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
-
-            if (!whitelist.IsEmailAllowed(email))
-            {
-                context.Response.Redirect(configuredPathBase + "/login?error=unauthorized");
-                context.HandleResponse();
-            }
-            return Task.CompletedTask;
-        };
-    });
-}
 else
 {
-    // No Google OAuth configured - use a simple cookie auth with no challenge
-    builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    // Cookie is the session scheme; providers are layered on top. No default challenge scheme is
+    // forced — unauthenticated users land on the cookie LoginPath (/login), which renders one button
+    // per configured provider (/login-google, /login-oidc).
+    var authBuilder = builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(options =>
         {
             options.LoginPath = "/login";
+            options.LogoutPath = "/logout";
+            options.ExpireTimeSpan = TimeSpan.FromHours(24);
         });
+
+    if (!string.IsNullOrWhiteSpace(googleClientId))
+    {
+        authBuilder.AddGoogle(options =>
+        {
+            options.ClientId = googleClientId!;
+            options.ClientSecret = googleAuthSection["ClientSecret"] ?? "";
+            options.Events.OnTicketReceived = WhitelistGate;
+        });
+    }
+
+    if (oidcEnabled)
+    {
+        authBuilder.AddOpenIdConnect("oidc", oidcSection["DisplayName"] ?? "SSO", options =>
+        {
+            options.Authority = oidcSection["Authority"];
+            options.ClientId = oidcSection["ClientId"];
+            options.ClientSecret = oidcSection["ClientSecret"];
+            options.ResponseType = "code";
+            options.UsePkce = true;
+            options.SaveTokens = true;
+            options.GetClaimsFromUserInfoEndpoint = true;
+            options.RequireHttpsMetadata = oidcSection.GetValue("RequireHttpsMetadata", true);
+            // Relative paths — combined with UsePathBase + forwarded headers they resolve to
+            // {PathBase}/signin-oidc etc. Register that full URL as the redirect URI at the IdP.
+            options.CallbackPath = "/signin-oidc";
+            options.SignedOutCallbackPath = "/signout-callback-oidc";
+
+            options.Scope.Clear();
+            foreach (var s in (oidcSection["Scopes"] ?? "openid profile email")
+                         .Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                options.Scope.Add(s);
+
+            var emailClaim = oidcSection["EmailClaim"] ?? "email";
+            options.ClaimActions.MapJsonKey(ClaimTypes.Email, emailClaim);
+            options.TokenValidationParameters.NameClaimType = emailClaim;
+
+            options.Events = new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectEvents
+            {
+                OnTicketReceived = WhitelistGate
+            };
+        });
+    }
 }
 
 builder.Services.AddAuthorization();
@@ -295,6 +332,14 @@ app.UseAuthorization();
 app.MapGet("/login-google", async (HttpContext ctx) =>
 {
     await ctx.ChallengeAsync(GoogleDefaults.AuthenticationScheme, new AuthenticationProperties
+    {
+        RedirectUri = configuredPathBase + "/"
+    });
+});
+
+app.MapGet("/login-oidc", async (HttpContext ctx) =>
+{
+    await ctx.ChallengeAsync("oidc", new AuthenticationProperties
     {
         RedirectUri = configuredPathBase + "/"
     });

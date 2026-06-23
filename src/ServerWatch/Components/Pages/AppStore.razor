@@ -5,6 +5,7 @@
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>App Store - ServerWatch</PageTitle>
 
@@ -157,10 +158,13 @@
         </DialogContent>
         <DialogActions>
             <MudButton OnClick="@(() => _showDialog = false)" Disabled="@_deploying">Abbrechen</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployTemplate"
-                       Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName) || _portConflicts.Any())">
-                Deployen auf @(_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local")
-            </MudButton>
+            @if (_role >= AppRole.Operator)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployTemplate"
+                           Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName) || _portConflicts.Any())">
+                    Deployen auf @(_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local")
+                </MudButton>
+            }
         </DialogActions>
     </MudDialog>
 }
@@ -178,6 +182,17 @@
     private List<ServerWatch.Models.ServerConfig> _servers = new();
     private HashSet<int> _usedPorts = new();
     private List<InstalledApp> _installedApps = new();
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     private class InstalledApp
     {
@@ -189,6 +204,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         try
         {
             var containers = await DockerService.ListAllContainersAsync(all: true);
@@ -274,6 +290,7 @@
 
     private async Task DeployTemplate()
     {
+        if (!Require(AppRole.Operator)) return;
         if (_selectedTemplate == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
 
         // Check required vars

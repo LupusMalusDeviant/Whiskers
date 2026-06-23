@@ -62,11 +62,18 @@ public class WebhookService
         if (webhook == null) return (false, "Webhook not found");
         if (!webhook.Enabled) return (false, "Webhook is disabled");
 
-        // Validate HMAC if signature provided
-        if (!string.IsNullOrEmpty(signature) && !string.IsNullOrEmpty(body))
+        // Validate HMAC. If the webhook has a secret configured, a valid signature is REQUIRED —
+        // otherwise anyone who learns the (unauthenticated) webhook URL could trigger it without
+        // knowing the shared secret. Compare in constant time to avoid signature-timing leaks.
+        if (!string.IsNullOrEmpty(webhook.Secret))
         {
-            var expectedSig = ComputeHmac(webhook.Secret, body);
-            if (!$"sha256={expectedSig}".Equals(signature, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(signature) || string.IsNullOrEmpty(body))
+                return (false, "Signature required");
+
+            var expected = Encoding.UTF8.GetBytes($"sha256={ComputeHmac(webhook.Secret, body)}");
+            var provided = Encoding.UTF8.GetBytes(signature.Trim());
+            if (expected.Length != provided.Length ||
+                !CryptographicOperations.FixedTimeEquals(expected, provided))
                 return (false, "Invalid signature");
         }
 

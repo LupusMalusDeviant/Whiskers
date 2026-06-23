@@ -3,6 +3,7 @@
 @inject IDockerService DockerService
 @inject ServerWatch.Services.Server.IHostCommandExecutor Executor
 @inject ISnackbar Snackbar
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Compose Editor - ServerWatch</PageTitle>
 
@@ -112,11 +113,14 @@
         <MudSpacer />
         <MudTextField @bind-Value="_projectName" Label="Projektname" Variant="Variant.Outlined" Dense="true"
                       Style="max-width: 200px;" Placeholder="my-app" />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch"
-                   OnClick="Deploy" Disabled="@(_deploying || string.IsNullOrWhiteSpace(_projectName))">
-            @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-            Deployen
-        </MudButton>
+        @if (_role >= AppRole.Operator)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch"
+                       OnClick="Deploy" Disabled="@(_deploying || string.IsNullOrWhiteSpace(_projectName))">
+                @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+                Deployen
+            </MudButton>
+        }
     </MudStack>
     <MudPaper Class="pa-3" Elevation="0" Style="background: rgba(0,0,0,0.3); border-radius: 8px;">
         <pre style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--sw-accent-green); margin: 0; white-space: pre-wrap;">@GenerateYaml()</pre>
@@ -128,6 +132,22 @@
     private ComposeService? _selectedService;
     private string _projectName = "";
     private bool _deploying;
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
+    }
 
     private void AddService()
     {
@@ -203,6 +223,7 @@
 
     private async Task Deploy()
     {
+        if (!Require(AppRole.Operator)) return;
         if (string.IsNullOrWhiteSpace(_projectName)) return;
         _deploying = true;
         try

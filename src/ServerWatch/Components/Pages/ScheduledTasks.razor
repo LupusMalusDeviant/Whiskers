@@ -3,6 +3,8 @@
 @inject ServerWatch.Services.Scheduler.SchedulerService Scheduler
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Geplante Tasks - ServerWatch</PageTitle>
 
@@ -16,8 +18,11 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">Automatische Container-Aktionen planen und verwalten</MudText>
         </div>
         <MudSpacer />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="ShowCreateDialog">Task erstellen</MudButton>
+        @if (_role >= AppRole.Admin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="ShowCreateDialog">Task erstellen</MudButton>
+        }
     </MudStack>
 </div>
 
@@ -106,12 +111,18 @@ else
             </MudTd>
             <MudTd>
                 <MudStack Row="true" Spacing="0">
-                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
-                                   OnClick="@(() => RunNow(context))" Title="Jetzt ausführen" />
-                    <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
-                               ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                   OnClick="@(() => DeleteTask(context))" Title="Löschen" />
+                    @if (_role >= AppRole.Operator)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
+                                       OnClick="@(() => RunNow(context))" Title="Jetzt ausführen" />
+                    }
+                    @if (_role >= AppRole.Admin)
+                    {
+                        <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
+                                   ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                       OnClick="@(() => DeleteTask(context))" Title="Löschen" />
+                    }
                 </MudStack>
             </MudTd>
         </RowTemplate>
@@ -227,9 +238,21 @@ else
     private string _formCron = "0 2 * * *";
     private string _formCommand = "";
     private int _formMaxBackups = 7;
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         await LoadData();
     }
 
@@ -248,6 +271,7 @@ else
 
     private async Task CreateTask()
     {
+        if (!Require(AppRole.Admin)) return;
         try
         {
             var config = new Dictionary<string, string>();
@@ -275,6 +299,7 @@ else
 
     private async Task RunNow(ServerWatch.Models.ScheduledTaskEntity task)
     {
+        if (!Require(AppRole.Operator)) return;
         Snackbar.Add($"Task '{task.Name}' wird ausgeführt...", Severity.Info);
         var (success, output) = await Scheduler.RunNowAsync(task.TaskId);
         Snackbar.Add(success ? $"Erfolgreich: {output}" : $"Fehler: {output}",
@@ -284,6 +309,7 @@ else
 
     private async Task ToggleEnabled(ServerWatch.Models.ScheduledTaskEntity task, bool enabled)
     {
+        if (!Require(AppRole.Admin)) return;
         task.Enabled = enabled;
         await Scheduler.UpdateTaskAsync(task);
         await LoadData();
@@ -291,9 +317,22 @@ else
 
     private async Task DeleteTask(ServerWatch.Models.ScheduledTaskEntity task)
     {
-        await Scheduler.DeleteTaskAsync(task.TaskId);
-        Snackbar.Add($"Task '{task.Name}' gelöscht.", Severity.Success);
-        await LoadData();
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Task löschen",
+            $"Geplanten Task '{task.Name}' wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+            yesText: "Löschen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+        try
+        {
+            await Scheduler.DeleteTaskAsync(task.TaskId);
+            Snackbar.Add($"Task '{task.Name}' gelöscht.", Severity.Success);
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+        }
     }
 
     private static Color GetTypeColor(ScheduledTaskType type) => type switch

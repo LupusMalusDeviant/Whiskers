@@ -2,6 +2,8 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Netzwerke - ServerWatch</PageTitle>
 
@@ -15,8 +17,11 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">Netzwerke erstellen und Container verbinden</MudText>
         </div>
         <MudSpacer />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="ShowCreateDialog">Netzwerk erstellen</MudButton>
+        @if (_role >= AppRole.Admin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="ShowCreateDialog">Netzwerk erstellen</MudButton>
+        }
         <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadNetworks">Aktualisieren</MudButton>
     </MudStack>
 </div>
@@ -74,7 +79,7 @@ else
                     }
                 </MudTd>
                 <MudTd>
-                    @if (!IsSystemNetwork(context.Name))
+                    @if (!IsSystemNetwork(context.Name) && _role >= AppRole.Admin)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => DeleteNetwork(context))" Title="Löschen" />
@@ -111,9 +116,21 @@ else
     private bool _showCreateDialog;
     private string _newNetworkName = "";
     private string _newNetworkDriver = "bridge";
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         await LoadNetworks();
     }
 
@@ -140,6 +157,7 @@ else
 
     private async Task CreateNetwork()
     {
+        if (!Require(AppRole.Admin)) return;
         try
         {
             await DockerService.CreateNetworkAsync(_newNetworkName, _newNetworkDriver);
@@ -155,6 +173,12 @@ else
 
     private async Task DeleteNetwork(ServerWatch.Models.NetworkInfo network)
     {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Netzwerk löschen",
+            $"Netzwerk '{network.Name}' wirklich löschen? Verbundene Container verlieren diese Netzwerkverbindung.",
+            yesText: "Löschen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         try
         {
             await DockerService.RemoveNetworkAsync(network.Id, network.ServerId == "local" ? null : network.ServerId);

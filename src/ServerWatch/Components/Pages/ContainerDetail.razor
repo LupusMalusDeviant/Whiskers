@@ -4,6 +4,8 @@
 @inject IDockerService DockerService
 @inject IHealthStore HealthStore
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject ITerminalSessionManager SessionManager
@@ -37,17 +39,26 @@ else
         <MudSpacer />
         @if (_container.State == "running")
         {
-            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.Stop" OnClick="Stop">Stoppen</MudButton>
-            <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="Restart">Neustarten</MudButton>
+            @if (_role >= AppRole.Operator)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Stop" OnClick="Stop">Stoppen</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="Restart">Neustarten</MudButton>
+            }
         }
         else
         {
-            <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start">Starten</MudButton>
-            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.Delete" OnClick="Remove">Entfernen</MudButton>
+            @if (_role >= AppRole.Operator)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start">Starten</MudButton>
+            }
+            @if (_role >= AppRole.Admin)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Delete" OnClick="Remove">Entfernen</MudButton>
+            }
         }
     </MudStack>
     </div>
@@ -989,8 +1000,21 @@ else
         public string EffectiveValue => IsEditing || IsNew ? Value : OriginalValue;
     }
 
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
+
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         await LoadContainer();
         _ = LoadChartData();
         _refreshTimer = new Timer(async _ =>
@@ -1106,6 +1130,7 @@ else
 
     private async Task Start()
     {
+        if (!Require(AppRole.Operator)) return;
         try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Gestartet", Severity.Success); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
@@ -1113,6 +1138,7 @@ else
 
     private async Task Stop()
     {
+        if (!Require(AppRole.Operator)) return;
         try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Gestoppt", Severity.Success); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
@@ -1120,6 +1146,7 @@ else
 
     private async Task Restart()
     {
+        if (!Require(AppRole.Operator)) return;
         try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Neugestartet", Severity.Success); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
@@ -1127,6 +1154,12 @@ else
 
     private async Task Remove()
     {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Container entfernen",
+            $"Container '{_container?.Name ?? ContainerId}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.",
+            yesText: "Entfernen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         try
         {
             await DockerService.RemoveContainerAsync(ContainerId, force: true, serverId: _resolvedServerId);
@@ -1280,7 +1313,13 @@ else
 
     private async Task SaveEnvAndRestart()
     {
+        if (!Require(AppRole.Admin)) return;
         if (_composeWorkingDir == null) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Umgebungsvariablen speichern",
+            "Die .env-Datei wird überschrieben und der Container neu gestartet. Fortfahren?",
+            yesText: "Speichern & Neustart", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         _envSaving = true;
 
         try
@@ -1504,7 +1543,13 @@ else
 
     private async Task RunMigration()
     {
+        if (!Require(AppRole.Admin)) return;
         if (_container == null || _dbCreds == null) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Migration ausführen",
+            "Datenbank-Migrationen ausführen? Dies verändert das Datenbankschema.",
+            yesText: "Ausführen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         _dbMigrating = true; _migrationOutput = null;
         try
         {
@@ -1530,7 +1575,13 @@ else
 
     private async Task RollbackMigration()
     {
+        if (!Require(AppRole.Admin)) return;
         if (_container == null) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Migration zurückrollen",
+            "Letzte Migration zurückrollen? Dies kann zu Datenverlust führen.",
+            yesText: "Rollback", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         _dbMigrating = true; _migrationOutput = null;
         try
         {
@@ -1544,6 +1595,7 @@ else
 
     private async Task CheckMigrationStatus()
     {
+        if (!Require(AppRole.Operator)) return;
         if (_container == null) return;
         _dbMigrating = true; _migrationOutput = null;
         try
@@ -1566,7 +1618,13 @@ else
 
     private async Task ExecuteMigrationFile()
     {
+        if (!Require(AppRole.Admin)) return;
         if (_migrationFileData == null || _container == null || _dbCreds == null) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "SQL-Datei ausführen",
+            $"Datei '{_migrationFileName}' gegen die Datenbank ausführen? Dies verändert Daten/Schema.",
+            yesText: "Ausführen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         _dbMigrating = true; _migrationOutput = null;
         try
         {
@@ -1597,7 +1655,13 @@ else
 
     private async Task ExecuteSeedFile()
     {
+        if (!Require(AppRole.Admin)) return;
         if (_seedFileData == null || _container == null || _dbCreds == null) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Daten importieren",
+            $"Datei '{_seedFileName}' in die Datenbank importieren?",
+            yesText: "Importieren", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         _dbSeeding = true; _seedOutput = null;
         try
         {
@@ -1623,6 +1687,7 @@ else
 
     private async Task ExecuteQuery()
     {
+        if (!Require(AppRole.Operator)) return;
         if (string.IsNullOrWhiteSpace(_dbQuery) || _dbCreds == null || _container == null) return;
         _dbExecuting = true;
         _dbResult = null;
@@ -1649,6 +1714,7 @@ else
 
     private async Task BackupDatabase()
     {
+        if (!Require(AppRole.Admin)) return;
         if (_dbCreds == null || _container == null) return;
         _dbBackingUp = true;
 

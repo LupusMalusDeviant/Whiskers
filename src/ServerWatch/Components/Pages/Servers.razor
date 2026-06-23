@@ -3,6 +3,8 @@
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ServerWatch.Services.Docker.DockerConnectionManager ConnectionManager
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Server - ServerWatch</PageTitle>
 
@@ -16,8 +18,11 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">Server hinzufügen, konfigurieren und verwalten</MudText>
         </div>
         <MudSpacer />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="ShowAddDialog">Server hinzufügen</MudButton>
+        @if (_role >= AppRole.Admin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="ShowAddDialog">Server hinzufügen</MudButton>
+        }
     </MudStack>
 </div>
 
@@ -81,7 +86,7 @@
         <MudTd>
             <MudIconButton Icon="@Icons.Material.Filled.NetworkCheck" Size="Size.Small" Color="Color.Primary"
                            OnClick="@(() => TestConnection(context))" Title="Verbindung testen" />
-            @if (!context.IsDefault)
+            @if (!context.IsDefault && _role >= AppRole.Admin)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Default"
                                OnClick="@(() => EditServer(context))" Title="Bearbeiten" />
@@ -161,8 +166,21 @@
     private HashSet<string> _testing = new();
     private Dictionary<string, TestResult> _testResults = new();
 
-    protected override void OnInitialized()
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
     {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
         _servers = ServerConfigService.GetServers();
     }
 
@@ -204,6 +222,7 @@
 
     private async Task SaveServer()
     {
+        if (!Require(AppRole.Admin)) return;
         // Resolve the cloud API key: blank field = keep the existing one; clearing the provider clears the key.
         if (_form.CloudProvider == ServerWatch.Models.CloudProvider.None)
             _form.CloudApiKey = null;
@@ -241,6 +260,12 @@
 
     private async Task DeleteServer(ServerWatch.Models.ServerConfig server)
     {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Server entfernen",
+            $"Server '{server.Name}' wirklich entfernen? Die Verbindung und hinterlegte Zugangsdaten gehen verloren.",
+            yesText: "Entfernen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         try
         {
             ConnectionManager.InvalidateClient(server.Id);

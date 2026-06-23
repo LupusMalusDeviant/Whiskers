@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager Nav
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Firewall - ServerWatch</PageTitle>
 
@@ -13,8 +14,15 @@
     <MudText Typo="Typo.h5">Firewall</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
     <MudSpacer />
-    <MudSwitch T="bool" Value="@_firewallActive" ValueChanged="ToggleFirewall" Color="Color.Success"
-               Label="@(_firewallActive ? "Aktiv" : "Inaktiv")" />
+    @if (_role >= AppRole.Admin)
+    {
+        <MudSwitch T="bool" Value="@_firewallActive" ValueChanged="ToggleFirewall" Color="Color.Success"
+                   Label="@(_firewallActive ? "Aktiv" : "Inaktiv")" />
+    }
+    else
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@(_firewallActive ? "Aktiv" : "Inaktiv")</MudChip>
+    }
 </MudStack>
 
 @if (_loading)
@@ -27,8 +35,11 @@ else
         <ToolBarContent>
             <MudText Typo="Typo.h6">Regeln</MudText>
             <MudSpacer />
-            <MudButton StartIcon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
-                       OnClick="OpenAddDialog">Regel hinzufügen</MudButton>
+            @if (_role >= AppRole.Admin)
+            {
+                <MudButton StartIcon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
+                           OnClick="OpenAddDialog">Regel hinzufügen</MudButton>
+            }
             <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Default" Variant="Variant.Outlined"
                        OnClick="LoadRules" Class="ml-2">Aktualisieren</MudButton>
         </ToolBarContent>
@@ -51,8 +62,11 @@ else
             <MudTd>@context.Direction</MudTd>
             <MudTd>@context.From</MudTd>
             <MudTd>
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                               OnClick="@(() => DeleteRule(context.Number))" />
+                @if (_role >= AppRole.Admin)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteRule(context.Number))" />
+                }
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
@@ -68,9 +82,21 @@ else
     private bool _loading = true;
     private bool _firewallActive;
     private List<ServerWatch.Services.Server.FirewallRule> _rules = new();
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         var server = ServerConfigService.GetServer(ServerId);
         _serverName = server?.Name ?? ServerId;
         await LoadRules();
@@ -94,6 +120,17 @@ else
 
     private async Task ToggleFirewall(bool enable)
     {
+        if (!Require(AppRole.Admin)) return;
+
+        // Disabling the firewall exposes the host — confirm explicitly.
+        if (!enable)
+        {
+            var confirmed = await DialogService.ShowMessageBoxAsync(
+                "Firewall deaktivieren", "Firewall wirklich deaktivieren? Alle Ports werden für eingehende Verbindungen geöffnet und der Server ist ungeschützt.",
+                yesText: "Deaktivieren", cancelText: "Abbrechen");
+            if (confirmed != true) return;
+        }
+
         try
         {
             var result = await FirewallService.SetStatusAsync(ServerId, enable);
@@ -111,6 +148,8 @@ else
 
     private async Task DeleteRule(int ruleNumber)
     {
+        if (!Require(AppRole.Admin)) return;
+
         var confirmed = await DialogService.ShowMessageBoxAsync(
             "Regel löschen", $"Firewall-Regel #{ruleNumber} entfernen?", yesText: "Löschen", cancelText: "Abbrechen");
         if (confirmed != true) return;
@@ -131,6 +170,8 @@ else
 
     private async Task OpenAddDialog()
     {
+        if (!Require(AppRole.Admin)) return;
+
         var parameters = new DialogParameters<AddFirewallRuleDialog>
         {
             { x => x.ServerId, ServerId }

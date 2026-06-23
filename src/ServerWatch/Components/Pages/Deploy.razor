@@ -3,6 +3,7 @@
 @inject IDeploymentService DeploymentService
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Bereitstellen - ServerWatch</PageTitle>
 
@@ -103,11 +104,14 @@
             </MudItem>
 
             <MudItem xs="12">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployFromForm"
-                           Disabled="_deploying" StartIcon="@Icons.Material.Filled.RocketLaunch">
-                    @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                    Bereitstellen
-                </MudButton>
+                @if (_role >= AppRole.Operator)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployFromForm"
+                               Disabled="_deploying" StartIcon="@Icons.Material.Filled.RocketLaunch">
+                        @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                        Bereitstellen
+                    </MudButton>
+                }
             </MudItem>
         </MudGrid>
 
@@ -128,12 +132,15 @@
                        StartIcon="@Icons.Material.Filled.CheckCircle">
                 Validieren
             </MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployFromCompose"
-                       Disabled="@(_deploying || string.IsNullOrWhiteSpace(_composeYaml))"
-                       StartIcon="@Icons.Material.Filled.RocketLaunch">
-                @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                Alle bereitstellen
-            </MudButton>
+            @if (_role >= AppRole.Operator)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployFromCompose"
+                           Disabled="@(_deploying || string.IsNullOrWhiteSpace(_composeYaml))"
+                           StartIcon="@Icons.Material.Filled.RocketLaunch">
+                    @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    Alle bereitstellen
+                </MudButton>
+            }
         </MudStack>
 
         @if (_validationResult != null)
@@ -177,9 +184,26 @@
     private DeploymentValidationResult? _validationResult;
     private bool _deploying;
     private string _deployProgress = string.Empty;
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
+    }
 
     private async Task DeployFromForm()
     {
+        if (!Require(AppRole.Operator)) return;
         if (string.IsNullOrWhiteSpace(_formRequest.Image))
         {
             Snackbar.Add("Image-Name ist erforderlich", Severity.Warning);
@@ -225,6 +249,7 @@
 
     private async Task DeployFromCompose()
     {
+        if (!Require(AppRole.Operator)) return;
         _deploying = true;
         _deployProgress = "";
         try

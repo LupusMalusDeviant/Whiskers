@@ -4,6 +4,8 @@
 @inject IDockerService DockerService
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Webhooks - ServerWatch</PageTitle>
 
@@ -17,8 +19,11 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">Automatische Deployments und Benachrichtigungen</MudText>
         </div>
         <MudSpacer />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="ShowCreateDialog">Webhook erstellen</MudButton>
+        @if (_role >= AppRole.Admin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="ShowCreateDialog">Webhook erstellen</MudButton>
+        }
     </MudStack>
 </div>
 
@@ -54,8 +59,11 @@ else
             <MudTd>
                 <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
                                OnClick="@(() => TestWebhook(context))" Title="Testen" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                               OnClick="@(() => DeleteWebhook(context))" Title="Löschen" />
+                @if (_role >= AppRole.Admin)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => DeleteWebhook(context))" Title="Löschen" />
+                }
             </MudTd>
         </RowTemplate>
     </MudTable>
@@ -102,9 +110,21 @@ else
     private string _formName = "";
     private string _formAction = "restart";
     private string _formTarget = "";
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         _webhooks = await WebhookService.GetWebhooksAsync();
     }
 
@@ -117,6 +137,7 @@ else
 
     private async Task CreateWebhook()
     {
+        if (!Require(AppRole.Admin)) return;
         try
         {
             var wh = await WebhookService.CreateWebhookAsync(new ServerWatch.Models.WebhookEntity
@@ -143,9 +164,22 @@ else
 
     private async Task DeleteWebhook(ServerWatch.Models.WebhookEntity wh)
     {
-        await WebhookService.DeleteWebhookAsync(wh.WebhookId);
-        Snackbar.Add("Webhook gelöscht.", Severity.Success);
-        _webhooks = await WebhookService.GetWebhooksAsync();
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Webhook löschen",
+            $"Webhook '{wh.Name}' wirklich löschen? Die zugehörige URL wird ungültig und kann nicht mehr ausgelöst werden.",
+            yesText: "Löschen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+        try
+        {
+            await WebhookService.DeleteWebhookAsync(wh.WebhookId);
+            Snackbar.Add("Webhook gelöscht.", Severity.Success);
+            _webhooks = await WebhookService.GetWebhooksAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+        }
     }
 
     private static Color GetActionColor(string action) => action switch

@@ -4,6 +4,7 @@
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>SSL-Zertifikate - ServerWatch</PageTitle>
 
@@ -12,8 +13,11 @@
     <MudText Typo="Typo.h5">SSL-Zertifikate</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
     <MudSpacer />
-    <MudButton StartIcon="@Icons.Material.Filled.Autorenew" Color="Color.Primary" Variant="Variant.Filled"
-               OnClick="RenewAll" Disabled="@_renewing">Alle erneuern</MudButton>
+    @if (_role >= AppRole.Admin)
+    {
+        <MudButton StartIcon="@Icons.Material.Filled.Autorenew" Color="Color.Primary" Variant="Variant.Filled"
+                   OnClick="RenewAll" Disabled="@_renewing">Alle erneuern</MudButton>
+    }
 </MudStack>
 
 @if (_loading)
@@ -47,11 +51,14 @@ else
                 </MudChip>
             </MudTd>
             <MudTd>
-                <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
-                           StartIcon="@Icons.Material.Filled.Autorenew"
-                           OnClick="@(() => RenewCert(context.CertName))" Disabled="@_renewing">
-                    Erneuern
-                </MudButton>
+                @if (_role >= AppRole.Admin)
+                {
+                    <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
+                               StartIcon="@Icons.Material.Filled.Autorenew"
+                               OnClick="@(() => RenewCert(context.CertName))" Disabled="@_renewing">
+                        Erneuern
+                    </MudButton>
+                }
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
@@ -67,9 +74,21 @@ else
     private bool _loading = true;
     private bool _renewing;
     private List<ServerWatch.Services.Server.SslCertificate> _certs = new();
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         var server = ServerConfigService.GetServer(ServerId);
         _serverName = server?.Name ?? ServerId;
         await LoadCerts();
@@ -85,6 +104,8 @@ else
 
     private async Task RenewCert(string certName)
     {
+        if (!Require(AppRole.Admin)) return;
+
         _renewing = true;
         try
         {
@@ -99,6 +120,8 @@ else
 
     private async Task RenewAll()
     {
+        if (!Require(AppRole.Admin)) return;
+
         _renewing = true;
         try
         {

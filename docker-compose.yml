@@ -17,6 +17,14 @@ services:
       - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-}
       - GoogleAuth__AllowedEmails__0=${GOOGLE_ADMIN_EMAIL:-}
       - Auth__Disabled=${AUTH_DISABLED:-false}
+      - Oidc__Enabled=${OIDC_ENABLED:-false}
+      - Oidc__Authority=${OIDC_AUTHORITY:-}
+      - Oidc__ClientId=${OIDC_CLIENT_ID:-}
+      - Oidc__ClientSecret=${OIDC_CLIENT_SECRET:-}
+      - Oidc__DisplayName=${OIDC_DISPLAY_NAME:-SSO}
+      - Oidc__Scopes=${OIDC_SCOPES:-openid profile email}
+      - Oidc__EmailClaim=${OIDC_EMAIL_CLAIM:-email}
+      - Oidc__RequireHttpsMetadata=${OIDC_REQUIRE_HTTPS:-true}
       - Mattermost__WebhookUrl=${MATTERMOST_WEBHOOK_URL:-}
       - Mattermost__Enabled=${MATTERMOST_ENABLED:-false}
       - PathBase=${PATH_BASE:-}

@@ -88,11 +88,15 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        // Escape the table identifier before embedding it in the query strings: '' for the
+        // SQL string literals (psql) and `` for the backtick-quoted identifier (MySQL).
+        var pgTable = table.Replace("'", "''");
+        var myTable = table.Replace("`", "``");
         var cmd = dbType switch
         {
             DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", database, "-t", "-A", "-c",
-                $"SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = '{table}') pk ON c.column_name = pk.column_name WHERE c.table_name = '{table}' AND c.table_schema = 'public' ORDER BY c.ordinal_position" },
-            DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", database, "-e", $"DESCRIBE `{table}`"),
+                $"SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = '{pgTable}') pk ON c.column_name = pk.column_name WHERE c.table_name = '{pgTable}' AND c.table_schema = 'public' ORDER BY c.ordinal_position" },
+            DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", database, "-e", $"DESCRIBE `{myTable}`"),
             _ => Array.Empty<string>()
         };
 
@@ -127,11 +131,15 @@ public class DatabaseService : IDatabaseService
         var fileName = $"{database}_{timestamp}.sql";
         var backupPath = $"/tmp/{fileName}";
 
+        // Interpolated values run through `sh -c`, so every one is POSIX-single-quoted (Sq) to prevent
+        // shell breakage/injection from passwords or DB names containing spaces or metacharacters.
+        // Passwords are passed via env vars (PGPASSWORD/MYSQL_PWD) instead of argv so they never appear
+        // in the container's process list.
         var cmd = dbType switch
         {
-            DatabaseType.PostgreSQL => new[] { "sh", "-c", $"pg_dump -U {creds.User} {database} > {backupPath}" },
-            DatabaseType.MySQL => new[] { "sh", "-c", $"mysqldump -u {creds.User} -p{creds.Password} {database} > {backupPath}" },
-            DatabaseType.MongoDB => new[] { "sh", "-c", $"mongodump --db {database} --archive={backupPath}.gz --gzip" },
+            DatabaseType.PostgreSQL => new[] { "sh", "-c", $"PGPASSWORD={Sq(creds.Password)} pg_dump -U {Sq(creds.User)} {Sq(database)} > {Sq(backupPath)}" },
+            DatabaseType.MySQL => new[] { "sh", "-c", $"MYSQL_PWD={Sq(creds.Password)} mysqldump -u {Sq(creds.User)} {Sq(database)} > {Sq(backupPath)}" },
+            DatabaseType.MongoDB => new[] { "sh", "-c", $"mongodump --db {Sq(database)} --archive={Sq(backupPath + ".gz")} --gzip" },
             _ => Array.Empty<string>()
         };
 
@@ -159,6 +167,9 @@ public class DatabaseService : IDatabaseService
         DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "-p", creds.Password, query },
         _ => new[] { "echo", "Unsupported database type" }
     };
+
+    /// <summary>POSIX single-quote escaping for values interpolated into a <c>sh -c</c> string.</summary>
+    private static string Sq(string? s) => "'" + (s ?? "").Replace("'", "'\\''") + "'";
 
     private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs)
     {

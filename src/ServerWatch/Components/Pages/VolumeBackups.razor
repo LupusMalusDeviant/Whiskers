@@ -3,6 +3,8 @@
 @inject ServerWatch.Services.Backup.IVolumeBackupService BackupService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Volume-Backups - ServerWatch</PageTitle>
 
@@ -16,8 +18,11 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">Volumes sichern und wiederherstellen</MudText>
         </div>
         <MudSpacer />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Backup"
-                   OnClick="ShowBackupDialog">Backup erstellen</MudButton>
+        @if (_role >= AppRole.Operator)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Backup"
+                       OnClick="ShowBackupDialog">Backup erstellen</MudButton>
+        }
     </MudStack>
 </div>
 
@@ -49,10 +54,13 @@ else
             <MudTd>@context.CreatedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")</MudTd>
             <MudTd>@(context.Notes ?? "-")</MudTd>
             <MudTd>
-                <MudIconButton Icon="@Icons.Material.Filled.Restore" Color="Color.Primary" Size="Size.Small"
-                               OnClick="@(() => RestoreBackup(context))" Title="Wiederherstellen" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                               OnClick="@(() => DeleteBackup(context))" Title="Löschen" />
+                @if (_role >= AppRole.Admin)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Restore" Color="Color.Primary" Size="Size.Small"
+                                   OnClick="@(() => RestoreBackup(context))" Title="Wiederherstellen" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => DeleteBackup(context))" Title="Löschen" />
+                }
             </MudTd>
         </RowTemplate>
     </MudTable>
@@ -102,6 +110,17 @@ else
     private string _selectedVolume = "";
     private string _backupContainerName = "";
     private string _backupNotes = "";
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     private string GetVolumeDisplayName(string volumeName)
     {
@@ -112,6 +131,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         await LoadBackups();
     }
 
@@ -163,6 +183,7 @@ else
 
     private async Task CreateBackup()
     {
+        if (!Require(AppRole.Operator)) return;
         _creating = true;
         try
         {
@@ -184,6 +205,12 @@ else
 
     private async Task RestoreBackup(ServerWatch.Models.VolumeBackupEntity backup)
     {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Volume wiederherstellen",
+            $"Volume '{backup.VolumeName}' aus diesem Backup wiederherstellen? Der aktuelle Inhalt des Volumes wird überschrieben.",
+            yesText: "Wiederherstellen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         try
         {
             await BackupService.RestoreVolumeAsync(backup.BackupId);
@@ -197,6 +224,12 @@ else
 
     private async Task DeleteBackup(ServerWatch.Models.VolumeBackupEntity backup)
     {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Backup löschen",
+            $"Backup von '{backup.VolumeName}' vom {backup.CreatedAt.ToLocalTime():dd.MM.yy HH:mm} wirklich löschen?",
+            yesText: "Löschen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
         try
         {
             await BackupService.DeleteBackupAsync(backup.BackupId);
