@@ -253,6 +253,13 @@ else
             options.CallbackPath = "/signin-oidc";
             options.SignedOutCallbackPath = "/signout-callback-oidc";
 
+            // Survive plain-HTTP / LAN deployments: form_post is a cross-site POST whose SameSite
+            // correlation/nonce cookies would be dropped without HTTPS ("Correlation failed").
+            // Query response mode makes the callback a top-level GET, so Lax cookies are sent.
+            options.ResponseMode = "query";
+            options.NonceCookie.SameSite = SameSiteMode.Lax;
+            options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+
             options.Scope.Clear();
             foreach (var s in (oidcSection["Scopes"] ?? "openid profile email")
                          .Split(' ', StringSplitOptions.RemoveEmptyEntries))
