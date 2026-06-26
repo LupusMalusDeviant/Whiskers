@@ -14,6 +14,16 @@ public enum CloudProvider
     Hostinger
 }
 
+public enum MetricsSourceKind
+{
+    // Legacy pull: container stats via Docker API, host metrics via SSH /proc-exec.
+    Docker,
+    // Read from a Prometheus-compatible TSDB (VictoriaMetrics) fed by node_exporter/cAdvisor.
+    // Keeps the SSH key out of the metrics hot path — see
+    // docs/plan-zero-ssh-telemetry-dockerapi.md.
+    Prometheus
+}
+
 public class ServerConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
@@ -33,6 +43,13 @@ public class ServerConfig
     public int SshPort { get; set; } = 22;
     public string? SshUser { get; set; }
     public string? SshKeyFileName { get; set; }
+
+    // Telemetry: where the metrics collector reads this server's metrics from.
+    // MetricsEndpoint is the Prometheus-compatible query base URL (e.g. the VictoriaMetrics
+    // instance http://<mesh-ip>:8428); the server is matched in queries by the `server` label
+    // carrying this server's Name. Defaults preserve the legacy Docker/SSH behaviour.
+    public MetricsSourceKind MetricsSource { get; set; } = MetricsSourceKind.Docker;
+    public string? MetricsEndpoint { get; set; }
 
     // Cloud provider control (out-of-band power/snapshot via provider API).
     // The API key is per-server: Hetzner tokens are per-project and Hostinger keys per-account,

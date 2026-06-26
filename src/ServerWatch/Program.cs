@@ -121,6 +121,12 @@ builder.Services.AddDbContext<MetricsDbContext>(options =>
     ServiceLifetime.Transient);
 builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
 builder.Services.AddSingleton<MetricsQueryService>();
+// Metrics source seam: collector reads through IMetricsSource so a server can be switched to a
+// push/scrape TSDB (VictoriaMetrics) instead of SSH/Docker. Docker is the default + fallback.
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<DockerMetricsSource>();
+builder.Services.AddSingleton<PrometheusMetricsSource>();
+builder.Services.AddSingleton<IMetricsSource, MetricsSourceDispatcher>();
 builder.Services.AddHostedService<MetricsCollectorService>();
 
 // Database service

@@ -43,9 +43,12 @@ public class MetricsCollectorService : BackgroundService
     {
         using var scope = _services.CreateScope();
         var docker = scope.ServiceProvider.GetRequiredService<IDockerService>();
+        var metricsSource = scope.ServiceProvider.GetRequiredService<IMetricsSource>();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 
         var now = DateTime.UtcNow;
+        // Container listing still goes through Docker (an inventory call, not a metric); the metric
+        // reads below go through IMetricsSource so Prometheus-configured servers bypass SSH.
         var containers = await docker.ListAllContainersAsync(all: false);
 
         // Collect container stats in parallel
@@ -53,7 +56,7 @@ public class MetricsCollectorService : BackgroundService
         {
             try
             {
-                var stats = await docker.GetContainerStatsAsync(c.Id, c.ServerId);
+                var stats = await metricsSource.GetContainerStatsAsync(c.ServerId, c.Id, c.Name);
                 if (stats != null)
                 {
                     return new ContainerMetricEntity
@@ -91,7 +94,7 @@ public class MetricsCollectorService : BackgroundService
         // Collect server metrics
         try
         {
-            var serverInfos = await docker.GetAllServerSystemInfoAsync();
+            var serverInfos = await metricsSource.GetAllServerSystemInfoAsync();
             foreach (var (serverId, info) in serverInfos)
             {
                 if (!info.IsReachable) continue;
