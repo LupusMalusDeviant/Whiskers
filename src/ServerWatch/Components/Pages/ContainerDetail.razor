@@ -1060,12 +1060,13 @@ else
         }
     }
 
-    // Container terminal works for Local and SSH servers; on TCP+mTLS the interactive exec stream
-    // can't traverse the Docker proxy, so the terminal is hidden with an explanatory note.
+    // Container terminal works for Local and SSH servers, and for TCP+mTLS servers with Tailscale
+    // SSH (keyless tailnet shell → `ssh root@host docker exec`). Without Tailscale SSH the
+    // interactive exec stream can't traverse the Docker proxy, so the terminal is hidden.
     private bool TerminalAvailable(string? serverId)
     {
         var s = serverId == null ? ServerConfigService.GetDefaultServer() : ServerConfigService.GetServer(serverId);
-        return s != null && s.ConnectionType != ServerWatch.Models.ConnectionType.TCP;
+        return s != null && (s.ConnectionType != ServerWatch.Models.ConnectionType.TCP || s.TailscaleSsh);
     }
 
     private async Task InitTerminal()

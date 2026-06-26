@@ -44,6 +44,13 @@ public class ServerConfig
     public string? TcpClientKeyPath { get; set; }
     public string? TcpCaCertPath { get; set; }
 
+    // Tailscale SSH: keyless, mesh-identity shell for the interactive web terminal. When set on a
+    // TCP/mTLS server (whose Docker plane is SSH-free), the terminal reaches the host via
+    // `ssh root@<TcpHost>` over the tailnet — Tailscale's node identity does the auth (no standing
+    // SSH key on disk), gated by the tailnet ACL ssh rules. The mTLS Docker proxy can't carry an
+    // interactive attach stream, so this is how the SSH-free hosts get a real PTY back.
+    public bool TailscaleSsh { get; set; }
+
     // SSH
     public string? SshHost { get; set; }
     public int SshPort { get; set; } = 22;

@@ -54,12 +54,28 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
                 return session;
             }
 
-            // TCP+mTLS server: a web terminal can't run over the mTLS Docker proxy — HAProxy proxies
-            // request/response but not Docker's interactive attach/hijack stream (so the session
-            // would connect but show nothing). Fail clearly instead of hanging.
+            // Tailscale SSH: keyless tailnet-identity shell (no standing SSH key). This is the path
+            // for the SSH-free TCP/mTLS hosts — the Docker proxy can't carry an attach stream, but
+            // Tailscale SSH gives a real interactive PTY via `ssh root@<tailnet-ip>` on port 22.
+            if (server != null && server.TailscaleSsh && containerId != null)
+            {
+                var tsHost = !string.IsNullOrEmpty(server.TcpHost) ? server.TcpHost : server.SshHost;
+                if (string.IsNullOrEmpty(tsHost))
+                    throw new InvalidOperationException("Tailscale SSH: kein Host (TcpHost/SshHost) konfiguriert.");
+                var session = new TerminalSession { ContainerId = containerId };
+                session.StartSshDockerExec(tsHost!, 22, "root", null, containerId); // keyPath null = keyless
+                _sessions[session.SessionId] = session;
+                _logger.LogInformation("Terminal session {SessionId} created (Tailscale SSH docker exec, container: {ContainerId})",
+                    session.SessionId, containerId);
+                return session;
+            }
+
+            // TCP+mTLS server without Tailscale SSH: a web terminal can't run over the mTLS Docker
+            // proxy — HAProxy proxies request/response but not Docker's interactive attach/hijack
+            // stream (so the session would connect but show nothing). Fail clearly instead of hanging.
             if (server != null && server.ConnectionType == ConnectionType.TCP)
                 throw new InvalidOperationException(
-                    "Web-Terminal über mTLS ist noch nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Attach-Stream weiter). Nutze 'execute_command' für einzelne Befehle.");
+                    "Web-Terminal über mTLS ist nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Attach-Stream weiter). Aktiviere 'Tailscale SSH' für diesen Server oder nutze 'execute_command'.");
         }
 
         var localSession = new TerminalSession { ContainerId = containerId };
@@ -80,17 +96,24 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         if (_sessions.Count >= _settings.MaxSessions)
             throw new InvalidOperationException($"Maximum terminal sessions ({_settings.MaxSessions}) reached");
 
-        var keyPath = _serverConfigService.GetSshKeyPath(server);
-
         var session = new TerminalSession();
 
-        if (server.ConnectionType == ConnectionType.SSH)
+        if (server.TailscaleSsh)
+        {
+            // Keyless tailnet-identity shell (no standing SSH key). Primary path for the SSH-free
+            // TCP/mTLS hosts; reaches the host over Tailscale SSH on port 22 as root (ACL-gated).
+            var tsHost = !string.IsNullOrEmpty(server.TcpHost) ? server.TcpHost : server.SshHost;
+            if (string.IsNullOrEmpty(tsHost))
+                throw new InvalidOperationException("Tailscale SSH: kein Host (TcpHost/SshHost) konfiguriert.");
+            session.StartSsh(tsHost!, 22, "root", null);
+        }
+        else if (server.ConnectionType == ConnectionType.SSH)
         {
             session.StartSsh(
                 server.SshHost ?? throw new InvalidOperationException("SSH host not configured"),
                 server.SshPort,
                 server.SshUser ?? "root",
-                keyPath);
+                _serverConfigService.GetSshKeyPath(server));
         }
         else if (server.ConnectionType == ConnectionType.Local)
         {
@@ -100,7 +123,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         {
             // See CreateSession: the mTLS Docker proxy doesn't carry an interactive attach stream.
             throw new InvalidOperationException(
-                "Web-Terminal über mTLS ist noch nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Attach-Stream weiter). Nutze 'execute_command' für einzelne Befehle.");
+                "Web-Terminal über mTLS ist nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Attach-Stream weiter). Aktiviere 'Tailscale SSH' für diesen Server oder nutze 'execute_command'.");
         }
         else
         {

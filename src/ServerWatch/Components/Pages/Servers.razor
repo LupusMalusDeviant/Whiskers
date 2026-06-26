@@ -117,6 +117,13 @@
                 <MudTextField @bind-Value="_form.TcpHost" Label="Host (Domain / IPv4 / IPv6)" Variant="Variant.Outlined" Class="mb-3" />
                 <MudNumericField @bind-Value="_form.TcpPort" Label="Port" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
                 <MudSwitch @bind-Value="_form.TcpUseTls" Label="TLS verwenden" Color="Color.Primary" />
+                <MudSwitch @bind-Value="_form.TailscaleSsh" Label="Tailscale SSH (keyless Web-Terminal)" Color="Color.Primary" />
+                @if (_form.TailscaleSsh)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">
+                        Web-Terminal verbindet sich keyless über das Tailnet (Mesh-Identität, kein SSH-Key) als root auf dem Host aus dem Feld oben. Voraussetzung: <code>tailscale set --ssh</code> auf dem Host.
+                    </MudText>
+                }
             }
             else if (_form.ConnectionType == ServerWatch.Models.ConnectionType.SSH)
             {
@@ -251,10 +258,16 @@
             TcpHost = server.TcpHost,
             TcpPort = server.TcpPort,
             TcpUseTls = server.TcpUseTls,
+            TcpClientCertPath = server.TcpClientCertPath,
+            TcpClientKeyPath = server.TcpClientKeyPath,
+            TcpCaCertPath = server.TcpCaCertPath,
+            TailscaleSsh = server.TailscaleSsh,
             SshHost = server.SshHost,
             SshPort = server.SshPort,
             SshUser = server.SshUser,
             SshKeyFileName = server.SshKeyFileName,
+            MetricsSource = server.MetricsSource,
+            MetricsEndpoint = server.MetricsEndpoint,
             CloudProvider = server.CloudProvider,
             CloudApiKey = server.CloudApiKey,
         };
