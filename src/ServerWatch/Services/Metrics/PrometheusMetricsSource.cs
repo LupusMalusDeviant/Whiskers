@@ -6,9 +6,11 @@ using ServerWatch.Services.ServerConfig;
 namespace ServerWatch.Services.Metrics;
 
 /// <summary>
-/// Reads metrics from a Prometheus-compatible TSDB (VictoriaMetrics) fed by node_exporter and
-/// cAdvisor over the mesh. No SSH key involved. Servers are matched by the <c>server</c> label,
-/// which carries the server's <see cref="ServerConfig.Name"/> (see deploy/telemetry/scrape.yml).
+/// Reads HOST metrics from a Prometheus-compatible TSDB (VictoriaMetrics) fed by node_exporter
+/// over the mesh. No SSH key involved. Servers are matched by the <c>server</c> label, which
+/// carries the server's <see cref="ServerConfig.Id"/> — a stable id (e.g. "local", "infomaniak"),
+/// not the display Name. The scrape config must label targets with the same id
+/// (see deploy/telemetry/scrape.yml).
 /// </summary>
 public class PrometheusMetricsSource
 {
@@ -35,7 +37,7 @@ public class PrometheusMetricsSource
         if (server?.MetricsEndpoint is not { Length: > 0 } endpoint)
             return null;
 
-        var s = Escape(server.Name);
+        var s = Escape(server.Id);   // stable id label, not the display Name
         var info = new ServerSystemInfo { ServerId = server.Id, ServerName = server.Name };
 
         var memTotal = await QueryScalarAsync(endpoint, $"node_memory_MemTotal_bytes{{server=\"{s}\"}}");

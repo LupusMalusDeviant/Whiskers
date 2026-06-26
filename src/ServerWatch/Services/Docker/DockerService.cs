@@ -5,6 +5,7 @@ using Docker.DotNet.Models;
 using Microsoft.Extensions.Caching.Memory;
 using ServerWatch.Models;
 using ServerWatch.Services.ServerConfig;
+using ServerWatch.Services.Metrics;
 
 namespace ServerWatch.Services.Docker;
 
@@ -12,6 +13,7 @@ public class DockerService : IDockerService
 {
     private readonly DockerConnectionManager _connectionManager;
     private readonly ServerConfigService _serverConfigService;
+    private readonly PrometheusMetricsSource _prometheusMetrics;
     private readonly ILogger<DockerService> _logger;
     private readonly MemoryCache _statsCache = new(new MemoryCacheOptions());
     private static readonly TimeSpan StatsCacheDuration = TimeSpan.FromSeconds(3);
@@ -19,10 +21,12 @@ public class DockerService : IDockerService
     public DockerService(
         DockerConnectionManager connectionManager,
         ServerConfigService serverConfigService,
+        PrometheusMetricsSource prometheusMetrics,
         ILogger<DockerService> logger)
     {
         _connectionManager = connectionManager;
         _serverConfigService = serverConfigService;
+        _prometheusMetrics = prometheusMetrics;
         _logger = logger;
     }
 
@@ -321,35 +325,51 @@ public class DockerService : IDockerService
             info.ImagesCount = (int)sysInfo.Images;
             info.IsReachable = true;
 
-            // Get real host CPU and memory usage via Docker exec on a lightweight container
-            // or fall back to aggregating container stats
-            try
+            // Host CPU/memory usage. For Prometheus-configured servers, read from the TSDB
+            // (node_exporter) so we don't spawn an SSH /proc-exec — OS/version/counts above still
+            // come from the Docker API. Other servers use the Docker exec, with a container-stats
+            // aggregate as fallback.
+            if (server?.MetricsSource == MetricsSourceKind.Prometheus)
             {
-                var (hostCpu, hostMem) = await GetHostResourceUsageAsync(client, serverId);
-                info.CpuUsagePercent = hostCpu;
-                info.MemoryUsedBytes = hostMem;
-            }
-            catch
-            {
-                // Fallback: aggregate from running containers (cached stats)
-                var containers = await client.Containers.ListContainersAsync(
-                    new ContainersListParameters { All = false });
-                long totalMemUsed = 0;
-                double totalCpu = 0;
-                var statsTasks = containers.Select(async c =>
+                var p = await _prometheusMetrics.GetServerSystemInfoAsync(server.Id);
+                if (p is { IsReachable: true })
                 {
-                    var s = await GetContainerStatsAsync(c.ID, serverId);
-                    if (s != null)
+                    info.CpuUsagePercent = p.CpuUsagePercent;
+                    info.MemoryUsedBytes = p.MemoryUsedBytes;
+                }
+                // If the TSDB has no data yet, leave CPU/Mem at 0 rather than falling back to an
+                // SSH exec — that fallback would defeat the purpose of moving off SSH.
+            }
+            else
+            {
+                try
+                {
+                    var (hostCpu, hostMem) = await GetHostResourceUsageAsync(client, serverId);
+                    info.CpuUsagePercent = hostCpu;
+                    info.MemoryUsedBytes = hostMem;
+                }
+                catch
+                {
+                    // Fallback: aggregate from running containers (cached stats)
+                    var containers = await client.Containers.ListContainersAsync(
+                        new ContainersListParameters { All = false });
+                    long totalMemUsed = 0;
+                    double totalCpu = 0;
+                    var statsTasks = containers.Select(async c =>
                     {
-                        Interlocked.Add(ref totalMemUsed, s.MemoryUsageBytes);
-                        double cur, nv;
-                        do { cur = totalCpu; nv = cur + s.CpuPercent; }
-                        while (cur != Interlocked.CompareExchange(ref totalCpu, nv, cur));
-                    }
-                });
-                await Task.WhenAll(statsTasks);
-                info.MemoryUsedBytes = totalMemUsed;
-                info.CpuUsagePercent = Math.Round(totalCpu, 2);
+                        var s = await GetContainerStatsAsync(c.ID, serverId);
+                        if (s != null)
+                        {
+                            Interlocked.Add(ref totalMemUsed, s.MemoryUsageBytes);
+                            double cur, nv;
+                            do { cur = totalCpu; nv = cur + s.CpuPercent; }
+                            while (cur != Interlocked.CompareExchange(ref totalCpu, nv, cur));
+                        }
+                    });
+                    await Task.WhenAll(statsTasks);
+                    info.MemoryUsedBytes = totalMemUsed;
+                    info.CpuUsagePercent = Math.Round(totalCpu, 2);
+                }
             }
 
             // IP address from Docker info
