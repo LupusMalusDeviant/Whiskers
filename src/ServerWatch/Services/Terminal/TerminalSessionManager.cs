@@ -54,19 +54,12 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
                 return session;
             }
 
-            // TCP+mTLS server: SSH-free container terminal over the mTLS Docker connection.
-            if (server != null && server.ConnectionType == ConnectionType.TCP && containerId != null
-                && !string.IsNullOrEmpty(server.TcpClientCertPath))
-            {
-                var session = new TerminalSession { ContainerId = containerId };
-                session.StartTcpMtls(server.TcpHost ?? throw new InvalidOperationException("TCP host not configured"),
-                    server.TcpPort, server.TcpCaCertPath!, server.TcpClientCertPath!, server.TcpClientKeyPath!,
-                    _settings.DefaultShell, containerId);
-                _sessions[session.SessionId] = session;
-                _logger.LogInformation("Terminal session {SessionId} created (mTLS docker, container: {ContainerId})",
-                    session.SessionId, containerId);
-                return session;
-            }
+            // TCP+mTLS server: a web terminal can't run over the mTLS Docker proxy — HAProxy proxies
+            // request/response but not Docker's interactive attach/hijack stream (so the session
+            // would connect but show nothing). Fail clearly instead of hanging.
+            if (server != null && server.ConnectionType == ConnectionType.TCP)
+                throw new InvalidOperationException(
+                    "Web-Terminal über mTLS ist noch nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Attach-Stream weiter). Nutze 'execute_command' für einzelne Befehle.");
         }
 
         var localSession = new TerminalSession { ContainerId = containerId };
@@ -103,13 +96,11 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         {
             session.Start(_settings.DefaultShell, null);
         }
-        else if (server.ConnectionType == ConnectionType.TCP && !string.IsNullOrEmpty(server.TcpClientCertPath))
+        else if (server.ConnectionType == ConnectionType.TCP)
         {
-            // SSH-free host terminal over the mTLS Docker connection (privileged nsenter container).
-            session.StartTcpMtls(
-                server.TcpHost ?? throw new InvalidOperationException("TCP host not configured"),
-                server.TcpPort, server.TcpCaCertPath!, server.TcpClientCertPath!, server.TcpClientKeyPath!,
-                _settings.DefaultShell, null);
+            // See CreateSession: the mTLS Docker proxy doesn't carry an interactive attach stream.
+            throw new InvalidOperationException(
+                "Web-Terminal über mTLS ist noch nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Attach-Stream weiter). Nutze 'execute_command' für einzelne Befehle.");
         }
         else
         {

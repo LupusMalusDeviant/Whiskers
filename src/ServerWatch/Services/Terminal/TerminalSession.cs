@@ -57,32 +57,6 @@ public class TerminalSession : IAsyncDisposable
         StartProcess("ssh", args);
     }
 
-    public void StartTcpMtls(string host, int port, string caPath, string certPath, string keyPath, string shell, string? containerId = null)
-    {
-        // SSH-free interactive shell over the mTLS Docker connection: run a one-shot privileged
-        // container that nsenters into the host. For a container terminal, run `docker exec` on the
-        // HOST's own docker (the mTLS proxy blocks container exec, but the host socket has full
-        // access). The docker CLI handles the mTLS transport + the interactive attach.
-        var args = new List<string>
-        {
-            "--tlsverify",
-            "-H", $"tcp://{host}:{port}",
-            "--tlscacert", caPath,
-            "--tlscert", certPath,
-            "--tlskey", keyPath,
-            "run", "--rm", "-i", "--privileged", "--pid=host",
-            "alpine",
-            "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
-        };
-        if (!string.IsNullOrEmpty(containerId))
-            args.AddRange(new[] { "docker", "exec", "-i", containerId, "sh", "-c",
-                "command -v bash >/dev/null && exec bash -l || exec sh" });
-        else
-            args.AddRange(new[] { shell, "-i", "-l" });
-
-        StartProcess("docker", args);
-    }
-
     private static List<string> SshBaseArgs(int port, string? keyPath)
     {
         var args = new List<string>
