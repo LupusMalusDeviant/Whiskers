@@ -10,6 +10,7 @@
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
 @inject ServerWatch.Services.Cve.CveFindingsStore CveStore
 @inject MetricsQueryService MetricsQuery
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @implements IDisposable
 
 <PageTitle>Dashboard - ServerWatch</PageTitle>
@@ -117,8 +118,11 @@
             }
         }
         <MudSpacer />
-        <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
-                       Href="@($"server-terminal/{serverGroup.ServerId}")" Title="SSH Terminal" />
+        @if (TerminalAvailable(serverGroup.ServerId))
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
+                           Href="@($"server-terminal/{serverGroup.ServerId}")" Title="Terminal" />
+        }
         <MudIconButton Icon="@Icons.Material.Filled.Security" Size="Size.Small" Color="Color.Warning"
                        Href="@($"firewall/{serverGroup.ServerId}")" Title="Firewall / Ports" />
         <MudIconButton Icon="@Icons.Material.Filled.Web" Size="Size.Small" Color="Color.Info"
@@ -609,6 +613,14 @@
 
     private bool GetServerReachable(string serverId)
         => _serverInfos.TryGetValue(serverId, out var info) && info.IsReachable;
+
+    // The interactive host terminal works for Local (nsenter) and SSH (with key). For TCP+mTLS
+    // servers it can't run over the mTLS Docker proxy, so the terminal entry is hidden.
+    private bool TerminalAvailable(string? serverId)
+    {
+        var s = serverId == null ? ServerConfigService.GetDefaultServer() : ServerConfigService.GetServer(serverId);
+        return s != null && s.ConnectionType != ServerWatch.Models.ConnectionType.TCP;
+    }
 
     private void ToggleServerExpand(string serverId)
     {

@@ -103,9 +103,7 @@
     </RowTemplate>
 </MudTable>
 
-@if (_showDialog)
-{
-    <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+<MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>@(_editingServer == null ? "Server hinzufügen" : "Server bearbeiten")</TitleContent>
         <DialogContent>
             <MudTextField @bind-Value="_form.Name" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
@@ -158,11 +156,8 @@
                        Disabled="@string.IsNullOrWhiteSpace(_form.Name)">Speichern</MudButton>
         </DialogActions>
     </MudDialog>
-}
 
-@if (_onboarding)
-{
-    <MudDialog Visible="_onboarding" VisibleChanged="@(v => { if (!_onboardBusy) _onboarding = v; })"
+<MudDialog Visible="_onboarding" VisibleChanged="@(v => { if (!_onboardBusy) _onboarding = v; })"
                Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
         <TitleContent>Onboarding: @_onboardingServer?.Name</TitleContent>
         <DialogContent>
@@ -198,7 +193,6 @@
             </MudButton>
         </DialogActions>
     </MudDialog>
-}
 
 @code {
     private List<ServerWatch.Models.ServerConfig> _servers = new();

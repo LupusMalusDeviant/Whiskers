@@ -12,6 +12,7 @@
 @inject MetricsQueryService MetricsQuery
 @inject IHostCommandExecutor HostCommandExecutor
 @inject ServerWatch.Services.Database.IDatabaseService DatabaseService
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ServerWatch.Services.Cve.CveFindingsStore CveStore
 @using ServerWatch.Models.Cve
 @implements IAsyncDisposable
@@ -216,7 +217,14 @@ else
 
         @* Terminal Tab - inline *@
         <MudTabPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
-            @if (_container.State != "running")
+            @if (!TerminalAvailable(_resolvedServerId))
+            {
+                <MudAlert Severity="Severity.Info">
+                    Das Container-Terminal ist auf mTLS-Servern nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Stream weiter).
+                    Nutze die Container-Logs oder <code>execute_command</code> für einzelne Befehle.
+                </MudAlert>
+            }
+            else if (_container.State != "running")
             {
                 <MudAlert Severity="Severity.Warning">Terminal ist nur für laufende Container verfügbar.</MudAlert>
             }
@@ -1052,8 +1060,17 @@ else
         }
     }
 
+    // Container terminal works for Local and SSH servers; on TCP+mTLS the interactive exec stream
+    // can't traverse the Docker proxy, so the terminal is hidden with an explanatory note.
+    private bool TerminalAvailable(string? serverId)
+    {
+        var s = serverId == null ? ServerConfigService.GetDefaultServer() : ServerConfigService.GetServer(serverId);
+        return s != null && s.ConnectionType != ServerWatch.Models.ConnectionType.TCP;
+    }
+
     private async Task InitTerminal()
     {
+        if (!TerminalAvailable(_resolvedServerId)) return;
         try
         {
             _dotNetRef = DotNetObjectReference.Create(this);

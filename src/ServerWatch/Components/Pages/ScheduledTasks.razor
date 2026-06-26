@@ -167,9 +167,7 @@ else
 }
 
 @* Create Dialog *@
-@if (_showDialog)
-{
-    <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+<MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>Task erstellen</TitleContent>
         <DialogContent>
             <MudTextField @bind-Value="_formName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
@@ -223,7 +221,6 @@ else
                        Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formCron))">Erstellen</MudButton>
         </DialogActions>
     </MudDialog>
-}
 
 @code {
     private List<ServerWatch.Models.ScheduledTaskEntity> _tasks = new();

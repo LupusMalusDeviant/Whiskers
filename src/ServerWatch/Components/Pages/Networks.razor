@@ -90,9 +90,7 @@ else
     }
 }
 
-@if (_showCreateDialog)
-{
-    <MudDialog Visible="_showCreateDialog" VisibleChanged="@(v => _showCreateDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+<MudDialog Visible="_showCreateDialog" VisibleChanged="@(v => _showCreateDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>Netzwerk erstellen</TitleContent>
         <DialogContent>
             <MudTextField @bind-Value="_newNetworkName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
@@ -108,7 +106,6 @@ else
                        Disabled="@string.IsNullOrWhiteSpace(_newNetworkName)">Erstellen</MudButton>
         </DialogActions>
     </MudDialog>
-}
 
 @code {
     private List<ServerWatch.Models.NetworkInfo> _networks = new();

@@ -109,9 +109,7 @@
 }
 
 @* Deploy Dialog *@
-@if (_selectedTemplate != null)
-{
-    <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+<MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@GetIcon(_selectedTemplate.Icon)" Color="Color.Primary" />
@@ -167,7 +165,6 @@
             }
         </DialogActions>
     </MudDialog>
-}
 
 @code {
     private ServerWatch.Models.AppTemplate? _selectedTemplate;

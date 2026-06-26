@@ -103,9 +103,7 @@ else
 }
 
 @* Create Rule Dialog *@
-@if (_showRuleDialog)
-{
-    <MudDialog Visible="_showRuleDialog" VisibleChanged="@(v => _showRuleDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+<MudDialog Visible="_showRuleDialog" VisibleChanged="@(v => _showRuleDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>Alert-Regel erstellen</TitleContent>
         <DialogContent>
             <MudTextField @bind-Value="_ruleName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
@@ -134,7 +132,6 @@ else
                        Disabled="@(string.IsNullOrWhiteSpace(_ruleName) || string.IsNullOrWhiteSpace(_rulePattern))">Erstellen</MudButton>
         </DialogActions>
     </MudDialog>
-}
 
 @code {
     private List<ServerWatch.Models.ContainerInfo> _containers = new();

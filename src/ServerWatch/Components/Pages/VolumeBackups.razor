@@ -66,9 +66,7 @@ else
     </MudTable>
 }
 
-@if (_showBackupDialog)
-{
-    <MudDialog Visible="_showBackupDialog" VisibleChanged="@(v => _showBackupDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+<MudDialog Visible="_showBackupDialog" VisibleChanged="@(v => _showBackupDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>Volume-Backup erstellen</TitleContent>
         <DialogContent>
             @if (_volumes.Any())
@@ -98,7 +96,6 @@ else
                        Disabled="@(string.IsNullOrWhiteSpace(_selectedVolume) || _creating)">Backup starten</MudButton>
         </DialogActions>
     </MudDialog>
-}
 
 @code {
     private List<ServerWatch.Models.VolumeBackupEntity> _backups = new();
