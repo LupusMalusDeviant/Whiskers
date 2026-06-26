@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Onboarding.OnboardingService Onboarding
 
 <PageTitle>Server - ServerWatch</PageTitle>
 
@@ -86,6 +87,11 @@
         <MudTd>
             <MudIconButton Icon="@Icons.Material.Filled.NetworkCheck" Size="Size.Small" Color="Color.Primary"
                            OnClick="@(() => TestConnection(context))" Title="Verbindung testen" />
+            @if (context.ConnectionType == ServerWatch.Models.ConnectionType.SSH && _role >= AppRole.Admin)
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.Hub" Size="Size.Small" Color="Color.Tertiary"
+                               OnClick="@(() => StartOnboarding(context))" Title="Ins Mesh onboarden (Tailscale + mTLS, SSH-frei)" />
+            }
             @if (!context.IsDefault && _role >= AppRole.Admin)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Default"
@@ -154,6 +160,46 @@
     </MudDialog>
 }
 
+@if (_onboarding)
+{
+    <MudDialog Visible="_onboarding" VisibleChanged="@(v => { if (!_onboardBusy) _onboarding = v; })"
+               Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+        <TitleContent>Onboarding: @_onboardingServer?.Name</TitleContent>
+        <DialogContent>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
+                Installiert Tailscale, deployt Telemetrie + mTLS-Proxy und stellt den Server SSH-frei (mTLS).
+            </MudText>
+            <MudPaper Class="pa-3" Outlined="true" Style="max-height:55vh; overflow-y:auto; font-size:0.88rem;">
+                @foreach (var line in _onboardLog)
+                {
+                    @if (line.StartsWith(ServerWatch.Services.Onboarding.OnboardingService.LinkMarker))
+                    {
+                        var url = line.Substring(ServerWatch.Services.Onboarding.OnboardingService.LinkMarker.Length);
+                        <MudAlert Severity="Severity.Info" Class="my-2">
+                            <MudText Typo="Typo.body2" Class="mb-2">Tailscale-Login — im Browser öffnen und den Node bestätigen:</MudText>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="@url" Target="_blank"
+                                       StartIcon="@Icons.Material.Filled.OpenInNew">Tailscale-Login öffnen</MudButton>
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <div style="font-family:monospace;">@line</div>
+                    }
+                }
+                @if (_onboardBusy)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+                }
+            </MudPaper>
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => { if (!_onboardBusy) _onboarding = false; })" Disabled="_onboardBusy">
+                @(_onboardBusy ? "Läuft…" : "Schließen")
+            </MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
 @code {
     private List<ServerWatch.Models.ServerConfig> _servers = new();
     private bool _showDialog;
@@ -165,6 +211,11 @@
     private bool _hasCloudKey;
     private HashSet<string> _testing = new();
     private Dictionary<string, TestResult> _testResults = new();
+
+    private bool _onboarding;
+    private bool _onboardBusy;
+    private List<string> _onboardLog = new();
+    private ServerWatch.Models.ServerConfig? _onboardingServer;
 
     private AppRole _role = AppRole.Viewer;
 
@@ -299,6 +350,37 @@
         finally
         {
             _testing.Remove(server.Id);
+        }
+    }
+
+    private async Task StartOnboarding(ServerWatch.Models.ServerConfig server)
+    {
+        if (!Require(AppRole.Admin)) return;
+        _onboardingServer = server;
+        _onboardLog = new();
+        _onboarding = true;
+        _onboardBusy = true;
+        StateHasChanged();
+
+        var progress = new Progress<string>(msg =>
+        {
+            _onboardLog.Add(msg);
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await Onboarding.OnboardServerAsync(server.Id, progress, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _onboardLog.Add($"❌ {ex.Message}");
+        }
+        finally
+        {
+            _onboardBusy = false;
+            _servers = ServerConfigService.GetServers();
+            await InvokeAsync(StateHasChanged);
         }
     }
 

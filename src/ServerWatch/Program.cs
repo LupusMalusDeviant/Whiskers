@@ -114,6 +114,7 @@ builder.Services.AddSingleton<FirewallService>();
 builder.Services.AddSingleton<NginxService>();
 builder.Services.AddSingleton<SystemdService>();
 builder.Services.AddSingleton<SslCertService>();
+builder.Services.AddSingleton<ServerWatch.Services.Onboarding.OnboardingService>();
 
 // SQLite metrics database
 builder.Services.AddDbContext<MetricsDbContext>(options =>
