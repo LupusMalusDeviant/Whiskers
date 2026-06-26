@@ -35,11 +35,16 @@ public class HostCommandExecutor : IHostCommandExecutor
 
         var effectiveTimeout = timeout ?? DefaultTimeout;
 
+        // The shell plane is independent of the Docker connection transport: a server can talk Docker
+        // over mTLS (ConnectionType.TCP) while shell commands still go over SSH. So use SSH for any
+        // non-local server that has SSH configured, regardless of ConnectionType. (Hardening the SSH
+        // shell plane itself — short-lived certs — is a separate later step.)
         return server.ConnectionType switch
         {
             ConnectionType.Local => await ExecuteLocalAsync(command, effectiveTimeout, ct),
-            ConnectionType.SSH => await ExecuteSshAsync(server, command, effectiveTimeout, ct),
-            _ => new CommandResult { ExitCode = -1, Error = $"Unsupported connection type: {server.ConnectionType}" }
+            _ when !string.IsNullOrWhiteSpace(server.SshHost)
+                => await ExecuteSshAsync(server, command, effectiveTimeout, ct),
+            _ => new CommandResult { ExitCode = -1, Error = $"No shell transport for server (ConnectionType={server.ConnectionType}, no SSH host configured)" }
         };
     }
 
