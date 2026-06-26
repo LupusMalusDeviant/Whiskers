@@ -38,8 +38,20 @@ public static class DatabaseDetector
                 break;
 
             case DatabaseType.MySQL:
-                creds.User = GetFirst(dict, "MYSQL_USER", "MARIADB_USER") ?? "root";
-                creds.Password = GetFirst(dict, "MYSQL_ROOT_PASSWORD", "MYSQL_PASSWORD", "MARIADB_ROOT_PASSWORD", "MARIADB_PASSWORD") ?? "";
+                // Pair the user with its OWN password. Prefer root (which can see all databases) when
+                // a root password is set; otherwise use the app user + its matching password. Pairing
+                // the app user with the ROOT password (the old behaviour) authenticates as nobody.
+                var mysqlRootPw = GetFirst(dict, "MYSQL_ROOT_PASSWORD", "MARIADB_ROOT_PASSWORD");
+                if (!string.IsNullOrEmpty(mysqlRootPw))
+                {
+                    creds.User = "root";
+                    creds.Password = mysqlRootPw;
+                }
+                else
+                {
+                    creds.User = GetFirst(dict, "MYSQL_USER", "MARIADB_USER") ?? "root";
+                    creds.Password = GetFirst(dict, "MYSQL_PASSWORD", "MARIADB_PASSWORD") ?? "";
+                }
                 creds.Database = GetFirst(dict, "MYSQL_DATABASE", "MARIADB_DATABASE") ?? "";
                 break;
 
