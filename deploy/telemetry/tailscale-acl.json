@@ -1,0 +1,29 @@
+// Sample Tailscale ACL for the mesh + mTLS setup.
+// Only the ServerWatch controller node (tag:serverwatch) may reach the telemetry / Docker-proxy
+// ports of the managed hosts (tag:swhost). Admins keep full access for maintenance.
+// Apply at https://login.tailscale.com/admin/acls
+//
+// Safe rollout (a wrong ACL can lock nodes out — use the admin console's "Preview"):
+//   1. Add the tagOwners block (keep the default allow-all acls) so tags become assignable.
+//   2. Tag the machines: every host -> tag:swhost; the controller -> tag:serverwatch (+ tag:swhost).
+//   3. Replace acls with the restricted version below.
+{
+  "tagOwners": {
+    "tag:serverwatch": ["autogroup:admin"],
+    "tag:swhost":      ["autogroup:admin"]
+  },
+  "acls": [
+    // controller -> hosts: only telemetry (9100) + the mTLS Docker proxy (2376)
+    {
+      "action": "accept",
+      "src":    ["tag:serverwatch"],
+      "dst":    ["tag:swhost:9100,8428,2376"]
+    },
+    // admins -> everything, for maintenance / bootstrap
+    {
+      "action": "accept",
+      "src":    ["autogroup:admin"],
+      "dst":    ["*:*"]
+    }
+  ]
+}

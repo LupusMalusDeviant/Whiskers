@@ -1,0 +1,15 @@
+# VictoriaMetrics scrape config. One node_exporter target per host, addressed by its mesh IP.
+# The `server` label MUST equal the ServerWatch ServerConfig.Id (a stable id like "host-a") —
+# PrometheusMetricsSource filters on it. Replace the placeholders with your hosts; ServerWatch's
+# onboarding wizard appends new hosts here automatically.
+
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: ['100.x.y.z:9100']       # controller host mesh IP
+        labels: { server: 'host-a' }
+      - targets: ['100.x.y.z:9100']       # second host mesh IP
+        labels: { server: 'host-b' }

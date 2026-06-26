@@ -1,0 +1,19 @@
+# Per-host telemetry: node_exporter (host CPU/RAM/disk/load/net).
+# Binds ONLY to the host's mesh (Tailscale) IP — never a public interface.
+# Deploy:  TS_IP=100.x.y.z docker compose up -d   (or put TS_IP in .env, see .env.example)
+#
+# No cAdvisor: container stats come from the Docker API (exact per-container values, de-SSH'd via
+# mTLS). cAdvisor's container discovery is unreliable on cgroup-v2 hosts and redundant here.
+
+services:
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.8.2
+    container_name: node-exporter
+    restart: unless-stopped
+    network_mode: host           # needs host net for full /proc + network metrics
+    pid: host
+    command:
+      - '--path.rootfs=/host'
+      - '--web.listen-address=${TS_IP}:9100'   # mesh-only binding
+    volumes:
+      - '/:/host:ro,rslave'

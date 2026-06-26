@@ -12,12 +12,28 @@ Docker Container & Server Management Dashboard mit integriertem MCP-Server fuer 
 - Gruppierung nach Server und Docker Compose Projekt
 
 ### Server-Verwaltung
-- Multi-Server-Unterstuetzung (Local + SSH)
+- Multi-Server-Unterstuetzung (Local, SSH und TCP/mTLS-Mesh)
 - Firewall-Management (ufw) ueber Web-UI
 - Nginx-Sites verwalten mit Config-Editor
 - systemd-Services starten/stoppen/ueberwachen
 - SSL-Zertifikate (Let's Encrypt) Status und Renewal
 - Integriertes Web-Terminal (Host + Container)
+
+### Sicherheit: Mesh + mTLS (SSH-key-frei)
+- Verwaltung ueber ein privates WireGuard-Mesh (Tailscale) — keine Management-Ports oeffentlich
+- Docker-Steuerung ueber **mutual TLS** (ghostunnel + verb-whitelisting socket-proxy) statt SSH-Tunnel
+- Host-Shell-Befehle SSH-frei ueber denselben mTLS-Kanal (privilegierter `nsenter`-Container)
+- **Kein gespeicherter SSH-Key** im Normalbetrieb — die zentrale Angriffsflaeche entfaellt
+- Eigene PKI (step-ca) fuer Client-/Server-Zertifikate
+- Telemetrie ueber `node_exporter` → VictoriaMetrics (Prometheus-kompatibel)
+- **Ein-Klick-Onboarding** neuer Server: installiert Tailscale (Login-Link direkt in der App),
+  deployt Telemetrie + mTLS-Proxy und stellt den Server SSH-frei
+
+→ Design-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+### Cloud-Control (out-of-band)
+- Provider-agnostische Power/Snapshot/Metrics-Steuerung (Hetzner, Hostinger) ueber die Provider-API —
+  funktioniert auch, wenn SSH/Docker gerade nicht erreichbar sind
 
 ### Monitoring & Alerting
 - Historische Metriken (CPU, RAM, Disk) in SQLite
@@ -144,11 +160,14 @@ ServerWatch/
 │   │   ├── ImageUpdate/      # Image-Update-Check
 │   │   ├── Metrics/          # Metriken-Sammlung
 │   │   ├── Notifications/    # Mattermost
+│   │   ├── Onboarding/       # Mesh+mTLS Server-Onboarding (Tailscale, step-ca, ghostunnel)
 │   │   ├── Persistence/      # SQLite + JSON
-│   │   ├── Server/           # Host-Befehle, Firewall, Nginx, systemd, SSL
+│   │   ├── Server/           # Host-Befehle (SSH-frei via mTLS), Firewall, Nginx, systemd, SSL
 │   │   ├── ServerConfig/     # Multi-Server-Verwaltung
 │   │   └── Terminal/         # Web-Terminal
 │   └── wwwroot/              # Statische Assets
+├── deploy/telemetry/         # Mesh/mTLS Deploy-Vorlagen (node_exporter, VictoriaMetrics, Tailscale-ACL)
+├── docs/ARCHITECTURE.md      # Zero-SSH-Key Architektur
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md

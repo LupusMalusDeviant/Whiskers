@@ -1,0 +1,19 @@
+# VictoriaMetrics (single-node, built-in scraping) on the controller host.
+# Scrapes every host's node_exporter over the mesh. Query API for ServerWatch: http://<mesh-ip>:8428
+# Deploy:  TS_IP=<controller-mesh-ip> docker compose up -d
+
+services:
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.102.1
+    container_name: victoriametrics
+    restart: unless-stopped
+    command:
+      - '-storageDataPath=/storage'
+      - '-retentionPeriod=3'                       # months; adjust as needed
+      - '-promscrape.config=/etc/vm/scrape.yml'
+      - '-promscrape.config.strictParse=true'
+    volumes:
+      - /opt/serverwatch-telemetry/vm-storage:/storage   # bind-mount, survives rebuild
+      - ./scrape.yml:/etc/vm/scrape.yml:ro
+    ports:
+      - '${TS_IP}:8428:8428'                        # mesh-only
