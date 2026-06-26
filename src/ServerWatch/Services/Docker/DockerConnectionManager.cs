@@ -197,14 +197,20 @@ public class DockerConnectionManager : IDisposable
 
         if (!string.IsNullOrEmpty(server.TcpCaCertPath))
         {
-            var caCert = X509CertificateLoader.LoadCertificateFromFile(server.TcpCaCertPath);
-            credentials.ServerCertificateValidationCallback = (_, cert, _, _) =>
+            // Load ALL certs from the CA file (root, and intermediate if the file is a bundle).
+            var trustAnchors = new X509Certificate2Collection();
+            trustAnchors.ImportFromPemFile(server.TcpCaCertPath);
+            credentials.ServerCertificateValidationCallback = (_, cert, presentedChain, _) =>
             {
                 if (cert is null) return false;
                 using var chain = new X509Chain();
                 chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.Add(caCert);
+                chain.ChainPolicy.CustomTrustStore.AddRange(trustAnchors);
                 chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                // Also trust any intermediates the server presents, so the chain can build to the root.
+                if (presentedChain is not null)
+                    foreach (var element in presentedChain.ChainElements)
+                        chain.ChainPolicy.ExtraStore.Add(element.Certificate);
                 return chain.Build(cert as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(cert.Export(X509ContentType.Cert)));
             };
         }
