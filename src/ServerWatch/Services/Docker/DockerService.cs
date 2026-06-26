@@ -220,6 +220,78 @@ public class DockerService : IDockerService
         return sb.Length > 0 ? sb.ToString() : "(no logs available)";
     }
 
+    private const string HostShellImage = "alpine:latest";
+
+    /// <summary>
+    /// Runs a shell command on the host via a one-shot privileged container that nsenters into the
+    /// host namespaces (pid 1). This is the SSH-free shell plane for TCP+mTLS servers: it goes over
+    /// the same mTLS Docker connection, so no SSH key is involved. The container is created, started,
+    /// waited on, its logs read, and then force-removed.
+    /// </summary>
+    public async Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(
+        string command, string? serverId = null, TimeSpan? timeout = null)
+    {
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        var client = await GetClient(serverId);
+
+        // Ensure the helper image exists on the target (pull once if missing).
+        try
+        {
+            await client.Images.InspectImageAsync(HostShellImage);
+        }
+        catch (DockerImageNotFoundException)
+        {
+            await client.Images.CreateImageAsync(
+                new ImagesCreateParameters { FromImage = "alpine", Tag = "latest" },
+                null, new Progress<JSONMessage>());
+        }
+
+        var create = await client.Containers.CreateContainerAsync(new CreateContainerParameters
+        {
+            Image = HostShellImage,
+            Cmd = new List<string> { "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command },
+            HostConfig = new HostConfig { Privileged = true, PidMode = "host", AutoRemove = false }
+        });
+        var id = create.ID;
+
+        try
+        {
+            await client.Containers.StartContainerAsync(id, new ContainerStartParameters());
+
+            long exitCode;
+            using (var cts = new CancellationTokenSource(effectiveTimeout))
+            {
+                try
+                {
+                    var wait = await client.Containers.WaitContainerAsync(id, cts.Token);
+                    exitCode = wait.StatusCode;
+                }
+                catch (OperationCanceledException)
+                {
+                    try { await client.Containers.KillContainerAsync(id, new ContainerKillParameters()); } catch { /* best effort */ }
+                    return ("", $"Command timed out after {effectiveTimeout.TotalSeconds}s", -1);
+                }
+            }
+
+            using var mux = await client.Containers.GetContainerLogsAsync(id, false,
+                new ContainerLogsParameters { ShowStdout = true, ShowStderr = true });
+            var stdout = new MemoryStream();
+            var stderr = new MemoryStream();
+            await mux.CopyOutputToAsync(Stream.Null, stdout, stderr, CancellationToken.None);
+            stdout.Position = 0;
+            stderr.Position = 0;
+            var outStr = await new StreamReader(stdout).ReadToEndAsync();
+            var errStr = await new StreamReader(stderr).ReadToEndAsync();
+
+            return (outStr, errStr, (int)exitCode);
+        }
+        finally
+        {
+            try { await client.Containers.RemoveContainerAsync(id, new ContainerRemoveParameters { Force = true }); }
+            catch { /* best effort cleanup */ }
+        }
+    }
+
     public async Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null)
     {
         var client = await GetClient(serverId);

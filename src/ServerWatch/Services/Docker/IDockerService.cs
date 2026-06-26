@@ -34,4 +34,9 @@ public interface IDockerService
 
     // Container exec
     Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerAsync(string containerId, string[] command, string? serverId = null, TimeSpan? timeout = null);
+
+    // Run a shell command on the HOST via a short-lived privileged nsenter container over the Docker
+    // API. This is the SSH-free shell plane for TCP+mTLS servers — same effect as nsenter -t 1 locally,
+    // but driven through the mTLS Docker connection instead of SSH.
+    Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(string command, string? serverId = null, TimeSpan? timeout = null);
 }

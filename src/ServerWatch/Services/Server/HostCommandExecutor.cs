@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ServerWatch.Models;
+using ServerWatch.Services.Docker;
 using ServerWatch.Services.ServerConfig;
 
 namespace ServerWatch.Services.Server;
@@ -7,6 +8,7 @@ namespace ServerWatch.Services.Server;
 public class HostCommandExecutor : IHostCommandExecutor
 {
     private readonly ServerConfigService _serverConfigService;
+    private readonly IDockerService _docker;
     private readonly ILogger<HostCommandExecutor> _logger;
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
@@ -16,9 +18,10 @@ public class HostCommandExecutor : IHostCommandExecutor
     private static readonly string ControlDir =
         Path.Combine(Path.GetTempPath(), "serverwatch-ssh");
 
-    public HostCommandExecutor(ServerConfigService serverConfigService, ILogger<HostCommandExecutor> logger)
+    public HostCommandExecutor(ServerConfigService serverConfigService, IDockerService docker, ILogger<HostCommandExecutor> logger)
     {
         _serverConfigService = serverConfigService;
+        _docker = docker;
         _logger = logger;
     }
 
@@ -35,13 +38,15 @@ public class HostCommandExecutor : IHostCommandExecutor
 
         var effectiveTimeout = timeout ?? DefaultTimeout;
 
-        // The shell plane is independent of the Docker connection transport: a server can talk Docker
-        // over mTLS (ConnectionType.TCP) while shell commands still go over SSH. So use SSH for any
-        // non-local server that has SSH configured, regardless of ConnectionType. (Hardening the SSH
-        // shell plane itself — short-lived certs — is a separate later step.)
+        // Shell transport, chosen independently of the Docker connection:
+        //   Local → nsenter into the host directly.
+        //   TCP   → SSH-free: run the command in a one-shot privileged nsenter container over the
+        //           mTLS Docker connection (no SSH key involved).
+        //   else  → SSH, if an SSH host is configured (legacy / bootstrap).
         return server.ConnectionType switch
         {
             ConnectionType.Local => await ExecuteLocalAsync(command, effectiveTimeout, ct),
+            ConnectionType.TCP => await ExecuteViaDockerAsync(server.Id, command, effectiveTimeout),
             _ when !string.IsNullOrWhiteSpace(server.SshHost)
                 => await ExecuteSshAsync(server, command, effectiveTimeout, ct),
             _ => new CommandResult { ExitCode = -1, Error = $"No shell transport for server (ConnectionType={server.ConnectionType}, no SSH host configured)" }
@@ -59,6 +64,24 @@ public class HostCommandExecutor : IHostCommandExecutor
         _logger.LogDebug("Executing local command via nsenter: {Command}", command);
 
         return await RunProcessAsync("nsenter", args, timeout, ct);
+    }
+
+    // SSH-free shell for TCP+mTLS servers: drive a one-shot privileged nsenter container over the
+    // mTLS Docker connection. Same host-namespace effect as ExecuteLocalAsync, but remote and
+    // without any SSH key.
+    private async Task<CommandResult> ExecuteViaDockerAsync(string serverId, string command, TimeSpan timeout)
+    {
+        _logger.LogDebug("Executing host command on {ServerId} via mTLS Docker (nsenter container): {Command}", serverId, command);
+        try
+        {
+            var (output, error, exitCode) = await _docker.RunHostShellAsync(command, serverId, timeout);
+            return new CommandResult { ExitCode = exitCode, Output = output, Error = error };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Host command via Docker failed on {ServerId}", serverId);
+            return new CommandResult { ExitCode = -1, Error = ex.Message };
+        }
     }
 
     private async Task<CommandResult> ExecuteSshAsync(Models.ServerConfig server, string command, TimeSpan timeout, CancellationToken ct)
