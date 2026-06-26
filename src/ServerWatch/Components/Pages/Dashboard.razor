@@ -9,6 +9,7 @@
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfig
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
 @inject ServerWatch.Services.Cve.CveFindingsStore CveStore
+@inject MetricsQueryService MetricsQuery
 @implements IDisposable
 
 <PageTitle>Dashboard - ServerWatch</PageTitle>
@@ -167,6 +168,59 @@
                     </MudStack>
                 </MudItem>
             </MudGrid>
+
+            @* Auslastungsverlauf *@
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-4 mb-2" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Color="Color.Primary" />
+                <MudText Typo="Typo.subtitle2">Auslastungsverlauf</MudText>
+                <MudSpacer />
+                <MudSelect T="string" Value="_chartPeriod" Variant="Variant.Outlined" Margin="Margin.Dense"
+                           Style="max-width: 130px;" Label="Zeitraum"
+                           ValueChanged="@((string v) => { _chartPeriod = v; _ = ReloadAllServerHistory(); })">
+                    <MudSelectItem Value="@("1h")">1 Stunde</MudSelectItem>
+                    <MudSelectItem Value="@("6h")">6 Stunden</MudSelectItem>
+                    <MudSelectItem Value="@("24h")">24 Stunden</MudSelectItem>
+                    <MudSelectItem Value="@("7d")">7 Tage</MudSelectItem>
+                </MudSelect>
+            </MudStack>
+
+            @{
+                var hasCpu = _serverCpuHistory.TryGetValue(serverGroup.ServerId, out var cpuHist) && cpuHist.Count > 0;
+                var hasMem = _serverMemHistory.TryGetValue(serverGroup.ServerId, out var memHist) && memHist.Count > 0;
+            }
+            @if (hasCpu || hasMem)
+            {
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3" Elevation="1">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">CPU-Verlauf</MudText>
+                            <ApexCharts.ApexChart TItem="MetricPoint" Height="180" Options="@_cpuChartOptions">
+                                <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="cpuHist"
+                                                 SeriesType="ApexCharts.SeriesType.Area"
+                                                 XValue="@(p => p.Timestamp)"
+                                                 YValue="@(p => (decimal)p.Value)"
+                                                 Name="CPU %" />
+                            </ApexCharts.ApexChart>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3" Elevation="1">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">Speicher-Verlauf</MudText>
+                            <ApexCharts.ApexChart TItem="MetricPoint" Height="180" Options="@_memChartOptions">
+                                <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="memHist"
+                                                 SeriesType="ApexCharts.SeriesType.Area"
+                                                 XValue="@(p => p.Timestamp)"
+                                                 YValue="@(p => (decimal)p.Value)"
+                                                 Name="Speicher %" />
+                            </ApexCharts.ApexChart>
+                        </MudPaper>
+                    </MudItem>
+                </MudGrid>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Noch keine historischen Daten vorhanden.</MudText>
+            }
         </div>
     }
 
@@ -279,6 +333,11 @@
     private List<ServerGroupViewModel> _grouped = new();
     private Dictionary<string, ServerSystemInfo> _serverInfos = new();
     private HashSet<string> _expandedServers = new();
+    private Dictionary<string, List<MetricPoint>> _serverCpuHistory = new();
+    private Dictionary<string, List<MetricPoint>> _serverMemHistory = new();
+    private string _chartPeriod = "1h";
+    private readonly ApexCharts.ApexChartOptions<MetricPoint> _cpuChartOptions = CreateChartOptions("#2196F3");
+    private readonly ApexCharts.ApexChartOptions<MetricPoint> _memChartOptions = CreateChartOptions("#9C27B0");
     private bool _loading = true;
     private Timer? _refreshTimer;
     private int _refreshCount;
@@ -400,6 +459,7 @@
             {
                 try { _serverInfos = await DockerService.GetAllServerSystemInfoAsync(); }
                 catch { }
+                await ReloadAllServerHistory();
             }
         }
         catch (Exception ex)
@@ -553,7 +613,67 @@
     private void ToggleServerExpand(string serverId)
     {
         if (!_expandedServers.Remove(serverId))
+        {
             _expandedServers.Add(serverId);
+            _ = LoadServerHistory(serverId);
+        }
+    }
+
+    private TimeSpan ChartPeriodSpan() => _chartPeriod switch
+    {
+        "1h" => TimeSpan.FromHours(1),
+        "6h" => TimeSpan.FromHours(6),
+        "24h" => TimeSpan.FromHours(24),
+        "7d" => TimeSpan.FromDays(7),
+        _ => TimeSpan.FromHours(1)
+    };
+
+    private async Task LoadServerHistory(string serverId)
+    {
+        try
+        {
+            var period = ChartPeriodSpan();
+            _serverCpuHistory[serverId] = await MetricsQuery.GetServerCpuHistoryAsync(serverId, period);
+            _serverMemHistory[serverId] = await MetricsQuery.GetServerMemoryHistoryAsync(serverId, period);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { }
+    }
+
+    private async Task ReloadAllServerHistory()
+    {
+        foreach (var serverId in _expandedServers.ToList())
+            await LoadServerHistory(serverId);
+    }
+
+    private static ApexCharts.ApexChartOptions<MetricPoint> CreateChartOptions(string color)
+    {
+        return new ApexCharts.ApexChartOptions<MetricPoint>
+        {
+            Chart = new ApexCharts.Chart
+            {
+                Background = "transparent",
+                Toolbar = new ApexCharts.Toolbar { Show = false },
+                Sparkline = new ApexCharts.ChartSparkline { Enabled = false },
+                Zoom = new ApexCharts.Zoom { Enabled = false }
+            },
+            Theme = new ApexCharts.Theme { Mode = ApexCharts.Mode.Dark },
+            Stroke = new ApexCharts.Stroke { Curve = ApexCharts.Curve.Smooth, Width = 2 },
+            Fill = new ApexCharts.Fill { Opacity = new List<double> { 0.15 }, Type = new List<ApexCharts.FillType> { ApexCharts.FillType.Solid } },
+            Colors = new List<string> { color },
+            Xaxis = new ApexCharts.XAxis { Type = ApexCharts.XAxisType.Datetime },
+            Yaxis = new List<ApexCharts.YAxis>
+            {
+                new ApexCharts.YAxis
+                {
+                    Min = 0,
+                    Max = 100,
+                    Labels = new ApexCharts.YAxisLabels { Formatter = "function(v) { return v.toFixed(0) + '%' }" }
+                }
+            },
+            Tooltip = new ApexCharts.Tooltip { X = new ApexCharts.TooltipX { Format = "HH:mm:ss" } },
+            Grid = new ApexCharts.Grid { BorderColor = "#333" }
+        };
     }
 
     public void Dispose()
