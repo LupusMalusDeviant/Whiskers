@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using Docker.DotNet;
+using Docker.DotNet.X509;
 using ServerWatch.Models;
 using ServerWatch.Services.ServerConfig;
 
@@ -160,10 +162,13 @@ public class DockerConnectionManager : IDisposable
 
             case ConnectionType.TCP:
             {
-                var uri = server.TcpUseTls
+                var uri = new Uri(server.TcpUseTls
                     ? $"https://{server.TcpHost}:{server.TcpPort}"
-                    : $"http://{server.TcpHost}:{server.TcpPort}";
-                return new DockerClientConfiguration(new Uri(uri)).CreateClient();
+                    : $"http://{server.TcpHost}:{server.TcpPort}");
+                // mTLS path: present a client cert and verify the server against the CA. No SSH key.
+                if (server.TcpUseTls && !string.IsNullOrEmpty(server.TcpClientCertPath))
+                    return new DockerClientConfiguration(uri, BuildMtlsCredentials(server)).CreateClient();
+                return new DockerClientConfiguration(uri).CreateClient();
             }
 
             case ConnectionType.SSH:
@@ -175,6 +180,36 @@ public class DockerConnectionManager : IDisposable
             default:
                 throw new ArgumentOutOfRangeException(nameof(server.ConnectionType));
         }
+    }
+
+    /// <summary>
+    /// Builds mutual-TLS credentials for the TCP path: presents the client certificate and verifies
+    /// the server's certificate chain against the configured CA (custom root trust, no reliance on
+    /// the system trust store). PEM client cert+key are round-tripped through PKCS#12 so the private
+    /// key is usable for TLS client auth across platforms.
+    /// </summary>
+    private static CertificateCredentials BuildMtlsCredentials(Models.ServerConfig server)
+    {
+        using var ephemeral = X509Certificate2.CreateFromPemFile(server.TcpClientCertPath!, server.TcpClientKeyPath);
+        var clientCert = X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pkcs12), null);
+
+        var credentials = new CertificateCredentials(clientCert);
+
+        if (!string.IsNullOrEmpty(server.TcpCaCertPath))
+        {
+            var caCert = X509CertificateLoader.LoadCertificateFromFile(server.TcpCaCertPath);
+            credentials.ServerCertificateValidationCallback = (_, cert, _, _) =>
+            {
+                if (cert is null) return false;
+                using var chain = new X509Chain();
+                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                chain.ChainPolicy.CustomTrustStore.Add(caCert);
+                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                return chain.Build(cert as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(cert.Export(X509ContentType.Cert)));
+            };
+        }
+
+        return credentials;
     }
 
     public void Dispose()

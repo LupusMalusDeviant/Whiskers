@@ -37,6 +37,12 @@ public class ServerConfig
     public string? TcpHost { get; set; }
     public int TcpPort { get; set; } = 2375;
     public bool TcpUseTls { get; set; }
+    // mTLS for the TCP path (e.g. a docker-socket-proxy fronted by ghostunnel over the mesh).
+    // When TcpUseTls is set and these point at PEM files, ServerWatch presents the client cert and
+    // verifies the server against the CA — no SSH key involved. See docs/plan-zero-ssh-...md (Step 2).
+    public string? TcpClientCertPath { get; set; }
+    public string? TcpClientKeyPath { get; set; }
+    public string? TcpCaCertPath { get; set; }
 
     // SSH
     public string? SshHost { get; set; }
