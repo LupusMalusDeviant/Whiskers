@@ -1,25 +1,38 @@
 using System.Diagnostics;
 using ServerWatch.Models;
-using ServerWatch.Services.Docker;
+using ServerWatch.Services.Server;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Database;
 
 public class DatabaseService : IDatabaseService
 {
-    private readonly IDockerService _docker;
+    private readonly IHostCommandExecutor _hostExec;
     private readonly ILogger<DatabaseService> _logger;
 
-    public DatabaseService(IDockerService docker, ILogger<DatabaseService> logger)
+    public DatabaseService(IHostCommandExecutor hostExec, ILogger<DatabaseService> logger)
     {
-        _docker = docker;
+        _hostExec = hostExec;
         _logger = logger;
+    }
+
+    // Run a command in a container via `docker exec` on the HOST shell plane (nsenter / SSH) instead
+    // of the Docker API's exec endpoint. The mTLS socket-proxy blocks container exec (EXEC=0), but the
+    // host's own docker.sock has full access — so this works uniformly on Local, SSH and TCP+mTLS.
+    private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainer(
+        string containerId, string[] cmd, string? serverId = null, TimeSpan? timeout = null)
+    {
+        var dockerCmd = "docker exec " + ShellUtils.Quote(containerId) + " " +
+                        string.Join(' ', cmd.Select(ShellUtils.Quote));
+        var r = await _hostExec.ExecuteAsync(serverId ?? "local", dockerCmd, timeout ?? TimeSpan.FromSeconds(30));
+        return (r.Output, r.Error, r.ExitCode);
     }
 
     public async Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
         var sw = Stopwatch.StartNew();
         var cmd = BuildQueryCommand(dbType, creds, query);
-        var (stdout, stderr, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId, TimeSpan.FromSeconds(30));
+        var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromSeconds(30));
         sw.Stop();
 
         if (exitCode != 0)
@@ -42,7 +55,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId);
         if (exitCode != 0) return new();
 
         return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -65,7 +78,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId);
         if (exitCode != 0) return new();
 
         var tables = new List<TableInfo>();
@@ -102,7 +115,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId);
         if (exitCode != 0) return new();
 
         var columns = new List<ColumnInfo>();
@@ -146,13 +159,13 @@ public class DatabaseService : IDatabaseService
         if (cmd.Length == 0)
             return (false, "", 0, $"Backup wird für {dbType} nicht unterstützt.");
 
-        var (stdout, stderr, exitCode) = await _docker.ExecInContainerAsync(containerId, cmd, serverId, TimeSpan.FromMinutes(5));
+        var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromMinutes(5));
 
         if (exitCode != 0)
             return (false, "", 0, stderr.Trim());
 
         // Get file size
-        var (sizeOut, _, _) = await _docker.ExecInContainerAsync(containerId, new[] { "stat", "-c", "%s", dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath }, serverId);
+        var (sizeOut, _, _) = await ExecInContainer(containerId, new[] { "stat", "-c", "%s", dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath }, serverId);
         long.TryParse(sizeOut.Trim(), out var size);
 
         return (true, dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath, size, "");

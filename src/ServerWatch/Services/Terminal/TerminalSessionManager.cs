@@ -53,6 +53,20 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
                     session.SessionId, containerId);
                 return session;
             }
+
+            // TCP+mTLS server: SSH-free container terminal over the mTLS Docker connection.
+            if (server != null && server.ConnectionType == ConnectionType.TCP && containerId != null
+                && !string.IsNullOrEmpty(server.TcpClientCertPath))
+            {
+                var session = new TerminalSession { ContainerId = containerId };
+                session.StartTcpMtls(server.TcpHost ?? throw new InvalidOperationException("TCP host not configured"),
+                    server.TcpPort, server.TcpCaCertPath!, server.TcpClientCertPath!, server.TcpClientKeyPath!,
+                    _settings.DefaultShell, containerId);
+                _sessions[session.SessionId] = session;
+                _logger.LogInformation("Terminal session {SessionId} created (mTLS docker, container: {ContainerId})",
+                    session.SessionId, containerId);
+                return session;
+            }
         }
 
         var localSession = new TerminalSession { ContainerId = containerId };
@@ -88,6 +102,14 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         else if (server.ConnectionType == ConnectionType.Local)
         {
             session.Start(_settings.DefaultShell, null);
+        }
+        else if (server.ConnectionType == ConnectionType.TCP && !string.IsNullOrEmpty(server.TcpClientCertPath))
+        {
+            // SSH-free host terminal over the mTLS Docker connection (privileged nsenter container).
+            session.StartTcpMtls(
+                server.TcpHost ?? throw new InvalidOperationException("TCP host not configured"),
+                server.TcpPort, server.TcpCaCertPath!, server.TcpClientCertPath!, server.TcpClientKeyPath!,
+                _settings.DefaultShell, null);
         }
         else
         {
