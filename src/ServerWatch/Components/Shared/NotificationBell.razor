@@ -4,14 +4,15 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 
-<MudMenu Open="_open" OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+<MudMenu Open="_open" OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight"
+         ActivationEvent="@MouseEvent.LeftClick">
     <ActivatorContent>
         <MudBadge Content="@Store.UnreadCount" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true">
-            <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit" title="Benachrichtigungen" />
+            <MudIcon Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit" Title="Benachrichtigungen" />
         </MudBadge>
     </ActivatorContent>
     <ChildContent>
-        <div style="min-width:340px; max-width:440px; max-height:480px; overflow-y:auto;">
+        <div style="min-width:340px; max-width:440px;">
             <div style="display:flex; align-items:center; padding:8px 12px;">
                 <MudText Typo="Typo.subtitle2">Benachrichtigungen</MudText>
                 <MudSpacer />
@@ -27,22 +28,25 @@
             }
             else
             {
-                @foreach (var n in Store.Recent)
-                {
-                    var clickable = n.Link is not null;
-                    <div style="@RowStyle(clickable)" @onclick="@(() => OnRowClick(n))">
-                        <MudIcon Icon="@SevIcon(n.Severity)" Color="@SevColor(n.Severity)" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto;" />
-                        <div style="min-width:0; flex:1;">
-                            <MudText Typo="Typo.body2" Style="font-weight:600;">@n.Title</MudText>
-                            <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.6); white-space:pre-wrap; display:block;">@Truncate(n.Detail)</MudText>
-                            <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.3);">@n.Timestamp.ToLocalTime().ToString("dd.MM HH:mm")</MudText>
-                        </div>
-                        @if (clickable)
-                        {
-                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto; color:rgba(255,255,255,0.3);" />
-                        }
-                    </div>
-                }
+                <div style="max-height:420px; overflow-y:auto;">
+                    @foreach (var n in Store.Recent)
+                    {
+                        <MudMenuItem OnClick="@(() => OnRowClick(n))" Style="white-space:normal;">
+                            <div style="display:flex; gap:10px; align-items:flex-start; max-width:420px;">
+                                <MudIcon Icon="@SevIcon(n.Severity)" Color="@SevColor(n.Severity)" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto;" />
+                                <div style="min-width:0; flex:1;">
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">@n.Title</MudText>
+                                    <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.6); white-space:pre-wrap; display:block;">@Truncate(n.Detail)</MudText>
+                                    <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.3);">@n.Timestamp.ToLocalTime().ToString("dd.MM HH:mm")</MudText>
+                                </div>
+                                @if (n.Link is not null)
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto; color:rgba(255,255,255,0.3);" />
+                                }
+                            </div>
+                        </MudMenuItem>
+                    }
+                </div>
             }
         </div>
     </ChildContent>
@@ -73,14 +77,10 @@
 
     private void OnRowClick(InAppNotification n)
     {
-        if (n.Link is null) return;   // "" = dashboard (path-base safe); null = not navigable
         _open = false;
+        if (n.Link is null) return;   // "" = dashboard (path-base safe); null = not navigable
         Nav.NavigateTo(n.Link);
     }
-
-    private static string RowStyle(bool clickable) =>
-        "display:flex; gap:10px; padding:8px 12px; border-bottom:1px solid var(--sw-glass-border);"
-        + (clickable ? " cursor:pointer;" : "");
 
     private void Clear() => Store.Clear();
 
