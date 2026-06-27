@@ -226,6 +226,9 @@ public class DockerService : IDockerService
     }
 
     private const string HostShellImage = "alpine:latest";
+    // Label stamped on every one-shot host-shell helper container so leaked ones (from a run that
+    // was interrupted before its finally-remove) can be identified and swept later.
+    private const string HostShellLabel = "serverwatch.hostshell";
 
     /// <summary>
     /// Runs a shell command on the host via a one-shot privileged container that nsenters into the
@@ -238,6 +241,9 @@ public class DockerService : IDockerService
     {
         var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
         var client = await GetClient(serverId);
+
+        // Opportunistically clear any helper containers leaked by a previously interrupted run.
+        _ = SweepHostShellLeftoversAsync(client);
 
         // Ensure the helper image exists on the target (pull once if missing).
         try
@@ -255,6 +261,7 @@ public class DockerService : IDockerService
         {
             Image = HostShellImage,
             Cmd = new List<string> { "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command },
+            Labels = new Dictionary<string, string> { [HostShellLabel] = "1" },
             HostConfig = new HostConfig { Privileged = true, PidMode = "host", AutoRemove = false }
         });
         var id = create.ID;
@@ -295,6 +302,39 @@ public class DockerService : IDockerService
             try { await client.Containers.RemoveContainerAsync(id, new ContainerRemoveParameters { Force = true }); }
             catch { /* best effort cleanup */ }
         }
+    }
+
+    /// <summary>
+    /// Best-effort cleanup of host-shell helper containers that leaked from a previous run which was
+    /// interrupted before its finally-remove (e.g. the app container was rebuilt mid-command, or the
+    /// mTLS link dropped). Only touches our own labelled, non-running containers older than a short
+    /// grace period, so it never races a command that is currently in flight.
+    /// </summary>
+    private static async Task SweepHostShellLeftoversAsync(DockerClient client)
+    {
+        try
+        {
+            var list = await client.Containers.ListContainersAsync(new ContainersListParameters
+            {
+                All = true,
+                Filters = new Dictionary<string, IDictionary<string, bool>>
+                {
+                    ["label"] = new Dictionary<string, bool> { [$"{HostShellLabel}=1"] = true },
+                    ["status"] = new Dictionary<string, bool>
+                    {
+                        ["created"] = true, ["exited"] = true, ["dead"] = true
+                    },
+                }
+            });
+            var cutoff = DateTime.UtcNow.AddSeconds(-30);
+            foreach (var c in list)
+            {
+                if (c.Created > cutoff) continue; // skip very recent — might be an in-flight command
+                try { await client.Containers.RemoveContainerAsync(c.ID, new ContainerRemoveParameters { Force = true }); }
+                catch { /* best effort */ }
+            }
+        }
+        catch { /* best effort */ }
     }
 
     public async Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null)
