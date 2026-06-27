@@ -549,9 +549,15 @@ code, pre, .monospace {
 .sw-sidebar-logo svg { width: 28px; height: 28px; flex-shrink: 0; }
 .sw-sidebar-logo-img { width: 34px; height: 34px; flex-shrink: 0; object-fit: contain; filter: drop-shadow(0 0 6px var(--sw-accent-primary-glow)); }
 
-/* Notification badge: keep it inside the (dense) app bar so the count isn't clipped at the top. */
-.mud-appbar .mud-toolbar { overflow: visible; }
-.sw-notify-badge .mud-badge.mud-badge-overlap { transform: scale(0.9) translate(40%, -5%) !important; }
+/* Notification badge: anchor it to the vertical CENTER of the bell icon so the count can
+   never poke above the (dense, top-fixed) app bar and get clipped. */
+.mud-appbar, .mud-appbar .mud-toolbar { overflow: visible; }
+.sw-notify-badge .mud-badge {
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translate(45%, -50%) scale(0.85) !important;
+    transform-origin: center !important;
+}
 .sw-sidebar-logo .sw-logo-text {
     font-size: 1.1rem;
     font-weight: 700;

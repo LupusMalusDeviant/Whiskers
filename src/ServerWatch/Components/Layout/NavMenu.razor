@@ -1,5 +1,5 @@
 <div class="sw-sidebar-logo">
-    <img src="brand.png" alt="ServerWatch" class="sw-sidebar-logo-img" />
+    <img src="brand.png?v=2" alt="ServerWatch" class="sw-sidebar-logo-img" />
     <span class="sw-gradient-text sw-logo-text">ServerWatch</span>
 </div>
 
@@ -25,6 +25,14 @@
         <MudNavLink Href="graph"
                     Icon="@Icons.Material.Filled.Hub">
             Topologie
+        </MudNavLink>
+        <MudNavLink Href="diff"
+                    Icon="@Icons.Material.Filled.Compare">
+            Vergleichen
+        </MudNavLink>
+        <MudNavLink Href="audit-log"
+                    Icon="@Icons.Material.Filled.History">
+            Audit-Protokoll
         </MudNavLink>
     </MudNavGroup>
 
@@ -80,14 +88,6 @@
                     Icon="@Icons.Material.Filled.Webhook">
             Webhooks
         </MudNavLink>
-        <MudNavLink Href="diff"
-                    Icon="@Icons.Material.Filled.Compare">
-            Vergleichen
-        </MudNavLink>
-        <MudNavLink Href="audit-log"
-                    Icon="@Icons.Material.Filled.History">
-            Audit-Protokoll
-        </MudNavLink>
         <MudNavLink Href="agent-history"
                     Icon="@Icons.Material.Filled.Policy">
             Agent-History
@@ -108,9 +108,13 @@
                     Icon="@Icons.Material.Filled.Bolt">
             AI-Trigger
         </MudNavLink>
-        <MudNavLink Href="settings"
-                    Icon="@Icons.Material.Filled.Settings">
-            Einstellungen
-        </MudNavLink>
     </MudNavGroup>
+
+    <div class="sw-nav-divider"></div>
+
+    @* Settings is a top-level destination, not part of any group. *@
+    <MudNavLink Href="settings"
+                Icon="@Icons.Material.Filled.Settings">
+        Einstellungen
+    </MudNavLink>
 </MudNavMenu>
