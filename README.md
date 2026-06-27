@@ -1,6 +1,10 @@
-# ServerWatch
+<p align="center">
+  <img src="src/ServerWatch/wwwroot/brand.png" alt="ServerWatch logo" width="150" height="150" />
+</p>
 
-**A Docker & server management dashboard with a built-in Model Context Protocol (MCP) server for AI-driven infrastructure operations.**
+<h1 align="center">ServerWatch</h1>
+
+<p align="center"><strong>A Docker &amp; server management dashboard with a built-in Model Context Protocol (MCP) server for AI-driven infrastructure operations.</strong></p>
 
 ServerWatch gives you a live, web-based control plane for a fleet of Docker hosts — containers, images, networks, databases, firewalls, Nginx, systemd, SSL, metrics and logs — and exposes the same capabilities to AI agents (such as Claude Code) through an authenticated MCP endpoint with per-key Read/Write/Admin permissions.
 
