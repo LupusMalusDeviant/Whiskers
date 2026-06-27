@@ -6,7 +6,7 @@
 
 @* The activator is a plain MudMenu Icon button — the exact pattern the (working) theme menu uses.
    The MudBadge only wraps it to show the unread count; it does not intercept the click. *@
-<MudBadge Content="@Store.UnreadCount" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true">
+<MudBadge Content="@Store.UnreadCount" Max="99" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true">
     <MudMenu Icon="@(Store.UnreadCount > 0 ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
              Color="Color.Inherit" title="Benachrichtigungen"
              OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
