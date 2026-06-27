@@ -127,7 +127,7 @@ public class AiChatService : IAiChatService
         - /webhooks — CI/CD Webhooks: URL für GitHub/GitLab Deployments erstellen
         - /diff — Container-Vergleich: Zwei Container side-by-side vergleichen (Image, Env-Vars, Ports, Labels)
         - /audit-log — Audit-Protokoll: Alle Aktionen nachverfolgen
-        - /settings — Einstellungen: Mattermost, Matrix, Benutzerrollen, Secret Vault, MCP-Keys, Coolify
+        - /settings — Einstellungen: Mattermost, Matrix, Benutzerrollen, Secret Vault, MCP-Keys
 
         AKTUELLE INFRASTRUKTUR:
         {CONTEXT}

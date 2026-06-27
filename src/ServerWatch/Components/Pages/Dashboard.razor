@@ -6,8 +6,6 @@
 @inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject NavigationManager Nav
 @inject ServerWatch.Services.ImageUpdate.IImageUpdateStore ImageUpdateStore
-@inject ServerWatch.Services.Coolify.ICoolifyConfigService CoolifyConfig
-@inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
 @inject ServerWatch.Services.Cve.ICveFindingsStore CveStore
 @inject IMetricsQueryService MetricsQuery
 @inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
@@ -74,20 +72,6 @@
             </MudStack>
         </div>
     </MudItem>
-    @if (CoolifyConfig.IsEnabled)
-    {
-        <MudItem xs="12" sm="6" md="3">
-            <div class="sw-stat-card sw-orange" style="cursor: pointer;" @onclick='() => Nav.NavigateTo("coolify")'>
-                <MudStack Row="true" AlignItems="AlignItems.Center">
-                    <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="sw-stat-icon mr-3" />
-                    <div>
-                        <div class="sw-stat-value">@_coolifyRunning / @_coolifyTotal</div>
-                        <div class="sw-stat-label">Coolify Apps</div>
-                    </div>
-                </MudStack>
-            </div>
-        </MudItem>
-    }
 </MudGrid>
 
 @* Grouped Container Tables *@
@@ -96,28 +80,32 @@
     <div class="sw-server-header">
         <MudIconButton Icon="@(_expandedServers.Contains(serverGroup.ServerId) ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
                        Size="Size.Small" OnClick="@(() => ToggleServerExpand(serverGroup.ServerId))" />
-        <span class="sw-pulse-dot sw-green" style="@(GetServerReachable(serverGroup.ServerId) ? "" : "background: var(--sw-accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.5);")"></span>
-        <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
-        <MudText Typo="Typo.h6" Style="font-weight: 600;">@serverGroup.ServerName</MudText>
-        @if (_serverInfos.TryGetValue(serverGroup.ServerId, out var sInfoHeader) && sInfoHeader.IsReachable)
-        {
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="ml-2">
-                @sInfoHeader.OperatingSystem — @sInfoHeader.CpuCount Kerne — @FormatBytes(sInfoHeader.MemoryTotalBytes) RAM
-            </MudText>
-            var cveSum = CveStore.SummarizeServer(serverGroup.ServerId);
-            if (cveSum.CriticalCount + cveSum.HighCount > 0)
+        <div style="display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1 1 auto; min-width: 0;"
+             title="Container ein-/ausklappen"
+             @onclick="@(() => ToggleServerExpand(serverGroup.ServerId))">
+            <span class="sw-pulse-dot sw-green" style="@(GetServerReachable(serverGroup.ServerId) ? "" : "background: var(--sw-accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.5);")"></span>
+            <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
+            <MudText Typo="Typo.h6" Style="font-weight: 600;">@serverGroup.ServerName</MudText>
+            @if (_serverInfos.TryGetValue(serverGroup.ServerId, out var sInfoHeader) && sInfoHeader.IsReachable)
             {
-                <MudTooltip Text="@($"{cveSum.CriticalCount} Critical, {cveSum.HighCount} High, {cveSum.MediumCount} Medium, {cveSum.LowCount} Low — klick zu /cves")">
-                    <MudLink Href="cves" Underline="Underline.None">
-                        <MudChip T="string" Size="Size.Small"
-                                 Color="@(cveSum.CriticalCount > 0 ? Color.Error : Color.Warning)"
-                                 Icon="@Icons.Material.Filled.Security" Class="ml-2">
-                            @(cveSum.CriticalCount + cveSum.HighCount) CVE@(cveSum.CriticalCount + cveSum.HighCount > 1 ? "s" : "")
-                        </MudChip>
-                    </MudLink>
-                </MudTooltip>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="ml-2">
+                    @sInfoHeader.OperatingSystem — @sInfoHeader.CpuCount Kerne — @FormatBytes(sInfoHeader.MemoryTotalBytes) RAM
+                </MudText>
+                var cveSum = CveStore.SummarizeServer(serverGroup.ServerId);
+                if (cveSum.CriticalCount + cveSum.HighCount > 0)
+                {
+                    <MudTooltip Text="@($"{cveSum.CriticalCount} Critical, {cveSum.HighCount} High, {cveSum.MediumCount} Medium, {cveSum.LowCount} Low — klick zu /cves")">
+                        <MudLink Href="cves" Underline="Underline.None" @onclick:stopPropagation="true">
+                            <MudChip T="string" Size="Size.Small"
+                                     Color="@(cveSum.CriticalCount > 0 ? Color.Error : Color.Warning)"
+                                     Icon="@Icons.Material.Filled.Security" Class="ml-2">
+                                @(cveSum.CriticalCount + cveSum.HighCount) CVE@(cveSum.CriticalCount + cveSum.HighCount > 1 ? "s" : "")
+                            </MudChip>
+                        </MudLink>
+                    </MudTooltip>
+                }
             }
-        }
+        </div>
         <MudSpacer />
         @if (ServerConfigService.SupportsTerminal(serverGroup.ServerId))
         {
@@ -229,8 +217,10 @@
         </div>
     }
 
-    @foreach (var projectGroup in serverGroup.Projects)
+    @if (_expandedServers.Contains(serverGroup.ServerId))
     {
+        foreach (var projectGroup in serverGroup.Projects)
+        {
         <div class="sw-project-label">
             <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" />
             @projectGroup.Project
@@ -325,6 +315,7 @@
                 <MudText Class="pa-4">Keine Container in diesem Projekt gefunden.</MudText>
             </NoRecordsContent>
         </MudTable>
+        }
     }
 }
 
@@ -346,8 +337,6 @@
     private bool _loading = true;
     private Timer? _refreshTimer;
     private int _refreshCount;
-    private int _coolifyTotal;
-    private int _coolifyRunning;
     private AppRole _role = AppRole.Viewer;
 
     // Guards a write/destructive handler. Returns false (and warns) if the user lacks the role —
@@ -385,22 +374,6 @@
             catch { }
             await InvokeAsync(StateHasChanged);
         });
-
-        // Phase 4: Load Coolify summary in background
-        if (CoolifyConfig.IsEnabled)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var apps = await CoolifyService.ListApplicationsAsync();
-                    _coolifyTotal = apps.Count;
-                    _coolifyRunning = apps.Count(a => a.DisplayStatus == "running");
-                }
-                catch { }
-                await InvokeAsync(StateHasChanged);
-            });
-        }
 
         // Periodic refresh
         _refreshTimer = new Timer(async _ =>

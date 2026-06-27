@@ -43,7 +43,6 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`Cloud/`](Cloud/) | Provider-agnostic out-of-band cloud control (dispatches to Hetzner/Hostinger) |
 | [`Hetzner/`](Hetzner/) | Hetzner Cloud API client |
 | [`Hostinger/`](Hostinger/) | Hostinger API client |
-| [`Coolify/`](Coolify/) | Coolify PaaS API client |
 | [`Notifications/`](Notifications/) | Mattermost / Matrix notification dispatch + container notification prefs |
 | [`Webhooks/`](Webhooks/) | Inbound/outbound webhook handling |
 | [`Scheduler/`](Scheduler/) | Cron-style scheduled task execution |

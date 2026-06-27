@@ -8,7 +8,7 @@
 <MudLayout>
     <MudAppBar Elevation="0" Dense="true">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
-                       Edge="Edge.Start" OnClick="ToggleDrawer" Class="d-md-none" />
+                       Edge="Edge.Start" OnClick="ToggleDrawer" />
         <MudSpacer />
         <AuthorizeView>
             <Authorized>
@@ -36,7 +36,8 @@
 </MudLayout>
 
 @code {
-    private bool _drawerOpen = true;
+    // Collapsed by default (incl. first visit); toggle via the AppBar menu button.
+    private bool _drawerOpen = false;
 
     private readonly MudTheme _theme = new()
     {

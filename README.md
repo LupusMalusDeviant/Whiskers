@@ -75,7 +75,6 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - Container deployment via a form (image, ports, env, volumes)
 - Docker Compose upload and deployment
 - Standardised app templates for fast deployment
-- Coolify integration (applications, databases, deploy by tag)
 
 ### AI integration
 - **MCP server** exposing the full toolset to external AI agents (see below)
@@ -188,7 +187,6 @@ ServerWatch ships an integrated MCP server so AI agents (e.g. Claude Code) can o
 - **Scheduler** — list/create/delete/run scheduled tasks
 - **CVEs & updates** — server/container CVE summaries, update status
 - **Cloud (out-of-band)** — Hetzner & Hostinger power/snapshot/metrics
-- **Coolify** — applications, databases, deploy by tag, env vars
 - **Agent** — `instruct_agent` (delegate a natural-language task to the in-process agent)
 
 The complete, current list with permission levels is in the web UI under *Settings → MCP*.
@@ -234,7 +232,7 @@ ServerWatch/
 │   │   ├── Configuration/      # strongly-typed settings classes
 │   │   ├── Hubs/               # SignalR hubs (container + terminal streams)
 │   │   ├── Mcp/                # MCP server tools + permission layer
-│   │   ├── Models/             # data models (Agent, Cloud, Coolify, Cve, Hetzner, Hostinger)
+│   │   ├── Models/             # data models (Agent, Cloud, Cve, Hetzner, Hostinger)
 │   │   ├── Services/           # all business logic (see Services/README.md)
 │   │   ├── Utils/              # small helpers (secret redaction, shell quoting)
 │   │   ├── wwwroot/            # static assets

@@ -14,7 +14,6 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | `ImageUpdateSettings.cs` | Image-update check cadence. |
 | `CveMonitorSettings.cs` | CVE scan cadence. |
 | `MattermostSettings.cs` / `MatrixSettings.cs` | Notification channel settings. |
-| `CoolifySettings.cs` | Coolify connection defaults. |
 | `TerminalSettings.cs` | Web-terminal settings. |
 | `AiChatSettings.cs` | Read-only advisor chat (provider, model, key). |
 | `AgentSettings.cs` | Acting-agent provider access (UI-editable, reload-on-change). |

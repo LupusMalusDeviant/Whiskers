@@ -9,7 +9,7 @@ The ASP.NET Core / Blazor Server application. For project overview, setup and de
 | [`Components/`](Components/) | Blazor UI — [`Pages/`](Components/Pages/), [`Layout/`](Components/Layout/), [`Shared/`](Components/Shared/) |
 | [`Services/`](Services/) | All business logic — see the [services tour](Services/README.md) |
 | [`Mcp/`](Mcp/) | MCP server: auth pipeline + [`Tools/`](Mcp/Tools/) |
-| [`Models/`](Models/) | Data models (+ Agent, Cloud, Coolify, Cve, Hetzner, Hostinger) |
+| [`Models/`](Models/) | Data models (+ Agent, Cloud, Cve, Hetzner, Hostinger) |
 | [`Configuration/`](Configuration/) | Strongly-typed settings classes |
 | [`Hubs/`](Hubs/) | SignalR hubs (container + terminal streams) |
 | [`Utils/`](Utils/) | Small helpers |

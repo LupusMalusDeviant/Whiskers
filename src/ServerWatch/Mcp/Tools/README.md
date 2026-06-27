@@ -18,7 +18,6 @@ The canonical tool→permission-level map lives in [`../../Models/McpPermission.
 | `CveTools.cs` | CVE summaries (server/container) |
 | `CloudTools.cs` | Out-of-band cloud control (provider-agnostic) |
 | `HetznerTools.cs` | Hetzner-specific extras (rescue, backups, snapshots, server type) |
-| `CoolifyTools.cs` | Coolify applications, databases, deployments, env vars |
 | `AgentTools.cs` | `instruct_agent` — delegate a natural-language task to the in-process agent |
 
 ## Related

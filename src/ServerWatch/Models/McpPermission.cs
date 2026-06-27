@@ -114,22 +114,6 @@ public static class McpPermissionLevels
         // (see AgentToolRegistry.NonAgentTools) — otherwise the agent would call itself recursively.
         ["instruct_agent"] = Read,
 
-        // Coolify read tools
-        ["list_coolify_applications"] = Read,
-        ["get_coolify_application"] = Read,
-        ["get_coolify_application_logs"] = Read,
-        ["list_coolify_servers"] = Read,
-        ["list_coolify_databases"] = Read,
-        ["get_coolify_env_vars"] = Read,
-
-        // Coolify write tools
-        ["deploy_coolify_application"] = Write,
-        ["start_coolify_application"] = Write,
-        ["stop_coolify_application"] = Write,
-        ["restart_coolify_application"] = Write,
-        ["deploy_coolify_by_tag"] = Write,
-        ["set_coolify_env_var"] = Write,
-
         // Cloud (provider-agnostic) read tools
         ["list_cloud_servers"] = Read,
         ["cloud_status"] = Read,
@@ -205,20 +189,6 @@ public static class McpPermissionLevels
         ["renew_ssl_certificate"] = "SSL",
         ["execute_command"] = "Admin",
         ["instruct_agent"] = "Agent",
-
-        // Coolify tools
-        ["list_coolify_applications"] = "Coolify",
-        ["get_coolify_application"] = "Coolify",
-        ["get_coolify_application_logs"] = "Coolify",
-        ["list_coolify_servers"] = "Coolify",
-        ["list_coolify_databases"] = "Coolify",
-        ["get_coolify_env_vars"] = "Coolify",
-        ["deploy_coolify_application"] = "Coolify",
-        ["start_coolify_application"] = "Coolify",
-        ["stop_coolify_application"] = "Coolify",
-        ["restart_coolify_application"] = "Coolify",
-        ["deploy_coolify_by_tag"] = "Coolify",
-        ["set_coolify_env_var"] = "Coolify",
 
         // Cloud (Hetzner/Hostinger)
         ["list_cloud_servers"] = "Cloud",

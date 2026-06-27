@@ -13,8 +13,6 @@
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 @inject ServerWatch.Services.Vault.IVaultService VaultService
 @inject ServerWatch.Services.Mcp.IMcpPermissionService McpPermissionService
-@inject ServerWatch.Services.Coolify.ICoolifyConfigService CoolifyConfigService
-@inject ServerWatch.Services.Coolify.ICoolifyService CoolifyApiService
 @inject ISnackbar Snackbar
 @inject IOptionsMonitor<ServerWatch.Configuration.CveMonitorSettings> CveSettings
 @inject ServerWatch.Services.Cve.ICveFindingsStore CveStore
@@ -310,41 +308,6 @@ else
         </MudButton>
     </MudExpansionPanel>
 
-    @* Coolify *@
-    <MudExpansionPanel Text="Coolify-Integration" Icon="@Icons.Material.Filled.Cloud">
-        <MudGrid>
-            <MudItem xs="12">
-                <MudSwitch T="bool" @bind-Value="_coolifyEnabled" Color="Color.Primary"
-                           Label="Coolify-Integration aktivieren" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudTextField @bind-Value="_coolifyApiUrl" Label="Coolify API-URL"
-                              Variant="Variant.Outlined" Placeholder="https://coolify.example.com"
-                              HelperText="Basis-URL Ihrer Coolify-Instanz (ohne /api/v1)" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudTextField @bind-Value="_coolifyApiToken" Label="API-Token"
-                              Variant="Variant.Outlined" InputType="InputType.Password"
-                              HelperText="Bearer-Token aus Coolify → Keys & Tokens → API tokens" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudNumericField @bind-Value="_coolifyPollingInterval" Label="Abfrageintervall (Sekunden)"
-                                 Variant="Variant.Outlined" Min="5" Max="300" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudStack Row="true" Spacing="2">
-                    <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveCoolifySettings"
-                               StartIcon="@Icons.Material.Filled.Save" Disabled="@_savingCoolify">
-                        @(_savingCoolify ? "Wird gespeichert..." : "Coolify-Einstellungen speichern")
-                    </MudButton>
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="TestCoolifyConnection"
-                               StartIcon="@Icons.Material.Filled.NetworkCheck" Disabled="@_testingCoolify">
-                        @(_testingCoolify ? "Teste..." : "Verbindung testen")
-                    </MudButton>
-                </MudStack>
-            </MudItem>
-        </MudGrid>
-    </MudExpansionPanel>
 
     @* Cloud-Provider (Hetzner/Hostinger) credentials are configured per server under "Server". *@
 
@@ -533,14 +496,6 @@ else
     private bool _savingMcp;
     private HashSet<string> _revealedKeys = new();
 
-    // Coolify
-    private bool _coolifyEnabled;
-    private string _coolifyApiUrl = "";
-    private string _coolifyApiToken = "";
-    private int _coolifyPollingInterval = 30;
-    private bool _savingCoolify;
-    private bool _testingCoolify;
-
     protected override async Task OnInitializedAsync()
     {
         // Settings holds whitelist, roles, vault secrets and MCP keys — Admin only.
@@ -555,13 +510,6 @@ else
         var mcpData = McpPermissionService.GetPermissionData();
         _mcpApiKeys = mcpData.ApiKeys;
         _mcpTools = mcpData.Tools;
-
-        // Coolify
-        var coolifySettings = CoolifyConfigService.GetSettings();
-        _coolifyEnabled = coolifySettings.Enabled;
-        _coolifyApiUrl = coolifySettings.ApiUrl;
-        _coolifyApiToken = coolifySettings.ApiToken;
-        _coolifyPollingInterval = coolifySettings.PollingIntervalSeconds;
 
         // Roles — merge whitelisted users that aren't in roles yet
         _roleEntries = RoleService.GetRoleData().Roles;
@@ -712,62 +660,6 @@ else
         catch (Exception ex)
         {
             Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
-        }
-    }
-
-    private async Task SaveCoolifySettings()
-    {
-        _savingCoolify = true;
-        try
-        {
-            await CoolifyConfigService.SaveAsync(new ServerWatch.Configuration.CoolifySettings
-            {
-                Enabled = _coolifyEnabled,
-                ApiUrl = _coolifyApiUrl?.Trim() ?? "",
-                ApiToken = _coolifyApiToken?.Trim() ?? "",
-                PollingIntervalSeconds = _coolifyPollingInterval
-            });
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "config.save", "config", "coolify", "Coolify-Einstellungen");
-            Snackbar.Add("Coolify-Einstellungen gespeichert. Änderungen gelten sofort.", Severity.Success);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Fehler beim Speichern: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _savingCoolify = false;
-        }
-    }
-
-    private async Task TestCoolifyConnection()
-    {
-        _testingCoolify = true;
-        try
-        {
-            // Temporarily save settings so the service uses the current values
-            await CoolifyConfigService.SaveAsync(new ServerWatch.Configuration.CoolifySettings
-            {
-                Enabled = true,
-                ApiUrl = _coolifyApiUrl?.Trim() ?? "",
-                ApiToken = _coolifyApiToken?.Trim() ?? "",
-                PollingIntervalSeconds = _coolifyPollingInterval
-            });
-
-            var success = await CoolifyApiService.TestConnectionAsync();
-            if (success)
-                Snackbar.Add("Verbindung zu Coolify erfolgreich!", Severity.Success);
-            else
-                Snackbar.Add("Verbindung fehlgeschlagen. Bitte URL und Token prüfen.", Severity.Error);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Verbindungsfehler: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _testingCoolify = false;
         }
     }
 

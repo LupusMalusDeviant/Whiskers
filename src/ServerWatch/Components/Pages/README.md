@@ -32,7 +32,6 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `Deploy.razor` | Container / Compose deployment form. |
 | `ComposeEditor.razor` | Visual Docker Compose editor. |
 | `AppStore.razor` | One-click deployment from app templates. |
-| `Coolify.razor` | Coolify applications and deployments. |
 | `VolumeBackups.razor` | Volume backup management. |
 
 ## Automation, security & ops

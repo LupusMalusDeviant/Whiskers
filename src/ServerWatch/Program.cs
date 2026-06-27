@@ -22,7 +22,6 @@ using ServerWatch.Services.ServerConfig;
 using ServerWatch.Services.ImageUpdate;
 using ServerWatch.Services.Cve;
 using ServerWatch.Services.Mcp;
-using ServerWatch.Services.Coolify;
 using ServerWatch.Services.Hetzner;
 using ServerWatch.Services.Hostinger;
 using Microsoft.AspNetCore.DataProtection;
@@ -106,10 +105,6 @@ builder.Services.AddSingleton<ServerWatch.Services.ConfigExport.IConfigExportSer
 
 // Secret vault
 builder.Services.AddSingleton<ServerWatch.Services.Vault.IVaultService, ServerWatch.Services.Vault.VaultService>();
-
-// Coolify integration
-builder.Services.AddSingleton<ServerWatch.Services.Coolify.ICoolifyConfigService, CoolifyConfigService>();
-builder.Services.AddHttpClient<ICoolifyService, CoolifyApiService>();
 
 // Cloud provider integrations (per-server credentials, provider-agnostic dispatch)
 builder.Services.AddHttpClient<IHetznerService, HetznerApiService>();
@@ -216,7 +211,6 @@ builder.Services.AddMcpServer()
     .WithTools<ContainerTools>()
     .WithTools<ServerTools>()
     .WithTools<MonitoringTools>()
-    .WithTools<CoolifyTools>()
     .WithTools<CloudTools>()
     .WithTools<HetznerTools>()
     .WithTools<NetworkTools>()
@@ -576,9 +570,6 @@ await mcpPermissionService.InitializeAsync();
 // Load guardrails (creates the restrictive SafeDefault on first run)
 var guardrailStore = app.Services.GetRequiredService<ServerWatch.Services.Agent.Guardrails.GuardrailStore>();
 await guardrailStore.InitializeAsync();
-
-var coolifyConfigService = app.Services.GetRequiredService<ServerWatch.Services.Coolify.ICoolifyConfigService>();
-await coolifyConfigService.InitializeAsync();
 
 // Ensure SQLite database and tables are created (including new tables on existing DBs)
 using (var scope = app.Services.CreateScope())

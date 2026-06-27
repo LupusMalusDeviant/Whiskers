@@ -31,7 +31,6 @@ Plain data models — DTOs, records and enums passed between services, the UI, a
 |---|---|
 | [`Agent/`](Agent/) | Agent runtime + provider-neutral DTOs (`AgentRuntime`, `AgentDtos`) |
 | [`Cloud/`](Cloud/) | Cloud server info (provider-agnostic) |
-| [`Coolify/`](Coolify/) | Coolify application/database/server/deployment models |
 | [`Cve/`](Cve/) | CVE findings, scan results, severity/source enums, summaries |
 | [`Hetzner/`](Hetzner/) | Hetzner API response models |
 | [`Hostinger/`](Hostinger/) | Hostinger API response models |
