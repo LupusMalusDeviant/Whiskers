@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <Version>0.9.0-beta</Version>
+    <Product>ServerWatch</Product>
   </PropertyGroup>
 
   <ItemGroup>

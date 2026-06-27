@@ -6,9 +6,15 @@ ServerWatch gives you a live, web-based control plane for a fleet of Docker host
 
 Its headline design goal is **SSH-key-free operation**: hosts are managed over a private WireGuard mesh with mutual-TLS Docker access, so there is no standing private key for an attacker to steal. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
+[![Version](https://img.shields.io/badge/version-0.9.0--beta-orange.svg)](#)
+[![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4.svg)](https://learn.microsoft.com/aspnet/core/blazor/)
+
+> ⚠️ **Beta (`0.9.0-beta`).** ServerWatch is under active development and not yet API-stable.
+> Run it on a trusted network, review the [security policy](SECURITY.md), and expect breaking
+> changes before `1.0`.
 
 ---
 
@@ -24,6 +30,7 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - [Project structure](#project-structure)
 - [Development](#development)
 - [Security](#security)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -277,7 +284,37 @@ dotnet run --project src/ServerWatch/ServerWatch.csproj
 - Secrets live in `.env` and `/app/data` (both gitignored / volume-mounted) — never in the image or repository.
 - MCP access is gated by per-key Read/Write/Admin permissions; the acting agent is bounded by code-enforced guardrails.
 
-If you discover a security issue, please open a private report rather than a public issue.
+If you discover a security issue, please report it privately — see [SECURITY.md](SECURITY.md).
+
+---
+
+## Roadmap
+
+Beta is feature-rich but not finished. Planned / not-yet-implemented:
+
+**Notification channels** (in addition to the in-app bell, Mattermost and Matrix)
+- Email (SMTP), Telegram, Ntfy / Gotify, Discord, Slack, and a generic outbound webhook.
+
+**In-app notifications**
+- Persistent history (survives restarts) and a dedicated notifications page with filtering.
+
+**Monitoring & triggers**
+- Proper traffic / anomaly detection and a dedicated "extreme traffic" trigger (today: sustained
+  CPU/RAM thresholds + a simple rolling-z-score outlier).
+- Disk-usage alerts (e.g. > 90%).
+
+**Settings**
+- Bring the remaining env settings into the UI (Terminal, AI chat, agent, MCP throttle); surface the
+  restart-only settings (auth providers, `PATH_BASE`, host binding) read-only with a clear note.
+
+**Fleet & deployment**
+- Server groups / tags; richer Compose templates.
+
+**Hardening**
+- Finish the zero-SSH-key migration tooling (Tailscale + step-ca + ghostunnel/socket-proxy) and
+  optional short-lived SSH certificates as break-glass.
+
+Have a request? Open an issue.
 
 ---
 
