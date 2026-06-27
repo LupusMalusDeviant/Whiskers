@@ -8,4 +8,5 @@ public sealed record InAppNotification(
     string EventType,
     string Title,
     string Detail,
-    string Severity);
+    string Severity,
+    string? Link = null);

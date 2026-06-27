@@ -89,6 +89,25 @@ public sealed class InAppNotificationStore : IInAppNotificationStore
             }.Where(s => s is not null));
 
         return new InAppNotification(
-            Guid.NewGuid().ToString("N")[..8], e.Timestamp, e.EventType, title, detail, severity);
+            Guid.NewGuid().ToString("N")[..8], e.Timestamp, e.EventType, title, detail, severity, LinkFor(e));
+    }
+
+    /// <summary>Maps an event to the in-app page it should open when the notification is clicked.
+    /// Null = not navigable.</summary>
+    private static string? LinkFor(NotificationEvent e)
+    {
+        if (e.EventType == "agent_approval") return "approvals";
+        if (e.EventType.StartsWith("agent_action", StringComparison.Ordinal)) return "agent-history";
+        if (e.EventType == "cve_finding") return "cves";
+        if (e.EventType.StartsWith("log_alert", StringComparison.Ordinal)) return "logs";
+        if (e.EventType is "image_update" or "auto_update_failed") return ""; // dashboard (path-base safe)
+
+        // Container-scoped events → the container's detail page when we know which one.
+        if (e.EventType is "unhealthy" or "oom_killed" or "stopped" or "restart_loop"
+                or "high_cpu" or "high_memory" or "metric_anomaly"
+            && !string.IsNullOrWhiteSpace(e.ContainerId))
+            return $"container/{e.ContainerId}";
+
+        return null;
     }
 }
