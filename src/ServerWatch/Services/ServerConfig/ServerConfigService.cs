@@ -145,8 +145,10 @@ public class ServerConfigService
         var keyPath = Path.Combine(keyDir, fileName);
         await File.WriteAllBytesAsync(keyPath, keyData);
 
-        // Set restrictive permissions (SSH requires this)
-        File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        // Set restrictive permissions (SSH requires this). Linux-only API — guarded so the analyzer
+        // and any non-Linux dev build are satisfied; the app itself runs in Linux containers.
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
         // Update server config
         var server = GetServer(serverId);

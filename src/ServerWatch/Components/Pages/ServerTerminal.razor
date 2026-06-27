@@ -68,8 +68,8 @@
                 _session = SessionManager.CreateSshSession(server);
             }
 
-            _ = ReadStreamAsync(_session.Process.StandardOutput, _cts.Token);
-            _ = ReadStreamAsync(_session.Process.StandardError, _cts.Token);
+            _ = ReadStreamAsync(_session.Process!.StandardOutput, _cts.Token);
+            _ = ReadStreamAsync(_session.Process!.StandardError, _cts.Token);
         }
         catch (Exception ex)
         {

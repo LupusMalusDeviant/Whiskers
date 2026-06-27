@@ -112,7 +112,7 @@
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                <MudIcon Icon="@GetIcon(_selectedTemplate.Icon)" Color="Color.Primary" />
+                <MudIcon Icon="@GetIcon(_selectedTemplate!.Icon)" Color="Color.Primary" />
                 <span>@_selectedTemplate.Name deployen</span>
             </MudStack>
         </TitleContent>
@@ -131,7 +131,7 @@
             @foreach (var key in _deployVars.Keys.ToList())
             {
                 var k = key;
-                var isRequired = _selectedTemplate.RequiredEnvVars.Contains(k);
+                var isRequired = _selectedTemplate!.RequiredEnvVars.Contains(k);
                 var isPort = k.Contains("PORT", StringComparison.OrdinalIgnoreCase);
                 <MudTextField Value="@_deployVars[k]" ValueChanged="@((string v) => { _deployVars[k] = v; if (isPort) CheckPortConflicts(); })"
                               Label="@k" Variant="Variant.Outlined" Class="mb-2"

@@ -94,10 +94,15 @@ public class DockerService : IDockerService
         {
             var client = await GetClient(serverId);
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            // Single-shot (Stream=false) returns the stats JSON as a Stream — all we need here. The
+            // non-obsolete overload requires an IProgress<JSONMessage> streaming callback; keep the
+            // simpler obsolete overload deliberately.
+#pragma warning disable CS0618
             var response = await client.Containers.GetContainerStatsAsync(
                 containerId,
                 new ContainerStatsParameters { Stream = false },
                 cts.Token);
+#pragma warning restore CS0618
 
             using var reader = new StreamReader(response);
             var json = await reader.ReadToEndAsync();
@@ -486,10 +491,6 @@ public class DockerService : IDockerService
         var cacheKey = $"hostres:{serverId ?? "local"}";
         if (_statsCache.TryGetValue(cacheKey, out (double cpu, long mem) cachedRes))
             return cachedRes;
-
-        // Use exec on a running container to read host /proc
-        // We need two CPU samples with a small delay
-        var script = "cat /host_proc/stat | head -1 && cat /host_proc/meminfo | head -3 && sleep 0.5 && cat /host_proc/stat | head -1";
 
         // Try to exec into the serverwatch container itself (which has /proc/1/root access)
         // Simpler approach: read from the host /proc mount

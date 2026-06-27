@@ -914,7 +914,6 @@ else
     private ContainerStats? _stats;
     private Timer? _refreshTimer;
     private int _activeTab;
-    private int _lastActiveTab = -1;
 
     // Chart state
     private string _chartPeriod = "1h";
@@ -1072,8 +1071,8 @@ else
 
             _termSession = SessionManager.CreateSession(ContainerId, _resolvedServerId);
 
-            _ = ReadTermStreamAsync(_termSession.Process.StandardOutput, _termCts.Token);
-            _ = ReadTermStreamAsync(_termSession.Process.StandardError, _termCts.Token);
+            _ = ReadTermStreamAsync(_termSession.Process!.StandardOutput, _termCts.Token);
+            _ = ReadTermStreamAsync(_termSession.Process!.StandardError, _termCts.Token);
         }
         catch (Exception ex)
         {

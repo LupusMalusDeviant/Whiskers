@@ -13,7 +13,7 @@
                    OnClick="@(() => Nav.NavigateTo($"container/{ServerId}/{ContainerId}"))" />
     <MudText Typo="Typo.h5">Container-Terminal</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
-        @ContainerId[..Math.Min(12, ContainerId?.Length ?? 0)]
+        @(string.IsNullOrEmpty(ContainerId) ? "" : ContainerId[..Math.Min(12, ContainerId.Length)])
     </MudChip>
 </MudStack>
 
@@ -55,8 +55,8 @@
 
             _session = SessionManager.CreateSession(ContainerId, ServerId);
 
-            _ = ReadStreamAsync(_session.Process.StandardOutput, _cts.Token);
-            _ = ReadStreamAsync(_session.Process.StandardError, _cts.Token);
+            _ = ReadStreamAsync(_session.Process!.StandardOutput, _cts.Token);
+            _ = ReadStreamAsync(_session.Process!.StandardError, _cts.Token);
         }
         catch (Exception ex)
         {

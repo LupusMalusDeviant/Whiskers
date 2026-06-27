@@ -30,7 +30,6 @@
 </MudPaper>
 
 @code {
-    private bool _loaded;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -107,7 +106,6 @@
             }
 
             await JS.InvokeVoidAsync("ServerWatch.Graph.create", "topology-graph", nodes, edges);
-            _loaded = true;
         }
         catch (Exception ex)
         {
