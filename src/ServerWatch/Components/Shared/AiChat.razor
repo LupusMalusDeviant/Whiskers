@@ -4,6 +4,7 @@
 @using ServerWatch.Models.Agent
 @using ServerWatch.Services.Agent
 @using ServerWatch.Services.Agent.Approvals
+@using ServerWatch.Services.Agent.Chat
 @using ServerWatch.Services.Agent.Guardrails
 @using ServerWatch.Services.Auth
 @inject ServerWatch.Services.AiChat.IAiChatService ChatService
@@ -14,6 +15,7 @@
 @inject ICurrentUserService CurrentUser
 @inject IApprovalCoordinator ApprovalCoordinator
 @inject IApprovalStore ApprovalStore
+@inject IChatWidgetParser WidgetParser
 @inject IJSRuntime JS
 
 @if (Visible)
@@ -74,6 +76,14 @@
                     <div style="@BubbleStyle(msg.Role)">
                         @if (msg.Role == "user") { <span style="white-space:pre-wrap;">@msg.Content</span> }
                         else if (msg.Role == "tool" || msg.Role == "error") { <span style="white-space:pre-wrap;">@msg.Content</span> }
+                        else if (WidgetParser.HasWidgets(msg.Content))
+                        {
+                            @foreach (var seg in WidgetParser.Parse(msg.Content))
+                            {
+                                if (seg.IsWidget) { <ChatWidget Spec="seg.Widget" /> }
+                                else if (!string.IsNullOrEmpty(seg.Text)) { @((MarkupString)RenderMarkdown(seg.Text)) }
+                            }
+                        }
                         else { @((MarkupString)RenderMarkdown(msg.Content)) }
                     </div>
                 }
