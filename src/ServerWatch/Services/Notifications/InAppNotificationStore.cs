@@ -72,6 +72,7 @@ public sealed class InAppNotificationStore : IInAppNotificationStore
             "high_memory" => ("Hohe RAM-Last", "Error"),
             "metric_anomaly" => ("Metrik-Ausreißer", "Warning"),
             "agent_action" => ("AI-Agent", "Info"),
+            "agent_approval" => ("Freigabe erforderlich", "Warning"),
             "auto_update_failed" => ("Auto-Update fehlgeschlagen", "Error"),
             _ when e.EventType.StartsWith("log_alert", StringComparison.Ordinal) => ("Log-Alert / Fehler im Log", "Warning"),
             _ => (e.EventType, "Info"),

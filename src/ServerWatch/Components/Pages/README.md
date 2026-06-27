@@ -47,6 +47,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `AgentCallDetailDialog.razor` | Detail dialog for a single recorded tool call — metadata, redacted parameters, result summary, error. |
 | `Agent.razor` | The acting agent's chat/console (markdown rendering, file attachments, provider + system-prompt editor). |
 | `Guardrails.razor` | Multi-preset guardrail editor (per-preset tool grid + mode, free-text rules). |
+| `Approvals.razor` | Human-in-the-Loop **Freigaben** (`/approvals`): live list of pending agent confirmations with Genehmigen/Ablehnen, plus recently-decided history. Backed by [`IApprovalStore`](../../Services/Agent/Approvals/). |
 | `AiTriggers.razor` | Manage AI triggers: events that run the agent autonomously, with quick-setup templates. |
 
 ## Settings & system

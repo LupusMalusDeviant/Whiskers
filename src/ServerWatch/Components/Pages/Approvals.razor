@@ -1,0 +1,182 @@
+@page "/approvals"
+@attribute [Authorize]
+@implements IDisposable
+@using ServerWatch.Models.Agent
+@using ServerWatch.Services.Agent.Approvals
+@inject IApprovalStore ApprovalStore
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
+
+<PageTitle>Freigaben - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Approval" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Freigaben</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Aktionen, für die der Agent deine Bestätigung braucht</MudText>
+        </div>
+    </MudStack>
+</div>
+
+@if (_pending.Count == 0)
+{
+    <MudPaper Class="pa-8" Outlined="true" Style="text-align: center;">
+        <MudIcon Icon="@Icons.Material.Filled.TaskAlt" Size="Size.Large" Color="Color.Success" Class="mb-2" />
+        <MudText Typo="Typo.body1">Keine offenen Freigaben.</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Sobald ein Agent eine bestätigungspflichtige Aktion ausführen möchte, erscheint sie hier.
+        </MudText>
+    </MudPaper>
+}
+else
+{
+    <MudStack Spacing="3">
+        @foreach (var a in _pending)
+        {
+            <MudPaper Class="pa-4" Outlined="true" Style="border-color: var(--mud-palette-warning);">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Wrap="Wrap.Wrap">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@a.Actor</MudChip>
+                    <MudText Typo="Typo.body1">möchte <code>@a.ToolName</code> ausführen</MudText>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@LevelColor(a.Level)">@a.Level</MudChip>
+                    <MudSpacer />
+                    <MudTooltip Text="@($"Läuft ab {a.ExpiresAt.ToLocalTime():HH:mm:ss}")">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" Style="vertical-align: middle;" />
+                            @a.CreatedAt.ToLocalTime().ToString("HH:mm:ss")
+                        </MudText>
+                    </MudTooltip>
+                </MudStack>
+
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@a.Reason</MudText>
+
+                @if (!string.IsNullOrWhiteSpace(a.ParamsJson))
+                {
+                    <MudExpansionPanels Elevation="0" Class="mb-2">
+                        <MudExpansionPanel Text="Parameter (Secrets redacted)" Dense="true">
+                            <pre class="sw-approval-params">@a.ParamsJson</pre>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(a.Diff))
+                {
+                    <pre class="sw-approval-params">@a.Diff</pre>
+                }
+
+                <MudStack Row="true" Spacing="2" Class="mt-2">
+                    <MudButton Color="Color.Success" Variant="Variant.Filled"
+                               StartIcon="@Icons.Material.Filled.Check"
+                               Disabled="@(_busy.Contains(a.Id))"
+                               OnClick="@(() => Resolve(a.Id, true))">Genehmigen</MudButton>
+                    <MudButton Color="Color.Error" Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Block"
+                               Disabled="@(_busy.Contains(a.Id))"
+                               OnClick="@(() => Resolve(a.Id, false))">Ablehnen</MudButton>
+                </MudStack>
+            </MudPaper>
+        }
+    </MudStack>
+}
+
+@if (_recent.Count > 0)
+{
+    <MudText Typo="Typo.subtitle2" Class="mt-6 mb-2" Color="Color.Secondary">Kürzlich entschieden</MudText>
+    <MudSimpleTable Dense="true" Hover="true" Striped="true">
+        <thead>
+            <tr><th>Zeit</th><th>Akteur</th><th>Tool</th><th>Entscheidung</th><th>Von</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var a in _recent)
+            {
+                <tr>
+                    <td>@((a.ResolvedAt ?? a.CreatedAt).ToLocalTime().ToString("HH:mm:ss"))</td>
+                    <td>@a.Actor</td>
+                    <td><code>@a.ToolName</code></td>
+                    <td><MudChip T="string" Size="Size.Small" Color="@StatusColor(a.Status)">@StatusLabel(a.Status)</MudChip></td>
+                    <td>@(a.ResolvedBy ?? "—")</td>
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+<style>
+    .sw-approval-params {
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 220px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 0.8rem;
+        margin: 0;
+    }
+</style>
+
+@code {
+    private IReadOnlyList<Approval> _pending = Array.Empty<Approval>();
+    private IReadOnlyList<Approval> _recent = Array.Empty<Approval>();
+    private readonly HashSet<string> _busy = new();
+
+    protected override void OnInitialized()
+    {
+        ApprovalStore.Changed += OnChanged;
+        Refresh();
+    }
+
+    private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
+
+    private void Refresh()
+    {
+        _pending = ApprovalStore.GetPending();
+        _recent = ApprovalStore.GetAll()
+            .Where(a => a.Status != ApprovalStatus.Pending)
+            .Take(15)
+            .ToList();
+    }
+
+    private async Task Resolve(string approvalId, bool approved)
+    {
+        _busy.Add(approvalId);
+        try
+        {
+            var by = await CurrentUser.GetEmailAsync() ?? "web";
+            await ApprovalStore.ResolveAsync(approvalId, approved, by);
+        }
+        finally
+        {
+            _busy.Remove(approvalId);
+        }
+        // Store raises Changed → list refreshes.
+    }
+
+    private static Color LevelColor(string level) => level switch
+    {
+        "admin" => Color.Error,
+        "write" => Color.Warning,
+        _ => Color.Success,
+    };
+
+    private static Color StatusColor(ApprovalStatus s) => s switch
+    {
+        ApprovalStatus.Approved => Color.Success,
+        ApprovalStatus.Rejected => Color.Error,
+        ApprovalStatus.Expired => Color.Warning,
+        ApprovalStatus.Cancelled => Color.Default,
+        _ => Color.Default,
+    };
+
+    private static string StatusLabel(ApprovalStatus s) => s switch
+    {
+        ApprovalStatus.Approved => "Genehmigt",
+        ApprovalStatus.Rejected => "Abgelehnt",
+        ApprovalStatus.Expired => "Abgelaufen",
+        ApprovalStatus.Cancelled => "Abgebrochen",
+        _ => s.ToString(),
+    };
+
+    public void Dispose() => ApprovalStore.Changed -= OnChanged;
+}

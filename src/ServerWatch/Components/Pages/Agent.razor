@@ -8,6 +8,7 @@
 @using ServerWatch.Models
 @using ServerWatch.Models.Agent
 @using ServerWatch.Services.Agent
+@using ServerWatch.Services.Agent.Approvals
 @using ServerWatch.Services.Agent.Guardrails
 @using ServerWatch.Services.Agent.Providers
 @using ServerWatch.Services.Auth
@@ -19,6 +20,8 @@
 @inject IAgentTranscriptStore TranscriptStore
 @inject IAgentSettingsStore SettingsStore
 @inject IAgentProviderFactory ProviderFactory
+@inject IApprovalCoordinator ApprovalCoordinator
+@inject IApprovalStore ApprovalStore
 @inject ISnackbar Snackbar
 
 <PageTitle>Agent</PageTitle>
@@ -233,8 +236,10 @@
     private static string FormatSize(int chars) => chars < 1024 ? $"{chars} B" : $"{chars / 1024} KB";
 
     private IAgentSession? _session;
+    private AgentContext? _context;
     private AgentToolCall? _pendingConfirm;
     private string _pendingReason = "";
+    private string? _pendingApprovalId;
 
     private string _email = "local@serverwatch.local";
     private IReadOnlyList<AgentMessage> _seedHistory = Array.Empty<AgentMessage>();
@@ -338,7 +343,11 @@
         _running = true;
         StateHasChanged();
 
-        _session ??= await AgentService.StartSessionAsync(await BuildContextAsync(), _seedHistory);
+        if (_session is null)
+        {
+            _context = await BuildContextAsync();
+            _session = await AgentService.StartSessionAsync(_context, _seedHistory);
+        }
 
         try
         {
@@ -355,6 +364,12 @@
                     case AgentEvent.ConfirmationRequired c:
                         _pendingConfirm = c.Call;
                         _pendingReason = c.Reason;
+                        // Register centrally so the bell + "Freigaben" page can also decide.
+                        if (_session is not null && _context is not null)
+                        {
+                            var approval = await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason);
+                            _pendingApprovalId = approval.Id;
+                        }
                         break;
                     case AgentEvent.Failed f:
                         _lines.Add(new Line("error", f.Message));
@@ -373,6 +388,7 @@
         {
             _running = false;
             _pendingConfirm = null;
+            _pendingApprovalId = null;
             StateHasChanged();
         }
 
@@ -382,8 +398,12 @@
 
     private async Task ClearChat()
     {
+        if (_session is not null) await ApprovalStore.CancelForSessionAsync(_session.SessionId);
         _lines.Clear();
         _session = null;
+        _context = null;
+        _pendingConfirm = null;
+        _pendingApprovalId = null;
         _seedHistory = Array.Empty<AgentMessage>();
         await TranscriptStore.ClearAsync(_email);
     }
@@ -391,9 +411,16 @@
     private async Task Resolve(bool approved)
     {
         var call = _pendingConfirm;
+        var approvalId = _pendingApprovalId;
         _pendingConfirm = null;
+        _pendingApprovalId = null;
         StateHasChanged();
-        if (_session is not null && call is not null)
+
+        // Route through the central store so the bell + "Freigaben" page stay consistent (idempotent:
+        // whoever resolves first wins). Fall back to the session directly if no approval was registered.
+        if (approvalId is not null)
+            await ApprovalStore.ResolveAsync(approvalId, approved, _email);
+        else if (_session is not null && call is not null)
             await _session.ResolveConfirmationAsync(call.Id, approved);
     }
 

@@ -46,8 +46,9 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
 
     public Task OnEventAsync(NotificationEvent evt)
     {
-        // Recursion guard: never react to our own result events.
+        // Recursion guard: never react to our own result events or approval pushes.
         if (evt.EventType.StartsWith("agent_action", StringComparison.Ordinal)) return Task.CompletedTask;
+        if (evt.EventType == "agent_approval") return Task.CompletedTask;
         if (!_settings.CurrentValue.Enabled) return Task.CompletedTask;
 
         var now = DateTime.UtcNow;
