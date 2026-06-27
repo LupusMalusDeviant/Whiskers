@@ -24,6 +24,14 @@ window.ServerWatch.Terminal = {
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
 
+        // Make URLs in terminal output clickable (e.g. the Tailscale SSH `check`-mode login link).
+        // Opens in a new tab; degrades gracefully if the addon script didn't load.
+        if (typeof WebLinksAddon !== 'undefined') {
+            term.loadAddon(new WebLinksAddon.WebLinksAddon(function (event, uri) {
+                window.open(uri, '_blank', 'noopener,noreferrer');
+            }));
+        }
+
         const el = document.getElementById(elementId);
         if (!el) {
             console.error('Terminal container element not found:', elementId);
