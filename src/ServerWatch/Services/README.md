@@ -56,7 +56,7 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`Vault/`](Vault/) | Encrypted-at-rest storage for secrets (API keys, tokens) |
 | [`ConfigExport/`](ConfigExport/) | Export non-secret app configuration as JSON |
 | [`AiChat/`](AiChat/) | Read-only advisor chat (guidance only, no actions) |
-| [`Agent/`](Agent/) | The acting agent: multi-provider LLM loop with inescapable guardrails |
+| [`Agent/`](Agent/) | The acting agent: multi-provider LLM loop with inescapable guardrails (presets) + AI triggers for autonomous runs |
 
 ## Conventions
 

@@ -25,8 +25,9 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 
 ## Subfolders
 
-- [`Guardrails/`](Guardrails/) — the code-enforced security policy and rule engine.
+- [`Guardrails/`](Guardrails/) — the code-enforced security policy, presets and rule engine.
 - [`Providers/`](Providers/) — one LLM wire-format implementation per provider.
+- [`Triggers/`](Triggers/) — AI triggers: run the agent autonomously on events.
 
 ## Related
 

@@ -8,3 +8,4 @@ JavaScript interop modules invoked from Blazor components via `IJSRuntime`, for 
 |---|---|
 | `graph-interop.js` | Renders/drives the container relationship graph ([`../../Components/Pages/ContainerGraph.razor`](../../Components/Pages/ContainerGraph.razor)). |
 | `terminal-interop.js` | Drives the in-browser terminal (xterm-style) for the terminal pages, bridging to [`TerminalHub`](../../Hubs/TerminalHub.cs). |
+| `theme-interop.js` | Persists the chosen UI theme in `localStorage` and applies it as `<html data-theme="…">` (see [`../../Components/Layout/AppThemes.cs`](../../Components/Layout/AppThemes.cs)). |

@@ -24,6 +24,7 @@ Plain data models — DTOs, records and enums passed between services, the UI, a
 | `McpPermission.cs` | MCP permission levels + the canonical tool→level map (`DefaultToolLevels`). |
 | `UserRole.cs` / `WhitelistData.cs` | Roles and the email whitelist. |
 | `VaultEntry.cs` | An encrypted vault entry. |
+| `AiTrigger.cs` | An AI trigger (events, name filter, prompt, guardrail preset, cooldown) + the `AiTriggerEvents` catalog of event types. |
 
 ## Subfolders
 

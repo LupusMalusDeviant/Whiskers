@@ -43,7 +43,9 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `LogSearch.razor` | Log search and alerts. |
 | `Cves.razor` | CVE findings dashboard. |
 | `AuditLog.razor` | Audit trail of privileged actions. |
-| `Agent.razor` | The acting agent's chat/console. |
+| `Agent.razor` | The acting agent's chat/console (markdown rendering, file attachments, provider + system-prompt editor). |
+| `Guardrails.razor` | Multi-preset guardrail editor (per-preset tool grid + mode, free-text rules). |
+| `AiTriggers.razor` | Manage AI triggers: events that run the agent autonomously, with quick-setup templates. |
 
 ## Settings & system
 
