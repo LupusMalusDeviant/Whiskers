@@ -9,7 +9,7 @@
 <MudLayout>
     <MudAppBar Elevation="0" Dense="true">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
-                       Edge="Edge.Start" OnClick="ToggleDrawer" />
+                       Edge="Edge.Start" OnClick="ToggleDrawer" Class="d-md-none" />
         <MudSpacer />
         <MudMenu Icon="@Icons.Material.Filled.Palette" Color="Color.Inherit" title="Theme"
                  AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
@@ -56,8 +56,7 @@
 </MudLayout>
 
 @code {
-    // Collapsed by default (incl. first visit); toggle via the AppBar menu button.
-    private bool _drawerOpen = false;
+    private bool _drawerOpen = true;
 
     // Selected theme (persisted in localStorage as "sw-theme"); drives both the MudBlazor
     // palette and the data-theme attribute that switches the CSS glassmorphism variables.
