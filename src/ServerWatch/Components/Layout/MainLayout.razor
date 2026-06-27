@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject IJSRuntime JS
 
 <MudThemeProvider Theme="_theme" IsDarkMode="true" />
 <MudPopoverProvider />
@@ -10,6 +11,25 @@
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
                        Edge="Edge.Start" OnClick="ToggleDrawer" />
         <MudSpacer />
+        <MudMenu Icon="@Icons.Material.Filled.Palette" Color="Color.Inherit" title="Theme"
+                 AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            @foreach (var th in AppThemes.All)
+            {
+                <MudMenuItem OnClick="@(() => SetThemeAsync(th.Key))">
+                    <div style="display: flex; align-items: center; gap: 10px; min-width: 150px;">
+                        <span style="width: 16px; height: 16px; border-radius: 50%; flex: 0 0 auto;
+                                     background: linear-gradient(135deg, @th.Primary, @th.Accent2);
+                                     box-shadow: 0 0 7px @th.Primary;"></span>
+                        <span>@th.Name</span>
+                        @if (_themeKey == th.Key)
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small"
+                                     Color="Color.Primary" Style="margin-left: auto;" />
+                        }
+                    </div>
+                </MudMenuItem>
+            }
+        </MudMenu>
         <AuthorizeView>
             <Authorized>
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: rgba(255,255,255,0.6);">
@@ -39,37 +59,30 @@
     // Collapsed by default (incl. first visit); toggle via the AppBar menu button.
     private bool _drawerOpen = false;
 
-    private readonly MudTheme _theme = new()
+    // Selected theme (persisted in localStorage as "sw-theme"); drives both the MudBlazor
+    // palette and the data-theme attribute that switches the CSS glassmorphism variables.
+    private string _themeKey = AppThemes.DefaultKey;
+    private MudTheme _theme = AppThemes.Get(AppThemes.DefaultKey).ToMudTheme();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        PaletteLight = new PaletteLight
+        if (!firstRender) return;
+        var stored = await JS.InvokeAsync<string?>("swTheme.get");
+        if (!string.IsNullOrEmpty(stored) && stored != _themeKey && AppThemes.All.Any(t => t.Key == stored))
         {
-            Primary = "#f97316",
-            Secondary = "#fb923c",
-            AppbarBackground = "#09090b"
-        },
-        PaletteDark = new PaletteDark
-        {
-            Primary = "#f97316",
-            Secondary = "#fb923c",
-            Tertiary = "#22c55e",
-            Info = "#3b82f6",
-            Success = "#22c55e",
-            Warning = "#f59e0b",
-            Error = "#ef4444",
-            AppbarBackground = "#09090b",
-            Background = "#09090b",
-            Surface = "#111113",
-            DrawerBackground = "#09090b",
-            TextPrimary = "#e4e4e7",
-            TextSecondary = "#a1a1aa",
-            ActionDefault = "#a1a1aa",
-            DrawerText = "#a1a1aa",
-            DrawerIcon = "#71717a",
-            TableStriped = "#0c0c0e",
-            Divider = "#27272a",
-            LinesDefault = "#27272a"
+            _themeKey = stored;
+            _theme = AppThemes.Get(stored).ToMudTheme();
+            StateHasChanged();
         }
-    };
+    }
+
+    private async Task SetThemeAsync(string key)
+    {
+        _themeKey = key;
+        _theme = AppThemes.Get(key).ToMudTheme();
+        await JS.InvokeVoidAsync("swTheme.set", key);
+        StateHasChanged();
+    }
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 }

@@ -13,10 +13,19 @@
     --sw-glass-border: rgba(255, 255, 255, 0.07);
     --sw-glass-hover: rgba(255, 255, 255, 0.06);
 
-    /* Primary accent: Orange */
+    /* Primary accent (default: Ember orange) — overridden per theme below */
     --sw-accent-primary: #f97316;
     --sw-accent-primary-soft: rgba(249, 115, 22, 0.12);
     --sw-accent-primary-glow: rgba(249, 115, 22, 0.2);
+
+    /* Second accent + the brand gradient (auto-tracks the two accents) */
+    --sw-accent-2: #fbbf24;
+    --sw-gradient: linear-gradient(135deg, var(--sw-accent-primary), var(--sw-accent-2));
+
+    /* Translucent chrome (app bar / drawer) + ambient background glow */
+    --sw-bg-glass-strong: rgba(9, 9, 11, 0.9);
+    --sw-ambient-1: rgba(249, 115, 22, 0.07);
+    --sw-ambient-2: rgba(251, 191, 36, 0.05);
 
     /* Secondary accents */
     --sw-accent-green: #22c55e;
@@ -31,6 +40,62 @@
     --sw-text-muted: rgba(255, 255, 255, 0.30);
 }
 
+/* === Themes — each overrides the accent + background variables; the gradient,
+   ambient glow, app bar/drawer tint and all glass surfaces follow automatically.
+   "ember" is the :root default, so it needs no block. === */
+
+html[data-theme="aurora"] {
+    --sw-bg-primary: #0a0f0e;
+    --sw-bg-secondary: #0d1714;
+    --sw-bg-elevated: #11201c;
+    --sw-accent-primary: #2dd4bf;
+    --sw-accent-primary-soft: rgba(45, 212, 191, 0.12);
+    --sw-accent-primary-glow: rgba(45, 212, 191, 0.20);
+    --sw-accent-2: #22d3ee;
+    --sw-bg-glass-strong: rgba(10, 15, 14, 0.90);
+    --sw-ambient-1: rgba(45, 212, 191, 0.08);
+    --sw-ambient-2: rgba(34, 211, 238, 0.05);
+}
+
+html[data-theme="nebula"] {
+    --sw-bg-primary: #0b0a12;
+    --sw-bg-secondary: #12101d;
+    --sw-bg-elevated: #181527;
+    --sw-accent-primary: #a78bfa;
+    --sw-accent-primary-soft: rgba(167, 139, 250, 0.14);
+    --sw-accent-primary-glow: rgba(167, 139, 250, 0.22);
+    --sw-accent-2: #f472b6;
+    --sw-bg-glass-strong: rgba(11, 10, 18, 0.90);
+    --sw-ambient-1: rgba(167, 139, 250, 0.09);
+    --sw-ambient-2: rgba(244, 114, 182, 0.06);
+}
+
+html[data-theme="ocean"] {
+    --sw-bg-primary: #080d14;
+    --sw-bg-secondary: #0c1420;
+    --sw-bg-elevated: #101b2b;
+    --sw-accent-primary: #38bdf8;
+    --sw-accent-primary-soft: rgba(56, 189, 248, 0.12);
+    --sw-accent-primary-glow: rgba(56, 189, 248, 0.20);
+    --sw-accent-2: #6366f1;
+    --sw-bg-glass-strong: rgba(8, 13, 20, 0.90);
+    --sw-ambient-1: rgba(56, 189, 248, 0.08);
+    --sw-ambient-2: rgba(99, 102, 241, 0.06);
+}
+
+html[data-theme="rose"] {
+    --sw-bg-primary: #120a0d;
+    --sw-bg-secondary: #1a0f14;
+    --sw-bg-elevated: #22141b;
+    --sw-accent-primary: #fb7185;
+    --sw-accent-primary-soft: rgba(251, 113, 133, 0.13);
+    --sw-accent-primary-glow: rgba(251, 113, 133, 0.20);
+    --sw-accent-2: #e879f9;
+    --sw-bg-glass-strong: rgba(18, 10, 13, 0.90);
+    --sw-ambient-1: rgba(251, 113, 133, 0.09);
+    --sw-ambient-2: rgba(232, 121, 249, 0.06);
+}
+
 html, body {
     margin: 0;
     padding: 0;
@@ -38,18 +103,20 @@ html, body {
     background: var(--sw-bg-primary);
     color: var(--sw-text-primary);
     -webkit-font-smoothing: antialiased;
+    transition: background 0.4s ease, color 0.4s ease;
 }
 
-/* Subtle warm ambient glow */
+/* Ambient gradient glow — colours come from the active theme */
 body::before {
     content: '';
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background:
-        radial-gradient(ellipse at 20% 10%, rgba(249, 115, 22, 0.04) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 90%, rgba(249, 115, 22, 0.02) 0%, transparent 50%);
+        radial-gradient(ellipse at 18% 8%, var(--sw-ambient-1) 0%, transparent 55%),
+        radial-gradient(ellipse at 85% 92%, var(--sw-ambient-2) 0%, transparent 55%);
     z-index: -1;
     pointer-events: none;
+    transition: background 0.4s ease;
 }
 
 code, pre, .monospace {
@@ -74,7 +141,7 @@ code, pre, .monospace {
 
 /* AppBar */
 .mud-appbar {
-    background: rgba(9, 9, 11, 0.9) !important;
+    background: var(--sw-bg-glass-strong) !important;
     backdrop-filter: blur(16px) !important;
     -webkit-backdrop-filter: blur(16px) !important;
     border-bottom: 1px solid var(--sw-glass-border) !important;
@@ -83,7 +150,7 @@ code, pre, .monospace {
 
 /* Drawer */
 .mud-drawer {
-    background: rgba(9, 9, 11, 0.95) !important;
+    background: var(--sw-bg-glass-strong) !important;
     backdrop-filter: blur(12px) !important;
     -webkit-backdrop-filter: blur(12px) !important;
     border-right: 1px solid var(--sw-glass-border) !important;
@@ -257,12 +324,21 @@ code, pre, .monospace {
     50% { opacity: 0.5; transform: scale(0.85); }
 }
 
-/* Gradient text — orange */
+/* Gradient text — tracks the active theme */
 .sw-gradient-text {
-    background: linear-gradient(135deg, #f97316, #fb923c);
+    background: var(--sw-gradient);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+}
+
+/* Primary filled buttons get the brand gradient for a modern accent */
+.mud-button-filled-primary {
+    background: var(--sw-gradient) !important;
+    color: #0b0b0d !important;
+}
+.mud-button-filled-primary:hover {
+    filter: brightness(1.08);
 }
 
 /* Query editor */
