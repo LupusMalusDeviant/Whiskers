@@ -547,6 +547,7 @@ code, pre, .monospace {
     border-bottom: 1px solid var(--sw-glass-border);
 }
 .sw-sidebar-logo svg { width: 28px; height: 28px; flex-shrink: 0; }
+.sw-sidebar-logo-img { width: 34px; height: 34px; flex-shrink: 0; object-fit: contain; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4)); }
 .sw-sidebar-logo .sw-logo-text {
     font-size: 1.1rem;
     font-weight: 700;
