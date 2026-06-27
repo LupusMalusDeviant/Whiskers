@@ -17,6 +17,7 @@
     --sw-accent-primary: #f97316;
     --sw-accent-primary-soft: rgba(249, 115, 22, 0.12);
     --sw-accent-primary-glow: rgba(249, 115, 22, 0.2);
+    --sw-logo-hue: 0deg; /* logo is already orange — no shift on the default Ember theme */
 
     /* Second accent + the brand gradient (auto-tracks the two accents) */
     --sw-accent-2: #fbbf24;
@@ -51,6 +52,7 @@ html[data-theme="aurora"] {
     --sw-accent-primary: #2dd4bf;
     --sw-accent-primary-soft: rgba(45, 212, 191, 0.12);
     --sw-accent-primary-glow: rgba(45, 212, 191, 0.20);
+    --sw-logo-hue: 147deg;
     --sw-accent-2: #22d3ee;
     --sw-bg-glass-strong: rgba(10, 15, 14, 0.90);
     --sw-ambient-1: rgba(45, 212, 191, 0.08);
@@ -64,6 +66,7 @@ html[data-theme="nebula"] {
     --sw-accent-primary: #a78bfa;
     --sw-accent-primary-soft: rgba(167, 139, 250, 0.14);
     --sw-accent-primary-glow: rgba(167, 139, 250, 0.22);
+    --sw-logo-hue: 230deg;
     --sw-accent-2: #f472b6;
     --sw-bg-glass-strong: rgba(11, 10, 18, 0.90);
     --sw-ambient-1: rgba(167, 139, 250, 0.09);
@@ -77,6 +80,7 @@ html[data-theme="ocean"] {
     --sw-accent-primary: #38bdf8;
     --sw-accent-primary-soft: rgba(56, 189, 248, 0.12);
     --sw-accent-primary-glow: rgba(56, 189, 248, 0.20);
+    --sw-logo-hue: 173deg;
     --sw-accent-2: #6366f1;
     --sw-bg-glass-strong: rgba(8, 13, 20, 0.90);
     --sw-ambient-1: rgba(56, 189, 248, 0.08);
@@ -90,6 +94,7 @@ html[data-theme="rose"] {
     --sw-accent-primary: #fb7185;
     --sw-accent-primary-soft: rgba(251, 113, 133, 0.13);
     --sw-accent-primary-glow: rgba(251, 113, 133, 0.20);
+    --sw-logo-hue: 326deg;
     --sw-accent-2: #e879f9;
     --sw-bg-glass-strong: rgba(18, 10, 13, 0.90);
     --sw-ambient-1: rgba(251, 113, 133, 0.09);
@@ -547,7 +552,7 @@ code, pre, .monospace {
     border-bottom: 1px solid var(--sw-glass-border);
 }
 .sw-sidebar-logo svg { width: 28px; height: 28px; flex-shrink: 0; }
-.sw-sidebar-logo-img { width: 34px; height: 34px; flex-shrink: 0; object-fit: contain; filter: drop-shadow(0 0 6px var(--sw-accent-primary-glow)); }
+.sw-sidebar-logo-img { width: 34px; height: 34px; flex-shrink: 0; object-fit: contain; filter: hue-rotate(var(--sw-logo-hue, 0deg)) drop-shadow(0 0 6px var(--sw-accent-primary-glow)); transition: filter 0.3s ease; }
 
 /* Notification badge: anchor it to the vertical CENTER of the bell icon so the count can
    never poke above the (dense, top-fixed) app bar and get clipped. */
