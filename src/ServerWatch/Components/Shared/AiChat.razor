@@ -1,29 +1,51 @@
+@using Microsoft.Extensions.Options
+@using ServerWatch.Configuration
+@using ServerWatch.Models
+@using ServerWatch.Models.Agent
+@using ServerWatch.Services.Agent
+@using ServerWatch.Services.Agent.Approvals
+@using ServerWatch.Services.Agent.Guardrails
+@using ServerWatch.Services.Auth
 @inject ServerWatch.Services.AiChat.IAiChatService ChatService
 @inject ServerWatch.Services.AiChat.IChatHistoryStore HistoryStore
+@inject IOptionsMonitor<AgentSettings> AgentSettings
+@inject IAgentService AgentService
+@inject IGuardrailStore GuardrailStore
+@inject ICurrentUserService CurrentUser
+@inject IApprovalCoordinator ApprovalCoordinator
+@inject IApprovalStore ApprovalStore
 @inject IJSRuntime JS
 
-@if (ChatService.IsEnabled)
+@if (Visible)
 {
-    @* Floating Chat Button *@
     @if (!_isOpen)
     {
         <div style="position: fixed; bottom: 24px; right: 24px; z-index: 1000;">
-            <MudFab Color="Color.Primary" StartIcon="@Icons.Material.Filled.SmartToy" Size="Size.Large"
-                    OnClick="OpenChat" Style="box-shadow: 0 4px 20px rgba(96, 165, 250, 0.3);" />
+            <MudBadge Dot="true" Color="Color.Success" Visible="@AgentMode" Overlap="true" Bordered="true">
+                <MudFab Color="Color.Primary" Size="Size.Large" OnClick="OpenChat"
+                        Style="box-shadow: 0 4px 20px rgba(96,165,250,0.3); overflow:hidden;">
+                    <img src="logo.png" alt="Agent" width="34" height="34" style="border-radius:50%;" />
+                </MudFab>
+            </MudBadge>
         </div>
     }
 
-    @* Chat Panel *@
     @if (_isOpen)
     {
-        <div style="position: fixed; bottom: 24px; right: 24px; width: 420px; max-height: 560px; z-index: 1001;
-                    background: rgba(15, 15, 35, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08);
+        <div style="position: fixed; bottom: 24px; right: 24px; width: 440px; max-height: 600px; z-index: 1001;
+                    background: rgba(15,15,35,0.96); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08);
                     border-radius: 16px; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,0.5);">
 
             @* Header *@
-            <div style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 8px;">
-                <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" Style="color: var(--sw-accent-blue);" />
-                <span style="font-weight: 600; font-size: 0.9rem; flex: 1;">ServerWatch Assistent</span>
+            <div style="padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 8px;">
+                <img src="logo.png" alt="ServerWatch" width="30" height="30" style="border-radius:50%; flex:0 0 auto;" />
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight: 600; font-size: 0.9rem;">@(AgentMode ? "ServerWatch-Agent" : "ServerWatch Assistent")</div>
+                    <div style="font-size: 0.7rem; color: rgba(255,255,255,0.4);">
+                        @if (AgentMode) { <span style="color: var(--sw-accent-green);">● handelnd</span> <text>· kennt diese Seite</text> }
+                        else { <text>Nur-Lese-Berater</text> }
+                    </div>
+                </div>
                 <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearChat" title="Chat leeren"
                                Style="color: rgba(255,255,255,0.4);" />
                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _isOpen = false)"
@@ -31,45 +53,54 @@
             </div>
 
             @* Messages *@
-            <div id="sw-chat-messages" style="flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; max-height: 400px;">
+            <div id="sw-chat-messages" style="flex: 1; overflow-y: auto; overflow-x:hidden; padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; max-height: 420px;">
                 @if (!_messages.Any())
                 {
-                    <div style="text-align: center; color: rgba(255,255,255,0.3); padding: 40px 0; font-size: 0.85rem;">
-                        Frag mich etwas zu deinen Containern, Servern oder Datenbanken.
+                    <div style="text-align: center; color: rgba(255,255,255,0.3); padding: 36px 0; font-size: 0.85rem;">
+                        @if (AgentMode) { <text>Ich sehe, was auf deiner Seite ist — sag mir, was ich tun soll.</text> }
+                        else { <text>Frag mich etwas zu deinen Containern, Servern oder Datenbanken.</text> }
                     </div>
                 }
                 @foreach (var msg in _messages)
                 {
-                    var isUser = msg.Role == "user";
-                    <div style="@($"align-self: {(isUser ? "flex-end" : "flex-start")}; max-width: 88%; padding: {(isUser ? "8px 12px" : "10px 14px")}; border-radius: {(isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px")}; background: {(isUser ? "rgba(96, 165, 250, 0.15)" : "rgba(255,255,255,0.04)")}; font-size: 0.85rem; line-height: 1.5;")">
-                        @if (isUser)
-                        {
-                            @msg.Content
-                        }
-                        else
-                        {
-                            @((MarkupString)RenderMarkdown(msg.Content))
-                        }
+                    <div style="@BubbleStyle(msg.Role)">
+                        @if (msg.Role == "user") { @msg.Content }
+                        else if (msg.Role == "tool" || msg.Role == "error") { <span style="white-space:pre-wrap;">@msg.Content</span> }
+                        else { @((MarkupString)RenderMarkdown(msg.Content)) }
                     </div>
                 }
-                @if (_thinking)
+                @if (_pendingConfirm is not null)
                 {
-                    <div style="align-self: flex-start; padding: 10px 14px; border-radius: 12px 12px 12px 4px; background: rgba(255,255,255,0.04); display: flex; align-items: center; gap: 8px;">
+                    <div style="align-self:stretch; padding:8px 10px; border-radius:8px; background:rgba(249,115,22,0.12); border:1px solid var(--sw-accent-amber);">
+                        <div style="font-size:0.8rem; margin-bottom:6px;"><b>Freigabe nötig:</b> <code>@_pendingConfirm.Call.Name</code> — @_pendingReason</div>
+                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="@(() => Resolve(true))" Class="mr-2">Genehmigen</MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" OnClick="@(() => Resolve(false))">Ablehnen</MudButton>
+                    </div>
+                }
+                @if (_thinking && _pendingConfirm is null)
+                {
+                    <div style="align-self: flex-start; padding: 10px 14px; border-radius: 12px; background: rgba(255,255,255,0.04); display: flex; align-items: center; gap: 8px;">
                         <MudProgressCircular Size="Size.Small" Indeterminate="true" Style="width: 16px; height: 16px;" />
-                        <span style="color: rgba(255,255,255,0.4); font-size: 0.8rem;">Denkt nach...</span>
+                        <span style="color: rgba(255,255,255,0.4); font-size: 0.8rem;">@(AgentMode ? "Arbeitet…" : "Denkt nach…")</span>
                     </div>
                 }
             </div>
 
             @* Input *@
-            <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.06);">
+            <div style="padding: 10px 14px; border-top: 1px solid rgba(255,255,255,0.06);">
                 <MudTextField @bind-Value="_input" Variant="Variant.Outlined"
-                              Placeholder="Nachricht... (Enter zum Senden)"
-                              Style="font-size: 0.85rem;"
-                              Immediate="true"
+                              Placeholder="@(AgentMode ? "Auftrag… (Enter sendet)" : "Nachricht… (Enter sendet)")"
+                              Style="font-size: 0.85rem;" Immediate="true"
                               OnKeyDown="OnKeyDown" Disabled="@_thinking"
                               Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Send"
                               AdornmentColor="Color.Primary" OnAdornmentClick="Send" />
+                @if (AgentMode)
+                {
+                    <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
+                        <MudSwitch T="bool" @bind-Value="_includeScreenshot" Color="Color.Primary" Size="Size.Small"
+                                   Label="Screenshot mitschicken (Vision)" Style="font-size:0.72rem;" />
+                    </div>
+                }
             </div>
         </div>
     }
@@ -81,24 +112,33 @@
     private bool _isOpen;
     private bool _thinking;
     private bool _loaded;
+    private bool _includeScreenshot;
     private string _input = "";
     private string _userEmail = "";
     private List<ServerWatch.Services.AiChat.ChatMessage> _messages = new();
 
+    // Agent-mode state
+    private IAgentSession? _session;
+    private AgentContext? _context;
+    private AgentEvent.ConfirmationRequired? _pendingConfirm;
+    private string _pendingReason = "";
+    private string? _pendingApprovalId;
+    private ServerWatch.Services.AiChat.ChatMessage? _streaming;
+
+    private bool AgentMode => AgentSettings.CurrentValue.Enabled;
+    private bool Visible => ChatService.IsEnabled || AgentMode;
+
     private async Task OpenChat()
     {
         _isOpen = true;
-
         if (!_loaded)
         {
-            // Get user email for persistent history
             if (AuthState != null)
             {
                 var state = await AuthState;
                 _userEmail = state.User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "anonymous";
             }
-
-            // Load history
+            // Advisor history is reused for display continuity; agent turns are appended live.
             _messages = await HistoryStore.LoadAsync(_userEmail);
             _loaded = true;
             StateHasChanged();
@@ -109,7 +149,6 @@
     private async Task Send()
     {
         if (string.IsNullOrWhiteSpace(_input) || _thinking) return;
-
         var userMsg = _input.Trim();
         _input = "";
         _messages.Add(new ServerWatch.Services.AiChat.ChatMessage { Role = "user", Content = userMsg });
@@ -117,29 +156,131 @@
         StateHasChanged();
         await ScrollToBottom();
 
-        // Send with recent history for context (last 10 messages)
-        var recentHistory = _messages.SkipLast(1).TakeLast(10).ToList();
-        var response = await ChatService.ChatAsync(userMsg, recentHistory);
+        try
+        {
+            if (AgentMode) await SendAgentAsync(userMsg);
+            else await SendAdvisorAsync(userMsg);
+        }
+        catch (Exception ex)
+        {
+            _messages.Add(new ServerWatch.Services.AiChat.ChatMessage { Role = "error", Content = $"Fehler: {ex.Message}" });
+        }
+        finally
+        {
+            _thinking = false;
+            _pendingConfirm = null;
+            _pendingApprovalId = null;
+            _streaming = null;
+            StateHasChanged();
+            await ScrollToBottom();
+        }
+    }
 
+    private async Task SendAdvisorAsync(string userMsg)
+    {
+        var recent = _messages.SkipLast(1).TakeLast(10).ToList();
+        var response = await ChatService.ChatAsync(userMsg, recent);
         _messages.Add(new ServerWatch.Services.AiChat.ChatMessage { Role = "assistant", Content = response });
-        _thinking = false;
-
-        // Persist
         await HistoryStore.SaveAsync(_userEmail, _messages);
+    }
 
+    private async Task SendAgentAsync(string userMsg)
+    {
+        // Page context (route + visible text) so the agent knows what the user is looking at.
+        PageCtx? ctx = null;
+        try { ctx = await JS.InvokeAsync<PageCtx>("swAgent.getPageContext"); } catch { }
+        string? shot = null;
+        if (_includeScreenshot)
+        {
+            try { shot = await JS.InvokeAsync<string?>("swAgent.captureScreenshot"); } catch { }
+        }
+
+        var prompt = userMsg;
+        if (ctx is not null && !string.IsNullOrWhiteSpace(ctx.Text))
+            prompt = $"[SEITENKONTEXT — der Nutzer ist auf „{ctx.Title}\" ({ctx.Route}). Sichtbarer Inhalt:\n{ctx.Text}\n— Ende Kontext]\n\nAUFGABE: {userMsg}";
+
+        if (_session is null)
+        {
+            _context = await BuildContextAsync();
+            _session = await AgentService.StartSessionAsync(_context);
+        }
+
+        _streaming = null;
+        await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg"))
+        {
+            switch (ev)
+            {
+                case AgentEvent.AssistantDelta d:
+                    if (_streaming is null)
+                    {
+                        _streaming = new ServerWatch.Services.AiChat.ChatMessage { Role = "assistant", Content = "" };
+                        _messages.Add(_streaming);
+                    }
+                    _streaming.Content += d.Text;
+                    StateHasChanged();
+                    await ScrollToBottom();
+                    break;
+                case AgentEvent.ToolExecuted t:
+                    _streaming = null;
+                    _messages.Add(new ServerWatch.Services.AiChat.ChatMessage
+                    {
+                        Role = t.Result.IsError ? "error" : "tool",
+                        Content = (t.Result.IsError ? "⚠ " : "🔧 ") + Truncate(t.Result.Content, 600)
+                    });
+                    StateHasChanged();
+                    await ScrollToBottom();
+                    break;
+                case AgentEvent.ConfirmationRequired c:
+                    _pendingConfirm = c;
+                    _pendingReason = c.Reason;
+                    if (_session is not null && _context is not null)
+                        _pendingApprovalId = (await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason)).Id;
+                    StateHasChanged();
+                    await ScrollToBottom();
+                    break;
+                case AgentEvent.Failed f:
+                    _messages.Add(new ServerWatch.Services.AiChat.ChatMessage { Role = "error", Content = f.Message });
+                    break;
+            }
+        }
+    }
+
+    private async Task Resolve(bool approved)
+    {
+        var id = _pendingApprovalId;
+        _pendingConfirm = null;
+        _pendingApprovalId = null;
         StateHasChanged();
-        await ScrollToBottom();
+        if (id is not null) await ApprovalStore.ResolveAsync(id, approved, _userEmail);
+    }
+
+    private async Task<AgentContext> BuildContextAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
+        var role = await CurrentUser.GetRoleAsync();
+        var level = role switch
+        {
+            AppRole.Admin => McpPermissionLevels.Admin,
+            AppRole.Operator => McpPermissionLevels.Write,
+            _ => McpPermissionLevels.Read,
+        };
+        var principal = new AgentPrincipal(AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
+        return new AgentContext(Guid.NewGuid().ToString("N"), principal, AgentOrigin.WebUi, GuardrailStore.Current);
     }
 
     private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !e.ShiftKey)
-            await Send();
+        if (e.Key == "Enter" && !e.ShiftKey) await Send();
     }
 
     private async Task ClearChat()
     {
+        if (_session is not null) await ApprovalStore.CancelForSessionAsync(_session.SessionId);
         _messages.Clear();
+        _session = null;
+        _context = null;
+        _pendingConfirm = null;
+        _pendingApprovalId = null;
         await HistoryStore.ClearAsync(_userEmail);
     }
 
@@ -147,59 +288,41 @@
     {
         try
         {
-            await Task.Delay(50); // small delay for DOM update
+            await Task.Delay(40);
             await JS.InvokeVoidAsync("eval", "document.getElementById('sw-chat-messages')?.scrollTo({top: 999999, behavior: 'smooth'})");
         }
         catch { }
     }
 
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
+
+    private record PageCtx(string Route, string Title, string Text);
+
+    private static string BubbleStyle(string role) => role switch
+    {
+        "user" => "align-self:flex-end; max-width:88%; padding:8px 12px; border-radius:12px 12px 4px 12px; background:rgba(96,165,250,0.15); font-size:0.85rem; line-height:1.5; overflow-wrap:anywhere;",
+        "tool" => "align-self:flex-start; max-width:92%; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.03); font-size:0.78rem; color:rgba(255,255,255,0.65); overflow-wrap:anywhere;",
+        "error" => "align-self:flex-start; max-width:92%; padding:8px 12px; border-radius:8px; background:rgba(239,68,68,0.12); font-size:0.8rem; color:#fca5a5; overflow-wrap:anywhere;",
+        _ => "align-self:flex-start; max-width:88%; padding:10px 14px; border-radius:12px 12px 12px 4px; background:rgba(255,255,255,0.04); font-size:0.85rem; line-height:1.5; overflow-wrap:anywhere;",
+    };
+
     /// <summary>Simple Markdown to HTML renderer for chat messages.</summary>
     private static string RenderMarkdown(string markdown)
     {
         if (string.IsNullOrEmpty(markdown)) return "";
-
         var html = System.Web.HttpUtility.HtmlEncode(markdown);
-
-        // Code blocks: ```...```
-        html = System.Text.RegularExpressions.Regex.Replace(html,
-            @"```(\w*)\n?([\s\S]*?)```",
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"```(\w*)\n?([\s\S]*?)```",
             "<pre style=\"background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; margin: 6px 0;\"><code>$2</code></pre>");
-
-        // Inline code: `...`
-        html = System.Text.RegularExpressions.Regex.Replace(html,
-            @"`([^`]+)`",
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"`([^`]+)`",
             "<code style=\"background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 0.82em;\">$1</code>");
-
-        // Bold: **...**
         html = System.Text.RegularExpressions.Regex.Replace(html, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
-
-        // Italic: *...*
         html = System.Text.RegularExpressions.Regex.Replace(html, @"(?<!\*)\*([^*]+?)\*(?!\*)", "<em>$1</em>");
-
-        // Bullet lists: - item
-        html = System.Text.RegularExpressions.Regex.Replace(html,
-            @"(?m)^- (.+)$",
-            "<li style=\"margin-left: 16px; list-style: disc;\">$1</li>");
-
-        // Numbered lists: 1. item
-        html = System.Text.RegularExpressions.Regex.Replace(html,
-            @"(?m)^\d+\. (.+)$",
-            "<li style=\"margin-left: 16px; list-style: decimal;\">$1</li>");
-
-        // Headers
-        html = System.Text.RegularExpressions.Regex.Replace(html, @"(?m)^### (.+)$",
-            "<div style=\"font-weight: 700; font-size: 0.9em; color: var(--sw-accent-blue); margin: 8px 0 4px;\">$1</div>");
-        html = System.Text.RegularExpressions.Regex.Replace(html, @"(?m)^## (.+)$",
-            "<div style=\"font-weight: 700; font-size: 0.95em; color: var(--sw-accent-blue); margin: 8px 0 4px;\">$1</div>");
-
-        // Line breaks
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"(?m)^- (.+)$", "<li style=\"margin-left: 16px; list-style: disc;\">$1</li>");
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"(?m)^\d+\. (.+)$", "<li style=\"margin-left: 16px; list-style: decimal;\">$1</li>");
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"(?m)^### (.+)$", "<div style=\"font-weight: 700; font-size: 0.9em; color: var(--sw-accent-blue); margin: 8px 0 4px;\">$1</div>");
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"(?m)^## (.+)$", "<div style=\"font-weight: 700; font-size: 0.95em; color: var(--sw-accent-blue); margin: 8px 0 4px;\">$1</div>");
         html = html.Replace("\n", "<br/>");
-
-        // Clean up
-        html = html.Replace("</pre><br/>", "</pre>");
-        html = html.Replace("</li><br/>", "</li>");
-        html = html.Replace("</div><br/>", "</div>");
-
+        html = html.Replace("</pre><br/>", "</pre>").Replace("</li><br/>", "</li>").Replace("</div><br/>", "</div>");
         return html;
     }
 }

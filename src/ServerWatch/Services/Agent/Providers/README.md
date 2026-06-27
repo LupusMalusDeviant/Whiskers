@@ -19,6 +19,8 @@ All providers stream (SSE) and surface the same `AgentStreamDelta` sequence — 
 | `AnthropicProvider.cs` | Anthropic Messages client (`x-api-key` + `anthropic-version`; default model `claude-opus-4-8`). |
 | `AnthropicWire.cs` | Request mapper + stream accumulator for Anthropic (top-level system, `tool_use`/`tool_result` blocks; no temperature, since 4.x models reject sampling params). |
 
+All three mappers support an optional **image** on a user turn (`AgentMessage.ImageBase64`): OpenAI `image_url` data-URI, Anthropic `image` base64 source, Gemini `inline_data`. Used by the page-aware agent widget to send a page screenshot to a vision-capable model.
+
 ## Related
 
-- Tests: `OpenAiWireTests`, `GeminiWireTests`, `AnthropicWireTests` in [`../../../../ServerWatch.Tests/`](../../../../ServerWatch.Tests/)
+- Tests: `OpenAiWireTests`, `GeminiWireTests`, `AnthropicWireTests`, `MultimodalWireTests` in [`../../../../ServerWatch.Tests/`](../../../../ServerWatch.Tests/)
