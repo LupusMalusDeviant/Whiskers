@@ -74,6 +74,9 @@ builder.Services.AddSingleton<INotificationService, CompositeNotificationService
 // Terminal
 builder.Services.AddSingleton<ITerminalSessionManager, TerminalSessionManager>();
 
+// In-app user handbook (Hilfe page)
+builder.Services.AddSingleton<ServerWatch.Services.Help.IHelpContentService, ServerWatch.Services.Help.HelpContentService>();
+
 // Deployment
 builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 

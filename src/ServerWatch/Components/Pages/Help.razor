@@ -1,0 +1,141 @@
+@page "/help"
+@using Microsoft.AspNetCore.Authorization
+@using Markdig
+@using ServerWatch.Models.Help
+@using ServerWatch.Services.Help
+@attribute [Authorize]
+@inject IHelpContentService HelpContent
+
+<PageTitle>Hilfe — ServerWatch</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <div style="display:flex; align-items:center; gap:12px;" class="mb-1">
+        <MudIcon Icon="@Icons.Material.Filled.MenuBook" Color="Color.Primary" />
+        <MudText Typo="Typo.h5">Hilfe &amp; Benutzerhandbuch</MudText>
+    </div>
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--sw-text-secondary);">
+        So benutzt du ServerWatch — Kapitel links wählen oder oben suchen.
+    </MudText>
+
+    <MudTextField Value="_search" ValueChanged="OnSearch" T="string" Immediate="true"
+                  Placeholder="In der Hilfe suchen…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Clearable="true" Class="mb-4" Style="max-width:440px;" />
+
+    <div class="sw-help-layout">
+        <nav class="sw-help-toc">
+            @foreach (var ch in FilteredChapters)
+            {
+                <button type="button" class="sw-help-toc-item @(ch.Id == _selectedId ? "active" : "")"
+                        @onclick="@(() => Select(ch.Id))">
+                    <MudIcon Icon="@ResolveIcon(ch.Icon)" Size="Size.Small" />
+                    <span>@ch.Title</span>
+                </button>
+            }
+            @if (!FilteredChapters.Any())
+            {
+                <div class="sw-help-empty">Keine Treffer für „@_search".</div>
+            }
+        </nav>
+
+        <article class="sw-help-content">
+            @if (_selected is not null)
+            {
+                <MudText Typo="Typo.h5" Class="mb-1">@_selected.Title</MudText>
+                <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--sw-text-secondary);">@_selected.Summary</MudText>
+
+                @foreach (var sec in _selected.Sections)
+                {
+                    <section class="sw-help-section">
+                        <MudText Typo="Typo.h6" Class="mb-2">@sec.Heading</MudText>
+                        <div class="sw-md">@((MarkupString)RenderMarkdown(sec.Markdown))</div>
+                        @if (sec.Figure is { } fig)
+                        {
+                            <figure class="sw-help-figure">
+                                @if (fig.Kind == HelpFigureKind.Svg)
+                                {
+                                    <div class="sw-help-svg">@((MarkupString)(fig.Svg ?? ""))</div>
+                                }
+                                else
+                                {
+                                    <div class="sw-help-shot-box">
+                                        <MudIcon Icon="@Icons.Material.Filled.PhotoCamera" Size="Size.Large" />
+                                        <span>Screenshot-Platzhalter</span>
+                                    </div>
+                                }
+                                <figcaption>@fig.Caption</figcaption>
+                            </figure>
+                        }
+                    </section>
+                }
+            }
+        </article>
+    </div>
+</MudContainer>
+
+@code {
+    private string _search = "";
+    private string _selectedId = "";
+    private HelpChapter? _selected;
+    private IReadOnlyList<HelpChapter> _all = Array.Empty<HelpChapter>();
+
+    protected override void OnInitialized()
+    {
+        _all = HelpContent.GetChapters();
+        _selected = _all.FirstOrDefault();
+        _selectedId = _selected?.Id ?? "";
+    }
+
+    private IEnumerable<HelpChapter> FilteredChapters =>
+        string.IsNullOrWhiteSpace(_search) ? _all : _all.Where(c => Matches(c, _search));
+
+    private static bool Matches(HelpChapter c, string term) =>
+        c.Title.Contains(term, StringComparison.OrdinalIgnoreCase)
+        || c.Summary.Contains(term, StringComparison.OrdinalIgnoreCase)
+        || c.Sections.Any(s => s.Heading.Contains(term, StringComparison.OrdinalIgnoreCase)
+                               || s.Markdown.Contains(term, StringComparison.OrdinalIgnoreCase));
+
+    private void OnSearch(string value)
+    {
+        _search = value ?? "";
+        // If the current selection no longer matches the filter, jump to the first match.
+        if (!string.IsNullOrWhiteSpace(_search) && _selected is not null && !Matches(_selected, _search))
+        {
+            var first = FilteredChapters.FirstOrDefault();
+            if (first is not null) Select(first.Id);
+        }
+    }
+
+    private void Select(string id)
+    {
+        _selectedId = id;
+        _selected = _all.FirstOrDefault(c => c.Id == id);
+    }
+
+    private static readonly MarkdownPipeline MdPipeline =
+        new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
+
+    private static string RenderMarkdown(string text) => Markdown.ToHtml(text ?? "", MdPipeline);
+
+    private static string ResolveIcon(string name) => name switch
+    {
+        "Rocket" => Icons.Material.Filled.Rocket,
+        "Dashboard" => Icons.Material.Filled.Dashboard,
+        "ViewInAr" => Icons.Material.Filled.ViewInAr,
+        "Security" => Icons.Material.Filled.Security,
+        "Search" => Icons.Material.Filled.Search,
+        "Storage" => Icons.Material.Filled.Storage,
+        "RocketLaunch" => Icons.Material.Filled.RocketLaunch,
+        "SmartToy" => Icons.Material.Filled.SmartToy,
+        "Shield" => Icons.Material.Filled.Shield,
+        "Approval" => Icons.Material.Filled.Approval,
+        "Policy" => Icons.Material.Filled.Policy,
+        "Bolt" => Icons.Material.Filled.Bolt,
+        "Notifications" => Icons.Material.Filled.Notifications,
+        "Settings" => Icons.Material.Filled.Settings,
+        "Hub" => Icons.Material.Filled.Hub,
+        "Insights" => Icons.Material.Filled.Insights,
+        "Palette" => Icons.Material.Filled.Palette,
+        _ => Icons.Material.Filled.Article,
+    };
+}
