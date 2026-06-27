@@ -8,14 +8,20 @@
 @inject IGuardrailStore GuardrailStore
 @inject ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>Guardrails</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
-    <MudText Typo="Typo.h5" Class="mb-1">Guardrails</MudText>
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+    <div style="display:flex; align-items:center; gap:12px;" class="mb-1">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
+                       OnClick="@(() => Nav.NavigateTo("agent"))" title="Zurück zum Agent" />
+        <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" />
+        <MudText Typo="Typo.h5">Guardrails</MudText>
+    </div>
     <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
-        Code-erzwungene, unumgängliche Sicherheits-Policy des Agenten. Sie wird am Tool-Boundary durchgesetzt
-        (nicht im Prompt) — der Agent kann sie nicht umgehen. Nur Admins können sie ändern.
+        Code-erzwungene, unumgängliche Sicherheits-Policy. Wird am Tool-Boundary durchgesetzt (nicht im Prompt) —
+        der Agent kann sie nicht umgehen. Nur Admins können sie ändern.
     </MudText>
 
     @if (!_isAdmin)
@@ -24,38 +30,97 @@
     }
     else
     {
-        <MudPaper Class="pa-4">
-            <MudSwitch @bind-Value="_policy.ReadOnlyMode" Color="Color.Warning" Label="Read-Only-Modus (Kill-Switch)" />
-            <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.4);">
-                Blockiert sofort alles oberhalb von „read" — egal welche andere Einstellung.
-            </MudText>
-
-            <MudSwitch @bind-Value="_policy.RequireConfirmationForWrites" Color="Color.Primary" Label="Writes erfordern Bestätigung" />
-
-            <MudSelect T="string" @bind-Value="_policy.MaxAutonomousLevel" Label="Autonomes Maximal-Level"
-                       Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2">
-                <MudSelectItem Value="@("read")">read</MudSelectItem>
-                <MudSelectItem Value="@("write")">write</MudSelectItem>
-                <MudSelectItem Value="@("admin")">admin</MudSelectItem>
-            </MudSelect>
-
-            <MudNumericField @bind-Value="_policy.MaxActionsPerSession" Label="Max. Aktionen pro Session"
-                             Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Class="mt-2" />
-
-            <MudTextField @bind-Value="_denyCsv" Label="Tool-Deny-Liste (Komma)" Margin="Margin.Dense"
-                          Variant="Variant.Outlined" Class="mt-2"
-                          HelperText="Diese Tools sind immer Deny — z.B. execute_command, deploy_app" />
-            <MudTextField @bind-Value="_protectedCsv" Label="Geschützte Ressourcen (Glob, Komma)" Margin="Margin.Dense"
-                          Variant="Variant.Outlined" Class="mt-2"
-                          HelperText="Glob-Muster für Container/Server/DB, die der Agent nie anfassen darf — z.B. serverwatch*" />
-            <MudTextField @bind-Value="_forbiddenCsv" Label="Verbotene Argument-Muster (Regex, Komma)" Margin="Margin.Dense"
-                          Variant="Variant.Outlined" Class="mt-2"
-                          HelperText="Regex gegen destruktive Shell-/SQL-Argumente" />
-
-            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveGuardrails" Class="mt-4" FullWidth="true">
-                Guardrails speichern
-            </MudButton>
+        @* Kill-switch — prominent, full width *@
+        <MudPaper Class="pa-4 mb-4" Style="border-left: 3px solid var(--mud-palette-warning);">
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                <MudIcon Icon="@Icons.Material.Filled.Block" Color="Color.Warning" Size="Size.Large" />
+                <div style="flex:1; min-width:220px;">
+                    <MudText Typo="Typo.subtitle1">Read-Only-Modus (Kill-Switch)</MudText>
+                    <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">
+                        Blockiert sofort alles oberhalb von „read" — egal welche andere Einstellung.
+                    </MudText>
+                </div>
+                <MudSwitch @bind-Value="_policy.ReadOnlyMode" Color="Color.Warning" />
+            </div>
         </MudPaper>
+
+        <MudGrid>
+            @* Autonomy & confirmation *@
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4" Style="height:100%;">
+                    <div style="display:flex; align-items:center; gap:8px;" class="mb-3">
+                        <MudIcon Icon="@Icons.Material.Filled.Tune" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle1">Autonomie &amp; Bestätigung</MudText>
+                    </div>
+
+                    <MudSelect T="string" @bind-Value="_policy.MaxAutonomousLevel" Label="Autonomes Maximal-Level"
+                               Margin="Margin.Dense" Variant="Variant.Outlined"
+                               HelperText="Höchstes Level, das der Agent OHNE Bestätigung ausführen darf.">
+                        <MudSelectItem Value="@("read")">read — nur lesen</MudSelectItem>
+                        <MudSelectItem Value="@("write")">write — auch ändern</MudSelectItem>
+                        <MudSelectItem Value="@("admin")">admin — alles</MudSelectItem>
+                    </MudSelect>
+
+                    <MudSwitch @bind-Value="_policy.RequireConfirmationForWrites" Color="Color.Primary"
+                               Label="Writes erfordern Bestätigung" Class="mt-3" />
+
+                    <MudNumericField @bind-Value="_policy.MaxActionsPerSession" Label="Max. Aktionen pro Session"
+                                     Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Class="mt-2"
+                                     HelperText="Obergrenze ausgeführter Aktionen pro Konversation." />
+                </MudPaper>
+            </MudItem>
+
+            @* Tool deny list *@
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4" Style="height:100%;">
+                    <div style="display:flex; align-items:center; gap:8px;" class="mb-3">
+                        <MudIcon Icon="@Icons.Material.Filled.Build" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle1">Tool-Deny-Liste</MudText>
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.5);">
+                        Diese Tools sind IMMER Deny — unabhängig von Rolle/Key. Kommagetrennt.
+                    </MudText>
+                    <MudTextField @bind-Value="_denyCsv" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Lines="3" Placeholder="execute_command, deploy_app, backup_database" />
+                </MudPaper>
+            </MudItem>
+
+            @* Protected resources *@
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4" Style="height:100%;">
+                    <div style="display:flex; align-items:center; gap:8px;" class="mb-3">
+                        <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle1">Geschützte Ressourcen</MudText>
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.5);">
+                        Glob-Muster für Container/Server/DB, die der Agent nie anfassen darf. Kommagetrennt.
+                    </MudText>
+                    <MudTextField @bind-Value="_protectedCsv" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Lines="3" Placeholder="serverwatch*, *-prod, db-*" />
+                </MudPaper>
+            </MudItem>
+
+            @* Forbidden argument patterns *@
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4" Style="height:100%;">
+                    <div style="display:flex; align-items:center; gap:8px;" class="mb-3">
+                        <MudIcon Icon="@Icons.Material.Filled.Code" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle1">Verbotene Argument-Muster</MudText>
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.5);">
+                        Regex gegen destruktive Shell-/SQL-Argumente. Treffer → Deny. Kommagetrennt.
+                    </MudText>
+                    <MudTextField @bind-Value="_forbiddenCsv" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Lines="3" Style="font-family: var(--sw-mono, monospace);"
+                                  Placeholder="rm\s+-rf\s+/, \bDROP\s+(DATABASE|TABLE)\b" />
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveGuardrails"
+                   StartIcon="@Icons.Material.Filled.Save" Class="mt-4" Size="Size.Large">
+            Guardrails speichern
+        </MudButton>
     }
 </MudContainer>
 
