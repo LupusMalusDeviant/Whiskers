@@ -107,9 +107,29 @@ public class MatrixNotificationService : IMatrixNotificationService
             $"🛡️ CVE Findings | {evt.ImageName} for {evt.ContainerName}. {evt.ImageInfo}",
             $"🛡️ <strong>CVE Findings</strong> | {evt.ImageName} for {evt.ContainerName}<br/>{evt.ImageInfo}"
         ),
+        "agent_action" => (
+            $"🤖 AI-Agent | {evt.ContainerName}. {evt.ImageInfo}",
+            $"🤖 <strong>AI-Agent</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+        ),
+        "high_cpu" => (
+            $"🔥 Hohe CPU-Last | {evt.ContainerName}. {evt.ImageInfo}",
+            $"🔥 <strong>Hohe CPU-Last</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+        ),
+        "high_memory" => (
+            $"🔥 Hohe RAM-Last | {evt.ContainerName}. {evt.ImageInfo}",
+            $"🔥 <strong>Hohe RAM-Last</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+        ),
+        "metric_anomaly" => (
+            $"📈 Metrik-Ausreißer | {evt.ContainerName}. {evt.ImageInfo}",
+            $"📈 <strong>Metrik-Ausreißer</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+        ),
+        _ when evt.EventType.StartsWith("log_alert", StringComparison.Ordinal) => (
+            $"🔍 Log-Alert | {evt.ContainerName}. {(string.IsNullOrWhiteSpace(evt.ImageInfo) ? evt.Image : evt.ImageInfo)}",
+            $"🔍 <strong>Log-Alert</strong> | <code>{evt.ContainerName}</code><br/>{(string.IsNullOrWhiteSpace(evt.ImageInfo) ? evt.Image : evt.ImageInfo)}"
+        ),
         _ => (
-            $"ℹ️ {evt.EventType} | {evt.ContainerName}. Image: {evt.Image}",
-            $"ℹ️ <strong>{evt.EventType}</strong> | <code>{evt.ContainerName}</code><br/>Image: <code>{evt.Image}</code>"
+            $"ℹ️ {evt.EventType} | {evt.ContainerName}. {(string.IsNullOrWhiteSpace(evt.ImageInfo) ? $"Image: {evt.Image}" : evt.ImageInfo)}",
+            $"ℹ️ <strong>{evt.EventType}</strong> | <code>{evt.ContainerName}</code><br/>{(string.IsNullOrWhiteSpace(evt.ImageInfo) ? $"Image: <code>{evt.Image}</code>" : evt.ImageInfo)}"
         )
     };
 }
