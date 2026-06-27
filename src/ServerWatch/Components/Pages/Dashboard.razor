@@ -118,7 +118,7 @@
             }
         }
         <MudSpacer />
-        @if (TerminalAvailable(serverGroup.ServerId))
+        @if (ServerConfigService.SupportsTerminal(serverGroup.ServerId))
         {
             <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
                            Href="@($"server-terminal/{serverGroup.ServerId}")" Title="Terminal" />
@@ -613,15 +613,6 @@
 
     private bool GetServerReachable(string serverId)
         => _serverInfos.TryGetValue(serverId, out var info) && info.IsReachable;
-
-    // The interactive host terminal works for Local (nsenter), SSH (with key), and any server with
-    // Tailscale SSH (keyless tailnet shell). A TCP+mTLS server without Tailscale SSH can't run a
-    // terminal over the Docker proxy, so its terminal entry stays hidden.
-    private bool TerminalAvailable(string? serverId)
-    {
-        var s = serverId == null ? ServerConfigService.GetDefaultServer() : ServerConfigService.GetServer(serverId);
-        return s != null && (s.ConnectionType != ServerWatch.Models.ConnectionType.TCP || s.TailscaleSsh);
-    }
 
     private void ToggleServerExpand(string serverId)
     {

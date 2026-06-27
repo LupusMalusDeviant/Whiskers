@@ -14,7 +14,7 @@ namespace ServerWatch.Services.Onboarding;
 /// into the VictoriaMetrics scrape config, and switches the server to TCP+mTLS + Prometheus metrics.
 ///
 /// Every command runs through <see cref="IHostCommandExecutor"/>: on the NEW host over the SSH
-/// bootstrap connection, and on "local" (Badwolf) for step-ca and the scrape config. Progress is
+/// bootstrap connection, and on "local" (the controller host) for step-ca and the scrape config. Progress is
 /// reported as plain strings; the Tailscale login URL is reported with the <see cref="LinkMarker"/>
 /// prefix so the UI can render it as a clickable link.
 /// </summary>
@@ -233,7 +233,7 @@ public class OnboardingService
 
     private async Task<string> ResolveVmEndpoint(CancellationToken ct)
     {
-        // VictoriaMetrics is bound to Badwolf's tailscale IP on :8428.
+        // VictoriaMetrics is bound to the controller host's tailscale IP on :8428.
         try
         {
             var r = await _exec.ExecuteAsync("local", "tailscale ip -4 | head -1", TimeSpan.FromSeconds(15), ct);

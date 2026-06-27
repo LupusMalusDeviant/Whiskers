@@ -8,7 +8,7 @@ namespace ServerWatch.Services.Metrics;
 /// <summary>
 /// Reads HOST metrics from a Prometheus-compatible TSDB (VictoriaMetrics) fed by node_exporter
 /// over the mesh. No SSH key involved. Servers are matched by the <c>server</c> label, which
-/// carries the server's <see cref="ServerConfig.Id"/> — a stable id (e.g. "local", "infomaniak"),
+/// carries the server's <see cref="ServerConfig.Id"/> — a stable id (e.g. "local", "host-a"),
 /// not the display Name. The scrape config must label targets with the same id
 /// (see deploy/telemetry/scrape.yml).
 /// </summary>

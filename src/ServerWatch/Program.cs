@@ -138,9 +138,6 @@ builder.Services.AddSingleton<ServerWatch.Services.Scheduler.TaskExecutor>();
 builder.Services.AddSingleton<ServerWatch.Services.Scheduler.SchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerWatch.Services.Scheduler.SchedulerService>());
 
-// Resource recommendations
-builder.Services.AddSingleton<ServerWatch.Services.Recommendations.ResourceRecommendationService>();
-
 // App templates
 builder.Services.AddSingleton<ServerWatch.Services.Templates.TemplateService>();
 

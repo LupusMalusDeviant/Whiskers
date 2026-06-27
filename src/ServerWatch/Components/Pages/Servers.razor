@@ -250,27 +250,7 @@
     private void EditServer(ServerWatch.Models.ServerConfig server)
     {
         _editingServer = server;
-        _form = new ServerWatch.Models.ServerConfig
-        {
-            Id = server.Id,
-            Name = server.Name,
-            ConnectionType = server.ConnectionType,
-            TcpHost = server.TcpHost,
-            TcpPort = server.TcpPort,
-            TcpUseTls = server.TcpUseTls,
-            TcpClientCertPath = server.TcpClientCertPath,
-            TcpClientKeyPath = server.TcpClientKeyPath,
-            TcpCaCertPath = server.TcpCaCertPath,
-            TailscaleSsh = server.TailscaleSsh,
-            SshHost = server.SshHost,
-            SshPort = server.SshPort,
-            SshUser = server.SshUser,
-            SshKeyFileName = server.SshKeyFileName,
-            MetricsSource = server.MetricsSource,
-            MetricsEndpoint = server.MetricsEndpoint,
-            CloudProvider = server.CloudProvider,
-            CloudApiKey = server.CloudApiKey,
-        };
+        _form = server.Clone();   // full copy — no field can be silently dropped on save
         _sshKeyFileName = server.SshKeyFileName;
         _sshKeyData = null;
         _cloudApiKey = "";                                  // never prefill the secret

@@ -72,6 +72,11 @@ public class ServerConfig
 
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; } = true;
+
+    // Shallow copy for the edit-form dialog. All members are value types or strings, so MemberwiseClone
+    // is safe — and using it (instead of a hand-listed `new ServerConfig { ... }`) guarantees that
+    // newly-added fields can never be silently dropped when a server is edited and saved.
+    public ServerConfig Clone() => (ServerConfig)MemberwiseClone();
 }
 
 public class ServerConfigData

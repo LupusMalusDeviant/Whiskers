@@ -104,9 +104,6 @@ public static class McpPermissionLevels
         ["connect_network"] = Write,
         ["disconnect_network"] = Write,
 
-        // Resource limit tools
-        ["update_container_resources"] = Write,
-
         // Admin tools
         ["execute_command"] = Admin,
 
@@ -159,7 +156,6 @@ public static class McpPermissionLevels
         ["update_container"] = "Container",
         ["get_container_env"] = "Container",
         ["set_container_env"] = "Container",
-        ["update_container_resources"] = "Container",
         ["search_logs"] = "Logs",
         ["list_log_alerts"] = "Logs",
         ["create_log_alert"] = "Logs",

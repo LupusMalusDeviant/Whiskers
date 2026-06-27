@@ -73,6 +73,15 @@ public class ServerConfigService
                ?? _cached.Servers.FirstOrDefault();
     }
 
+    // Whether the interactive web terminal is usable for a server: Local (nsenter) and SSH always, and
+    // TCP/mTLS only when Tailscale SSH (keyless tailnet shell) is enabled — the mTLS Docker proxy can't
+    // carry an interactive attach stream. Single source of truth for the Dashboard + ContainerDetail UI.
+    public bool SupportsTerminal(string? serverId)
+    {
+        var s = serverId == null ? GetDefaultServer() : GetServer(serverId);
+        return s != null && (s.ConnectionType != ConnectionType.TCP || s.TailscaleSsh);
+    }
+
     public async Task AddServerAsync(Models.ServerConfig server)
     {
         await _lock.WaitAsync();

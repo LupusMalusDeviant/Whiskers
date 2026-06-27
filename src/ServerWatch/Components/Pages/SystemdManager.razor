@@ -81,9 +81,7 @@ else
     </MudTable>
 }
 
-@if (_journalService != null)
-{
-    <MudDialog Visible="_showJournal" VisibleChanged="@(v => _showJournal = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
+<MudDialog Visible="_showJournal" VisibleChanged="@(v => _showJournal = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
         <TitleContent>Protokoll: @_journalService</TitleContent>
         <DialogContent>
             <MudPaper Style="max-height: 500px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; padding: 16px; background: #0d1117;">
@@ -94,7 +92,6 @@ else
             <MudButton OnClick="@(() => _showJournal = false)">Schließen</MudButton>
         </DialogActions>
     </MudDialog>
-}
 
 @code {
     [Parameter] public string ServerId { get; set; } = "";

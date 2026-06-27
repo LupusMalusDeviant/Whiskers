@@ -218,7 +218,10 @@
                 .OrderBy(a => a.Project)
                 .ToList();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Installierte Apps konnten nicht geladen werden: {ex.Message}", Severity.Error);
+        }
     }
 
     private IEnumerable<ServerWatch.Models.AppTemplate> FilteredTemplates
@@ -269,7 +272,7 @@
                     _usedPorts.Add(p.PublicPort);
             }
         }
-        catch { }
+        catch { /* best-effort: if the container list is unavailable, port-conflict hints are simply skipped */ }
     }
 
     private void CheckPortConflicts()

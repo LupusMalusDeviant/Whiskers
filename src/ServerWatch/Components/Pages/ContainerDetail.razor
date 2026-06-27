@@ -217,7 +217,7 @@ else
 
         @* Terminal Tab - inline *@
         <MudTabPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
-            @if (!TerminalAvailable(_resolvedServerId))
+            @if (!ServerConfigService.SupportsTerminal(_resolvedServerId))
             {
                 <MudAlert Severity="Severity.Info">
                     Das Container-Terminal ist auf mTLS-Servern nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Stream weiter).
@@ -1060,18 +1060,9 @@ else
         }
     }
 
-    // Container terminal works for Local and SSH servers, and for TCP+mTLS servers with Tailscale
-    // SSH (keyless tailnet shell → `ssh root@host docker exec`). Without Tailscale SSH the
-    // interactive exec stream can't traverse the Docker proxy, so the terminal is hidden.
-    private bool TerminalAvailable(string? serverId)
-    {
-        var s = serverId == null ? ServerConfigService.GetDefaultServer() : ServerConfigService.GetServer(serverId);
-        return s != null && (s.ConnectionType != ServerWatch.Models.ConnectionType.TCP || s.TailscaleSsh);
-    }
-
     private async Task InitTerminal()
     {
-        if (!TerminalAvailable(_resolvedServerId)) return;
+        if (!ServerConfigService.SupportsTerminal(_resolvedServerId)) return;
         try
         {
             _dotNetRef = DotNetObjectReference.Create(this);
@@ -1559,6 +1550,17 @@ else
             _dbQuery = sql;
     }
 
+    // Run a command in the container via `docker exec` on the HOST shell plane (nsenter/SSH) instead of
+    // the Docker API exec endpoint: the mTLS socket-proxy blocks container exec (EXEC=0), but the host's
+    // own docker.sock has full access, so this works uniformly on Local, SSH and TCP+mTLS servers.
+    private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string[] cmd, TimeSpan timeout)
+    {
+        var dockerCmd = "docker exec " + ServerWatch.Utils.ShellUtils.Quote(ContainerId) + " " +
+                        string.Join(' ', cmd.Select(ServerWatch.Utils.ShellUtils.Quote));
+        var r = await HostCommandExecutor.ExecuteAsync(_resolvedServerId ?? "local", dockerCmd, timeout);
+        return (r.Output, r.Error, r.ExitCode);
+    }
+
     private async Task RunMigration()
     {
         if (!Require(AppRole.Admin)) return;
@@ -1571,11 +1573,8 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            // Detect framework from companion container (Laravel: artisan, Rails: rake, .NET: ef)
-            var sid = _resolvedServerId;
-            var project = _container.ComposeProject;
             // Try artisan migrate (Laravel)
-            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, sid, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
             if (!result.StdOut.Contains("NO_ARTISAN"))
             {
                 _migrationOutput = result.StdOut; _migrationSuccess = result.ExitCode == 0;
@@ -1603,7 +1602,7 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, _resolvedServerId, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
             _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? "Kein Framework erkannt." : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
@@ -1618,7 +1617,7 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, _resolvedServerId, TimeSpan.FromMinutes(1));
+            var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
             _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? "Kein Framework erkannt." : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
@@ -1654,7 +1653,7 @@ else
                 DatabaseType.MySQL => $"echo '{b64}' | base64 -d | mysql -u {_dbCreds.User} -p{_dbCreds.Password} {db} 2>&1",
                 _ => "echo 'Nicht unterstützt'"
             };
-            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", cmd }, _resolvedServerId, TimeSpan.FromMinutes(5));
+            var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
             _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? "Erfolgreich ausgeführt." : result.StdOut;
             _migrationSuccess = result.ExitCode == 0;
             if (_migrationSuccess) await LoadDatabaseInfo();
@@ -1694,7 +1693,7 @@ else
                 (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {db} --file /tmp/seed.json 2>&1",
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... Dateiformat {ext} wird für {_container.DatabaseType} unterstützt via SQL-Pipe'"
             };
-            var result = await DockerService.ExecInContainerAsync(ContainerId, new[] { "sh", "-c", cmd }, _resolvedServerId, TimeSpan.FromMinutes(5));
+            var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
             _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? "Erfolgreich importiert." : result.StdOut;
             _seedSuccess = result.ExitCode == 0;
             if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }
