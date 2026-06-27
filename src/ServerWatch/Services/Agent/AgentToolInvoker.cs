@@ -1,11 +1,15 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using ServerWatch.Models;
 using ServerWatch.Models.Agent;
 using ServerWatch.Services.Agent.Guardrails;
+using ServerWatch.Services.Observability;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Agent;
 
@@ -21,25 +25,34 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     private readonly IAgentToolRegistry _registry;
     private readonly IAgentGuardrailEngine _guardrails;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IMcpCallLogStore? _callLog;
     private readonly ILogger<AgentToolInvoker>? _logger;
 
     public AgentToolInvoker(
         IAgentToolRegistry registry,
         IAgentGuardrailEngine guardrails,
         IServiceScopeFactory scopeFactory,
+        IMcpCallLogStore? callLog = null,
         ILogger<AgentToolInvoker>? logger = null)
     {
         _registry = registry;
         _guardrails = guardrails;
         _scopeFactory = scopeFactory;
+        _callLog = callLog;
         _logger = logger;
     }
 
     public async Task<AgentToolResult> InvokeAsync(AgentToolCall call, AgentContext context, CancellationToken ct = default)
     {
+        var sw = Stopwatch.StartNew();
+        var (actor, actorType) = ActorOf(context);
+
         if (!_registry.Tools.TryGetValue(call.Name, out var entry))
-            return Error(call.Id, $"Unbekanntes Tool '{call.Name}'.",
-                new GuardrailDecision(GuardrailVerdict.Deny, "Tool nicht im Register.", Array.Empty<string>()));
+        {
+            var unknown = new GuardrailDecision(GuardrailVerdict.Deny, "Tool nicht im Register.", Array.Empty<string>());
+            await RecordAsync(call.Name, "?", actor, actorType, call.ArgumentsJson, unknown, sw, false, null, "Unbekanntes Tool");
+            return Error(call.Id, $"Unbekanntes Tool '{call.Name}'.", unknown);
+        }
 
         var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
 
@@ -48,6 +61,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (decision.Verdict == GuardrailVerdict.Deny)
         {
             _logger?.LogWarning("Agent-Tool '{Tool}' blockiert: {Reason}", entry.Name, decision.Reason);
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, decision.Reason);
             return Error(call.Id, $"Durch Guardrails blockiert: {decision.Reason}", decision);
         }
 
@@ -56,14 +70,60 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             var output = await ExecuteAsync(entry, args, context);
             if (output.Length > MaxOutputChars)
                 output = output[..MaxOutputChars] + $"\n… [gekürzt, {output.Length - MaxOutputChars} Zeichen mehr]";
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null);
             return new AgentToolResult(call.Id, output, false, decision);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, ex.Message);
             return Error(call.Id, $"Fehler bei '{entry.Name}': {ex.Message}", decision);
         }
     }
+
+    private static (string actor, string actorType) ActorOf(AgentContext ctx)
+    {
+        var p = ctx.Principal;
+        var actor = p.UserEmail ?? p.McpKeyId ?? p.DisplayName;
+        var type = ctx.Origin switch
+        {
+            AgentOrigin.WebUi => "agent-web",
+            AgentOrigin.McpTool => "agent-mcp",
+            AgentOrigin.Trigger => "trigger",
+            _ => "agent",
+        };
+        return (actor, type);
+    }
+
+    /// <summary>Records the tool call for the Agent-History/observability log (secrets redacted).</summary>
+    private async Task RecordAsync(
+        string tool, string level, string actor, string actorType, string? rawArgs,
+        GuardrailDecision decision, Stopwatch sw, bool success, string? output, string? error)
+    {
+        if (_callLog is null) return;
+        sw.Stop();
+        try
+        {
+            await _callLog.RecordAsync(new McpToolCallEntity
+            {
+                Timestamp = DateTime.UtcNow,
+                Actor = actor,
+                ActorType = actorType,
+                ToolName = tool,
+                Level = level,
+                ParamsJson = Cap(SecretRedactor.Redact(rawArgs), 4000),
+                Verdict = decision.Verdict.ToString().ToLowerInvariant(),
+                Success = success,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                ResultSummary = output is null ? null : Cap(SecretRedactor.Redact(output), 2000),
+                Error = error is null ? null : Cap(error, 1000),
+            });
+        }
+        catch { /* observability must never break tool execution */ }
+    }
+
+    private static string? Cap(string? s, int max) =>
+        s is null ? null : (s.Length > max ? s[..max] + "…" : s);
 
     private async Task<string> ExecuteAsync(AgentToolEntry entry, IReadOnlyDictionary<string, JsonElement> args, AgentContext context)
     {

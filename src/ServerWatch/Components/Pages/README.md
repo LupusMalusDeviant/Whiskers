@@ -43,6 +43,8 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `LogSearch.razor` | Log search and alerts. |
 | `Cves.razor` | CVE findings dashboard. |
 | `AuditLog.razor` | Audit trail of privileged actions. |
+| `AgentHistory.razor` | Observability dashboard for every agent/MCP tool call (`/agent-history`): filter by actor, tool, period, writes-only or denies-only; row click opens `AgentCallDetailDialog`. Backed by [`IMcpCallLogStore`](../../Services/Observability/). |
+| `AgentCallDetailDialog.razor` | Detail dialog for a single recorded tool call — metadata, redacted parameters, result summary, error. |
 | `Agent.razor` | The acting agent's chat/console (markdown rendering, file attachments, provider + system-prompt editor). |
 | `Guardrails.razor` | Multi-preset guardrail editor (per-preset tool grid + mode, free-text rules). |
 | `AiTriggers.razor` | Manage AI triggers: events that run the agent autonomously, with quick-setup templates. |

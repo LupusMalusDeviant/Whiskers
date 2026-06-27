@@ -1,0 +1,188 @@
+@page "/agent-history"
+@attribute [Authorize]
+@inject ServerWatch.Services.Observability.IMcpCallLogStore CallLog
+
+<PageTitle>Agent-History - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Policy" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Agent-History</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Jeder Agent-/MCP-Tool-Aufruf — Akteur, Parameter, Verdict, Ergebnis</MudText>
+        </div>
+    </MudStack>
+</div>
+
+<MudStack Row="true" Class="mb-4" Spacing="2" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
+    <MudTextField T="string" Value="@_actorFilter" ValueChanged="OnActorChanged" DebounceInterval="400"
+                  Label="Akteur" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Person" Clearable="true" />
+    <MudTextField T="string" Value="@_toolFilter" ValueChanged="OnToolChanged" DebounceInterval="400"
+                  Label="Tool" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Build" Clearable="true" />
+    <MudSelect T="string" Value="@_period" ValueChanged="OnPeriodChanged"
+               Label="Zeitraum" Variant="Variant.Outlined" Dense="true" Style="max-width: 160px;">
+        <MudSelectItem Value="@("1h")">Letzte Stunde</MudSelectItem>
+        <MudSelectItem Value="@("24h")">Letzte 24 h</MudSelectItem>
+        <MudSelectItem Value="@("7d")">Letzte 7 Tage</MudSelectItem>
+        <MudSelectItem Value="@("30d")">Letzte 30 Tage</MudSelectItem>
+        <MudSelectItem Value="@("all")">Alles</MudSelectItem>
+    </MudSelect>
+    <MudSwitch T="bool" Value="@_writesOnly" ValueChanged="OnWritesOnlyChanged"
+               Color="Color.Warning" Label="Nur Schreibzugriffe" />
+    <MudSwitch T="bool" Value="@_deniesOnly" ValueChanged="OnDeniesOnlyChanged"
+               Color="Color.Error" Label="Nur Verweigerte" />
+    <MudSpacer />
+    <MudText Typo="Typo.body2" Class="align-self-center" Style="color: #888;">
+        @_totalCount Einträge
+    </MudText>
+</MudStack>
+
+<MudTable Items="@_entries" Dense="true" Hover="true" Striped="true" Loading="@_loading"
+          FixedHeader="true" Height="calc(100vh - 300px)" OnRowClick="OnRowClick"
+          T="ServerWatch.Models.McpToolCallEntity">
+    <HeaderContent>
+        <MudTh Style="width: 150px;">Zeitpunkt</MudTh>
+        <MudTh Style="width: 190px;">Akteur</MudTh>
+        <MudTh>Tool</MudTh>
+        <MudTh Style="width: 90px;">Level</MudTh>
+        <MudTh Style="width: 100px;">Verdict</MudTh>
+        <MudTh Style="width: 80px;" Align="Align.Right">Dauer</MudTh>
+        <MudTh Style="width: 70px;">Status</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Zeitpunkt">
+            <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                @context.Timestamp.ToLocalTime().ToString("dd.MM.yy HH:mm:ss")
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="Akteur">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@ActorColor(context.ActorType)">
+                @context.Actor
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Tool"><code>@context.ToolName</code></MudTd>
+        <MudTd DataLabel="Level">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@LevelColor(context.Level)">
+                @context.Level
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Verdict">
+            <MudChip T="string" Size="Size.Small" Color="@VerdictColor(context.Verdict)">
+                @context.Verdict
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Dauer" Style="text-align: right; font-family: monospace;">@context.DurationMs ms</MudTd>
+        <MudTd DataLabel="Status">
+            @if (context.Success)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+            }
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@if (_totalCount > _pageSize)
+{
+    <MudStack Row="true" Class="mt-3" Justify="Justify.Center">
+        <MudPagination Count="@((int)Math.Ceiling(_totalCount / (double)_pageSize))"
+                       Selected="@(_currentPage + 1)" SelectedChanged="OnPageChanged" />
+    </MudStack>
+}
+
+@code {
+    private List<ServerWatch.Models.McpToolCallEntity> _entries = new();
+    private bool _loading = true;
+    private string? _actorFilter;
+    private string? _toolFilter;
+    private string _period = "24h";
+    private bool _writesOnly;
+    private bool _deniesOnly;
+    private int _totalCount;
+    private int _currentPage;
+    private const int _pageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private DateTime? Since() => _period switch
+    {
+        "1h" => DateTime.UtcNow.AddHours(-1),
+        "24h" => DateTime.UtcNow.AddHours(-24),
+        "7d" => DateTime.UtcNow.AddDays(-7),
+        "30d" => DateTime.UtcNow.AddDays(-30),
+        _ => null,
+    };
+
+    private string? Verdict() => _deniesOnly ? "deny" : null;
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        var since = Since();
+        _totalCount = await CallLog.CountAsync(_actorFilter, _toolFilter, Verdict(), _writesOnly, since);
+        _entries = await CallLog.GetRecentAsync(_pageSize, _currentPage * _pageSize,
+            _actorFilter, _toolFilter, Verdict(), _writesOnly, since);
+        _loading = false;
+    }
+
+    private async Task Reload()
+    {
+        _currentPage = 0;
+        await LoadData();
+    }
+
+    private async Task OnActorChanged(string v) { _actorFilter = v; await Reload(); }
+    private async Task OnToolChanged(string v) { _toolFilter = v; await Reload(); }
+    private async Task OnPeriodChanged(string v) { _period = v; await Reload(); }
+    private async Task OnWritesOnlyChanged(bool v) { _writesOnly = v; await Reload(); }
+    private async Task OnDeniesOnlyChanged(bool v) { _deniesOnly = v; await Reload(); }
+
+    private async Task OnPageChanged(int page)
+    {
+        _currentPage = page - 1;
+        await LoadData();
+    }
+
+    private async Task OnRowClick(TableRowClickEventArgs<ServerWatch.Models.McpToolCallEntity> args)
+    {
+        if (args.Item is null) return;
+        await DialogService.ShowAsync<AgentCallDetailDialog>(
+            args.Item.ToolName,
+            new DialogParameters { ["Entry"] = args.Item },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+    }
+
+    [Inject] private IDialogService DialogService { get; set; } = default!;
+
+    private static Color ActorColor(string actorType) => actorType switch
+    {
+        "agent-web" => Color.Primary,
+        "agent-mcp" => Color.Tertiary,
+        "mcp-direct" => Color.Info,
+        "trigger" => Color.Warning,
+        _ => Color.Default,
+    };
+
+    private static Color LevelColor(string level) => level switch
+    {
+        "admin" => Color.Error,
+        "write" => Color.Warning,
+        "read" => Color.Success,
+        _ => Color.Default,
+    };
+
+    private static Color VerdictColor(string verdict) => verdict switch
+    {
+        "deny" => Color.Error,
+        "confirm" => Color.Warning,
+        "allow" => Color.Success,
+        _ => Color.Default,
+    };
+}

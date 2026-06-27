@@ -212,6 +212,9 @@ builder.Services.AddSingleton<ServerWatch.Services.Agent.Triggers.IAiTriggerDisp
 // Audit log
 builder.Services.AddSingleton<ServerWatch.Services.AuditLog.IAuditLogService, ServerWatch.Services.AuditLog.AuditLogService>();
 
+// MCP/agent observability (Agent History)
+builder.Services.AddSingleton<ServerWatch.Services.Observability.IMcpCallLogStore, ServerWatch.Services.Observability.McpCallLogStore>();
+
 // Volume backups
 builder.Services.AddSingleton<ServerWatch.Services.Backup.IVolumeBackupService, ServerWatch.Services.Backup.VolumeBackupService>();
 
@@ -458,6 +461,9 @@ app.MapGet("/logout", async (HttpContext ctx) =>
 app.MapHub<ContainerHub>("/hubs/containers");
 app.MapHub<TerminalHub>("/hubs/terminal");
 
+// Records external/direct MCP tool calls (callers that bypass the in-process agent) for Agent-History.
+app.UseMiddleware<ServerWatch.Mcp.McpCallLogMiddleware>();
+
 // MCP endpoint with API key auth (new permission system)
 app.MapMcp("/mcp").RequireAuthorization(policy =>
     policy.RequireAssertion(context =>
@@ -646,6 +652,25 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS "IX_AuditLog_Timestamp" ON "AuditLog" ("Timestamp");
         CREATE INDEX IF NOT EXISTS "IX_AuditLog_Action_Timestamp" ON "AuditLog" ("Action", "Timestamp");
         CREATE INDEX IF NOT EXISTS "IX_AuditLog_Actor" ON "AuditLog" ("Actor");
+
+        CREATE TABLE IF NOT EXISTS "McpToolCalls" (
+            "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "Timestamp" TEXT NOT NULL,
+            "Actor" TEXT NOT NULL,
+            "ActorType" TEXT NOT NULL,
+            "ToolName" TEXT NOT NULL,
+            "Level" TEXT NOT NULL,
+            "ParamsJson" TEXT,
+            "Verdict" TEXT NOT NULL,
+            "Success" INTEGER NOT NULL,
+            "DurationMs" INTEGER NOT NULL,
+            "ResultSummary" TEXT,
+            "ServerId" TEXT,
+            "Error" TEXT
+        );
+        CREATE INDEX IF NOT EXISTS "IX_McpToolCalls_Timestamp" ON "McpToolCalls" ("Timestamp");
+        CREATE INDEX IF NOT EXISTS "IX_McpToolCalls_ToolName_Timestamp" ON "McpToolCalls" ("ToolName", "Timestamp");
+        CREATE INDEX IF NOT EXISTS "IX_McpToolCalls_Actor" ON "McpToolCalls" ("Actor");
 
         CREATE TABLE IF NOT EXISTS "VolumeBackups" (
             "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

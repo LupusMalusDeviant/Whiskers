@@ -50,6 +50,7 @@ public class MetricsDbContext : DbContext
     public DbSet<ServerMetricEntity> ServerMetrics => Set<ServerMetricEntity>();
     public DbSet<AlertHistoryEntity> AlertHistory => Set<AlertHistoryEntity>();
     public DbSet<AuditLogEntity> AuditLog => Set<AuditLogEntity>();
+    public DbSet<McpToolCallEntity> McpToolCalls => Set<McpToolCallEntity>();
     public DbSet<VolumeBackupEntity> VolumeBackups => Set<VolumeBackupEntity>();
     public DbSet<ScheduledTaskEntity> ScheduledTasks => Set<ScheduledTaskEntity>();
     public DbSet<TaskRunHistoryEntity> TaskRunHistory => Set<TaskRunHistoryEntity>();
@@ -85,6 +86,13 @@ public class MetricsDbContext : DbContext
         {
             e.HasIndex(x => x.Timestamp);
             e.HasIndex(x => new { x.Action, x.Timestamp });
+            e.HasIndex(x => x.Actor);
+        });
+
+        modelBuilder.Entity<McpToolCallEntity>(e =>
+        {
+            e.HasIndex(x => x.Timestamp);
+            e.HasIndex(x => new { x.ToolName, x.Timestamp });
             e.HasIndex(x => x.Actor);
         });
 
