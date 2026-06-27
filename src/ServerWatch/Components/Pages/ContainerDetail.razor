@@ -64,7 +64,7 @@ else
     </MudStack>
     </div>
 
-    <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+    <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
         @* Overview Tab *@
         <MudTabPanel Text="Übersicht" Icon="@Icons.Material.Filled.Info">
             <MudSimpleTable Striped="true" Dense="true">
@@ -298,7 +298,7 @@ else
                         var entry = _dotEnvEntries[idx];
                         <MudStack Row="true" Class="mb-2" AlignItems="AlignItems.Center">
                             <MudTextField @bind-Value="entry.Key" Label="Key" Variant="Variant.Outlined"
-                                          Dense="true" Style="max-width: 280px; font-family: monospace;"
+                                          Style="max-width: 280px; font-family: monospace;"
                                           ReadOnly="@(!entry.IsNew)" />
                             @if (entry.IsSensitive)
                             {
@@ -306,7 +306,7 @@ else
                                 @if (entry.IsNew || entry.IsEditing)
                                 {
                                     <MudTextField @bind-Value="entry.Value" Label="@(entry.IsNew ? "Wert" : "Neuer Wert")"
-                                                  Variant="Variant.Outlined" Dense="true"
+                                                  Variant="Variant.Outlined"
                                                   Style="font-family: monospace;"
                                                   InputType="@(entry.ShowValue ? InputType.Text : InputType.Password)"
                                                   Adornment="Adornment.End"
@@ -317,16 +317,16 @@ else
                                     {
                                         <MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Warning" Size="Size.Small"
                                                        OnClick="@(() => { entry.IsEditing = false; entry.Value = ""; })"
-                                                       Title="Änderung verwerfen" />
+                                                       title="Änderung verwerfen" />
                                     }
                                 }
                                 else
                                 {
                                     <MudTextField Value="@("••••••••")" Label="Wert (gespeichert)" Variant="Variant.Outlined"
-                                                  Dense="true" Style="font-family: monospace; color: #888;" ReadOnly="true" />
+                                                  Style="font-family: monospace; color: #888;" ReadOnly="true" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" Size="Size.Small"
                                                    OnClick="@(() => { entry.IsEditing = true; entry.Value = ""; })"
-                                                   Title="Wert ändern" />
+                                                   title="Wert ändern" />
                                 }
                             }
                             else
@@ -335,18 +335,18 @@ else
                                 @if (entry.IsNew)
                                 {
                                     <MudTextField @bind-Value="entry.Value" Label="Wert" Variant="Variant.Outlined"
-                                                  Dense="true" Style="font-family: monospace;" />
+                                                  Style="font-family: monospace;" />
                                 }
                                 else
                                 {
                                     <MudTextField Value="@entry.OriginalValue"
                                                   ValueChanged="@((string v) => { entry.Value = v; entry.IsEditing = true; entry.OriginalValue = v; })"
                                                   Label="Wert" Variant="Variant.Outlined"
-                                                  Dense="true" Style="font-family: monospace;" />
+                                                  Style="font-family: monospace;" />
                                 }
                             }
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                           OnClick="@(() => _dotEnvEntries.RemoveAt(idx))" Title="Variable entfernen" />
+                                           OnClick="@(() => _dotEnvEntries.RemoveAt(idx))" title="Variable entfernen" />
                         </MudStack>
                     }
 
@@ -467,7 +467,7 @@ else
                             @if (_qbAction == "SELECT")
                             {
                                 <MudNumericField T="int" @bind-Value="_qbLimit" Label="LIMIT" Variant="Variant.Outlined"
-                                                 Dense="true" Min="1" Max="10000" Style="max-width: 100px;" />
+                                                 Min="1" Max="10000" Style="max-width: 100px;" />
                             }
                         </MudStack>
 
@@ -476,10 +476,10 @@ else
                         {
                             <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
                                 <MudTextField @bind-Value="_qbColumnsText" Label="Spalten (kommagetrennt, leer = alle)"
-                                              Variant="Variant.Outlined" Dense="true" Style="min-width: 220px; font-family: 'JetBrains Mono', monospace;"
+                                              Variant="Variant.Outlined" Style="min-width: 220px; font-family: 'JetBrains Mono', monospace;"
                                               Placeholder="@(string.Join(", ", _qbTableColumns.Take(3)) + ", ...")" />
                                 <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
-                                              Dense="true" Placeholder="z.B. id = 1" Style="flex: 1; font-family: 'JetBrains Mono', monospace;" />
+                                              Placeholder="z.B. id = 1" Style="flex: 1; font-family: 'JetBrains Mono', monospace;" />
                                 <MudSelect T="string" @bind-Value="_qbOrderBy" Label="ORDER BY" Variant="Variant.Outlined"
                                            Dense="true" Clearable="true" Style="min-width: 160px;">
                                     @foreach (var col in _qbTableColumns)
@@ -491,14 +491,14 @@ else
                                 {
                                     <MudToggleIconButton @bind-Toggled="_qbOrderDesc"
                                                          Icon="@Icons.Material.Filled.ArrowUpward" ToggledIcon="@Icons.Material.Filled.ArrowDownward"
-                                                         Title="@(_qbOrderDesc ? "DESC" : "ASC")" Size="Size.Small" />
+                                                         title="@(_qbOrderDesc ? "DESC" : "ASC")" Size="Size.Small" />
                                 }
                             </MudStack>
                         }
                         else if (_qbAction == "COUNT")
                         {
                             <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
-                                          Dense="true" Placeholder="z.B. status = 'active'" Class="mb-3"
+                                          Placeholder="z.B. status = 'active'" Class="mb-3"
                                           Style="font-family: 'JetBrains Mono', monospace;" />
                         }
                         else if (_qbAction == "INSERT" && _qbTableColumns.Any())
@@ -511,7 +511,7 @@ else
                                     <MudItem xs="6" sm="4" md="3">
                                         <MudTextField Value="@_qbSetFields[idx].Value"
                                                       ValueChanged="@((string v) => { var f = _qbSetFields[idx]; _qbSetFields[idx] = (f.Key, v); })"
-                                                      Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined" Dense="true"
+                                                      Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined"
                                                       Style="font-family: 'JetBrains Mono', monospace;" />
                                     </MudItem>
                                 }
@@ -527,13 +527,13 @@ else
                                     <MudItem xs="6" sm="4" md="3">
                                         <MudTextField Value="@_qbSetFields[idx].Value"
                                                       ValueChanged="@((string v) => { var f = _qbSetFields[idx]; _qbSetFields[idx] = (f.Key, v); })"
-                                                      Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined" Dense="true"
+                                                      Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined"
                                                       Style="font-family: 'JetBrains Mono', monospace;" />
                                     </MudItem>
                                 }
                             </MudGrid>
                             <MudTextField @bind-Value="_qbWhere" Label="WHERE (Pflicht!)" Variant="Variant.Outlined"
-                                          Dense="true" Placeholder="z.B. id = 42" Class="mb-3"
+                                          Placeholder="z.B. id = 42" Class="mb-3"
                                           Style="font-family: 'JetBrains Mono', monospace;" />
                             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
                                 UPDATE ohne WHERE ändert ALLE Zeilen! WHERE ist Pflicht.
@@ -542,7 +542,7 @@ else
                         else if (_qbAction == "DELETE")
                         {
                             <MudTextField @bind-Value="_qbWhere" Label="WHERE (Pflicht!)" Variant="Variant.Outlined"
-                                          Dense="true" Placeholder="z.B. id = 42" Class="mb-3"
+                                          Placeholder="z.B. id = 42" Class="mb-3"
                                           Style="font-family: 'JetBrains Mono', monospace;" />
                             <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
                                 DELETE ohne WHERE löscht ALLE Zeilen! WHERE ist Pflicht.
@@ -759,7 +759,7 @@ else
                                         <MudTd><code style="color: var(--sw-text-muted);">@(context.Default ?? "-")</code></MudTd>
                                         <MudTd>
                                             <MudIconButton Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small"
-                                                           Title="@($"SELECT * FROM {_dbSelectedTable} WHERE {context.Name} = ... LIMIT 50")"
+                                                           title="@($"SELECT * FROM {_dbSelectedTable} WHERE {context.Name} = ... LIMIT 50")"
                                                            OnClick="@(() => { _dbQuery = $"SELECT * FROM {_dbSelectedTable} WHERE {context.Name} = '' LIMIT 50"; })" />
                                         </MudTd>
                                     </RowTemplate>
@@ -771,7 +771,7 @@ else
                     @* Query Editor — Collapsible *@
                     <MudExpansionPanels Class="mb-4">
                         <MudExpansionPanel Text="Query-Editor" Icon="@Icons.Material.Filled.Code"
-                                           IsInitiallyExpanded="@(_dbResult != null || !string.IsNullOrEmpty(_dbQuery))">
+                                           Expanded="@(_dbResult != null || !string.IsNullOrEmpty(_dbQuery))">
                             <MudTextField @bind-Value="_dbQuery" Label="SQL / Befehl" Variant="Variant.Outlined"
                                           Lines="4" Class="mb-2 sw-query-editor"
                                           Placeholder="@(_container.DatabaseType == ServerWatch.Models.DatabaseType.Redis ? "GET key" : "SELECT * FROM ... LIMIT 10")" />

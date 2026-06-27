@@ -101,8 +101,8 @@ public static class McpPermissionLevels
         ["list_networks"] = Read,
         ["create_network"] = Write,
         ["remove_network"] = Write,
-        ["connect_network"] = Write,
-        ["disconnect_network"] = Write,
+        ["connect_container_to_network"] = Write,
+        ["disconnect_container_from_network"] = Write,
 
         // Admin tools
         ["execute_command"] = Admin,
@@ -172,8 +172,8 @@ public static class McpPermissionLevels
         ["list_networks"] = "Netzwerk",
         ["create_network"] = "Netzwerk",
         ["remove_network"] = "Netzwerk",
-        ["connect_network"] = "Netzwerk",
-        ["disconnect_network"] = "Netzwerk",
+        ["connect_container_to_network"] = "Netzwerk",
+        ["disconnect_container_from_network"] = "Netzwerk",
         ["deploy_app"] = "Deployment",
         ["deploy_compose"] = "Deployment",
         ["get_update_status"] = "Monitoring",

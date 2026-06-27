@@ -114,14 +114,14 @@ else
                     @if (_role >= AppRole.Operator)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
-                                       OnClick="@(() => RunNow(context))" Title="Jetzt ausführen" />
+                                       OnClick="@(() => RunNow(context))" title="Jetzt ausführen" />
                     }
                     @if (_role >= AppRole.Admin)
                     {
                         <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
                                    ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                       OnClick="@(() => DeleteTask(context))" Title="Löschen" />
+                                       OnClick="@(() => DeleteTask(context))" title="Löschen" />
                     }
                 </MudStack>
             </MudTd>

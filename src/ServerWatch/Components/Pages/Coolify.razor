@@ -111,21 +111,21 @@ else
             </MudTd>
             <MudTd>
                 <MudIconButton Icon="@Icons.Material.Filled.RocketLaunch" Size="Size.Small" Color="Color.Primary"
-                               Title="Deploy" OnClick="@(() => DeployApp(context))"
+                               title="Deploy" OnClick="@(() => DeployApp(context))"
                                Disabled="@_actionInProgress" />
                 @if (context.DisplayStatus == "running")
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                   Title="Stoppen" OnClick="@(() => StopApp(context))"
+                                   title="Stoppen" OnClick="@(() => StopApp(context))"
                                    Disabled="@_actionInProgress" />
                     <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                   Title="Neustarten" OnClick="@(() => RestartApp(context))"
+                                   title="Neustarten" OnClick="@(() => RestartApp(context))"
                                    Disabled="@_actionInProgress" />
                 }
                 else
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                   Title="Starten" OnClick="@(() => StartApp(context))"
+                                   title="Starten" OnClick="@(() => StartApp(context))"
                                    Disabled="@_actionInProgress" />
                 }
             </MudTd>
@@ -166,13 +166,13 @@ else
                     @if (context.Status?.Contains("running") == true)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                       Title="Stoppen" OnClick="@(() => StopDb(context))"
+                                       title="Stoppen" OnClick="@(() => StopDb(context))"
                                        Disabled="@_actionInProgress" />
                     }
                     else
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                       Title="Starten" OnClick="@(() => StartDb(context))"
+                                       title="Starten" OnClick="@(() => StartDb(context))"
                                        Disabled="@_actionInProgress" />
                     }
                 </MudTd>

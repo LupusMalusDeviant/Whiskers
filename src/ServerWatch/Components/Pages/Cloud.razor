@@ -65,19 +65,19 @@
                 @if (context.Status == "running")
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                   Title="Neustarten" OnClick="@(() => Act(context, "reboot"))" Disabled="@_busy" />
+                                   title="Neustarten" OnClick="@(() => Act(context, "reboot"))" Disabled="@_busy" />
                     <MudIconButton Icon="@Icons.Material.Filled.PowerSettingsNew" Size="Size.Small" Color="Color.Warning"
-                                   Title="Herunterfahren" OnClick="@(() => Act(context, "shutdown"))" Disabled="@_busy" />
+                                   title="Herunterfahren" OnClick="@(() => Act(context, "shutdown"))" Disabled="@_busy" />
                     <MudIconButton Icon="@Icons.Material.Filled.FlashOn" Size="Size.Small" Color="Color.Error"
-                                   Title="Hard-Reset (erzwungener Neustart)" OnClick="@(() => Act(context, "reset"))" Disabled="@_busy" />
+                                   title="Hard-Reset (erzwungener Neustart)" OnClick="@(() => Act(context, "reset"))" Disabled="@_busy" />
                 }
                 else
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                   Title="Einschalten" OnClick="@(() => Act(context, "poweron"))" Disabled="@_busy" />
+                                   title="Einschalten" OnClick="@(() => Act(context, "poweron"))" Disabled="@_busy" />
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.PhotoCamera" Size="Size.Small" Color="Color.Primary"
-                               Title="Snapshot erstellen" OnClick="@(() => Act(context, "snapshot"))" Disabled="@_busy" />
+                               title="Snapshot erstellen" OnClick="@(() => Act(context, "snapshot"))" Disabled="@_busy" />
             }
         </MudTd>
     </RowTemplate>

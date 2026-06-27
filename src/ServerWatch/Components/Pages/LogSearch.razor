@@ -23,7 +23,7 @@
 <MudPaper Class="pa-4 mb-4" Elevation="0">
     <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End" Class="mb-3">
         <MudTextField @bind-Value="_searchPattern" Label="Suchbegriff / Regex" Variant="Variant.Outlined"
-                      Dense="true" Style="flex: 1; font-family: 'JetBrains Mono', monospace;"
+                      Style="flex: 1; font-family: 'JetBrains Mono', monospace;"
                       Placeholder="ERROR|Exception|OOM" Adornment="Adornment.Start"
                       AdornmentIcon="@Icons.Material.Filled.Search" />
         <MudSwitch @bind-Value="_isRegex" Label="Regex" Color="Color.Primary" />
@@ -96,7 +96,7 @@ else
                 <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
                            ValueChanged="@((bool v) => ToggleRule(context, v))" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                               OnClick="@(() => DeleteRule(context))" Title="Löschen" />
+                               OnClick="@(() => DeleteRule(context))" title="Löschen" />
             </MudTd>
         </RowTemplate>
     </MudTable>

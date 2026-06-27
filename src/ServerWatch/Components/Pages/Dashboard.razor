@@ -121,16 +121,16 @@
         @if (ServerConfigService.SupportsTerminal(serverGroup.ServerId))
         {
             <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
-                           Href="@($"server-terminal/{serverGroup.ServerId}")" Title="Terminal" />
+                           Href="@($"server-terminal/{serverGroup.ServerId}")" title="Terminal" />
         }
         <MudIconButton Icon="@Icons.Material.Filled.Security" Size="Size.Small" Color="Color.Warning"
-                       Href="@($"firewall/{serverGroup.ServerId}")" Title="Firewall / Ports" />
+                       Href="@($"firewall/{serverGroup.ServerId}")" title="Firewall / Ports" />
         <MudIconButton Icon="@Icons.Material.Filled.Web" Size="Size.Small" Color="Color.Info"
-                       Href="@($"nginx/{serverGroup.ServerId}")" Title="Nginx-Seiten" />
+                       Href="@($"nginx/{serverGroup.ServerId}")" title="Nginx-Seiten" />
         <MudIconButton Icon="@Icons.Material.Filled.MiscellaneousServices" Size="Size.Small" Color="Color.Default"
-                       Href="@($"services/{serverGroup.ServerId}")" Title="Systemdienste" />
+                       Href="@($"services/{serverGroup.ServerId}")" title="Systemdienste" />
         <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Success"
-                       Href="@($"ssl/{serverGroup.ServerId}")" Title="SSL-Zertifikate" />
+                       Href="@($"ssl/{serverGroup.ServerId}")" title="SSL-Zertifikate" />
     </div>
 
     @if (_expandedServers.Contains(serverGroup.ServerId) && _serverInfos.TryGetValue(serverGroup.ServerId, out var sInfo) && sInfo.IsReachable)
@@ -295,13 +295,13 @@
                         @if (_role >= AppRole.Operator)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                           Title="Stoppen" OnClick="@(() => StopContainer(context))" />
+                                           title="Stoppen" OnClick="@(() => StopContainer(context))" />
                             <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                           Title="Neustarten" OnClick="@(() => RestartContainer(context))" />
+                                           title="Neustarten" OnClick="@(() => RestartContainer(context))" />
                             @if (HasUpdate(context))
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.SystemUpdateAlt" Size="Size.Small" Color="Color.Warning"
-                                               Title="Image aktualisieren" OnClick="@(() => UpdateContainer(context))" />
+                                               title="Image aktualisieren" OnClick="@(() => UpdateContainer(context))" />
                             }
                         }
                     }
@@ -310,12 +310,12 @@
                         @if (_role >= AppRole.Operator)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                           Title="Starten" OnClick="@(() => StartContainer(context))" />
+                                           title="Starten" OnClick="@(() => StartContainer(context))" />
                         }
                         @if (_role >= AppRole.Admin)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                           Title="Entfernen" OnClick="@(() => RemoveContainer(context))" />
+                                           title="Entfernen" OnClick="@(() => RemoveContainer(context))" />
                         }
                     }
                 </MudTd>

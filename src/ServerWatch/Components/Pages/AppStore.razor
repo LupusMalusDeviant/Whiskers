@@ -19,7 +19,7 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">@TemplateService.GetTemplates().Count Apps verfügbar</MudText>
         </div>
         <MudSpacer />
-        <MudTextField @bind-Value="_search" Placeholder="Suchen..." Variant="Variant.Outlined" Dense="true"
+        <MudTextField @bind-Value="_search" Placeholder="Suchen..." Variant="Variant.Outlined"
                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                       Immediate="true" Style="max-width: 280px;" />
     </MudStack>
@@ -134,7 +134,7 @@
                 var isRequired = _selectedTemplate.RequiredEnvVars.Contains(k);
                 var isPort = k.Contains("PORT", StringComparison.OrdinalIgnoreCase);
                 <MudTextField Value="@_deployVars[k]" ValueChanged="@((string v) => { _deployVars[k] = v; if (isPort) CheckPortConflicts(); })"
-                              Label="@k" Variant="Variant.Outlined" Dense="true" Class="mb-2"
+                              Label="@k" Variant="Variant.Outlined" Class="mb-2"
                               Style="font-family: 'JetBrains Mono', monospace;"
                               InputType="@(k.Contains("PASSWORD") || k.Contains("SECRET") || k.Contains("TOKEN") ? InputType.Password : InputType.Text)"
                               Required="@isRequired"

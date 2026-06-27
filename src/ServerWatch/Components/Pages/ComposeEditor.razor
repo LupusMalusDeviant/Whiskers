@@ -43,7 +43,7 @@
                     </MudStack>
                     <MudSpacer />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                   OnClick="@(() => _services.Remove(s))" OnClickStopPropagation="true" />
+                                   OnClick="@(() => _services.Remove(s))" />
                 </MudStack>
             </MudPaper>
         }
@@ -60,22 +60,22 @@
                 </MudText>
                 <MudGrid>
                     <MudItem xs="6">
-                        <MudTextField @bind-Value="svc.Name" Label="Service-Name" Variant="Variant.Outlined" Dense="true" />
+                        <MudTextField @bind-Value="svc.Name" Label="Service-Name" Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="6">
-                        <MudTextField @bind-Value="svc.Image" Label="Image" Variant="Variant.Outlined" Dense="true"
+                        <MudTextField @bind-Value="svc.Image" Label="Image" Variant="Variant.Outlined"
                                       Placeholder="nginx:latest" Style="font-family: monospace;" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="svc.Ports" Label="Ports (kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                        <MudTextField @bind-Value="svc.Ports" Label="Ports (kommagetrennt)" Variant="Variant.Outlined"
                                       Placeholder="8080:80, 8443:443" Style="font-family: monospace;" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="svc.EnvVars" Label="Umgebungsvariablen (KEY=VALUE, kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                        <MudTextField @bind-Value="svc.EnvVars" Label="Umgebungsvariablen (KEY=VALUE, kommagetrennt)" Variant="Variant.Outlined"
                                       Placeholder="DB_HOST=db, DB_PORT=5432" Style="font-family: monospace;" Lines="2" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="svc.Volumes" Label="Volumes (kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                        <MudTextField @bind-Value="svc.Volumes" Label="Volumes (kommagetrennt)" Variant="Variant.Outlined"
                                       Placeholder="data:/app/data, ./config:/etc/config" Style="font-family: monospace;" />
                     </MudItem>
                     <MudItem xs="6">
@@ -87,11 +87,11 @@
                         </MudSelect>
                     </MudItem>
                     <MudItem xs="6">
-                        <MudTextField @bind-Value="svc.DependsOn" Label="Depends On (kommagetrennt)" Variant="Variant.Outlined" Dense="true"
+                        <MudTextField @bind-Value="svc.DependsOn" Label="Depends On (kommagetrennt)" Variant="Variant.Outlined"
                                       Placeholder="db, redis" />
                     </MudItem>
                     <MudItem xs="6">
-                        <MudTextField @bind-Value="svc.Network" Label="Netzwerk" Variant="Variant.Outlined" Dense="true"
+                        <MudTextField @bind-Value="svc.Network" Label="Netzwerk" Variant="Variant.Outlined"
                                       Placeholder="app-network" />
                     </MudItem>
                 </MudGrid>
@@ -111,7 +111,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
         <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Generierte docker-compose.yml</MudText>
         <MudSpacer />
-        <MudTextField @bind-Value="_projectName" Label="Projektname" Variant="Variant.Outlined" Dense="true"
+        <MudTextField @bind-Value="_projectName" Label="Projektname" Variant="Variant.Outlined"
                       Style="max-width: 200px;" Placeholder="my-app" />
         @if (_role >= AppRole.Operator)
         {

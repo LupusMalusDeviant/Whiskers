@@ -76,7 +76,7 @@ public class NetworkTools
         [Description("Container name or ID")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
-        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "connect_network");
+        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "connect_container_to_network");
         if (denied != null) return denied;
 
         await docker.ConnectContainerToNetworkAsync(networkId, containerId, serverId);
@@ -92,7 +92,7 @@ public class NetworkTools
         [Description("Container name or ID")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
-        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "disconnect_network");
+        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "disconnect_container_from_network");
         if (denied != null) return denied;
 
         await docker.DisconnectContainerFromNetworkAsync(networkId, containerId, serverId);

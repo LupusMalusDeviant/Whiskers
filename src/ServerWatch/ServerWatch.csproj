@@ -15,6 +15,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.5" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.5" />
     <PackageReference Include="MudBlazor" Version="9.2.0" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageReference Include="System.Reactive" Version="6.1.0" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.1.0" />

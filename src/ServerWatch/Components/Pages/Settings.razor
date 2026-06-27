@@ -44,7 +44,7 @@ else
 <MudExpansionPanels MultiExpansion="true">
     @* Mattermost *@
     <MudExpansionPanel Text="Mattermost-Benachrichtigungen" Icon="@Icons.Material.Filled.Notifications"
-                       IsInitiallyExpanded="true">
+                       Expanded="true">
         <MudGrid>
             <MudItem xs="12">
                 <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert"
@@ -216,7 +216,7 @@ else
 
     @* MCP Permissions *@
     <MudExpansionPanel Text="MCP-Rechte" Icon="@Icons.Material.Filled.VpnKey"
-                       IsInitiallyExpanded="false">
+                       Expanded="false">
         <MudText Typo="Typo.subtitle1" Class="mb-3">API-Schlüssel</MudText>
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
             Jeder API-Schlüssel hat eine Berechtigungsstufe: <b>Lesen</b> (nur Abfragen), <b>Schreiben</b> (Container/Server verwalten) oder <b>Admin</b> (alle Befehle inkl. Shell).
@@ -384,7 +384,7 @@ else
             </MudItem>
             <MudItem xs="12">
                 <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
-                    <MudTextField @bind-Value="_newRoleEmail" Label="E-Mail" Variant="Variant.Outlined" Dense="true" Style="max-width: 300px;" />
+                    <MudTextField @bind-Value="_newRoleEmail" Label="E-Mail" Variant="Variant.Outlined" Style="max-width: 300px;" />
                     <MudSelect T="ServerWatch.Models.AppRole" @bind-Value="_newRoleRole" Label="Rolle" Variant="Variant.Outlined" Dense="true" Style="max-width: 140px;">
                         <MudSelectItem Value="ServerWatch.Models.AppRole.Viewer">Viewer</MudSelectItem>
                         <MudSelectItem Value="ServerWatch.Models.AppRole.Operator">Operator</MudSelectItem>
@@ -443,8 +443,8 @@ else
                 </MudItem>
                 <MudItem xs="12">
                     <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
-                        <MudTextField @bind-Value="_newVaultKey" Label="Key" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;" />
-                        <MudTextField @bind-Value="_newVaultValue" Label="Value" Variant="Variant.Outlined" Dense="true"
+                        <MudTextField @bind-Value="_newVaultKey" Label="Key" Variant="Variant.Outlined" Style="max-width: 200px;" />
+                        <MudTextField @bind-Value="_newVaultValue" Label="Value" Variant="Variant.Outlined"
                                       InputType="InputType.Password" Style="flex: 1;" />
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="AddVaultSecret"
                                    Disabled="@(string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue))">Speichern</MudButton>

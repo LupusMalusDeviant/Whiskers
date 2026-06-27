@@ -24,7 +24,7 @@
             <div style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 8px;">
                 <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" Style="color: var(--sw-accent-blue);" />
                 <span style="font-weight: 600; font-size: 0.9rem; flex: 1;">ServerWatch Assistent</span>
-                <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearChat" Title="Chat leeren"
+                <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearChat" title="Chat leeren"
                                Style="color: rgba(255,255,255,0.4);" />
                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _isOpen = false)"
                                Style="color: rgba(255,255,255,0.4);" />
@@ -63,7 +63,7 @@
 
             @* Input *@
             <div style="padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.06);">
-                <MudTextField @bind-Value="_input" Variant="Variant.Outlined" Dense="true"
+                <MudTextField @bind-Value="_input" Variant="Variant.Outlined"
                               Placeholder="Nachricht... (Enter zum Senden)"
                               Style="font-size: 0.85rem;"
                               Immediate="true"

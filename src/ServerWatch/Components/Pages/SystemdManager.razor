@@ -64,18 +64,18 @@ else
                     @if (context.ActiveState == "active")
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                       Title="Stoppen" OnClick="@(() => ManageService(context.Name, "stop"))" />
+                                       title="Stoppen" OnClick="@(() => ManageService(context.Name, "stop"))" />
                         <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                       Title="Neustarten" OnClick="@(() => ManageService(context.Name, "restart"))" />
+                                       title="Neustarten" OnClick="@(() => ManageService(context.Name, "restart"))" />
                     }
                     else
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                       Title="Starten" OnClick="@(() => ManageService(context.Name, "start"))" />
+                                       title="Starten" OnClick="@(() => ManageService(context.Name, "start"))" />
                     }
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.Article" Size="Size.Small" Color="Color.Default"
-                               Title="Protokoll" OnClick="@(() => ShowJournal(context.Name))" />
+                               title="Protokoll" OnClick="@(() => ShowJournal(context.Name))" />
             </MudTd>
         </RowTemplate>
     </MudTable>

@@ -86,18 +86,18 @@
         </MudTd>
         <MudTd>
             <MudIconButton Icon="@Icons.Material.Filled.NetworkCheck" Size="Size.Small" Color="Color.Primary"
-                           OnClick="@(() => TestConnection(context))" Title="Verbindung testen" />
+                           OnClick="@(() => TestConnection(context))" title="Verbindung testen" />
             @if (context.ConnectionType == ServerWatch.Models.ConnectionType.SSH && _role >= AppRole.Admin)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Hub" Size="Size.Small" Color="Color.Tertiary"
-                               OnClick="@(() => StartOnboarding(context))" Title="Ins Mesh onboarden (Tailscale + mTLS, SSH-frei)" />
+                               OnClick="@(() => StartOnboarding(context))" title="Ins Mesh onboarden (Tailscale + mTLS, SSH-frei)" />
             }
             @if (!context.IsDefault && _role >= AppRole.Admin)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Default"
-                               OnClick="@(() => EditServer(context))" Title="Bearbeiten" />
+                               OnClick="@(() => EditServer(context))" title="Bearbeiten" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                               OnClick="@(() => DeleteServer(context))" Title="Löschen" />
+                               OnClick="@(() => DeleteServer(context))" title="Löschen" />
             }
         </MudTd>
     </RowTemplate>

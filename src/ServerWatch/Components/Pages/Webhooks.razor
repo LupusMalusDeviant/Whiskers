@@ -58,11 +58,11 @@ else
             <MudTd>@context.TriggerCount×</MudTd>
             <MudTd>
                 <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
-                               OnClick="@(() => TestWebhook(context))" Title="Testen" />
+                               OnClick="@(() => TestWebhook(context))" title="Testen" />
                 @if (_role >= AppRole.Admin)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                   OnClick="@(() => DeleteWebhook(context))" Title="Löschen" />
+                                   OnClick="@(() => DeleteWebhook(context))" title="Löschen" />
                 }
             </MudTd>
         </RowTemplate>

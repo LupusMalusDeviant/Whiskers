@@ -19,7 +19,7 @@
     </MudStack>
 </div>
 
-<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-6">
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
     @* Tab 1: Form Deploy *@
     <MudTabPanel Text="Formular" Icon="@Icons.Material.Filled.EditNote">
         <MudGrid>
@@ -40,10 +40,10 @@
                     var idx = i;
                     <MudStack Row="true" Class="mb-2">
                         <MudTextField @bind-Value="_ports[idx].Host" Label="Host-Port" Variant="Variant.Outlined"
-                                      Dense="true" Style="max-width: 150px;" />
+                                      Style="max-width: 150px;" />
                         <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="align-self-center" />
                         <MudTextField @bind-Value="_ports[idx].Container" Label="Container-Port" Variant="Variant.Outlined"
-                                      Dense="true" Style="max-width: 150px;" />
+                                      Style="max-width: 150px;" />
                         <MudIconButton Icon="@Icons.Material.Filled.Remove" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => _ports.RemoveAt(idx))" Class="align-self-center" />
                     </MudStack>
@@ -60,7 +60,7 @@
                     var idx = i;
                     <MudStack Row="true" Class="mb-2">
                         <MudTextField @bind-Value="_volumes[idx]" Label="host:container" Variant="Variant.Outlined"
-                                      Dense="true" Placeholder="/data:/app/data" />
+                                      Placeholder="/data:/app/data" />
                         <MudIconButton Icon="@Icons.Material.Filled.Remove" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => _volumes.RemoveAt(idx))" Class="align-self-center" />
                     </MudStack>
@@ -77,9 +77,8 @@
                     var idx = i;
                     <MudStack Row="true" Class="mb-2">
                         <MudTextField @bind-Value="_envVars[idx].Key" Label="Key" Variant="Variant.Outlined"
-                                      Dense="true" Style="max-width: 200px;" />
-                        <MudTextField @bind-Value="_envVars[idx].Value" Label="Value" Variant="Variant.Outlined"
-                                      Dense="true" />
+                                      Style="max-width: 200px;" />
+                        <MudTextField @bind-Value="_envVars[idx].Value" Label="Value" Variant="Variant.Outlined" />
                         <MudIconButton Icon="@Icons.Material.Filled.Remove" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => _envVars.RemoveAt(idx))" Class="align-self-center" />
                     </MudStack>
