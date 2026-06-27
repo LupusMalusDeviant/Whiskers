@@ -22,7 +22,19 @@
 
 @if (_container == null)
 {
-    <MudProgressCircular Indeterminate="true" />
+    @if (_initialLoadDone)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="pa-4" Spacing="2">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="GoBack" />
+            <MudAlert Severity="Severity.Warning">
+                Container <code>@(ContainerId.Length > 12 ? ContainerId[..12] : ContainerId)</code> wurde auf keinem Server gefunden — er wurde möglicherweise entfernt oder neu erstellt (Image-Update vergibt eine neue ID).
+            </MudAlert>
+        </MudStack>
+    }
+    else
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
 }
 else
 {
@@ -912,6 +924,7 @@ else
     [Parameter] public string ServerId { get; set; } = "";
 
     private ContainerInfo? _container;
+    private bool _initialLoadDone;
     private ContainerStats? _stats;
     private Timer? _refreshTimer;
     private int _activeTab;
@@ -1026,6 +1039,7 @@ else
     {
         _role = await CurrentUser.GetRoleAsync();
         await LoadContainer();
+        _initialLoadDone = true;
         _ = LoadChartData();
         _refreshTimer = new Timer(async _ =>
         {
@@ -1114,7 +1128,15 @@ else
         }
     }
 
-    private string? _resolvedServerId => string.IsNullOrEmpty(ServerId) ? null : ServerId;
+    // When the route carries no server (e.g. opened from a notification deep-link), we discover
+    // which server the container lives on during the first load and remember it here.
+    private string? _discoveredServerId;
+    private bool _crossServerSearched;
+    private string? _resolvedServerId => !string.IsNullOrEmpty(ServerId) ? ServerId : _discoveredServerId;
+
+    // Tolerant id match: containers may be referenced by full (64-char) or short (12-char) id.
+    private static bool MatchesId(string a, string b) =>
+        a == b || (a.Length >= 12 && b.Length >= 12 && (a.StartsWith(b) || b.StartsWith(a)));
 
     private void GoBack()
     {
@@ -1126,8 +1148,27 @@ else
     {
         try
         {
-            var containers = await DockerService.ListContainersAsync(serverId: _resolvedServerId);
-            _container = containers.FirstOrDefault(c => c.Id == ContainerId);
+            if (string.IsNullOrEmpty(ServerId) && _discoveredServerId == null && !_crossServerSearched)
+            {
+                // No server in the route → search every server once to locate the container,
+                // then pin _discoveredServerId so later refreshes hit only that server.
+                _crossServerSearched = true;
+                var all = await DockerService.ListAllContainersAsync();
+                var match = all.FirstOrDefault(c => c.Id == ContainerId)
+                            ?? all.FirstOrDefault(c => MatchesId(c.Id, ContainerId));
+                if (match != null)
+                {
+                    _discoveredServerId = match.ServerId;
+                    _container = match;
+                }
+            }
+            else
+            {
+                var containers = await DockerService.ListContainersAsync(serverId: _resolvedServerId);
+                _container = containers.FirstOrDefault(c => c.Id == ContainerId)
+                             ?? containers.FirstOrDefault(c => MatchesId(c.Id, ContainerId));
+            }
+
             if (_container?.State == "running")
             {
                 _stats = await DockerService.GetContainerStatsAsync(ContainerId, _resolvedServerId);
