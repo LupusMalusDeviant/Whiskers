@@ -24,6 +24,7 @@
 @inject IApprovalCoordinator ApprovalCoordinator
 @inject IApprovalStore ApprovalStore
 @inject IChatWidgetParser WidgetParser
+@inject IJSRuntime JS
 @inject ISnackbar Snackbar
 
 <PageTitle>Agent</PageTitle>
@@ -51,7 +52,7 @@
     <MudGrid>
         <MudItem xs="12" md="@(_isAdmin ? 7 : 12)">
             <MudPaper Class="pa-3" Style="display:flex; flex-direction:column; height: calc(100vh - 210px); min-height: 460px;">
-                <div style="flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                <div @ref="_chatScroll" style="flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
                     @if (_lines.Count == 0)
                     {
                         <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-8" Style="color: rgba(255,255,255,0.3);">
@@ -490,10 +491,20 @@
 
     // === Model discovery ===
 
+    private ElementReference _chatScroll;
+    private int _lastScrolledCount = -1;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && _isAdmin && (_llmProvider == "claude-code" || !string.IsNullOrWhiteSpace(_llmKey)))
             await MaybeTestAsync();
+
+        // Keep the chat pinned to the newest message whenever a line was added.
+        if (_lines.Count != _lastScrolledCount)
+        {
+            _lastScrolledCount = _lines.Count;
+            try { await JS.InvokeVoidAsync("swChat.scrollToBottom", _chatScroll); } catch { /* JS not ready */ }
+        }
     }
 
     private string Signature() => $"{_llmProvider}|{_llmEndpoint}|{_llmKey}";

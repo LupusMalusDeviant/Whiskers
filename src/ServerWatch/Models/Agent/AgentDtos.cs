@@ -16,7 +16,10 @@ public sealed record AgentUsage(int InputTokens, int OutputTokens);
 
 public sealed record AgentToolDefinition(string Name, string Description, JsonElement JsonSchema);
 
-public sealed record AgentToolCall(string Id, string Name, string ArgumentsJson);
+/// <summary>A tool call requested by the model. <paramref name="ProviderSignature"/> carries an
+/// opaque per-provider token that MUST be replayed with the call on the next request — e.g. Gemini's
+/// <c>thoughtSignature</c> for thinking models (omitting it is a hard 400). Null for providers that don't use one.</summary>
+public sealed record AgentToolCall(string Id, string Name, string ArgumentsJson, string? ProviderSignature = null);
 
 public sealed record AgentMessage(
     AgentRole Role,

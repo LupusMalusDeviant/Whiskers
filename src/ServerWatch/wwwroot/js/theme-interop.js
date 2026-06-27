@@ -9,3 +9,10 @@ window.swTheme = {
         try { return localStorage.getItem('sw-theme'); } catch (e) { return null; }
     }
 };
+
+// Scrolls a container to its bottom (used to keep the agent chat pinned to the newest message).
+window.swChat = {
+    scrollToBottom: function (el) {
+        if (el) { el.scrollTop = el.scrollHeight; }
+    }
+};

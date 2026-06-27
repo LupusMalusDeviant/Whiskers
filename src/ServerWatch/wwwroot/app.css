@@ -109,6 +109,11 @@ html, body {
     max-width: 100%;
 }
 
+/* Drawer / nav must never scroll sideways (long labels wrap/clip, no horizontal bar). */
+.mud-drawer, .mud-drawer-content, .mud-navmenu, .mud-nav-group, .mud-nav-link {
+    overflow-x: hidden;
+}
+
 /* Ambient gradient glow — colours come from the active theme */
 body::before {
     content: '';

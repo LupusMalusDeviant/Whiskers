@@ -79,14 +79,20 @@ public static class GeminiRequestMapper
                     parts.Add(new JsonObject { ["text"] = m.Text });
                 if (m.ToolCalls is { Count: > 0 })
                     foreach (var c in m.ToolCalls)
-                        parts.Add(new JsonObject
+                    {
+                        var fcPart = new JsonObject
                         {
                             ["functionCall"] = new JsonObject
                             {
                                 ["name"] = c.Name,
                                 ["args"] = JsonNode.Parse(string.IsNullOrWhiteSpace(c.ArgumentsJson) ? "{}" : c.ArgumentsJson),
                             }
-                        });
+                        };
+                        // Replay Gemini's thoughtSignature — required for tools to work on thinking models.
+                        if (!string.IsNullOrEmpty(c.ProviderSignature))
+                            fcPart["thoughtSignature"] = c.ProviderSignature;
+                        parts.Add(fcPart);
+                    }
                 // Gemini rejects a content with an empty parts array (400). Never emit one.
                 if (parts.Count == 0)
                     parts.Add(new JsonObject { ["text"] = "" });
@@ -140,7 +146,10 @@ public sealed class GeminiStreamAccumulator
             {
                 var name = fc.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "";
                 var args = fc.TryGetProperty("args", out var ar) ? ar.GetRawText() : "{}";
-                _calls.Add(new AgentToolCall($"call_{_calls.Count}", name, args));
+                // thoughtSignature sits on the PART (sibling of functionCall) and must be replayed.
+                var sig = part.TryGetProperty("thoughtSignature", out var ts) && ts.ValueKind == JsonValueKind.String
+                    ? ts.GetString() : null;
+                _calls.Add(new AgentToolCall($"call_{_calls.Count}", name, args, sig));
             }
         }
         return text?.ToString();

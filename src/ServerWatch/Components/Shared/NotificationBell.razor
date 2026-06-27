@@ -4,16 +4,12 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 
-@* Uncontrolled MudMenu (self-manages Open like the working theme menu); we only listen to
-   OpenChanged to mark notifications read. A real MudIconButton is the activator so the click
-   is always captured; rows are MudMenuItems so their OnClick fires reliably. *@
-<MudMenu OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-    <ActivatorContent>
-        <MudBadge Content="@Store.UnreadCount" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true">
-            <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit" title="Benachrichtigungen" />
-        </MudBadge>
-    </ActivatorContent>
-    <ChildContent>
+@* The activator is a plain MudMenu Icon button — the exact pattern the (working) theme menu uses.
+   The MudBadge only wraps it to show the unread count; it does not intercept the click. *@
+<MudBadge Content="@Store.UnreadCount" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true">
+    <MudMenu Icon="@(Store.UnreadCount > 0 ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
+             Color="Color.Inherit" title="Benachrichtigungen"
+             OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
         <div style="min-width:340px; max-width:440px;">
             <div style="display:flex; align-items:center; padding:8px 12px;">
                 <MudText Typo="Typo.subtitle2">Benachrichtigungen</MudText>
@@ -51,8 +47,8 @@
                 </div>
             }
         </div>
-    </ChildContent>
-</MudMenu>
+    </MudMenu>
+</MudBadge>
 
 @code {
     protected override void OnInitialized()

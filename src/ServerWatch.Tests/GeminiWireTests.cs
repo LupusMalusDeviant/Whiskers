@@ -112,3 +112,42 @@ public class GeminiFactoryTests
         Assert.IsType<GeminiProvider>(provider);
     }
 }
+
+public class GeminiThoughtSignatureTests
+{
+    [Fact]
+    public void Accumulator_captures_thoughtSignature_and_mapper_replays_it()
+    {
+        var chunk = JsonDocument.Parse("""
+            {"candidates":[{"content":{"parts":[
+                {"thoughtSignature":"SIG123","functionCall":{"name":"get_server_metrics","args":{}}}
+            ]}}]}
+            """).RootElement;
+
+        var acc = new GeminiStreamAccumulator();
+        acc.FeedChunk(chunk);
+        var call = Assert.Single(acc.CompletedToolCalls());
+        Assert.Equal("SIG123", call.ProviderSignature);
+
+        var req = new AgentCompletionRequest("gemini-2.5-flash", "sys",
+            new[] { new AgentMessage(AgentRole.Assistant, null, new[] { call }) },
+            Array.Empty<AgentToolDefinition>());
+        var body = GeminiRequestMapper.BuildBody(req);
+
+        var part = body["contents"]!.AsArray()[0]!["parts"]!.AsArray()[0]!;
+        Assert.Equal("SIG123", (string)part["thoughtSignature"]!);
+        Assert.Equal("get_server_metrics", (string)part["functionCall"]!["name"]!);
+    }
+
+    [Fact]
+    public void Assistant_turn_without_text_or_calls_still_has_a_part()
+    {
+        var req = new AgentCompletionRequest("gemini-2.5-flash", "sys",
+            new[] { new AgentMessage(AgentRole.Assistant, null, null) },
+            Array.Empty<AgentToolDefinition>());
+        var body = GeminiRequestMapper.BuildBody(req);
+
+        var parts = body["contents"]!.AsArray()[0]!["parts"]!.AsArray();
+        Assert.NotEmpty(parts); // Gemini 400s on an empty parts array
+    }
+}
