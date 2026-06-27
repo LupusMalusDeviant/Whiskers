@@ -21,4 +21,9 @@ public class AgentSettings
 
     /// <summary>Hard upper bound on tool iterations per turn — code-enforced, not in the prompt.</summary>
     public int MaxToolIterations { get; set; } = 8;
+
+    /// <summary>Custom system prompt for the agent. Empty = use the built-in default
+    /// (AgentService.SystemPrompt). UI-editable; does NOT relax the guardrails (those are enforced
+    /// at the tool boundary regardless of the prompt).</summary>
+    public string SystemPrompt { get; set; } = "";
 }

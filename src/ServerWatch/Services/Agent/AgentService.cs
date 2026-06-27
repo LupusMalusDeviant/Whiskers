@@ -57,7 +57,9 @@ public sealed class AgentService : IAgentService
     {
         var settings = _settings.CurrentValue;
         var provider = _factory.Resolve(settings);
-        var session = new AgentSession(context, provider, _catalog, _invoker, _guardrails, _registry, settings, SystemPrompt, seedHistory);
+        // Empty configured prompt → fall back to the built-in default.
+        var prompt = string.IsNullOrWhiteSpace(settings.SystemPrompt) ? SystemPrompt : settings.SystemPrompt;
+        var session = new AgentSession(context, provider, _catalog, _invoker, _guardrails, _registry, settings, prompt, seedHistory);
         _sessions[context.SessionId] = session;
         _order.Enqueue(context.SessionId);
         while (_sessions.Count > MaxSessions && _order.TryDequeue(out var oldId))

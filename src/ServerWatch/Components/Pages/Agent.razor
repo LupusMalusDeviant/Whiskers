@@ -140,6 +140,32 @@
                                      HelperText="@(_availableModels.Count > 0 ? $"{_availableModels.Count} Modelle verfügbar — tippen zum Filtern" : "Frei eingeben, oder API-Key testen für Vorschläge")" />
 
                     <MudNumericField @bind-Value="_llmIterations" Label="Max. Tool-Iterationen" Min="1" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
+
+                    <MudExpansionPanels Elevation="0" Class="mt-2" Style="background:transparent;">
+                        <MudExpansionPanel Style="background:transparent;">
+                            <TitleContent>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">System-Prompt</MudText>
+                                    @if (_systemPrompt.Trim() != DefaultSystemPrompt.Trim())
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text">angepasst</MudChip>
+                                    }
+                                </div>
+                            </TitleContent>
+                            <ChildContent>
+                                <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.5);">
+                                    Anweisung an das LLM. Leer = Standard. Ändert NICHT die Guardrails — die greifen
+                                    code-erzwungen am Tool-Boundary, egal was hier steht.
+                                </MudText>
+                                <MudTextField @bind-Value="_systemPrompt" Lines="12" Variant="Variant.Outlined"
+                                              Margin="Margin.Dense" Style="font-size:0.82rem;" />
+                                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Restore"
+                                           OnClick="ResetSystemPrompt" Class="mt-1">Auf Standard zurücksetzen</MudButton>
+                            </ChildContent>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+
                     <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveLlm" Class="mt-3" FullWidth="true">
                         Provider speichern
                     </MudButton>
@@ -180,6 +206,10 @@
     private string _llmEndpoint = "";
     private string _llmKey = "";
     private int _llmIterations = 8;
+    private string _systemPrompt = "";
+
+    // The built-in default prompt (fully qualified — "AgentService" the type is shadowed by the injected instance).
+    private static readonly string DefaultSystemPrompt = ServerWatch.Services.Agent.AgentService.SystemPrompt;
 
     // Model discovery (key test → available models)
     private List<string> _availableModels = new();
@@ -203,6 +233,7 @@
         _llmEndpoint = cfg.Endpoint ?? "";
         _llmKey = cfg.ApiKey;
         _llmIterations = cfg.MaxToolIterations;
+        _systemPrompt = string.IsNullOrWhiteSpace(cfg.SystemPrompt) ? DefaultSystemPrompt : cfg.SystemPrompt;
 
         // Load the persisted conversation — used both for display and as seed context for the new session.
         _email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
@@ -328,9 +359,13 @@
             Endpoint = string.IsNullOrWhiteSpace(_llmEndpoint) ? null : _llmEndpoint,
             ApiKey = _llmKey,
             MaxToolIterations = _llmIterations,
+            // Store empty when unchanged from default, so it keeps tracking the built-in prompt.
+            SystemPrompt = _systemPrompt.Trim() == DefaultSystemPrompt.Trim() ? "" : _systemPrompt,
         });
         Snackbar.Add("Provider gespeichert.", Severity.Success);
     }
+
+    private void ResetSystemPrompt() => _systemPrompt = DefaultSystemPrompt;
 
     // === Model discovery ===
 

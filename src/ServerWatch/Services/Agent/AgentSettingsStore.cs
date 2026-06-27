@@ -35,6 +35,7 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
                 ["Endpoint"] = settings.Endpoint ?? "",
                 ["ApiKey"] = settings.ApiKey,
                 ["MaxToolIterations"] = settings.MaxToolIterations,
+                ["SystemPrompt"] = settings.SystemPrompt,
             }
         };
 
