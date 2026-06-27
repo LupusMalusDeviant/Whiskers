@@ -12,15 +12,15 @@ namespace ServerWatch.Services.Metrics;
 /// not the display Name. The scrape config must label targets with the same id
 /// (see deploy/telemetry/scrape.yml).
 /// </summary>
-public class PrometheusMetricsSource
+public class PrometheusMetricsSource : IPrometheusMetricsSource
 {
     private readonly IHttpClientFactory _httpFactory;
-    private readonly ServerConfigService _serverConfig;
+    private readonly IServerConfigService _serverConfig;
     private readonly ILogger<PrometheusMetricsSource> _logger;
 
     public PrometheusMetricsSource(
         IHttpClientFactory httpFactory,
-        ServerConfigService serverConfig,
+        IServerConfigService serverConfig,
         ILogger<PrometheusMetricsSource> logger)
     {
         _httpFactory = httpFactory;

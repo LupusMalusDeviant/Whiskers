@@ -13,8 +13,8 @@ public class SchedulerTools
     [McpServerTool, Description("List all scheduled tasks with their status, schedule, and last run info.")]
     public static async Task<string> ListScheduledTasks(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SchedulerService scheduler)
+        IMcpPermissionService permissionService,
+        ISchedulerService scheduler)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_scheduled_tasks");
         if (denied != null) return denied;
@@ -30,8 +30,8 @@ public class SchedulerTools
     [McpServerTool, Description("Create a new scheduled task (e.g., periodic backup, container restart, cleanup).")]
     public static async Task<string> CreateScheduledTask(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SchedulerService scheduler,
+        IMcpPermissionService permissionService,
+        ISchedulerService scheduler,
         [Description("Task name")] string name,
         [Description("Cron expression (e.g., '0 2 * * *' for daily at 2am)")] string cronExpression,
         [Description("Task type: ContainerRestart, DbBackup, VolumeBackup, CustomCommand, Cleanup")] string taskType,
@@ -67,8 +67,8 @@ public class SchedulerTools
     [McpServerTool, Description("Delete a scheduled task by its task ID.")]
     public static async Task<string> DeleteScheduledTask(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SchedulerService scheduler,
+        IMcpPermissionService permissionService,
+        ISchedulerService scheduler,
         [Description("Task ID to delete")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "delete_scheduled_task");
@@ -81,8 +81,8 @@ public class SchedulerTools
     [McpServerTool, Description("Run a scheduled task immediately (outside its normal schedule).")]
     public static async Task<string> RunScheduledTask(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SchedulerService scheduler,
+        IMcpPermissionService permissionService,
+        ISchedulerService scheduler,
         [Description("Task ID to run")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "run_scheduled_task");

@@ -15,7 +15,7 @@ public static class McpPermissionCheck
     /// Checks if the current caller has permission to execute the given tool.
     /// Returns null if allowed, or an error message string if denied.
     /// </summary>
-    public static string? CheckAccess(IHttpContextAccessor httpContextAccessor, McpPermissionService permissionService, string toolName)
+    public static string? CheckAccess(IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, string toolName)
     {
         var httpContext = httpContextAccessor.HttpContext;
         if (httpContext == null)
@@ -57,7 +57,7 @@ public static class McpPermissionCheck
             return McpPermissionLevels.Admin;
 
         var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
-        var role = httpContext.RequestServices.GetService<RoleService>()?.GetRole(email) ?? AppRole.Viewer;
+        var role = httpContext.RequestServices.GetService<IRoleService>()?.GetRole(email) ?? AppRole.Viewer;
         return role switch
         {
             AppRole.Admin => McpPermissionLevels.Admin,

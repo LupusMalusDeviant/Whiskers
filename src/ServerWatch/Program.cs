@@ -29,6 +29,10 @@ using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// UI-writable agent provider settings (overrides only Agent:* keys; reloadOnChange → IOptionsMonitor
+// picks up UI changes without a restart). As the last source, so the UI takes precedence over env/appsettings.
+builder.Configuration.AddJsonFile("/app/data/agent-settings.json", optional: true, reloadOnChange: true);
+
 // Path base for reverse proxy subpath
 var configuredPathBase = builder.Configuration["PathBase"] ?? "";
 
@@ -46,9 +50,9 @@ builder.Services.Configure<HealthMonitorSettings>(builder.Configuration.GetSecti
 builder.Services.Configure<ServerWatch.Configuration.MatrixSettings>(builder.Configuration.GetSection(ServerWatch.Configuration.MatrixSettings.SectionName));
 
 // Server config + Docker services
-builder.Services.AddSingleton<ServerConfigService>();
-builder.Services.AddSingleton<SshTunnelManager>();
-builder.Services.AddSingleton<DockerConnectionManager>();
+builder.Services.AddSingleton<ServerWatch.Services.ServerConfig.IServerConfigService, ServerConfigService>();
+builder.Services.AddSingleton<ServerWatch.Services.Docker.ISshTunnelManager, SshTunnelManager>();
+builder.Services.AddSingleton<ServerWatch.Services.Docker.IDockerConnectionManager, DockerConnectionManager>();
 builder.Services.AddSingleton<IDockerService, DockerService>();
 
 // Health monitoring
@@ -58,8 +62,10 @@ builder.Services.AddHostedService<ContainerHealthMonitor>();
 // Notifications (Mattermost + Matrix via composite)
 builder.Services.AddHttpClient<MattermostNotificationService>();
 builder.Services.AddSingleton<MattermostNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMattermostNotificationService>(sp => sp.GetRequiredService<MattermostNotificationService>());
 builder.Services.AddHttpClient<MatrixNotificationService>();
 builder.Services.AddSingleton<MatrixNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMatrixNotificationService>(sp => sp.GetRequiredService<MatrixNotificationService>());
 builder.Services.AddSingleton<INotificationService, CompositeNotificationService>();
 
 // Terminal
@@ -71,62 +77,64 @@ builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 // Image update checking
 builder.Services.Configure<ImageUpdateSettings>(builder.Configuration.GetSection("ImageUpdate"));
 builder.Services.AddHttpClient<RegistryClient>();
-builder.Services.AddSingleton<ImageUpdateStore>();
+builder.Services.AddSingleton<ServerWatch.Services.ImageUpdate.IImageUpdateStore, ImageUpdateStore>();
 builder.Services.AddSingleton<RegistryClient>();
+builder.Services.AddSingleton<ServerWatch.Services.ImageUpdate.IRegistryClient>(sp => sp.GetRequiredService<RegistryClient>());
 builder.Services.AddHostedService<ImageUpdateChecker>();
 
 // CVE monitoring (containers via Trivy + OS via apt)
 builder.Services.Configure<CveMonitorSettings>(builder.Configuration.GetSection(CveMonitorSettings.SectionName));
-builder.Services.AddSingleton<CveFindingsStore>();
-builder.Services.AddSingleton<OsCveScanner>();
-builder.Services.AddSingleton<TrivyScanner>();
+builder.Services.AddSingleton<ServerWatch.Services.Cve.ICveFindingsStore, CveFindingsStore>();
+builder.Services.AddSingleton<ServerWatch.Services.Cve.IOsCveScanner, OsCveScanner>();
+builder.Services.AddSingleton<ServerWatch.Services.Cve.ITrivyScanner, TrivyScanner>();
 // Registered as Singleton AND HostedService — same instance — so UI can trigger manual scans.
 builder.Services.AddSingleton<CveMonitorService>();
+builder.Services.AddSingleton<ServerWatch.Services.Cve.ICveMonitorService>(sp => sp.GetRequiredService<CveMonitorService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CveMonitorService>());
 
 // Auth whitelist + roles
-builder.Services.AddSingleton<WhitelistService>();
-builder.Services.AddSingleton<ServerWatch.Services.Auth.RoleService>();
+builder.Services.AddSingleton<ServerWatch.Services.Auth.IWhitelistService, WhitelistService>();
+builder.Services.AddSingleton<ServerWatch.Services.Auth.IRoleService, ServerWatch.Services.Auth.RoleService>();
 // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
-builder.Services.AddScoped<ServerWatch.Services.Auth.CurrentUserService>();
+builder.Services.AddScoped<ServerWatch.Services.Auth.ICurrentUserService, ServerWatch.Services.Auth.CurrentUserService>();
 
 // Notification prefs per container
-builder.Services.AddSingleton<ServerWatch.Services.Notifications.ContainerNotificationPrefsService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.IContainerNotificationPrefsService, ServerWatch.Services.Notifications.ContainerNotificationPrefsService>();
 
 // Config export
-builder.Services.AddSingleton<ServerWatch.Services.ConfigExport.ConfigExportService>();
+builder.Services.AddSingleton<ServerWatch.Services.ConfigExport.IConfigExportService, ServerWatch.Services.ConfigExport.ConfigExportService>();
 
 // Secret vault
-builder.Services.AddSingleton<ServerWatch.Services.Vault.VaultService>();
+builder.Services.AddSingleton<ServerWatch.Services.Vault.IVaultService, ServerWatch.Services.Vault.VaultService>();
 
 // Coolify integration
-builder.Services.AddSingleton<CoolifyConfigService>();
+builder.Services.AddSingleton<ServerWatch.Services.Coolify.ICoolifyConfigService, CoolifyConfigService>();
 builder.Services.AddHttpClient<ICoolifyService, CoolifyApiService>();
 
 // Cloud provider integrations (per-server credentials, provider-agnostic dispatch)
 builder.Services.AddHttpClient<IHetznerService, HetznerApiService>();
 builder.Services.AddHttpClient<IHostingerService, HostingerApiService>();
-builder.Services.AddSingleton<ServerWatch.Services.Cloud.CloudControlService>();
+builder.Services.AddSingleton<ServerWatch.Services.Cloud.ICloudControlService, ServerWatch.Services.Cloud.CloudControlService>();
 
 // Host command execution + server management
 builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
-builder.Services.AddSingleton<FirewallService>();
-builder.Services.AddSingleton<NginxService>();
-builder.Services.AddSingleton<SystemdService>();
-builder.Services.AddSingleton<SslCertService>();
-builder.Services.AddSingleton<ServerWatch.Services.Onboarding.OnboardingService>();
+builder.Services.AddSingleton<ServerWatch.Services.Server.IFirewallService, FirewallService>();
+builder.Services.AddSingleton<ServerWatch.Services.Server.INginxService, NginxService>();
+builder.Services.AddSingleton<ServerWatch.Services.Server.ISystemdService, SystemdService>();
+builder.Services.AddSingleton<ServerWatch.Services.Server.ISslCertService, SslCertService>();
+builder.Services.AddSingleton<ServerWatch.Services.Onboarding.IOnboardingService, ServerWatch.Services.Onboarding.OnboardingService>();
 
 // SQLite metrics database
 builder.Services.AddDbContext<MetricsDbContext>(options =>
     options.UseSqlite("Data Source=/app/data/metrics.db"),
     ServiceLifetime.Transient);
 builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
-builder.Services.AddSingleton<MetricsQueryService>();
+builder.Services.AddSingleton<ServerWatch.Services.Metrics.IMetricsQueryService, MetricsQueryService>();
 // Metrics source seam: collector reads through IMetricsSource so a server can be switched to a
 // push/scrape TSDB (VictoriaMetrics) instead of SSH/Docker. Docker is the default + fallback.
 builder.Services.AddHttpClient();
-builder.Services.AddSingleton<DockerMetricsSource>();
-builder.Services.AddSingleton<PrometheusMetricsSource>();
+builder.Services.AddSingleton<ServerWatch.Services.Metrics.IDockerMetricsSource, DockerMetricsSource>();
+builder.Services.AddSingleton<ServerWatch.Services.Metrics.IPrometheusMetricsSource, PrometheusMetricsSource>();
 builder.Services.AddSingleton<IMetricsSource, MetricsSourceDispatcher>();
 builder.Services.AddHostedService<MetricsCollectorService>();
 
@@ -134,30 +142,64 @@ builder.Services.AddHostedService<MetricsCollectorService>();
 builder.Services.AddSingleton<ServerWatch.Services.Database.IDatabaseService, ServerWatch.Services.Database.DatabaseService>();
 
 // Scheduler
-builder.Services.AddSingleton<ServerWatch.Services.Scheduler.TaskExecutor>();
+builder.Services.AddSingleton<ServerWatch.Services.Scheduler.ITaskExecutor, ServerWatch.Services.Scheduler.TaskExecutor>();
 builder.Services.AddSingleton<ServerWatch.Services.Scheduler.SchedulerService>();
+builder.Services.AddSingleton<ServerWatch.Services.Scheduler.ISchedulerService>(sp => sp.GetRequiredService<ServerWatch.Services.Scheduler.SchedulerService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerWatch.Services.Scheduler.SchedulerService>());
 
 // App templates
-builder.Services.AddSingleton<ServerWatch.Services.Templates.TemplateService>();
+builder.Services.AddSingleton<ServerWatch.Services.Templates.ITemplateService, ServerWatch.Services.Templates.TemplateService>();
 
 // Auto-update (opt-in only)
 builder.Services.AddSingleton<ServerWatch.Services.AutoUpdate.AutoUpdateService>();
+builder.Services.AddSingleton<ServerWatch.Services.AutoUpdate.IAutoUpdateService>(sp => sp.GetRequiredService<ServerWatch.Services.AutoUpdate.AutoUpdateService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerWatch.Services.AutoUpdate.AutoUpdateService>());
 
 // Webhooks
-builder.Services.AddSingleton<ServerWatch.Services.Webhooks.WebhookService>();
+builder.Services.AddSingleton<ServerWatch.Services.Webhooks.IWebhookService, ServerWatch.Services.Webhooks.WebhookService>();
 
 // Log monitoring
-builder.Services.AddSingleton<ServerWatch.Services.LogMonitor.LogSearchService>();
+builder.Services.AddSingleton<ServerWatch.Services.LogMonitor.ILogSearchService, ServerWatch.Services.LogMonitor.LogSearchService>();
 builder.Services.AddSingleton<ServerWatch.Services.LogMonitor.LogMonitorService>();
+builder.Services.AddSingleton<ServerWatch.Services.LogMonitor.ILogMonitorService>(sp => sp.GetRequiredService<ServerWatch.Services.LogMonitor.LogMonitorService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerWatch.Services.LogMonitor.LogMonitorService>());
 
 // AI Chat
 builder.Services.Configure<ServerWatch.Configuration.AiChatSettings>(builder.Configuration.GetSection(ServerWatch.Configuration.AiChatSettings.SectionName));
 builder.Services.AddHttpClient<ServerWatch.Services.AiChat.AiChatService>();
 builder.Services.AddSingleton<ServerWatch.Services.AiChat.AiChatService>();
-builder.Services.AddSingleton<ServerWatch.Services.AiChat.ChatHistoryStore>();
+builder.Services.AddSingleton<ServerWatch.Services.AiChat.IAiChatService>(sp => sp.GetRequiredService<ServerWatch.Services.AiChat.AiChatService>());
+builder.Services.AddSingleton<ServerWatch.Services.AiChat.IChatHistoryStore, ServerWatch.Services.AiChat.ChatHistoryStore>();
+
+// Agent (acting multi-provider agent with inescapable guardrails)
+builder.Services.Configure<ServerWatch.Configuration.AgentSettings>(
+    builder.Configuration.GetSection(ServerWatch.Configuration.AgentSettings.SectionName));
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentToolRegistry,
+    ServerWatch.Services.Agent.AgentToolRegistry>();
+// The guardrail engine is stateless → a shared default rule set is enough.
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Guardrails.IAgentGuardrailEngine>(
+    ServerWatch.Services.Agent.Guardrails.GuardrailEngine.CreateDefault());
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Guardrails.GuardrailStore>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Guardrails.IGuardrailStore>(
+    sp => sp.GetRequiredService<ServerWatch.Services.Agent.Guardrails.GuardrailStore>());
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Guardrails.IGuardrailRuleCatalog,
+    ServerWatch.Services.Agent.Guardrails.GuardrailRuleCatalog>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Providers.IAgentProviderFactory,
+    ServerWatch.Services.Agent.Providers.AgentProviderFactory>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentToolCatalog,
+    ServerWatch.Services.Agent.AgentToolCatalog>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentToolInvoker,
+    ServerWatch.Services.Agent.AgentToolInvoker>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentPrincipalResolver,
+    ServerWatch.Services.Agent.AgentPrincipalResolver>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentService,
+    ServerWatch.Services.Agent.AgentService>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IClaudeCodeRuntime,
+    ServerWatch.Services.Agent.ClaudeCodeRuntime>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentTranscriptStore,
+    ServerWatch.Services.Agent.AgentTranscriptStore>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentSettingsStore,
+    ServerWatch.Services.Agent.AgentSettingsStore>();
 
 // Audit log
 builder.Services.AddSingleton<ServerWatch.Services.AuditLog.IAuditLogService, ServerWatch.Services.AuditLog.AuditLogService>();
@@ -167,8 +209,8 @@ builder.Services.AddSingleton<ServerWatch.Services.Backup.IVolumeBackupService, 
 
 // MCP Server + Permissions
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddSingleton<McpApiKeyStore>();
-builder.Services.AddSingleton<McpPermissionService>();
+builder.Services.AddSingleton<ServerWatch.Mcp.IMcpApiKeyStore, McpApiKeyStore>();
+builder.Services.AddSingleton<ServerWatch.Services.Mcp.IMcpPermissionService, McpPermissionService>();
 builder.Services.AddMcpServer()
     .WithHttpTransport()
     .WithTools<ContainerTools>()
@@ -181,7 +223,8 @@ builder.Services.AddMcpServer()
     .WithTools<DatabaseTools>()
     .WithTools<SchedulerTools>()
     .WithTools<LogTools>()
-    .WithTools<CveTools>();
+    .WithTools<CveTools>()
+    .WithTools<AgentTools>();
 
 // MudBlazor
 builder.Services.AddMudServices();
@@ -200,7 +243,7 @@ var oidcEnabled = oidcSection.GetValue<bool>("Enabled") && !string.IsNullOrWhite
 // the local cookie. Used by both Google and OIDC (both deliver a TicketReceivedContext).
 Task WhitelistGate(Microsoft.AspNetCore.Authentication.TicketReceivedContext context)
 {
-    var whitelist = context.HttpContext.RequestServices.GetRequiredService<WhitelistService>();
+    var whitelist = context.HttpContext.RequestServices.GetRequiredService<ServerWatch.Services.Auth.IWhitelistService>();
     var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
     if (!whitelist.IsEmailAllowed(email))
     {
@@ -248,7 +291,7 @@ else
                     if (string.IsNullOrEmpty(email))
                         return Task.CompletedTask;
 
-                    var whitelist = context.HttpContext.RequestServices.GetRequiredService<WhitelistService>();
+                    var whitelist = context.HttpContext.RequestServices.GetRequiredService<ServerWatch.Services.Auth.IWhitelistService>();
                     // IsEmailAllowed returns true when the whitelist is empty/disabled (fail-open).
                     if (!whitelist.IsEmailAllowed(email))
                     {
@@ -413,14 +456,14 @@ app.MapMcp("/mcp").RequireAuthorization(policy =>
     policy.RequireAssertion(context =>
     {
         var httpContext = context.Resource as HttpContext;
-        var permService = httpContext?.RequestServices.GetService<McpPermissionService>();
+        var permService = httpContext?.RequestServices.GetService<ServerWatch.Services.Mcp.IMcpPermissionService>();
         var authHeader = httpContext?.Request.Headers.Authorization.FirstOrDefault();
         if (authHeader != null && authHeader.StartsWith("Bearer "))
         {
             var key = authHeader["Bearer ".Length..];
             // Validate via new permission service (or legacy store for backwards compat)
             if (permService?.ValidateKey(key) != null) return true;
-            var legacyStore = httpContext?.RequestServices.GetService<McpApiKeyStore>();
+            var legacyStore = httpContext?.RequestServices.GetService<ServerWatch.Mcp.IMcpApiKeyStore>();
             return legacyStore?.ValidateKey(key) == true;
         }
         // Also allow authenticated web users
@@ -430,7 +473,7 @@ app.MapMcp("/mcp").RequireAuthorization(policy =>
 // Webhook API endpoint (no auth — uses HMAC signature validation)
 app.MapPost("/api/webhooks/{webhookId}", async (string webhookId, HttpContext ctx) =>
 {
-    var webhookService = ctx.RequestServices.GetRequiredService<ServerWatch.Services.Webhooks.WebhookService>();
+    var webhookService = ctx.RequestServices.GetRequiredService<ServerWatch.Services.Webhooks.IWebhookService>();
     var body = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
     var signature = ctx.Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
     var sourceIp = ctx.Connection.RemoteIpAddress?.ToString();
@@ -509,28 +552,32 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 // Initialize services that need async startup
-var whitelistService = app.Services.GetRequiredService<WhitelistService>();
+var whitelistService = app.Services.GetRequiredService<ServerWatch.Services.Auth.IWhitelistService>();
 await whitelistService.InitializeAsync();
 
-var roleService = app.Services.GetRequiredService<ServerWatch.Services.Auth.RoleService>();
+var roleService = app.Services.GetRequiredService<ServerWatch.Services.Auth.IRoleService>();
 await roleService.InitializeAsync();
 
-var notifPrefsService = app.Services.GetRequiredService<ServerWatch.Services.Notifications.ContainerNotificationPrefsService>();
+var notifPrefsService = app.Services.GetRequiredService<ServerWatch.Services.Notifications.IContainerNotificationPrefsService>();
 await notifPrefsService.InitializeAsync();
 
-var vaultService = app.Services.GetRequiredService<ServerWatch.Services.Vault.VaultService>();
+var vaultService = app.Services.GetRequiredService<ServerWatch.Services.Vault.IVaultService>();
 await vaultService.InitializeAsync();
 
-var serverConfigService = app.Services.GetRequiredService<ServerConfigService>();
+var serverConfigService = app.Services.GetRequiredService<ServerWatch.Services.ServerConfig.IServerConfigService>();
 await serverConfigService.InitializeAsync();
 
-var mcpApiKeyStore = app.Services.GetRequiredService<McpApiKeyStore>();
+var mcpApiKeyStore = app.Services.GetRequiredService<ServerWatch.Mcp.IMcpApiKeyStore>();
 await mcpApiKeyStore.InitializeAsync();
 
-var mcpPermissionService = app.Services.GetRequiredService<McpPermissionService>();
+var mcpPermissionService = app.Services.GetRequiredService<ServerWatch.Services.Mcp.IMcpPermissionService>();
 await mcpPermissionService.InitializeAsync();
 
-var coolifyConfigService = app.Services.GetRequiredService<CoolifyConfigService>();
+// Load guardrails (creates the restrictive SafeDefault on first run)
+var guardrailStore = app.Services.GetRequiredService<ServerWatch.Services.Agent.Guardrails.GuardrailStore>();
+await guardrailStore.InitializeAsync();
+
+var coolifyConfigService = app.Services.GetRequiredService<ServerWatch.Services.Coolify.ICoolifyConfigService>();
 await coolifyConfigService.InitializeAsync();
 
 // Ensure SQLite database and tables are created (including new tables on existing DBs)

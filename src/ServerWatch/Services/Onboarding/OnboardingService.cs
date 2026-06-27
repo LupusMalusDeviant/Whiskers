@@ -18,12 +18,12 @@ namespace ServerWatch.Services.Onboarding;
 /// reported as plain strings; the Tailscale login URL is reported with the <see cref="LinkMarker"/>
 /// prefix so the UI can render it as a clickable link.
 /// </summary>
-public class OnboardingService
+public class OnboardingService : IOnboardingService
 {
     public const string LinkMarker = "::TS_LOGIN::";
 
     private readonly IHostCommandExecutor _exec;
-    private readonly ServerConfigService _serverConfig;
+    private readonly IServerConfigService _serverConfig;
     private readonly IDockerService _docker;
     private readonly ILogger<OnboardingService> _logger;
 
@@ -38,7 +38,7 @@ public class OnboardingService
 
     public OnboardingService(
         IHostCommandExecutor exec,
-        ServerConfigService serverConfig,
+        IServerConfigService serverConfig,
         IDockerService docker,
         ILogger<OnboardingService> logger)
     {

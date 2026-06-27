@@ -15,7 +15,7 @@ public class SslCertificate
     public List<string> Domains { get; set; } = new();
 }
 
-public class SslCertService
+public class SslCertService : ISslCertService
 {
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<SslCertService> _logger;

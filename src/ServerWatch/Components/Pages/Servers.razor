@@ -1,11 +1,11 @@
 @page "/servers"
 @attribute [Authorize]
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
-@inject ServerWatch.Services.Docker.DockerConnectionManager ConnectionManager
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
+@inject ServerWatch.Services.Docker.IDockerConnectionManager ConnectionManager
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
-@inject ServerWatch.Services.Onboarding.OnboardingService Onboarding
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
+@inject ServerWatch.Services.Onboarding.IOnboardingService Onboarding
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Server - ServerWatch</PageTitle>

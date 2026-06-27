@@ -4,9 +4,9 @@
 @using ServerWatch.Models.Cve
 @using ServerWatch.Services.Cve
 @using ServerWatch.Services.ServerConfig
-@inject CveFindingsStore Store
-@inject ServerConfigService ServerConfig
-@inject CveMonitorService Monitor
+@inject ICveFindingsStore Store
+@inject IServerConfigService ServerConfig
+@inject ICveMonitorService Monitor
 @inject IOptionsMonitor<CveMonitorSettings> SettingsMonitor
 @inject ISnackbar Snackbar
 

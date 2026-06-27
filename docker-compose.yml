@@ -33,6 +33,14 @@ services:
       - AiChat__ApiUrl=${AICHAT_API_URL:-}
       - AiChat__Model=${AICHAT_MODEL:-}
       - AiChat__Provider=${AICHAT_PROVIDER:-openai}
+      - Agent__Enabled=${AGENT_ENABLED:-false}
+      - Agent__Provider=${AGENT_PROVIDER:-openai}
+      - Agent__Model=${AGENT_MODEL:-gpt-4o-mini}
+      - Agent__Endpoint=${AGENT_ENDPOINT:-}
+      - Agent__ApiKey=${AGENT_API_KEY:-}
+      - Agent__MaxToolIterations=${AGENT_MAX_TOOL_ITERATIONS:-8}
+      - Agent__ClaudeCode__McpUrl=${AGENT_CLAUDE_CODE_MCP_URL:-http://localhost:8080/mcp}
+      - Agent__ClaudeCode__McpKey=${AGENT_CLAUDE_CODE_MCP_KEY:-}
     restart: unless-stopped
 
 volumes:

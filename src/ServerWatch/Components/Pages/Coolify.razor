@@ -1,9 +1,9 @@
 @page "/coolify"
 @attribute [Authorize]
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
-@inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfig
+@inject ServerWatch.Services.Coolify.ICoolifyConfigService CoolifyConfig
 @inject ISnackbar Snackbar
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @implements IDisposable
 
 <PageTitle>Coolify - ServerWatch</PageTitle>

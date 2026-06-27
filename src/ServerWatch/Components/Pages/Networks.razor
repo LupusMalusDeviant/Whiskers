@@ -1,10 +1,10 @@
 @page "/networks"
 @attribute [Authorize]
 @inject IDockerService DockerService
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Netzwerke - ServerWatch</PageTitle>

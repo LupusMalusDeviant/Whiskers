@@ -12,14 +12,14 @@ public class ImageUpdateChecker : BackgroundService
 {
     private readonly IServiceProvider _services;
     private readonly ImageUpdateStore _store;
-    private readonly RegistryClient _registry;
+    private readonly IRegistryClient _registry;
     private readonly ILogger<ImageUpdateChecker> _logger;
     private readonly ImageUpdateSettings _settings;
 
     public ImageUpdateChecker(
         IServiceProvider services,
         ImageUpdateStore store,
-        RegistryClient registry,
+        IRegistryClient registry,
         IOptions<ImageUpdateSettings> settings,
         ILogger<ImageUpdateChecker> logger)
     {

@@ -1,5 +1,5 @@
-@inject ServerWatch.Services.AiChat.AiChatService ChatService
-@inject ServerWatch.Services.AiChat.ChatHistoryStore HistoryStore
+@inject ServerWatch.Services.AiChat.IAiChatService ChatService
+@inject ServerWatch.Services.AiChat.IChatHistoryStore HistoryStore
 @inject IJSRuntime JS
 
 @if (ChatService.IsEnabled)

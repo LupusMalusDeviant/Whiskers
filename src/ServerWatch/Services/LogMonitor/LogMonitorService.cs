@@ -11,7 +11,7 @@ namespace ServerWatch.Services.LogMonitor;
 /// <summary>
 /// Background service that periodically checks container logs against alert rules.
 /// </summary>
-public class LogMonitorService : BackgroundService
+public class LogMonitorService : BackgroundService, ILogMonitorService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDockerService _docker;

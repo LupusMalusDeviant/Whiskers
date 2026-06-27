@@ -2,10 +2,10 @@
 @attribute [Authorize]
 @using ServerWatch.Models
 @using ServerWatch.Models.Cloud
-@inject ServerWatch.Services.Cloud.CloudControlService CloudControl
+@inject ServerWatch.Services.Cloud.ICloudControlService CloudControl
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 
 <PageTitle>Cloud - ServerWatch</PageTitle>
 

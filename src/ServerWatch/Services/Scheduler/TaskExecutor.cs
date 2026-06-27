@@ -7,7 +7,7 @@ using ServerWatch.Services.Server;
 
 namespace ServerWatch.Services.Scheduler;
 
-public class TaskExecutor
+public class TaskExecutor : ITaskExecutor
 {
     private readonly IDockerService _docker;
     private readonly IDatabaseService _dbService;

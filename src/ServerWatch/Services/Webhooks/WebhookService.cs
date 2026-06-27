@@ -8,7 +8,7 @@ using ServerWatch.Services.Server;
 
 namespace ServerWatch.Services.Webhooks;
 
-public class WebhookService
+public class WebhookService : IWebhookService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDockerService _docker;

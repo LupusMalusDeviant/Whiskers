@@ -5,7 +5,7 @@ using ServerWatch.Services.Persistence;
 
 namespace ServerWatch.Services.Mcp;
 
-public class McpPermissionService
+public class McpPermissionService : IMcpPermissionService
 {
     private readonly JsonFileStore<McpPermissionData> _store;
     private readonly ILogger<McpPermissionService> _logger;

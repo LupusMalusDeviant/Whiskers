@@ -21,7 +21,7 @@ public class FirewallStatus
     public string RawOutput { get; set; } = "";
 }
 
-public class FirewallService
+public class FirewallService : IFirewallService
 {
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<FirewallService> _logger;

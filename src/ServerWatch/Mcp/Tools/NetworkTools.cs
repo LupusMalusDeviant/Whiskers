@@ -13,7 +13,7 @@ public class NetworkTools
     [McpServerTool, Description("List all Docker networks on a server. Shows name, driver, scope, subnet, and connected containers.")]
     public static async Task<string> ListNetworks(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Server ID (optional, defaults to local)")] string? serverId = null)
     {
@@ -37,7 +37,7 @@ public class NetworkTools
     [McpServerTool, Description("Create a new Docker network.")]
     public static async Task<string> CreateNetwork(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IAuditLogService auditLog,
         [Description("Network name")] string name,
@@ -68,7 +68,7 @@ public class NetworkTools
     [McpServerTool, Description("Remove a Docker network by name or ID.")]
     public static async Task<string> RemoveNetwork(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IAuditLogService auditLog,
         [Description("Network name or ID")] string networkId,
@@ -94,7 +94,7 @@ public class NetworkTools
     [McpServerTool, Description("Connect a container to a Docker network.")]
     public static async Task<string> ConnectContainerToNetwork(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Network name or ID")] string networkId,
         [Description("Container name or ID")] string containerId,
@@ -110,7 +110,7 @@ public class NetworkTools
     [McpServerTool, Description("Disconnect a container from a Docker network.")]
     public static async Task<string> DisconnectContainerFromNetwork(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Network name or ID")] string networkId,
         [Description("Container name or ID")] string containerId,

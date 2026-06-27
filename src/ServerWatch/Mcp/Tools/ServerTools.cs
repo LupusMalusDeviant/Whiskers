@@ -16,9 +16,9 @@ public class ServerTools
     [McpServerTool, Description("List all configured servers with their connection type and status.")]
     public static async Task<string> ListServers(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
-        ServerConfigService serverConfig)
+        IServerConfigService serverConfig)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_servers");
         if (denied != null) return denied;
@@ -42,7 +42,7 @@ public class ServerTools
     [McpServerTool, Description("Get detailed system information for a server (OS, CPU, RAM, disk, Docker version, containers).")]
     public static async Task<string> GetServerInfo(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Server ID")] string serverId)
     {
@@ -71,7 +71,7 @@ public class ServerTools
     [McpServerTool, Description("Execute a shell command on a server. Use with caution.")]
     public static async Task<string> ExecuteCommand(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IHostCommandExecutor executor,
         IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
@@ -108,8 +108,8 @@ public class ServerTools
     [McpServerTool, Description("List firewall (UFW) rules on a server.")]
     public static async Task<string> ListFirewallRules(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        FirewallService firewall,
+        IMcpPermissionService permissionService,
+        IFirewallService firewall,
         [Description("Server ID")] string serverId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_firewall_rules");
@@ -130,8 +130,8 @@ public class ServerTools
     [McpServerTool, Description("Add a firewall rule (UFW) to allow or deny traffic on a port.")]
     public static async Task<string> AddFirewallRule(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        FirewallService firewall,
+        IMcpPermissionService permissionService,
+        IFirewallService firewall,
         IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Port number or range (e.g. '80', '8000:9000')")] string port,
@@ -166,8 +166,8 @@ public class ServerTools
     [McpServerTool, Description("Remove a firewall rule by its number.")]
     public static async Task<string> RemoveFirewallRule(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        FirewallService firewall,
+        IMcpPermissionService permissionService,
+        IFirewallService firewall,
         IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Rule number to remove")] int ruleNumber)
@@ -188,8 +188,8 @@ public class ServerTools
     [McpServerTool, Description("List Nginx sites (enabled and available) on a server.")]
     public static async Task<string> ListNginxSites(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        NginxService nginx,
+        IMcpPermissionService permissionService,
+        INginxService nginx,
         [Description("Server ID")] string serverId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_nginx_sites");
@@ -205,8 +205,8 @@ public class ServerTools
     [McpServerTool, Description("Get the Nginx configuration for a specific site.")]
     public static async Task<string> GetNginxConfig(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        NginxService nginx,
+        IMcpPermissionService permissionService,
+        INginxService nginx,
         [Description("Server ID")] string serverId,
         [Description("Site name (filename in sites-available)")] string siteName)
     {
@@ -224,8 +224,8 @@ public class ServerTools
     [McpServerTool, Description("Update an Nginx site configuration. Validates with nginx -t before applying.")]
     public static async Task<string> UpdateNginxConfig(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        NginxService nginx,
+        IMcpPermissionService permissionService,
+        INginxService nginx,
         IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Site name")] string siteName,
@@ -249,8 +249,8 @@ public class ServerTools
     [McpServerTool, Description("List systemd services on a server.")]
     public static async Task<string> ListSystemdServices(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SystemdService systemd,
+        IMcpPermissionService permissionService,
+        ISystemdService systemd,
         [Description("Server ID")] string serverId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_systemd_services");
@@ -266,8 +266,8 @@ public class ServerTools
     [McpServerTool, Description("Manage a systemd service (start, stop, restart, enable, disable).")]
     public static async Task<string> ManageSystemdService(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SystemdService systemd,
+        IMcpPermissionService permissionService,
+        ISystemdService systemd,
         IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Service name (e.g. 'nginx', 'docker')")] string serviceName,
@@ -303,8 +303,8 @@ public class ServerTools
     [McpServerTool, Description("List SSL/TLS certificates managed by certbot on a server.")]
     public static async Task<string> ListSslCertificates(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SslCertService ssl,
+        IMcpPermissionService permissionService,
+        ISslCertService ssl,
         [Description("Server ID")] string serverId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_ssl_certificates");
@@ -322,8 +322,8 @@ public class ServerTools
     [McpServerTool, Description("Renew an SSL certificate using certbot.")]
     public static async Task<string> RenewSslCertificate(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        SslCertService ssl,
+        IMcpPermissionService permissionService,
+        ISslCertService ssl,
         IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Certificate name (from list). Use 'all' to renew all.")] string certName)

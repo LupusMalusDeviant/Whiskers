@@ -9,7 +9,7 @@ public class MetricPoint
     public double Value { get; set; }
 }
 
-public class MetricsQueryService
+public class MetricsQueryService : IMetricsQueryService
 {
     private readonly IServiceProvider _services;
 

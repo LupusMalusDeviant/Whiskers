@@ -1,12 +1,12 @@
 @page "/webhooks"
 @attribute [Authorize]
-@inject ServerWatch.Services.Webhooks.WebhookService WebhookService
+@inject ServerWatch.Services.Webhooks.IWebhookService WebhookService
 @inject IDockerService DockerService
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 
 <PageTitle>Webhooks - ServerWatch</PageTitle>
 

@@ -20,7 +20,7 @@ public class UserChatHistory
 }
 
 /// <summary>Persists chat history per user to /app/data/chat/{email-hash}.json</summary>
-public class ChatHistoryStore
+public class ChatHistoryStore : IChatHistoryStore
 {
     private const string BasePath = "/app/data/chat";
 
@@ -67,7 +67,7 @@ public class ChatHistoryStore
 /// Strictly limited AI chat — ONLY for ServerWatch operations.
 /// No coding, no web search, no general knowledge. Only container/server management.
 /// </summary>
-public class AiChatService
+public class AiChatService : IAiChatService
 {
     private readonly HttpClient _httpClient;
     private readonly IOptionsMonitor<AiChatSettings> _settings;

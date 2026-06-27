@@ -10,12 +10,12 @@ namespace ServerWatch.Services.Auth;
 /// hide UI they may not use and to guard destructive handlers (defense in depth — hiding a button is
 /// not by itself authorization).
 /// </summary>
-public class CurrentUserService
+public class CurrentUserService : ICurrentUserService
 {
     private readonly AuthenticationStateProvider _authProvider;
-    private readonly RoleService _roles;
+    private readonly IRoleService _roles;
 
-    public CurrentUserService(AuthenticationStateProvider authProvider, RoleService roles)
+    public CurrentUserService(AuthenticationStateProvider authProvider, IRoleService roles)
     {
         _authProvider = authProvider;
         _roles = roles;

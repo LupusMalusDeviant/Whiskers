@@ -3,7 +3,7 @@ using ServerWatch.Services.Persistence;
 
 namespace ServerWatch.Services.Coolify;
 
-public class CoolifyConfigService
+public class CoolifyConfigService : ICoolifyConfigService
 {
     private readonly JsonFileStore<CoolifySettings> _store;
     private readonly ILogger<CoolifyConfigService> _logger;

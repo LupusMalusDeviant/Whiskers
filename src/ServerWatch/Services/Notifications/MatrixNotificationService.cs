@@ -6,7 +6,7 @@ using ServerWatch.Models;
 
 namespace ServerWatch.Services.Notifications;
 
-public class MatrixNotificationService : INotificationService
+public class MatrixNotificationService : IMatrixNotificationService
 {
     private readonly HttpClient _httpClient;
     private readonly IOptionsMonitor<MatrixSettings> _settings;

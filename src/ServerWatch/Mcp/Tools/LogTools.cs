@@ -13,8 +13,8 @@ public class LogTools
     [McpServerTool, Description("Search container logs for a pattern (text or regex). Returns matching lines across one or all containers.")]
     public static async Task<string> SearchLogs(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        LogSearchService searchService,
+        IMcpPermissionService permissionService,
+        ILogSearchService searchService,
         [Description("Search pattern (text or regex)")] string pattern,
         [Description("Use regex matching (default: false)")] bool isRegex = false,
         [Description("Container name to search (optional, omit for all)")] string? containerId = null,
@@ -34,8 +34,8 @@ public class LogTools
     [McpServerTool, Description("Create a log alert rule that triggers notifications when a pattern is found in container logs.")]
     public static async Task<string> CreateLogAlert(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        LogMonitorService monitorService,
+        IMcpPermissionService permissionService,
+        ILogMonitorService monitorService,
         [Description("Rule name")] string name,
         [Description("Pattern to match (text or regex)")] string pattern,
         [Description("Use regex matching (default: false)")] bool isRegex = false,
@@ -62,8 +62,8 @@ public class LogTools
     [McpServerTool, Description("List all configured log alert rules.")]
     public static async Task<string> ListLogAlerts(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        LogMonitorService monitorService)
+        IMcpPermissionService permissionService,
+        ILogMonitorService monitorService)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_log_alerts");
         if (denied != null) return denied;

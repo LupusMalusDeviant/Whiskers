@@ -15,7 +15,7 @@ public class DatabaseTools
     [McpServerTool, Description("Detect the database type of a container. Returns the database engine (PostgreSQL, MySQL, MongoDB, Redis, Neo4j) or 'None'.")]
     public static async Task<string> DetectDatabase(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
@@ -39,7 +39,7 @@ public class DatabaseTools
     [McpServerTool, Description("List all databases in a database container.")]
     public static async Task<string> ListDatabases(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IDatabaseService dbService,
         [Description("Container ID or name")] string containerId,
@@ -60,7 +60,7 @@ public class DatabaseTools
     [McpServerTool, Description("List tables in a database with row counts and sizes.")]
     public static async Task<string> ListTables(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IDatabaseService dbService,
         [Description("Container ID or name")] string containerId,
@@ -83,7 +83,7 @@ public class DatabaseTools
     [McpServerTool, Description("Get the schema (columns, types, keys) of a table.")]
     public static async Task<string> GetSchema(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IDatabaseService dbService,
         [Description("Container ID or name")] string containerId,
@@ -108,7 +108,7 @@ public class DatabaseTools
     [McpServerTool, Description("Execute a SQL query or database command and return the results.")]
     public static async Task<string> ExecuteQuery(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IDatabaseService dbService,
         [Description("Container ID or name")] string containerId,
@@ -148,7 +148,7 @@ public class DatabaseTools
     [McpServerTool, Description("Create a database backup (dump) for a database container.")]
     public static async Task<string> BackupDatabase(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IDatabaseService dbService,
         IAuditLogService auditLog,

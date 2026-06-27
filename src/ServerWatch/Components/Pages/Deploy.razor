@@ -1,10 +1,10 @@
 @page "/deploy"
 @attribute [Authorize]
 @inject IDeploymentService DeploymentService
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Bereitstellen - ServerWatch</PageTitle>
@@ -21,7 +21,7 @@
     </MudStack>
 </div>
 
-@* Server Selection (gilt für beide Tabs) *@
+@* Server Selection (applies to both tabs) *@
 <MudSelect T="string" @bind-Value="_serverId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-4" Style="max-width: 320px;">
     @foreach (var srv in _servers)
     {

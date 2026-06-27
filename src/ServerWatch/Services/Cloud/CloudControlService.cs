@@ -14,15 +14,15 @@ namespace ServerWatch.Services.Cloud;
 /// metric operations to the right provider client. Callers work in terms of ServerWatch servers and
 /// never deal with provider-specific IDs.
 /// </summary>
-public class CloudControlService
+public class CloudControlService : ICloudControlService
 {
-    private readonly ServerConfigService _serverConfig;
+    private readonly IServerConfigService _serverConfig;
     private readonly IHetznerService _hetzner;
     private readonly IHostingerService _hostinger;
     private readonly ILogger<CloudControlService> _logger;
 
     public CloudControlService(
-        ServerConfigService serverConfig,
+        IServerConfigService serverConfig,
         IHetznerService hetzner,
         IHostingerService hostinger,
         ILogger<CloudControlService> logger)

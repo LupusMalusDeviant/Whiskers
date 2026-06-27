@@ -1,0 +1,16 @@
+# Services/AiChat
+
+The **read-only advisor chat** in the UI — an assistant that answers questions and gives guidance about your infrastructure but takes **no actions**. (For an agent that *acts*, see [`../Agent/`](../Agent/).)
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `IAiChatService.cs` / `AiChatService.cs` | Read-only advisor chat (guidance only, no actions); calls a configured LLM endpoint. The system prompt is German (user-facing). |
+| `IChatHistoryStore.cs` | Per-user persistence of the advisor chat history. |
+
+## Related
+
+- Config: `AICHAT_*` in [`../../../.env.example`](../../../.env.example)
+- UI: [`../../Components/Shared/AiChat.razor`](../../Components/Shared/AiChat.razor)
+- The acting agent (distinct): [`../Agent/`](../Agent/)

@@ -9,10 +9,10 @@ using ServerWatch.Services.ServerConfig;
 
 namespace ServerWatch.Services.Docker;
 
-public class DockerConnectionManager : IDisposable
+public class DockerConnectionManager : IDockerConnectionManager
 {
-    private readonly ServerConfigService _serverConfig;
-    private readonly SshTunnelManager _sshTunnelManager;
+    private readonly IServerConfigService _serverConfig;
+    private readonly ISshTunnelManager _sshTunnelManager;
     private readonly ILogger<DockerConnectionManager> _logger;
     private readonly ConcurrentDictionary<string, DockerClient> _clients = new();
 
@@ -22,8 +22,8 @@ public class DockerConnectionManager : IDisposable
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
 
     public DockerConnectionManager(
-        ServerConfigService serverConfig,
-        SshTunnelManager sshTunnelManager,
+        IServerConfigService serverConfig,
+        ISshTunnelManager sshTunnelManager,
         ILogger<DockerConnectionManager> logger)
     {
         _serverConfig = serverConfig;

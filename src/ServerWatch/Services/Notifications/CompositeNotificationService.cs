@@ -8,13 +8,13 @@ namespace ServerWatch.Services.Notifications;
 /// </summary>
 public class CompositeNotificationService : INotificationService
 {
-    private readonly MattermostNotificationService _mattermost;
-    private readonly MatrixNotificationService _matrix;
+    private readonly IMattermostNotificationService _mattermost;
+    private readonly IMatrixNotificationService _matrix;
     private readonly ILogger<CompositeNotificationService> _logger;
 
     public CompositeNotificationService(
-        MattermostNotificationService mattermost,
-        MatrixNotificationService matrix,
+        IMattermostNotificationService mattermost,
+        IMatrixNotificationService matrix,
         ILogger<CompositeNotificationService> logger)
     {
         _mattermost = mattermost;

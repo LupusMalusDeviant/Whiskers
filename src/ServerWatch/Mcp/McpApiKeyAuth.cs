@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace ServerWatch.Mcp;
 
-public class McpApiKeyStore
+public class McpApiKeyStore : IMcpApiKeyStore
 {
     private readonly string _filePath;
     private HashSet<string> _keys = new();

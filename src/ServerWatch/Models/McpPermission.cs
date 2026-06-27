@@ -109,6 +109,11 @@ public static class McpPermissionLevels
         // Admin tools
         ["execute_command"] = Admin,
 
+        // Agent: an MCP caller (e.g. external Claude Code) instructs the in-process agent.
+        // Read level, because the agent only inherits the caller's rights anyway. NOT agent-callable
+        // (see AgentToolRegistry.NonAgentTools) — otherwise the agent would call itself recursively.
+        ["instruct_agent"] = Read,
+
         // Coolify read tools
         ["list_coolify_applications"] = Read,
         ["get_coolify_application"] = Read,
@@ -199,6 +204,7 @@ public static class McpPermissionLevels
         ["list_ssl_certificates"] = "SSL",
         ["renew_ssl_certificate"] = "SSL",
         ["execute_command"] = "Admin",
+        ["instruct_agent"] = "Agent",
 
         // Coolify tools
         ["list_coolify_applications"] = "Coolify",

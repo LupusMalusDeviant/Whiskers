@@ -5,7 +5,7 @@ using ServerWatch.Services.Persistence;
 
 namespace ServerWatch.Services.ServerConfig;
 
-public class ServerConfigService
+public class ServerConfigService : IServerConfigService
 {
     private readonly JsonFileStore<ServerConfigData> _store;
     private readonly IOptions<DockerSettings> _dockerSettings;

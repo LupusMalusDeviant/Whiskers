@@ -7,7 +7,7 @@ namespace ServerWatch.Services.Server;
 
 public class HostCommandExecutor : IHostCommandExecutor
 {
-    private readonly ServerConfigService _serverConfigService;
+    private readonly IServerConfigService _serverConfigService;
     private readonly IDockerService _docker;
     private readonly ILogger<HostCommandExecutor> _logger;
 
@@ -23,7 +23,7 @@ public class HostCommandExecutor : IHostCommandExecutor
     private static readonly string ControlDir =
         Path.Combine(Path.GetTempPath(), "serverwatch-ssh");
 
-    public HostCommandExecutor(ServerConfigService serverConfigService, IDockerService docker, ILogger<HostCommandExecutor> logger)
+    public HostCommandExecutor(IServerConfigService serverConfigService, IDockerService docker, ILogger<HostCommandExecutor> logger)
     {
         _serverConfigService = serverConfigService;
         _docker = docker;

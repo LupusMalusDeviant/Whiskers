@@ -1,110 +1,121 @@
 # ServerWatch
 
-Docker Container & Server Management Dashboard mit integriertem MCP-Server fuer KI-gesteuerte Infrastrukturverwaltung.
+**A Docker & server management dashboard with a built-in Model Context Protocol (MCP) server for AI-driven infrastructure operations.**
+
+ServerWatch gives you a live, web-based control plane for a fleet of Docker hosts — containers, images, networks, databases, firewalls, Nginx, systemd, SSL, metrics and logs — and exposes the same capabilities to AI agents (such as Claude Code) through an authenticated MCP endpoint with per-key Read/Write/Admin permissions.
+
+Its headline design goal is **SSH-key-free operation**: hosts are managed over a private WireGuard mesh with mutual-TLS Docker access, so there is no standing private key for an attacker to steal. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
+
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
+[![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4.svg)](https://learn.microsoft.com/aspnet/core/blazor/)
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [MCP server](#mcp-server)
+- [AI agent](#ai-agent-optional)
+- [Architecture](#architecture)
+- [Project structure](#project-structure)
+- [Development](#development)
+- [Security](#security)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
 
 ## Features
 
-### Container-Management
-- Live-Dashboard mit CPU/Memory/Health-Status aller Container
-- Container starten, stoppen, neustarten, loeschen
-- Image-Update-Erkennung mit One-Click-Update
-- Container-Logs, Stats und Health-Reports
-- Gruppierung nach Server und Docker Compose Projekt
+### Container management
+- Live dashboard with CPU / memory / health status across all hosts
+- Start, stop, restart and remove containers
+- Image-update detection with one-click update
+- Container logs, stats and health reports
+- Grouping by server and by Docker Compose project
 
-### Server-Verwaltung
-- Multi-Server-Unterstuetzung (Local, SSH und TCP/mTLS-Mesh)
-- Firewall-Management (ufw) ueber Web-UI
-- Nginx-Sites verwalten mit Config-Editor
-- systemd-Services starten/stoppen/ueberwachen
-- SSL-Zertifikate (Let's Encrypt) Status und Renewal
-- Integriertes Web-Terminal (Host + Container)
+### Server & host management
+- Multi-server support (local, SSH, and TCP/mTLS mesh)
+- Firewall management (ufw) from the web UI
+- Nginx site management with a config editor
+- systemd service start/stop/monitor
+- SSL certificate (Let's Encrypt) status and renewal
+- Integrated web terminal (host and container)
 
-### Sicherheit: Mesh + mTLS (SSH-key-frei)
-- Verwaltung ueber ein privates WireGuard-Mesh (Tailscale) — keine Management-Ports oeffentlich
-- Docker-Steuerung ueber **mutual TLS** (ghostunnel + verb-whitelisting socket-proxy) statt SSH-Tunnel
-- Host-Shell-Befehle SSH-frei ueber denselben mTLS-Kanal (privilegierter `nsenter`-Container)
-- **Kein gespeicherter SSH-Key** im Normalbetrieb — die zentrale Angriffsflaeche entfaellt
-- Eigene PKI (step-ca) fuer Client-/Server-Zertifikate
-- Telemetrie ueber `node_exporter` → VictoriaMetrics (Prometheus-kompatibel)
-- **Ein-Klick-Onboarding** neuer Server: installiert Tailscale (Login-Link direkt in der App),
-  deployt Telemetrie + mTLS-Proxy und stellt den Server SSH-frei
+### Security: mesh + mTLS (SSH-key-free)
+- Management over a private WireGuard mesh (Tailscale) — no management ports exposed publicly
+- Docker control over **mutual TLS** (ghostunnel + a verb-whitelisting socket-proxy) instead of SSH tunnels
+- Host shell commands without SSH over the same mTLS channel (a one-shot privileged `nsenter` container)
+- **No stored SSH key** in steady state — the central attack surface is removed
+- Own PKI (step-ca) for client/server certificates
+- Telemetry via `node_exporter` → VictoriaMetrics (Prometheus-compatible)
+- **One-click onboarding** of new servers: installs Tailscale (login link surfaced directly in the app), deploys telemetry + mTLS proxy, and switches the server to SSH-free operation
 
-→ Design-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+→ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-### Cloud-Control (out-of-band)
-- Provider-agnostische Power/Snapshot/Metrics-Steuerung (Hetzner, Hostinger) ueber die Provider-API —
-  funktioniert auch, wenn SSH/Docker gerade nicht erreichbar sind
+### Cloud control (out-of-band)
+- Provider-agnostic power / snapshot / metrics control (Hetzner, Hostinger) via the provider API — works even when SSH/Docker is temporarily unreachable
 
-### Monitoring & Alerting
-- Historische Metriken (CPU, RAM, Disk) in SQLite
-- Mattermost-Benachrichtigungen bei:
-  - Container unhealthy / gestoppt / OOM
-  - Restart-Loops
-  - Image-Updates verfuegbar
-- Health-Reports mit Zeitverlauf
+### Monitoring & alerting
+- Historical metrics (CPU, RAM, disk) in SQLite
+- Notifications (Mattermost / Matrix) on:
+  - container unhealthy / stopped / OOM
+  - restart loops
+  - image updates available
+- Health reports with history
+
+### Security scanning
+- OS and container CVE scanning (Trivy) with a findings dashboard and summaries
 
 ### Deployment
-- Container-Deployment per Formular (Image, Ports, Env, Volumes)
-- Docker Compose Upload und Deployment
-- Standardisierte App-Vorlagen fuer schnelles Deployment
+- Container deployment via a form (image, ports, env, volumes)
+- Docker Compose upload and deployment
+- Standardised app templates for fast deployment
+- Coolify integration (applications, databases, deploy by tag)
 
-### MCP-Server (Model Context Protocol)
-Integrierter MCP-Server fuer KI-Agenten (z.B. Claude Code):
+### AI integration
+- **MCP server** exposing the full toolset to external AI agents (see below)
+- **Read-only advisor chat** in the UI (optional)
+- **Acting agent** that plans and executes operations tasks under inescapable guardrails (optional, see below)
 
-```json
-{
-  "mcpServers": {
-    "serverwatch": {
-      "url": "https://your-server.com/serverwatch/mcp",
-      "headers": {
-        "Authorization": "Bearer <API-KEY>"
-      }
-    }
-  }
-}
-```
+---
 
-**Tools** (Berechtigungen pro API-Key als Read / Write / Admin durchgesetzt):
-- **Container:** `list_containers`, `get_container_details`, `get_container_logs`, `get_container_metrics`, `get_container_env`, `set_container_env`, `start_container`, `stop_container`, `restart_container`, `update_container`
-- **Server & Host:** `list_servers`, `get_server_info`, `get_server_logs`, `get_server_metrics`, `get_health_summary`, `execute_command` (Admin)
-- **Deployment:** `deploy_app`, `deploy_compose`
-- **Infrastruktur:** Firewall (`list_firewall_rules`, `add_firewall_rule`, `remove_firewall_rule`), Nginx (`list_nginx_sites`, `get_nginx_config`, `update_nginx_config`), systemd (`list_systemd_services`, `manage_systemd_service`), SSL (`list_ssl_certificates`, `renew_ssl_certificate`)
-- **Datenbanken:** `detect_database`, `list_databases`, `list_tables`, `get_schema`, `execute_query`, `backup_database`
-- **Netzwerke:** `list_networks`, `create_network`, `remove_network`, `connect_container_to_network`, `disconnect_container_from_network`
-- **Logs & Alerts:** `search_logs`, `list_log_alerts`, `create_log_alert`
-- **Scheduler:** `list_scheduled_tasks`, `create_scheduled_task`, `delete_scheduled_task`, `run_scheduled_task`
-- **CVEs & Updates:** `get_cve_summary`, `get_server_cves`, `get_container_cves`, `get_update_status`
-- **Cloud (out-of-band, Hetzner/Hostinger):** `list_cloud_servers`, `cloud_status`, `cloud_metrics`, `cloud_power_on`, `cloud_shutdown`, `cloud_reboot`, `cloud_hard_reset`, `cloud_create_snapshot` + Hetzner-Extras (`hetzner_enable_rescue`/`hetzner_disable_rescue`, `hetzner_enable_backups`/`hetzner_disable_backups`, `hetzner_list_snapshots`, `hetzner_delete_snapshot`, `hetzner_change_server_type`)
-- **Coolify:** `list_coolify_applications`, `get_coolify_application`, `get_coolify_application_logs`, `list_coolify_servers`, `list_coolify_databases`, `get_coolify_env_vars`, `deploy_coolify_application`, `start_coolify_application`, `stop_coolify_application`, `restart_coolify_application`, `deploy_coolify_by_tag`, `set_coolify_env_var`
+## Tech stack
 
-Die vollstaendige, aktuelle Liste samt Berechtigungsstufe steht im Web-UI unter **Settings → MCP**.
+| Layer | Technology |
+|---|---|
+| Backend | C# / .NET 10 / ASP.NET Core |
+| Frontend | Blazor Server + [MudBlazor](https://mudblazor.com/) |
+| Docker API | [Docker.DotNet](https://github.com/dotnet/Docker.DotNet) |
+| Database | SQLite (Entity Framework Core) + JSON file stores |
+| Auth | Google OAuth 2.0 or generic OIDC + roles & email whitelist |
+| Real-time | SignalR |
+| MCP | [ModelContextProtocol.AspNetCore](https://github.com/modelcontextprotocol) |
+| Metrics | VictoriaMetrics (Prometheus-compatible) |
 
-## Tech Stack
+---
 
-- **Backend:** C# / .NET 10.0 / ASP.NET Core
-- **Frontend:** Blazor Server + MudBlazor
-- **Docker API:** Docker.DotNet
-- **Datenbank:** SQLite (Entity Framework Core)
-- **Auth:** Google OAuth 2.0 oder generisches OIDC + Rollen & Email-Whitelist
-- **Echtzeit:** SignalR
-- **MCP:** ModelContextProtocol.AspNetCore
+## Quick start
 
-## Deployment
-
-### Als Docker Container (empfohlen)
+### Docker (recommended)
 
 ```bash
 git clone https://github.com/LupusMalusDeviant/ServerWatch.git
 cd ServerWatch
 cp .env.example .env
-# .env editieren und Werte eintragen
+# edit .env and fill in values
 docker compose up -d
 ```
 
-Alle Konfigurationswerte werden ueber `.env` gesetzt (siehe [.env.example](.env.example)).
-Die Datei `.env` ist gitignored — Secrets landen nie im Repo.
+All configuration is set through `.env` (see [.env.example](.env.example)). `.env` is gitignored — secrets never land in the repository.
 
-### Nginx Reverse Proxy
+The app listens on `127.0.0.1:5100` by default (configurable via `HOST_BIND` / `HOST_PORT`).
+
+### Behind an Nginx reverse proxy
 
 ```nginx
 location /serverwatch/ {
@@ -123,61 +134,166 @@ location /serverwatch/ {
 }
 ```
 
-## Konfiguration
+When serving under a subpath, set `PATH_BASE=/serverwatch` in `.env`.
 
-### Google OAuth
-1. Google Cloud Console > APIs & Services > Credentials
-2. OAuth 2.0 Client-ID erstellen
-3. Autorisierte Weiterleitungs-URI: `https://your-server.com/serverwatch/signin-google`
-   (Google akzeptiert keine privaten IPs / intranet-TLDs — fuer LAN-only Deployments
-   `AUTH_DISABLED=true` in `.env` setzen.)
-4. `GOOGLE_CLIENT_ID` und `GOOGLE_CLIENT_SECRET` in `.env` eintragen
-5. `GOOGLE_ADMIN_EMAIL` mit der initialen Admin-Adresse fuellen
+---
 
-### Email-Whitelist
-Wird ueber Settings > Authentication im Web-UI verwaltet.
-Aenderungen werden ohne Neustart uebernommen.
+## Configuration
 
-### MCP API-Key
-Wird beim ersten Start automatisch generiert und in den Container-Logs ausgegeben.
-Gespeichert in `/app/data/api-keys.json` (persistiert im Docker Volume).
+ServerWatch is configured entirely through environment variables (`.env`). The most important groups:
 
-### Mattermost
-Settings > Mattermost Notifications > Webhook-URL eintragen.
+| Group | Keys | Notes |
+|---|---|---|
+| Authentication | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ADMIN_EMAIL`, `AUTH_DISABLED` | Set `AUTH_DISABLED=true` for trusted LAN-only deployments where Google rejects private redirect URIs |
+| OIDC (optional) | `OIDC_ENABLED`, `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, … | Generic OpenID Connect (Authentik, Keycloak, Authelia, Zitadel, …) for real 2FA/passkeys from your IdP |
+| Notifications | `MATTERMOST_WEBHOOK_URL`, `MATTERMOST_ENABLED` | Matrix is configured in the UI |
+| Routing | `PATH_BASE` | Path prefix when reverse-proxied under a subpath |
+| AI chat | `AICHAT_ENABLED`, `AICHAT_API_KEY`, `AICHAT_API_URL`, `AICHAT_MODEL`, `AICHAT_PROVIDER` | Read-only advisor chat |
+| Agent | `AGENT_ENABLED`, `AGENT_PROVIDER`, `AGENT_MODEL`, `AGENT_API_KEY`, … | Acting agent (see below) |
+| Host binding | `HOST_BIND`, `HOST_PORT` | The container always listens on `8080` internally |
 
-## Projektstruktur
+See [.env.example](.env.example) for the full, commented list.
+
+### Notable runtime details
+- **Email whitelist** — managed in the UI under *Settings → Authentication*; changes apply without a restart.
+- **MCP API key** — auto-generated on first start and printed to the container logs; stored in `/app/data/api-keys.json` (persisted in the Docker volume).
+- **Data persistence** — SQLite, JSON stores and certificates live under `/app/data` (a bind-mount / volume); never in the image.
+
+---
+
+## MCP server
+
+ServerWatch ships an integrated MCP server so AI agents (e.g. Claude Code) can operate your infrastructure. Add it to your MCP client:
+
+```json
+{
+  "mcpServers": {
+    "serverwatch": {
+      "url": "https://your-server.com/serverwatch/mcp",
+      "headers": { "Authorization": "Bearer <API-KEY>" }
+    }
+  }
+}
+```
+
+**Permissions are enforced per API key** as Read / Write / Admin. Tools span:
+
+- **Containers** — list/inspect/logs/metrics/env, start/stop/restart/update
+- **Server & host** — info, logs, metrics, health summary, `execute_command` (Admin)
+- **Deployment** — `deploy_app`, `deploy_compose`
+- **Infrastructure** — firewall, Nginx, systemd, SSL
+- **Databases** — detect, list, schema, query, backup
+- **Networks** — list/create/remove, connect/disconnect containers
+- **Logs & alerts** — search, list/create log alerts
+- **Scheduler** — list/create/delete/run scheduled tasks
+- **CVEs & updates** — server/container CVE summaries, update status
+- **Cloud (out-of-band)** — Hetzner & Hostinger power/snapshot/metrics
+- **Coolify** — applications, databases, deploy by tag, env vars
+- **Agent** — `instruct_agent` (delegate a natural-language task to the in-process agent)
+
+The complete, current list with permission levels is in the web UI under *Settings → MCP*.
+
+---
+
+## AI agent (optional)
+
+Beyond the MCP server (which serves *external* agents), ServerWatch has an **in-process acting agent**: you describe an operations task in natural language and it plans and executes using ServerWatch's own tools. It supports multiple LLM providers (OpenAI, OpenRouter, Ollama, Gemini, Anthropic, and Claude Code) selectable in the UI.
+
+Its safety model is enforced in code, not in the prompt:
+- **Guardrails** (a separate, admin-only `guardrails.json`) define inescapable Allow/Confirm/Deny rules evaluated at the tool boundary — "most-restrictive wins".
+- The agent **inherits the rights of whoever triggered it** (web user or MCP key) and can never exceed them.
+- **Hybrid autonomy** — reads run autonomously; writes/admin actions require confirmation.
+
+See [src/ServerWatch/Services/Agent/](src/ServerWatch/Services/Agent/) for the implementation.
+
+---
+
+## Architecture
+
+ServerWatch manages hosts across three independent planes, each moved off SSH:
+
+| Plane | What | Transport |
+|---|---|---|
+| **Telemetry** | host CPU/RAM/disk, container stats | `node_exporter` → VictoriaMetrics (pull over the mesh) |
+| **Docker control** | list/restart/deploy/inspect | Docker Engine API over **mTLS** + verb-whitelisting proxy |
+| **Shell** | `execute_command`, systemd, journald, edits | one-shot privileged `nsenter` container over the same mTLS channel |
+
+The full design — PKI, onboarding flow, trade-offs — is documented in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+---
+
+## Project structure
+
+Each source folder carries its own `README.md` describing the files within. High-level map:
 
 ```
 ServerWatch/
-├── src/ServerWatch/
-│   ├── Components/Pages/     # Blazor UI-Seiten
-│   ├── Configuration/        # Settings-Klassen
-│   ├── Hubs/                 # SignalR Hubs
-│   ├── Mcp/                  # MCP-Server Tools
-│   ├── Models/               # Datenmodelle
-│   ├── Services/
-│   │   ├── Auth/             # Whitelist
-│   │   ├── Deployment/       # Container-Deployment
-│   │   ├── Docker/           # Docker API
-│   │   ├── HealthMonitor/    # Health-Ueberwachung
-│   │   ├── ImageUpdate/      # Image-Update-Check
-│   │   ├── Metrics/          # Metriken-Sammlung
-│   │   ├── Notifications/    # Mattermost
-│   │   ├── Onboarding/       # Mesh+mTLS Server-Onboarding (Tailscale, step-ca, ghostunnel)
-│   │   ├── Persistence/      # SQLite + JSON
-│   │   ├── Server/           # Host-Befehle (SSH-frei via mTLS), Firewall, Nginx, systemd, SSL
-│   │   ├── ServerConfig/     # Multi-Server-Verwaltung
-│   │   └── Terminal/         # Web-Terminal
-│   └── wwwroot/              # Statische Assets
-├── deploy/telemetry/         # Mesh/mTLS Deploy-Vorlagen (node_exporter, VictoriaMetrics, Tailscale-ACL)
-├── docs/ARCHITECTURE.md      # Zero-SSH-Key Architektur
+├── src/
+│   ├── ServerWatch/            # the application
+│   │   ├── Components/         # Blazor UI (Pages, Layout, Shared)
+│   │   ├── Configuration/      # strongly-typed settings classes
+│   │   ├── Hubs/               # SignalR hubs (container + terminal streams)
+│   │   ├── Mcp/                # MCP server tools + permission layer
+│   │   ├── Models/             # data models (Agent, Cloud, Coolify, Cve, Hetzner, Hostinger)
+│   │   ├── Services/           # all business logic (see Services/README.md)
+│   │   ├── Utils/              # small helpers (secret redaction, shell quoting)
+│   │   ├── wwwroot/            # static assets
+│   │   └── Program.cs          # composition root (DI, middleware, MCP, auth)
+│   └── ServerWatch.Tests/      # xUnit test suite
+├── deploy/telemetry/           # mesh/mTLS deploy templates (node_exporter, VictoriaMetrics, Tailscale ACL)
+├── docs/ARCHITECTURE.md        # SSH-key-free architecture
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
 ```
 
-## Lizenz
+The `Services/` tree is the heart of the app — see [src/ServerWatch/Services/README.md](src/ServerWatch/Services/README.md) for a guided tour of every service folder.
 
-Apache License 2.0 — siehe [LICENSE](LICENSE).
+### Code conventions
+- **Interface-first**: services are defined behind an `IFoo` interface and registered in DI; consumers depend on the interface.
+- **English** in-code comments and XML docs throughout; user-facing strings may be localised (currently German).
 
-Copyright 2026 ServerWatch Contributors
+---
+
+## Development
+
+Requirements: the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+
+```bash
+# build
+dotnet build src/ServerWatch/ServerWatch.csproj
+
+# run tests
+dotnet test src/ServerWatch.Tests/ServerWatch.Tests.csproj
+
+# run locally (listens on :8080)
+dotnet run --project src/ServerWatch/ServerWatch.csproj
+```
+
+---
+
+## Security
+
+- No standing SSH key is required for managed servers in steady state (see [Architecture](#architecture)).
+- All management ports are mesh-bound; nothing management-related is exposed to the internet by design.
+- Secrets live in `.env` and `/app/data` (both gitignored / volume-mounted) — never in the image or repository.
+- MCP access is gated by per-key Read/Write/Admin permissions; the acting agent is bounded by code-enforced guardrails.
+
+If you discover a security issue, please open a private report rather than a public issue.
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Please:
+- keep changes interface-first and add/extend tests under `src/ServerWatch.Tests/`;
+- run `dotnet build` (0 warnings) and `dotnet test` before opening a PR;
+- write in-code comments and docs in English.
+
+---
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+Copyright © 2026 ServerWatch Contributors

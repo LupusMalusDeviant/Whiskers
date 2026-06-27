@@ -5,7 +5,7 @@ using ServerWatch.Models;
 
 namespace ServerWatch.Services.Notifications;
 
-public class MattermostNotificationService : INotificationService
+public class MattermostNotificationService : IMattermostNotificationService
 {
     private readonly HttpClient _httpClient;
     private readonly IOptionsMonitor<MattermostSettings> _settings;

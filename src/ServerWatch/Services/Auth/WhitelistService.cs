@@ -3,7 +3,7 @@ using ServerWatch.Services.Persistence;
 
 namespace ServerWatch.Services.Auth;
 
-public class WhitelistService
+public class WhitelistService : IWhitelistService
 {
     private readonly JsonFileStore<WhitelistData> _store;
     private readonly IConfiguration _configuration;

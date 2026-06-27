@@ -11,17 +11,17 @@ namespace ServerWatch.Services.Docker;
 
 public class DockerService : IDockerService
 {
-    private readonly DockerConnectionManager _connectionManager;
-    private readonly ServerConfigService _serverConfigService;
-    private readonly PrometheusMetricsSource _prometheusMetrics;
+    private readonly IDockerConnectionManager _connectionManager;
+    private readonly IServerConfigService _serverConfigService;
+    private readonly IPrometheusMetricsSource _prometheusMetrics;
     private readonly ILogger<DockerService> _logger;
     private readonly MemoryCache _statsCache = new(new MemoryCacheOptions());
     private static readonly TimeSpan StatsCacheDuration = TimeSpan.FromSeconds(3);
 
     public DockerService(
-        DockerConnectionManager connectionManager,
-        ServerConfigService serverConfigService,
-        PrometheusMetricsSource prometheusMetrics,
+        IDockerConnectionManager connectionManager,
+        IServerConfigService serverConfigService,
+        IPrometheusMetricsSource prometheusMetrics,
         ILogger<DockerService> logger)
     {
         _connectionManager = connectionManager;

@@ -1,10 +1,10 @@
 @page "/logs"
 @attribute [Authorize]
-@inject ServerWatch.Services.LogMonitor.LogSearchService SearchService
-@inject ServerWatch.Services.LogMonitor.LogMonitorService MonitorService
+@inject ServerWatch.Services.LogMonitor.ILogSearchService SearchService
+@inject ServerWatch.Services.LogMonitor.ILogMonitorService MonitorService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 
 <PageTitle>Log-Suche - ServerWatch</PageTitle>
 

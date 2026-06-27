@@ -9,7 +9,7 @@ namespace ServerWatch.Services.Vault;
 /// AES-256 encrypted secret vault. Master key from VAULT_KEY env var.
 /// Secrets are stored encrypted at rest in /app/data/vault.json.
 /// </summary>
-public class VaultService
+public class VaultService : IVaultService
 {
     private readonly JsonFileStore<VaultData> _store;
     private readonly ILogger<VaultService> _logger;

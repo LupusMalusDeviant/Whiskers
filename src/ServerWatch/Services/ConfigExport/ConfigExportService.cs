@@ -15,15 +15,15 @@ public class ConfigExportData
     public object? Whitelist { get; set; }
 }
 
-public class ConfigExportService
+public class ConfigExportService : IConfigExportService
 {
-    private readonly ServerConfigService _serverConfig;
-    private readonly RoleService _roleService;
-    private readonly McpPermissionService _mcpService;
-    private readonly WhitelistService _whitelistService;
+    private readonly IServerConfigService _serverConfig;
+    private readonly IRoleService _roleService;
+    private readonly IMcpPermissionService _mcpService;
+    private readonly IWhitelistService _whitelistService;
 
-    public ConfigExportService(ServerConfigService serverConfig, RoleService roleService,
-        McpPermissionService mcpService, WhitelistService whitelistService)
+    public ConfigExportService(IServerConfigService serverConfig, IRoleService roleService,
+        IMcpPermissionService mcpService, IWhitelistService whitelistService)
     {
         _serverConfig = serverConfig;
         _roleService = roleService;

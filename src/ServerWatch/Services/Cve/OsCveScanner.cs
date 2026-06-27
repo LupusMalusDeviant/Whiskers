@@ -12,7 +12,7 @@ namespace ServerWatch.Services.Cve;
 /// optionally, the CVE IDs they address. CVE IDs are extracted from apt changelogs
 /// (slow but works without extra tooling installed on the target server).
 /// </summary>
-public class OsCveScanner
+public class OsCveScanner : IOsCveScanner
 {
     private readonly IHostCommandExecutor _executor;
     private readonly IOptionsMonitor<CveMonitorSettings> _settings;

@@ -11,11 +11,11 @@ namespace ServerWatch.Services.AutoUpdate;
 /// Background service that auto-updates containers WITH OPT-IN policies.
 /// Default: OFF. Each container must explicitly enable auto-update.
 /// </summary>
-public class AutoUpdateService : BackgroundService
+public class AutoUpdateService : BackgroundService, IAutoUpdateService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDockerService _docker;
-    private readonly ImageUpdateStore _updateStore;
+    private readonly IImageUpdateStore _updateStore;
     private readonly INotificationService _notifications;
     private readonly ILogger<AutoUpdateService> _logger;
 
@@ -24,7 +24,7 @@ public class AutoUpdateService : BackgroundService
     public AutoUpdateService(
         IServiceScopeFactory scopeFactory,
         IDockerService docker,
-        ImageUpdateStore updateStore,
+        IImageUpdateStore updateStore,
         INotificationService notifications,
         ILogger<AutoUpdateService> logger)
     {

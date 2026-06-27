@@ -3,7 +3,7 @@ using ServerWatch.Services.Persistence;
 
 namespace ServerWatch.Services.Notifications;
 
-public class ContainerNotificationPrefsService
+public class ContainerNotificationPrefsService : IContainerNotificationPrefsService
 {
     private readonly JsonFileStore<ContainerNotificationPrefs> _store;
     private ContainerNotificationPrefs _data = new();

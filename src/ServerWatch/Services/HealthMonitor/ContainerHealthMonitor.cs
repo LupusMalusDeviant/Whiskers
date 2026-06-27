@@ -14,7 +14,7 @@ public class ContainerHealthMonitor : BackgroundService
     private readonly IDockerService _docker;
     private readonly IHealthStore _healthStore;
     private readonly INotificationService _notifications;
-    private readonly ContainerNotificationPrefsService _notifPrefs;
+    private readonly IContainerNotificationPrefsService _notifPrefs;
     private readonly IHubContext<ContainerHub> _hubContext;
     private readonly HealthMonitorSettings _settings;
     private readonly ILogger<ContainerHealthMonitor> _logger;
@@ -27,7 +27,7 @@ public class ContainerHealthMonitor : BackgroundService
         IDockerService docker,
         IHealthStore healthStore,
         INotificationService notifications,
-        ContainerNotificationPrefsService notifPrefs,
+        IContainerNotificationPrefsService notifPrefs,
         IHubContext<ContainerHub> hubContext,
         IOptions<HealthMonitorSettings> settings,
         ILogger<ContainerHealthMonitor> logger)

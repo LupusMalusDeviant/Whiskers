@@ -18,8 +18,8 @@ public class CloudTools
     [McpServerTool, Description("List all ServerWatch servers that have a cloud provider (Hetzner/Hostinger) configured, with their live power status, type, location, IP, and (Hetzner) traffic usage.")]
     public static async Task<string> ListCloudServers(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        CloudControlService cloud)
+        IMcpPermissionService permissionService,
+        ICloudControlService cloud)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_cloud_servers");
         if (denied != null) return denied;
@@ -41,8 +41,8 @@ public class CloudTools
     [McpServerTool, Description("Get the live cloud status of a ServerWatch server (by name or id): provider, power state, type, location, IP, and (Hetzner) traffic usage and backups.")]
     public static async Task<string> CloudStatus(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        CloudControlService cloud,
+        IMcpPermissionService permissionService,
+        ICloudControlService cloud,
         [Description("ServerWatch server name or id")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "cloud_status");
@@ -72,44 +72,44 @@ public class CloudTools
 
     [McpServerTool, Description("Power on a server (by ServerWatch name or id) via its cloud provider.")]
     public static async Task<string> CloudPowerOn(
-        IHttpContextAccessor httpContextAccessor, McpPermissionService permissionService, CloudControlService cloud,
+        IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, ICloudControlService cloud,
         [Description("ServerWatch server name or id")] string server)
         => await Guarded(httpContextAccessor, permissionService, "cloud_power_on", () => cloud.PowerOnAsync(server));
 
     [McpServerTool, Description("Gracefully shut down a server (by ServerWatch name or id) via its cloud provider.")]
     public static async Task<string> CloudShutdown(
-        IHttpContextAccessor httpContextAccessor, McpPermissionService permissionService, CloudControlService cloud,
+        IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, ICloudControlService cloud,
         [Description("ServerWatch server name or id")] string server)
         => await Guarded(httpContextAccessor, permissionService, "cloud_shutdown", () => cloud.ShutdownAsync(server));
 
     [McpServerTool, Description("Gracefully reboot a server (by ServerWatch name or id) via its cloud provider.")]
     public static async Task<string> CloudReboot(
-        IHttpContextAccessor httpContextAccessor, McpPermissionService permissionService, CloudControlService cloud,
+        IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, ICloudControlService cloud,
         [Description("ServerWatch server name or id")] string server)
         => await Guarded(httpContextAccessor, permissionService, "cloud_reboot", () => cloud.RebootAsync(server));
 
     [McpServerTool, Description("HARD reset (power-cycle) a server via its cloud provider — forceful, use only when a graceful reboot is impossible (e.g. SSH unresponsive). Hetzner: true power-cycle; Hostinger: falls back to a restart (no hard reset available).")]
     public static async Task<string> CloudHardReset(
-        IHttpContextAccessor httpContextAccessor, McpPermissionService permissionService, CloudControlService cloud,
+        IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, ICloudControlService cloud,
         [Description("ServerWatch server name or id")] string server)
         => await Guarded(httpContextAccessor, permissionService, "cloud_hard_reset", () => cloud.HardResetAsync(server));
 
     [McpServerTool, Description("Create a snapshot of a server (by ServerWatch name or id) via its cloud provider. Useful before risky changes. Note: Hostinger keeps only ONE snapshot per VM (replaces the previous).")]
     public static async Task<string> CloudCreateSnapshot(
-        IHttpContextAccessor httpContextAccessor, McpPermissionService permissionService, CloudControlService cloud,
+        IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, ICloudControlService cloud,
         [Description("ServerWatch server name or id")] string server,
         [Description("Optional snapshot description (Hetzner only)")] string? description = null)
         => await Guarded(httpContextAccessor, permissionService, "cloud_create_snapshot", () => cloud.CreateSnapshotAsync(server, description));
 
     [McpServerTool, Description("Get recent cloud metrics for a server (by ServerWatch name or id). Hetzner type: cpu, disk, network. Hostinger returns raw metric data.")]
     public static async Task<string> CloudMetrics(
-        IHttpContextAccessor httpContextAccessor, McpPermissionService permissionService, CloudControlService cloud,
+        IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, ICloudControlService cloud,
         [Description("ServerWatch server name or id")] string server,
         [Description("Metric type for Hetzner: cpu, disk, or network")] string type = "cpu")
         => await Guarded(httpContextAccessor, permissionService, "cloud_metrics", () => cloud.MetricsAsync(server, type));
 
     private static async Task<string> Guarded(
-        IHttpContextAccessor http, McpPermissionService perm, string toolName, Func<Task<string>> action)
+        IHttpContextAccessor http, IMcpPermissionService perm, string toolName, Func<Task<string>> action)
     {
         var denied = McpPermissionCheck.CheckAccess(http, perm, toolName);
         if (denied != null) return denied;

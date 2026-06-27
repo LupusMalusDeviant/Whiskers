@@ -11,15 +11,15 @@ namespace ServerWatch.Services.Metrics;
 /// </summary>
 public class MetricsSourceDispatcher : IMetricsSource
 {
-    private readonly ServerConfigService _serverConfig;
-    private readonly DockerMetricsSource _docker;
-    private readonly PrometheusMetricsSource _prometheus;
+    private readonly IServerConfigService _serverConfig;
+    private readonly IDockerMetricsSource _docker;
+    private readonly IPrometheusMetricsSource _prometheus;
     private readonly ILogger<MetricsSourceDispatcher> _logger;
 
     public MetricsSourceDispatcher(
-        ServerConfigService serverConfig,
-        DockerMetricsSource docker,
-        PrometheusMetricsSource prometheus,
+        IServerConfigService serverConfig,
+        IDockerMetricsSource docker,
+        IPrometheusMetricsSource prometheus,
         ILogger<MetricsSourceDispatcher> logger)
     {
         _serverConfig = serverConfig;

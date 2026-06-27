@@ -14,9 +14,9 @@ public class CoolifyTools
     [McpServerTool, Description("List all Coolify applications with their status, Git repository, branch, and domain.")]
     public static async Task<string> ListCoolifyApplications(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config)
+        ICoolifyConfigService config)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_coolify_applications");
         if (denied != null) return denied;
@@ -33,9 +33,9 @@ public class CoolifyTools
     [McpServerTool, Description("Get detailed information about a specific Coolify application including its Git repo, branch, build pack, status, and domain.")]
     public static async Task<string> GetCoolifyApplication(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string uuid)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_coolify_application");
@@ -68,9 +68,9 @@ public class CoolifyTools
     [McpServerTool, Description("Trigger a deployment for a Coolify application. Optionally force a rebuild without cache.")]
     public static async Task<string> DeployCoolifyApplication(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string uuid,
         [Description("Force rebuild without cache (default: false)")] bool force = false)
     {
@@ -86,9 +86,9 @@ public class CoolifyTools
     [McpServerTool, Description("Start a Coolify application.")]
     public static async Task<string> StartCoolifyApplication(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string uuid)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "start_coolify_application");
@@ -103,9 +103,9 @@ public class CoolifyTools
     [McpServerTool, Description("Stop a Coolify application.")]
     public static async Task<string> StopCoolifyApplication(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string uuid)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "stop_coolify_application");
@@ -120,9 +120,9 @@ public class CoolifyTools
     [McpServerTool, Description("Restart a Coolify application.")]
     public static async Task<string> RestartCoolifyApplication(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string uuid)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "restart_coolify_application");
@@ -137,9 +137,9 @@ public class CoolifyTools
     [McpServerTool, Description("Get logs from a Coolify application.")]
     public static async Task<string> GetCoolifyApplicationLogs(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string uuid)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_coolify_application_logs");
@@ -154,9 +154,9 @@ public class CoolifyTools
     [McpServerTool, Description("List all Coolify servers with their status, IP, and Docker version.")]
     public static async Task<string> ListCoolifyServers(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config)
+        ICoolifyConfigService config)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_coolify_servers");
         if (denied != null) return denied;
@@ -173,9 +173,9 @@ public class CoolifyTools
     [McpServerTool, Description("List all Coolify databases with their type and status.")]
     public static async Task<string> ListCoolifyDatabases(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config)
+        ICoolifyConfigService config)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_coolify_databases");
         if (denied != null) return denied;
@@ -192,9 +192,9 @@ public class CoolifyTools
     [McpServerTool, Description("Deploy all Coolify applications matching a specific tag. Supports comma-separated tags.")]
     public static async Task<string> DeployCoolifyByTag(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("Tag name (supports comma-separated)")] string tag,
         [Description("Force rebuild without cache (default: false)")] bool force = false)
     {
@@ -214,9 +214,9 @@ public class CoolifyTools
     [McpServerTool, Description("Get environment variables for a Coolify application.")]
     public static async Task<string> GetCoolifyEnvVars(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string appUuid)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_coolify_env_vars");
@@ -235,9 +235,9 @@ public class CoolifyTools
     [McpServerTool, Description("Set an environment variable for a Coolify application.")]
     public static async Task<string> SetCoolifyEnvVar(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         ICoolifyService coolify,
-        CoolifyConfigService config,
+        ICoolifyConfigService config,
         [Description("The application UUID")] string appUuid,
         [Description("Variable name (key)")] string key,
         [Description("Variable value")] string value,

@@ -20,7 +20,7 @@ public interface IAuditLogService
     /// </summary>
     static (string Actor, string ActorType) GetActorFromHttpContext(
         Microsoft.AspNetCore.Http.HttpContext? httpContext,
-        Mcp.McpPermissionService? permissionService = null)
+        Mcp.IMcpPermissionService? permissionService = null)
     {
         if (httpContext == null)
             return ("system", "system");

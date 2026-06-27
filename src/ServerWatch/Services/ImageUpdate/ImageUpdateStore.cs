@@ -3,7 +3,7 @@ using ServerWatch.Models;
 
 namespace ServerWatch.Services.ImageUpdate;
 
-public class ImageUpdateStore
+public class ImageUpdateStore : IImageUpdateStore
 {
     private readonly ConcurrentDictionary<string, ImageUpdateInfo> _updates = new();
     public DateTime? LastCheckAt { get; set; }

@@ -8,7 +8,7 @@ namespace ServerWatch.Services.Coolify;
 public class CoolifyApiService : ICoolifyService
 {
     private readonly HttpClient _http;
-    private readonly CoolifyConfigService _config;
+    private readonly ICoolifyConfigService _config;
     private readonly ILogger<CoolifyApiService> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -17,7 +17,7 @@ public class CoolifyApiService : ICoolifyService
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
 
-    public CoolifyApiService(HttpClient http, CoolifyConfigService config, ILogger<CoolifyApiService> logger)
+    public CoolifyApiService(HttpClient http, ICoolifyConfigService config, ILogger<CoolifyApiService> logger)
     {
         _http = http;
         _config = config;

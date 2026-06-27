@@ -18,16 +18,16 @@ namespace ServerWatch.Services.Cve;
 /// target) above the configured severity threshold are sent as a single aggregated
 /// Mattermost notification per target.
 /// </summary>
-public class CveMonitorService : BackgroundService
+public class CveMonitorService : BackgroundService, ICveMonitorService
 {
     private readonly IServiceProvider _services;
-    private readonly CveFindingsStore _store;
+    private readonly ICveFindingsStore _store;
     private readonly IOptionsMonitor<CveMonitorSettings> _settings;
     private readonly ILogger<CveMonitorService> _logger;
 
     public CveMonitorService(
         IServiceProvider services,
-        CveFindingsStore store,
+        ICveFindingsStore store,
         IOptionsMonitor<CveMonitorSettings> settings,
         ILogger<CveMonitorService> logger)
     {
@@ -78,10 +78,10 @@ public class CveMonitorService : BackgroundService
         {
             using var scope = _services.CreateScope();
             var sp = scope.ServiceProvider;
-            var serverConfig = sp.GetRequiredService<ServerConfigService>();
+            var serverConfig = sp.GetRequiredService<IServerConfigService>();
             var docker = sp.GetRequiredService<IDockerService>();
-            var osScanner = sp.GetRequiredService<OsCveScanner>();
-            var trivyScanner = sp.GetRequiredService<TrivyScanner>();
+            var osScanner = sp.GetRequiredService<IOsCveScanner>();
+            var trivyScanner = sp.GetRequiredService<ITrivyScanner>();
             var notification = sp.GetRequiredService<INotificationService>();
             var hub = sp.GetRequiredService<IHubContext<ContainerHub>>();
             var serverNames = serverConfig.GetServers().ToDictionary(s => s.Id, s => s.Name);

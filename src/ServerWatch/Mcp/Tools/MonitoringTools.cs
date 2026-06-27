@@ -15,7 +15,7 @@ public class MonitoringTools
     [McpServerTool, Description("Get a health summary of all containers across all servers.")]
     public static async Task<string> GetHealthSummary(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IHealthStore healthStore)
     {
@@ -55,8 +55,8 @@ public class MonitoringTools
     [McpServerTool, Description("Get historical CPU/memory metrics for a container over a time period.")]
     public static async Task<string> GetContainerMetrics(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        MetricsQueryService metrics,
+        IMcpPermissionService permissionService,
+        IMetricsQueryService metrics,
         [Description("Container ID")] string containerId,
         [Description("Server ID")] string serverId,
         [Description("Time period: 1h, 6h, 24h, 7d")] string period = "1h")
@@ -90,8 +90,8 @@ public class MonitoringTools
     [McpServerTool, Description("Get historical CPU/memory metrics for a server over a time period.")]
     public static async Task<string> GetServerMetrics(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        MetricsQueryService metrics,
+        IMcpPermissionService permissionService,
+        IMetricsQueryService metrics,
         [Description("Server ID")] string serverId,
         [Description("Time period: 1h, 6h, 24h, 7d")] string period = "1h")
     {
@@ -121,7 +121,7 @@ public class MonitoringTools
     [McpServerTool, Description("Get system logs from a server via journalctl. Can filter by service name.")]
     public static async Task<string> GetServerLogs(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IHostCommandExecutor executor,
         [Description("Server ID")] string serverId,
         [Description("Service name to filter (optional, e.g. 'nginx', 'docker')")] string? serviceName = null,

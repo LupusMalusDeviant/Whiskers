@@ -14,9 +14,9 @@ public class CveTools
     [McpServerTool, Description("Get a CVE summary across all servers: per-server counts of CVE findings (OS + all containers) broken down by severity.")]
     public static string GetCveSummary(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        CveFindingsStore store,
-        ServerConfigService serverConfig)
+        IMcpPermissionService permissionService,
+        ICveFindingsStore store,
+        IServerConfigService serverConfig)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_cve_summary");
         if (denied != null) return denied;
@@ -46,8 +46,8 @@ public class CveTools
     [McpServerTool, Description("Get the CVE findings for the host OS on one server (pending security updates and the CVE IDs they address).")]
     public static string GetServerCves(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        CveFindingsStore store,
+        IMcpPermissionService permissionService,
+        ICveFindingsStore store,
         [Description("Server ID")] string serverId,
         [Description("Min severity to include: Low, Medium, High, Critical (default Low)")] string minSeverity = "Low")
     {
@@ -82,8 +82,8 @@ public class CveTools
     [McpServerTool, Description("Get the CVE findings for a specific container image on a server.")]
     public static string GetContainerCves(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
-        CveFindingsStore store,
+        IMcpPermissionService permissionService,
+        ICveFindingsStore store,
         [Description("Container ID")] string containerId,
         [Description("Server ID")] string serverId,
         [Description("Min severity to include: Low, Medium, High, Critical (default Low)")] string minSeverity = "Low")

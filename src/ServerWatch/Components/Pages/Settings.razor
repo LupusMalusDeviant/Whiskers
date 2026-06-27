@@ -6,19 +6,19 @@
 @inject IOptionsMonitor<ServerWatch.Configuration.GoogleAuthSettings> AuthOptions
 @inject INotificationService NotificationService
 @inject IOptionsMonitor<ServerWatch.Configuration.MatrixSettings> MatrixOptions
-@inject ServerWatch.Services.Notifications.MatrixNotificationService MatrixService
-@inject WhitelistService WhitelistService
-@inject ServerWatch.Services.Auth.RoleService RoleService
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Notifications.IMatrixNotificationService MatrixService
+@inject IWhitelistService WhitelistService
+@inject ServerWatch.Services.Auth.IRoleService RoleService
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
-@inject ServerWatch.Services.Vault.VaultService VaultService
-@inject ServerWatch.Services.Mcp.McpPermissionService McpPermissionService
-@inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfigService
+@inject ServerWatch.Services.Vault.IVaultService VaultService
+@inject ServerWatch.Services.Mcp.IMcpPermissionService McpPermissionService
+@inject ServerWatch.Services.Coolify.ICoolifyConfigService CoolifyConfigService
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyApiService
 @inject ISnackbar Snackbar
 @inject IOptionsMonitor<ServerWatch.Configuration.CveMonitorSettings> CveSettings
-@inject ServerWatch.Services.Cve.CveFindingsStore CveStore
-@inject ServerWatch.Services.Cve.CveMonitorService CveMonitor
+@inject ServerWatch.Services.Cve.ICveFindingsStore CveStore
+@inject ServerWatch.Services.Cve.ICveMonitorService CveMonitor
 
 <PageTitle>Einstellungen - ServerWatch</PageTitle>
 

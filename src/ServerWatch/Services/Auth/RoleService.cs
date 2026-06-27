@@ -3,7 +3,7 @@ using ServerWatch.Services.Persistence;
 
 namespace ServerWatch.Services.Auth;
 
-public class RoleService
+public class RoleService : IRoleService
 {
     private readonly JsonFileStore<UserRoleData> _store;
     private readonly ILogger<RoleService> _logger;

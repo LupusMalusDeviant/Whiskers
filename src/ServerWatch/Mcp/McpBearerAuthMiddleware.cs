@@ -26,7 +26,7 @@ public class McpBearerAuthMiddleware
             if (authHeader != null && authHeader.StartsWith("Bearer "))
             {
                 var key = authHeader["Bearer ".Length..];
-                var permService = context.RequestServices.GetService<McpPermissionService>();
+                var permService = context.RequestServices.GetService<IMcpPermissionService>();
 
                 if (permService?.ValidateKey(key) != null)
                 {

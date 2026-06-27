@@ -12,7 +12,7 @@ public class SystemdUnit
     public bool Enabled { get; set; }
 }
 
-public class SystemdService
+public class SystemdService : ISystemdService
 {
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<SystemdService> _logger;

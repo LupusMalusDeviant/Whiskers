@@ -2,7 +2,7 @@ using ServerWatch.Models;
 
 namespace ServerWatch.Services.Templates;
 
-public class TemplateService
+public class TemplateService : ITemplateService
 {
     public List<AppTemplate> GetTemplates() => Templates;
     public AppTemplate? GetTemplate(string id) => Templates.FirstOrDefault(t => t.Id == id);

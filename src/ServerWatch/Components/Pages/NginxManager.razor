@@ -1,11 +1,11 @@
 @page "/nginx/{ServerId}"
 @attribute [Authorize]
-@inject ServerWatch.Services.Server.NginxService NginxService
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.Server.INginxService NginxService
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager Nav
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Nginx - ServerWatch</PageTitle>

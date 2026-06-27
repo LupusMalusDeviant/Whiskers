@@ -7,13 +7,13 @@ using ServerWatch.Services.ServerConfig;
 
 namespace ServerWatch.Services.Docker;
 
-public class SshTunnelManager : IDisposable
+public class SshTunnelManager : ISshTunnelManager
 {
-    private readonly ServerConfigService _serverConfig;
+    private readonly IServerConfigService _serverConfig;
     private readonly ILogger<SshTunnelManager> _logger;
     private readonly ConcurrentDictionary<string, SshTunnel> _tunnels = new();
 
-    public SshTunnelManager(ServerConfigService serverConfig, ILogger<SshTunnelManager> logger)
+    public SshTunnelManager(IServerConfigService serverConfig, ILogger<SshTunnelManager> logger)
     {
         _serverConfig = serverConfig;
         _logger = logger;

@@ -11,7 +11,7 @@ public class NginxSite
     public string Content { get; set; } = "";
 }
 
-public class NginxService
+public class NginxService : INginxService
 {
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<NginxService> _logger;

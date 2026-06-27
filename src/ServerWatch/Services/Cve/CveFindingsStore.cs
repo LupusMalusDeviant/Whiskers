@@ -8,7 +8,7 @@ namespace ServerWatch.Services.Cve;
 /// Mirrors the style of <c>ImageUpdateStore</c> — no persistence; results are rebuilt each scan cycle.
 /// Key format: "<serverId>:<containerId|os>".
 /// </summary>
-public class CveFindingsStore
+public class CveFindingsStore : ICveFindingsStore
 {
     private readonly ConcurrentDictionary<string, CveScanResult> _results = new();
 

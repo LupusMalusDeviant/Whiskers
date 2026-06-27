@@ -10,13 +10,13 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
 {
     private readonly ConcurrentDictionary<string, TerminalSession> _sessions = new();
     private readonly TerminalSettings _settings;
-    private readonly ServerConfigService _serverConfigService;
+    private readonly IServerConfigService _serverConfigService;
     private readonly ILogger<TerminalSessionManager> _logger;
     private readonly Timer _cleanupTimer;
 
     public TerminalSessionManager(
         IOptions<TerminalSettings> settings,
-        ServerConfigService serverConfigService,
+        IServerConfigService serverConfigService,
         ILogger<TerminalSessionManager> logger)
     {
         _settings = settings.Value;

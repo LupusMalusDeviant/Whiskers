@@ -8,7 +8,7 @@ namespace ServerWatch.Services.ImageUpdate;
 /// Queries Docker Registry v2 API for remote image manifest digests.
 /// Supports Docker Hub (registry-1.docker.io) and generic v2 registries.
 /// </summary>
-public class RegistryClient
+public class RegistryClient : IRegistryClient
 {
     private readonly HttpClient _http;
     private readonly ILogger<RegistryClient> _logger;

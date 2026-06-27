@@ -1,11 +1,11 @@
 @page "/apps"
 @attribute [Authorize]
-@inject ServerWatch.Services.Templates.TemplateService TemplateService
+@inject ServerWatch.Services.Templates.ITemplateService TemplateService
 @inject ServerWatch.Services.Server.IHostCommandExecutor Executor
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>App Store - ServerWatch</PageTitle>

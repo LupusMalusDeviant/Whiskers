@@ -5,16 +5,16 @@ using ServerWatch.Services.Persistence;
 
 namespace ServerWatch.Services.Scheduler;
 
-public class SchedulerService : BackgroundService
+public class SchedulerService : BackgroundService, ISchedulerService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly TaskExecutor _executor;
+    private readonly ITaskExecutor _executor;
     private readonly ILogger<SchedulerService> _logger;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
 
     public SchedulerService(
         IServiceScopeFactory scopeFactory,
-        TaskExecutor executor,
+        ITaskExecutor executor,
         ILogger<SchedulerService> logger)
     {
         _scopeFactory = scopeFactory;

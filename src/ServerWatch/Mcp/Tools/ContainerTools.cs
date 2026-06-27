@@ -17,7 +17,7 @@ public class ContainerTools
     [McpServerTool, Description("List all Docker containers across all configured servers. Returns container name, image, state, health, server, and compose project.")]
     public static async Task<string> ListContainers(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Optional server ID to filter by. Omit for all servers.")] string? serverId = null)
     {
@@ -35,7 +35,7 @@ public class ContainerTools
     [McpServerTool, Description("Get detailed information about a specific Docker container including its configuration, ports, labels, and stats.")]
     public static async Task<string> GetContainerDetails(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("The full container ID")] string containerId,
         [Description("Server ID where the container runs")] string? serverId = null)
@@ -74,7 +74,7 @@ public class ContainerTools
     [McpServerTool, Description("Get logs from a Docker container.")]
     public static async Task<string> GetContainerLogs(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Container ID or name")] string containerId,
         [Description("Number of tail lines (default 100)")] int lines = 100,
@@ -99,7 +99,7 @@ public class ContainerTools
     [McpServerTool, Description("Start a stopped Docker container.")]
     public static async Task<string> StartContainer(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
@@ -130,7 +130,7 @@ public class ContainerTools
     [McpServerTool, Description("Stop a running Docker container.")]
     public static async Task<string> StopContainer(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
@@ -161,7 +161,7 @@ public class ContainerTools
     [McpServerTool, Description("Restart a Docker container.")]
     public static async Task<string> RestartContainer(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
@@ -192,9 +192,9 @@ public class ContainerTools
     [McpServerTool, Description("Pull latest image and recreate a Docker container (update).")]
     public static async Task<string> UpdateContainer(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
-        ImageUpdateStore updateStore,
+        IImageUpdateStore updateStore,
         IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
@@ -229,9 +229,9 @@ public class ContainerTools
     [McpServerTool, Description("Check which containers have image updates available.")]
     public static async Task<string> GetUpdateStatus(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
-        ImageUpdateStore updateStore)
+        IImageUpdateStore updateStore)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_update_status");
         if (denied != null) return denied;
@@ -250,7 +250,7 @@ public class ContainerTools
     [McpServerTool, Description("Deploy a new application on a server using a standardized template. Supports common app types like web apps, databases, and custom Docker images. Creates the container with sensible defaults and starts it.")]
     public static async Task<string> DeployApp(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IAuditLogService auditLog,
         [Description("Application name (used as container name)")] string appName,
@@ -333,7 +333,7 @@ public class ContainerTools
     [McpServerTool, Description("Get environment variables of a running Docker container. Sensitive values (keys, secrets, passwords, tokens) are masked for security.")]
     public static async Task<string> GetContainerEnv(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
@@ -362,7 +362,7 @@ public class ContainerTools
     [McpServerTool, Description("Set environment variables in a container's .env file and restart via docker compose. Only works for containers managed by docker-compose. Provide variables as 'KEY=VALUE' pairs separated by newlines or commas. Existing variables not included are kept unchanged.")]
     public static async Task<string> SetContainerEnv(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IDockerService docker,
         IHostCommandExecutor executor,
         IAuditLogService auditLog,
@@ -458,7 +458,7 @@ public class ContainerTools
     [McpServerTool, Description("Deploy an application using a docker-compose.yml content string. Creates and starts all services defined in the compose file.")]
     public static async Task<string> DeployCompose(
         IHttpContextAccessor httpContextAccessor,
-        McpPermissionService permissionService,
+        IMcpPermissionService permissionService,
         IHostCommandExecutor executor,
         IAuditLogService auditLog,
         [Description("Server ID to deploy on")] string serverId,

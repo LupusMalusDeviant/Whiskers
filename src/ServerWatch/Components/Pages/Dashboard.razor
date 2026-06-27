@@ -3,14 +3,14 @@
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject NavigationManager Nav
-@inject ServerWatch.Services.ImageUpdate.ImageUpdateStore ImageUpdateStore
-@inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfig
+@inject ServerWatch.Services.ImageUpdate.IImageUpdateStore ImageUpdateStore
+@inject ServerWatch.Services.Coolify.ICoolifyConfigService CoolifyConfig
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
-@inject ServerWatch.Services.Cve.CveFindingsStore CveStore
-@inject MetricsQueryService MetricsQuery
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.Cve.ICveFindingsStore CveStore
+@inject IMetricsQueryService MetricsQuery
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 @implements IDisposable
 

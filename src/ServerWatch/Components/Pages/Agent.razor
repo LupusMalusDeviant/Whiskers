@@ -1,0 +1,365 @@
+@page "/agent"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Options
+@using ServerWatch.Configuration
+@using ServerWatch.Models
+@using ServerWatch.Models.Agent
+@using ServerWatch.Services.Agent
+@using ServerWatch.Services.Agent.Guardrails
+@using ServerWatch.Services.Auth
+@attribute [Authorize]
+@inject IAgentService AgentService
+@inject IGuardrailStore GuardrailStore
+@inject IOptionsMonitor<AgentSettings> Settings
+@inject ICurrentUserService CurrentUser
+@inject IAgentTranscriptStore TranscriptStore
+@inject IAgentSettingsStore SettingsStore
+@inject ISnackbar Snackbar
+
+<PageTitle>Agent</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+    <div style="display:flex; align-items:center; gap:8px;">
+        <MudText Typo="Typo.h5" Class="mb-1 flex-1">ServerWatch-Agent</MudText>
+        @if (_lines.Count > 0)
+        {
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.DeleteSweep"
+                       Variant="Variant.Text" OnClick="ClearChat">Verlauf leeren</MudButton>
+        }
+    </div>
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
+        Handelnder Assistent — führt Aktionen nur innerhalb der Guardrails und nie über deine eigenen Rechte hinaus aus.
+    </MudText>
+
+    @if (!Settings.CurrentValue.Enabled)
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-4">
+            Der Agent ist nicht aktiviert. Setze <code>Agent:Enabled=true</code>, einen Provider und einen API-Key in der Konfiguration.
+        </MudAlert>
+    }
+
+    <MudGrid>
+        <MudItem xs="12" md="@(_isAdmin ? 7 : 12)">
+            <MudPaper Class="pa-3" Style="display:flex; flex-direction:column; height: 540px;">
+                <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                    @if (_lines.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-8" Style="color: rgba(255,255,255,0.3);">
+                            Sag dem Agenten, was er tun soll — z.B. „liste alle unhealthy Container".
+                        </MudText>
+                    }
+                    @foreach (var line in _lines)
+                    {
+                        <div style="@LineStyle(line.Kind)">
+                            @if (line.Kind == "tool")
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Build" Size="Size.Small" Class="mr-1" />
+                            }
+                            <span style="white-space: pre-wrap;">@line.Text</span>
+                        </div>
+                    }
+                    @if (_pendingConfirm is not null)
+                    {
+                        <MudPaper Class="pa-3" Outlined="true" Style="border-color: var(--mud-palette-warning);">
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                <b>Bestätigung nötig:</b> @_pendingConfirm.Name — @_pendingReason
+                            </MudText>
+                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled"
+                                       OnClick="@(() => Resolve(true))" Class="mr-2">Freigeben</MudButton>
+                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                                       OnClick="@(() => Resolve(false))">Ablehnen</MudButton>
+                        </MudPaper>
+                    }
+                    @if (_running && _pendingConfirm is null)
+                    {
+                        <div style="display:flex; align-items:center; gap:8px; color: rgba(255,255,255,0.4);">
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                            <span>Arbeitet…</span>
+                        </div>
+                    }
+                </div>
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <MudTextField @bind-Value="_input" Placeholder="Auftrag… (Enter sendet)" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Immediate="true" Disabled="@_running"
+                                  OnKeyDown="OnKeyDown" Class="flex-1" />
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Send"
+                               Disabled="@(_running || string.IsNullOrWhiteSpace(_input))">Senden</MudButton>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        @if (_isAdmin)
+        {
+            <MudItem xs="12" md="5">
+                <MudPaper Class="pa-4" Style="height: 540px; overflow-y:auto;">
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">LLM-Provider</MudText>
+                    <MudSwitch @bind-Value="_llmEnabled" Color="Color.Primary" Label="Agent aktiviert" />
+                    <MudSelect T="string" @bind-Value="_llmProvider" Label="Provider" Margin="Margin.Dense"
+                               Variant="Variant.Outlined" Class="mt-2">
+                        <MudSelectItem Value="@("openai")">openai</MudSelectItem>
+                        <MudSelectItem Value="@("openrouter")">openrouter</MudSelectItem>
+                        <MudSelectItem Value="@("ollama")">ollama</MudSelectItem>
+                        <MudSelectItem Value="@("gemini")">gemini</MudSelectItem>
+                        <MudSelectItem Value="@("anthropic")">anthropic</MudSelectItem>
+                        <MudSelectItem Value="@("claude-code")">claude-code</MudSelectItem>
+                    </MudSelect>
+                    <MudTextField @bind-Value="_llmModel" Label="Modell" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField @bind-Value="_llmEndpoint" Label="Endpoint (optional)" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField @bind-Value="_llmKey" Label="API-Key" InputType="InputType.Password" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudNumericField @bind-Value="_llmIterations" Label="Max. Tool-Iterationen" Min="1" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveLlm" Class="mt-3" FullWidth="true">
+                        Provider speichern
+                    </MudButton>
+                    <MudText Typo="Typo.caption" Class="mt-1" Style="color: rgba(255,255,255,0.4);">
+                        Wird ohne Neustart übernommen (reloadOnChange).
+                    </MudText>
+
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.subtitle1" Class="mb-1">Guardrails</MudText>
+                    <MudText Typo="Typo.caption" Class="mb-3" Style="color: rgba(255,255,255,0.5);">
+                        Code-erzwungen, unumgänglich. Nur Admins können sie ändern.
+                    </MudText>
+
+                    <MudSwitch @bind-Value="_policy.ReadOnlyMode" Color="Color.Warning" Label="Read-Only-Modus (Kill-Switch)" />
+                    <MudSwitch @bind-Value="_policy.RequireConfirmationForWrites" Color="Color.Primary" Label="Writes erfordern Bestätigung" />
+
+                    <MudSelect T="string" @bind-Value="_policy.MaxAutonomousLevel" Label="Autonomes Maximal-Level"
+                               Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2">
+                        <MudSelectItem Value="@("read")">read</MudSelectItem>
+                        <MudSelectItem Value="@("write")">write</MudSelectItem>
+                        <MudSelectItem Value="@("admin")">admin</MudSelectItem>
+                    </MudSelect>
+
+                    <MudNumericField @bind-Value="_policy.MaxActionsPerSession" Label="Max. Aktionen pro Session"
+                                     Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Class="mt-2" />
+
+                    <MudTextField @bind-Value="_denyCsv" Label="Tool-Deny-Liste (Komma)" Margin="Margin.Dense"
+                                  Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField @bind-Value="_protectedCsv" Label="Geschützte Ressourcen (Glob, Komma)" Margin="Margin.Dense"
+                                  Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField @bind-Value="_forbiddenCsv" Label="Verbotene Argument-Muster (Regex, Komma)" Margin="Margin.Dense"
+                                  Variant="Variant.Outlined" Class="mt-2" />
+
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveGuardrails" Class="mt-3" FullWidth="true">
+                        Guardrails speichern
+                    </MudButton>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+</MudContainer>
+
+@code {
+    private sealed record Line(string Kind, string Text);
+
+    private readonly List<Line> _lines = new();
+    private string _input = "";
+    private bool _running;
+    private bool _isAdmin;
+
+    private IAgentSession? _session;
+    private AgentToolCall? _pendingConfirm;
+    private string _pendingReason = "";
+
+    private string _email = "local@serverwatch.local";
+    private IReadOnlyList<AgentMessage> _seedHistory = Array.Empty<AgentMessage>();
+
+    // LLM provider editor (admin)
+    private bool _llmEnabled;
+    private string _llmProvider = "openai";
+    private string _llmModel = "";
+    private string _llmEndpoint = "";
+    private string _llmKey = "";
+    private int _llmIterations = 8;
+
+    // Guardrail editor (admin)
+    private GuardrailPolicy _policy = new();
+    private string _denyCsv = "";
+    private string _protectedCsv = "";
+    private string _forbiddenCsv = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+
+        var cfg = Settings.CurrentValue;
+        _llmEnabled = cfg.Enabled;
+        _llmProvider = cfg.Provider;
+        _llmModel = cfg.Model;
+        _llmEndpoint = cfg.Endpoint ?? "";
+        _llmKey = cfg.ApiKey;
+        _llmIterations = cfg.MaxToolIterations;
+
+        // Load the persisted conversation — used both for display and as seed context for the new session.
+        _email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
+        _seedHistory = await TranscriptStore.LoadAsync(_email);
+        foreach (var m in _seedHistory)
+        {
+            switch (m.Role)
+            {
+                case AgentRole.User: _lines.Add(new Line("user", m.Text ?? "")); break;
+                case AgentRole.Assistant when !string.IsNullOrEmpty(m.Text): _lines.Add(new Line("assistant", m.Text!)); break;
+                case AgentRole.Tool: _lines.Add(new Line("tool", $"{(m.IsError ? "⚠ " : "")}{Truncate(m.Text ?? "")}")); break;
+            }
+        }
+
+        var c = GuardrailStore.Current;
+        _policy = new GuardrailPolicy
+        {
+            MaxAutonomousLevel = c.MaxAutonomousLevel,
+            ReadOnlyMode = c.ReadOnlyMode,
+            RequireConfirmationForWrites = c.RequireConfirmationForWrites,
+            MaxActionsPerSession = c.MaxActionsPerSession,
+            ToolDenyList = new(c.ToolDenyList),
+            ToolAllowList = new(c.ToolAllowList),
+            ProtectedResources = new(c.ProtectedResources),
+            ForbiddenArgPatterns = new(c.ForbiddenArgPatterns),
+        };
+        _denyCsv = string.Join(", ", _policy.ToolDenyList);
+        _protectedCsv = string.Join(", ", _policy.ProtectedResources);
+        _forbiddenCsv = string.Join(", ", _policy.ForbiddenArgPatterns);
+    }
+
+    private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await Send();
+    }
+
+    private async Task Send()
+    {
+        if (string.IsNullOrWhiteSpace(_input) || _running) return;
+        var message = _input.Trim();
+        _input = "";
+        _lines.Add(new Line("user", message));
+        _running = true;
+        StateHasChanged();
+
+        _session ??= await AgentService.StartSessionAsync(await BuildContextAsync(), _seedHistory);
+
+        try
+        {
+            await foreach (var ev in _session.SendAsync(message))
+            {
+                switch (ev)
+                {
+                    case AgentEvent.AssistantDelta d:
+                        AppendAssistant(d.Text);
+                        break;
+                    case AgentEvent.ToolExecuted t:
+                        _lines.Add(new Line("tool", $"{(t.Result.IsError ? "⚠ " : "")}{Truncate(t.Result.Content)}"));
+                        break;
+                    case AgentEvent.ConfirmationRequired c:
+                        _pendingConfirm = c.Call;
+                        _pendingReason = c.Reason;
+                        break;
+                    case AgentEvent.Failed f:
+                        _lines.Add(new Line("error", f.Message));
+                        break;
+                    case AgentEvent.TurnCompleted:
+                        break;
+                }
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            _lines.Add(new Line("error", $"Fehler: {ex.Message}"));
+        }
+        finally
+        {
+            _running = false;
+            _pendingConfirm = null;
+            StateHasChanged();
+        }
+
+        if (_session is not null)
+            await TranscriptStore.SaveAsync(_email, _session.History);
+    }
+
+    private async Task ClearChat()
+    {
+        _lines.Clear();
+        _session = null;
+        _seedHistory = Array.Empty<AgentMessage>();
+        await TranscriptStore.ClearAsync(_email);
+    }
+
+    private async Task Resolve(bool approved)
+    {
+        var call = _pendingConfirm;
+        _pendingConfirm = null;
+        StateHasChanged();
+        if (_session is not null && call is not null)
+            await _session.ResolveConfirmationAsync(call.Id, approved);
+    }
+
+    private void AppendAssistant(string text)
+    {
+        if (_lines.Count > 0 && _lines[^1].Kind == "assistant")
+            _lines[^1] = _lines[^1] with { Text = _lines[^1].Text + text };
+        else
+            _lines.Add(new Line("assistant", text));
+    }
+
+    private async Task<AgentContext> BuildContextAsync()
+    {
+        var principal = await BuildPrincipalAsync();
+        return new AgentContext(Guid.NewGuid().ToString("N"), principal, AgentOrigin.WebUi, GuardrailStore.Current);
+    }
+
+    private async Task<AgentPrincipal> BuildPrincipalAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
+        var role = await CurrentUser.GetRoleAsync();
+        var level = role switch
+        {
+            AppRole.Admin => McpPermissionLevels.Admin,
+            AppRole.Operator => McpPermissionLevels.Write,
+            _ => McpPermissionLevels.Read,
+        };
+        return new AgentPrincipal(AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
+    }
+
+    private async Task SaveLlm()
+    {
+        await SettingsStore.SaveAsync(new AgentSettings
+        {
+            Enabled = _llmEnabled,
+            Provider = _llmProvider,
+            Model = _llmModel,
+            Endpoint = string.IsNullOrWhiteSpace(_llmEndpoint) ? null : _llmEndpoint,
+            ApiKey = _llmKey,
+            MaxToolIterations = _llmIterations,
+        });
+        Snackbar.Add("Provider gespeichert.", Severity.Success);
+    }
+
+    private async Task SaveGuardrails()
+    {
+        _policy.ToolDenyList = SplitCsv(_denyCsv);
+        _policy.ProtectedResources = SplitCsv(_protectedCsv);
+        _policy.ForbiddenArgPatterns = SplitCsv(_forbiddenCsv);
+        try
+        {
+            await GuardrailStore.SaveAsync(_policy, await BuildPrincipalAsync());
+            Snackbar.Add("Guardrails gespeichert.", Severity.Success);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private static List<string> SplitCsv(string? csv) =>
+        (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private static string Truncate(string s) => s.Length > 600 ? s[..600] + "…" : s;
+
+    private static string LineStyle(string kind) => kind switch
+    {
+        "user" => "align-self:flex-end; max-width:85%; padding:8px 12px; border-radius:12px 12px 4px 12px; background:rgba(96,165,250,0.15); font-size:0.85rem;",
+        "tool" => "align-self:flex-start; max-width:90%; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.03); font-size:0.8rem; color:rgba(255,255,255,0.7);",
+        "error" => "align-self:flex-start; max-width:90%; padding:8px 12px; border-radius:8px; background:rgba(239,68,68,0.12); font-size:0.82rem; color:#fca5a5;",
+        _ => "align-self:flex-start; max-width:90%; padding:10px 14px; border-radius:12px 12px 12px 4px; background:rgba(255,255,255,0.05); font-size:0.85rem; line-height:1.5;",
+    };
+}

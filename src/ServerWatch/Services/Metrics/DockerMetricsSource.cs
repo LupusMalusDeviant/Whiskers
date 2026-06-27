@@ -8,7 +8,7 @@ namespace ServerWatch.Services.Metrics;
 /// API, host metrics via SSH /proc-exec). This is the default and the fallback — behaviour is
 /// unchanged from before the <see cref="IMetricsSource"/> seam was introduced.
 /// </summary>
-public class DockerMetricsSource
+public class DockerMetricsSource : IDockerMetricsSource
 {
     private readonly IDockerService _docker;
 

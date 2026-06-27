@@ -5,15 +5,15 @@
 @inject IHealthStore HealthStore
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject ITerminalSessionManager SessionManager
-@inject MetricsQueryService MetricsQuery
+@inject IMetricsQueryService MetricsQuery
 @inject IHostCommandExecutor HostCommandExecutor
 @inject ServerWatch.Services.Database.IDatabaseService DatabaseService
-@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
-@inject ServerWatch.Services.Cve.CveFindingsStore CveStore
+@inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
+@inject ServerWatch.Services.Cve.ICveFindingsStore CveStore
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 @using ServerWatch.Models.Cve
 @implements IAsyncDisposable
@@ -699,7 +699,7 @@ else
                         </MudGrid>
                     }
 
-                    @* Tabelle ausgewählt — Quick-Buttons + Schema *@
+                    @* Table selected — quick buttons + schema *@
                     @if (_dbSelectedTable != null)
                     {
                         <MudPaper Class="pa-4 mb-4" Elevation="0">

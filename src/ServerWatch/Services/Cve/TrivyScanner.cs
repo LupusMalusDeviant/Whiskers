@@ -13,7 +13,7 @@ namespace ServerWatch.Services.Cve;
 /// Trivy vulnerability DB between scans (only the first scan per server pays the
 /// full DB download cost).
 /// </summary>
-public class TrivyScanner
+public class TrivyScanner : ITrivyScanner
 {
     private readonly IHostCommandExecutor _executor;
     private readonly IOptionsMonitor<CveMonitorSettings> _settings;

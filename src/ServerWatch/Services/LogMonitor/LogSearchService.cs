@@ -11,7 +11,7 @@ public class LogSearchResult
     public int LineNumber { get; set; }
 }
 
-public class LogSearchService
+public class LogSearchService : ILogSearchService
 {
     private readonly IDockerService _docker;
     private readonly ILogger<LogSearchService> _logger;
