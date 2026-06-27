@@ -14,6 +14,7 @@ Each channel has its own interface (distinct strategies) so the composite can en
 | `IMatrixNotificationService.cs` / `MatrixNotificationService.cs` | Matrix channel. |
 | `IContainerNotificationPrefsService.cs` / `ContainerNotificationPrefsService.cs` | Per-container notification preferences (which events should notify). |
 | `NotificationThrottler.cs` | Suppresses duplicate/flapping notifications within a time window. |
+| `InAppNotificationStore.cs` | `IInAppNotificationStore` — in-memory feed of recent events for the in-app bell (no external channel needed); fed by the composite. |
 
 ## Related
 

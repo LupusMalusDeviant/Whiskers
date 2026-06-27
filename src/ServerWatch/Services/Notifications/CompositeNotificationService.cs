@@ -13,23 +13,29 @@ public class CompositeNotificationService : INotificationService
 {
     private readonly IMattermostNotificationService _mattermost;
     private readonly IMatrixNotificationService _matrix;
+    private readonly IInAppNotificationStore _inApp;
     private readonly IServiceProvider _sp;
     private readonly ILogger<CompositeNotificationService> _logger;
 
     public CompositeNotificationService(
         IMattermostNotificationService mattermost,
         IMatrixNotificationService matrix,
+        IInAppNotificationStore inApp,
         IServiceProvider sp,
         ILogger<CompositeNotificationService> logger)
     {
         _mattermost = mattermost;
         _matrix = matrix;
+        _inApp = inApp;
         _sp = sp;
         _logger = logger;
     }
 
     public async Task SendAsync(NotificationEvent evt)
     {
+        // Always record in the in-app feed (no external channel needed).
+        try { _inApp.Add(evt); } catch (Exception ex) { _logger.LogWarning(ex, "In-app notification failed"); }
+
         var tasks = new List<Task>();
 
         tasks.Add(SafeSend("Mattermost", () => _mattermost.SendAsync(evt)));

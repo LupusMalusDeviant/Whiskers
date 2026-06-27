@@ -68,6 +68,7 @@ builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMattermostNoti
 builder.Services.AddHttpClient<MatrixNotificationService>();
 builder.Services.AddSingleton<MatrixNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMatrixNotificationService>(sp => sp.GetRequiredService<MatrixNotificationService>());
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.IInAppNotificationStore, ServerWatch.Services.Notifications.InAppNotificationStore>();
 builder.Services.AddSingleton<INotificationService, CompositeNotificationService>();
 
 // Terminal

@@ -11,6 +11,7 @@
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
                        Edge="Edge.Start" OnClick="ToggleDrawer" Class="d-md-none" />
         <MudSpacer />
+        <ServerWatch.Components.Shared.NotificationBell />
         <MudMenu Icon="@Icons.Material.Filled.Palette" Color="Color.Inherit" title="Theme"
                  AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
             @foreach (var th in AppThemes.All)
