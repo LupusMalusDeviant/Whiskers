@@ -20,7 +20,8 @@ public enum AgentPrincipalKind { WebUser, McpKey }
 public enum AgentOrigin
 {
     WebUi,        // human in the ServerWatch UI
-    McpTool       // external agent calls the instruct_agent tool via /mcp
+    McpTool,      // external agent calls the instruct_agent tool via /mcp
+    Trigger       // autonomous run started by an AI trigger (no human)
 }
 
 /// <summary>Full execution context of a tool call — flows into the gate and the audit.</summary>

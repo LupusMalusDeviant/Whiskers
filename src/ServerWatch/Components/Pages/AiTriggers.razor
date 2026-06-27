@@ -1,0 +1,158 @@
+@page "/ai-triggers"
+@using Microsoft.AspNetCore.Authorization
+@using ServerWatch.Models
+@using ServerWatch.Services.Agent.Guardrails
+@using ServerWatch.Services.Agent.Triggers
+@using ServerWatch.Services.Auth
+@attribute [Authorize]
+@inject IAiTriggerStore Store
+@inject IGuardrailStore GuardrailStore
+@inject ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+
+<PageTitle>AI-Trigger</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+    <div style="display:flex; align-items:center; gap:12px;" class="mb-1">
+        <MudIcon Icon="@Icons.Material.Filled.Bolt" Color="Color.Primary" />
+        <MudText Typo="Typo.h5">AI-Trigger</MudText>
+    </div>
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
+        Ereignisse, die den Agenten <b>autonom</b> auslösen. Pro Trigger: Ereignistyp(en), optionaler Namensfilter,
+        ein eigener Auftrag/Workflow und das Guardrail-Preset, das den Lauf begrenzt. Bestätigungen werden im
+        autonomen Lauf bis zum Preset-Level automatisch freigegeben. Nur Admins.
+    </MudText>
+
+    @if (!_isAdmin)
+    {
+        <MudAlert Severity="Severity.Warning">Nur Admins können AI-Trigger verwalten.</MudAlert>
+    }
+    else
+    {
+        <div style="display:flex; gap:8px;" class="mb-4">
+            <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Outlined" OnClick="AddTrigger">Neuer Trigger</MudButton>
+            <MudSpacer />
+            <MudButton StartIcon="@Icons.Material.Filled.Save" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAll">Speichern</MudButton>
+        </div>
+
+        @if (_triggers.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">Noch keine Trigger. „Neuer Trigger" anlegen.</MudAlert>
+        }
+
+        @foreach (var t in _triggers)
+        {
+            <MudPaper Class="pa-4 mb-3" Style="@(t.Enabled ? "" : "opacity:0.6;")">
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;" class="mb-2">
+                    <MudSwitch @bind-Value="t.Enabled" Color="Color.Success" />
+                    <MudTextField @bind-Value="t.Name" Label="Name" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                  Style="min-width:220px;" />
+                    <MudSpacer />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => _triggers.Remove(t))" title="Trigger löschen" />
+                </div>
+
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="string" Label="Ereignisse" MultiSelection="true"
+                                   SelectedValues="t.EventTypes" SelectedValuesChanged="@(v => t.EventTypes = v.ToList())"
+                                   Margin="Margin.Dense" Variant="Variant.Outlined"
+                                   MultiSelectionTextFunc="@(s => $"{s.Count} Ereignis(se)")">
+                            @foreach (var e in AiTriggerEvents.All)
+                            {
+                                <MudSelectItem T="string" Value="@e.Type">@e.Label</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="t.NameFilter" Label="Namensfilter (Glob, optional)"
+                                      Placeholder="z.B. prod-*  oder  nginx" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="string" @bind-Value="t.GuardrailPreset" Label="Guardrail-Preset"
+                                   Margin="Margin.Dense" Variant="Variant.Outlined">
+                            @foreach (var p in _presets)
+                            {
+                                <MudSelectItem T="string" Value="@p">@p</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudNumericField @bind-Value="t.CooldownSeconds" Label="Cooldown (Sekunden, pro Container)"
+                                         Min="0" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="t.Prompt" Label="Auftrag / Workflow für den Agenten"
+                                      Lines="4" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                      Placeholder="z.B. „Prüfe die Logs des betroffenen Containers, identifiziere die Ursache und starte ihn neu, falls es ein transienter Fehler ist. Fasse die Ursache zusammen." />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+    }
+</MudContainer>
+
+@code {
+    private bool _isAdmin;
+    private List<AiTrigger> _triggers = new();
+    private List<string> _presets = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+        if (!_isAdmin) return;
+
+        _triggers = Store.Triggers.Select(Clone).ToList();
+        _presets = GuardrailStore.Config.Presets.Select(p => p.Name).ToList();
+        if (_presets.Count == 0) _presets.Add("Standard");
+    }
+
+    private void AddTrigger()
+    {
+        _triggers.Add(new AiTrigger
+        {
+            Name = $"Trigger {_triggers.Count + 1}",
+            GuardrailPreset = _presets.FirstOrDefault() ?? "Standard",
+        });
+    }
+
+    private async Task SaveAll()
+    {
+        foreach (var t in _triggers)
+            if (string.IsNullOrWhiteSpace(t.Name)) t.Name = "Trigger";
+        try
+        {
+            await Store.SaveAsync(_triggers, await BuildPrincipalAsync());
+            Snackbar.Add($"{_triggers.Count} Trigger gespeichert.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
+        var role = await CurrentUser.GetRoleAsync();
+        var level = role switch
+        {
+            AppRole.Admin => McpPermissionLevels.Admin,
+            AppRole.Operator => McpPermissionLevels.Write,
+            _ => McpPermissionLevels.Read,
+        };
+        return new Models.Agent.AgentPrincipal(Models.Agent.AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
+    }
+
+    private static AiTrigger Clone(AiTrigger s) => new()
+    {
+        Id = s.Id,
+        Name = s.Name,
+        Enabled = s.Enabled,
+        EventTypes = new(s.EventTypes),
+        NameFilter = s.NameFilter,
+        Prompt = s.Prompt,
+        GuardrailPreset = s.GuardrailPreset,
+        CooldownSeconds = s.CooldownSeconds,
+    };
+}

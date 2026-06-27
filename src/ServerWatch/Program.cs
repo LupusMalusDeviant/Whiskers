@@ -196,6 +196,13 @@ builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentTranscriptStore,
 builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentSettingsStore,
     ServerWatch.Services.Agent.AgentSettingsStore>();
 
+// AI triggers (autonomous agent runs on events)
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Triggers.AiTriggerStore>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Triggers.IAiTriggerStore>(
+    sp => sp.GetRequiredService<ServerWatch.Services.Agent.Triggers.AiTriggerStore>());
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Triggers.IAiTriggerDispatcher,
+    ServerWatch.Services.Agent.Triggers.AiTriggerDispatcher>();
+
 // Audit log
 builder.Services.AddSingleton<ServerWatch.Services.AuditLog.IAuditLogService, ServerWatch.Services.AuditLog.AuditLogService>();
 
@@ -570,6 +577,10 @@ await mcpPermissionService.InitializeAsync();
 // Load guardrails (creates the restrictive SafeDefault on first run)
 var guardrailStore = app.Services.GetRequiredService<ServerWatch.Services.Agent.Guardrails.GuardrailStore>();
 await guardrailStore.InitializeAsync();
+
+// Load AI triggers
+var aiTriggerStore = app.Services.GetRequiredService<ServerWatch.Services.Agent.Triggers.AiTriggerStore>();
+await aiTriggerStore.InitializeAsync();
 
 // Ensure SQLite database and tables are created (including new tables on existing DBs)
 using (var scope = app.Services.CreateScope())

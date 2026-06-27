@@ -1,24 +1,30 @@
+using Microsoft.Extensions.DependencyInjection;
 using ServerWatch.Models;
+using ServerWatch.Services.Agent.Triggers;
 
 namespace ServerWatch.Services.Notifications;
 
 /// <summary>
 /// Delegates notifications to all configured providers (Mattermost, Matrix, etc.).
-/// Each provider handles its own enabled/disabled check independently.
+/// Each provider handles its own enabled/disabled check independently. Also feeds every
+/// event to the AI-trigger dispatcher (resolved lazily to avoid a DI cycle).
 /// </summary>
 public class CompositeNotificationService : INotificationService
 {
     private readonly IMattermostNotificationService _mattermost;
     private readonly IMatrixNotificationService _matrix;
+    private readonly IServiceProvider _sp;
     private readonly ILogger<CompositeNotificationService> _logger;
 
     public CompositeNotificationService(
         IMattermostNotificationService mattermost,
         IMatrixNotificationService matrix,
+        IServiceProvider sp,
         ILogger<CompositeNotificationService> logger)
     {
         _mattermost = mattermost;
         _matrix = matrix;
+        _sp = sp;
         _logger = logger;
     }
 
@@ -28,6 +34,7 @@ public class CompositeNotificationService : INotificationService
 
         tasks.Add(SafeSend("Mattermost", () => _mattermost.SendAsync(evt)));
         tasks.Add(SafeSend("Matrix", () => _matrix.SendAsync(evt)));
+        tasks.Add(SafeSend("AI-Trigger", () => _sp.GetRequiredService<IAiTriggerDispatcher>().OnEventAsync(evt)));
 
         await Task.WhenAll(tasks);
     }
