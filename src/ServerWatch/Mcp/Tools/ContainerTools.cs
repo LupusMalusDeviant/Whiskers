@@ -6,6 +6,7 @@ using ServerWatch.Services.Server;
 using ServerWatch.Models;
 using ServerWatch.Services.Mcp;
 using ServerWatch.Services.AuditLog;
+using ServerWatch.Utils;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -388,7 +389,7 @@ public class ContainerTools
         {
             var sid = serverId ?? "local";
             var check = await executor.ExecuteAsync(sid,
-                $"test -f /opt/deployments/{container.ComposeProject}/docker-compose.yml && echo /opt/deployments/{container.ComposeProject}",
+                $"test -f /opt/deployments/{ShellUtils.Quote(container.ComposeProject)}/docker-compose.yml && echo /opt/deployments/{ShellUtils.Quote(container.ComposeProject)}",
                 TimeSpan.FromSeconds(5));
             if (check.Success && !string.IsNullOrWhiteSpace(check.Output))
                 workingDir = check.Output.Trim();
@@ -401,7 +402,7 @@ public class ContainerTools
 
         // Load existing .env
         var existing = new Dictionary<string, string>();
-        var readResult = await executor.ExecuteAsync(sid2, $"cat {workingDir}/.env 2>/dev/null", TimeSpan.FromSeconds(5));
+        var readResult = await executor.ExecuteAsync(sid2, $"cat {ShellUtils.Quote(workingDir + "/.env")} 2>/dev/null", TimeSpan.FromSeconds(5));
         if (readResult.Success && !string.IsNullOrWhiteSpace(readResult.Output))
         {
             foreach (var line in readResult.Output.Split('\n'))
@@ -432,7 +433,7 @@ public class ContainerTools
         var content = string.Join('\n', existing.Select(e => $"{e.Key}={e.Value}")) + "\n";
         var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(content));
         var writeResult = await executor.ExecuteAsync(sid2,
-            $"echo '{b64}' | base64 -d > {workingDir}/.env",
+            $"echo '{b64}' | base64 -d > {ShellUtils.Quote(workingDir + "/.env")}",
             TimeSpan.FromSeconds(10));
 
         if (!writeResult.Success)
@@ -440,7 +441,7 @@ public class ContainerTools
 
         // Restart via docker compose
         var restartResult = await executor.ExecuteAsync(sid2,
-            $"cd {workingDir} && docker compose up -d 2>&1",
+            $"cd {ShellUtils.Quote(workingDir)} && docker compose up -d 2>&1",
             TimeSpan.FromMinutes(2));
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);

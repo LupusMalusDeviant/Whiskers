@@ -293,6 +293,11 @@
     {
         if (!Require(AppRole.Operator)) return;
         if (_selectedTemplate == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
+        if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
+        {
+            Snackbar.Add("Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.", Severity.Error);
+            return;
+        }
 
         // Check required vars
         foreach (var req in _selectedTemplate.RequiredEnvVars)

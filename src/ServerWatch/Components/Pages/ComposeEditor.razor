@@ -238,6 +238,11 @@
     {
         if (!Require(AppRole.Operator)) return;
         if (string.IsNullOrWhiteSpace(_projectName)) return;
+        if (_projectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_projectName, @"^[a-zA-Z0-9._-]+$"))
+        {
+            Snackbar.Add("Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.", Severity.Error);
+            return;
+        }
         _deploying = true;
         try
         {

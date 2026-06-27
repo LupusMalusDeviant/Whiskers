@@ -93,7 +93,9 @@ public class ServerTools
 
         var result = await executor.ExecuteAsync(serverId, command, TimeSpan.FromSeconds(timeoutSeconds));
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
-        await auditLog.LogAsync(actor, actorType, "command.execute", "command", command, command, details: $"Exit code: {result.ExitCode}", serverId: serverId, success: result.ExitCode == 0);
+        // Redact secrets before persisting the command to the audit log (the executed command is unchanged).
+        var redactedCommand = SecretRedactor.Redact(command);
+        await auditLog.LogAsync(actor, actorType, "command.execute", "command", redactedCommand, redactedCommand, details: $"Exit code: {result.ExitCode}", serverId: serverId, success: result.ExitCode == 0);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Exit code: {result.ExitCode}");
         if (!string.IsNullOrEmpty(result.Output))

@@ -4,6 +4,7 @@
 @inject IJSRuntime JS
 @inject ITerminalSessionManager SessionManager
 @inject NavigationManager Nav
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 @implements IAsyncDisposable
 
 <PageTitle>Terminal - ServerWatch</PageTitle>
@@ -44,6 +45,13 @@
         if (string.IsNullOrEmpty(ContainerId))
         {
             _error = "Keine Container-ID angegeben.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (await CurrentUser.GetRoleAsync() < AppRole.Operator)
+        {
+            _error = "Keine Berechtigung — Operator erforderlich.";
             await InvokeAsync(StateHasChanged);
             return;
         }

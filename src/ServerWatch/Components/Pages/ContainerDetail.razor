@@ -1010,6 +1010,8 @@ else
 
     private AppRole _role = AppRole.Viewer;
 
+    private static string Quote(string s) => ServerWatch.Utils.ShellUtils.Quote(s);
+
     private bool Require(AppRole required)
     {
         if (_role < required)
@@ -1063,6 +1065,7 @@ else
     private async Task InitTerminal()
     {
         if (!ServerConfigService.SupportsTerminal(_resolvedServerId)) return;
+        if (_role < AppRole.Operator) { _termError = "Keine Berechtigung — Operator erforderlich."; return; }
         try
         {
             _dotNetRef = DotNetObjectReference.Create(this);
@@ -1271,7 +1274,7 @@ else
                 // Fallback: check standard deployment path
                 var sid = _resolvedServerId ?? "local";
                 var checkResult = await HostCommandExecutor.ExecuteAsync(sid,
-                    $"test -f /opt/deployments/{project}/docker-compose.yml && echo /opt/deployments/{project}",
+                    $"test -f /opt/deployments/{Quote(project)}/docker-compose.yml && echo /opt/deployments/{Quote(project)}",
                     TimeSpan.FromSeconds(5));
                 if (checkResult.Success && !string.IsNullOrWhiteSpace(checkResult.Output))
                     _composeWorkingDir = checkResult.Output.Trim();
@@ -1282,7 +1285,7 @@ else
             {
                 var sid = _resolvedServerId ?? "local";
                 var result = await HostCommandExecutor.ExecuteAsync(sid,
-                    $"cat {_composeWorkingDir}/.env 2>/dev/null",
+                    $"cat {Quote(_composeWorkingDir + "/.env")} 2>/dev/null",
                     TimeSpan.FromSeconds(5));
 
                 _dotEnvEntries.Clear();
@@ -1355,7 +1358,7 @@ else
             // Write .env file via base64 to avoid escaping issues
             var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
             var writeResult = await HostCommandExecutor.ExecuteAsync(sid,
-                $"echo '{b64}' | base64 -d > {_composeWorkingDir}/.env",
+                $"echo '{b64}' | base64 -d > {Quote(_composeWorkingDir + "/.env")}",
                 TimeSpan.FromSeconds(10));
 
             if (!writeResult.Success)
@@ -1366,7 +1369,7 @@ else
 
             // Restart via docker compose
             var restartResult = await HostCommandExecutor.ExecuteAsync(sid,
-                $"cd {_composeWorkingDir} && docker compose up -d 2>&1",
+                $"cd {Quote(_composeWorkingDir)} && docker compose up -d 2>&1",
                 TimeSpan.FromMinutes(2));
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
@@ -1662,8 +1665,8 @@ else
             var db = _dbSelectedDatabase ?? _dbCreds.Database;
             var cmd = _container.DatabaseType switch
             {
-                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | psql -U {_dbCreds.User} -d {db} 2>&1",
-                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | mysql -u {_dbCreds.User} -p{_dbCreds.Password} {db} 2>&1",
+                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} 2>&1",
+                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
                 _ => "echo 'Nicht unterstützt'"
             };
             var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
@@ -1700,10 +1703,10 @@ else
             var ext = System.IO.Path.GetExtension(_seedFileName)?.ToLower();
             var cmd = (_container.DatabaseType, ext) switch
             {
-                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | psql -U {_dbCreds.User} -d {db} 2>&1",
-                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && psql -U {_dbCreds.User} -d {db} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV-Import: Bitte Tabellennamen im Query-Editor angeben'",
-                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | mysql -u {_dbCreds.User} -p{_dbCreds.Password} {db} 2>&1",
-                (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {db} --file /tmp/seed.json 2>&1",
+                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} 2>&1",
+                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV-Import: Bitte Tabellennamen im Query-Editor angeben'",
+                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
+                (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... Dateiformat {ext} wird für {_container.DatabaseType} unterstützt via SQL-Pipe'"
             };
             var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));

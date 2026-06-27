@@ -4,6 +4,7 @@
 @inject ServerWatch.Services.LogMonitor.LogMonitorService MonitorService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
 <PageTitle>Log-Suche - ServerWatch</PageTitle>
 
@@ -150,9 +151,21 @@ else
     private string? _ruleContainer;
     private string _ruleSeverity = "error";
     private int _ruleCooldown = 10;
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         _containers = (await DockerService.ListAllContainersAsync(all: false)).ToList();
         _rules = await MonitorService.GetRulesAsync();
     }
@@ -180,6 +193,7 @@ else
 
     private async Task CreateRule()
     {
+        if (!Require(AppRole.Operator)) return;
         try
         {
             await MonitorService.CreateRuleAsync(new ServerWatch.Models.LogAlertRuleEntity
@@ -200,12 +214,14 @@ else
 
     private async Task ToggleRule(ServerWatch.Models.LogAlertRuleEntity rule, bool enabled)
     {
+        if (!Require(AppRole.Operator)) return;
         await MonitorService.ToggleRuleAsync(rule.RuleId, enabled);
         _rules = await MonitorService.GetRulesAsync();
     }
 
     private async Task DeleteRule(ServerWatch.Models.LogAlertRuleEntity rule)
     {
+        if (!Require(AppRole.Operator)) return;
         await MonitorService.DeleteRuleAsync(rule.RuleId);
         Snackbar.Add("Regel gelöscht.", Severity.Success);
         _rules = await MonitorService.GetRulesAsync();

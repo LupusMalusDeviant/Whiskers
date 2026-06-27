@@ -3,6 +3,7 @@
 @inject IJSRuntime JS
 @inject ITerminalSessionManager SessionManager
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 @implements IAsyncDisposable
 
 <PageTitle>Server-Terminal - ServerWatch</PageTitle>
@@ -42,6 +43,13 @@
     {
         if (!firstRender || _initialized) return;
         _initialized = true;
+
+        if (await CurrentUser.GetRoleAsync() < AppRole.Admin)
+        {
+            _error = "Keine Berechtigung — Admin erforderlich.";
+            StateHasChanged();
+            return;
+        }
 
         try
         {

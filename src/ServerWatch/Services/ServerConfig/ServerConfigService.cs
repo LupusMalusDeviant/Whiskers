@@ -139,6 +139,11 @@ public class ServerConfigService
 
     public async Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData)
     {
+        // Strip any directory components to prevent path traversal (e.g. "../../etc/passwd").
+        fileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("Ungültiger Dateiname");
+
         var keyDir = Path.Combine(SshKeysBasePath, serverId);
         Directory.CreateDirectory(keyDir);
 

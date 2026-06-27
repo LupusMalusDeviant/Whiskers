@@ -3,6 +3,7 @@
 @inject ServerWatch.Services.Coolify.ICoolifyService CoolifyService
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfig
 @inject ISnackbar Snackbar
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 @implements IDisposable
 
 <PageTitle>Coolify - ServerWatch</PageTitle>
@@ -217,9 +218,21 @@ else
     private bool _loading = true;
     private bool _actionInProgress;
     private Timer? _refreshTimer;
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         if (!CoolifyConfig.IsEnabled) { _loading = false; return; }
 
         await LoadAll();
@@ -260,6 +273,7 @@ else
 
     private async Task DeployApp(ServerWatch.Models.Coolify.CoolifyApplication app)
     {
+        if (!Require(AppRole.Operator)) return;
         _actionInProgress = true;
         try
         {
@@ -276,6 +290,7 @@ else
 
     private async Task StartApp(ServerWatch.Models.Coolify.CoolifyApplication app)
     {
+        if (!Require(AppRole.Operator)) return;
         _actionInProgress = true;
         try
         {
@@ -292,6 +307,7 @@ else
 
     private async Task StopApp(ServerWatch.Models.Coolify.CoolifyApplication app)
     {
+        if (!Require(AppRole.Operator)) return;
         _actionInProgress = true;
         try
         {
@@ -308,6 +324,7 @@ else
 
     private async Task RestartApp(ServerWatch.Models.Coolify.CoolifyApplication app)
     {
+        if (!Require(AppRole.Operator)) return;
         _actionInProgress = true;
         try
         {
@@ -324,6 +341,7 @@ else
 
     private async Task StartDb(ServerWatch.Models.Coolify.CoolifyDatabase db)
     {
+        if (!Require(AppRole.Operator)) return;
         _actionInProgress = true;
         try
         {
@@ -340,6 +358,7 @@ else
 
     private async Task StopDb(ServerWatch.Models.Coolify.CoolifyDatabase db)
     {
+        if (!Require(AppRole.Operator)) return;
         _actionInProgress = true;
         try
         {

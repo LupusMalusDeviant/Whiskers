@@ -124,6 +124,10 @@ public class MetricsCollectorService : BackgroundService
         await db.ServerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
         await db.AlertHistory.Where(a => a.Timestamp < cutoff).ExecuteDeleteAsync(ct);
 
+        // Audit log has a longer retention (90 days). Timestamp is indexed.
+        var cutoff90d = DateTime.UtcNow.AddDays(-90);
+        await db.AuditLog.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
+
         _logger.LogDebug("Collected metrics for {ContainerCount} containers; pruned data before {Cutoff}",
             metrics.Count, cutoff);
     }

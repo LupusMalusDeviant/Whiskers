@@ -1,7 +1,9 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using ServerWatch.Models;
 using ServerWatch.Services.Persistence;
 using ServerWatch.Services.Server;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Backup;
 
@@ -11,6 +13,17 @@ public class VolumeBackupService : IVolumeBackupService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<VolumeBackupService> _logger;
     private const string BackupDir = "/app/data/backups";
+
+    // Docker volume/container names and backup file names: must start alphanumeric, then
+    // alphanumerics plus _ . - only. Rejects anything that could break out of the shell command.
+    private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
+
+    private static string ValidateName(string value, string what)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !SafeName.IsMatch(value))
+            throw new ArgumentException($"Invalid {what}: '{value}'");
+        return value;
+    }
 
     public VolumeBackupService(
         IHostCommandExecutor executor,
@@ -25,15 +38,16 @@ public class VolumeBackupService : IVolumeBackupService
     public async Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null)
     {
         var sid = serverId ?? "local";
+        ValidateName(volumeName, "volume name");
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{volumeName}_{timestamp}.tar.gz";
 
         // Ensure backup directory exists
-        await _executor.ExecuteAsync(sid, $"mkdir -p {BackupDir}", TimeSpan.FromSeconds(5));
+        await _executor.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(BackupDir)}", TimeSpan.FromSeconds(5));
 
         // Create backup using a temporary alpine container
         var result = await _executor.ExecuteAsync(sid,
-            $"docker run --rm -v {volumeName}:/data -v {BackupDir}:/backup alpine tar czf /backup/{fileName} -C /data . 2>&1",
+            $"docker run --rm -v {ShellUtils.Quote(volumeName + ":/data")} -v {ShellUtils.Quote(BackupDir + ":/backup")} alpine tar czf {ShellUtils.Quote("/backup/" + fileName)} -C /data . 2>&1",
             TimeSpan.FromMinutes(10));
 
         if (!result.Success)
@@ -41,7 +55,7 @@ public class VolumeBackupService : IVolumeBackupService
 
         // Get file size
         var sizeResult = await _executor.ExecuteAsync(sid,
-            $"stat -c %s {BackupDir}/{fileName}",
+            $"stat -c %s {ShellUtils.Quote(BackupDir + "/" + fileName)}",
             TimeSpan.FromSeconds(5));
 
         long sizeBytes = 0;
@@ -76,9 +90,14 @@ public class VolumeBackupService : IVolumeBackupService
             ?? throw new Exception($"Backup '{backupId}' not found.");
 
         var volume = targetVolume ?? backup.VolumeName;
+        ValidateName(volume, "volume name");
+        ValidateName(backup.FileName, "backup file name");
 
+        // The inner `sh -c` script is itself single-quoted for the host shell; the file name is validated
+        // to a safe charset above, so embedding it inside the inner script is safe.
+        var innerScript = $"rm -rf /data/* && tar xzf {ShellUtils.Quote("/backup/" + backup.FileName)} -C /data";
         var result = await _executor.ExecuteAsync(backup.ServerId,
-            $"docker run --rm -v {volume}:/data -v {BackupDir}:/backup alpine sh -c \"rm -rf /data/* && tar xzf /backup/{backup.FileName} -C /data\" 2>&1",
+            $"docker run --rm -v {ShellUtils.Quote(volume + ":/data")} -v {ShellUtils.Quote(BackupDir + ":/backup")} alpine sh -c {ShellUtils.Quote(innerScript)} 2>&1",
             TimeSpan.FromMinutes(10));
 
         if (!result.Success)
@@ -110,8 +129,9 @@ public class VolumeBackupService : IVolumeBackupService
             ?? throw new Exception($"Backup '{backupId}' not found.");
 
         // Delete file
+        ValidateName(backup.FileName, "backup file name");
         await _executor.ExecuteAsync(backup.ServerId,
-            $"rm -f {BackupDir}/{backup.FileName}",
+            $"rm -f {ShellUtils.Quote(BackupDir + "/" + backup.FileName)}",
             TimeSpan.FromSeconds(5));
 
         // Delete metadata
