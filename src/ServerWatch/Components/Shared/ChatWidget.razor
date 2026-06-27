@@ -1,0 +1,216 @@
+@using ServerWatch.Models
+@using ServerWatch.Models.Agent
+@using ServerWatch.Services.Metrics
+@using ServerWatch.Services.Docker
+@inject IMetricsQueryService MetricsQuery
+@inject IDockerService Docker
+
+@if (Spec is null)
+{
+    return;
+}
+else if (Spec.Kind == ChatWidgetKind.Chart)
+{
+    <MudPaper Class="pa-3 my-2 sw-chat-widget" Elevation="0" Outlined="true">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-1" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Color="Color.Primary" />
+            <MudText Typo="Typo.subtitle2">@Title</MudText>
+            <MudSpacer />
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@_subtitle</MudText>
+        </MudStack>
+        @if (_loading)
+        {
+            <MudSkeleton Height="200px" Width="100%" />
+        }
+        else if (_history.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="py-4" Align="Align.Center">
+                Keine Metrikdaten für die letzte Stunde.
+            </MudText>
+        }
+        else
+        {
+            <ApexCharts.ApexChart TItem="MetricPoint" Height="200" Options="@_options">
+                <ApexCharts.ApexPointSeries TItem="MetricPoint"
+                                            Items="_history"
+                                            SeriesType="ApexCharts.SeriesType.Area"
+                                            XValue="@(p => p.Timestamp)"
+                                            YValue="@(p => (decimal)p.Value)"
+                                            Name="@_seriesName" />
+            </ApexCharts.ApexChart>
+        }
+    </MudPaper>
+}
+else
+{
+    <MudPaper Class="pa-3 my-2 sw-chat-widget" Elevation="0" Outlined="true">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@(Spec.Target == ChatWidgetTarget.Server ? Icons.Material.Filled.Dns : Icons.Material.Filled.Inventory2)"
+                     Color="@_statusColor" />
+            <div style="flex:1; min-width:0;">
+                <MudText Typo="Typo.subtitle2" Style="overflow:hidden; text-overflow:ellipsis;">@_statusName</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@_statusLine</MudText>
+            </div>
+            <MudChip T="string" Size="Size.Small" Color="@_statusColor" Variant="Variant.Text">@_statusLabel</MudChip>
+        </MudStack>
+        @if (_latestCpu is not null || _latestMem is not null)
+        {
+            <MudStack Row="true" Spacing="4" Class="mt-2">
+                @if (_latestCpu is not null)
+                {
+                    <div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">CPU</MudText>
+                        <MudText Typo="Typo.body2"><b>@_latestCpu.Value.ToString("F0")%</b></MudText>
+                    </div>
+                }
+                @if (_latestMem is not null)
+                {
+                    <div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">RAM</MudText>
+                        <MudText Typo="Typo.body2"><b>@_latestMem.Value.ToString("F0")%</b></MudText>
+                    </div>
+                }
+            </MudStack>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public ChatWidgetSpec? Spec { get; set; }
+
+    private static readonly TimeSpan Window = TimeSpan.FromHours(1);
+
+    private bool _loading = true;
+    private List<MetricPoint> _history = new();
+    private ApexCharts.ApexChartOptions<MetricPoint> _options = CreateOptions("#2196F3");
+    private string _seriesName = "CPU %";
+    private string _subtitle = "letzte Stunde";
+
+    // Status-card state
+    private string _statusName = "";
+    private string _statusLine = "";
+    private string _statusLabel = "—";
+    private Color _statusColor = Color.Default;
+    private double? _latestCpu;
+    private double? _latestMem;
+
+    private string Title => Spec is null ? "" : Spec.Metric == ChatWidgetMetric.Memory
+        ? $"Speicher · {ShortId}"
+        : $"CPU · {ShortId}";
+
+    private string ShortId => Spec is null ? "" : Spec.Id.Length > 12 ? Spec.Id[..12] : Spec.Id;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Spec is null) return;
+        if (Spec.Kind == ChatWidgetKind.Chart) await LoadChartAsync();
+        else await LoadStatusAsync();
+    }
+
+    private async Task LoadChartAsync()
+    {
+        _loading = true;
+        try
+        {
+            var isMem = Spec!.Metric == ChatWidgetMetric.Memory;
+            _seriesName = isMem ? "Speicher %" : "CPU %";
+            _options = CreateOptions(isMem ? "#9C27B0" : "#2196F3");
+
+            _history = Spec.Target == ChatWidgetTarget.Server
+                ? (isMem ? await MetricsQuery.GetServerMemoryHistoryAsync(ServerId, Window)
+                         : await MetricsQuery.GetServerCpuHistoryAsync(ServerId, Window))
+                : (isMem ? await MetricsQuery.GetContainerMemoryHistoryAsync(Spec.Id, ServerId, Window)
+                         : await MetricsQuery.GetContainerCpuHistoryAsync(Spec.Id, ServerId, Window));
+        }
+        catch
+        {
+            _history = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadStatusAsync()
+    {
+        try
+        {
+            if (Spec!.Target == ChatWidgetTarget.Container)
+            {
+                var all = await Docker.ListAllContainersAsync(all: true);
+                var c = all.FirstOrDefault(x => x.Id == Spec.Id || x.Id.StartsWith(Spec.Id, StringComparison.OrdinalIgnoreCase));
+                if (c is not null)
+                {
+                    _statusName = c.Name;
+                    _statusLine = c.Image;
+                    (_statusLabel, _statusColor) = StateChip(c.State, c.HealthStatus);
+                    _latestCpu = LastValue(await MetricsQuery.GetContainerCpuHistoryAsync(c.Id, c.ServerId, Window));
+                    _latestMem = LastValue(await MetricsQuery.GetContainerMemoryHistoryAsync(c.Id, c.ServerId, Window));
+                    return;
+                }
+                _statusName = ShortId;
+                _statusLine = "Container nicht gefunden";
+                _statusLabel = "unbekannt";
+            }
+            else
+            {
+                _statusName = Spec.Id;
+                _statusLine = "Server";
+                var cpu = await MetricsQuery.GetServerCpuHistoryAsync(Spec.Id, Window);
+                _latestCpu = LastValue(cpu);
+                _latestMem = LastValue(await MetricsQuery.GetServerMemoryHistoryAsync(Spec.Id, Window));
+                (_statusLabel, _statusColor) = _latestCpu is not null
+                    ? ("erreichbar", Color.Success)
+                    : ("keine Daten", Color.Default);
+            }
+        }
+        catch
+        {
+            _statusLabel = "Fehler";
+            _statusColor = Color.Error;
+        }
+    }
+
+    private string ServerId => string.IsNullOrEmpty(Spec?.Id) ? "local" : (Spec!.Target == ChatWidgetTarget.Server ? Spec.Id : "local");
+
+    private static double? LastValue(List<MetricPoint> pts) => pts.Count == 0 ? null : pts[^1].Value;
+
+    private static (string, Color) StateChip(string state, string health)
+    {
+        if (health == "unhealthy") return ("unhealthy", Color.Error);
+        return state?.ToLowerInvariant() switch
+        {
+            "running" => (health == "healthy" ? "healthy" : "läuft", Color.Success),
+            "exited" or "dead" => ("gestoppt", Color.Error),
+            "restarting" => ("Neustart", Color.Warning),
+            "paused" => ("pausiert", Color.Warning),
+            _ => (string.IsNullOrEmpty(state) ? "—" : state, Color.Default),
+        };
+    }
+
+    private static ApexCharts.ApexChartOptions<MetricPoint> CreateOptions(string color) => new()
+    {
+        Chart = new ApexCharts.Chart
+        {
+            Background = "transparent",
+            Toolbar = new ApexCharts.Toolbar { Show = false },
+            Zoom = new ApexCharts.Zoom { Enabled = false },
+        },
+        Theme = new ApexCharts.Theme { Mode = ApexCharts.Mode.Dark },
+        Colors = new List<string> { color },
+        Stroke = new ApexCharts.Stroke { Curve = ApexCharts.Curve.Smooth, Width = 2 },
+        Fill = new ApexCharts.Fill { Opacity = new List<double> { 0.15 }, Type = new List<ApexCharts.FillType> { ApexCharts.FillType.Solid } },
+        Xaxis = new ApexCharts.XAxis { Type = ApexCharts.XAxisType.Datetime },
+        Yaxis = new List<ApexCharts.YAxis>
+        {
+            new ApexCharts.YAxis
+            {
+                Min = 0,
+                Labels = new ApexCharts.YAxisLabels { Formatter = "function(v) { return v.toFixed(0) + '%' }" },
+            },
+        },
+        Tooltip = new ApexCharts.Tooltip { X = new ApexCharts.TooltipX { Format = "HH:mm:ss" } },
+        Grid = new ApexCharts.Grid { BorderColor = "#333" },
+    };
+}

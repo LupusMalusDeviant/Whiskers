@@ -23,6 +23,14 @@ public sealed class AgentService : IAgentService
         - Wird ein Tool durch Guardrails blockiert, akzeptiere das, erkläre es kurz und suche einen erlaubten Weg.
         - Antworte auf Deutsch, präzise und ohne Fülltext. Fasse am Ende das Ergebnis knapp zusammen.
 
+        RICH-WIDGETS (optional): Du kannst in deine Antwort ein Live-Widget einbetten, indem du genau eines
+        dieser Token schreibst (die Oberfläche rendert es als echte Komponente):
+        - [[chart:container:<containerId>:cpu]] oder :mem — CPU-/RAM-Verlauf eines Containers
+        - [[chart:server:<serverId>:cpu]] oder :mem — CPU-/RAM-Verlauf eines Servers
+        - [[status:container:<containerId>]] / [[status:server:<serverId>]] — Status-Karte
+        Nutze sie nur sparsam, wenn ein Diagramm/Status den Nutzer wirklich weiterbringt, und nur mit echten
+        IDs aus den Tool-Ergebnissen. Kein anderes Token-Format wird gerendert.
+
         Du kannst nie mehr Rechte ausüben als der Benutzer/MCP-Key, der dich ausgelöst hat.
         """;
 

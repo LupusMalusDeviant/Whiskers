@@ -197,6 +197,8 @@ builder.Services.AddSingleton<ServerWatch.Services.Agent.Approvals.IApprovalStor
     ServerWatch.Services.Agent.Approvals.ApprovalStore>();
 builder.Services.AddSingleton<ServerWatch.Services.Agent.Approvals.IApprovalCoordinator,
     ServerWatch.Services.Agent.Approvals.ApprovalCoordinator>();
+builder.Services.AddSingleton<ServerWatch.Services.Agent.Chat.IChatWidgetParser,
+    ServerWatch.Services.Agent.Chat.ChatWidgetParser>();
 builder.Services.AddSingleton<ServerWatch.Services.Agent.IAgentService,
     ServerWatch.Services.Agent.AgentService>();
 builder.Services.AddSingleton<ServerWatch.Services.Agent.IClaudeCodeRuntime,

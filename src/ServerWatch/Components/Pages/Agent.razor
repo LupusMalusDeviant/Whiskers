@@ -9,6 +9,7 @@
 @using ServerWatch.Models.Agent
 @using ServerWatch.Services.Agent
 @using ServerWatch.Services.Agent.Approvals
+@using ServerWatch.Services.Agent.Chat
 @using ServerWatch.Services.Agent.Guardrails
 @using ServerWatch.Services.Agent.Providers
 @using ServerWatch.Services.Auth
@@ -22,6 +23,7 @@
 @inject IAgentProviderFactory ProviderFactory
 @inject IApprovalCoordinator ApprovalCoordinator
 @inject IApprovalStore ApprovalStore
+@inject IChatWidgetParser WidgetParser
 @inject ISnackbar Snackbar
 
 <PageTitle>Agent</PageTitle>
@@ -65,7 +67,24 @@
                             }
                             @if (line.Kind == "assistant")
                             {
-                                <div class="sw-md">@((MarkupString)RenderMarkdown(line.Text))</div>
+                                @if (WidgetParser.HasWidgets(line.Text))
+                                {
+                                    @foreach (var seg in WidgetParser.Parse(line.Text))
+                                    {
+                                        if (seg.IsWidget)
+                                        {
+                                            <ChatWidget Spec="seg.Widget" />
+                                        }
+                                        else if (!string.IsNullOrEmpty(seg.Text))
+                                        {
+                                            <div class="sw-md">@((MarkupString)RenderMarkdown(seg.Text))</div>
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    <div class="sw-md">@((MarkupString)RenderMarkdown(line.Text))</div>
+                                }
                             }
                             else
                             {
