@@ -309,10 +309,19 @@ Beta is feature-rich but not finished. Planned / not-yet-implemented:
 
 **Fleet & deployment**
 - Server groups / tags; richer Compose templates.
+- Lightweight Kubernetes (**k3s**) support — discover and operate k3s clusters alongside Docker hosts.
 
-**Hardening**
-- Finish the zero-SSH-key migration tooling (Tailscale + step-ca + ghostunnel/socket-proxy) and
-  optional short-lived SSH certificates as break-glass.
+**Agent governance** (building on the shipped Agent-History, Freigaben/Human-in-the-Loop and rich
+chat widgets)
+- Extend approvals to **block external/direct MCP calls** too — today the Human-in-the-Loop gate
+  covers the in-process agent; direct `tools/call` requests are recorded but not held for approval.
+- Real per-tool **diffs** in the approval card (show exactly what a write would change).
+- A fuller **rich-widget / MCP-Apps** catalog beyond the curated chart + status card.
+
+**Hardening & resilience**
+- Finish the zero-SSH-key migration tooling (Tailscale + step-ca + ghostunnel/socket-proxy).
+- **Break-glass / disaster recovery**: short-lived SSH certificates issued via step-ca as an
+  auditable emergency-access path when the normal control plane is unavailable.
 
 Have a request? Open an issue.
 
