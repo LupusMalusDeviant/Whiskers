@@ -1,6 +1,9 @@
 @page "/agent"
+@using Markdig
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.Extensions.Options
+@using System.Text
 @using ServerWatch.Configuration
 @using ServerWatch.Models
 @using ServerWatch.Models.Agent
@@ -57,7 +60,14 @@
                             {
                                 <MudIcon Icon="@Icons.Material.Filled.Build" Size="Size.Small" Class="mr-1" />
                             }
-                            <span style="white-space: pre-wrap;">@line.Text</span>
+                            @if (line.Kind == "assistant")
+                            {
+                                <div class="sw-md">@((MarkupString)RenderMarkdown(line.Text))</div>
+                            }
+                            else
+                            {
+                                <span style="white-space: pre-wrap;">@line.Text</span>
+                            }
                         </div>
                     }
                     @if (_pendingConfirm is not null)
@@ -80,12 +90,28 @@
                         </div>
                     }
                 </div>
-                <div style="display:flex; gap:8px; margin-top:8px;">
+                @if (_attachments.Count > 0)
+                {
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+                        @foreach (var att in _attachments)
+                        {
+                            <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.AttachFile"
+                                     OnClose="@(() => _attachments.Remove(att))">
+                                @att.Name (@FormatSize(att.Content.Length))
+                            </MudChip>
+                        }
+                    </div>
+                }
+                <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
+                    <MudFileUpload @ref="_fileUpload" T="IBrowserFile" FilesChanged="OnFileSelected" Class="d-none"
+                                   Accept=".txt,.log,.json,.yml,.yaml,.md,.csv,.conf,.ini,.env,.sh,.cs,.xml,.html,.py,.js,.ts,.sql,Dockerfile" />
+                    <MudIconButton Icon="@Icons.Material.Filled.AttachFile" title="Textdatei anhängen"
+                                   OnClick="OpenFilePicker" Disabled="@_running" />
                     <MudTextField @bind-Value="_input" Placeholder="Auftrag… (Enter sendet)" Variant="Variant.Outlined"
                                   Margin="Margin.Dense" Immediate="true" Disabled="@_running"
                                   OnKeyDown="OnKeyDown" Class="flex-1" />
                     <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Send"
-                               Disabled="@(_running || string.IsNullOrWhiteSpace(_input))">Senden</MudButton>
+                               Disabled="@(_running || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0))">Senden</MudButton>
                 </div>
             </MudPaper>
         </MudItem>
@@ -192,6 +218,20 @@
     private bool _running;
     private bool _isAdmin;
 
+    private sealed record Attachment(string Name, string Content);
+    private readonly List<Attachment> _attachments = new();
+    private MudFileUpload<IBrowserFile> _fileUpload = null!;
+
+    private async Task OpenFilePicker()
+    {
+        if (_fileUpload is not null) await _fileUpload.OpenFilePickerAsync();
+    }
+
+    private static readonly MarkdownPipeline MdPipeline =
+        new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
+    private static string RenderMarkdown(string? text) => Markdown.ToHtml(text ?? "", MdPipeline);
+    private static string FormatSize(int chars) => chars < 1024 ? $"{chars} B" : $"{chars / 1024} KB";
+
     private IAgentSession? _session;
     private AgentToolCall? _pendingConfirm;
     private string _pendingReason = "";
@@ -254,12 +294,47 @@
         if (e.Key == "Enter" && !e.ShiftKey) await Send();
     }
 
+    private async Task OnFileSelected(IBrowserFile? file)
+    {
+        if (file is null) return;
+        const long max = 512 * 1024;
+        if (file.Size > max)
+        {
+            Snackbar.Add($"{file.Name} ist zu groß (max. 512 KB Text).", Severity.Warning);
+            return;
+        }
+        try
+        {
+            using var reader = new StreamReader(file.OpenReadStream(max));
+            var content = await reader.ReadToEndAsync();
+            _attachments.Add(new Attachment(file.Name, content));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Datei konnte nicht gelesen werden: {ex.Message}", Severity.Error);
+        }
+    }
+
     private async Task Send()
     {
-        if (string.IsNullOrWhiteSpace(_input) || _running) return;
-        var message = _input.Trim();
+        if (_running || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0)) return;
+        var typed = _input.Trim();
         _input = "";
-        _lines.Add(new Line("user", message));
+
+        // Build the message: attachment contents (for the agent) + the typed prompt.
+        var full = new StringBuilder();
+        foreach (var a in _attachments)
+            full.Append($"[Angehängte Datei: {a.Name}]\n```\n{a.Content}\n```\n\n");
+        full.Append(typed);
+        var message = full.ToString().Trim();
+
+        // Display line: the typed text + a note of attached files (not the full content).
+        var display = _attachments.Count > 0
+            ? $"{typed}\n📎 {string.Join(", ", _attachments.Select(a => a.Name))}".Trim()
+            : typed;
+        _attachments.Clear();
+
+        _lines.Add(new Line("user", display));
         _running = true;
         StateHasChanged();
 
