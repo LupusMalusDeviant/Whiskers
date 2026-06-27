@@ -70,8 +70,10 @@ public static class McpPermissionLevels
         ["stop_container"] = Write,
         ["restart_container"] = Write,
         ["update_container"] = Write,
-        ["deploy_app"] = Write,
-        ["deploy_compose"] = Write,
+        // Admin (not Write): both accept arbitrary host bind-mounts / images, so a container they create
+        // can mount the host root = de-facto root on the host. Keep them above the write boundary.
+        ["deploy_app"] = Admin,
+        ["deploy_compose"] = Admin,
         ["add_firewall_rule"] = Write,
         ["remove_firewall_rule"] = Write,
         ["update_nginx_config"] = Write,

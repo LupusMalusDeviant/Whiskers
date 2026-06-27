@@ -18,12 +18,13 @@ public class LogTools
         [Description("Search pattern (text or regex)")] string pattern,
         [Description("Use regex matching (default: false)")] bool isRegex = false,
         [Description("Container name to search (optional, omit for all)")] string? containerId = null,
+        [Description("Server ID (optional, defaults to local)")] string? serverId = null,
         [Description("Number of log tail lines to search per container (default: 500)")] int tailLines = 500)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "search_logs");
         if (denied != null) return denied;
 
-        var results = await searchService.SearchAsync(pattern, isRegex, containerId, tailLines: tailLines);
+        var results = await searchService.SearchAsync(pattern, isRegex, containerId, serverId, tailLines);
         if (!results.Any()) return $"No matches found for '{pattern}'.";
 
         var lines = results.Select(r => $"[{r.ContainerName}:{r.LineNumber}] {r.Line}");

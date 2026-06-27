@@ -223,5 +223,9 @@ public class DockerConnectionManager : IDisposable
         foreach (var client in _clients.Values)
             client.Dispose();
         _clients.Clear();
+
+        foreach (var gate in _locks.Values)
+            gate.Dispose();
+        _locks.Clear();
     }
 }

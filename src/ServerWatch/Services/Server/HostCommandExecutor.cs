@@ -13,6 +13,11 @@ public class HostCommandExecutor : IHostCommandExecutor
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
+    // Cap how much we buffer per stream so a runaway command (e.g. `cat` on a huge file) can't OOM
+    // the process. Output beyond this is drained but discarded, with a marker appended.
+    private const int MaxOutputChars = 1024 * 1024; // ~1 MB per stream
+    private const string TruncationMarker = "… (Ausgabe gekürzt)";
+
     // Directory holding SSH connection-multiplexing control sockets. Reusing a master connection
     // across calls avoids a fresh TCP+auth handshake on every command (hundreds of ms each).
     private static readonly string ControlDir =
@@ -141,8 +146,8 @@ public class HostCommandExecutor : IHostCommandExecutor
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(timeout);
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
+            var stdoutTask = ReadCappedAsync(process.StandardOutput, cts.Token);
+            var stderrTask = ReadCappedAsync(process.StandardError, cts.Token);
 
             try
             {
@@ -170,5 +175,40 @@ public class HostCommandExecutor : IHostCommandExecutor
             _logger.LogError(ex, "Failed to start process {FileName}", fileName);
             return new CommandResult { ExitCode = -1, Error = ex.Message };
         }
+    }
+
+    // Reads a stream but buffers at most MaxOutputChars; any further output is read and discarded
+    // (so the child process never blocks on a full pipe) and a marker is appended. Applies to every
+    // caller of RunProcessAsync (local nsenter + SSH), so firewall/nginx/systemd/etc. are all capped.
+    private static async Task<string> ReadCappedAsync(StreamReader reader, CancellationToken ct)
+    {
+        var buffer = new char[8192];
+        var sb = new System.Text.StringBuilder();
+        var truncated = false;
+
+        int read;
+        while ((read = await reader.ReadAsync(buffer, ct)) > 0)
+        {
+            if (!truncated)
+            {
+                var remaining = MaxOutputChars - sb.Length;
+                if (read <= remaining)
+                {
+                    sb.Append(buffer, 0, read);
+                }
+                else
+                {
+                    if (remaining > 0)
+                        sb.Append(buffer, 0, remaining);
+                    truncated = true;
+                }
+            }
+            // Once truncated, keep draining the stream to unblock the writer but store nothing.
+        }
+
+        if (truncated)
+            sb.Append('\n').Append(TruncationMarker);
+
+        return sb.ToString();
     }
 }

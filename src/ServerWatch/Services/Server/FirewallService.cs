@@ -88,10 +88,14 @@ public class FirewallService
         var match = RuleLineRegex.Match(line);
         if (!match.Success) return null;
 
+        // A malformed/overlong rule number must skip this line, not abort the whole list.
+        if (!int.TryParse(match.Groups[1].Value, out var ruleNumber))
+            return null;
+
         var rule = new FirewallRule
         {
             Raw = line,
-            Number = int.Parse(match.Groups[1].Value),
+            Number = ruleNumber,
             Action = match.Groups[3].Value.Trim().ToUpperInvariant(),
             Direction = (match.Groups[4].Value.Trim().ToUpperInvariant() is { Length: > 0 } dir ? dir : "IN")
         };

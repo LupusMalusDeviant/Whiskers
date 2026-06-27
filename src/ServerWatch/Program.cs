@@ -228,6 +228,40 @@ else
             options.LoginPath = "/login";
             options.LogoutPath = "/logout";
             options.ExpireTimeSpan = TimeSpan.FromHours(24);
+
+            // Re-check the whitelist on every request, not just at login, so an email that has been
+            // removed from a NON-empty whitelist loses access on its next request instead of riding
+            // out its 24h cookie. FAIL-OPEN by design: the synthetic AuthDisabled principal is exempt,
+            // and an empty/disabled whitelist or any error allows through — matching WhitelistService's
+            // "empty ⇒ allow all" semantics. The only new rejection is an email explicitly dropped from
+            // a populated whitelist.
+            options.Events.OnValidatePrincipal = context =>
+            {
+                try
+                {
+                    // Never touch the trusted-LAN auth-bypass principal.
+                    if (context.Principal?.Identity?.AuthenticationType == "AuthDisabled")
+                        return Task.CompletedTask;
+
+                    var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
+                    // No email ⇒ leave as-is; the login flow already decided this principal was OK.
+                    if (string.IsNullOrEmpty(email))
+                        return Task.CompletedTask;
+
+                    var whitelist = context.HttpContext.RequestServices.GetRequiredService<WhitelistService>();
+                    // IsEmailAllowed returns true when the whitelist is empty/disabled (fail-open).
+                    if (!whitelist.IsEmailAllowed(email))
+                    {
+                        context.RejectPrincipal();
+                        return context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    }
+                }
+                catch
+                {
+                    // Fail-open: a transient error must never lock out a legitimate user.
+                }
+                return Task.CompletedTask;
+            };
         });
 
     if (!string.IsNullOrWhiteSpace(googleClientId))
@@ -510,6 +544,37 @@ using (var scope = app.Services.CreateScope())
     await conn.OpenAsync();
     using var cmd = conn.CreateCommand();
     cmd.CommandText = """
+        CREATE TABLE IF NOT EXISTS "ContainerMetrics" (
+            "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "ContainerId" TEXT NOT NULL,
+            "ContainerName" TEXT NOT NULL,
+            "ServerId" TEXT NOT NULL,
+            "Timestamp" TEXT NOT NULL,
+            "CpuPercent" REAL NOT NULL,
+            "MemoryUsageBytes" INTEGER NOT NULL,
+            "MemoryLimitBytes" INTEGER NOT NULL,
+            "NetworkRxBytes" INTEGER NOT NULL,
+            "NetworkTxBytes" INTEGER NOT NULL,
+            "BlockReadBytes" INTEGER NOT NULL,
+            "BlockWriteBytes" INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_ContainerMetrics_ContainerId_ServerId_Timestamp" ON "ContainerMetrics" ("ContainerId", "ServerId", "Timestamp");
+        CREATE INDEX IF NOT EXISTS "IX_ContainerMetrics_Timestamp" ON "ContainerMetrics" ("Timestamp");
+
+        CREATE TABLE IF NOT EXISTS "ServerMetrics" (
+            "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "ServerId" TEXT NOT NULL,
+            "ServerName" TEXT NOT NULL,
+            "Timestamp" TEXT NOT NULL,
+            "CpuPercent" REAL NOT NULL,
+            "MemoryUsedBytes" INTEGER NOT NULL,
+            "MemoryTotalBytes" INTEGER NOT NULL,
+            "DiskUsedBytes" INTEGER NOT NULL,
+            "DiskTotalBytes" INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_ServerMetrics_ServerId_Timestamp" ON "ServerMetrics" ("ServerId", "Timestamp");
+        CREATE INDEX IF NOT EXISTS "IX_ServerMetrics_Timestamp" ON "ServerMetrics" ("Timestamp");
+
         CREATE TABLE IF NOT EXISTS "AuditLog" (
             "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             "Timestamp" TEXT NOT NULL,

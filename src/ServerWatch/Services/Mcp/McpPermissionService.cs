@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ServerWatch.Models;
 using ServerWatch.Services.Persistence;
 
@@ -21,15 +23,17 @@ public class McpPermissionService
         await _lock.WaitAsync();
         try
         {
-            _data = await _store.LoadAsync();
+            // Build a fresh data object, then publish it with a single atomic assignment so the
+            // lock-free readers never observe a half-seeded state.
+            var data = await _store.LoadAsync();
 
             // Seed default tool configs for any missing tools
             var changed = false;
             foreach (var (tool, level) in McpPermissionLevels.DefaultToolLevels)
             {
-                if (!_data.Tools.ContainsKey(tool))
+                if (!data.Tools.ContainsKey(tool))
                 {
-                    _data.Tools[tool] = new McpToolConfig
+                    data.Tools[tool] = new McpToolConfig
                     {
                         Enabled = true,
                         RequiredLevel = level,
@@ -40,7 +44,7 @@ public class McpPermissionService
             }
 
             // Generate default API key if none exist
-            if (_data.ApiKeys.Count == 0)
+            if (data.ApiKeys.Count == 0)
             {
                 var defaultKey = new McpApiKeyConfig
                 {
@@ -49,13 +53,15 @@ public class McpPermissionService
                     PermissionLevel = McpPermissionLevels.Read,
                     Enabled = true
                 };
-                _data.ApiKeys.Add(defaultKey);
+                data.ApiKeys.Add(defaultKey);
                 changed = true;
                 _logger.LogInformation("Generated default MCP API key: {Key} (Level: {Level})", defaultKey.Key, defaultKey.PermissionLevel);
             }
 
             if (changed)
-                await _store.SaveAsync(_data);
+                await _store.SaveAsync(data);
+
+            _data = data;
 
             _logger.LogInformation("MCP permissions loaded: {KeyCount} keys, {ToolCount} tools",
                 _data.ApiKeys.Count, _data.Tools.Count);
@@ -67,11 +73,27 @@ public class McpPermissionService
     }
 
     /// <summary>
+    /// Constant-time comparison of a stored key against a provided key. Keys are kept as-is
+    /// (plaintext); this only removes the early-exit timing side channel of an ordinal `==`.
+    /// </summary>
+    private static bool KeysMatch(string storedKey, string providedKey)
+    {
+        if (string.IsNullOrEmpty(storedKey) || string.IsNullOrEmpty(providedKey))
+            return false;
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(storedKey),
+            Encoding.UTF8.GetBytes(providedKey));
+    }
+
+    /// <summary>
     /// Validates an API key and returns the config if valid, null otherwise.
     /// </summary>
     public McpApiKeyConfig? ValidateKey(string key)
     {
-        return _data.ApiKeys.FirstOrDefault(k => k.Key == key && k.Enabled);
+        if (string.IsNullOrEmpty(key))
+            return null;
+        // Single reference read = consistent immutable snapshot (writers swap _data atomically).
+        return _data.ApiKeys.FirstOrDefault(k => k.Enabled && KeysMatch(k.Key, key));
     }
 
     /// <summary>
@@ -79,18 +101,22 @@ public class McpPermissionService
     /// </summary>
     public bool IsToolAllowed(string key, string toolName)
     {
+        if (string.IsNullOrEmpty(key))
+            return false;
+
+        var data = _data;
         var keyConfig = ValidateKey(key);
         if (keyConfig == null)
         {
             _logger.LogWarning("IsToolAllowed: key not found or disabled. Provided key starts with: {KeyPrefix}, total keys in store: {Count}",
-                key.Length > 8 ? key[..8] : key, _data.ApiKeys.Count);
+                key.Length > 8 ? key[..8] : key, data.ApiKeys.Count);
             return false;
         }
 
         // Check if tool exists and is enabled
-        if (!_data.Tools.TryGetValue(toolName, out var toolConfig))
+        if (!data.Tools.TryGetValue(toolName, out var toolConfig))
         {
-            _logger.LogWarning("IsToolAllowed: tool '{Tool}' not found in {Count} configured tools", toolName, _data.Tools.Count);
+            _logger.LogWarning("IsToolAllowed: tool '{Tool}' not found in {Count} configured tools", toolName, data.Tools.Count);
             return false;
         }
 
@@ -120,8 +146,9 @@ public class McpPermissionService
         var keyConfig = ValidateKey(key);
         if (keyConfig == null) return new HashSet<string>();
 
+        var data = _data;
         var allowed = new HashSet<string>();
-        foreach (var (toolName, toolConfig) in _data.Tools)
+        foreach (var (toolName, toolConfig) in data.Tools)
         {
             if (!toolConfig.Enabled) continue;
 
@@ -139,9 +166,36 @@ public class McpPermissionService
     }
 
     /// <summary>
-    /// Returns the full permission data for the UI.
+    /// Returns a copy of the full permission data for the UI. Never hands out the live reference,
+    /// so callers can't mutate the published snapshot out from under the lock-free readers.
     /// </summary>
-    public McpPermissionData GetPermissionData() => _data;
+    public McpPermissionData GetPermissionData()
+    {
+        var data = _data;
+        return new McpPermissionData
+        {
+            ApiKeys = data.ApiKeys.Select(CloneKey).ToList(),
+            Tools = data.Tools.ToDictionary(kv => kv.Key, kv => CloneTool(kv.Value))
+        };
+    }
+
+    private static McpApiKeyConfig CloneKey(McpApiKeyConfig k) => new()
+    {
+        Id = k.Id,
+        Name = k.Name,
+        Key = k.Key,
+        PermissionLevel = k.PermissionLevel,
+        Enabled = k.Enabled,
+        CreatedAt = k.CreatedAt,
+        AllowedTools = k.AllowedTools == null ? null : new List<string>(k.AllowedTools)
+    };
+
+    private static McpToolConfig CloneTool(McpToolConfig t) => new()
+    {
+        Enabled = t.Enabled,
+        RequiredLevel = t.RequiredLevel,
+        Category = t.Category
+    };
 
     /// <summary>
     /// Updates the full permission data from the UI.
@@ -178,8 +232,14 @@ public class McpPermissionService
         await _lock.WaitAsync();
         try
         {
-            _data.ApiKeys.Add(keyConfig);
-            await _store.SaveAsync(_data);
+            // Copy-on-write: build a new data object and publish it atomically.
+            var newData = new McpPermissionData
+            {
+                ApiKeys = new List<McpApiKeyConfig>(_data.ApiKeys) { keyConfig },
+                Tools = _data.Tools
+            };
+            await _store.SaveAsync(newData);
+            _data = newData;
         }
         finally
         {
@@ -198,8 +258,14 @@ public class McpPermissionService
         await _lock.WaitAsync();
         try
         {
-            _data.ApiKeys.RemoveAll(k => k.Id == id);
-            await _store.SaveAsync(_data);
+            // Copy-on-write: build a new list without the removed key and publish atomically.
+            var newData = new McpPermissionData
+            {
+                ApiKeys = _data.ApiKeys.Where(k => k.Id != id).ToList(),
+                Tools = _data.Tools
+            };
+            await _store.SaveAsync(newData);
+            _data = newData;
         }
         finally
         {
@@ -215,10 +281,25 @@ public class McpPermissionService
         await _lock.WaitAsync();
         try
         {
-            if (_data.Tools.TryGetValue(toolName, out var tool))
+            if (_data.Tools.TryGetValue(toolName, out var existing))
             {
-                tool.Enabled = enabled;
-                await _store.SaveAsync(_data);
+                // Copy-on-write: clone the Tools dictionary and the one changed entry, then publish.
+                var tools = new Dictionary<string, McpToolConfig>(_data.Tools)
+                {
+                    [toolName] = new McpToolConfig
+                    {
+                        Enabled = enabled,
+                        RequiredLevel = existing.RequiredLevel,
+                        Category = existing.Category
+                    }
+                };
+                var newData = new McpPermissionData
+                {
+                    ApiKeys = _data.ApiKeys,
+                    Tools = tools
+                };
+                await _store.SaveAsync(newData);
+                _data = newData;
             }
         }
         finally

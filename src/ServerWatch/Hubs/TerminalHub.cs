@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using ServerWatch.Services.Terminal;
@@ -10,7 +11,7 @@ public class TerminalHub : Hub
     private readonly ITerminalSessionManager _sessions;
     private readonly ILogger<TerminalHub> _logger;
 
-    private static readonly Dictionary<string, string> _connectionSessions = new();
+    private static readonly ConcurrentDictionary<string, string> _connectionSessions = new();
 
     public TerminalHub(ITerminalSessionManager sessions, ILogger<TerminalHub> logger)
     {
@@ -98,7 +99,7 @@ public class TerminalHub : Hub
     public async Task DestroySession(string sessionId)
     {
         await _sessions.DestroySession(sessionId);
-        _connectionSessions.Remove(Context.ConnectionId);
+        _connectionSessions.TryRemove(Context.ConnectionId, out _);
         await Clients.Caller.SendAsync("SessionDestroyed", sessionId);
     }
 
@@ -107,7 +108,7 @@ public class TerminalHub : Hub
         if (_connectionSessions.TryGetValue(Context.ConnectionId, out var sessionId))
         {
             await _sessions.DestroySession(sessionId);
-            _connectionSessions.Remove(Context.ConnectionId);
+            _connectionSessions.TryRemove(Context.ConnectionId, out _);
         }
         await base.OnDisconnectedAsync(exception);
     }

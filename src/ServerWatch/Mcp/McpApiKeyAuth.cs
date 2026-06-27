@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace ServerWatch.Mcp;
@@ -33,7 +35,20 @@ public class McpApiKeyStore
         }
     }
 
-    public bool ValidateKey(string key) => _keys.Contains(key);
+    public bool ValidateKey(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+            return false;
+        // Constant-time scan so this legacy fallback doesn't leak key length/content via timing.
+        var provided = Encoding.UTF8.GetBytes(key);
+        var match = false;
+        foreach (var stored in _keys)
+        {
+            if (CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(stored), provided))
+                match = true;
+        }
+        return match;
+    }
 
     public IReadOnlySet<string> GetKeys() => _keys;
 

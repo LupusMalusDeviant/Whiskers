@@ -87,8 +87,12 @@ public class ServerConfigService
         await _lock.WaitAsync();
         try
         {
-            _cached.Servers.Add(server);
-            await _store.SaveAsync(_cached);
+            // Copy-on-write: build a new list + data object and swap the reference atomically, so the
+            // lock-free readers always see a fully-consistent immutable snapshot.
+            var servers = new List<Models.ServerConfig>(_cached.Servers) { server };
+            var newData = new ServerConfigData { Servers = servers };
+            await _store.SaveAsync(newData);
+            _cached = newData;
         }
         finally
         {
@@ -104,8 +108,11 @@ public class ServerConfigService
             var index = _cached.Servers.FindIndex(s => s.Id == server.Id);
             if (index >= 0)
             {
-                _cached.Servers[index] = server;
-                await _store.SaveAsync(_cached);
+                var servers = new List<Models.ServerConfig>(_cached.Servers);
+                servers[index] = server;
+                var newData = new ServerConfigData { Servers = servers };
+                await _store.SaveAsync(newData);
+                _cached = newData;
             }
         }
         finally
@@ -123,8 +130,10 @@ public class ServerConfigService
             if (server is { IsDefault: true })
                 throw new InvalidOperationException("Cannot remove the default server");
 
-            _cached.Servers.RemoveAll(s => s.Id == serverId);
-            await _store.SaveAsync(_cached);
+            var servers = _cached.Servers.Where(s => s.Id != serverId).ToList();
+            var newData = new ServerConfigData { Servers = servers };
+            await _store.SaveAsync(newData);
+            _cached = newData;
 
             // Clean up SSH keys
             var keyDir = Path.Combine(SshKeysBasePath, serverId);
