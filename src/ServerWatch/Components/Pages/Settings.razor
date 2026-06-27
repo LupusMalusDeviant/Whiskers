@@ -10,6 +10,7 @@
 @inject WhitelistService WhitelistService
 @inject ServerWatch.Services.Auth.RoleService RoleService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 @inject ServerWatch.Services.Vault.VaultService VaultService
 @inject ServerWatch.Services.Mcp.McpPermissionService McpPermissionService
 @inject ServerWatch.Services.Coolify.CoolifyConfigService CoolifyConfigService
@@ -633,6 +634,8 @@ else
                 ApiKeys = _mcpApiKeys,
                 Tools = _mcpTools
             });
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "config.save", "config", "mcp-permissions", "MCP-Rechte");
             Snackbar.Add("MCP-Rechte gespeichert. Änderungen gelten sofort.", Severity.Success);
         }
         catch (Exception ex)
@@ -672,6 +675,8 @@ else
                 Enabled = _whitelistEnabled,
                 Emails = _whitelistEmails
             });
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "config.save", "config", "whitelist", "E-Mail-Whitelist");
             Snackbar.Add("Whitelist gespeichert. Änderungen gelten ab der nächsten Anmeldung.", Severity.Success);
         }
         catch (Exception ex)
@@ -722,6 +727,8 @@ else
                 ApiToken = _coolifyApiToken?.Trim() ?? "",
                 PollingIntervalSeconds = _coolifyPollingInterval
             });
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "config.save", "config", "coolify", "Coolify-Einstellungen");
             Snackbar.Add("Coolify-Einstellungen gespeichert. Änderungen gelten sofort.", Severity.Success);
         }
         catch (Exception ex)
@@ -777,6 +784,8 @@ else
     private async Task SaveRoles()
     {
         await RoleService.SaveRoleDataAsync(new ServerWatch.Models.UserRoleData { Roles = _roleEntries });
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        await AuditLog.LogAsync(actor, "web", "config.save", "config", "roles", "Benutzerrollen");
         Snackbar.Add("Rollen gespeichert.", Severity.Success);
     }
 

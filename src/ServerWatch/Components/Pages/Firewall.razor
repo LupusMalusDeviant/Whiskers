@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Firewall - ServerWatch</PageTitle>
 
@@ -157,6 +158,8 @@ else
         try
         {
             var result = await FirewallService.RemoveRuleAsync(ServerId, ruleNumber);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "firewall.remove", "firewall", ruleNumber.ToString(), $"Rule #{ruleNumber}", serverId: ServerId, success: result.Success);
             if (result.Success)
             {
                 Snackbar.Add("Regel entfernt", Severity.Success);

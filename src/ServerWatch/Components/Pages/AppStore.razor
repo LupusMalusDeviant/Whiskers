@@ -6,6 +6,7 @@
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>App Store - ServerWatch</PageTitle>
 
@@ -325,6 +326,8 @@
                 $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
                 TimeSpan.FromMinutes(5));
 
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, _selectedTemplate.Name, details: $"Template: {_selectedTemplate.Id}", serverId: _deployServerId, success: result.Success);
             if (result.Success)
             {
                 Snackbar.Add($"'{_selectedTemplate.Name}' erfolgreich deployed auf {_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"}!", Severity.Success);

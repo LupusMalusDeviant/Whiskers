@@ -14,6 +14,7 @@
 @inject ServerWatch.Services.Database.IDatabaseService DatabaseService
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ServerWatch.Services.Cve.CveFindingsStore CveStore
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 @using ServerWatch.Models.Cve
 @implements IAsyncDisposable
 
@@ -1139,24 +1140,30 @@ else
     private async Task Start()
     {
         if (!Require(AppRole.Operator)) return;
-        try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Gestartet", Severity.Success); }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        var name = _container?.Name ?? ContainerId;
+        try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add("Gestartet", Severity.Success); }
+        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
 
     private async Task Stop()
     {
         if (!Require(AppRole.Operator)) return;
-        try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Gestoppt", Severity.Success); }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        var name = _container?.Name ?? ContainerId;
+        try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add("Gestoppt", Severity.Success); }
+        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
 
     private async Task Restart()
     {
         if (!Require(AppRole.Operator)) return;
-        try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); Snackbar.Add("Neugestartet", Severity.Success); }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        var name = _container?.Name ?? ContainerId;
+        try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add("Neugestartet", Severity.Success); }
+        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
 
@@ -1168,13 +1175,16 @@ else
             $"Container '{_container?.Name ?? ContainerId}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.",
             yesText: "Entfernen", cancelText: "Abbrechen");
         if (confirmed != true) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        var name = _container?.Name ?? ContainerId;
         try
         {
             await DockerService.RemoveContainerAsync(ContainerId, force: true, serverId: _resolvedServerId);
+            await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, serverId: _resolvedServerId);
             Snackbar.Add("Entfernt", Severity.Success);
             Nav.NavigateTo("/");
         }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
     }
 
     private static MudBlazor.Color GetStateColor(string state) => state switch
@@ -1359,8 +1369,11 @@ else
                 $"cd {_composeWorkingDir} && docker compose up -d 2>&1",
                 TimeSpan.FromMinutes(2));
 
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            var name = _container?.Name ?? ContainerId;
             if (restartResult.Success)
             {
+                await AuditLog.LogAsync(actor, "web", "env.save", "env", ContainerId, name, serverId: _resolvedServerId);
                 Snackbar.Add("Umgebungsvariablen gespeichert und Container neu gestartet.", Severity.Success);
                 // Reload env vars and container state
                 _envLoaded = false;
@@ -1369,6 +1382,7 @@ else
             }
             else
             {
+                await AuditLog.LogAsync(actor, "web", "env.save", "env", ContainerId, name, details: "Neustart fehlgeschlagen", serverId: _resolvedServerId, success: false);
                 Snackbar.Add($"Fehler beim Neustart: {restartResult.Output}\n{restartResult.Error}", Severity.Error);
             }
         }

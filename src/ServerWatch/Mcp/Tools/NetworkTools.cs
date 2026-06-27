@@ -2,6 +2,7 @@ using ModelContextProtocol.Server;
 using System.ComponentModel;
 using ServerWatch.Services.Docker;
 using ServerWatch.Services.Mcp;
+using ServerWatch.Services.AuditLog;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -38,6 +39,7 @@ public class NetworkTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IDockerService docker,
+        IAuditLogService auditLog,
         [Description("Network name")] string name,
         [Description("Network driver: bridge, overlay, macvlan (default: bridge)")] string driver = "bridge",
         [Description("Server ID")] string? serverId = null)
@@ -48,7 +50,18 @@ public class NetworkTools
         if (string.IsNullOrWhiteSpace(name))
             return "Network name is required.";
 
-        var id = await docker.CreateNetworkAsync(name, driver, serverId);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        string id;
+        try
+        {
+            id = await docker.CreateNetworkAsync(name, driver, serverId);
+        }
+        catch
+        {
+            await auditLog.LogAsync(actor, actorType, "network.create", "network", name, name, details: $"Driver: {driver}", serverId: serverId, success: false);
+            throw;
+        }
+        await auditLog.LogAsync(actor, actorType, "network.create", "network", id, name, details: $"Driver: {driver}", serverId: serverId);
         return $"Network '{name}' created (ID: {id[..12]}, Driver: {driver}).";
     }
 
@@ -57,13 +70,24 @@ public class NetworkTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IDockerService docker,
+        IAuditLogService auditLog,
         [Description("Network name or ID")] string networkId,
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "remove_network");
         if (denied != null) return denied;
 
-        await docker.RemoveNetworkAsync(networkId, serverId);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        try
+        {
+            await docker.RemoveNetworkAsync(networkId, serverId);
+        }
+        catch
+        {
+            await auditLog.LogAsync(actor, actorType, "network.remove", "network", networkId, networkId, serverId: serverId, success: false);
+            throw;
+        }
+        await auditLog.LogAsync(actor, actorType, "network.remove", "network", networkId, networkId, serverId: serverId);
         return $"Network '{networkId}' removed.";
     }
 

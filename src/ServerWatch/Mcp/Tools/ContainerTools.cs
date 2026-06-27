@@ -5,6 +5,7 @@ using ServerWatch.Services.ImageUpdate;
 using ServerWatch.Services.Server;
 using ServerWatch.Models;
 using ServerWatch.Services.Mcp;
+using ServerWatch.Services.AuditLog;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -99,6 +100,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IDockerService docker,
+        IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
@@ -110,7 +112,17 @@ public class ContainerTools
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
         var id = container?.Id ?? containerId;
-        await docker.StartContainerAsync(id, serverId);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        try
+        {
+            await docker.StartContainerAsync(id, serverId);
+        }
+        catch
+        {
+            await auditLog.LogAsync(actor, actorType, "container.start", "container", id, container?.Name ?? containerId, serverId: serverId, success: false);
+            throw;
+        }
+        await auditLog.LogAsync(actor, actorType, "container.start", "container", id, container?.Name ?? containerId, serverId: serverId);
         return $"Container {container?.Name ?? containerId} started.";
     }
 
@@ -119,6 +131,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IDockerService docker,
+        IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
@@ -130,7 +143,17 @@ public class ContainerTools
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
         var id = container?.Id ?? containerId;
-        await docker.StopContainerAsync(id, serverId);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        try
+        {
+            await docker.StopContainerAsync(id, serverId);
+        }
+        catch
+        {
+            await auditLog.LogAsync(actor, actorType, "container.stop", "container", id, container?.Name ?? containerId, serverId: serverId, success: false);
+            throw;
+        }
+        await auditLog.LogAsync(actor, actorType, "container.stop", "container", id, container?.Name ?? containerId, serverId: serverId);
         return $"Container {container?.Name ?? containerId} stopped.";
     }
 
@@ -139,6 +162,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IDockerService docker,
+        IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
@@ -150,7 +174,17 @@ public class ContainerTools
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
         var id = container?.Id ?? containerId;
-        await docker.RestartContainerAsync(id, serverId);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        try
+        {
+            await docker.RestartContainerAsync(id, serverId);
+        }
+        catch
+        {
+            await auditLog.LogAsync(actor, actorType, "container.restart", "container", id, container?.Name ?? containerId, serverId: serverId, success: false);
+            throw;
+        }
+        await auditLog.LogAsync(actor, actorType, "container.restart", "container", id, container?.Name ?? containerId, serverId: serverId);
         return $"Container {container?.Name ?? containerId} restarted.";
     }
 
@@ -160,6 +194,7 @@ public class ContainerTools
         McpPermissionService permissionService,
         IDockerService docker,
         ImageUpdateStore updateStore,
+        IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
@@ -174,8 +209,19 @@ public class ContainerTools
 
         var messages = new List<string>();
         var progress = new Progress<string>(msg => messages.Add(msg));
-        var newId = await docker.RecreateContainerAsync(id, serverId, progress);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        string newId;
+        try
+        {
+            newId = await docker.RecreateContainerAsync(id, serverId, progress);
+        }
+        catch
+        {
+            await auditLog.LogAsync(actor, actorType, "container.update", "container", id, container?.Name ?? containerId, serverId: serverId, success: false);
+            throw;
+        }
         updateStore.Remove(id, serverId ?? "local");
+        await auditLog.LogAsync(actor, actorType, "container.update", "container", newId, container?.Name ?? containerId, serverId: serverId);
         return $"Container updated:\n{string.Join('\n', messages)}\nNew ID: {newId[..12]}";
     }
 
@@ -205,6 +251,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IDockerService docker,
+        IAuditLogService auditLog,
         [Description("Application name (used as container name)")] string appName,
         [Description("Docker image to deploy (e.g. 'nginx:latest', 'postgres:17', 'node:22-alpine')")] string image,
         [Description("Server ID to deploy on")] string? serverId = null,
@@ -259,6 +306,7 @@ public class ContainerTools
             request.Volumes = volumes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         }
 
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
         {
             // Pull image first
@@ -266,6 +314,7 @@ public class ContainerTools
 
             // Create and start container
             var containerId = await docker.CreateContainerAsync(request, serverId);
+            await auditLog.LogAsync(actor, actorType, "deploy.app", "container", containerId, appName, details: $"Image: {image}", serverId: serverId);
             return $"App '{appName}' deployed successfully!\n" +
                    $"  Container ID: {containerId[..12]}\n" +
                    $"  Image: {image}\n" +
@@ -275,6 +324,7 @@ public class ContainerTools
         }
         catch (Exception ex)
         {
+            await auditLog.LogAsync(actor, actorType, "deploy.app", "container", appName, appName, details: $"Image: {image}; {ex.Message}", serverId: serverId, success: false);
             return $"Deployment failed: {ex.Message}";
         }
     }
@@ -314,6 +364,7 @@ public class ContainerTools
         McpPermissionService permissionService,
         IDockerService docker,
         IHostCommandExecutor executor,
+        IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Environment variables to set as 'KEY=VALUE' pairs, comma-separated (e.g. 'OPENAI_API_KEY=sk-...,MODEL=gpt-4')")] string envVars,
         [Description("Server ID")] string? serverId = null)
@@ -392,9 +443,14 @@ public class ContainerTools
             $"cd {workingDir} && docker compose up -d 2>&1",
             TimeSpan.FromMinutes(2));
 
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         if (!restartResult.Success)
+        {
+            await auditLog.LogAsync(actor, actorType, "env.save", "env", container.Id, container.Name, details: $"{changed.Count} var(s): {string.Join(", ", changed)}", serverId: serverId, success: false);
             return $"Env vars written but restart failed: {restartResult.Output}\n{restartResult.Error}";
+        }
 
+        await auditLog.LogAsync(actor, actorType, "env.save", "env", container.Id, container.Name, details: $"{changed.Count} var(s): {string.Join(", ", changed)}", serverId: serverId);
         return $"Updated {changed.Count} variable(s) in {workingDir}/.env and restarted:\n  {string.Join(", ", changed)}\n\n{restartResult.Output}";
     }
 
@@ -403,6 +459,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IHostCommandExecutor executor,
+        IAuditLogService auditLog,
         [Description("Server ID to deploy on")] string serverId,
         [Description("Name/directory for the deployment (e.g. 'my-app')")] string projectName,
         [Description("Full docker-compose.yml content")] string composeContent)
@@ -423,14 +480,19 @@ public class ContainerTools
             $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml",
             TimeSpan.FromSeconds(10));
 
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         if (!setupResult.Success)
+        {
+            await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, details: setupResult.Error, serverId: serverId, success: false);
             return $"Failed to write compose file: {setupResult.Error}";
+        }
 
         // Run docker compose up
         var deployResult = await executor.ExecuteAsync(serverId,
             $"cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
             TimeSpan.FromMinutes(5));
 
+        await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, serverId: serverId, success: deployResult.Success);
         return deployResult.Success
             ? $"Compose deployment '{projectName}' succeeded:\n{deployResult.Output}"
             : $"Compose deployment failed:\n{deployResult.Output}\n{deployResult.Error}";

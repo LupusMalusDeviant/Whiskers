@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Netzwerke - ServerWatch</PageTitle>
 
@@ -166,16 +167,19 @@ else
     private async Task CreateNetwork()
     {
         if (!Require(AppRole.Admin)) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        var sid = _newNetworkServerId == "local" ? null : _newNetworkServerId;
         try
         {
-            await DockerService.CreateNetworkAsync(_newNetworkName, _newNetworkDriver,
-                _newNetworkServerId == "local" ? null : _newNetworkServerId);
+            var id = await DockerService.CreateNetworkAsync(_newNetworkName, _newNetworkDriver, sid);
+            await AuditLog.LogAsync(actor, "web", "network.create", "network", id, _newNetworkName, details: $"Driver: {_newNetworkDriver}", serverId: sid);
             Snackbar.Add($"Netzwerk '{_newNetworkName}' erstellt.", Severity.Success);
             _showCreateDialog = false;
             await LoadNetworks();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "network.create", "network", _newNetworkName, _newNetworkName, details: ex.Message, serverId: sid, success: false);
             Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
         }
     }
@@ -188,14 +192,18 @@ else
             $"Netzwerk '{network.Name}' wirklich löschen? Verbundene Container verlieren diese Netzwerkverbindung.",
             yesText: "Löschen", cancelText: "Abbrechen");
         if (confirmed != true) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        var sid = network.ServerId == "local" ? null : network.ServerId;
         try
         {
-            await DockerService.RemoveNetworkAsync(network.Id, network.ServerId == "local" ? null : network.ServerId);
+            await DockerService.RemoveNetworkAsync(network.Id, sid);
+            await AuditLog.LogAsync(actor, "web", "network.remove", "network", network.Id, network.Name, serverId: sid);
             Snackbar.Add($"Netzwerk '{network.Name}' gelöscht.", Severity.Success);
             await LoadNetworks();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "network.remove", "network", network.Id, network.Name, details: ex.Message, serverId: sid, success: false);
             Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
         }
     }

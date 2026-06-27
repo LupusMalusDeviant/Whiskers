@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Nginx - ServerWatch</PageTitle>
 
@@ -146,6 +147,8 @@ else
         try
         {
             var result = await NginxService.UpdateSiteConfigAsync(ServerId, _editingSite, _editContent);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "nginx.update", "nginx", _editingSite, _editingSite, serverId: ServerId, success: result.Success);
             if (result.Success)
             {
                 Snackbar.Add("Konfiguration gespeichert und Nginx neu geladen", Severity.Success);
@@ -168,6 +171,8 @@ else
             var result = enable
                 ? await NginxService.EnableSiteAsync(ServerId, name)
                 : await NginxService.DisableSiteAsync(ServerId, name);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "nginx.update", "nginx", name, name, details: enable ? "enabled" : "disabled", serverId: ServerId, success: result.Success);
             if (result.Success)
             {
                 Snackbar.Add($"Seite {name} {(enable ? "aktiviert" : "deaktiviert")}", Severity.Success);

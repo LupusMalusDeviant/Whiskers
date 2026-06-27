@@ -5,6 +5,7 @@
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Compose Editor - ServerWatch</PageTitle>
 
@@ -248,6 +249,8 @@
                 $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
                 TimeSpan.FromMinutes(5));
 
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _projectName, _projectName, serverId: _serverId, success: result.Success);
             if (result.Success)
                 Snackbar.Add($"Deployment '{_projectName}' erfolgreich!\n{result.Output}", Severity.Success);
             else

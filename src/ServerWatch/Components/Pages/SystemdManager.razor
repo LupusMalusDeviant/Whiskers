@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Dienste - ServerWatch</PageTitle>
 
@@ -164,6 +165,8 @@ else
                 "restart" => await SystemdService.RestartAsync(ServerId, name),
                 _ => throw new ArgumentException($"Unknown action: {action}")
             };
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "systemd.manage", "systemd", name, name, details: action, serverId: ServerId, success: result.Success);
             Snackbar.Add(result.Success ? $"{name}: {action} erfolgreich" : $"{name}: {result.Error}",
                 result.Success ? Severity.Success : Severity.Error);
             await LoadServices();

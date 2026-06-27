@@ -6,6 +6,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Volume-Backups - ServerWatch</PageTitle>
 
@@ -212,12 +213,16 @@ else
         {
             var backup = await BackupService.BackupVolumeAsync(
                 _selectedVolume, _backupContainerName, _backupServerId, _backupNotes);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", backup.BackupId, _selectedVolume, serverId: _backupServerId == "local" ? null : _backupServerId);
             Snackbar.Add($"Backup erstellt: {backup.FileName} ({FormatBytes(backup.SizeBytes)})", Severity.Success);
             _showBackupDialog = false;
             await LoadBackups();
         }
         catch (Exception ex)
         {
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", _selectedVolume, _selectedVolume, details: ex.Message, serverId: _backupServerId == "local" ? null : _backupServerId, success: false);
             Snackbar.Add($"Backup fehlgeschlagen: {ex.Message}", Severity.Error);
         }
         finally
@@ -234,13 +239,16 @@ else
             $"Volume '{backup.VolumeName}' aus diesem Backup wiederherstellen? Der aktuelle Inhalt des Volumes wird überschrieben.",
             yesText: "Wiederherstellen", cancelText: "Abbrechen");
         if (confirmed != true) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await BackupService.RestoreVolumeAsync(backup.BackupId);
+            await AuditLog.LogAsync(actor, "web", "backup.restore", "volume", backup.BackupId, backup.VolumeName, serverId: backup.ServerId);
             Snackbar.Add($"Volume '{backup.VolumeName}' wiederhergestellt aus Backup.", Severity.Success);
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "backup.restore", "volume", backup.BackupId, backup.VolumeName, details: ex.Message, serverId: backup.ServerId, success: false);
             Snackbar.Add($"Wiederherstellung fehlgeschlagen: {ex.Message}", Severity.Error);
         }
     }
@@ -253,14 +261,17 @@ else
             $"Backup von '{backup.VolumeName}' vom {backup.CreatedAt.ToLocalTime():dd.MM.yy HH:mm} wirklich löschen?",
             yesText: "Löschen", cancelText: "Abbrechen");
         if (confirmed != true) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await BackupService.DeleteBackupAsync(backup.BackupId);
+            await AuditLog.LogAsync(actor, "web", "backup.delete", "volume", backup.BackupId, backup.VolumeName, serverId: backup.ServerId);
             Snackbar.Add("Backup gelöscht.", Severity.Success);
             await LoadBackups();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "backup.delete", "volume", backup.BackupId, backup.VolumeName, details: ex.Message, serverId: backup.ServerId, success: false);
             Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
         }
     }

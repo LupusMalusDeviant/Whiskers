@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Bereitstellen - ServerWatch</PageTitle>
 
@@ -240,11 +241,17 @@
                 InvokeAsync(StateHasChanged);
             });
             var id = await DeploymentService.DeployFromFormAsync(_formRequest, progress, _serverId);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;
+            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", id, appName, details: $"Image: {_formRequest.Image}", serverId: _serverId);
             Snackbar.Add($"Container bereitgestellt: {id[..12]}", Severity.Success);
             _deployProgress = $"Erfolgreich! Container-ID: {id[..12]}";
         }
         catch (Exception ex)
         {
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;
+            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", appName, appName, details: $"Image: {_formRequest.Image}; {ex.Message}", serverId: _serverId, success: false);
             Snackbar.Add($"Bereitstellung fehlgeschlagen: {ex.Message}", Severity.Error);
             _deployProgress = $"Fehler: {ex.Message}";
         }
@@ -272,11 +279,15 @@
                 InvokeAsync(StateHasChanged);
             });
             var ids = await DeploymentService.DeployFromComposeAsync(_composeYaml, progress, _serverId);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: $"{ids.Count} Container", serverId: _serverId);
             Snackbar.Add($"{ids.Count} Container bereitgestellt", Severity.Success);
             _deployProgress = $"Erfolgreich! {ids.Count} Container bereitgestellt";
         }
         catch (Exception ex)
         {
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: ex.Message, serverId: _serverId, success: false);
             Snackbar.Add($"Bereitstellung fehlgeschlagen: {ex.Message}", Severity.Error);
             _deployProgress = $"Fehler: {ex.Message}";
         }

@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>SSL-Zertifikate - ServerWatch</PageTitle>
 
@@ -110,6 +111,8 @@ else
         try
         {
             var result = await SslCertService.RenewAsync(ServerId, certName);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "ssl.renew", "ssl", certName, certName, serverId: ServerId, success: result.Success);
             Snackbar.Add(result.Success ? $"{certName} erneuert" : $"Fehler: {result.Error}",
                 result.Success ? Severity.Success : Severity.Error);
             await LoadCerts();
@@ -126,6 +129,8 @@ else
         try
         {
             var result = await SslCertService.RenewAllAsync(ServerId);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "ssl.renew", "ssl", "all", "all", serverId: ServerId, success: result.Success);
             Snackbar.Add(result.Success ? "Alle Zertifikate erneuert" : $"Fehler: {result.Error}",
                 result.Success ? Severity.Success : Severity.Error);
             await LoadCerts();

@@ -4,6 +4,7 @@ using ServerWatch.Services.Docker;
 using ServerWatch.Services.Server;
 using ServerWatch.Services.ServerConfig;
 using ServerWatch.Services.Mcp;
+using ServerWatch.Services.AuditLog;
 using ServerWatch.Utils;
 using Microsoft.AspNetCore.Http;
 
@@ -72,6 +73,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         IHostCommandExecutor executor,
+        IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Shell command to execute")] string command,
         [Description("Timeout in seconds (default 30, max 600)")] int timeoutSeconds = 30)
@@ -90,6 +92,8 @@ public class ServerTools
         const int maxStreamChars = 50_000;
 
         var result = await executor.ExecuteAsync(serverId, command, TimeSpan.FromSeconds(timeoutSeconds));
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "command.execute", "command", command, command, details: $"Exit code: {result.ExitCode}", serverId: serverId, success: result.ExitCode == 0);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Exit code: {result.ExitCode}");
         if (!string.IsNullOrEmpty(result.Output))
@@ -126,6 +130,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         FirewallService firewall,
+        IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Port number or range (e.g. '80', '8000:9000')")] string port,
         [Description("Protocol: tcp, udp, or both")] string protocol = "tcp",
@@ -148,6 +153,9 @@ public class ServerTools
             return $"Invalid action '{action}'. Must be one of: allow, deny.";
 
         var result = await firewall.AddRuleAsync(serverId, port, protocol, action, from);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        var ruleDesc = $"{action} {port}/{protocol}" + (from != null ? $" from {from}" : "");
+        await auditLog.LogAsync(actor, actorType, "firewall.add", "firewall", ruleDesc, ruleDesc, serverId: serverId, success: result.Success);
         return result.Success
             ? $"Rule added: {action} {port}/{protocol}" + (from != null ? $" from {from}" : "")
             : $"Failed: {result.Error}";
@@ -158,6 +166,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         FirewallService firewall,
+        IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Rule number to remove")] int ruleNumber)
     {
@@ -169,6 +178,8 @@ public class ServerTools
             return "Rule number must be a positive integer.";
 
         var result = await firewall.RemoveRuleAsync(serverId, ruleNumber);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "firewall.remove", "firewall", ruleNumber.ToString(), $"Rule #{ruleNumber}", serverId: serverId, success: result.Success);
         return result.Success ? $"Rule {ruleNumber} removed." : $"Failed: {result.Error}";
     }
 
@@ -213,6 +224,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         NginxService nginx,
+        IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Site name")] string siteName,
         [Description("New nginx config content")] string content)
@@ -227,6 +239,8 @@ public class ServerTools
             return "Config content is required.";
 
         var result = await nginx.UpdateSiteConfigAsync(serverId, siteName, content);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "nginx.update", "nginx", siteName, siteName, serverId: serverId, success: result.Success);
         return result.Success ? $"Nginx config for {siteName} updated and reloaded." : $"Failed: {result.Error}";
     }
 
@@ -252,6 +266,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         SystemdService systemd,
+        IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Service name (e.g. 'nginx', 'docker')")] string serviceName,
         [Description("Action: start, stop, restart, enable, disable")] string action)
@@ -278,6 +293,8 @@ public class ServerTools
             "disable" => await systemd.DisableAsync(serverId, serviceName),
             _ => new ServerWatch.Services.Server.CommandResult { ExitCode = 1, Error = $"Unknown action: {action}" }
         };
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "systemd.manage", "systemd", serviceName, serviceName, details: action, serverId: serverId, success: result.Success);
         return result.Success ? $"{serviceName}: {action} succeeded." : $"{serviceName}: {action} failed - {result.Error}";
     }
 
@@ -305,6 +322,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         McpPermissionService permissionService,
         SslCertService ssl,
+        IAuditLogService auditLog,
         [Description("Server ID")] string serverId,
         [Description("Certificate name (from list). Use 'all' to renew all.")] string certName)
     {
@@ -318,6 +336,8 @@ public class ServerTools
         var result = certName.ToLower() == "all"
             ? await ssl.RenewAllAsync(serverId)
             : await ssl.RenewAsync(serverId, certName);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "ssl.renew", "ssl", certName, certName, serverId: serverId, success: result.Success);
         return result.Success ? $"SSL renewal succeeded." : $"SSL renewal failed: {result.Error}";
     }
 }

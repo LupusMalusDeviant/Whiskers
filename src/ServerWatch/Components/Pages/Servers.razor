@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 @inject ServerWatch.Services.Onboarding.OnboardingService Onboarding
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Server - ServerWatch</PageTitle>
 
@@ -269,6 +270,7 @@
         else
             _form.CloudApiKey = _editingServer?.CloudApiKey;   // keep existing (null for new server)
 
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         if (_editingServer != null)
         {
             _form.Id = _editingServer.Id;
@@ -280,6 +282,7 @@
 
             await ServerConfigService.UpdateServerAsync(_form);
             ConnectionManager.InvalidateClient(_form.Id);
+            await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
             Snackbar.Add($"{_form.Name} aktualisiert", Severity.Success);
         }
         else
@@ -289,6 +292,7 @@
             if (_sshKeyData != null && _sshKeyFileName != null)
                 await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
 
+            await AuditLog.LogAsync(actor, "web", "server.add", "server", _form.Id, _form.Name, serverId: _form.Id);
             Snackbar.Add($"{_form.Name} hinzugefügt", Severity.Success);
         }
 
@@ -304,15 +308,18 @@
             $"Server '{server.Name}' wirklich entfernen? Die Verbindung und hinterlegte Zugangsdaten gehen verloren.",
             yesText: "Entfernen", cancelText: "Abbrechen");
         if (confirmed != true) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             ConnectionManager.InvalidateClient(server.Id);
             await ServerConfigService.RemoveServerAsync(server.Id);
             _servers = ServerConfigService.GetServers();
+            await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, serverId: server.Id);
             Snackbar.Add($"{server.Name} entfernt", Severity.Success);
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, details: ex.Message, serverId: server.Id, success: false);
             Snackbar.Add(ex.Message, Severity.Error);
         }
     }

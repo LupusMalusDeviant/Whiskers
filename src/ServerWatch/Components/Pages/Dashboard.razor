@@ -11,6 +11,7 @@
 @inject ServerWatch.Services.Cve.CveFindingsStore CveStore
 @inject MetricsQueryService MetricsQuery
 @inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 @implements IDisposable
 
 <PageTitle>Dashboard - ServerWatch</PageTitle>
@@ -499,14 +500,17 @@
     private async Task StartContainer(ContainerInfo container)
     {
         if (!Require(AppRole.Operator)) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await DockerService.StartContainerAsync(container.Id, container.ServerId);
+            await AuditLog.LogAsync(actor, "web", "container.start", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} gestartet", Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "container.start", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
             Snackbar.Add($"Fehler beim Starten von {container.Name}: {ex.Message}", Severity.Error);
         }
     }
@@ -514,14 +518,17 @@
     private async Task StopContainer(ContainerInfo container)
     {
         if (!Require(AppRole.Operator)) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await DockerService.StopContainerAsync(container.Id, container.ServerId);
+            await AuditLog.LogAsync(actor, "web", "container.stop", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} gestoppt", Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "container.stop", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
             Snackbar.Add($"Fehler beim Stoppen von {container.Name}: {ex.Message}", Severity.Error);
         }
     }
@@ -529,14 +536,17 @@
     private async Task RestartContainer(ContainerInfo container)
     {
         if (!Require(AppRole.Operator)) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await DockerService.RestartContainerAsync(container.Id, container.ServerId);
+            await AuditLog.LogAsync(actor, "web", "container.restart", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} neugestartet", Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "container.restart", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
             Snackbar.Add($"Fehler beim Neustarten von {container.Name}: {ex.Message}", Severity.Error);
         }
     }
@@ -549,14 +559,17 @@
             $"Container '{container.Name}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.",
             yesText: "Entfernen", cancelText: "Abbrechen");
         if (confirmed != true) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await DockerService.RemoveContainerAsync(container.Id, force: true, serverId: container.ServerId);
+            await AuditLog.LogAsync(actor, "web", "container.remove", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} entfernt", Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "container.remove", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
             Snackbar.Add($"Fehler beim Entfernen von {container.Name}: {ex.Message}", Severity.Error);
         }
     }
@@ -576,17 +589,20 @@
     private async Task UpdateContainer(ContainerInfo container)
     {
         if (!Require(AppRole.Operator)) return;
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             Snackbar.Add($"{container.Name} wird aktualisiert...", Severity.Info);
             var progress = new Progress<string>(msg => Snackbar.Add(msg, Severity.Info));
             await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
             ImageUpdateStore.Remove(container.Id, container.ServerId);
+            await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} erfolgreich aktualisiert!", Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
+            await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
             Snackbar.Add($"Fehler beim Aktualisieren von {container.Name}: {ex.Message}", Severity.Error);
         }
     }

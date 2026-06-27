@@ -4,6 +4,7 @@ using ServerWatch.Models;
 using ServerWatch.Services.Database;
 using ServerWatch.Services.Docker;
 using ServerWatch.Services.Mcp;
+using ServerWatch.Services.AuditLog;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -150,6 +151,7 @@ public class DatabaseTools
         McpPermissionService permissionService,
         IDockerService docker,
         IDatabaseService dbService,
+        IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Database name to backup")] string database,
         [Description("Server ID")] string? serverId = null)
@@ -162,6 +164,9 @@ public class DatabaseTools
 
         var (success, filePath, sizeBytes, backupError) = await dbService.BackupDatabaseAsync(
             container!.Id, database, container.DatabaseType, creds!, serverId);
+
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "backup.create", "volume", database, $"{container.Name}/{database}", details: success ? filePath : backupError, serverId: serverId, success: success);
 
         return success
             ? $"Backup created:\n  File: {filePath}\n  Size: {sizeBytes / 1024}KB"

@@ -1,5 +1,7 @@
 @inject ServerWatch.Services.Server.FirewallService FirewallService
 @inject ISnackbar Snackbar
+@inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
+@inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
 
 <MudDialog>
     <DialogContent>
@@ -46,6 +48,9 @@
         {
             var result = await FirewallService.AddRuleAsync(ServerId, _port, _protocol, _action,
                 string.IsNullOrWhiteSpace(_from) ? null : _from);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            var ruleDesc = $"{_action} {_port}/{_protocol}" + (string.IsNullOrWhiteSpace(_from) ? "" : $" from {_from}");
+            await AuditLog.LogAsync(actor, "web", "firewall.add", "firewall", ruleDesc, ruleDesc, serverId: ServerId, success: result.Success);
             if (result.Success)
             {
                 Snackbar.Add("Regel hinzugefügt", Severity.Success);
