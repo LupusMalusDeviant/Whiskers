@@ -9,12 +9,19 @@ namespace ServerWatch.Services.Agent.Guardrails;
 /// take the guardrails with it. Manageable via UI; the engine loads exclusively from here.</summary>
 public interface IGuardrailStore
 {
+    /// <summary>The active preset's policy — what the engine enforces.</summary>
     GuardrailPolicy Current { get; }
 
-    /// <summary>Saves a new policy. Throws/refuses if editor.PermissionLevel != Admin.</summary>
+    /// <summary>All presets + which one is active (for the editor UI).</summary>
+    GuardrailConfig Config { get; }
+
+    /// <summary>Saves the whole preset config (admin-only). Throws if editor.PermissionLevel != Admin.</summary>
+    Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default);
+
+    /// <summary>Back-compat: replace the active preset's policy. Throws if editor isn't Admin.</summary>
     Task SaveAsync(GuardrailPolicy policy, AgentPrincipal editor, CancellationToken ct = default);
 
-    /// <summary>Fires after a successful save so the engine rebuilds its rules.</summary>
+    /// <summary>Fires after a successful save so consumers re-read the active policy.</summary>
     event Action? Changed;
 }
 

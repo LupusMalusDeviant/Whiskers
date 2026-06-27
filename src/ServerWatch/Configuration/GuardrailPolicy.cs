@@ -20,6 +20,11 @@ public class GuardrailPolicy
     /// <summary>If not empty: ONLY these tools are allowed, everything else Deny.</summary>
     public List<string> ToolAllowList { get; set; } = new();
 
+    /// <summary>Tool gating mode for the clickable grid: "deny" (all allowed except ToolDenyList) or
+    /// "allow" (only ToolAllowList allowed — default-deny). In "allow" mode the whitelist is enforced
+    /// even when empty (= nothing allowed).</summary>
+    public string ToolMode { get; set; } = "deny";
+
     /// <summary>Glob patterns for resources (container/server/DB) the agent must never touch.</summary>
     public List<string> ProtectedResources { get; set; } = new();
 

@@ -87,15 +87,19 @@ public sealed class ToolDenyListRule : IGuardrailRule
     }
 }
 
-/// <summary>If an allow list is set, everything else is Deny.</summary>
+/// <summary>Whitelist rule. Active when an allow list is set OR the policy is in "allow" mode
+/// (default-deny). In allow mode the whitelist is enforced even when empty (= nothing allowed).</summary>
 public sealed class ToolAllowListRule : IGuardrailRule
 {
     public string Id => "tool-allow-list";
 
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
     {
-        var allow = request.Context.Policy.ToolAllowList;
-        if (allow.Count > 0 && !allow.Contains(request.ToolName))
+        var policy = request.Context.Policy;
+        var allow = policy.ToolAllowList;
+        var whitelistActive = string.Equals(policy.ToolMode, "allow", StringComparison.OrdinalIgnoreCase)
+                              || allow.Count > 0;
+        if (whitelistActive && !allow.Contains(request.ToolName))
         {
             reason = $"'{request.ToolName}' ist nicht in der Allow-Liste der Guardrails.";
             return GuardrailVerdict.Deny;
