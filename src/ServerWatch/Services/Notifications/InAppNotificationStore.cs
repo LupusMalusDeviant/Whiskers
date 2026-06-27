@@ -100,13 +100,14 @@ public sealed class InAppNotificationStore : IInAppNotificationStore
         if (e.EventType.StartsWith("agent_action", StringComparison.Ordinal)) return "agent-history";
         if (e.EventType == "cve_finding") return "cves";
         if (e.EventType.StartsWith("log_alert", StringComparison.Ordinal)) return "logs";
-        if (e.EventType is "image_update" or "auto_update_failed") return ""; // dashboard (path-base safe)
-
-        // Container-scoped events → the container's detail page when we know which one.
-        if (e.EventType is "unhealthy" or "oom_killed" or "stopped" or "restart_loop"
+        // Image-update + container-scoped events → the specific container's detail page when we know it.
+        if (e.EventType is "image_update" or "auto_update_failed"
+                or "unhealthy" or "oom_killed" or "stopped" or "restart_loop"
                 or "high_cpu" or "high_memory" or "metric_anomaly"
             && !string.IsNullOrWhiteSpace(e.ContainerId))
             return $"container/{e.ContainerId}";
+
+        if (e.EventType is "image_update" or "auto_update_failed") return ""; // fallback: dashboard
 
         return null;
     }

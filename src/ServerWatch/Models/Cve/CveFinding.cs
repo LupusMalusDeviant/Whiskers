@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ServerWatch.Models.Cve;
 
 /// <summary>A single known vulnerability detected in either an OS package or a container image.</summary>
@@ -32,12 +34,15 @@ public class CveFinding
     /// <summary>A real CVE was matched against an actually-installed package+version (Trivy, or apt with a
     /// resolved CVE-ID) — i.e. confirmed applicable. False for synthetic "SECURITY-UPDATE/&lt;pkg&gt;"
     /// pending-update markers that have no CVE-ID.</summary>
+    [JsonIgnore]
     public bool IsVerified => !CveId.StartsWith("SECURITY-UPDATE/", StringComparison.Ordinal);
 
     /// <summary>A fix is available (an upgrade target version is known).</summary>
+    [JsonIgnore]
     public bool HasFix => !string.IsNullOrWhiteSpace(FixedVersion);
 
     /// <summary>Stable identity key for diffing (same vuln in same place across scans).</summary>
+    [JsonIgnore]
     public string IdentityKey =>
         $"{ServerId}|{Source}|{ContainerId ?? "-"}|{Package}|{CveId}";
 }

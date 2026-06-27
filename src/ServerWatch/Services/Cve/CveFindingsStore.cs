@@ -1,19 +1,63 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using ServerWatch.Models.Cve;
 
 namespace ServerWatch.Services.Cve;
 
 /// <summary>
-/// In-memory store of the latest CVE scan results per target.
-/// Mirrors the style of <c>ImageUpdateStore</c> — no persistence; results are rebuilt each scan cycle.
+/// Store of the latest CVE scan results per target. Persisted to disk so results (and the last-scan
+/// time) survive restarts — that way the app does NOT re-scan on every startup; it only scans on the
+/// configured interval or a manual trigger, and only genuinely new findings notify.
 /// Key format: "<serverId>:<containerId|os>".
 /// </summary>
 public class CveFindingsStore : ICveFindingsStore
 {
+    private const string PersistPath = "/app/data/cve-findings.json";
+
     private readonly ConcurrentDictionary<string, CveScanResult> _results = new();
+    private readonly ILogger<CveFindingsStore>? _logger;
 
     public DateTime? LastScanAt { get; set; }
     public bool IsScanning { get; set; }
+
+    private sealed class PersistModel
+    {
+        public Dictionary<string, CveScanResult> Results { get; set; } = new();
+        public DateTime? LastScanAt { get; set; }
+    }
+
+    public CveFindingsStore(ILogger<CveFindingsStore>? logger = null)
+    {
+        _logger = logger;
+        try
+        {
+            if (File.Exists(PersistPath))
+            {
+                var model = JsonSerializer.Deserialize<PersistModel>(File.ReadAllText(PersistPath));
+                if (model is not null)
+                {
+                    foreach (var kv in model.Results) _results[kv.Key] = kv.Value;
+                    LastScanAt = model.LastScanAt;
+                    _logger?.LogInformation("Loaded persisted CVE findings: {Targets} target(s), last scan {Last}",
+                        _results.Count, LastScanAt);
+                }
+            }
+        }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to load persisted CVE findings"); }
+    }
+
+    /// <summary>Persists the current results + last-scan time so they survive a restart.</summary>
+    public async Task SaveAsync()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(PersistPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var model = new PersistModel { Results = new Dictionary<string, CveScanResult>(_results), LastScanAt = LastScanAt };
+            await File.WriteAllTextAsync(PersistPath, JsonSerializer.Serialize(model));
+        }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to persist CVE findings"); }
+    }
 
     private static string Key(string serverId, string? containerId)
         => $"{serverId}:{containerId ?? "os"}";

@@ -50,7 +50,16 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
             try
             {
                 if (_settings.CurrentValue.Enabled)
-                    await RunOneCycleAsync(ct);
+                {
+                    // Scan ONLY when actually due — never on every restart. Persisted results from a
+                    // previous run are kept until the interval elapses (or a manual scan is triggered).
+                    var interval = TimeSpan.FromHours(Math.Max(1, _settings.CurrentValue.CheckIntervalHours));
+                    if (_store.LastScanAt is { } last && DateTime.UtcNow - last < interval)
+                        _logger.LogInformation("CVE scan not due yet (last {Last:u}, every {H}h) — using persisted results",
+                            last, _settings.CurrentValue.CheckIntervalHours);
+                    else
+                        await RunOneCycleAsync(ct);
+                }
             }
             catch (OperationCanceledException) { /* shutdown */ }
             catch (Exception ex)
@@ -58,8 +67,11 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                 _logger.LogError(ex, "CVE monitor cycle failed");
             }
 
-            var hours = Math.Max(1, _settings.CurrentValue.CheckIntervalHours);
-            try { await Task.Delay(TimeSpan.FromHours(hours), ct); }
+            // Sleep until the next scan is due (based on the last scan time), not a flat interval from start.
+            var iv = TimeSpan.FromHours(Math.Max(1, _settings.CurrentValue.CheckIntervalHours));
+            var wait = _store.LastScanAt is { } l ? iv - (DateTime.UtcNow - l) : iv;
+            if (wait < TimeSpan.FromMinutes(1)) wait = iv;
+            try { await Task.Delay(wait, ct); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -180,6 +192,9 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                 await ageStore.RecordSeenAsync(allIdentities, ct);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "Recording CVE first-seen failed"); }
+
+            // Persist results + last-scan time so a restart doesn't trigger a re-scan or re-notify.
+            await _store.SaveAsync();
 
             // Aggregated notifications — one per target with new findings >= threshold.
             if (settings.NotifyOnFinding)

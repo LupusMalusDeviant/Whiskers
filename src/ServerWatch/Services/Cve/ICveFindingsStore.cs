@@ -13,6 +13,7 @@ public interface ICveFindingsStore
     IReadOnlyList<CveScanResult> GetAll();
     void Remove(string serverId, string? containerId);
     void Clear();
+    Task SaveAsync();
     CveSummary SummarizeServer(string serverId);
 
     /// <summary>De-duplicates every finding into one <see cref="CveGroup"/> per CVE-ID, listing all the
