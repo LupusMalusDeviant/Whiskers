@@ -58,6 +58,23 @@ public static class OpenAiRequestMapper
             case AgentRole.System:
                 return new JsonObject { ["role"] = "system", ["content"] = m.Text ?? "" };
             case AgentRole.User:
+                if (!string.IsNullOrEmpty(m.ImageBase64))
+                    return new JsonObject
+                    {
+                        ["role"] = "user",
+                        ["content"] = new JsonArray
+                        {
+                            new JsonObject { ["type"] = "text", ["text"] = m.Text ?? "" },
+                            new JsonObject
+                            {
+                                ["type"] = "image_url",
+                                ["image_url"] = new JsonObject
+                                {
+                                    ["url"] = $"data:{m.ImageMediaType ?? "image/png"};base64,{m.ImageBase64}",
+                                }
+                            }
+                        }
+                    };
                 return new JsonObject { ["role"] = "user", ["content"] = m.Text ?? "" };
             case AgentRole.Tool:
                 return new JsonObject

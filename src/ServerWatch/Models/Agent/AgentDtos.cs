@@ -27,7 +27,9 @@ public sealed record AgentMessage(
     IReadOnlyList<AgentToolCall>? ToolCalls = null,   // assistant requests tools
     string? ToolCallId = null,                         // tool response references a call (OpenAI/Anthropic)
     bool IsError = false,
-    string? ToolName = null);                          // tool response: function name (Gemini pairs by name)
+    string? ToolName = null,                            // tool response: function name (Gemini pairs by name)
+    string? ImageBase64 = null,                        // optional base64 image on a user turn (page screenshot for vision)
+    string? ImageMediaType = "image/png");             // media type for ImageBase64
 
 public sealed record AgentCompletionRequest(
     string Model,

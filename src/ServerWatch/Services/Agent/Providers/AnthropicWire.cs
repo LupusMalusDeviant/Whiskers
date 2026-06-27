@@ -55,6 +55,25 @@ public static class AnthropicRequestMapper
             case AgentRole.System:
                 return null; // System goes through the top-level system field
             case AgentRole.User:
+                if (!string.IsNullOrEmpty(m.ImageBase64))
+                    return new JsonObject
+                    {
+                        ["role"] = "user",
+                        ["content"] = new JsonArray
+                        {
+                            new JsonObject
+                            {
+                                ["type"] = "image",
+                                ["source"] = new JsonObject
+                                {
+                                    ["type"] = "base64",
+                                    ["media_type"] = m.ImageMediaType ?? "image/png",
+                                    ["data"] = m.ImageBase64,
+                                }
+                            },
+                            new JsonObject { ["type"] = "text", ["text"] = m.Text ?? "" },
+                        }
+                    };
                 return new JsonObject { ["role"] = "user", ["content"] = m.Text ?? "" };
             case AgentRole.Tool:
                 return new JsonObject

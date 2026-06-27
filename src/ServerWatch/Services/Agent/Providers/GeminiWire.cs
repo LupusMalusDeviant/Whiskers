@@ -99,11 +99,17 @@ public static class GeminiRequestMapper
                 return new JsonObject { ["role"] = "model", ["parts"] = parts };
 
             default: // User + System (System ends up as user text, since system_instruction goes separately)
-                return new JsonObject
-                {
-                    ["role"] = "user",
-                    ["parts"] = new JsonArray { new JsonObject { ["text"] = m.Text ?? "" } }
-                };
+                var uparts = new JsonArray { new JsonObject { ["text"] = m.Text ?? "" } };
+                if (!string.IsNullOrEmpty(m.ImageBase64))
+                    uparts.Add(new JsonObject
+                    {
+                        ["inline_data"] = new JsonObject
+                        {
+                            ["mime_type"] = m.ImageMediaType ?? "image/png",
+                            ["data"] = m.ImageBase64,
+                        }
+                    });
+                return new JsonObject { ["role"] = "user", ["parts"] = uparts };
         }
     }
 

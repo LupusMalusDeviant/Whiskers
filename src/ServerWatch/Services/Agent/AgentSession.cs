@@ -58,9 +58,12 @@ public sealed class AgentSession : IAgentSession
     }
 
     public async IAsyncEnumerable<AgentEvent> SendAsync(
-        string userMessage, [EnumeratorCancellation] CancellationToken ct = default)
+        string userMessage, string? imageBase64 = null, string? imageMediaType = null,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
-        _history.Add(new AgentMessage(AgentRole.User, userMessage));
+        _history.Add(new AgentMessage(AgentRole.User, userMessage,
+            ImageBase64: string.IsNullOrEmpty(imageBase64) ? null : imageBase64,
+            ImageMediaType: imageMediaType ?? "image/png"));
         var tools = _catalog.GetVisibleTools(_context);
         var maxIterations = Math.Max(1, _settings.MaxToolIterations);
 

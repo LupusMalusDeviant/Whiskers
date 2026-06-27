@@ -22,7 +22,9 @@ public interface IAgentSession
 
     /// <summary>Send a user turn; stream of events until the turn ends or a confirmation
     /// is required (hybrid mode). On AwaitingConfirmation the loop pauses.</summary>
-    IAsyncEnumerable<AgentEvent> SendAsync(string userMessage, CancellationToken ct = default);
+    IAsyncEnumerable<AgentEvent> SendAsync(
+        string userMessage, string? imageBase64 = null, string? imageMediaType = null,
+        CancellationToken ct = default);
 
     /// <summary>Hybrid flow: approve or reject an open confirm tool call.
     /// On approved=true the loop continues, otherwise the call is fed back as Deny.</summary>
