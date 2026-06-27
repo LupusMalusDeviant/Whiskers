@@ -1,12 +1,17 @@
 // ServerWatch Service Worker — Offline-Caching + PWA Install
-const CACHE_NAME = 'serverwatch-v1';
+const CACHE_NAME = 'serverwatch-v2';
 
 self.addEventListener('install', event => {
     self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
-    event.waitUntil(clients.claim());
+    // Drop caches from older versions so stale icons/assets can't be served.
+    event.waitUntil(
+        caches.keys()
+            .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
+            .then(() => clients.claim())
+    );
 });
 
 // Network-first strategy — always try network, fall back to cache

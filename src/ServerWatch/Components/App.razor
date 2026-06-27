@@ -25,9 +25,11 @@
     <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["ServerWatch.styles.css"]" />
-    <link rel="icon" type="image/x-icon" href="favicon.ico?v=2" />
-    <link rel="icon" type="image/png" href="favicon.png?v=2" />
-    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
+    @* Content-fingerprinted icon URLs: the hash changes whenever the file content changes,
+       so browsers refetch the new icon instead of serving a stale one from the favicon cache. *@
+    <link rel="icon" type="image/x-icon" href="@Assets["favicon.ico"]" />
+    <link rel="icon" type="image/png" href="@Assets["favicon.png"]" />
+    <link rel="apple-touch-icon" href="@Assets["apple-touch-icon.png"]" />
     <link rel="manifest" href="manifest.json" />
     <meta name="theme-color" content="#0a0a1a" />
     <HeadOutlet @rendermode="InteractiveServer" />
