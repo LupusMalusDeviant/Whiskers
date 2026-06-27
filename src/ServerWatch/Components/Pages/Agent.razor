@@ -108,7 +108,8 @@
                     <MudTextField @bind-Value="_llmEndpoint" Label="Endpoint (optional)" Margin="Margin.Dense"
                                   Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync" />
                     <MudTextField @bind-Value="_llmKey" Label="API-Key" InputType="InputType.Password" Margin="Margin.Dense"
-                                  Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync" />
+                                  Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync"
+                                  Immediate="true" DebounceInterval="700" OnDebounceIntervalElapsed="OnKeyDebounced" />
 
                     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;" class="mt-2">
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.NetworkCheck"
@@ -147,33 +148,9 @@
                     </MudText>
 
                     <MudDivider Class="my-4" />
-                    <MudText Typo="Typo.subtitle1" Class="mb-1">Guardrails</MudText>
-                    <MudText Typo="Typo.caption" Class="mb-3" Style="color: rgba(255,255,255,0.5);">
-                        Code-erzwungen, unumgänglich. Nur Admins können sie ändern.
-                    </MudText>
-
-                    <MudSwitch @bind-Value="_policy.ReadOnlyMode" Color="Color.Warning" Label="Read-Only-Modus (Kill-Switch)" />
-                    <MudSwitch @bind-Value="_policy.RequireConfirmationForWrites" Color="Color.Primary" Label="Writes erfordern Bestätigung" />
-
-                    <MudSelect T="string" @bind-Value="_policy.MaxAutonomousLevel" Label="Autonomes Maximal-Level"
-                               Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2">
-                        <MudSelectItem Value="@("read")">read</MudSelectItem>
-                        <MudSelectItem Value="@("write")">write</MudSelectItem>
-                        <MudSelectItem Value="@("admin")">admin</MudSelectItem>
-                    </MudSelect>
-
-                    <MudNumericField @bind-Value="_policy.MaxActionsPerSession" Label="Max. Aktionen pro Session"
-                                     Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Class="mt-2" />
-
-                    <MudTextField @bind-Value="_denyCsv" Label="Tool-Deny-Liste (Komma)" Margin="Margin.Dense"
-                                  Variant="Variant.Outlined" Class="mt-2" />
-                    <MudTextField @bind-Value="_protectedCsv" Label="Geschützte Ressourcen (Glob, Komma)" Margin="Margin.Dense"
-                                  Variant="Variant.Outlined" Class="mt-2" />
-                    <MudTextField @bind-Value="_forbiddenCsv" Label="Verbotene Argument-Muster (Regex, Komma)" Margin="Margin.Dense"
-                                  Variant="Variant.Outlined" Class="mt-2" />
-
-                    <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveGuardrails" Class="mt-3" FullWidth="true">
-                        Guardrails speichern
+                    <MudButton Href="guardrails" Variant="Variant.Outlined" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Shield" FullWidth="true">
+                        Guardrails verwalten
                     </MudButton>
                 </MudPaper>
             </MudItem>
@@ -215,12 +192,6 @@
     private static readonly string[] ClaudeCodeModels =
         { "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5" };
 
-    // Guardrail editor (admin)
-    private GuardrailPolicy _policy = new();
-    private string _denyCsv = "";
-    private string _protectedCsv = "";
-    private string _forbiddenCsv = "";
-
     protected override async Task OnInitializedAsync()
     {
         _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
@@ -245,22 +216,6 @@
                 case AgentRole.Tool: _lines.Add(new Line("tool", $"{(m.IsError ? "⚠ " : "")}{Truncate(m.Text ?? "")}")); break;
             }
         }
-
-        var c = GuardrailStore.Current;
-        _policy = new GuardrailPolicy
-        {
-            MaxAutonomousLevel = c.MaxAutonomousLevel,
-            ReadOnlyMode = c.ReadOnlyMode,
-            RequireConfirmationForWrites = c.RequireConfirmationForWrites,
-            MaxActionsPerSession = c.MaxActionsPerSession,
-            ToolDenyList = new(c.ToolDenyList),
-            ToolAllowList = new(c.ToolAllowList),
-            ProtectedResources = new(c.ProtectedResources),
-            ForbiddenArgPatterns = new(c.ForbiddenArgPatterns),
-        };
-        _denyCsv = string.Join(", ", _policy.ToolDenyList);
-        _protectedCsv = string.Join(", ", _policy.ProtectedResources);
-        _forbiddenCsv = string.Join(", ", _policy.ForbiddenArgPatterns);
     }
 
     private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
@@ -402,6 +357,21 @@
         await TestAndLoadModelsAsync();
     }
 
+    // Fires shortly after the key is pasted/typed (debounced) → auto-test without waiting for blur.
+    private Task OnKeyDebounced(string _) => MaybeTestAsync();
+
+    /// <summary>Pick a sensible default model from the fetched list (prefers fast/cheap variants).</summary>
+    private static string PickPreferredModel(IReadOnlyList<string> models)
+    {
+        string[] prefs = { "flash", "gpt-4o-mini", "mini", "sonnet", "haiku", "gpt-4o" };
+        foreach (var p in prefs)
+        {
+            var hit = models.FirstOrDefault(m => m.Contains(p, StringComparison.OrdinalIgnoreCase));
+            if (hit is not null) return hit;
+        }
+        return models[0];
+    }
+
     private async Task OnProviderChanged(string provider)
     {
         _llmProvider = provider;
@@ -417,6 +387,8 @@
         if (_llmProvider == "claude-code")
         {
             _availableModels = ClaudeCodeModels.ToList();
+            if (!_availableModels.Contains(_llmModel, StringComparer.OrdinalIgnoreCase))
+                _llmModel = PickPreferredModel(_availableModels);
             _modelStatus = "ok";
             _modelStatusMsg = $"{_availableModels.Count} Modelle";
             _lastTestedSignature = Signature();
@@ -443,6 +415,9 @@
             };
             var models = await ProviderFactory.Resolve(probe).ListModelsAsync();
             _availableModels = models.ToList();
+            // Auto-fill the model after a successful test if the current value isn't valid for this provider.
+            if (_availableModels.Count > 0 && !_availableModels.Contains(_llmModel, StringComparer.OrdinalIgnoreCase))
+                _llmModel = PickPreferredModel(_availableModels);
             _modelStatus = "ok";
             _modelStatusMsg = _availableModels.Count > 0
                 ? $"{_availableModels.Count} Modelle gefunden"
@@ -469,25 +444,6 @@
             : _availableModels.Where(m => m.Contains(value, StringComparison.OrdinalIgnoreCase));
         return Task.FromResult(items);
     }
-
-    private async Task SaveGuardrails()
-    {
-        _policy.ToolDenyList = SplitCsv(_denyCsv);
-        _policy.ProtectedResources = SplitCsv(_protectedCsv);
-        _policy.ForbiddenArgPatterns = SplitCsv(_forbiddenCsv);
-        try
-        {
-            await GuardrailStore.SaveAsync(_policy, await BuildPrincipalAsync());
-            Snackbar.Add("Guardrails gespeichert.", Severity.Success);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Snackbar.Add(ex.Message, Severity.Error);
-        }
-    }
-
-    private static List<string> SplitCsv(string? csv) =>
-        (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
     private static string Truncate(string s) => s.Length > 600 ? s[..600] + "…" : s;
 

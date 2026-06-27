@@ -1,0 +1,121 @@
+@page "/guardrails"
+@using Microsoft.AspNetCore.Authorization
+@using ServerWatch.Configuration
+@using ServerWatch.Models
+@using ServerWatch.Services.Agent.Guardrails
+@using ServerWatch.Services.Auth
+@attribute [Authorize]
+@inject IGuardrailStore GuardrailStore
+@inject ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+
+<PageTitle>Guardrails</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
+    <MudText Typo="Typo.h5" Class="mb-1">Guardrails</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
+        Code-erzwungene, unumgängliche Sicherheits-Policy des Agenten. Sie wird am Tool-Boundary durchgesetzt
+        (nicht im Prompt) — der Agent kann sie nicht umgehen. Nur Admins können sie ändern.
+    </MudText>
+
+    @if (!_isAdmin)
+    {
+        <MudAlert Severity="Severity.Warning">Nur Admins können die Guardrails ändern.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="pa-4">
+            <MudSwitch @bind-Value="_policy.ReadOnlyMode" Color="Color.Warning" Label="Read-Only-Modus (Kill-Switch)" />
+            <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.4);">
+                Blockiert sofort alles oberhalb von „read" — egal welche andere Einstellung.
+            </MudText>
+
+            <MudSwitch @bind-Value="_policy.RequireConfirmationForWrites" Color="Color.Primary" Label="Writes erfordern Bestätigung" />
+
+            <MudSelect T="string" @bind-Value="_policy.MaxAutonomousLevel" Label="Autonomes Maximal-Level"
+                       Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2">
+                <MudSelectItem Value="@("read")">read</MudSelectItem>
+                <MudSelectItem Value="@("write")">write</MudSelectItem>
+                <MudSelectItem Value="@("admin")">admin</MudSelectItem>
+            </MudSelect>
+
+            <MudNumericField @bind-Value="_policy.MaxActionsPerSession" Label="Max. Aktionen pro Session"
+                             Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Class="mt-2" />
+
+            <MudTextField @bind-Value="_denyCsv" Label="Tool-Deny-Liste (Komma)" Margin="Margin.Dense"
+                          Variant="Variant.Outlined" Class="mt-2"
+                          HelperText="Diese Tools sind immer Deny — z.B. execute_command, deploy_app" />
+            <MudTextField @bind-Value="_protectedCsv" Label="Geschützte Ressourcen (Glob, Komma)" Margin="Margin.Dense"
+                          Variant="Variant.Outlined" Class="mt-2"
+                          HelperText="Glob-Muster für Container/Server/DB, die der Agent nie anfassen darf — z.B. serverwatch*" />
+            <MudTextField @bind-Value="_forbiddenCsv" Label="Verbotene Argument-Muster (Regex, Komma)" Margin="Margin.Dense"
+                          Variant="Variant.Outlined" Class="mt-2"
+                          HelperText="Regex gegen destruktive Shell-/SQL-Argumente" />
+
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveGuardrails" Class="mt-4" FullWidth="true">
+                Guardrails speichern
+            </MudButton>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    private bool _isAdmin;
+    private GuardrailPolicy _policy = new();
+    private string _denyCsv = "";
+    private string _protectedCsv = "";
+    private string _forbiddenCsv = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+
+        var c = GuardrailStore.Current;
+        _policy = new GuardrailPolicy
+        {
+            MaxAutonomousLevel = c.MaxAutonomousLevel,
+            ReadOnlyMode = c.ReadOnlyMode,
+            RequireConfirmationForWrites = c.RequireConfirmationForWrites,
+            MaxActionsPerSession = c.MaxActionsPerSession,
+            ToolDenyList = new(c.ToolDenyList),
+            ToolAllowList = new(c.ToolAllowList),
+            ProtectedResources = new(c.ProtectedResources),
+            ForbiddenArgPatterns = new(c.ForbiddenArgPatterns),
+        };
+        _denyCsv = string.Join(", ", _policy.ToolDenyList);
+        _protectedCsv = string.Join(", ", _policy.ProtectedResources);
+        _forbiddenCsv = string.Join(", ", _policy.ForbiddenArgPatterns);
+    }
+
+    private async Task SaveGuardrails()
+    {
+        _policy.ToolDenyList = SplitCsv(_denyCsv);
+        _policy.ProtectedResources = SplitCsv(_protectedCsv);
+        _policy.ForbiddenArgPatterns = SplitCsv(_forbiddenCsv);
+        try
+        {
+            await GuardrailStore.SaveAsync(_policy, await BuildPrincipalAsync());
+            Snackbar.Add("Guardrails gespeichert.", Severity.Success);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
+        var role = await CurrentUser.GetRoleAsync();
+        var level = role switch
+        {
+            AppRole.Admin => McpPermissionLevels.Admin,
+            AppRole.Operator => McpPermissionLevels.Write,
+            _ => McpPermissionLevels.Read,
+        };
+        return new Models.Agent.AgentPrincipal(Models.Agent.AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
+    }
+
+    private static List<string> SplitCsv(string? csv) =>
+        (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+}
