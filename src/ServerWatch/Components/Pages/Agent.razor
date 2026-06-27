@@ -51,7 +51,7 @@
     <MudGrid>
         <MudItem xs="12" md="@(_isAdmin ? 7 : 12)">
             <MudPaper Class="pa-3" Style="display:flex; flex-direction:column; height: calc(100vh - 210px); min-height: 460px;">
-                <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                <div style="flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
                     @if (_lines.Count == 0)
                     {
                         <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-8" Style="color: rgba(255,255,255,0.3);">
@@ -88,7 +88,7 @@
                             }
                             else
                             {
-                                <span style="white-space: pre-wrap;">@line.Text</span>
+                                <span style="white-space: pre-wrap; overflow-wrap:anywhere; word-break:break-word;">@line.Text</span>
                             }
                         </div>
                     }
@@ -603,11 +603,14 @@
 
     private static string Truncate(string s) => s.Length > 600 ? s[..600] + "…" : s;
 
+    // Every bubble breaks long unbreakable tokens (JSON log lines, URLs) so the chat never scrolls sideways.
+    private const string Wrap = " overflow-wrap:anywhere; word-break:break-word; min-width:0;";
+
     private static string LineStyle(string kind) => kind switch
     {
-        "user" => "align-self:flex-end; max-width:85%; padding:8px 12px; border-radius:12px 12px 4px 12px; background:rgba(96,165,250,0.15); font-size:0.85rem;",
-        "tool" => "align-self:flex-start; max-width:90%; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.03); font-size:0.8rem; color:rgba(255,255,255,0.7);",
-        "error" => "align-self:flex-start; max-width:90%; padding:8px 12px; border-radius:8px; background:rgba(239,68,68,0.12); font-size:0.82rem; color:#fca5a5;",
-        _ => "align-self:flex-start; max-width:90%; padding:10px 14px; border-radius:12px 12px 12px 4px; background:rgba(255,255,255,0.05); font-size:0.85rem; line-height:1.5;",
+        "user" => "align-self:flex-end; max-width:85%; padding:8px 12px; border-radius:12px 12px 4px 12px; background:rgba(96,165,250,0.15); font-size:0.85rem;" + Wrap,
+        "tool" => "align-self:flex-start; max-width:90%; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.03); font-size:0.8rem; color:rgba(255,255,255,0.7);" + Wrap,
+        "error" => "align-self:flex-start; max-width:90%; padding:8px 12px; border-radius:8px; background:rgba(239,68,68,0.12); font-size:0.82rem; color:#fca5a5;" + Wrap,
+        _ => "align-self:flex-start; max-width:90%; padding:10px 14px; border-radius:12px 12px 12px 4px; background:rgba(255,255,255,0.05); font-size:0.85rem; line-height:1.5;" + Wrap,
     };
 }

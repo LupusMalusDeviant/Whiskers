@@ -87,6 +87,9 @@ public static class GeminiRequestMapper
                                 ["args"] = JsonNode.Parse(string.IsNullOrWhiteSpace(c.ArgumentsJson) ? "{}" : c.ArgumentsJson),
                             }
                         });
+                // Gemini rejects a content with an empty parts array (400). Never emit one.
+                if (parts.Count == 0)
+                    parts.Add(new JsonObject { ["text"] = "" });
                 return new JsonObject { ["role"] = "model", ["parts"] = parts };
 
             default: // User + System (System ends up as user text, since system_instruction goes separately)
