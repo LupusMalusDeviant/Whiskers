@@ -13,6 +13,8 @@ services:
       - serverwatch-data:/app/data
       - /proc:/host_proc:ro
     environment:
+      # Container timezone — drives .NET's TimeZoneInfo.Local / ToLocalTime() and log timestamps.
+      - TZ=${TZ:-Europe/Berlin}
       - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}
       - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-}
       - GoogleAuth__AllowedEmails__0=${GOOGLE_ADMIN_EMAIL:-}
