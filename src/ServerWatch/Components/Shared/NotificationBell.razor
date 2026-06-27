@@ -4,11 +4,13 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 
-<MudMenu Open="_open" OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight"
-         ActivationEvent="@MouseEvent.LeftClick">
+@* Uncontrolled MudMenu (self-manages Open like the working theme menu); we only listen to
+   OpenChanged to mark notifications read. A real MudIconButton is the activator so the click
+   is always captured; rows are MudMenuItems so their OnClick fires reliably. *@
+<MudMenu OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
     <ActivatorContent>
         <MudBadge Content="@Store.UnreadCount" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true">
-            <MudIcon Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit" Title="Benachrichtigungen" />
+            <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit" title="Benachrichtigungen" />
         </MudBadge>
     </ActivatorContent>
     <ChildContent>
@@ -53,8 +55,6 @@
 </MudMenu>
 
 @code {
-    private bool _open;
-
     protected override void OnInitialized()
     {
         Store.Changed += OnChanged;
@@ -71,15 +71,13 @@
 
     private void OnOpenChanged(bool open)
     {
-        _open = open;
         if (open) Store.MarkAllRead();
     }
 
     private void OnRowClick(InAppNotification n)
     {
-        _open = false;
         if (n.Link is null) return;   // "" = dashboard (path-base safe); null = not navigable
-        Nav.NavigateTo(n.Link);
+        Nav.NavigateTo(n.Link);       // MudMenuItem auto-closes the menu
     }
 
     private void Clear() => Store.Clear();
