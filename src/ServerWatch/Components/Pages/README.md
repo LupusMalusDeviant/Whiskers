@@ -41,7 +41,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `ScheduledTasks.razor` | Cron-style scheduled tasks. |
 | `Webhooks.razor` | CI/CD webhooks. |
 | `LogSearch.razor` | Log search and alerts. |
-| `Cves.razor` | CVE findings dashboard. |
+| `Cves.razor` | CVE dashboard — **one row per CVE** (de-duplicated), expandable to all affected container/server instances with OS context + a verified flag; shows how long each CVE has been open and whether a fix exists. |
 | `AuditLog.razor` | Audit trail of privileged actions. |
 | `AgentHistory.razor` | Observability dashboard for every agent/MCP tool call (`/agent-history`): filter by actor, tool, period, writes-only or denies-only; row click opens `AgentCallDetailDialog`. Backed by [`IMcpCallLogStore`](../../Services/Observability/). |
 | `AgentCallDetailDialog.razor` | Detail dialog for a single recorded tool call — metadata, redacted parameters, result summary, error. |

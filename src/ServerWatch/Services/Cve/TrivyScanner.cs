@@ -80,6 +80,14 @@ public class TrivyScanner : ITrivyScanner
             if (results == null)
                 return result;
 
+            // The image's OS family+name (e.g. "debian 12"), so we can show what the CVE actually applies to.
+            var osMeta = root?["Metadata"]?["OS"];
+            var osContext = osMeta is null
+                ? null
+                : string.Join(' ', new[] { TryString(osMeta, "Family"), TryString(osMeta, "Name") }
+                    .Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+            if (string.IsNullOrWhiteSpace(osContext)) osContext = null;
+
             foreach (var r in results)
             {
                 var vulns = r?["Vulnerabilities"]?.AsArray();
@@ -97,12 +105,14 @@ public class TrivyScanner : ITrivyScanner
                         ContainerId = containerId,
                         ContainerName = containerName,
                         Image = image,
+                        OsContext = osContext,
                         CveId = cveId,
                         Package = TryString(v, "PkgName") ?? "",
                         InstalledVersion = TryString(v, "InstalledVersion"),
                         FixedVersion = TryString(v, "FixedVersion"),
                         Title = TryString(v, "Title"),
                         Reference = TryString(v, "PrimaryURL"),
+                        PublishedDate = TryDate(v, "PublishedDate"),
                         Severity = ParseSeverity(TryString(v, "Severity"))
                     });
                 }
@@ -126,6 +136,14 @@ public class TrivyScanner : ITrivyScanner
         if (val is null) return null;
         try { return val.GetValue<string>(); }
         catch { return val.ToString(); }
+    }
+
+    private static DateTime? TryDate(JsonNode? node, string prop)
+    {
+        var s = TryString(node, prop);
+        return DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+            out var dt) ? dt : null;
     }
 
     private static CveSeverity ParseSeverity(string? s) => s?.ToUpperInvariant() switch

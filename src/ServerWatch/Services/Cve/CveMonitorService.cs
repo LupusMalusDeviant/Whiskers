@@ -83,8 +83,23 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
             var osScanner = sp.GetRequiredService<IOsCveScanner>();
             var trivyScanner = sp.GetRequiredService<ITrivyScanner>();
             var notification = sp.GetRequiredService<INotificationService>();
+            var ageStore = sp.GetRequiredService<ICveAgeStore>();
             var hub = sp.GetRequiredService<IHubContext<ContainerHub>>();
             var serverNames = serverConfig.GetServers().ToDictionary(s => s.Id, s => s.Name);
+
+            // Real host OS per server (so OS findings carry the actual OS they apply to).
+            var osByServer = new Dictionary<string, string>();
+            try
+            {
+                var metricsSource = sp.GetRequiredService<ServerWatch.Services.Metrics.IMetricsSource>();
+                foreach (var (sid, info) in await metricsSource.GetAllServerSystemInfoAsync())
+                {
+                    var os = string.Join(' ', new[] { info.OperatingSystem, info.OsVersion }
+                        .Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+                    if (!string.IsNullOrWhiteSpace(os)) osByServer[sid] = os;
+                }
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "Could not resolve server OS info for CVE context"); }
 
             var servers = serverConfig.GetEnabledServers();
             var threshold = ParseSeverity(settings.NotifySeverity);
@@ -102,6 +117,9 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                     {
                         var prev = _store.Get(server.Id, null);
                         var osResult = await osScanner.ScanAsync(server.Id, ct);
+                        if (osByServer.TryGetValue(server.Id, out var hostOs))
+                            foreach (var f in osResult.Findings)
+                                f.OsContext ??= hostOs;
                         var news = DiffFindings(prev, osResult);
                         _store.Set(osResult);
                         if (news.Count > 0) newPerTarget.Add((osResult, news));
@@ -152,6 +170,16 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
             }
 
             _store.LastScanAt = DateTime.UtcNow;
+
+            // Persist first-seen for every current finding so the "open for N days" age survives restarts.
+            try
+            {
+                var allIdentities = _store.GetAll()
+                    .SelectMany(r => r.Findings)
+                    .Select(f => (f.IdentityKey, f.CveId));
+                await ageStore.RecordSeenAsync(allIdentities, ct);
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "Recording CVE first-seen failed"); }
 
             // Aggregated notifications — one per target with new findings >= threshold.
             if (settings.NotifyOnFinding)

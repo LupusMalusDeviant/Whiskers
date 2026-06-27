@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ServerWatch.Models;
+using ServerWatch.Models.Cve;
 
 namespace ServerWatch.Services.Persistence;
 
@@ -59,6 +60,7 @@ public class MetricsDbContext : DbContext
     public DbSet<UpdateHistoryEntity> UpdateHistory => Set<UpdateHistoryEntity>();
     public DbSet<WebhookEntity> Webhooks => Set<WebhookEntity>();
     public DbSet<WebhookLogEntity> WebhookLogs => Set<WebhookLogEntity>();
+    public DbSet<CveFirstSeenEntity> CveFirstSeen => Set<CveFirstSeenEntity>();
 
     public MetricsDbContext(DbContextOptions<MetricsDbContext> options) : base(options) { }
 
@@ -120,6 +122,12 @@ public class MetricsDbContext : DbContext
         {
             e.HasIndex(x => x.RuleId).IsUnique();
             e.HasIndex(x => x.Enabled);
+        });
+
+        modelBuilder.Entity<CveFirstSeenEntity>(e =>
+        {
+            e.HasIndex(x => x.IdentityKey).IsUnique();
+            e.HasIndex(x => x.CveId);
         });
     }
 }

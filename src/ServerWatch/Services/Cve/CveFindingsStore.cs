@@ -61,6 +61,61 @@ public class CveFindingsStore : ICveFindingsStore
         return s;
     }
 
+    /// <summary>De-duplicate every finding into one group per CVE-ID, with all real affected instances.</summary>
+    public IReadOnlyList<CveGroup> BuildGroups(
+        IReadOnlyDictionary<string, DateTime> firstSeen,
+        IReadOnlyDictionary<string, string> serverNames)
+    {
+        var groups = new Dictionary<string, CveGroup>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var result in _results.Values)
+        {
+            foreach (var f in result.Findings)
+            {
+                if (string.IsNullOrEmpty(f.CveId)) continue;
+
+                if (!groups.TryGetValue(f.CveId, out var g))
+                {
+                    g = new CveGroup { CveId = f.CveId, Severity = f.Severity, FirstSeenUtc = DateTime.UtcNow };
+                    groups[f.CveId] = g;
+                }
+
+                // Worst severity + best available metadata win at the group level.
+                if (f.Severity > g.Severity) g.Severity = f.Severity;
+                if (string.IsNullOrEmpty(g.Title) && !string.IsNullOrEmpty(f.Title)) g.Title = f.Title;
+                if (string.IsNullOrEmpty(g.Reference) && !string.IsNullOrEmpty(f.Reference)) g.Reference = f.Reference;
+                if (g.PublishedDate is null && f.PublishedDate is not null) g.PublishedDate = f.PublishedDate;
+
+                var seen = firstSeen.TryGetValue(f.IdentityKey, out var ts) ? ts : f.DetectedAt;
+                if (seen < g.FirstSeenUtc) g.FirstSeenUtc = seen;
+
+                g.Affected.Add(new CveAffected
+                {
+                    ServerId = f.ServerId,
+                    ServerName = serverNames.TryGetValue(f.ServerId, out var sn) ? sn : f.ServerId,
+                    Source = f.Source,
+                    ContainerId = f.ContainerId,
+                    ContainerName = f.ContainerName,
+                    Image = f.Image,
+                    Os = f.OsContext,
+                    Package = f.Package,
+                    InstalledVersion = f.InstalledVersion,
+                    FixedVersion = f.FixedVersion,
+                    Verified = f.IsVerified,
+                    HasFix = f.HasFix,
+                    FirstSeenUtc = seen,
+                });
+            }
+        }
+
+        // Worst severity first, then longest-open first, then CVE-ID.
+        return groups.Values
+            .OrderByDescending(g => g.Severity)
+            .ThenBy(g => g.FirstSeenUtc)
+            .ThenBy(g => g.CveId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>Aggregate one combined summary per server (OS + all containers merged).</summary>
     public CveSummary SummarizeServer(string serverId)
     {

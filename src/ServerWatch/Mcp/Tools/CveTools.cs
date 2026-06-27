@@ -43,6 +43,47 @@ public class CveTools
         return sb.ToString();
     }
 
+    [McpServerTool, Description("List DE-DUPLICATED CVEs across the whole fleet: one entry per CVE-ID with every affected server/container behind it, how long it has been open, and whether a fix exists. Use this instead of the per-target tools to avoid duplicate CVEs.")]
+    public static async Task<string> ListCveGroups(
+        IHttpContextAccessor httpContextAccessor,
+        IMcpPermissionService permissionService,
+        ICveFindingsStore store,
+        ICveAgeStore ageStore,
+        IServerConfigService serverConfig,
+        [Description("Min severity to include: Low, Medium, High, Critical (default High)")] string minSeverity = "High",
+        [Description("Only CVEs that have an available fix (default false)")] bool fixableOnly = false,
+        [Description("Max CVEs to return (default 60)")] int limit = 60)
+    {
+        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_cve_groups");
+        if (denied != null) return denied;
+
+        var threshold = ParseSeverity(minSeverity);
+        var firstSeen = await ageStore.GetFirstSeenAsync();
+        var names = serverConfig.GetServers().ToDictionary(s => s.Id, s => s.Name);
+        var groups = store.BuildGroups(firstSeen, names)
+            .Where(g => g.Severity >= threshold)
+            .Where(g => !fixableOnly || g.HasFix)
+            .ToList();
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"De-duplicated CVEs (severity >= {threshold}{(fixableOnly ? ", fixable only" : "")}): {groups.Count} unique");
+        if (store.LastScanAt is { } last) sb.AppendLine($"Last scan: {last:yyyy-MM-dd HH:mm} UTC");
+        foreach (var g in groups.Take(Math.Clamp(limit, 1, 500)))
+        {
+            var days = Math.Max(0, (int)g.OpenFor.TotalDays);
+            var targets = string.Join(", ", g.Affected
+                .Select(a => a.Source == CveSource.Os ? $"{a.ServerName}/OS" : $"{a.ServerName}/{a.TargetLabel}")
+                .Distinct().Take(8));
+            if (g.Affected.Select(a => a.Source == CveSource.Os ? $"{a.ServerName}/OS" : $"{a.ServerName}/{a.TargetLabel}").Distinct().Count() > 8)
+                targets += ", …";
+            sb.AppendLine(
+                $"- [{g.Severity}] {g.CveId} | open {days}d | {(g.HasFix ? "FIX available" : "no fix")} | " +
+                $"{g.InstanceCount} instance(s) on {g.ServerCount} server(s): {targets}");
+        }
+        if (groups.Count > limit) sb.AppendLine($"… +{groups.Count - limit} more (raise limit)");
+        return sb.ToString();
+    }
+
     [McpServerTool, Description("Get the CVE findings for the host OS on one server (pending security updates and the CVE IDs they address).")]
     public static string GetServerCves(
         IHttpContextAccessor httpContextAccessor,

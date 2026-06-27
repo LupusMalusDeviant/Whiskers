@@ -88,6 +88,7 @@ builder.Services.AddHostedService<ImageUpdateChecker>();
 // CVE monitoring (containers via Trivy + OS via apt)
 builder.Services.Configure<CveMonitorSettings>(builder.Configuration.GetSection(CveMonitorSettings.SectionName));
 builder.Services.AddSingleton<ServerWatch.Services.Cve.ICveFindingsStore, CveFindingsStore>();
+builder.Services.AddSingleton<ServerWatch.Services.Cve.ICveAgeStore, ServerWatch.Services.Cve.CveAgeStore>();
 builder.Services.AddSingleton<ServerWatch.Services.Cve.IOsCveScanner, OsCveScanner>();
 builder.Services.AddSingleton<ServerWatch.Services.Cve.ITrivyScanner, TrivyScanner>();
 // Registered as Singleton AND HostedService — same instance — so UI can trigger manual scans.
@@ -677,6 +678,15 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS "IX_McpToolCalls_Timestamp" ON "McpToolCalls" ("Timestamp");
         CREATE INDEX IF NOT EXISTS "IX_McpToolCalls_ToolName_Timestamp" ON "McpToolCalls" ("ToolName", "Timestamp");
         CREATE INDEX IF NOT EXISTS "IX_McpToolCalls_Actor" ON "McpToolCalls" ("Actor");
+
+        CREATE TABLE IF NOT EXISTS "CveFirstSeen" (
+            "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "IdentityKey" TEXT NOT NULL,
+            "CveId" TEXT NOT NULL,
+            "FirstSeenUtc" TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "IX_CveFirstSeen_IdentityKey" ON "CveFirstSeen" ("IdentityKey");
+        CREATE INDEX IF NOT EXISTS "IX_CveFirstSeen_CveId" ON "CveFirstSeen" ("CveId");
 
         CREATE TABLE IF NOT EXISTS "VolumeBackups" (
             "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
