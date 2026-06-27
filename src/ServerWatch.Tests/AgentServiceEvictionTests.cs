@@ -18,8 +18,11 @@ public class AgentServiceEvictionTests
             AgentCompletionRequest request, [EnumeratorCancellation] CancellationToken ct = default)
         {
             await Task.CompletedTask;
-            yield break;   // im Eviction-Test nie aufgerufen
+            yield break;   // never invoked in the eviction test
         }
+
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
     private sealed class StubFactory : IAgentProviderFactory

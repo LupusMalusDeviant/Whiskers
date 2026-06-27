@@ -27,6 +27,9 @@ public class AgentSessionTests
             foreach (var d in turn) yield return d;
             await Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
     private sealed class FakeCatalog : IAgentToolCatalog

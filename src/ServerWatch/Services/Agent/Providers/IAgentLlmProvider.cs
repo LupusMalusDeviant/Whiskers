@@ -15,6 +15,10 @@ public interface IAgentLlmProvider
     /// completed by a delta with Final set. Non-streaming backends
     /// emulate this with a single delta.</summary>
     IAsyncEnumerable<AgentStreamDelta> StreamAsync(AgentCompletionRequest request, CancellationToken ct = default);
+
+    /// <summary>Lists the model ids available to the configured key/endpoint. Used to verify the
+    /// key and populate the model picker. Throws on an auth or network failure.</summary>
+    Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default);
 }
 
 /// <summary>Selects the matching provider impl based on the settings.</summary>

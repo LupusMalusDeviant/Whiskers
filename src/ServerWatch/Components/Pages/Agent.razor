@@ -6,6 +6,7 @@
 @using ServerWatch.Models.Agent
 @using ServerWatch.Services.Agent
 @using ServerWatch.Services.Agent.Guardrails
+@using ServerWatch.Services.Agent.Providers
 @using ServerWatch.Services.Auth
 @attribute [Authorize]
 @inject IAgentService AgentService
@@ -14,11 +15,12 @@
 @inject ICurrentUserService CurrentUser
 @inject IAgentTranscriptStore TranscriptStore
 @inject IAgentSettingsStore SettingsStore
+@inject IAgentProviderFactory ProviderFactory
 @inject ISnackbar Snackbar
 
 <PageTitle>Agent</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <div style="display:flex; align-items:center; gap:8px;">
         <MudText Typo="Typo.h5" Class="mb-1 flex-1">ServerWatch-Agent</MudText>
         @if (_lines.Count > 0)
@@ -40,7 +42,7 @@
 
     <MudGrid>
         <MudItem xs="12" md="@(_isAdmin ? 7 : 12)">
-            <MudPaper Class="pa-3" Style="display:flex; flex-direction:column; height: 540px;">
+            <MudPaper Class="pa-3" Style="display:flex; flex-direction:column; height: calc(100vh - 210px); min-height: 460px;">
                 <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
                     @if (_lines.Count == 0)
                     {
@@ -91,10 +93,10 @@
         @if (_isAdmin)
         {
             <MudItem xs="12" md="5">
-                <MudPaper Class="pa-4" Style="height: 540px; overflow-y:auto;">
+                <MudPaper Class="pa-4" Style="height: calc(100vh - 210px); min-height: 460px; overflow-y:auto;">
                     <MudText Typo="Typo.subtitle1" Class="mb-2">LLM-Provider</MudText>
                     <MudSwitch @bind-Value="_llmEnabled" Color="Color.Primary" Label="Agent aktiviert" />
-                    <MudSelect T="string" @bind-Value="_llmProvider" Label="Provider" Margin="Margin.Dense"
+                    <MudSelect T="string" Value="_llmProvider" ValueChanged="OnProviderChanged" Label="Provider" Margin="Margin.Dense"
                                Variant="Variant.Outlined" Class="mt-2">
                         <MudSelectItem Value="@("openai")">openai</MudSelectItem>
                         <MudSelectItem Value="@("openrouter")">openrouter</MudSelectItem>
@@ -103,9 +105,39 @@
                         <MudSelectItem Value="@("anthropic")">anthropic</MudSelectItem>
                         <MudSelectItem Value="@("claude-code")">claude-code</MudSelectItem>
                     </MudSelect>
-                    <MudTextField @bind-Value="_llmModel" Label="Modell" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
-                    <MudTextField @bind-Value="_llmEndpoint" Label="Endpoint (optional)" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
-                    <MudTextField @bind-Value="_llmKey" Label="API-Key" InputType="InputType.Password" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField @bind-Value="_llmEndpoint" Label="Endpoint (optional)" Margin="Margin.Dense"
+                                  Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync" />
+                    <MudTextField @bind-Value="_llmKey" Label="API-Key" InputType="InputType.Password" Margin="Margin.Dense"
+                                  Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync" />
+
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;" class="mt-2">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.NetworkCheck"
+                                   OnClick="ForceTestAsync" Disabled="@(_modelTesting || _llmProvider == "claude-code")">
+                            Verbindung testen
+                        </MudButton>
+                        @if (_modelTesting)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                            <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">Teste…</MudText>
+                        }
+                        else if (_modelStatus == "ok")
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                            <MudText Typo="Typo.caption" Style="color:#86efac;">@_modelStatusMsg</MudText>
+                        }
+                        else if (_modelStatus == "fail")
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Error" Size="Size.Small" Color="Color.Error" />
+                            <MudText Typo="Typo.caption" Style="color:#fca5a5;">@_modelStatusMsg</MudText>
+                        }
+                    </div>
+
+                    <MudAutocomplete T="string" @bind-Value="_llmModel" Label="Modell" Margin="Margin.Dense"
+                                     Variant="Variant.Outlined" Class="mt-2" SearchFunc="SearchModels"
+                                     CoerceValue="true" CoerceText="false" ResetValueOnEmptyText="false" MaxItems="300"
+                                     AdornmentIcon="@Icons.Material.Filled.ExpandMore" Clearable="true"
+                                     HelperText="@(_availableModels.Count > 0 ? $"{_availableModels.Count} Modelle verfügbar — tippen zum Filtern" : "Frei eingeben, oder API-Key testen für Vorschläge")" />
+
                     <MudNumericField @bind-Value="_llmIterations" Label="Max. Tool-Iterationen" Min="1" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
                     <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveLlm" Class="mt-3" FullWidth="true">
                         Provider speichern
@@ -171,6 +203,17 @@
     private string _llmEndpoint = "";
     private string _llmKey = "";
     private int _llmIterations = 8;
+
+    // Model discovery (key test → available models)
+    private List<string> _availableModels = new();
+    private bool _modelTesting;
+    private string _modelStatus = "";       // "", "ok", "fail"
+    private string _modelStatusMsg = "";
+    private string _lastTestedSignature = "";   // provider|endpoint|key — avoids redundant probes
+
+    // Known Claude Code models (no listing API; the CLI resolves these).
+    private static readonly string[] ClaudeCodeModels =
+        { "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5" };
 
     // Guardrail editor (admin)
     private GuardrailPolicy _policy = new();
@@ -332,6 +375,99 @@
             MaxToolIterations = _llmIterations,
         });
         Snackbar.Add("Provider gespeichert.", Severity.Success);
+    }
+
+    // === Model discovery ===
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _isAdmin && (_llmProvider == "claude-code" || !string.IsNullOrWhiteSpace(_llmKey)))
+            await MaybeTestAsync();
+    }
+
+    private string Signature() => $"{_llmProvider}|{_llmEndpoint}|{_llmKey}";
+
+    /// <summary>Auto-test when a relevant field changed and a key is present (avoids redundant probes).</summary>
+    private async Task MaybeTestAsync()
+    {
+        if (_modelTesting) return;
+        if (_llmProvider != "claude-code" && string.IsNullOrWhiteSpace(_llmKey)) return;
+        if (Signature() == _lastTestedSignature && _availableModels.Count > 0) return;
+        await TestAndLoadModelsAsync();
+    }
+
+    private async Task ForceTestAsync()
+    {
+        _lastTestedSignature = "";
+        await TestAndLoadModelsAsync();
+    }
+
+    private async Task OnProviderChanged(string provider)
+    {
+        _llmProvider = provider;
+        _availableModels.Clear();
+        _modelStatus = "";
+        _lastTestedSignature = "";
+        if (provider == "claude-code" || !string.IsNullOrWhiteSpace(_llmKey))
+            await TestAndLoadModelsAsync();
+    }
+
+    private async Task TestAndLoadModelsAsync()
+    {
+        if (_llmProvider == "claude-code")
+        {
+            _availableModels = ClaudeCodeModels.ToList();
+            _modelStatus = "ok";
+            _modelStatusMsg = $"{_availableModels.Count} Modelle";
+            _lastTestedSignature = Signature();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_llmKey))
+        {
+            _modelStatus = "";
+            _availableModels.Clear();
+            return;
+        }
+
+        _modelTesting = true;
+        _modelStatus = "";
+        StateHasChanged();
+        try
+        {
+            var probe = new AgentSettings
+            {
+                Provider = _llmProvider,
+                ApiKey = _llmKey,
+                Endpoint = string.IsNullOrWhiteSpace(_llmEndpoint) ? null : _llmEndpoint,
+                Model = _llmModel,
+            };
+            var models = await ProviderFactory.Resolve(probe).ListModelsAsync();
+            _availableModels = models.ToList();
+            _modelStatus = "ok";
+            _modelStatusMsg = _availableModels.Count > 0
+                ? $"{_availableModels.Count} Modelle gefunden"
+                : "Key gültig, keine Modelle gelistet";
+            _lastTestedSignature = Signature();
+        }
+        catch (Exception)
+        {
+            _availableModels.Clear();
+            _modelStatus = "fail";
+            _modelStatusMsg = "Verbindung fehlgeschlagen — Key/Endpoint prüfen";
+        }
+        finally
+        {
+            _modelTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task<IEnumerable<string>> SearchModels(string value, CancellationToken ct)
+    {
+        IEnumerable<string> items = string.IsNullOrWhiteSpace(value)
+            ? _availableModels
+            : _availableModels.Where(m => m.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(items);
     }
 
     private async Task SaveGuardrails()

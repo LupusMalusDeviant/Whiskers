@@ -66,4 +66,33 @@ public sealed class GeminiProvider : IAgentLlmProvider
 
         yield return new AgentStreamDelta(Final: accumulator.StopReason());
     }
+
+    public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, _baseEndpoint);
+        if (!string.IsNullOrEmpty(_apiKey))
+            req.Headers.Add("x-goog-api-key", _apiKey);
+
+        using var resp = await _http.SendAsync(req, ct);
+        resp.EnsureSuccessStatusCode();
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        var ids = new List<string>();
+        if (doc.RootElement.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array)
+            foreach (var m in models.EnumerateArray())
+            {
+                // Keep only models that can actually generate content.
+                var canGenerate = m.TryGetProperty("supportedGenerationMethods", out var methods)
+                    && methods.ValueKind == JsonValueKind.Array
+                    && methods.EnumerateArray().Any(x => x.GetString() == "generateContent");
+                if (!canGenerate) continue;
+
+                if (m.TryGetProperty("name", out var name) && name.GetString() is { } s)
+                    ids.Add(s.StartsWith("models/", StringComparison.Ordinal) ? s["models/".Length..] : s);
+            }
+        ids.Sort(StringComparer.OrdinalIgnoreCase);
+        return ids;
+    }
 }

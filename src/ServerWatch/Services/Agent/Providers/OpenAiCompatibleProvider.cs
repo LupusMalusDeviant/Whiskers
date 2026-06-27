@@ -68,4 +68,33 @@ public sealed class OpenAiCompatibleProvider : IAgentLlmProvider
 
         yield return new AgentStreamDelta(Final: accumulator.StopReason());
     }
+
+    public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, ModelsUrl(_endpoint));
+        if (!string.IsNullOrEmpty(_apiKey))
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+
+        using var resp = await _http.SendAsync(req, ct);
+        resp.EnsureSuccessStatusCode();
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        var ids = new List<string>();
+        if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            foreach (var m in data.EnumerateArray())
+                if (m.TryGetProperty("id", out var id) && id.GetString() is { } s)
+                    ids.Add(s);
+        ids.Sort(StringComparer.OrdinalIgnoreCase);
+        return ids;
+    }
+
+    /// <summary>Derives the /models URL from the configured chat-completions endpoint.</summary>
+    private static string ModelsUrl(string endpoint)
+    {
+        if (endpoint.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            return endpoint.Replace("/chat/completions", "/models", StringComparison.OrdinalIgnoreCase);
+        return endpoint.TrimEnd('/') + "/models";
+    }
 }

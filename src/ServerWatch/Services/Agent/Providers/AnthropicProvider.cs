@@ -68,4 +68,28 @@ public sealed class AnthropicProvider : IAgentLlmProvider
 
         yield return new AgentStreamDelta(Final: accumulator.StopReason());
     }
+
+    public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)
+    {
+        var url = _endpoint.Contains("/messages", StringComparison.OrdinalIgnoreCase)
+            ? _endpoint.Replace("/messages", "/models", StringComparison.OrdinalIgnoreCase)
+            : _endpoint.TrimEnd('/') + "/models";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Add("x-api-key", _apiKey);
+        req.Headers.Add("anthropic-version", AnthropicVersion);
+
+        using var resp = await _http.SendAsync(req, ct);
+        resp.EnsureSuccessStatusCode();
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        var ids = new List<string>();
+        if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            foreach (var m in data.EnumerateArray())
+                if (m.TryGetProperty("id", out var id) && id.GetString() is { } s)
+                    ids.Add(s);
+        return ids;
+    }
 }
