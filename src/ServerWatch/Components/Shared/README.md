@@ -12,7 +12,7 @@ Reusable UI widgets used across multiple pages.
 | `RoleGuard.razor` | Renders its child content only if the current user holds the required role. |
 | `AiChat.razor` | The floating read-only advisor chat widget (see [`../../Services/AiChat/`](../../Services/AiChat/)). |
 | `ChatWidget.razor` | Renders a curated rich widget embedded in an agent reply — a live CPU/RAM ApexChart or a status card for a server/container. Driven by a [`ChatWidgetSpec`](../../Models/Agent/ChatWidget.cs) parsed from a `[[chart:…]]` / `[[status:…]]` token (see [`../../Services/Agent/Chat/`](../../Services/Agent/Chat/)); data via `IMetricsQueryService`. |
-| `NotificationBell.razor` | AppBar bell + unread badge + dropdown feed of recent events, with a toast on arrival (see [`../../Services/Notifications/InAppNotificationStore.cs`](../../Services/Notifications/InAppNotificationStore.cs)). |
+| `NotificationBell.razor` | AppBar bell + unread badge + dropdown feed of recent events, with a toast on arrival. Each entry is clickable and navigates to the relevant page via its `Link` (approval → Freigaben, agent run → Agent-History, CVE → CVEs, log alert → Logs, container event → that container); entries without a target stay non-clickable. See [`../../Services/Notifications/InAppNotificationStore.cs`](../../Services/Notifications/InAppNotificationStore.cs). |
 
 ## Related
 
