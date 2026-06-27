@@ -124,6 +124,7 @@ builder.Services.AddDbContext<MetricsDbContext>(options =>
     options.UseSqlite("Data Source=/app/data/metrics.db"),
     ServiceLifetime.Transient);
 builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
+builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
 builder.Services.AddSingleton<ServerWatch.Services.Metrics.IMetricsQueryService, MetricsQueryService>();
 // Metrics source seam: collector reads through IMetricsSource so a server can be switched to a
 // push/scrape TSDB (VictoriaMetrics) instead of SSH/Docker. Docker is the default + fallback.

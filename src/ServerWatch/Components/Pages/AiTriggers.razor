@@ -4,9 +4,11 @@
 @using ServerWatch.Services.Agent.Guardrails
 @using ServerWatch.Services.Agent.Triggers
 @using ServerWatch.Services.Auth
+@using ServerWatch.Services.LogMonitor
 @attribute [Authorize]
 @inject IAiTriggerStore Store
 @inject IGuardrailStore GuardrailStore
+@inject ILogMonitorService LogMonitor
 @inject ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
 
@@ -29,11 +31,31 @@
     }
     else
     {
-        <div style="display:flex; gap:8px;" class="mb-4">
+        <div style="display:flex; gap:8px;" class="mb-3">
             <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Outlined" OnClick="AddTrigger">Neuer Trigger</MudButton>
             <MudSpacer />
             <MudButton StartIcon="@Icons.Material.Filled.Save" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAll">Speichern</MudButton>
         </div>
+
+        <MudPaper Class="pa-3 mb-4" Style="background: var(--sw-glass);">
+            <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);" Class="mb-2">
+                Schnell-Vorlagen (fügen einen vorausgefüllten Trigger hinzu — danach „Speichern"):
+            </MudText>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.BugReport"
+                           OnClick="AddErrorLogSetup">Fehler-Logs → Agent</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.HealthAndSafety"
+                           OnClick="@(() => AddTemplate("Unhealthy → analysieren/neustarten", new[]{"unhealthy","restart_loop"}, "Prüfe den betroffenen Container (Status, jüngste Logs), bestimme die Ursache und starte ihn neu, falls es ein transienter Fehler ist. Sonst fasse die Ursache zusammen und empfiehl Maßnahmen."))">Unhealthy/Crash-Loop</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Memory"
+                           OnClick="@(() => AddTemplate("Hohe CPU untersuchen", new[]{"high_cpu"}, "Untersuche die anhaltend hohe CPU-Last des Containers: prüfe Logs und Metriken, identifiziere die wahrscheinliche Ursache und fasse sie mit einer Handlungsempfehlung zusammen."))">Hohe CPU</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Storage"
+                           OnClick="@(() => AddTemplate("Hohe RAM untersuchen", new[]{"high_memory"}, "Untersuche die anhaltend hohe RAM-Nutzung des Containers (mögliches Leck?), prüfe Logs/Metriken und fasse Ursache + Empfehlung zusammen."))">Hohe RAM</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Insights"
+                           OnClick="@(() => AddTemplate("Metrik-Anomalie", new[]{"metric_anomaly"}, "Es wurde ein Ausreißer in den Metriken erkannt. Untersuche den Container und das Umfeld, bewerte ob es kritisch ist und fasse das Ergebnis zusammen."))">Anomalie</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Security"
+                           OnClick="@(() => AddTemplate("Neue CVE → Bericht", new[]{"cve_finding"}, "Bewerte die neu gefundene Schwachstelle: Schweregrad, betroffene Komponente, ob ein Update verfügbar ist, und empfiehl konkrete Schritte."))">Neue CVE</MudButton>
+            </div>
+        </MudPaper>
 
         @if (_triggers.Count == 0)
         {
@@ -114,6 +136,47 @@
             Name = $"Trigger {_triggers.Count + 1}",
             GuardrailPreset = _presets.FirstOrDefault() ?? "Standard",
         });
+    }
+
+    private void AddTemplate(string name, string[] events, string prompt)
+    {
+        _triggers.Add(new AiTrigger
+        {
+            Name = name,
+            EventTypes = events.ToList(),
+            Prompt = prompt,
+            GuardrailPreset = _presets.FirstOrDefault() ?? "Standard",
+        });
+        Snackbar.Add($"Vorlage '{name}' hinzugefügt — nicht vergessen zu speichern.", Severity.Info);
+    }
+
+    /// <summary>Creates the matching log-alert rule (so log_alert events actually fire) plus the trigger.</summary>
+    private async Task AddErrorLogSetup()
+    {
+        const string ruleName = "Fehler/Errors (AI-Trigger)";
+        try
+        {
+            var rules = await LogMonitor.GetRulesAsync();
+            if (!rules.Any(r => r.Name == ruleName))
+            {
+                await LogMonitor.CreateRuleAsync(new LogAlertRuleEntity
+                {
+                    Name = ruleName,
+                    Pattern = @"(?i)(error|exception|fatal|panic|traceback)",
+                    IsRegex = true,
+                    Severity = "error",
+                    Enabled = true,
+                });
+                Snackbar.Add("Log-Alert-Regel 'Fehler/Errors' angelegt — feuert bei Fehlern in Container-Logs.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Log-Regel konnte nicht angelegt werden: {ex.Message}", Severity.Warning);
+        }
+
+        AddTemplate("Fehler-Logs → Agent", new[] { "log_alert" },
+            "Analysiere die gemeldete Fehlermeldung aus dem Container-Log: rufe die jüngsten Logs ab, bestimme die wahrscheinliche Ursache und behebe sie wenn möglich (im Rahmen der Guardrails). Sonst fasse die Ursache zusammen und empfiehl konkrete Maßnahmen.");
     }
 
     private async Task SaveAll()

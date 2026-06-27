@@ -38,6 +38,9 @@ public static class AiTriggerEvents
         ("cve_finding",   "Neue CVE gefunden"),
         ("log_alert",     "Log-Alert / Fehler im Log"),
         ("auto_update_failed", "Auto-Update fehlgeschlagen"),
+        ("high_cpu",      "Hohe CPU-Last (Schwellwert)"),
+        ("high_memory",   "Hohe RAM-Last (Schwellwert)"),
+        ("metric_anomaly", "Metrik-Ausreißer (Anomalie)"),
     };
 
     public static string Label(string type) =>
