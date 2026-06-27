@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject ServerWatch.Services.Server.IHostCommandExecutor Executor
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
 
@@ -111,6 +112,13 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
         <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Generierte docker-compose.yml</MudText>
         <MudSpacer />
+        <MudSelect T="string" @bind-Value="_serverId" Label="Ziel-Server" Variant="Variant.Outlined"
+                   Style="max-width: 200px;">
+            @foreach (var srv in _servers)
+            {
+                <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
+            }
+        </MudSelect>
         <MudTextField @bind-Value="_projectName" Label="Projektname" Variant="Variant.Outlined"
                       Style="max-width: 200px;" Placeholder="my-app" />
         @if (_role >= AppRole.Operator)
@@ -133,6 +141,8 @@
     private string _projectName = "";
     private bool _deploying;
     private AppRole _role = AppRole.Viewer;
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private string _serverId = "local";
 
     private bool Require(AppRole required)
     {
@@ -147,6 +157,8 @@
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _servers = ServerConfigService.GetEnabledServers();
+        _serverId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
     }
 
     private void AddService()
@@ -232,7 +244,7 @@
             var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(yaml));
             var dir = $"/opt/deployments/{_projectName}";
 
-            var result = await Executor.ExecuteAsync("local",
+            var result = await Executor.ExecuteAsync(_serverId,
                 $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
                 TimeSpan.FromMinutes(5));
 

@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject ServerWatch.Services.Scheduler.SchedulerService Scheduler
 @inject IDockerService DockerService
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
@@ -171,6 +172,12 @@ else
         <TitleContent>Task erstellen</TitleContent>
         <DialogContent>
             <MudTextField @bind-Value="_formName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect T="string" Value="_formServerId" ValueChanged="OnTaskServerChanged" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var srv in _servers)
+                {
+                    <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
+                }
+            </MudSelect>
             <MudSelect T="ServerWatch.Models.ScheduledTaskType" @bind-Value="_formType" Label="Typ" Variant="Variant.Outlined" Class="mb-3">
                 <MudSelectItem Value="ServerWatch.Models.ScheduledTaskType.ContainerRestart">Container-Neustart</MudSelectItem>
                 <MudSelectItem Value="ServerWatch.Models.ScheduledTaskType.DbBackup">Datenbank-Backup</MudSelectItem>
@@ -235,6 +242,8 @@ else
     private string _formCron = "0 2 * * *";
     private string _formCommand = "";
     private int _formMaxBackups = 7;
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private string _formServerId = "local";
     private AppRole _role = AppRole.Viewer;
 
     private bool Require(AppRole required)
@@ -250,6 +259,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _servers = ServerConfigService.GetEnabledServers();
         await LoadData();
     }
 
@@ -262,8 +272,22 @@ else
     private async Task ShowCreateDialog()
     {
         _formName = ""; _formTargetId = ""; _formCron = "0 2 * * *"; _formCommand = ""; _formMaxBackups = 7;
-        _containers = (await DockerService.ListAllContainersAsync()).ToList();
+        _formServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
+        await LoadContainersForServer();
         _showDialog = true;
+    }
+
+    private async Task OnTaskServerChanged(string serverId)
+    {
+        _formServerId = serverId;
+        _formTargetId = "";
+        await LoadContainersForServer();
+    }
+
+    private async Task LoadContainersForServer()
+    {
+        var sid = _formServerId == "local" ? null : _formServerId;
+        _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
     }
 
     private async Task CreateTask()
@@ -282,6 +306,7 @@ else
                 TaskType = _formType,
                 TargetId = _formTargetId,
                 TargetName = _formTargetId,
+                ServerId = _formServerId,
                 Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null
             });
             Snackbar.Add($"Task '{_formName}' erstellt.", Severity.Success);

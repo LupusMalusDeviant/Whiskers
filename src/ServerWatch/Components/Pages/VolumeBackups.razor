@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject ServerWatch.Services.Backup.IVolumeBackupService BackupService
 @inject IDockerService DockerService
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
@@ -69,6 +70,13 @@ else
 <MudDialog Visible="_showBackupDialog" VisibleChanged="@(v => _showBackupDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>Volume-Backup erstellen</TitleContent>
         <DialogContent>
+            <MudSelect T="string" Value="_backupServerId" ValueChanged="OnBackupServerChanged" Label="Ziel-Server"
+                       Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var srv in _servers)
+                {
+                    <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
+                }
+            </MudSelect>
             @if (_volumes.Any())
             {
                 <MudSelect @bind-Value="_selectedVolume" Label="Volume" Variant="Variant.Outlined" Class="mb-3">
@@ -107,6 +115,8 @@ else
     private string _selectedVolume = "";
     private string _backupContainerName = "";
     private string _backupNotes = "";
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private string _backupServerId = "local";
     private AppRole _role = AppRole.Viewer;
 
     private bool Require(AppRole required)
@@ -129,6 +139,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _servers = ServerConfigService.GetEnabledServers();
+        _backupServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
         await LoadBackups();
     }
 
@@ -151,15 +163,29 @@ else
         _selectedVolume = "";
         _backupContainerName = "";
         _backupNotes = "";
+        _backupServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
         _showBackupDialog = true;
+        await LoadVolumesForServer();
+    }
+
+    private async Task OnBackupServerChanged(string serverId)
+    {
+        _backupServerId = serverId;
+        _selectedVolume = "";
+        await LoadVolumesForServer();
+    }
+
+    private async Task LoadVolumesForServer()
+    {
         _volumeLabels.Clear();
+        var sid = _backupServerId == "local" ? null : _backupServerId;
 
         try
         {
-            _volumes = await BackupService.ListVolumesAsync();
+            _volumes = await BackupService.ListVolumesAsync(sid);
 
             // Map volumes to containers for readable labels
-            var containers = await DockerService.ListContainersAsync();
+            var containers = await DockerService.ListContainersAsync(serverId: sid);
             foreach (var c in containers)
             {
                 // Docker labels contain mount info; we check via container name matching volume prefix
@@ -185,7 +211,7 @@ else
         try
         {
             var backup = await BackupService.BackupVolumeAsync(
-                _selectedVolume, _backupContainerName, null, _backupNotes);
+                _selectedVolume, _backupContainerName, _backupServerId, _backupNotes);
             Snackbar.Add($"Backup erstellt: {backup.FileName} ({FormatBytes(backup.SizeBytes)})", Severity.Success);
             _showBackupDialog = false;
             await LoadBackups();

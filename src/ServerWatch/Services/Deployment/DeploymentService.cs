@@ -14,13 +14,13 @@ public class DeploymentService : IDeploymentService
         _logger = logger;
     }
 
-    public async Task<string> DeployFromFormAsync(DeploymentRequest request, IProgress<string>? progress = null)
+    public async Task<string> DeployFromFormAsync(DeploymentRequest request, IProgress<string>? progress = null, string? serverId = null)
     {
         progress?.Report($"Pulling image {request.Image}...");
-        await _docker.PullImageAsync(request.Image, progress);
+        await _docker.PullImageAsync(request.Image, progress, serverId);
 
         progress?.Report("Creating container...");
-        var containerId = await _docker.CreateContainerAsync(request);
+        var containerId = await _docker.CreateContainerAsync(request, serverId);
 
         progress?.Report($"Container {containerId[..12]} started successfully");
         _logger.LogInformation("Deployed container {ContainerId} from image {Image}",
@@ -29,7 +29,7 @@ public class DeploymentService : IDeploymentService
         return containerId;
     }
 
-    public async Task<IList<string>> DeployFromComposeAsync(string yamlContent, IProgress<string>? progress = null)
+    public async Task<IList<string>> DeployFromComposeAsync(string yamlContent, IProgress<string>? progress = null, string? serverId = null)
     {
         var validation = ValidateCompose(yamlContent);
         if (!validation.IsValid)
@@ -42,7 +42,7 @@ public class DeploymentService : IDeploymentService
         foreach (var service in validation.Services)
         {
             progress?.Report($"Deploying service: {service.ContainerName ?? service.Image}");
-            var id = await DeployFromFormAsync(service, progress);
+            var id = await DeployFromFormAsync(service, progress, serverId);
             containerIds.Add(id);
         }
 

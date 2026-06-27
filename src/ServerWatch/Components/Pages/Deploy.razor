@@ -1,6 +1,7 @@
 @page "/deploy"
 @attribute [Authorize]
 @inject IDeploymentService DeploymentService
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
@@ -18,6 +19,14 @@
         </div>
     </MudStack>
 </div>
+
+@* Server Selection (gilt für beide Tabs) *@
+<MudSelect T="string" @bind-Value="_serverId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-4" Style="max-width: 320px;">
+    @foreach (var srv in _servers)
+    {
+        <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
+    }
+</MudSelect>
 
 <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
     @* Tab 1: Form Deploy *@
@@ -184,6 +193,8 @@
     private bool _deploying;
     private string _deployProgress = string.Empty;
     private AppRole _role = AppRole.Viewer;
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private string _serverId = "local";
 
     private bool Require(AppRole required)
     {
@@ -198,6 +209,8 @@
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _servers = ServerConfigService.GetEnabledServers();
+        _serverId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
     }
 
     private async Task DeployFromForm()
@@ -226,7 +239,7 @@
                 _deployProgress = msg;
                 InvokeAsync(StateHasChanged);
             });
-            var id = await DeploymentService.DeployFromFormAsync(_formRequest, progress);
+            var id = await DeploymentService.DeployFromFormAsync(_formRequest, progress, _serverId);
             Snackbar.Add($"Container bereitgestellt: {id[..12]}", Severity.Success);
             _deployProgress = $"Erfolgreich! Container-ID: {id[..12]}";
         }
@@ -258,7 +271,7 @@
                 _deployProgress = msg;
                 InvokeAsync(StateHasChanged);
             });
-            var ids = await DeploymentService.DeployFromComposeAsync(_composeYaml, progress);
+            var ids = await DeploymentService.DeployFromComposeAsync(_composeYaml, progress, _serverId);
             Snackbar.Add($"{ids.Count} Container bereitgestellt", Severity.Success);
             _deployProgress = $"Erfolgreich! {ids.Count} Container bereitgestellt";
         }

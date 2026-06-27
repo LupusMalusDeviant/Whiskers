@@ -4,8 +4,8 @@ namespace ServerWatch.Services.Deployment;
 
 public interface IDeploymentService
 {
-    Task<string> DeployFromFormAsync(DeploymentRequest request, IProgress<string>? progress = null);
-    Task<IList<string>> DeployFromComposeAsync(string yamlContent, IProgress<string>? progress = null);
+    Task<string> DeployFromFormAsync(DeploymentRequest request, IProgress<string>? progress = null, string? serverId = null);
+    Task<IList<string>> DeployFromComposeAsync(string yamlContent, IProgress<string>? progress = null, string? serverId = null);
     DeploymentValidationResult ValidateCompose(string yamlContent);
 }
 

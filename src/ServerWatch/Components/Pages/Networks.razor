@@ -1,6 +1,7 @@
 @page "/networks"
 @attribute [Authorize]
 @inject IDockerService DockerService
+@inject ServerWatch.Services.ServerConfig.ServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ServerWatch.Services.Auth.CurrentUserService CurrentUser
@@ -94,6 +95,12 @@ else
         <TitleContent>Netzwerk erstellen</TitleContent>
         <DialogContent>
             <MudTextField @bind-Value="_newNetworkName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect T="string" @bind-Value="_newNetworkServerId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var srv in _servers)
+                {
+                    <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
+                }
+            </MudSelect>
             <MudSelect @bind-Value="_newNetworkDriver" Label="Treiber" Variant="Variant.Outlined">
                 <MudSelectItem Value="@("bridge")">bridge</MudSelectItem>
                 <MudSelectItem Value="@("overlay")">overlay</MudSelectItem>
@@ -113,6 +120,8 @@ else
     private bool _showCreateDialog;
     private string _newNetworkName = "";
     private string _newNetworkDriver = "bridge";
+    private List<ServerWatch.Models.ServerConfig> _servers = new();
+    private string _newNetworkServerId = "local";
     private AppRole _role = AppRole.Viewer;
 
     private bool Require(AppRole required)
@@ -128,6 +137,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _servers = ServerConfigService.GetEnabledServers();
         await LoadNetworks();
     }
 
@@ -149,6 +159,7 @@ else
     {
         _newNetworkName = "";
         _newNetworkDriver = "bridge";
+        _newNetworkServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
         _showCreateDialog = true;
     }
 
@@ -157,7 +168,8 @@ else
         if (!Require(AppRole.Admin)) return;
         try
         {
-            await DockerService.CreateNetworkAsync(_newNetworkName, _newNetworkDriver);
+            await DockerService.CreateNetworkAsync(_newNetworkName, _newNetworkDriver,
+                _newNetworkServerId == "local" ? null : _newNetworkServerId);
             Snackbar.Add($"Netzwerk '{_newNetworkName}' erstellt.", Severity.Success);
             _showCreateDialog = false;
             await LoadNetworks();
