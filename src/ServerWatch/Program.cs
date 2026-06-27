@@ -31,6 +31,9 @@ var builder = WebApplication.CreateBuilder(args);
 // UI-writable agent provider settings (overrides only Agent:* keys; reloadOnChange → IOptionsMonitor
 // picks up UI changes without a restart). As the last source, so the UI takes precedence over env/appsettings.
 builder.Configuration.AddJsonFile("/app/data/agent-settings.json", optional: true, reloadOnChange: true);
+// UI-writable settings for all other sections (Mattermost, Matrix, HealthMonitor, CveMonitor,
+// ImageUpdate, MetricAlert, …). Last layer → overrides env; reloadOnChange → applied live.
+builder.Configuration.AddJsonFile("/app/data/app-settings.json", optional: true, reloadOnChange: true);
 
 // Path base for reverse proxy subpath
 var configuredPathBase = builder.Configuration["PathBase"] ?? "";
@@ -125,6 +128,7 @@ builder.Services.AddDbContext<MetricsDbContext>(options =>
     ServiceLifetime.Transient);
 builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
 builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
+builder.Services.AddSingleton<ServerWatch.Services.Persistence.IAppSettingsStore, ServerWatch.Services.Persistence.AppSettingsStore>();
 builder.Services.AddSingleton<ServerWatch.Services.Metrics.IMetricsQueryService, MetricsQueryService>();
 // Metrics source seam: collector reads through IMetricsSource so a server can be switched to a
 // push/scrape TSDB (VictoriaMetrics) instead of SSH/Docker. Docker is the default + fallback.

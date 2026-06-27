@@ -1,4 +1,5 @@
 @page "/settings"
+@using ServerWatch.Configuration
 @attribute [Authorize]
 @inject IOptionsMonitor<ServerWatch.Configuration.MattermostSettings> MattermostOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.HealthMonitorSettings> HealthOptions
@@ -17,6 +18,9 @@
 @inject IOptionsMonitor<ServerWatch.Configuration.CveMonitorSettings> CveSettings
 @inject ServerWatch.Services.Cve.ICveFindingsStore CveStore
 @inject ServerWatch.Services.Cve.ICveMonitorService CveMonitor
+@inject IOptionsMonitor<ServerWatch.Configuration.MetricAlertSettings> MetricAlertOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.ImageUpdateSettings> ImageUpdateOptions
+@inject ServerWatch.Services.Persistence.IAppSettingsStore AppSettings
 
 <PageTitle>Einstellungen - ServerWatch</PageTitle>
 
@@ -41,91 +45,73 @@
 else
 {
 <MudExpansionPanels MultiExpansion="true">
-    @* Mattermost *@
-    <MudExpansionPanel Text="Mattermost-Benachrichtigungen" Icon="@Icons.Material.Filled.Notifications"
-                       Expanded="true">
+    @* Notifications (Mattermost + Matrix) *@
+    <MudExpansionPanel Text="Benachrichtigungen" Icon="@Icons.Material.Filled.Notifications" Expanded="true">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Mattermost</MudText>
         <MudGrid>
-            <MudItem xs="12">
-                <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert"
-                           Value="@MattermostOptions.CurrentValue.Enabled" ReadOnly="true" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudTextField Value="@MattermostOptions.CurrentValue.WebhookUrl" Label="Webhook-URL"
-                              Variant="Variant.Outlined" ReadOnly="true"
-                              HelperText="Über Umgebungsvariable setzen: Mattermost__WebhookUrl" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@MattermostOptions.CurrentValue.Channel" Label="Kanal"
-                              Variant="Variant.Outlined" ReadOnly="true"
-                              HelperText="Über Umgebungsvariable setzen: Mattermost__Channel" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@MattermostOptions.CurrentValue.BotUsername" Label="Bot-Benutzername"
-                              Variant="Variant.Outlined" ReadOnly="true" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="TestMattermost"
-                           StartIcon="@Icons.Material.Filled.Send" Disabled="@(!MattermostOptions.CurrentValue.Enabled)">
-                    Testbenachrichtigung senden
-                </MudButton>
-            </MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mmEnabled" Color="Color.Primary" Label="Aktiviert" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_mmWebhook" Label="Webhook-URL" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmChannel" Label="Kanal" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmBot" Label="Bot-Benutzername" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mmThrottle" Label="Throttle (Min)" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
-    </MudExpansionPanel>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="TestMattermost" StartIcon="@Icons.Material.Filled.Send"
+                   Disabled="@(!_mmEnabled)" Class="mt-1">Testbenachrichtigung</MudButton>
 
-    @* Matrix *@
-    <MudExpansionPanel Text="Matrix-Benachrichtigungen" Icon="@Icons.Material.Filled.Chat">
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Matrix</MudText>
         <MudGrid>
-            <MudItem xs="12">
-                <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert"
-                           Value="@MatrixOptions.CurrentValue.Enabled" ReadOnly="true" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudTextField Value="@MatrixOptions.CurrentValue.HomeserverUrl" Label="Homeserver-URL"
-                              Variant="Variant.Outlined" ReadOnly="true"
-                              HelperText="Über Umgebungsvariable setzen: Matrix__HomeserverUrl" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@MatrixOptions.CurrentValue.RoomId" Label="Raum-ID"
-                              Variant="Variant.Outlined" ReadOnly="true"
-                              HelperText="Über Umgebungsvariable setzen: Matrix__RoomId (z.B. !abc123:matrix.org)" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@(string.IsNullOrEmpty(MatrixOptions.CurrentValue.AccessToken) ? "" : "••••••••")"
-                              Label="Access Token" Variant="Variant.Outlined" ReadOnly="true"
-                              HelperText="Über Umgebungsvariable setzen: Matrix__AccessToken" />
-            </MudItem>
-            <MudItem xs="12">
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="TestMatrix"
-                           StartIcon="@Icons.Material.Filled.Send" Disabled="@(!MatrixOptions.CurrentValue.Enabled)">
-                    Testbenachrichtigung senden
-                </MudButton>
-            </MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mxEnabled" Color="Color.Primary" Label="Aktiviert" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_mxHomeserver" Label="Homeserver-URL" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mxRoom" Label="Raum-ID" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="!abc123:matrix.org" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mxToken" Label="Access Token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mxThrottle" Label="Throttle (Min)" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="TestMatrix" StartIcon="@Icons.Material.Filled.Send"
+                   Disabled="@(!_mxEnabled)" Class="mt-1">Testbenachrichtigung</MudButton>
+
+        <MudDivider Class="my-3" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveNotifications">Benachrichtigungen speichern</MudButton>
     </MudExpansionPanel>
 
     @* Health Monitoring *@
     <MudExpansionPanel Text="Zustandsüberwachung" Icon="@Icons.Material.Filled.MonitorHeart">
         <MudGrid>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@HealthOptions.CurrentValue.CheckIntervalSeconds" Label="Prüfintervall (Sekunden)"
-                              Variant="Variant.Outlined" ReadOnly="true" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@HealthOptions.CurrentValue.HistoryRetentionHours" Label="Verlaufsaufbewahrung (Stunden)"
-                              Variant="Variant.Outlined" ReadOnly="true" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@HealthOptions.CurrentValue.RestartLoopThreshold" Label="Neustart-Schleifenschwellwert"
-                              Variant="Variant.Outlined" ReadOnly="true" />
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudTextField Value="@HealthOptions.CurrentValue.RestartLoopWindowMinutes" Label="Neustart-Schleifenfenster (Minuten)"
-                              Variant="Variant.Outlined" ReadOnly="true" />
-            </MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hInterval" Label="Prüfintervall (Sekunden)" Min="5" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hRetention" Label="Verlaufsaufbewahrung (Stunden)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopThreshold" Label="Neustart-Schleifenschwellwert" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopWindow" Label="Neustart-Schleifenfenster (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
-        <MudAlert Severity="Severity.Info" Class="mt-2">
-            Einstellungen werden über Umgebungsvariablen oder appsettings.json konfiguriert. Änderungen erfordern einen Container-Neustart.
-        </MudAlert>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveHealth" Class="mt-2">Speichern</MudButton>
+    </MudExpansionPanel>
+
+    @* Metric alerts *@
+    <MudExpansionPanel Text="Metrik-Alerts (für AI-Trigger)" Icon="@Icons.Material.Filled.Insights">
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch @bind-Value="_maEnabled" Color="Color.Primary" Label="Metrik-Alerts aktiv (emittiert high_cpu / high_memory / metric_anomaly)" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCpu" Label="CPU-Schwelle (%)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maMem" Label="RAM-Schwelle (%)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maSustained" Label="Anhaltend (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCooldown" Label="Cooldown (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        </MudGrid>
+        <MudDivider Class="my-2" />
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch @bind-Value="_maAnom" Color="Color.Secondary" Label="Ausreißererkennung (Anomalie) aktiv" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomWindow" Label="Baseline-Fenster (Samples)" Min="5" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomSigma" Label="Sigma (Ausreißer-Schwelle)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomFloor" Label="Mindestwert (%) für Anomalie" Min="0" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
+        </MudGrid>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMetricAlert" Class="mt-2">Speichern</MudButton>
+    </MudExpansionPanel>
+
+    @* Image / Auto-Update *@
+    <MudExpansionPanel Text="Image-Updates" Icon="@Icons.Material.Filled.SystemUpdate">
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch @bind-Value="_iuEnabled" Color="Color.Primary" Label="Image-Update-Prüfung aktiv" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_iuInterval" Label="Prüfintervall (Stunden)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudSwitch @bind-Value="_iuNotify" Color="Color.Primary" Label="Bei verfügbarem Update benachrichtigen" /></MudItem>
+        </MudGrid>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveImageUpdate" Class="mt-2">Speichern</MudButton>
     </MudExpansionPanel>
 
     @* Terminal *@
@@ -166,28 +152,24 @@ else
                     </MudButton>
                 </MudStack>
             </MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveEnabled" Color="Color.Primary" Label="Aktiviert" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanContainers" Color="Color.Primary" Label="Container scannen" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanOs" Color="Color.Primary" Label="Host-OS scannen" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveInterval" Label="Prüfintervall (Stunden)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveMaxScans" Label="Max. parallele Scans" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_cveTrivy" Label="Trivy-Image" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_cveSeverity" Label="Ab Schweregrad benachrichtigen" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("Critical")">Critical</MudSelectItem>
+                    <MudSelectItem Value="@("High")">High</MudSelectItem>
+                    <MudSelectItem Value="@("Medium")">Medium</MudSelectItem>
+                    <MudSelectItem Value="@("Low")">Low</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveNotify" Color="Color.Primary" Label="Bei Fund benachrichtigen" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveOsIds" Color="Color.Primary" Label="OS-CVE-IDs auflösen" /></MudItem>
             <MudItem xs="12">
-                <MudAlert Severity="MudBlazor.Severity.Info" Dense="true">
-                    Konfiguration aus <code>appsettings.json</code> Sektion <code>CveMonitor</code> — Änderungen werden automatisch übernommen (kein Neustart nötig).
-                </MudAlert>
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudList T="string" Dense="true">
-                    <MudListItem T="string">Enabled: <strong>@cveCfg.Enabled</strong></MudListItem>
-                    <MudListItem T="string">CheckIntervalHours: <strong>@cveCfg.CheckIntervalHours</strong></MudListItem>
-                    <MudListItem T="string">ScanContainers: <strong>@cveCfg.ScanContainers</strong></MudListItem>
-                    <MudListItem T="string">ScanOs: <strong>@cveCfg.ScanOs</strong></MudListItem>
-                    <MudListItem T="string">EnableOsCveIds: <strong>@cveCfg.EnableOsCveIds</strong></MudListItem>
-                </MudList>
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <MudList T="string" Dense="true">
-                    <MudListItem T="string">TrivyImage: <code>@cveCfg.TrivyImage</code></MudListItem>
-                    <MudListItem T="string">NotifyOnFinding: <strong>@cveCfg.NotifyOnFinding</strong></MudListItem>
-                    <MudListItem T="string">NotifySeverity: <strong>@cveCfg.NotifySeverity</strong></MudListItem>
-                    <MudListItem T="string">MaxConcurrentScans: <strong>@cveCfg.MaxConcurrentScans</strong></MudListItem>
-                    <MudListItem T="string">OsChangelogTimeoutSeconds: <strong>@cveCfg.OsChangelogTimeoutSeconds</strong></MudListItem>
-                </MudList>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveCve">Speichern</MudButton>
             </MudItem>
         </MudGrid>
     </MudExpansionPanel>
@@ -496,6 +478,16 @@ else
     private bool _savingMcp;
     private HashSet<string> _revealedKeys = new();
 
+    // Editable settings (saved live to app-settings.json, no restart)
+    private bool _mmEnabled; private string _mmWebhook = ""; private string _mmChannel = ""; private string _mmBot = ""; private int _mmThrottle = 5;
+    private bool _mxEnabled; private string _mxHomeserver = ""; private string _mxRoom = ""; private string _mxToken = ""; private int _mxThrottle = 5;
+    private int _hInterval = 30; private int _hRetention = 24; private int _hLoopThreshold = 5; private int _hLoopWindow = 10;
+    private bool _maEnabled = true; private double _maCpu = 90; private double _maMem = 90; private int _maSustained = 3; private int _maCooldown = 15;
+    private bool _maAnom; private int _maAnomWindow = 20; private double _maAnomSigma = 3; private double _maAnomFloor = 40;
+    private bool _cveEnabled; private int _cveInterval = 12; private bool _cveScanContainers = true; private bool _cveScanOs = true; private bool _cveOsIds = true;
+    private string _cveTrivy = "aquasec/trivy:latest"; private bool _cveNotify = true; private string _cveSeverity = "High"; private int _cveMaxScans = 3;
+    private bool _iuEnabled = true; private int _iuInterval = 6; private bool _iuNotify = true;
+
     protected override async Task OnInitializedAsync()
     {
         // Settings holds whitelist, roles, vault secrets and MCP keys — Admin only.
@@ -521,6 +513,97 @@ else
 
         // Vault
         LoadVault();
+
+        // Editable settings — load current effective values.
+        var mm = MattermostOptions.CurrentValue;
+        _mmEnabled = mm.Enabled; _mmWebhook = mm.WebhookUrl; _mmChannel = mm.Channel; _mmBot = mm.BotUsername; _mmThrottle = mm.ThrottleMinutes;
+        var mx = MatrixOptions.CurrentValue;
+        _mxEnabled = mx.Enabled; _mxHomeserver = mx.HomeserverUrl; _mxRoom = mx.RoomId; _mxToken = mx.AccessToken; _mxThrottle = mx.ThrottleMinutes;
+        var h = HealthOptions.CurrentValue;
+        _hInterval = h.CheckIntervalSeconds; _hRetention = h.HistoryRetentionHours; _hLoopThreshold = h.RestartLoopThreshold; _hLoopWindow = h.RestartLoopWindowMinutes;
+        var ma = MetricAlertOptions.CurrentValue;
+        _maEnabled = ma.Enabled; _maCpu = ma.CpuPercent; _maMem = ma.MemoryPercent; _maSustained = ma.SustainedMinutes; _maCooldown = ma.CooldownMinutes;
+        _maAnom = ma.AnomalyEnabled; _maAnomWindow = ma.AnomalyWindow; _maAnomSigma = ma.AnomalySigma; _maAnomFloor = ma.AnomalyFloorPercent;
+        var cv = CveSettings.CurrentValue;
+        _cveEnabled = cv.Enabled; _cveInterval = cv.CheckIntervalHours; _cveScanContainers = cv.ScanContainers; _cveScanOs = cv.ScanOs; _cveOsIds = cv.EnableOsCveIds;
+        _cveTrivy = cv.TrivyImage; _cveNotify = cv.NotifyOnFinding; _cveSeverity = cv.NotifySeverity; _cveMaxScans = cv.MaxConcurrentScans;
+        var iu = ImageUpdateOptions.CurrentValue;
+        _iuEnabled = iu.Enabled; _iuInterval = iu.CheckIntervalHours; _iuNotify = iu.NotifyOnUpdate;
+    }
+
+    private async Task SaveNotifications()
+    {
+        var mmCur = MattermostOptions.CurrentValue;
+        await AppSettings.SaveSectionAsync("Mattermost", new MattermostSettings
+        {
+            Enabled = _mmEnabled, WebhookUrl = _mmWebhook?.Trim() ?? "", Channel = _mmChannel?.Trim() ?? "",
+            BotUsername = string.IsNullOrWhiteSpace(_mmBot) ? "ServerWatch" : _mmBot.Trim(),
+            BotIconUrl = mmCur.BotIconUrl, ThrottleMinutes = _mmThrottle,
+        });
+        await AppSettings.SaveSectionAsync("Matrix", new MatrixSettings
+        {
+            Enabled = _mxEnabled, HomeserverUrl = _mxHomeserver?.Trim() ?? "", RoomId = _mxRoom?.Trim() ?? "",
+            AccessToken = _mxToken ?? "", ThrottleMinutes = _mxThrottle,
+        });
+        await Audit("notifications");
+        Snackbar.Add("Benachrichtigungen gespeichert (gelten sofort).", Severity.Success);
+    }
+
+    private async Task SaveHealth()
+    {
+        await AppSettings.SaveSectionAsync("HealthMonitor", new HealthMonitorSettings
+        {
+            CheckIntervalSeconds = _hInterval, HistoryRetentionHours = _hRetention,
+            RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
+        });
+        await Audit("healthmonitor");
+        Snackbar.Add("Zustandsüberwachung gespeichert.", Severity.Success);
+    }
+
+    private async Task SaveMetricAlert()
+    {
+        await AppSettings.SaveSectionAsync("MetricAlert", new MetricAlertSettings
+        {
+            Enabled = _maEnabled, CpuPercent = _maCpu, MemoryPercent = _maMem,
+            SustainedMinutes = _maSustained, CooldownMinutes = _maCooldown,
+            AnomalyEnabled = _maAnom, AnomalyWindow = _maAnomWindow, AnomalySigma = _maAnomSigma, AnomalyFloorPercent = _maAnomFloor,
+        });
+        await Audit("metricalert");
+        Snackbar.Add("Metrik-Alerts gespeichert.", Severity.Success);
+    }
+
+    private async Task SaveCve()
+    {
+        var cur = CveSettings.CurrentValue;
+        await AppSettings.SaveSectionAsync("CveMonitor", new CveMonitorSettings
+        {
+            Enabled = _cveEnabled, CheckIntervalHours = _cveInterval, ScanContainers = _cveScanContainers,
+            ScanOs = _cveScanOs, EnableOsCveIds = _cveOsIds, TrivyImage = string.IsNullOrWhiteSpace(_cveTrivy) ? cur.TrivyImage : _cveTrivy.Trim(),
+            NotifyOnFinding = _cveNotify, NotifySeverity = _cveSeverity, MaxConcurrentScans = _cveMaxScans,
+            OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
+        });
+        await Audit("cvemonitor");
+        Snackbar.Add("CVE-Monitor gespeichert.", Severity.Success);
+    }
+
+    private async Task SaveImageUpdate()
+    {
+        await AppSettings.SaveSectionAsync("ImageUpdate", new ImageUpdateSettings
+        {
+            Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
+        });
+        await Audit("imageupdate");
+        Snackbar.Add("Image-Updates gespeichert.", Severity.Success);
+    }
+
+    private async Task Audit(string section)
+    {
+        try
+        {
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "config.save", "config", section, section);
+        }
+        catch { }
     }
 
     private void ToggleKeyVisibility(string keyId)
