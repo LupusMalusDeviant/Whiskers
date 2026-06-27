@@ -64,17 +64,20 @@ Integrierter MCP-Server fuer KI-Agenten (z.B. Claude Code):
 }
 ```
 
-**Verfuegbare Tools:**
-- `list_containers`, `get_container_details`, `get_container_logs`
-- `start_container`, `stop_container`, `restart_container`, `update_container`
-- `deploy_app` — standardisiertes Deployment mit Vorlagen
-- `list_servers`, `get_server_info`, `execute_command`
-- `list_firewall_rules`, `add_firewall_rule`, `remove_firewall_rule`
-- `list_nginx_sites`, `get_nginx_config`, `update_nginx_config`
-- `list_systemd_services`, `manage_systemd_service`
-- `list_ssl_certificates`, `renew_ssl_certificate`
-- `get_health_summary`, `get_container_metrics`, `get_server_metrics`
-- `get_server_logs`, `get_container_log_stream`
+**Tools** (Berechtigungen pro API-Key als Read / Write / Admin durchgesetzt):
+- **Container:** `list_containers`, `get_container_details`, `get_container_logs`, `get_container_metrics`, `get_container_env`, `set_container_env`, `start_container`, `stop_container`, `restart_container`, `update_container`
+- **Server & Host:** `list_servers`, `get_server_info`, `get_server_logs`, `get_server_metrics`, `get_health_summary`, `execute_command` (Admin)
+- **Deployment:** `deploy_app`, `deploy_compose`
+- **Infrastruktur:** Firewall (`list_firewall_rules`, `add_firewall_rule`, `remove_firewall_rule`), Nginx (`list_nginx_sites`, `get_nginx_config`, `update_nginx_config`), systemd (`list_systemd_services`, `manage_systemd_service`), SSL (`list_ssl_certificates`, `renew_ssl_certificate`)
+- **Datenbanken:** `detect_database`, `list_databases`, `list_tables`, `get_schema`, `execute_query`, `backup_database`
+- **Netzwerke:** `list_networks`, `create_network`, `remove_network`, `connect_container_to_network`, `disconnect_container_from_network`
+- **Logs & Alerts:** `search_logs`, `list_log_alerts`, `create_log_alert`
+- **Scheduler:** `list_scheduled_tasks`, `create_scheduled_task`, `delete_scheduled_task`, `run_scheduled_task`
+- **CVEs & Updates:** `get_cve_summary`, `get_server_cves`, `get_container_cves`, `get_update_status`
+- **Cloud (out-of-band, Hetzner/Hostinger):** `list_cloud_servers`, `cloud_status`, `cloud_metrics`, `cloud_power_on`, `cloud_shutdown`, `cloud_reboot`, `cloud_hard_reset`, `cloud_create_snapshot` + Hetzner-Extras (`hetzner_enable_rescue`/`hetzner_disable_rescue`, `hetzner_enable_backups`/`hetzner_disable_backups`, `hetzner_list_snapshots`, `hetzner_delete_snapshot`, `hetzner_change_server_type`)
+- **Coolify:** `list_coolify_applications`, `get_coolify_application`, `get_coolify_application_logs`, `list_coolify_servers`, `list_coolify_databases`, `get_coolify_env_vars`, `deploy_coolify_application`, `start_coolify_application`, `stop_coolify_application`, `restart_coolify_application`, `deploy_coolify_by_tag`, `set_coolify_env_var`
+
+Die vollstaendige, aktuelle Liste samt Berechtigungsstufe steht im Web-UI unter **Settings → MCP**.
 
 ## Tech Stack
 
@@ -82,7 +85,7 @@ Integrierter MCP-Server fuer KI-Agenten (z.B. Claude Code):
 - **Frontend:** Blazor Server + MudBlazor
 - **Docker API:** Docker.DotNet
 - **Datenbank:** SQLite (Entity Framework Core)
-- **Auth:** Google OAuth 2.0 + Email-Whitelist
+- **Auth:** Google OAuth 2.0 oder generisches OIDC + Rollen & Email-Whitelist
 - **Echtzeit:** SignalR
 - **MCP:** ModelContextProtocol.AspNetCore
 

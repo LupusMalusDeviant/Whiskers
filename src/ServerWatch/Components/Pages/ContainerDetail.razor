@@ -190,7 +190,7 @@ else
 
         @* Logs Tab *@
         <MudTabPanel Text="Logs" Icon="@Icons.Material.Filled.Article">
-            <LogViewer ContainerId="@ContainerId" Height="calc(100vh - 320px)" />
+            <LogViewer ContainerId="@ContainerId" ServerId="@_resolvedServerId" Height="calc(100vh - 320px)" />
         </MudTabPanel>
 
         @* Health Tab *@

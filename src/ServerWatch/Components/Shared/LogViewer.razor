@@ -13,6 +13,7 @@
 
 @code {
     [Parameter] public string ContainerId { get; set; } = string.Empty;
+    [Parameter] public string? ServerId { get; set; }
     [Parameter] public string Height { get; set; } = "500px";
 
     private string _logs = "Loading...";
@@ -29,7 +30,7 @@
         if (string.IsNullOrEmpty(ContainerId)) return;
         try
         {
-            _logs = await DockerService.GetContainerLogsAsync(ContainerId, _tailLines);
+            _logs = await DockerService.GetContainerLogsAsync(ContainerId, _tailLines, ServerId);
             if (string.IsNullOrWhiteSpace(_logs))
                 _logs = "(no logs available)";
         }
