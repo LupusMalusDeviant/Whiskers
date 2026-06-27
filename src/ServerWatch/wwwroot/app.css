@@ -104,6 +104,9 @@ html, body {
     color: var(--sw-text-primary);
     -webkit-font-smoothing: antialiased;
     transition: background 0.4s ease, color 0.4s ease;
+    /* Kill the stray horizontal scrollbar — no content should ever scroll the page sideways. */
+    overflow-x: hidden;
+    max-width: 100%;
 }
 
 /* Ambient gradient glow — colours come from the active theme */
