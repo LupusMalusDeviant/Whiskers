@@ -60,7 +60,8 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - **Resilient dashboard**: an unreachable host is marked *nicht erreichbar* instead of blanking the whole view (each server is time-boxed)
 
 ### Security: mesh + mTLS (SSH-key-free)
-- Management over a private WireGuard mesh (Tailscale), no management ports exposed publicly
+- Management over a private WireGuard mesh, no management ports exposed publicly
+- **Pluggable mesh VPN** (Tailscale or NetBird): the VPN bring-up is decoupled from the app image behind a provider seam — run it in-app, on the host, or in a sidecar
 - Docker control over **mutual TLS** (ghostunnel + a verb-whitelisting socket-proxy) instead of SSH tunnels
 - Host shell commands without SSH over the same mTLS channel (a one-shot privileged `nsenter` container)
 - **No stored SSH key** in steady state, the central attack surface is removed
@@ -88,6 +89,7 @@ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Container deployment via a form (image, ports, env, volumes)
 - Docker Compose upload and deployment
 - Standardised app templates for fast deployment
+- **Image search across registries** (Docker Hub, GHCR, and a self-hosted Harbor) with one-click deploy from the App Store
 
 ### AI integration
 - **MCP server** exposing the full toolset to external AI agents (see below)
@@ -148,6 +150,16 @@ location /serverwatch/ {
 
 When serving under a subpath, set `PATH_BASE=/serverwatch` in `.env`.
 
+### Deployment profiles
+
+- **Full** (`docker-compose.yml`, default): privileged + host PID namespace so ServerWatch can manage
+  its **own** host (firewall/Nginx/systemd/`execute_command` via `nsenter`) and run an in-container VPN.
+- **Hardened** (`docker-compose.hardened.yml`): for monitoring **remote** hosts only — non-root, no
+  `privileged`, dropped capabilities, read-only rootfs, and Docker access through a verb-restricted
+  socket-proxy. Trades away local host-shell management for a much smaller attack surface.
+
+See **[docs/container-hardening.md](docs/container-hardening.md)** for the full matrix and trade-offs.
+
 ---
 
 ## Configuration
@@ -162,6 +174,8 @@ ServerWatch is configured entirely through environment variables (`.env`). The m
 | Routing | `PATH_BASE` | Path prefix when reverse-proxied under a subpath |
 | AI chat | `AICHAT_ENABLED`, `AICHAT_API_KEY`, `AICHAT_API_URL`, `AICHAT_MODEL`, `AICHAT_PROVIDER` | Read-only advisor chat |
 | Agent | `AGENT_ENABLED`, `AGENT_PROVIDER`, `AGENT_MODEL`, `AGENT_API_KEY`, ... | Acting agent (see below) |
+| Mesh VPN | `VPN_PROVIDER`, `TAILSCALE_AUTHKEY`, `NETBIRD_SETUP_KEY`, ... | Pluggable VPN bring-up (`none`/`tailscale`/`netbird`); empty = legacy in-container Tailscale |
+| Image search | `HARBOR_URL`, `HARBOR_USERNAME`, `HARBOR_PASSWORD` | Add a self-hosted Harbor marketplace (Docker Hub + GHCR are on by default) |
 | Host binding | `HOST_BIND`, `HOST_PORT` | The container always listens on `8080` internally |
 
 See [.env.example](.env.example) for the full, commented list.
@@ -328,6 +342,8 @@ chat widgets)
 - Finish the zero-SSH-key migration tooling (Tailscale + step-ca + ghostunnel/socket-proxy).
 - **Break-glass / disaster recovery**: short-lived SSH certificates issued via step-ca as an
   auditable emergency-access path when the normal control plane is unavailable.
+- **Distroless/chiseled "remote" image** for the hardened profile (a locked-down container profile
+  and a pluggable Tailscale/NetBird VPN already ship — see [docs/container-hardening.md](docs/container-hardening.md)).
 
 Have a request? Open an issue.
 

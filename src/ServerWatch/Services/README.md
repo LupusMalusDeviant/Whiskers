@@ -31,10 +31,12 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 |---|---|
 | [`Deployment/`](Deployment/) | Container and Docker Compose deployment |
 | [`Templates/`](Templates/) | Standardised app templates for one-click deployment |
+| [`ImageSearch/`](ImageSearch/) | Search container images across multiple registries ("marketplaces": Docker Hub, GHCR, Harbor) |
 | [`ImageUpdate/`](ImageUpdate/) | Detect newer image tags/digests in registries |
 | [`AutoUpdate/`](AutoUpdate/) | Scheduled automatic container updates |
 | [`Backup/`](Backup/) | Volume backup operations |
 | [`Onboarding/`](Onboarding/) | One-click mesh + mTLS server onboarding (Tailscale, step-ca, ghostunnel) |
+| [`Vpn/`](Vpn/) | Pluggable mesh-VPN bring-up (Tailscale / NetBird / none) decoupled from the app image |
 
 ## Integrations
 

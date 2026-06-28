@@ -155,6 +155,24 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerWatch.Servic
 // App templates
 builder.Services.AddSingleton<ServerWatch.Services.Templates.ITemplateService, ServerWatch.Services.Templates.TemplateService>();
 
+// Multi-registry image search ("marketplaces") — Docker Hub + GHCR by default, Harbor opt-in via config.
+builder.Services.Configure<ServerWatch.Services.ImageSearch.ImageSearchSettings>(
+    builder.Configuration.GetSection(ServerWatch.Services.ImageSearch.ImageSearchSettings.SectionName));
+builder.Services.AddSingleton<ServerWatch.Services.ImageSearch.IImageSearchProvider, ServerWatch.Services.ImageSearch.Providers.DockerHubSearchProvider>();
+builder.Services.AddSingleton<ServerWatch.Services.ImageSearch.IImageSearchProvider, ServerWatch.Services.ImageSearch.Providers.GhcrSearchProvider>();
+builder.Services.AddSingleton<ServerWatch.Services.ImageSearch.IImageSearchProvider, ServerWatch.Services.ImageSearch.Providers.HarborSearchProvider>();
+builder.Services.AddSingleton<ServerWatch.Services.ImageSearch.IImageSearchService, ServerWatch.Services.ImageSearch.ImageSearchService>();
+
+// Mesh VPN provider abstraction (decoupled from the app image). Default provider "none" = VPN on
+// host/sidecar (or legacy entrypoint.sh); "tailscale"/"netbird" let the app manage it.
+builder.Services.Configure<ServerWatch.Services.Vpn.VpnSettings>(
+    builder.Configuration.GetSection(ServerWatch.Services.Vpn.VpnSettings.SectionName));
+builder.Services.AddSingleton<ServerWatch.Services.Vpn.IVpnProvider, ServerWatch.Services.Vpn.Providers.TailscaleVpnProvider>();
+builder.Services.AddSingleton<ServerWatch.Services.Vpn.IVpnProvider, ServerWatch.Services.Vpn.Providers.NetbirdVpnProvider>();
+builder.Services.AddSingleton<ServerWatch.Services.Vpn.IVpnProvider, ServerWatch.Services.Vpn.Providers.NoopVpnProvider>();
+builder.Services.AddSingleton<ServerWatch.Services.Vpn.IVpnService, ServerWatch.Services.Vpn.VpnService>();
+builder.Services.AddHostedService<ServerWatch.Services.Vpn.VpnBootstrapHostedService>();
+
 // Auto-update (opt-in only)
 builder.Services.AddSingleton<ServerWatch.Services.AutoUpdate.AutoUpdateService>();
 builder.Services.AddSingleton<ServerWatch.Services.AutoUpdate.IAutoUpdateService>(sp => sp.GetRequiredService<ServerWatch.Services.AutoUpdate.AutoUpdateService>());

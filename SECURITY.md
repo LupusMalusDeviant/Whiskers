@@ -51,3 +51,8 @@ fixes. There is no long-term-support branch yet.
 - Set a strong `VAULT_KEY` and protect the `/app/data` volume (it holds plaintext provider keys by
   design choice and the data-protection keys).
 - Keep dependencies current, Dependabot config ships in `.github/dependabot.yml`.
+- **Run the least-privileged container profile that fits.** The default `docker-compose.yml` is
+  privileged because it can manage its own host (nsenter host-shell). If ServerWatch only monitors
+  *remote* hosts, deploy `docker-compose.hardened.yml` instead (non-root, no `privileged`, dropped
+  capabilities, read-only rootfs, Docker via a verb-restricted socket-proxy). See
+  [docs/container-hardening.md](docs/container-hardening.md).

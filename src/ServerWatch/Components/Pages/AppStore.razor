@@ -1,6 +1,7 @@
 @page "/apps"
 @attribute [Authorize]
 @inject ServerWatch.Services.Templates.ITemplateService TemplateService
+@inject ServerWatch.Services.ImageSearch.IImageSearchService ImageSearch
 @inject ServerWatch.Services.Server.IHostCommandExecutor Executor
 @inject ServerWatch.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IDockerService DockerService
@@ -20,12 +21,34 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">@TemplateService.GetTemplates().Count Apps verfügbar</MudText>
         </div>
         <MudSpacer />
-        <MudTextField @bind-Value="_search" Placeholder="Suchen..." Variant="Variant.Outlined"
-                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                      Immediate="true" Style="max-width: 280px;" />
+        @if (_mode == ViewMode.Registry)
+        {
+            <MudTextField @bind-Value="_search" Placeholder="Image suchen (z.B. nginx, ghcr.io/owner/app)..." Variant="Variant.Outlined"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                          OnAdornmentClick="SearchRegistry" OnKeyDown="OnRegistrySearchKey"
+                          Immediate="true" Style="max-width: 360px;" />
+        }
+        else
+        {
+            <MudTextField @bind-Value="_search" Placeholder="Suchen..." Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true" Style="max-width: 280px;" />
+        }
     </MudStack>
 </div>
 
+@* Mode toggle: built-in template catalog vs. live registry search *@
+<MudStack Row="true" Spacing="1" Class="mb-4">
+    <MudButton Variant="@(_mode == ViewMode.Apps ? Variant.Filled : Variant.Outlined)"
+               Color="Color.Primary" StartIcon="@Icons.Material.Filled.Apps"
+               OnClick="@(() => _mode = ViewMode.Apps)">App-Katalog</MudButton>
+    <MudButton Variant="@(_mode == ViewMode.Registry ? Variant.Filled : Variant.Outlined)"
+               Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+               OnClick="@(() => _mode = ViewMode.Registry)">Registry-Suche</MudButton>
+</MudStack>
+
+@if (_mode == ViewMode.Apps)
+{
 @* Category Filter Chips *@
 <MudStack Row="true" Spacing="1" Class="mb-4" Style="flex-wrap: wrap;">
     <MudChip T="string" Size="Size.Small" OnClick="@(() => _categoryFilter = null)"
@@ -108,6 +131,149 @@
 {
     <MudAlert Severity="Severity.Info" Class="mt-4">Keine Apps gefunden für "@_search".</MudAlert>
 }
+}
+
+@* Registry Search Mode *@
+@if (_mode == ViewMode.Registry)
+{
+    @* Marketplace selector *@
+    <MudStack Row="true" Spacing="1" Class="mb-2" Style="flex-wrap: wrap;">
+        <MudChip T="string" Size="Size.Small" OnClick="@(() => SelectRegistry(null))"
+                 Color="@(_selectedRegistryId == null ? Color.Primary : Color.Default)"
+                 Variant="@(_selectedRegistryId == null ? Variant.Filled : Variant.Outlined)">Alle Marketplaces</MudChip>
+        @foreach (var reg in _registries)
+        {
+            var r = reg;
+            <MudChip T="string" Size="Size.Small" OnClick="@(() => SelectRegistry(r.Id))"
+                     Color="@(_selectedRegistryId == r.Id ? Color.Primary : Color.Default)"
+                     Variant="@(_selectedRegistryId == r.Id ? Variant.Filled : Variant.Outlined)">
+                @r.Name@(r.SupportsSearch ? "" : " (exakte Referenz)")
+            </MudChip>
+        }
+    </MudStack>
+
+    @if (_selectedRegistryId != null && _registries.FirstOrDefault(r => r.Id == _selectedRegistryId) is { SupportsSearch: false })
+    {
+        <MudText Typo="Typo.caption" Class="mb-3" Style="color: var(--sw-text-muted);">
+            Dieser Marketplace bietet keine Volltextsuche — gib die exakte Referenz ein (z.B. <code>ghcr.io/owner/app</code> oder <code>owner/app</code>).
+        </MudText>
+    }
+
+    @if (_searching)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+    }
+    else if (_searchResults.Any())
+    {
+        <MudGrid>
+            @foreach (var img in _searchResults)
+            {
+                var i = img;
+                <MudItem xs="12" sm="6" md="4" lg="3">
+                    <MudPaper Class="pa-4" Elevation="0" Style="cursor: pointer; height: 100%; border: 1px solid var(--sw-glass-border); border-radius: 12px;"
+                              @onclick="@(() => SelectRegistryImage(i))">
+                        <MudStack Spacing="2">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="flex-wrap: wrap;">
+                                <MudIcon Icon="@Icons.Material.Filled.Inventory2" Style="color: var(--sw-accent-primary);" />
+                                <MudText Typo="Typo.body1" Style="font-weight: 600; word-break: break-all;">@i.Name</MudText>
+                            </MudStack>
+                            <MudStack Row="true" Spacing="1" Style="flex-wrap: wrap;">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Style="font-size: 0.65rem;">@i.RegistryName</MudChip>
+                                @if (i.IsOfficial)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text" Style="font-size: 0.65rem;">official</MudChip>
+                                }
+                                @if (i.Stars is > 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Star" Variant="Variant.Text" Style="font-size: 0.65rem;">@FormatCount(i.Stars!.Value)</MudChip>
+                                }
+                                @if (i.Pulls is > 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Download" Variant="Variant.Text" Style="font-size: 0.65rem;">@FormatCount(i.Pulls!.Value)</MudChip>
+                                }
+                            </MudStack>
+                            @if (!string.IsNullOrWhiteSpace(i.Description))
+                            {
+                                <MudText Typo="Typo.body2" Style="color: var(--sw-text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">@i.Description</MudText>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+    else if (_searchPerformed)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">Keine Images gefunden für "@_search".</MudAlert>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Normal" Class="mt-4">Suchbegriff eingeben und Enter drücken, um Container-Images über die Marketplaces zu finden.</MudAlert>
+    }
+}
+
+@* Registry Deploy Dialog *@
+<MudDialog Visible="_showRegistryDialog" VisibleChanged="@(v => _showRegistryDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" />
+            <span>@_selectedImage?.Name deployen</span>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Class="mb-3">@_selectedImage?.RegistryName</MudChip>
+
+        <MudTextField @bind-Value="_deployProjectName" Label="Projektname" Variant="Variant.Outlined" Class="mb-3" Placeholder="my-app" />
+
+        <MudSelect T="string" @bind-Value="_deployServerId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+            @foreach (var srv in _servers)
+            {
+                <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_loadingTags)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+        }
+        else if (_availableTags.Any())
+        {
+            <MudSelect T="string" @bind-Value="_deployTag" Label="Tag" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var tag in _availableTags)
+                {
+                    <MudSelectItem Value="@tag">@tag</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        else
+        {
+            <MudTextField @bind-Value="_deployTag" Label="Tag" Variant="Variant.Outlined" Class="mb-3" Placeholder="latest" />
+        }
+
+        <MudTextField @bind-Value="_deployPorts" Label="Ports (optional)" Variant="Variant.Outlined" Class="mb-1"
+                      Placeholder="8080:80, 8443:443" Style="font-family: 'JetBrains Mono', monospace;" />
+        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">Format host:container, mehrere mit Komma getrennt.</MudText>
+
+        <MudText Typo="Typo.caption" Class="mt-3" Style="display: block; color: var(--sw-text-muted);">
+            Image: <code>@($"{_selectedImage?.PullReference}:{(string.IsNullOrWhiteSpace(_deployTag) ? "latest" : _deployTag)}")</code>
+        </MudText>
+
+        @if (_deploying)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showRegistryDialog = false)" Disabled="@_deploying">Abbrechen</MudButton>
+        @if (_role >= AppRole.Operator)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployRegistryImage"
+                       Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName))">
+                Deployen auf @(_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local")
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
 
 @* Deploy Dialog *@
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
@@ -182,6 +348,21 @@
     private List<InstalledApp> _installedApps = new();
     private AppRole _role = AppRole.Viewer;
 
+    // Registry-search mode
+    private enum ViewMode { Apps, Registry }
+    private ViewMode _mode = ViewMode.Apps;
+    private IReadOnlyList<ServerWatch.Services.ImageSearch.ImageRegistryInfo> _registries = new List<ServerWatch.Services.ImageSearch.ImageRegistryInfo>();
+    private string? _selectedRegistryId;
+    private List<ServerWatch.Services.ImageSearch.ImageSearchResult> _searchResults = new();
+    private bool _searching;
+    private bool _searchPerformed;
+    private ServerWatch.Services.ImageSearch.ImageSearchResult? _selectedImage;
+    private bool _showRegistryDialog;
+    private string _deployTag = "latest";
+    private List<string> _availableTags = new();
+    private bool _loadingTags;
+    private string _deployPorts = "";
+
     private bool Require(AppRole required)
     {
         if (_role < required)
@@ -203,6 +384,7 @@
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _registries = ImageSearch.GetRegistries();
         try
         {
             var containers = await DockerService.ListAllContainersAsync(all: true);
@@ -346,6 +528,138 @@
         catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
         finally { _deploying = false; }
     }
+
+    private void SelectRegistry(string? registryId)
+    {
+        _selectedRegistryId = registryId;
+        if (_searchPerformed) _ = SearchRegistry();
+    }
+
+    private async Task OnRegistrySearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SearchRegistry();
+    }
+
+    private async Task SearchRegistry()
+    {
+        if (string.IsNullOrWhiteSpace(_search)) return;
+        _searching = true;
+        _searchPerformed = true;
+        try
+        {
+            var results = await ImageSearch.SearchAsync(_search.Trim(), _selectedRegistryId);
+            _searchResults = results.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Suche fehlgeschlagen: {ex.Message}", Severity.Error);
+            _searchResults = new();
+        }
+        finally { _searching = false; }
+    }
+
+    private async Task SelectRegistryImage(ServerWatch.Services.ImageSearch.ImageSearchResult img)
+    {
+        _selectedImage = img;
+        _deployProjectName = new string(img.Name.Split('/').Last().Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.').ToArray());
+        _deployTag = "latest";
+        _deployPorts = "";
+        _availableTags = new();
+
+        _servers = ServerConfigService.GetEnabledServers();
+        _deployServerId = _servers.FirstOrDefault()?.Id ?? "local";
+
+        _showRegistryDialog = true;
+
+        // Load tags best-effort (the dialog falls back to a free-text tag field if none come back).
+        _loadingTags = true;
+        try
+        {
+            var tags = await ImageSearch.GetTagsAsync(img.RegistryId, img.Name);
+            _availableTags = tags.ToList();
+            if (_availableTags.Contains("latest")) _deployTag = "latest";
+            else if (_availableTags.Any()) _deployTag = _availableTags.First();
+        }
+        catch { /* best-effort: keep the free-text tag field */ }
+        finally { _loadingTags = false; }
+    }
+
+    private async Task DeployRegistryImage()
+    {
+        if (!Require(AppRole.Operator)) return;
+        if (_selectedImage == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
+        if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
+        {
+            Snackbar.Add("Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.", Severity.Error);
+            return;
+        }
+
+        var tag = string.IsNullOrWhiteSpace(_deployTag) ? "latest" : _deployTag.Trim();
+        var imageRef = $"{_selectedImage.PullReference}:{tag}";
+
+        // Build a minimal compose file, reusing the same deploy mechanism as the template store.
+        var ports = ParsePorts(_deployPorts);
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("services:");
+        sb.AppendLine($"  {_deployProjectName}:");
+        sb.AppendLine($"    image: {imageRef}");
+        sb.AppendLine($"    container_name: {_deployProjectName}");
+        sb.AppendLine("    restart: unless-stopped");
+        if (ports.Any())
+        {
+            sb.AppendLine("    ports:");
+            foreach (var p in ports)
+                sb.AppendLine($"      - \"{p}\"");
+        }
+
+        _deploying = true;
+        try
+        {
+            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+            var dir = $"/opt/deployments/{_deployProjectName}";
+
+            var result = await Executor.ExecuteAsync(_deployServerId,
+                $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+                TimeSpan.FromMinutes(5));
+
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, imageRef,
+                details: $"Registry: {_selectedImage.RegistryName} ({_selectedImage.RegistryId})", serverId: _deployServerId, success: result.Success);
+
+            if (result.Success)
+            {
+                Snackbar.Add($"'{imageRef}' deployed auf {_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"}!", Severity.Success);
+                _showRegistryDialog = false;
+            }
+            else
+            {
+                Snackbar.Add($"Fehler: {result.Output}\n{result.Error}", Severity.Error);
+            }
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        finally { _deploying = false; }
+    }
+
+    private static List<string> ParsePorts(string raw)
+    {
+        var ports = new List<string>();
+        if (string.IsNullOrWhiteSpace(raw)) return ports;
+        foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            // Only accept host:container with numeric parts to avoid compose injection.
+            if (System.Text.RegularExpressions.Regex.IsMatch(part, @"^\d{1,5}:\d{1,5}$"))
+                ports.Add(part);
+        }
+        return ports;
+    }
+
+    private static string FormatCount(long n) => n switch
+    {
+        >= 1_000_000_000 => $"{n / 1_000_000_000.0:0.#}B",
+        >= 1_000_000 => $"{n / 1_000_000.0:0.#}M",
+        >= 1_000 => $"{n / 1_000.0:0.#}K",
+        _ => n.ToString()
+    };
 
     private static string GetIcon(string iconName) => iconName switch
     {

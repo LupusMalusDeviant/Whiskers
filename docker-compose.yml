@@ -1,3 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ServerWatch — FULL deployment (default). Runs as root, privileged, with host PID
+# namespace so it can manage its OWN host's shell (firewall/nginx/systemd/
+# execute_command) via `nsenter -t 1` and run the in-container VPN daemon.
+#
+# `privileged: true` + `pid: host` are required for the nsenter host-shell plane;
+# the docker.sock mount + /dev/net/tun + /proc are for Docker ops, the VPN and host
+# metrics. This is the right profile when ServerWatch manages the box it runs on.
+#
+# If ServerWatch only monitors REMOTE hosts (mesh + mTLS) and should not have these
+# privileges, use the locked-down profile instead: docker-compose.hardened.yml
+# (non-root, no privileged, socket-proxy, dropped caps). See docs/container-hardening.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
   serverwatch:
     build: .
@@ -43,6 +57,19 @@ services:
       - Agent__MaxToolIterations=${AGENT_MAX_TOOL_ITERATIONS:-8}
       - Agent__ClaudeCode__McpUrl=${AGENT_CLAUDE_CODE_MCP_URL:-http://localhost:8080/mcp}
       - Agent__ClaudeCode__McpKey=${AGENT_CLAUDE_CODE_MCP_KEY:-}
+      # Mesh VPN: unset = legacy entrypoint Tailscale bring-up; set to none|tailscale|netbird to use
+      # the in-app provider. VPN_PROVIDER must mirror Vpn__Provider so entrypoint.sh defers correctly.
+      - VPN_PROVIDER=${VPN_PROVIDER:-}
+      - Vpn__Provider=${VPN_PROVIDER:-none}
+      - Vpn__Hostname=${VPN_HOSTNAME:-}
+      - Vpn__Tailscale__AuthKey=${TAILSCALE_AUTHKEY:-}
+      - Vpn__Tailscale__LoginServer=${TAILSCALE_LOGIN_SERVER:-}
+      - Vpn__Netbird__SetupKey=${NETBIRD_SETUP_KEY:-}
+      - Vpn__Netbird__ManagementUrl=${NETBIRD_MANAGEMENT_URL:-}
+      # Image search marketplaces (Docker Hub + GHCR on by default; Harbor opt-in via URL)
+      - ImageSearch__Harbor__BaseUrl=${HARBOR_URL:-}
+      - ImageSearch__Harbor__Username=${HARBOR_USERNAME:-}
+      - ImageSearch__Harbor__Password=${HARBOR_PASSWORD:-}
     restart: unless-stopped
 
 volumes:

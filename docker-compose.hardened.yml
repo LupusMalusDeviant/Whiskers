@@ -1,0 +1,125 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ServerWatch — HARDENED / locked-down deployment posture.
+#
+# Use this instead of docker-compose.yml when ServerWatch does NOT manage its own
+# host's shell (firewall/nginx/systemd/execute_command on the LOCAL host) — i.e. it
+# monitors remote hosts over the mesh + mTLS and, at most, talks to the local Docker
+# daemon through a restricted socket-proxy.
+#
+# What this buys you vs. the default compose:
+#   • runs as a non-root user (uid 10001)            (default image runs as root)
+#   • no `privileged`, no `pid: host`                 (default needs both for nsenter)
+#   • all Linux capabilities dropped + no-new-privs
+#   • read-only root filesystem (only /app/data + tmpfs are writable)
+#   • the raw docker.sock is NOT exposed to the app — only a verb-restricted proxy
+#   • the VPN runs on the host (Vpn__Provider=none), no tailscaled / tun in the app
+#
+# What it disables (by design — these need host privilege):
+#   • local host-shell management (nsenter): firewall/nginx/systemd/execute_command
+#     against the *local* host. Remote hosts over mTLS are unaffected.
+#   • the in-container VPN daemon — run Tailscale/NetBird on the host instead.
+#
+# See docs/container-hardening.md for the full rationale and the per-mode matrix.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # Restricted Docker API: the app talks to THIS, never to the raw socket. Verb whitelist keeps
+  # exec/swarm/secrets off; container-create stays on so deploys work (the known root-equiv residual).
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: serverwatch-socket-proxy
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 1
+      VOLUMES: 1
+      INFO: 1
+      VERSION: 1
+      POST: 1        # required for deploy/start/stop/restart
+      EXEC: 0        # block `docker exec`
+      SWARM: 0
+      SECRETS: 0
+      CONFIGS: 0
+      SYSTEM: 0
+      AUTH: 0
+      PLUGINS: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      # Bound to loopback so the host-networked app reaches it at 127.0.0.1:2375 and nothing else can.
+      - "127.0.0.1:2375:2375"
+    read_only: true
+    tmpfs:
+      - /run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  serverwatch:
+    build: .
+    # Or pull a prebuilt image that includes the non-root user:
+    # image: ${SERVERWATCH_IMAGE:-serverwatch:local}
+    container_name: serverwatch
+    depends_on:
+      - socket-proxy
+    # Host networking so the app can reach mesh (tailnet) IPs of managed hosts. Not a privilege
+    # escalation; it shares the host net namespace only. The app listens on 8080 — set HOST_BIND
+    # via your reverse proxy / firewall since `ports:` is ignored under host networking.
+    network_mode: host
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/tmp
+    volumes:
+      - serverwatch-data:/app/data
+    environment:
+      - ASPNETCORE_URLS=http://127.0.0.1:8080
+      - TZ=${TZ:-Europe/Berlin}
+      # Point the built-in "local" server at the proxy (Settings → Servers, or servers.json):
+      #   SocketPath = http://127.0.0.1:2375 . Or manage only remote (mTLS) hosts and ignore local.
+      - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}
+      - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-}
+      - GoogleAuth__AllowedEmails__0=${GOOGLE_ADMIN_EMAIL:-}
+      - Auth__Disabled=${AUTH_DISABLED:-false}
+      - Oidc__Enabled=${OIDC_ENABLED:-false}
+      - Oidc__Authority=${OIDC_AUTHORITY:-}
+      - Oidc__ClientId=${OIDC_CLIENT_ID:-}
+      - Oidc__ClientSecret=${OIDC_CLIENT_SECRET:-}
+      - Oidc__DisplayName=${OIDC_DISPLAY_NAME:-SSO}
+      - Oidc__Scopes=${OIDC_SCOPES:-openid profile email}
+      - Oidc__EmailClaim=${OIDC_EMAIL_CLAIM:-email}
+      - Oidc__RequireHttpsMetadata=${OIDC_REQUIRE_HTTPS:-true}
+      - Mattermost__WebhookUrl=${MATTERMOST_WEBHOOK_URL:-}
+      - Mattermost__Enabled=${MATTERMOST_ENABLED:-false}
+      - PathBase=${PATH_BASE:-}
+      - AiChat__Enabled=${AICHAT_ENABLED:-false}
+      - AiChat__ApiKey=${AICHAT_API_KEY:-}
+      - AiChat__ApiUrl=${AICHAT_API_URL:-}
+      - AiChat__Model=${AICHAT_MODEL:-}
+      - AiChat__Provider=${AICHAT_PROVIDER:-openai}
+      - Agent__Enabled=${AGENT_ENABLED:-false}
+      - Agent__Provider=${AGENT_PROVIDER:-openai}
+      - Agent__Model=${AGENT_MODEL:-gpt-4o-mini}
+      - Agent__Endpoint=${AGENT_ENDPOINT:-}
+      - Agent__ApiKey=${AGENT_API_KEY:-}
+      - Agent__MaxToolIterations=${AGENT_MAX_TOOL_ITERATIONS:-8}
+      - Agent__ClaudeCode__McpUrl=${AGENT_CLAUDE_CODE_MCP_URL:-http://localhost:8080/mcp}
+      - Agent__ClaudeCode__McpKey=${AGENT_CLAUDE_CODE_MCP_KEY:-}
+      # VPN runs on the host/sidecar in this posture — the app does not bring it up.
+      - VPN_PROVIDER=none
+      - Vpn__Provider=none
+      # Image-search marketplaces (Harbor opt-in)
+      - ImageSearch__Harbor__BaseUrl=${HARBOR_URL:-}
+      - ImageSearch__Harbor__Username=${HARBOR_USERNAME:-}
+      - ImageSearch__Harbor__Password=${HARBOR_PASSWORD:-}
+    restart: unless-stopped
+
+volumes:
+  serverwatch-data:

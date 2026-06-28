@@ -1,6 +1,17 @@
 #!/bin/sh
 set -e
 
+# VPN bring-up is being moved behind the in-app IVpnProvider abstraction (Services/Vpn).
+# When VPN_PROVIDER is set (Vpn__Provider), the app manages the VPN (or it runs on the host /
+# a sidecar for "none"), so this shell skips its legacy Tailscale bring-up. With VPN_PROVIDER
+# unset, existing deployments keep their current behavior unchanged.
+if [ -n "$VPN_PROVIDER" ]; then
+    echo "[entrypoint] VPN_PROVIDER='$VPN_PROVIDER' set — VPN handled in-app, skipping legacy bring-up."
+    echo "[entrypoint] Starting ServerWatch..."
+    exec dotnet ServerWatch.dll
+fi
+
+# --- Legacy Tailscale bring-up (used when VPN_PROVIDER is unset) ---
 # Start Tailscale daemon in background (state persisted in /app/data/tailscale)
 mkdir -p /app/data/tailscale
 if command -v tailscaled >/dev/null 2>&1; then
