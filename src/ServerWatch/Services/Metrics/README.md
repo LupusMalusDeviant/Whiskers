@@ -12,7 +12,7 @@ A background collector samples on a schedule and writes time-series to SQLite ([
 | `IDockerMetricsSource.cs` / `DockerMetricsSource.cs` | Reads live metrics straight from the Docker engine (default source). |
 | `IPrometheusMetricsSource.cs` / `PrometheusMetricsSource.cs` | Reads server metrics from a Prometheus/VictoriaMetrics endpoint (push/scrape source). |
 | `MetricsSourceDispatcher.cs` | Routes each read to the source configured for that server (`ServerConfig.MetricsSource`); Docker is the default and fallback, Prometheus is opt-in. |
-| `MetricsCollectorService.cs` | Background service that samples all servers on a schedule and persists the time-series. Also emits `high_cpu` / `high_memory` / `metric_anomaly` events (thresholds from `MetricAlertSettings`) which drive [AI triggers](../Agent/Triggers/). |
+| `MetricsCollectorService.cs` | Background service that samples all servers on a schedule and persists the time-series (incl. host root-filesystem usage via `df`). Also emits `high_cpu` / `high_memory` / `high_disk` (server-level) / `metric_anomaly` events (thresholds from `MetricAlertSettings`) which drive [AI triggers](../Agent/Triggers/). |
 | `IMetricsQueryService.cs` / `MetricsQueryService.cs` | Queries historical container/server metrics from the time-series store. |
 
 ## Related

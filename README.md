@@ -314,8 +314,7 @@ Beta is feature-rich but not finished. Planned / not-yet-implemented:
 
 **Monitoring & triggers**
 - Proper traffic / anomaly detection and a dedicated "extreme traffic" trigger (today: sustained
-  CPU/RAM thresholds + a simple rolling-z-score outlier).
-- Disk-usage alerts (e.g. > 90%).
+  CPU/RAM/disk thresholds + a simple rolling-z-score outlier).
 
 **Fleet & deployment**
 - Server groups / tags; richer Compose templates.

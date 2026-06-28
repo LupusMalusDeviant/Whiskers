@@ -14,6 +14,9 @@ public class MetricAlertSettings
     /// <summary>Container memory% (of its limit) that counts as "high".</summary>
     public double MemoryPercent { get; set; } = 90;
 
+    /// <summary>Host disk usage% (root filesystem) that counts as "high" (server-level alert).</summary>
+    public double DiskPercent { get; set; } = 90;
+
     /// <summary>How long the value must stay above the threshold before an event fires.</summary>
     public int SustainedMinutes { get; set; } = 3;
 

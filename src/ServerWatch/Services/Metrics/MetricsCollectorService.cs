@@ -57,6 +57,7 @@ public class MetricsCollectorService : BackgroundService
         var metricsSource = scope.ServiceProvider.GetRequiredService<IMetricsSource>();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var notify = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var executor = scope.ServiceProvider.GetRequiredService<ServerWatch.Services.Server.IHostCommandExecutor>();
         var alertCfg = _alertSettings.CurrentValue;
 
         var now = DateTime.UtcNow;
@@ -118,6 +119,9 @@ public class MetricsCollectorService : BackgroundService
             {
                 if (!info.IsReachable) continue;
 
+                // Host root-filesystem usage via df (the metrics sources don't carry disk yet).
+                var (diskUsed, diskTotal) = await GetDiskUsageAsync(executor, serverId, ct);
+
                 db.ServerMetrics.Add(new ServerMetricEntity
                 {
                     ServerId = serverId,
@@ -125,9 +129,16 @@ public class MetricsCollectorService : BackgroundService
                     Timestamp = now,
                     CpuPercent = info.CpuUsagePercent,
                     MemoryUsedBytes = info.MemoryUsedBytes,
-                    MemoryTotalBytes = info.MemoryTotalBytes
-                    // DiskUsed/DiskTotal will be populated later when we add disk monitoring
+                    MemoryTotalBytes = info.MemoryTotalBytes,
+                    DiskUsedBytes = diskUsed,
+                    DiskTotalBytes = diskTotal,
                 });
+
+                if (alertCfg.Enabled && diskTotal > 0)
+                {
+                    try { await EvaluateServerDiskAsync(serverId, info.ServerName, diskUsed, diskTotal, alertCfg, notify); }
+                    catch (Exception aex) { _logger.LogDebug(aex, "Disk alert evaluation failed for {ServerId}", serverId); }
+                }
             }
         }
         catch (Exception ex)
@@ -223,12 +234,52 @@ public class MetricsCollectorService : BackgroundService
             ImageInfo = info,
         });
 
+    /// <summary>Server-level sustained disk-usage threshold (root filesystem) → high_disk event.</summary>
+    private async Task EvaluateServerDiskAsync(string serverId, string serverName, long used, long total, MetricAlertSettings cfg, INotificationService notify)
+    {
+        var pct = used * 100.0 / total;
+        var st = _alert.GetOrAdd($"disk:{serverId}", _ => new AlertState());
+        var now = DateTime.UtcNow;
+        var sustained = Math.Max(1, cfg.SustainedMinutes * 2); // 30s sampling interval
+
+        st.DiskOver = pct >= cfg.DiskPercent ? st.DiskOver + 1 : 0;
+        if (st.DiskOver >= sustained && now >= st.DiskCooldown)
+        {
+            st.DiskOver = 0;
+            st.DiskCooldown = now.AddMinutes(cfg.CooldownMinutes);
+            await notify.SendAsync(new NotificationEvent
+            {
+                EventType = "high_disk",
+                ContainerName = serverName,
+                ImageInfo = $"Festplatte {pct:F0}% voll auf {serverName} (Schwelle {cfg.DiskPercent:F0}%).",
+            });
+        }
+    }
+
+    /// <summary>Root-filesystem (used, total) bytes via df. Best-effort: returns (0,0) on any failure.</summary>
+    private static async Task<(long Used, long Total)> GetDiskUsageAsync(ServerWatch.Services.Server.IHostCommandExecutor executor, string serverId, CancellationToken ct)
+    {
+        try
+        {
+            var res = await executor.ExecuteAsync(serverId, "df -PB1 / | tail -n1", TimeSpan.FromSeconds(10), ct);
+            if (res.ExitCode != 0 || string.IsNullOrWhiteSpace(res.Output)) return (0, 0);
+            // df -PB1 columns: Filesystem  1B-blocks(total)  Used  Available  Use%  Mounted-on
+            var parts = res.Output.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3 && long.TryParse(parts[1], out var total) && long.TryParse(parts[2], out var used))
+                return (used, total);
+            return (0, 0);
+        }
+        catch { return (0, 0); }
+    }
+
     private sealed class AlertState
     {
         public int CpuOver;
         public int MemOver;
+        public int DiskOver;
         public DateTime CpuCooldown;
         public DateTime MemCooldown;
+        public DateTime DiskCooldown;
         public DateTime AnomCooldown;
         public readonly Queue<double> CpuWin = new();
         public readonly Queue<double> MemWin = new();

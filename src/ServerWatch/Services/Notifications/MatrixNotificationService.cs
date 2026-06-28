@@ -119,6 +119,10 @@ public class MatrixNotificationService : IMatrixNotificationService
             $"🔥 Hohe RAM-Last | {evt.ContainerName}. {evt.ImageInfo}",
             $"🔥 <strong>Hohe RAM-Last</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
         ),
+        "high_disk" => (
+            $"💾 Hohe Festplatten-Last | {evt.ContainerName}. {evt.ImageInfo}",
+            $"💾 <strong>Hohe Festplatten-Last</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+        ),
         "metric_anomaly" => (
             $"📈 Metrik-Ausreißer | {evt.ContainerName}. {evt.ImageInfo}",
             $"📈 <strong>Metrik-Ausreißer</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"

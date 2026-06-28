@@ -155,9 +155,10 @@ else
     @* Metric alerts *@
     <MudExpansionPanel Text="Metrik-Alerts (für AI-Trigger)" Icon="@Icons.Material.Filled.Insights">
         <MudGrid>
-            <MudItem xs="12"><MudSwitch @bind-Value="_maEnabled" Color="Color.Primary" Label="Metrik-Alerts aktiv (emittiert high_cpu / high_memory / metric_anomaly)" /></MudItem>
+            <MudItem xs="12"><MudSwitch @bind-Value="_maEnabled" Color="Color.Primary" Label="Metrik-Alerts aktiv (emittiert high_cpu / high_memory / high_disk / metric_anomaly)" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCpu" Label="CPU-Schwelle (%)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maMem" Label="RAM-Schwelle (%)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maDisk" Label="Festplatten-Schwelle (%, Host)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maSustained" Label="Anhaltend (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCooldown" Label="Cooldown (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
@@ -595,7 +596,7 @@ else
     private bool _mmEnabled; private string _mmWebhook = ""; private string _mmChannel = ""; private string _mmBot = ""; private int _mmThrottle = 5;
     private bool _mxEnabled; private string _mxHomeserver = ""; private string _mxRoom = ""; private string _mxToken = ""; private int _mxThrottle = 5;
     private int _hInterval = 30; private int _hRetention = 24; private int _hLoopThreshold = 5; private int _hLoopWindow = 10;
-    private bool _maEnabled = true; private double _maCpu = 90; private double _maMem = 90; private int _maSustained = 3; private int _maCooldown = 15;
+    private bool _maEnabled = true; private double _maCpu = 90; private double _maMem = 90; private double _maDisk = 90; private int _maSustained = 3; private int _maCooldown = 15;
     private bool _maAnom; private int _maAnomWindow = 20; private double _maAnomSigma = 3; private double _maAnomFloor = 40;
     private bool _cveEnabled; private int _cveInterval = 12; private bool _cveScanContainers = true; private bool _cveScanOs = true; private bool _cveOsIds = true;
     private string _cveTrivy = "aquasec/trivy:latest"; private bool _cveNotify = true; private string _cveSeverity = "High"; private int _cveMaxScans = 3;
@@ -644,7 +645,7 @@ else
         var h = HealthOptions.CurrentValue;
         _hInterval = h.CheckIntervalSeconds; _hRetention = h.HistoryRetentionHours; _hLoopThreshold = h.RestartLoopThreshold; _hLoopWindow = h.RestartLoopWindowMinutes;
         var ma = MetricAlertOptions.CurrentValue;
-        _maEnabled = ma.Enabled; _maCpu = ma.CpuPercent; _maMem = ma.MemoryPercent; _maSustained = ma.SustainedMinutes; _maCooldown = ma.CooldownMinutes;
+        _maEnabled = ma.Enabled; _maCpu = ma.CpuPercent; _maMem = ma.MemoryPercent; _maDisk = ma.DiskPercent; _maSustained = ma.SustainedMinutes; _maCooldown = ma.CooldownMinutes;
         _maAnom = ma.AnomalyEnabled; _maAnomWindow = ma.AnomalyWindow; _maAnomSigma = ma.AnomalySigma; _maAnomFloor = ma.AnomalyFloorPercent;
         var cv = CveSettings.CurrentValue;
         _cveEnabled = cv.Enabled; _cveInterval = cv.CheckIntervalHours; _cveScanContainers = cv.ScanContainers; _cveScanOs = cv.ScanOs; _cveOsIds = cv.EnableOsCveIds;
@@ -696,7 +697,7 @@ else
     {
         await AppSettings.SaveSectionAsync("MetricAlert", new MetricAlertSettings
         {
-            Enabled = _maEnabled, CpuPercent = _maCpu, MemoryPercent = _maMem,
+            Enabled = _maEnabled, CpuPercent = _maCpu, MemoryPercent = _maMem, DiskPercent = _maDisk,
             SustainedMinutes = _maSustained, CooldownMinutes = _maCooldown,
             AnomalyEnabled = _maAnom, AnomalyWindow = _maAnomWindow, AnomalySigma = _maAnomSigma, AnomalyFloorPercent = _maAnomFloor,
         });

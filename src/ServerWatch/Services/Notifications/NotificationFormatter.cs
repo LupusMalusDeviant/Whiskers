@@ -17,6 +17,7 @@ public static class NotificationFormatter
         "cve_finding" => ("Neue CVE", "Error"),
         "high_cpu" => ("Hohe CPU-Last", "Error"),
         "high_memory" => ("Hohe RAM-Last", "Error"),
+        "high_disk" => ("Hohe Festplatten-Last", "Error"),
         "metric_anomaly" => ("Metrik-Ausreißer", "Warning"),
         "agent_action" => ("AI-Agent", "Info"),
         "agent_approval" => ("Freigabe erforderlich", "Warning"),

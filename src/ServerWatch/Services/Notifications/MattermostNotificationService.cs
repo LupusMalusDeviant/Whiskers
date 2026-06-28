@@ -84,6 +84,7 @@ public class MattermostNotificationService : IMattermostNotificationService
         "agent_action" => $":robot_face: **AI-Agent** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
         "high_cpu" => $":fire: **Hohe CPU-Last** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
         "high_memory" => $":fire: **Hohe RAM-Last** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
+        "high_disk" => $":floppy_disk: **Hohe Festplatten-Last** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
         "metric_anomaly" => $":chart_with_upwards_trend: **Metrik-Ausreißer** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
         _ when evt.EventType.StartsWith("log_alert", StringComparison.Ordinal) =>
             $":mag: **Log-Alert** | `{evt.ContainerName}`\n> {(string.IsNullOrWhiteSpace(evt.ImageInfo) ? evt.Image : evt.ImageInfo)}",
