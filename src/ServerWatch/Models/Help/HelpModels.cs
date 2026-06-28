@@ -18,13 +18,16 @@ public enum HelpFigureKind
 {
     /// <summary>Inline SVG illustration/diagram (theme-aware via CSS variables).</summary>
     Svg,
+    /// <summary>A real screenshot image referenced by its public path (<see cref="HelpFigure.Image"/>).</summary>
+    Image,
     /// <summary>A labelled placeholder where a real screenshot can be dropped in later.</summary>
     Screenshot,
 }
 
-/// <summary>An illustration attached to a section — either an inline SVG diagram we render
-/// ourselves, or a placeholder marking where a real screenshot belongs.</summary>
+/// <summary>An illustration attached to a section: an inline SVG diagram, a real screenshot image,
+/// or a placeholder marking where a real screenshot belongs.</summary>
 public sealed record HelpFigure(
     HelpFigureKind Kind,
     string Caption,
-    string? Svg = null);
+    string? Svg = null,
+    string? Image = null);

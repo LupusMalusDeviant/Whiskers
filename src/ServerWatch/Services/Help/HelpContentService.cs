@@ -12,6 +12,7 @@ public sealed class HelpContentService : IHelpContentService
     public IReadOnlyList<HelpChapter> GetChapters() => Chapters;
 
     private static HelpFigure Shot(string caption) => new(HelpFigureKind.Screenshot, caption);
+    private static HelpFigure Img(string caption, string path) => new(HelpFigureKind.Image, caption, Image: path);
     private static HelpFigure Diagram(string caption, string svg) => new(HelpFigureKind.Svg, caption, svg);
 
     private static readonly IReadOnlyList<HelpChapter> Chapters = new List<HelpChapter>
@@ -65,7 +66,7 @@ public sealed class HelpContentService : IHelpContentService
                     Klick auf einen **Container-Namen** öffnet die Detailansicht; das **▶/■-Symbol** startet bzw.
                     stoppt ihn direkt, der **Mülleimer** entfernt ihn (nur mit ausreichender Rolle).
                     """,
-                    Shot("Dashboard mit Server-Karten und aufgeklappten Container-Gruppen")),
+                    Img("Dashboard mit Server-Karten und aufgeklappten Container-Gruppen", "/help/dashboard.png")),
                 new("Schnell zur richtigen Stelle", """
                     Viele Stellen verlinken direkt: Klickst du z. B. eine **Image-Update-Benachrichtigung** an,
                     landest du sofort auf der Detailseite des betroffenen Containers, auch wenn er auf einem
@@ -114,7 +115,7 @@ public sealed class HelpContentService : IHelpContentService
                     Pro Finding siehst du **Schweregrad** (Critical/High/Medium/Low), die **CVE-ID** (verlinkt),
                     das betroffene **Paket**, die installierte Version und, falls vorhanden, die **Fix-Version**.
                     """,
-                    Shot("CVE-Monitor mit deduplizierter Findings-Liste")),
+                    Img("CVE-Monitor mit deduplizierter Findings-Liste", "/help/cve-monitor.png")),
                 new("Alter & Scan-Intervall", """
                     Zu jeder CVE wird das **Alter** geführt, sowohl seit wann sie in *deiner* Umgebung
                     auftaucht als auch das offizielle Veröffentlichungsdatum. So erkennst du Altlasten.
@@ -219,7 +220,7 @@ public sealed class HelpContentService : IHelpContentService
                     Gemini …), **API-Key** und **Modell**. Beim Einfügen des Keys testet ServerWatch die
                     Verbindung und füllt die Modellliste automatisch.
                     """,
-                    Shot("Agent-Konfiguration mit Anbieter, Key-Test und Modell-Dropdown")),
+                    Img("Agent-Konfiguration mit Anbieter, Key-Test und Modell-Dropdown", "/help/agent.png")),
                 new("Berater vs. handelnder Agent", """
                     Das **schwebende Chat-Widget** (unten rechts) ist auf der gesamten Seite verfügbar. Es kennt
                     die **aktuell geöffnete Seite** (liest den angezeigten Inhalt) und kann auf Wunsch einen
@@ -246,7 +247,7 @@ public sealed class HelpContentService : IHelpContentService
                     wird, nicht bloß im Prompt. Selbst wenn das Modell etwas Verbotenes versucht, wird es im Code
                     geblockt. Nur **Admins** können Guardrails ändern.
                     """,
-                    Shot("Guardrails-Seite mit Preset-Auswahl und Werkzeug-Raster")),
+                    Img("Guardrails-Seite mit Preset-Auswahl und Werkzeug-Raster", "/help/guardrails.png")),
                 new("Presets & Werkzeug-Modi", """
                     Du legst mehrere **Presets** an und schaltest das aktive um. Pro Werkzeug wählst du den Modus:
 
@@ -365,7 +366,7 @@ public sealed class HelpContentService : IHelpContentService
                     **Übersicht → Topologie** zeichnet ein Netzwerk-Diagramm: welche Container in welchen
                     Docker-Netzwerken hängen. Gut, um Abhängigkeiten und Isolation auf einen Blick zu sehen.
                     """,
-                    Shot("Topologie-Graph der Container und Netzwerke")),
+                    Img("Topologie-Graph der Container und Netzwerke", "/help/topologie.png")),
                 new("Vergleichen & Audit-Protokoll", """
                     - **Vergleichen**: stellt Konfigurationen/Zustände gegenüber, um Abweichungen zu finden.
                     - **Audit-Protokoll**: lückenlose Historie aller *Benutzer*-Aktionen (wer hat wann was

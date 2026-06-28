@@ -56,6 +56,10 @@
                                 {
                                     <div class="sw-help-svg">@((MarkupString)(fig.Svg ?? ""))</div>
                                 }
+                                else if (fig.Kind == HelpFigureKind.Image && !string.IsNullOrEmpty(fig.Image))
+                                {
+                                    <img class="sw-help-img" src="@fig.Image" alt="@fig.Caption" loading="lazy" />
+                                }
                                 else
                                 {
                                     <div class="sw-help-shot-box">
