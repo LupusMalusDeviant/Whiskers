@@ -681,6 +681,21 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS "IX_AuditLog_Action_Timestamp" ON "AuditLog" ("Action", "Timestamp");
         CREATE INDEX IF NOT EXISTS "IX_AuditLog_Actor" ON "AuditLog" ("Actor");
 
+        CREATE TABLE IF NOT EXISTS "Notifications" (
+            "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "NotificationId" TEXT NOT NULL,
+            "Timestamp" TEXT NOT NULL,
+            "EventType" TEXT NOT NULL,
+            "Title" TEXT NOT NULL,
+            "Detail" TEXT NOT NULL,
+            "Severity" TEXT NOT NULL,
+            "Link" TEXT,
+            "Read" INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_Notifications_Timestamp" ON "Notifications" ("Timestamp");
+        CREATE INDEX IF NOT EXISTS "IX_Notifications_Severity_Timestamp" ON "Notifications" ("Severity", "Timestamp");
+        CREATE INDEX IF NOT EXISTS "IX_Notifications_Read" ON "Notifications" ("Read");
+
         CREATE TABLE IF NOT EXISTS "McpToolCalls" (
             "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             "Timestamp" TEXT NOT NULL,

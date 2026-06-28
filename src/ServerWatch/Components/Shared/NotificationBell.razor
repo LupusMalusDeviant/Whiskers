@@ -46,6 +46,11 @@
                     }
                 </div>
             }
+            <MudDivider />
+            <div style="display:flex; justify-content:center; padding:6px;">
+                <MudButton Size="Size.Small" Variant="Variant.Text" FullWidth="true"
+                           OnClick="@(() => Nav.NavigateTo("notifications"))">Alle anzeigen</MudButton>
+            </div>
         </div>
     </MudMenu>
 </MudBadge>

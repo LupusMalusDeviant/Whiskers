@@ -45,6 +45,21 @@ public class AlertHistoryEntity
     public bool Resolved { get; set; }
 }
 
+/// <summary>Persisted in-app notification (the bell feed + the /notifications page) so the history
+/// survives restarts. Mirrors <see cref="ServerWatch.Models.InAppNotification"/> plus a read flag.</summary>
+public class NotificationEntity
+{
+    public long Id { get; set; }
+    public string NotificationId { get; set; } = "";
+    public DateTime Timestamp { get; set; }
+    public string EventType { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Detail { get; set; } = "";
+    public string Severity { get; set; } = "Info";
+    public string? Link { get; set; }
+    public bool Read { get; set; }
+}
+
 public class MetricsDbContext : DbContext
 {
     public DbSet<ContainerMetricEntity> ContainerMetrics => Set<ContainerMetricEntity>();
@@ -61,6 +76,7 @@ public class MetricsDbContext : DbContext
     public DbSet<WebhookEntity> Webhooks => Set<WebhookEntity>();
     public DbSet<WebhookLogEntity> WebhookLogs => Set<WebhookLogEntity>();
     public DbSet<CveFirstSeenEntity> CveFirstSeen => Set<CveFirstSeenEntity>();
+    public DbSet<NotificationEntity> Notifications => Set<NotificationEntity>();
 
     public MetricsDbContext(DbContextOptions<MetricsDbContext> options) : base(options) { }
 
@@ -128,6 +144,13 @@ public class MetricsDbContext : DbContext
         {
             e.HasIndex(x => x.IdentityKey).IsUnique();
             e.HasIndex(x => x.CveId);
+        });
+
+        modelBuilder.Entity<NotificationEntity>(e =>
+        {
+            e.HasIndex(x => x.Timestamp);
+            e.HasIndex(x => new { x.Severity, x.Timestamp });
+            e.HasIndex(x => x.Read);
         });
     }
 }

@@ -1,0 +1,139 @@
+@page "/notifications"
+@attribute [Authorize]
+@using ServerWatch.Models
+@inject ServerWatch.Services.Notifications.IInAppNotificationStore Store
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Benachrichtigungen - ServerWatch</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Notifications" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Benachrichtigungen</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Verlauf aller Ereignisse (überlebt Neustarts)</MudText>
+        </div>
+    </MudStack>
+</div>
+
+<MudStack Row="true" Class="mb-4" Spacing="2" AlignItems="AlignItems.Center" Style="flex-wrap: wrap;">
+    <MudSelect T="string" Value="@_severityFilter" ValueChanged="OnSeverityChanged"
+               Label="Schweregrad" Variant="Variant.Outlined" Dense="true" Style="max-width: 180px;" Clearable="true">
+        <MudSelectItem Value="@("Error")">Fehler</MudSelectItem>
+        <MudSelectItem Value="@("Warning")">Warnung</MudSelectItem>
+        <MudSelectItem Value="@("Info")">Info</MudSelectItem>
+        <MudSelectItem Value="@("Success")">Erfolg</MudSelectItem>
+    </MudSelect>
+    <MudSelect T="string" Value="@_typeFilter" ValueChanged="OnTypeChanged"
+               Label="Typ" Variant="Variant.Outlined" Dense="true" Style="max-width: 220px;" Clearable="true">
+        <MudSelectItem Value="@("unhealthy")">Container unhealthy</MudSelectItem>
+        <MudSelectItem Value="@("stopped")">Container gestoppt</MudSelectItem>
+        <MudSelectItem Value="@("oom_killed")">OOM-gekillt</MudSelectItem>
+        <MudSelectItem Value="@("restart_loop")">Restart-Loop</MudSelectItem>
+        <MudSelectItem Value="@("image_update")">Image-Update</MudSelectItem>
+        <MudSelectItem Value="@("cve_finding")">CVE</MudSelectItem>
+        <MudSelectItem Value="@("high_cpu")">Hohe CPU-Last</MudSelectItem>
+        <MudSelectItem Value="@("high_memory")">Hohe RAM-Last</MudSelectItem>
+        <MudSelectItem Value="@("metric_anomaly")">Metrik-Ausreißer</MudSelectItem>
+        <MudSelectItem Value="@("auto_update_failed")">Auto-Update fehlgeschlagen</MudSelectItem>
+        <MudSelectItem Value="@("agent_action")">AI-Agent</MudSelectItem>
+        <MudSelectItem Value="@("agent_approval")">Freigabe erforderlich</MudSelectItem>
+    </MudSelect>
+    <MudSpacer />
+    <MudText Typo="Typo.body2" Style="color: #888;">@_totalCount Einträge</MudText>
+    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DoneAll" OnClick="MarkAllRead">Als gelesen</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAll">Alle löschen</MudButton>
+</MudStack>
+
+<MudTable Items="@_entries" Dense="true" Hover="true" Striped="true" Loading="@_loading"
+          FixedHeader="true" Height="calc(100vh - 280px)">
+    <HeaderContent>
+        <MudTh Style="width: 150px;">Zeitpunkt</MudTh>
+        <MudTh Style="width: 60px;">Grad</MudTh>
+        <MudTh Style="width: 240px;">Titel</MudTh>
+        <MudTh>Details</MudTh>
+        <MudTh Style="width: 60px;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Zeitpunkt">
+            <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                @context.Timestamp.ToLocalTime().ToString("dd.MM.yy HH:mm:ss")
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="Grad">
+            <MudIcon Icon="@SevIcon(context.Severity)" Color="@SevColor(context.Severity)" Size="Size.Small" />
+        </MudTd>
+        <MudTd DataLabel="Titel"><MudText Typo="Typo.body2" Style="font-weight: 600;">@context.Title</MudText></MudTd>
+        <MudTd DataLabel="Details">
+            <MudText Typo="Typo.caption" Style="color: #aaa; white-space: pre-wrap;">@context.Detail</MudText>
+        </MudTd>
+        <MudTd>
+            @if (context.Link is not null)
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small"
+                               OnClick="@(() => Open(context))" title="Öffnen" />
+            }
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@if (_totalCount > _pageSize)
+{
+    <MudStack Row="true" Class="mt-3" Justify="Justify.Center">
+        <MudPagination Count="@((int)Math.Ceiling(_totalCount / (double)_pageSize))"
+                       Selected="@(_currentPage + 1)" SelectedChanged="OnPageChanged" />
+    </MudStack>
+}
+
+@code {
+    private List<InAppNotification> _entries = new();
+    private bool _loading = true;
+    private string? _severityFilter;
+    private string? _typeFilter;
+    private int _totalCount;
+    private int _currentPage;
+    private const int _pageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _totalCount = await Store.CountAsync(_severityFilter, _typeFilter);
+        _entries = await Store.QueryAsync(_severityFilter, _typeFilter, _currentPage * _pageSize, _pageSize);
+        _loading = false;
+    }
+
+    private async Task OnSeverityChanged(string value) { _severityFilter = value; _currentPage = 0; await LoadData(); }
+    private async Task OnTypeChanged(string value) { _typeFilter = value; _currentPage = 0; await LoadData(); }
+    private async Task OnPageChanged(int page) { _currentPage = page - 1; await LoadData(); }
+
+    private void MarkAllRead() { Store.MarkAllRead(); Snackbar.Add("Als gelesen markiert.", Severity.Success); }
+
+    private async Task ClearAll()
+    {
+        Store.Clear();
+        _currentPage = 0;
+        await LoadData();
+        Snackbar.Add("Verlauf geleert.", Severity.Success);
+    }
+
+    private void Open(InAppNotification n)
+    {
+        if (n.Link is null) return;   // "" = dashboard (path-base safe); null = not navigable
+        Nav.NavigateTo(n.Link);
+    }
+
+    private static Color SevColor(string s) => s switch
+    {
+        "Error" => Color.Error, "Warning" => Color.Warning, "Success" => Color.Success, _ => Color.Info,
+    };
+    private static string SevIcon(string s) => s switch
+    {
+        "Error" => Icons.Material.Filled.Error, "Warning" => Icons.Material.Filled.Warning,
+        "Success" => Icons.Material.Filled.CheckCircle, _ => Icons.Material.Filled.Info,
+    };
+}
