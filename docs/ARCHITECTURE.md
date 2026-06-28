@@ -95,19 +95,27 @@ CA can later issue short-lived SSH certificates if an independent SSH break-glas
 
 ## Onboarding a new server
 
-Adding a server starts from an SSH **bootstrap** connection (the only time SSH is used). The
-onboarding orchestrator then runs, end to end, with live progress in the UI:
+Adding a server starts from a single SSH **bootstrap** connection (the only time SSH is used),
+launched straight from the add/edit-server dialog (**„Speichern & Onboarden"**). The bootstrap
+authenticates with **either an uploaded SSH key or a transient root/SSH password** (fed to `sshpass`
+via the `SSHPASS` env var; `ServerConfig.SshPassword` is `[JsonIgnore]`, so it lives in memory only).
+The onboarding orchestrator then runs, end to end, with live progress in the UI:
 
 1. install Tailscale, bring it up, and **surface the interactive login link in the app** (the user
-   clicks it to authorise the node), then wait until the node joins and gets a mesh IP;
-2. deploy `node_exporter` (mesh-only);
-3. issue a per-host server certificate from the CA;
-4. deploy `docker-socket-proxy` + `ghostunnel` (mTLS);
-5. add the host to the scrape config and reload the TSDB;
-6. switch the server to `TCP+mTLS` + Prometheus metrics and verify over mTLS.
+   clicks it to authorise the node), then wait until the node joins and gets a mesh IP — this step is
+   **re-run-safe**: if the node is already authenticated it reuses the existing mesh IP instead of
+   waiting for a login link that won't reappear;
+2. **ensure Docker is installed** (a fresh VPS often isn't — install via the official convenience
+   script if `docker` is missing), since the following steps run `docker compose`;
+3. deploy `node_exporter` (mesh-only);
+4. issue a per-host server certificate from the CA;
+5. deploy `docker-socket-proxy` + `ghostunnel` (mTLS);
+6. add the host to the scrape config and reload the TSDB;
+7. switch the server to `TCP+mTLS` + Prometheus metrics and verify over mTLS.
 
-After that the bootstrap SSH key is no longer needed and can be removed — the server is fully
-mesh + mTLS, SSH-free.
+On success the **bootstrap credentials are dropped automatically** — the password is cleared from
+memory and the SSH key deleted from disk (`IServerConfigService.DeleteSshKeyAsync`) — leaving the
+server fully mesh + mTLS, SSH-free, with no standing credential.
 
 ## What's where
 

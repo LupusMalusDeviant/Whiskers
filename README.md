@@ -56,6 +56,8 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - systemd service start/stop/monitor
 - SSL certificate (Let's Encrypt) status and renewal
 - Integrated web terminal (host and container)
+- **Connection test on save** — adding/editing a server probes the connection before closing, so a broken host isn't saved silently
+- **Resilient dashboard** — an unreachable host is marked *nicht erreichbar* instead of blanking the whole view (each server is time-boxed)
 
 ### Security: mesh + mTLS (SSH-key-free)
 - Management over a private WireGuard mesh (Tailscale) — no management ports exposed publicly
@@ -64,7 +66,7 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - **No stored SSH key** in steady state — the central attack surface is removed
 - Own PKI (step-ca) for client/server certificates
 - Telemetry via `node_exporter` → VictoriaMetrics (Prometheus-compatible)
-- **One-click onboarding** of new servers: installs Tailscale (login link surfaced directly in the app), deploys telemetry + mTLS proxy, and switches the server to SSH-free operation
+- **One-click onboarding** of new servers (from the add/edit dialog): bootstraps over a single SSH connection authenticated by an **SSH key _or_ a root password**, installs Docker if missing, brings up Tailscale (login link surfaced in the app), deploys telemetry + the mTLS proxy, switches the host to SSH-free mTLS, and **auto-deletes the bootstrap credentials** afterwards
 
 → Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 

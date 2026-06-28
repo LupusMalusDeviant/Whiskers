@@ -168,10 +168,24 @@ public sealed class HelpContentService : IHelpContentService
                     2. Verbindungsdaten (Host, Port, ggf. Zertifikate/Schlüssel).
                     3. Optional **Cloud-Provider** (Hetzner/Hostinger) + API-Key für Out-of-Band-Steuerung.
 
-                    Nach dem Speichern erscheint der Server im Dashboard. Der Startlog sollte „Loaded N server
-                    configs" zeigen.
+                    Beim **Speichern** baut ServerWatch die Verbindung gleich auf und **testet sie** (kurzes
+                    Timeout): Klappt es, schließt der Dialog mit der Container-Zahl; klappt es nicht, bleibt er
+                    offen und zeigt den Fehler — so wird kein toter Server unbemerkt gespeichert. Ein nicht
+                    erreichbarer Host wird im Dashboard als **„nicht erreichbar"** markiert, statt die ganze
+                    Übersicht leer zu machen.
                     """,
                     Shot("Server-Anlegen-Formular mit Verbindungstyp und Cloud-Provider")),
+                new("Onboarding — SSH-frei werden", """
+                    Für einen frischen Host bringt dich **„Speichern & Onboarden"** (bei Verbindungstyp **SSH**)
+                    in einem Rutsch ins Mesh: Über **eine einmalige SSH-Bootstrap-Verbindung** — wahlweise mit
+                    **SSH-Key oder Root-Passwort** — installiert ServerWatch (falls nötig) Docker, bringt Tailscale
+                    hoch (der Login-Link erscheint direkt in der App), deployt Telemetrie + den **mTLS-Proxy** und
+                    stellt den Host auf **TCP+mTLS** um.
+
+                    Danach ist der Server **SSH-frei** — und die Bootstrap-Zugangsdaten werden **automatisch
+                    entfernt**: das Passwort aus dem Speicher, der SSH-Key von der Platte. Es bleibt kein stehender
+                    Zugang übrig.
+                    """),
                 new("Cloud, Netzwerke, Backups", """
                     - **Cloud** — Power on/off, Reboot, Snapshots und Metriken direkt beim Provider, selbst wenn
                       SSH/Docker mal nicht erreichbar ist. Funktioniert sobald pro Server Provider + API-Key gesetzt sind.
