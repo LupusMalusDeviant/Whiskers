@@ -157,11 +157,22 @@
                                   HelperText="@(_hasCloudKey ? "Ein Key ist gespeichert — leer lassen, um ihn beizubehalten." : "API-Token des Providers (Hetzner: Projekt-Token; Hostinger: API-Token). Matching erfolgt über die Server-IP.")" />
                 }
             }
+
+            @if (!string.IsNullOrEmpty(_connectError))
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                    Gespeichert, aber die Verbindung ließ sich nicht aufbauen: @_connectError
+                    <br />Host/Port/TLS prüfen — der Server bleibt gespeichert; korrigiere und speichere erneut.
+                </MudAlert>
+            }
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+            <MudButton OnClick="@(() => _showDialog = false)" Disabled="_saving">Abbrechen</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveServer"
-                       Disabled="@string.IsNullOrWhiteSpace(_form.Name)">Speichern</MudButton>
+                       Disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name))">
+                @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                @(_saving ? "Verbinde…" : "Speichern")
+            </MudButton>
         </DialogActions>
     </MudDialog>
 
@@ -205,6 +216,8 @@
 @code {
     private List<ServerWatch.Models.ServerConfig> _servers = new();
     private bool _showDialog;
+    private bool _saving;
+    private string? _connectError;
     private ServerWatch.Models.ServerConfig? _editingServer;
     private ServerWatch.Models.ServerConfig _form = new();
     private string? _sshKeyFileName;
@@ -245,6 +258,7 @@
         _sshKeyData = null;
         _cloudApiKey = "";
         _hasCloudKey = false;
+        _connectError = null;
         _showDialog = true;
     }
 
@@ -256,6 +270,7 @@
         _sshKeyData = null;
         _cloudApiKey = "";                                  // never prefill the secret
         _hasCloudKey = !string.IsNullOrWhiteSpace(server.CloudApiKey);
+        _connectError = null;
         _showDialog = true;
     }
 
@@ -271,33 +286,77 @@
             _form.CloudApiKey = _editingServer?.CloudApiKey;   // keep existing (null for new server)
 
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-        if (_editingServer != null)
+        _saving = true;
+        _connectError = null;
+        StateHasChanged();
+        try
         {
-            _form.Id = _editingServer.Id;
-            _form.IsDefault = _editingServer.IsDefault;
-            _form.Enabled = _editingServer.Enabled;
+            if (_editingServer != null)
+            {
+                _form.Id = _editingServer.Id;
+                _form.IsDefault = _editingServer.IsDefault;
+                _form.Enabled = _editingServer.Enabled;
 
-            if (_sshKeyData != null && _sshKeyFileName != null)
-                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+                if (_sshKeyData != null && _sshKeyFileName != null)
+                    await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
 
-            await ServerConfigService.UpdateServerAsync(_form);
-            ConnectionManager.InvalidateClient(_form.Id);
-            await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
-            Snackbar.Add($"{_form.Name} aktualisiert", Severity.Success);
+                await ServerConfigService.UpdateServerAsync(_form);
+                ConnectionManager.InvalidateClient(_form.Id);
+                await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
+            }
+            else
+            {
+                await ServerConfigService.AddServerAsync(_form);
+
+                if (_sshKeyData != null && _sshKeyFileName != null)
+                    await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+
+                await AuditLog.LogAsync(actor, "web", "server.add", "server", _form.Id, _form.Name, serverId: _form.Id);
+            }
+
+            _servers = ServerConfigService.GetServers();
+
+            // Build + probe the connection before closing, so a broken server isn't saved silently
+            // (which would otherwise drag the dashboard with timeouts later).
+            var (ok, info) = await TryConnectAsync(_form.Id, TimeSpan.FromSeconds(12));
+            if (ok)
+            {
+                Snackbar.Add($"{_form.Name} gespeichert — verbunden ({info}).", Severity.Success);
+                _showDialog = false;
+            }
+            else
+            {
+                _connectError = info;
+                Snackbar.Add($"{_form.Name} gespeichert, aber Verbindung fehlgeschlagen.", Severity.Warning);
+            }
         }
-        else
+        finally
         {
-            await ServerConfigService.AddServerAsync(_form);
-
-            if (_sshKeyData != null && _sshKeyFileName != null)
-                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
-
-            await AuditLog.LogAsync(actor, "web", "server.add", "server", _form.Id, _form.Name, serverId: _form.Id);
-            Snackbar.Add($"{_form.Name} hinzugefügt", Severity.Success);
+            _saving = false;
         }
+    }
 
-        _servers = ServerConfigService.GetServers();
-        _showDialog = false;
+    /// <summary>Forces a fresh client for the server and probes it (list containers) within a timeout,
+    /// so the save flow can report whether the connection actually comes up.</summary>
+    private async Task<(bool ok, string info)> TryConnectAsync(string serverId, TimeSpan timeout)
+    {
+        try
+        {
+            ConnectionManager.InvalidateClient(serverId);
+            var client = await ConnectionManager.GetClientAsync(serverId);
+            using var cts = new System.Threading.CancellationTokenSource(timeout);
+            var containers = await client.Containers.ListContainersAsync(
+                new Docker.DotNet.Models.ContainersListParameters { All = true }, cts.Token);
+            return (true, $"{containers.Count} Container");
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, $"Zeitüberschreitung nach {timeout.TotalSeconds:0}s — Host/Port/Firewall prüfen.");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
     }
 
     private async Task DeleteServer(ServerWatch.Models.ServerConfig server)
