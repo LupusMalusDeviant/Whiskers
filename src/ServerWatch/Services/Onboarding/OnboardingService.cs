@@ -65,38 +65,56 @@ public class OnboardingService : IOnboardingService
             await Sh(serverId, "command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sudo sh", TimeSpan.FromMinutes(3), ct);
             await ShTry(serverId, "sudo systemctl enable --now tailscaled", TimeSpan.FromSeconds(30), ct);
 
-            // 2) Bring up Tailscale (detached) and surface the login link --------------------------
-            progress.Report("③ Tailscale starten…");
-            await ShTry(serverId, "sudo systemctl reset-failed ts-up", TimeSpan.FromSeconds(10), ct);
-            await Sh(serverId, $"sudo systemd-run --collect --unit=ts-up tailscale up --accept-dns=false --hostname={slug}", TimeSpan.FromSeconds(20), ct);
-
-            progress.Report("④ Auf Tailscale-Login warten…");
-            var loginUrl = await PollAsync(async () =>
+            // 2) Bring up Tailscale. If the node is already authenticated (e.g. a re-run after a
+            // failed onboarding), skip the login dance entirely and reuse the existing tailnet IP.
+            string? tsIp = null;
+            var already = await Sh(serverId, "tailscale status --json 2>/dev/null | grep -m1 '\"BackendState\"'", TimeSpan.FromSeconds(20), ct);
+            if (already.Output.Contains("Running"))
             {
-                var r = await Sh(serverId, "sudo journalctl -u tailscaled --since '90 seconds ago' --no-pager 2>/dev/null | grep -oE 'https://login\\.tailscale\\.com/[A-Za-z0-9/]+' | tail -1", TimeSpan.FromSeconds(20), ct);
-                var url = r.Output.Trim();
-                return string.IsNullOrEmpty(url) ? null : url;
-            }, attempts: 15, delay: TimeSpan.FromSeconds(3), ct);
+                var ip0 = await Sh(serverId, "tailscale ip -4 2>/dev/null | head -1", TimeSpan.FromSeconds(20), ct);
+                tsIp = string.IsNullOrWhiteSpace(ip0.Output) ? null : ip0.Output.Trim();
+            }
 
-            if (loginUrl == null) { progress.Report("❌ Kein Tailscale-Login-Link gefunden (Timeout)."); return false; }
-            progress.Report($"{LinkMarker}{loginUrl}");
-            progress.Report("⏳ Bitte den Link öffnen und den Node im Browser bestätigen…");
-
-            // 3) Wait until the node is authenticated + has an IP ----------------------------------
-            var tsIp = await PollAsync(async () =>
+            if (tsIp == null)
             {
-                var st = await Sh(serverId, "tailscale status --json 2>/dev/null | grep -m1 '\"BackendState\"'", TimeSpan.FromSeconds(20), ct);
-                if (!st.Output.Contains("Running")) return null;
-                var ip = await Sh(serverId, "tailscale ip -4 2>/dev/null | head -1", TimeSpan.FromSeconds(20), ct);
-                var v = ip.Output.Trim();
-                return string.IsNullOrEmpty(v) ? null : v;
-            }, attempts: 100, delay: TimeSpan.FromSeconds(3), ct); // ~5 min for the user to click
+                progress.Report("③ Tailscale starten…");
+                await ShTry(serverId, "sudo systemctl reset-failed ts-up", TimeSpan.FromSeconds(10), ct);
+                await Sh(serverId, $"sudo systemd-run --collect --unit=ts-up tailscale up --accept-dns=false --hostname={slug}", TimeSpan.FromSeconds(20), ct);
 
-            if (tsIp == null) { progress.Report("❌ Node nicht verbunden (Timeout beim Login)."); return false; }
+                progress.Report("④ Auf Tailscale-Login warten…");
+                var loginUrl = await PollAsync(async () =>
+                {
+                    var r = await Sh(serverId, "sudo journalctl -u tailscaled --since '90 seconds ago' --no-pager 2>/dev/null | grep -oE 'https://login\\.tailscale\\.com/[A-Za-z0-9/]+' | tail -1", TimeSpan.FromSeconds(20), ct);
+                    var url = r.Output.Trim();
+                    return string.IsNullOrEmpty(url) ? null : url;
+                }, attempts: 15, delay: TimeSpan.FromSeconds(3), ct);
+
+                if (loginUrl == null) { progress.Report("❌ Kein Tailscale-Login-Link gefunden (Timeout)."); return false; }
+                progress.Report($"{LinkMarker}{loginUrl}");
+                progress.Report("⏳ Bitte den Link öffnen und den Node im Browser bestätigen…");
+
+                // 3) Wait until the node is authenticated + has an IP ----------------------------------
+                tsIp = await PollAsync(async () =>
+                {
+                    var st = await Sh(serverId, "tailscale status --json 2>/dev/null | grep -m1 '\"BackendState\"'", TimeSpan.FromSeconds(20), ct);
+                    if (!st.Output.Contains("Running")) return null;
+                    var ip = await Sh(serverId, "tailscale ip -4 2>/dev/null | head -1", TimeSpan.FromSeconds(20), ct);
+                    var v = ip.Output.Trim();
+                    return string.IsNullOrEmpty(v) ? null : v;
+                }, attempts: 100, delay: TimeSpan.FromSeconds(3), ct); // ~5 min for the user to click
+
+                if (tsIp == null) { progress.Report("❌ Node nicht verbunden (Timeout beim Login)."); return false; }
+            }
             progress.Report($"✅ Mit dem Tailnet verbunden: {tsIp}");
 
+            // 3b) Ensure Docker is present — a fresh VPS may not have it; the telemetry + proxy steps
+            // below all run `docker compose`. Install via the official convenience script if missing.
+            progress.Report("⑤ Docker sicherstellen…");
+            await Sh(serverId, "command -v docker >/dev/null 2>&1 || (curl -fsSL https://get.docker.com | sudo sh)", TimeSpan.FromMinutes(5), ct);
+            await ShTry(serverId, "sudo systemctl enable --now docker", TimeSpan.FromSeconds(30), ct);
+
             // 4) Deploy node_exporter (mesh-only) on the new host ---------------------------------
-            progress.Report("⑤ node-exporter deployen…");
+            progress.Report("⑥ node-exporter deployen…");
             await WriteFile(serverId, "/opt/telemetry/docker-compose.yml", NodeExporterCompose(tsIp), ct);
             await Sh(serverId, "cd /opt/telemetry && sudo docker compose up -d", TimeSpan.FromMinutes(2), ct);
 
