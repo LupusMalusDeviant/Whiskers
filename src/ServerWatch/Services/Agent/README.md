@@ -33,4 +33,4 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 
 - Models: [`../../Models/Agent/`](../../Models/Agent/) (`AgentDtos`, `AgentRuntime`)
 - Config: [`../../Configuration/AgentSettings.cs`](../../Configuration/AgentSettings.cs)
-- Tests: [`../../../ServerWatch.Tests/`](../../../ServerWatch.Tests/) (`AgentService*`, `AgentSession`, `AgentToolInvoker`, `AgentToolRegistry`, `ClaudeCodeOutputParser`, …)
+- Tests: [`../../../ServerWatch.Tests/`](../../../ServerWatch.Tests/) (`AgentService*`, `AgentSession`, `AgentToolInvoker`, `AgentToolRegistry`, `ClaudeCodeOutputParser`, ...)

@@ -15,4 +15,4 @@ SVG figures inline or shows a placeholder box where a real screenshot can be dro
 **To extend the handbook:** add a `HelpChapter` to the list in `HelpContentService`. Use
 `Shot("caption")` for a screenshot placeholder or `Diagram("caption", svg)` for an inline SVG.
 SVG diagrams should use the theme CSS variables (`var(--sw-accent-primary)`, `var(--sw-text-primary)`
-…) so they track the active theme. Registered interface-first in `Program.cs`.
+...) so they track the active theme. Registered interface-first in `Program.cs`.

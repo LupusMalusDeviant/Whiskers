@@ -17,7 +17,7 @@ User-facing strings here are German (the product's UI language); in-code comment
 | Folder | Contents |
 |---|---|
 | [`Layout/`](Layout/) | App shell, main layout, navigation menu, reconnect modal |
-| [`Pages/`](Pages/) | Routable pages (dashboard, container detail, settings, deploy, …) |
+| [`Pages/`](Pages/) | Routable pages (dashboard, container detail, settings, deploy, ...) |
 | [`Shared/`](Shared/) | Reusable widgets (gauges, badges, log viewer, role guard, advisor chat) |
 
 ## Related

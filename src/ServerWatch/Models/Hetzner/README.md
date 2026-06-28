@@ -6,7 +6,7 @@ Response models for the Hetzner Cloud API ([`../../Services/Hetzner/`](../../Ser
 
 | File | Purpose |
 |---|---|
-| `HetznerModels.cs` | The DTOs for Hetzner Cloud API responses (servers, actions, snapshots, server types, …). |
+| `HetznerModels.cs` | The DTOs for Hetzner Cloud API responses (servers, actions, snapshots, server types, ...). |
 
 ## Related
 

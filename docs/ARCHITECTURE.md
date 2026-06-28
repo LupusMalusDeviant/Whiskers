@@ -57,7 +57,7 @@ ServerWatch ──mTLS──▶ ghostunnel ──plaintext(local)──▶ docke
   signed by the fleet CA. Bound to the mesh IP only.
 - **docker-socket-proxy** allows only the API sections ServerWatch needs
   (`CONTAINERS`, `IMAGES`, `NETWORKS`, `VOLUMES`, `INFO`, `VERSION`, `POST`) and **denies the rest**
-  (`EXEC=0`, `SWARM=0`, `SECRETS=0`, `CONFIGS=0`, …). Container **exec-start** (`/exec/*`) is blocked,
+  (`EXEC=0`, `SWARM=0`, `SECRETS=0`, `CONFIGS=0`, ...). Container **exec-start** (`/exec/*`) is blocked,
   so even though exec-create slips through the broad `/containers` rule, the exec can never run.
 - **Residual, by design:** `POST /containers/create` stays allowed (deploy needs it) and is
   root-equivalent (a container can bind-mount `/`). This is the one acknowledged powerful verb.
