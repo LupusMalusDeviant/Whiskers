@@ -76,7 +76,7 @@ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ### Monitoring & alerting
 - Historical metrics (CPU, RAM, disk) in SQLite
-- Notifications (Mattermost, Matrix, Telegram, ntfy, Discord, Email/SMTP, and a generic outbound webhook) on:
+- Notifications (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, Email/SMTP, and a generic outbound webhook) on:
   - container unhealthy / stopped / OOM
   - restart loops
   - image updates available
@@ -311,9 +311,6 @@ If you discover a security issue, please report it privately, see [SECURITY.md](
 ## Roadmap
 
 Beta is feature-rich but not finished. Planned / not-yet-implemented:
-
-**Notification channels**
-- Slack incoming-webhook (Mattermost, Matrix, Telegram, ntfy, Discord, Email/SMTP and a generic outbound webhook already ship; Gotify works via the generic webhook).
 
 **Monitoring & triggers**
 - Proper traffic / anomaly detection and a dedicated "extreme traffic" trigger (today: sustained

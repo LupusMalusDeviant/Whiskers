@@ -16,6 +16,7 @@ public class CompositeNotificationService : INotificationService
     private readonly ITelegramNotificationService _telegram;
     private readonly INtfyNotificationService _ntfy;
     private readonly IDiscordNotificationService _discord;
+    private readonly ISlackNotificationService _slack;
     private readonly IEmailNotificationService _email;
     private readonly IWebhookNotificationService _webhook;
     private readonly IInAppNotificationStore _inApp;
@@ -28,6 +29,7 @@ public class CompositeNotificationService : INotificationService
         ITelegramNotificationService telegram,
         INtfyNotificationService ntfy,
         IDiscordNotificationService discord,
+        ISlackNotificationService slack,
         IEmailNotificationService email,
         IWebhookNotificationService webhook,
         IInAppNotificationStore inApp,
@@ -39,6 +41,7 @@ public class CompositeNotificationService : INotificationService
         _telegram = telegram;
         _ntfy = ntfy;
         _discord = discord;
+        _slack = slack;
         _email = email;
         _webhook = webhook;
         _inApp = inApp;
@@ -58,6 +61,7 @@ public class CompositeNotificationService : INotificationService
         tasks.Add(SafeSend("Telegram", () => _telegram.SendAsync(evt)));
         tasks.Add(SafeSend("ntfy", () => _ntfy.SendAsync(evt)));
         tasks.Add(SafeSend("Discord", () => _discord.SendAsync(evt)));
+        tasks.Add(SafeSend("Slack", () => _slack.SendAsync(evt)));
         tasks.Add(SafeSend("Email", () => _email.SendAsync(evt)));
         tasks.Add(SafeSend("Webhook", () => _webhook.SendAsync(evt)));
         tasks.Add(SafeSend("AI-Trigger", () => _sp.GetRequiredService<IAiTriggerDispatcher>().OnEventAsync(evt)));
@@ -84,6 +88,9 @@ public class CompositeNotificationService : INotificationService
 
         try { await _discord.SendTestAsync(); }
         catch (Exception ex) { errors.Add($"Discord: {ex.Message}"); }
+
+        try { await _slack.SendTestAsync(); }
+        catch (Exception ex) { errors.Add($"Slack: {ex.Message}"); }
 
         try { await _email.SendTestAsync(); }
         catch (Exception ex) { errors.Add($"Email: {ex.Message}"); }

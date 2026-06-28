@@ -53,6 +53,7 @@ builder.Services.Configure<ServerWatch.Configuration.MatrixSettings>(builder.Con
 builder.Services.Configure<TelegramSettings>(builder.Configuration.GetSection(TelegramSettings.SectionName));
 builder.Services.Configure<NtfySettings>(builder.Configuration.GetSection(NtfySettings.SectionName));
 builder.Services.Configure<DiscordSettings>(builder.Configuration.GetSection(DiscordSettings.SectionName));
+builder.Services.Configure<SlackSettings>(builder.Configuration.GetSection(SlackSettings.SectionName));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
 builder.Services.Configure<WebhookNotificationSettings>(builder.Configuration.GetSection(WebhookNotificationSettings.SectionName));
 
@@ -83,6 +84,9 @@ builder.Services.AddSingleton<ServerWatch.Services.Notifications.INtfyNotificati
 builder.Services.AddHttpClient<ServerWatch.Services.Notifications.DiscordNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.DiscordNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IDiscordNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.DiscordNotificationService>());
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.SlackNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.SlackNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.ISlackNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.SlackNotificationService>());
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IEmailNotificationService, ServerWatch.Services.Notifications.EmailNotificationService>();
 builder.Services.AddHttpClient<ServerWatch.Services.Notifications.WebhookNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.WebhookNotificationService>();

@@ -24,6 +24,7 @@
 @inject IOptionsMonitor<ServerWatch.Configuration.TelegramSettings> TelegramOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.NtfySettings> NtfyOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.DiscordSettings> DiscordOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.SlackSettings> SlackOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.EmailSettings> EmailOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.WebhookNotificationSettings> WebhookOptions
 @inject ServerWatch.Services.Persistence.IAppSettingsStore AppSettings
@@ -104,6 +105,13 @@ else
         <MudGrid>
             <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_dcEnabled" /></MudItem>
             <MudItem xs="12"><MudTextField @bind-Value="_dcWebhook" Label="Webhook-URL" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+        </MudGrid>
+
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Slack</MudText>
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_slEnabled" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_slWebhook" Label="Webhook-URL" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
@@ -598,6 +606,7 @@ else
     private bool _tgEnabled; private string _tgToken = ""; private string _tgChat = "";
     private bool _ntfyEnabled; private string _ntfyServer = "https://ntfy.sh"; private string _ntfyTopic = ""; private string _ntfyToken = "";
     private bool _dcEnabled; private string _dcWebhook = "";
+    private bool _slEnabled; private string _slWebhook = "";
     private bool _mailEnabled; private string _mailHost = ""; private int _mailPort = 587; private bool _mailSsl = true; private string _mailUser = ""; private string _mailPass = ""; private string _mailFrom = ""; private string _mailTo = "";
     private bool _whEnabled; private string _whUrl = "";
 
@@ -649,6 +658,7 @@ else
         var tg = TelegramOptions.CurrentValue; _tgEnabled = tg.Enabled; _tgToken = tg.BotToken; _tgChat = tg.ChatId;
         var nt = NtfyOptions.CurrentValue; _ntfyEnabled = nt.Enabled; _ntfyServer = nt.ServerUrl; _ntfyTopic = nt.Topic; _ntfyToken = nt.Token;
         var dc = DiscordOptions.CurrentValue; _dcEnabled = dc.Enabled; _dcWebhook = dc.WebhookUrl;
+        var sl = SlackOptions.CurrentValue; _slEnabled = sl.Enabled; _slWebhook = sl.WebhookUrl;
         var ml = EmailOptions.CurrentValue; _mailEnabled = ml.Enabled; _mailHost = ml.Host; _mailPort = ml.Port; _mailSsl = ml.UseSsl; _mailUser = ml.Username; _mailPass = ml.Password; _mailFrom = ml.From; _mailTo = ml.To;
         var wh = WebhookOptions.CurrentValue; _whEnabled = wh.Enabled; _whUrl = wh.Url;
     }
@@ -760,6 +770,10 @@ else
         await AppSettings.SaveSectionAsync("Discord", new DiscordSettings
         {
             Enabled = _dcEnabled, WebhookUrl = _dcWebhook?.Trim() ?? "", ThrottleMinutes = DiscordOptions.CurrentValue.ThrottleMinutes,
+        });
+        await AppSettings.SaveSectionAsync("Slack", new SlackSettings
+        {
+            Enabled = _slEnabled, WebhookUrl = _slWebhook?.Trim() ?? "", ThrottleMinutes = SlackOptions.CurrentValue.ThrottleMinutes,
         });
         await AppSettings.SaveSectionAsync("Email", new EmailSettings
         {

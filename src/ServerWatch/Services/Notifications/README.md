@@ -16,6 +16,7 @@ Each channel has its own interface (distinct strategies) so the composite can en
 | `ITelegramNotificationService.cs` / `TelegramNotificationService.cs` | Telegram bot channel (sendMessage API). |
 | `INtfyNotificationService.cs` / `NtfyNotificationService.cs` | ntfy push channel (ntfy.sh or self-hosted; severity → priority/tags). |
 | `IDiscordNotificationService.cs` / `DiscordNotificationService.cs` | Discord incoming-webhook channel (coloured embeds per severity). |
+| `ISlackNotificationService.cs` / `SlackNotificationService.cs` | Slack incoming-webhook channel (coloured attachments per severity). |
 | `IEmailNotificationService.cs` / `EmailNotificationService.cs` | Email (SMTP) channel via `System.Net.Mail`. |
 | `IWebhookNotificationService.cs` / `WebhookNotificationService.cs` | Generic outbound webhook (POSTs a JSON event). Distinct from the inbound [`../Webhooks/`](../Webhooks/). |
 | `IContainerNotificationPrefsService.cs` / `ContainerNotificationPrefsService.cs` | Per-container notification preferences (which events should notify). |
