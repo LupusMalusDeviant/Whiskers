@@ -105,6 +105,10 @@
                     </MudTooltip>
                 }
             }
+            else
+            {
+                <MudText Typo="Typo.body2" Color="Color.Error" Class="ml-2">nicht erreichbar</MudText>
+            }
         </div>
         <MudSpacer />
         @if (ServerConfigService.SupportsTerminal(serverGroup.ServerId))
@@ -450,23 +454,38 @@
 
     private void RebuildGrouping()
     {
-        _grouped = _containers
-            .GroupBy(c => new { c.ServerId, c.ServerName })
-            .OrderBy(g => g.Key.ServerName)
-            .Select(serverGroup => new ServerGroupViewModel
+        var byServer = _containers
+            .GroupBy(c => c.ServerId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Build a group for EVERY known server (from the reachability probe), not just those that
+        // returned containers — so a currently-unreachable host still shows as a card (marked
+        // unreachable in the header) instead of silently disappearing from the dashboard.
+        var serverIds = _serverInfos.Keys.Union(byServer.Keys).ToList();
+
+        _grouped = serverIds
+            .Select(id =>
             {
-                ServerId = serverGroup.Key.ServerId,
-                ServerName = serverGroup.Key.ServerName,
-                Projects = serverGroup
-                    .GroupBy(c => c.ComposeProject)
-                    .OrderBy(g => g.Key)
-                    .Select(projectGroup => new ProjectGroupViewModel
-                    {
-                        Project = projectGroup.Key,
-                        Containers = projectGroup.OrderBy(c => c.Name).ToList()
-                    })
-                    .ToList()
+                var list = byServer.TryGetValue(id, out var cs) ? cs : new List<ContainerInfo>();
+                var name = _serverInfos.TryGetValue(id, out var si) && !string.IsNullOrEmpty(si.ServerName)
+                    ? si.ServerName
+                    : list.FirstOrDefault()?.ServerName ?? id;
+                return new ServerGroupViewModel
+                {
+                    ServerId = id,
+                    ServerName = name,
+                    Projects = list
+                        .GroupBy(c => c.ComposeProject)
+                        .OrderBy(g => g.Key)
+                        .Select(projectGroup => new ProjectGroupViewModel
+                        {
+                            Project = projectGroup.Key,
+                            Containers = projectGroup.OrderBy(c => c.Name).ToList()
+                        })
+                        .ToList()
+                };
             })
+            .OrderBy(g => g.ServerName)
             .ToList();
     }
 

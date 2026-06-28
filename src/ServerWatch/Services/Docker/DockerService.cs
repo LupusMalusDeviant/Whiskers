@@ -67,11 +67,24 @@ public class DockerService : IDockerService
     public async Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true)
     {
         var servers = _serverConfigService.GetEnabledServers();
+        // Bound each server with a short timeout so ONE unreachable host can't blank the whole
+        // dashboard: a slow/dead server is skipped after 8s (returns empty) while the reachable ones
+        // render immediately. Unreachability itself is surfaced separately via GetServerSystemInfoAsync.
+        var perServerTimeout = TimeSpan.FromSeconds(8);
         var tasks = servers.Select(async server =>
         {
             try
             {
-                return await ListContainersAsync(all, server.Id);
+                var listTask = ListContainersAsync(all, server.Id);
+                var winner = await Task.WhenAny(listTask, Task.Delay(perServerTimeout));
+                if (winner == listTask)
+                    return await listTask;
+
+                // Timed out — observe any later fault so it isn't an unobserved exception, then degrade.
+                _ = listTask.ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                _logger.LogWarning("Listing containers for server {ServerName} timed out ({Timeout}s) — skipping (degraded view).",
+                    server.Name, perServerTimeout.TotalSeconds);
+                return (IList<ContainerInfo>)new List<ContainerInfo>();
             }
             catch (Exception ex)
             {
@@ -510,10 +523,26 @@ public class DockerService : IDockerService
     public async Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync()
     {
         var servers = _serverConfigService.GetEnabledServers();
+        // Bound each server's reachability probe so one dead host (whose retrying executor can take up
+        // to ~60s) can't stall the whole dashboard load — it's marked unreachable after 8s instead.
+        var perServerTimeout = TimeSpan.FromSeconds(8);
         var tasks = servers.Select(async s =>
         {
-            var info = await GetServerSystemInfoAsync(s.Id);
-            return (s.Id, info);
+            var infoTask = GetServerSystemInfoAsync(s.Id);
+            var winner = await Task.WhenAny(infoTask, Task.Delay(perServerTimeout));
+            if (winner == infoTask)
+                return (s.Id, info: await infoTask);
+
+            _ = infoTask.ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+            _logger.LogWarning("System info for server {ServerName} timed out ({Timeout}s) — marking unreachable (degraded view).",
+                s.Name, perServerTimeout.TotalSeconds);
+            return (s.Id, info: new ServerSystemInfo
+            {
+                ServerId = s.Id,
+                ServerName = s.Name,
+                IsReachable = false,
+                Error = $"Zeitüberschreitung nach {perServerTimeout.TotalSeconds:0}s"
+            });
         });
 
         var results = await Task.WhenAll(tasks);
