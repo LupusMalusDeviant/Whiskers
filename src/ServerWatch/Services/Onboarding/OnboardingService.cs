@@ -153,7 +153,12 @@ public class OnboardingService : IOnboardingService
                 return false;
             }
 
-            progress.Report($"🎉 Fertig! {server.Name} ist im Mesh, läuft über mTLS ({info.ContainersRunning}/{info.ContainersTotal} Container, {info.OperatingSystem}). Der SSH-Bootstrap-Key wird nicht mehr benötigt.");
+            // Onboarding succeeded over mTLS → drop the one-time bootstrap credentials so nothing
+            // standing remains: clear the in-memory password and delete the SSH key from disk.
+            server.SshPassword = null;
+            await _serverConfig.DeleteSshKeyAsync(serverId);
+
+            progress.Report($"🎉 Fertig! {server.Name} ist im Mesh, läuft über mTLS ({info.ContainersRunning}/{info.ContainersTotal} Container, {info.OperatingSystem}). SSH-Bootstrap-Key + Passwort wurden entfernt — SSH wird nicht mehr benötigt.");
             return true;
         }
         catch (OperationCanceledException)

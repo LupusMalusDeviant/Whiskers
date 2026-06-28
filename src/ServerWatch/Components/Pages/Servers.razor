@@ -131,14 +131,32 @@
                 <MudTextField @bind-Value="_form.SshHost" Label="Host (Domain / IPv4 / IPv6)" Variant="Variant.Outlined" Class="mb-3" />
                 <MudNumericField @bind-Value="_form.SshPort" Label="SSH-Port" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
                 <MudTextField @bind-Value="_form.SshUser" Label="SSH-Benutzer" Variant="Variant.Outlined" Class="mb-3" />
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Key"
-                               HtmlTag="label" for="ssh-key-upload">
-                        @(_sshKeyFileName ?? "SSH-Schlüssel hochladen")
-                    </MudButton>
-                    <InputFile id="ssh-key-upload" OnChange="OnSshKeyFileChanged" style="display:none;" />
-                </MudStack>
+
+                <MudSwitch @bind-Value="_useSshPassword" Color="Color.Primary" Class="mb-1"
+                           Label="Mit Root-/Passwort statt SSH-Key (nur fürs Erst-Onboarding)" />
+                @if (_useSshPassword)
+                {
+                    <MudTextField @bind-Value="_form.SshPassword" Label="Root-/SSH-Passwort" Variant="Variant.Outlined"
+                                  InputType="InputType.Password" Class="mb-2"
+                                  HelperText="Wird nur einmalig fürs Onboarding genutzt, nie gespeichert und nach Erfolg verworfen." />
+                }
+                else
+                {
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Key"
+                                   HtmlTag="label" for="ssh-key-upload">
+                            @(_sshKeyFileName ?? "SSH-Schlüssel hochladen")
+                        </MudButton>
+                        <InputFile id="ssh-key-upload" OnChange="OnSshKeyFileChanged" style="display:none;" />
+                    </MudStack>
+                }
+
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                    <strong>Onboarding (SSH-frei werden):</strong> „Speichern &amp; Onboarden" installiert Tailscale +
+                    mTLS-Proxy über <em>eine</em> SSH-Bootstrap-Verbindung und stellt den Host danach auf TCP+mTLS um.
+                    Key bzw. Passwort werden nach Erfolg automatisch entfernt.
+                </MudAlert>
             }
 
             @if (_form.ConnectionType != ServerWatch.Models.ConnectionType.Local)
@@ -168,6 +186,14 @@
         </DialogContent>
         <DialogActions>
             <MudButton OnClick="@(() => _showDialog = false)" Disabled="_saving">Abbrechen</MudButton>
+            @if (_form.ConnectionType == ServerWatch.Models.ConnectionType.SSH)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="SaveAndOnboard"
+                           Disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name))"
+                           StartIcon="@Icons.Material.Filled.Hub">
+                    Speichern &amp; Onboarden
+                </MudButton>
+            }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveServer"
                        Disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name))">
                 @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
@@ -218,6 +244,7 @@
     private bool _showDialog;
     private bool _saving;
     private string? _connectError;
+    private bool _useSshPassword;
     private ServerWatch.Models.ServerConfig? _editingServer;
     private ServerWatch.Models.ServerConfig _form = new();
     private string? _sshKeyFileName;
@@ -259,6 +286,7 @@
         _cloudApiKey = "";
         _hasCloudKey = false;
         _connectError = null;
+        _useSshPassword = false;
         _showDialog = true;
     }
 
@@ -271,12 +299,14 @@
         _cloudApiKey = "";                                  // never prefill the secret
         _hasCloudKey = !string.IsNullOrWhiteSpace(server.CloudApiKey);
         _connectError = null;
+        _useSshPassword = false;
         _showDialog = true;
     }
 
-    private async Task SaveServer()
+    // Persists the form (add/update + SSH key) and returns the live in-memory ServerConfig — which
+    // keeps the transient SshPassword (used for onboarding) that is never written to disk.
+    private async Task<ServerWatch.Models.ServerConfig> PersistServerAsync()
     {
-        if (!Require(AppRole.Admin)) return;
         // Resolve the cloud API key: blank field = keep the existing one; clearing the provider clears the key.
         if (_form.CloudProvider == ServerWatch.Models.CloudProvider.None)
             _form.CloudApiKey = null;
@@ -285,40 +315,49 @@
         else
             _form.CloudApiKey = _editingServer?.CloudApiKey;   // keep existing (null for new server)
 
+        // Key vs password are mutually exclusive — drop a stale password if the user picked key auth.
+        if (!_useSshPassword) _form.SshPassword = null;
+
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        if (_editingServer != null)
+        {
+            _form.Id = _editingServer.Id;
+            _form.IsDefault = _editingServer.IsDefault;
+            _form.Enabled = _editingServer.Enabled;
+
+            if (_sshKeyData != null && _sshKeyFileName != null)
+                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+
+            await ServerConfigService.UpdateServerAsync(_form);
+            ConnectionManager.InvalidateClient(_form.Id);
+            await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
+        }
+        else
+        {
+            await ServerConfigService.AddServerAsync(_form);
+
+            if (_sshKeyData != null && _sshKeyFileName != null)
+                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+
+            await AuditLog.LogAsync(actor, "web", "server.add", "server", _form.Id, _form.Name, serverId: _form.Id);
+        }
+
+        _servers = ServerConfigService.GetServers();
+        return ServerConfigService.GetServer(_form.Id) ?? _form;
+    }
+
+    private async Task SaveServer()
+    {
+        if (!Require(AppRole.Admin)) return;
         _saving = true;
         _connectError = null;
         StateHasChanged();
         try
         {
-            if (_editingServer != null)
-            {
-                _form.Id = _editingServer.Id;
-                _form.IsDefault = _editingServer.IsDefault;
-                _form.Enabled = _editingServer.Enabled;
-
-                if (_sshKeyData != null && _sshKeyFileName != null)
-                    await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
-
-                await ServerConfigService.UpdateServerAsync(_form);
-                ConnectionManager.InvalidateClient(_form.Id);
-                await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
-            }
-            else
-            {
-                await ServerConfigService.AddServerAsync(_form);
-
-                if (_sshKeyData != null && _sshKeyFileName != null)
-                    await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
-
-                await AuditLog.LogAsync(actor, "web", "server.add", "server", _form.Id, _form.Name, serverId: _form.Id);
-            }
-
-            _servers = ServerConfigService.GetServers();
-
+            var saved = await PersistServerAsync();
             // Build + probe the connection before closing, so a broken server isn't saved silently
             // (which would otherwise drag the dashboard with timeouts later).
-            var (ok, info) = await TryConnectAsync(_form.Id, TimeSpan.FromSeconds(12));
+            var (ok, info) = await TryConnectAsync(saved.Id, TimeSpan.FromSeconds(12));
             if (ok)
             {
                 Snackbar.Add($"{_form.Name} gespeichert — verbunden ({info}).", Severity.Success);
@@ -329,6 +368,26 @@
                 _connectError = info;
                 Snackbar.Add($"{_form.Name} gespeichert, aber Verbindung fehlgeschlagen.", Severity.Warning);
             }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    // Save, then run the one-time onboarding (Tailscale + mTLS proxy) over the SSH key / root password
+    // just entered. The bootstrap credentials are auto-deleted on success.
+    private async Task SaveAndOnboard()
+    {
+        if (!Require(AppRole.Admin)) return;
+        _saving = true;
+        _connectError = null;
+        StateHasChanged();
+        try
+        {
+            var saved = await PersistServerAsync();
+            _showDialog = false;
+            await StartOnboarding(saved);
         }
         finally
         {

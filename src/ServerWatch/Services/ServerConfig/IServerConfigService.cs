@@ -16,4 +16,8 @@ public interface IServerConfigService
     Task RemoveServerAsync(string serverId);
     Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData);
     string? GetSshKeyPath(Models.ServerConfig server);
+
+    /// <summary>Deletes the stored SSH key for a server and clears its key reference — used after a
+    /// successful onboarding so no standing bootstrap key remains on disk.</summary>
+    Task DeleteSshKeyAsync(string serverId);
 }

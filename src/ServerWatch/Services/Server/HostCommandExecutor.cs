@@ -96,9 +96,16 @@ public class HostCommandExecutor : IHostCommandExecutor
         if (string.IsNullOrWhiteSpace(server.SshUser))
             return new CommandResult { ExitCode = -1, Error = "SSH user is not configured" };
 
-        var keyPath = _serverConfigService.GetSshKeyPath(server);
-        if (string.IsNullOrWhiteSpace(keyPath))
-            return new CommandResult { ExitCode = -1, Error = "SSH key not found for server" };
+        // Bootstrap auth: a transient root/SSH password (one-time onboarding) takes precedence;
+        // otherwise the stored key. Password is fed to sshpass via the SSHPASS env var below.
+        var usePassword = !string.IsNullOrEmpty(server.SshPassword);
+        string? keyPath = null;
+        if (!usePassword)
+        {
+            keyPath = _serverConfigService.GetSshKeyPath(server);
+            if (string.IsNullOrWhiteSpace(keyPath))
+                return new CommandResult { ExitCode = -1, Error = "SSH key not found for server" };
+        }
 
         try { Directory.CreateDirectory(ControlDir); } catch { /* best effort; ssh falls back to no mux */ }
 
@@ -112,19 +119,34 @@ public class HostCommandExecutor : IHostCommandExecutor
             "-o", "ControlPersist=60s",
             "-o", $"ControlPath={Path.Combine(ControlDir, "cm-%C")}",
             "-p", server.SshPort.ToString(),
-            "-i", keyPath,
-            $"{server.SshUser}@{server.SshHost}",
-            // The command is a single argv element: ssh forwards it verbatim to the remote login
-            // shell, so a full shell command string (pipes, redirects, &&) works as written.
-            command
         };
+        if (usePassword)
+        {
+            args.AddRange(new[] { "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1" });
+        }
+        else
+        {
+            args.Add("-i");
+            args.Add(keyPath!);
+        }
+        args.Add($"{server.SshUser}@{server.SshHost}");
+        // The command is a single argv element: ssh forwards it verbatim to the remote login shell,
+        // so a full shell command string (pipes, redirects, &&) works as written.
+        args.Add(command);
 
-        _logger.LogDebug("Executing SSH command on {Host}: {Command}", server.SshHost, command);
+        _logger.LogDebug("Executing SSH command on {Host} ({Auth}): {Command}",
+            server.SshHost, usePassword ? "password" : "key", command);
+
+        if (usePassword)
+            // sshpass -e reads the password from SSHPASS — never on the command line / process list.
+            return await RunProcessAsync("sshpass", new[] { "-e", "ssh" }.Concat(args), timeout, ct,
+                env: ("SSHPASS", server.SshPassword!));
 
         return await RunProcessAsync("ssh", args, timeout, ct);
     }
 
-    private async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct)
+    private async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,
+        (string Key, string Value)? env = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -136,6 +158,8 @@ public class HostCommandExecutor : IHostCommandExecutor
         };
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
+        if (env is { } e)
+            psi.Environment[e.Key] = e.Value;
 
         using var process = new Process { StartInfo = psi };
 

@@ -18,6 +18,7 @@ RUN . /etc/os-release \
     && apt-get install -y --no-install-recommends \
         docker.io \
         openssh-client \
+        sshpass \
         curl \
         gnupg \
         ca-certificates \

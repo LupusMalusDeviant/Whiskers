@@ -2,6 +2,8 @@
 
 **One-click server onboarding** into the zero-SSH-key managed stack. Starting from a single SSH bootstrap connection (the only time SSH is used), the orchestrator installs Tailscale, deploys telemetry and the mTLS Docker proxy, issues certificates, and switches the server to mesh + mTLS — with live progress streamed to the UI.
 
+The bootstrap authenticates with **either an uploaded SSH key or a transient root/SSH password** (fed to `sshpass` via the `SSHPASS` env var, never persisted — `ServerConfig.SshPassword` is `[JsonIgnore]`). On success both are dropped: the password is cleared from memory and the key deleted from disk (`IServerConfigService.DeleteSshKeyAsync`), so **no standing credential remains**. Reachable from the server add/edit dialog (**„Speichern & Onboarden"**) or the per-row onboarding button.
+
 See [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) → *Onboarding a new server* for the full step sequence.
 
 ## Files

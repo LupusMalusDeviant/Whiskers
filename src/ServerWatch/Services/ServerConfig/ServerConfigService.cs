@@ -181,4 +181,18 @@ public class ServerConfigService : IServerConfigService
         var path = Path.Combine(SshKeysBasePath, server.Id, server.SshKeyFileName);
         return File.Exists(path) ? path : null;
     }
+
+    public async Task DeleteSshKeyAsync(string serverId)
+    {
+        var keyDir = Path.Combine(SshKeysBasePath, serverId);
+        try { if (Directory.Exists(keyDir)) Directory.Delete(keyDir, true); }
+        catch { /* best effort */ }
+
+        var server = GetServer(serverId);
+        if (server != null && server.SshKeyFileName != null)
+        {
+            server.SshKeyFileName = null;
+            await UpdateServerAsync(server);
+        }
+    }
 }

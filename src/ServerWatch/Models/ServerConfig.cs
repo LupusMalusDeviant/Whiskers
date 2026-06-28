@@ -57,6 +57,12 @@ public class ServerConfig
     public string? SshUser { get; set; }
     public string? SshKeyFileName { get; set; }
 
+    // Transient root/SSH password used ONLY for a one-time onboarding bootstrap (e.g. a fresh VPS that
+    // only offers root+password). Held in memory, never written to servers.json, and cleared after a
+    // successful onboarding (which switches the host to SSH-free mTLS).
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? SshPassword { get; set; }
+
     // Telemetry: where the metrics collector reads this server's metrics from.
     // MetricsEndpoint is the Prometheus-compatible query base URL (e.g. the VictoriaMetrics
     // instance http://<mesh-ip>:8428); the server is matched in queries by the `server` label
