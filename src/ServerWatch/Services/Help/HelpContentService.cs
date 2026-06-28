@@ -158,12 +158,12 @@ public sealed class HelpContentService : IHelpContentService
                 new("Wie ServerWatch Server erreicht", """
                     ServerWatch spricht jeden Host über die **Docker-API** an, entweder lokal, über einen
                     **SSH-Tunnel** oder über **TCP mit gegenseitigem TLS (mTLS)**. Für Host-Befehle (Firewall,
-                    Nginx, systemd …) startet es einen kurzlebigen, privilegierten Helfer-Container, der per
+                    Nginx, systemd ...) startet es einen kurzlebigen, privilegierten Helfer-Container, der per
                     `nsenter` in den Host springt, **ohne** dauerhaften SSH-Schlüssel.
                     """,
                     Diagram("Verbindungs-Architektur", SvgArchitecture)),
                 new("Einen Server hinzufügen", """
-                    Unter **Infrastruktur → Server → Hinzufügen** legst du einen Host an:
+                    Unter **Infrastruktur > Server > Hinzufügen** legst du einen Host an:
 
                     1. **Name** und **Verbindungstyp** (Local / SSH / TCP+mTLS).
                     2. Verbindungsdaten (Host, Port, ggf. Zertifikate/Schlüssel).
@@ -200,24 +200,24 @@ public sealed class HelpContentService : IHelpContentService
             new List<HelpSection>
             {
                 new("Container bereitstellen", """
-                    Unter **Deployment → Bereitstellen** startest du einen neuen Container: Image, Name, Ports,
+                    Unter **Deployment > Bereitstellen** startest du einen neuen Container: Image, Name, Ports,
                     Volumes, Umgebungsvariablen und Restart-Policy, wie ein geführtes `docker run`.
                     """,
                     Shot("Bereitstellen-Formular")),
                 new("Compose-Editor & App Store", """
                     - **Compose Editor**: `docker-compose.yml` direkt im Browser bearbeiten und deployen.
-                    - **App Store**: kuratierte Vorlagen (Redis, Nginx, Ghost …) als Startpunkt; Platzhalter
+                    - **App Store**: kuratierte Vorlagen (Redis, Nginx, Ghost ...) als Startpunkt; Platzhalter
                       wie `{PROJECT}`/`{PORT}` werden beim Deploy ersetzt.
                     """),
             }),
 
         new("agent", "Der KI-Agent", "SmartToy",
-            "LLM-Anbindung, Chat-Widget, Vision und der Wechsel Berater → handelnder Agent.",
+            "LLM-Anbindung, Chat-Widget, Vision und der Wechsel Berater > handelnder Agent.",
             new List<HelpSection>
             {
                 new("Einrichten", """
-                    Unter **Automatisierung → Agent** verbindest du ein LLM: **Anbieter** (OpenAI/Anthropic/
-                    Gemini …), **API-Key** und **Modell**. Beim Einfügen des Keys testet ServerWatch die
+                    Unter **Automatisierung > Agent** verbindest du ein LLM: **Anbieter** (OpenAI/Anthropic/
+                    Gemini ...), **API-Key** und **Modell**. Beim Einfügen des Keys testet ServerWatch die
                     Verbindung und füllt die Modellliste automatisch.
                     """,
                     Img("Agent-Konfiguration mit Anbieter, Key-Test und Modell-Dropdown", "/help/agent.png")),
@@ -228,9 +228,9 @@ public sealed class HelpContentService : IHelpContentService
 
                     - **Deaktiviert/Berater**: der Agent erklärt und schlägt vor, führt aber nichts aus.
                     - **Aktiviert/handelnd**: der Agent darf Werkzeuge benutzen (Container neu starten, Befehle
-                      ausführen …), immer begrenzt durch die **Guardrails** und ggf. **Freigaben**.
+                      ausführen ...), immer begrenzt durch die **Guardrails** und ggf. **Freigaben**.
                     """,
-                    Diagram("Berater → handelnder Agent (mit Guardrail-Grenze)", SvgAgent)),
+                    Diagram("Berater > handelnder Agent (mit Guardrail-Grenze)", SvgAgent)),
                 new("Das Widget bedienen", """
                     Das Fenster ist **verschiebbar** (am Kopf ziehen) und **größenveränderbar** (untere Ecke).
                     Eingabe mit **Enter** senden, **Shift+Enter** für eine neue Zeile. Antworten können
@@ -345,9 +345,9 @@ public sealed class HelpContentService : IHelpContentService
                     externer KI-Client (z. B. **Claude Code**) verbindet sich mit dem MCP-Endpunkt und kann dann, 
                     im Rahmen seiner Berechtigung, Container listen, Logs lesen, Befehle ausführen usw.
                     """,
-                    Diagram("MCP-Fluss: KI-Client → Berechtigung → Werkzeuge → Server", SvgMcp)),
+                    Diagram("MCP-Fluss: KI-Client > Berechtigung > Werkzeuge > Server", SvgMcp)),
                 new("API-Keys & Berechtigungen", """
-                    In den **Einstellungen → MCP** legst du **API-Keys** an. Jeder Key hat eine Stufe:
+                    In den **Einstellungen > MCP** legst du **API-Keys** an. Jeder Key hat eine Stufe:
 
                     - **Read**: nur lesen (listen, inspizieren, Logs).
                     - **Write**: zusätzlich verändern (start/stop, deploy, Befehle).
@@ -363,7 +363,7 @@ public sealed class HelpContentService : IHelpContentService
             new List<HelpSection>
             {
                 new("Topologie", """
-                    **Übersicht → Topologie** zeichnet ein Netzwerk-Diagramm: welche Container in welchen
+                    **Übersicht > Topologie** zeichnet ein Netzwerk-Diagramm: welche Container in welchen
                     Docker-Netzwerken hängen. Gut, um Abhängigkeiten und Isolation auf einen Blick zu sehen.
                     """,
                     Img("Topologie-Graph der Container und Netzwerke", "/help/topologie.png")),
@@ -373,7 +373,7 @@ public sealed class HelpContentService : IHelpContentService
                       gestartet/gestoppt/geändert). Ergänzt die *Agent-History* (KI-Aktionen).
                     """),
                 new("Statusberichte (Health)", """
-                    **Übersicht → Statusberichte** fasst den Gesundheitszustand der Flotte zusammen, ungesunde
+                    **Übersicht > Statusberichte** fasst den Gesundheitszustand der Flotte zusammen, ungesunde
                     Container, Restart-Loops und auffällige Hosts auf einen Blick.
                     """),
             }),
@@ -462,10 +462,10 @@ public sealed class HelpContentService : IHelpContentService
           <line x1="400" y1="175" x2="460" y2="190" stroke="var(--sw-glass-border)" stroke-width="1.5"/>
           <rect x="460" y="90" width="160" height="56" rx="10" fill="var(--sw-bg-elevated)" stroke="var(--sw-glass-border)"/>
           <text x="540" y="114" fill="var(--sw-text-primary)" font-size="11" text-anchor="middle">Werkzeuge laufen</text>
-          <text x="540" y="132" fill="var(--sw-text-secondary)" font-size="10" text-anchor="middle">→ Aktion am Server</text>
+          <text x="540" y="132" fill="var(--sw-text-secondary)" font-size="10" text-anchor="middle">Aktion am Server</text>
           <rect x="460" y="160" width="160" height="56" rx="10" fill="var(--sw-bg-secondary)" stroke="var(--sw-glass-border)"/>
           <text x="540" y="184" fill="var(--sw-text-primary)" font-size="11" text-anchor="middle">Freigabe nötig</text>
-          <text x="540" y="202" fill="var(--sw-text-secondary)" font-size="10" text-anchor="middle">→ du bestätigst</text>
+          <text x="540" y="202" fill="var(--sw-text-secondary)" font-size="10" text-anchor="middle">du bestätigst</text>
         </svg>
         """;
 
