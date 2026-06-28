@@ -1,6 +1,6 @@
 # Components/Layout
 
-The application shell — the chrome that wraps every page: the main layout, the navigation menu, and the connection-lost modal. Each component has a co-located `.razor.css` (scoped styles) and, where needed, a `.razor.js` (interop).
+The application shell, the chrome that wraps every page: the main layout, the navigation menu, and the connection-lost modal. Each component has a co-located `.razor.css` (scoped styles) and, where needed, a `.razor.js` (interop).
 
 ## Files
 

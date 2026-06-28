@@ -1,6 +1,6 @@
 # Services/ConfigExport
 
-Exports the **non-secret** application configuration (servers, roles, whitelist, MCP setup) as JSON — useful for backup, review, or migrating to another instance. Secrets are never included.
+Exports the **non-secret** application configuration (servers, roles, whitelist, MCP setup) as JSON, useful for backup, review, or migrating to another instance. Secrets are never included.
 
 ## Files
 

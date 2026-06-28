@@ -1,6 +1,6 @@
 # Services/Deployment
 
-Deploys workloads onto managed hosts — both single containers (from a form: image, ports, env, volumes) and full **Docker Compose** stacks (uploaded or pasted).
+Deploys workloads onto managed hosts, both single containers (from a form: image, ports, env, volumes) and full **Docker Compose** stacks (uploaded or pasted).
 
 ## Files
 

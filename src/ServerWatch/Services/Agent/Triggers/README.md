@@ -1,6 +1,6 @@
 # Services/Agent/Triggers
 
-**AI triggers** — run the agent autonomously when an event occurs. A dispatcher taps every
+**AI triggers**: run the agent autonomously when an event occurs. A dispatcher taps every
 `NotificationEvent` (via [`../../Notifications/CompositeNotificationService.cs`](../../Notifications/CompositeNotificationService.cs))
 and, for each enabled matching trigger, starts an agent run under the trigger's chosen guardrail
 preset (admin principal, so the preset is the ceiling), auto-approving confirmations up to the
@@ -13,8 +13,8 @@ concurrency cap. Runs only when the agent is enabled.
 
 | File | Purpose |
 |---|---|
-| `AiTriggerStore.cs` | `IAiTriggerStore` + `AiTriggerStore` — persists the triggers in `ai-triggers.json` (admin-only). |
-| `AiTriggerDispatcher.cs` | `IAiTriggerDispatcher` + `AiTriggerDispatcher` — matches events to triggers and runs the agent autonomously; resolves its dependencies lazily from the root provider to avoid a DI cycle with the notification service. |
+| `AiTriggerStore.cs` | `IAiTriggerStore` + `AiTriggerStore`, persists the triggers in `ai-triggers.json` (admin-only). |
+| `AiTriggerDispatcher.cs` | `IAiTriggerDispatcher` + `AiTriggerDispatcher`, matches events to triggers and runs the agent autonomously; resolves its dependencies lazily from the root provider to avoid a DI cycle with the notification service. |
 
 ## Related
 

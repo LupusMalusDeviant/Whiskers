@@ -1,6 +1,6 @@
 # Services/Database
 
-Detect and operate **databases running inside managed containers** — recognise the engine (Postgres, MySQL/MariaDB, …) from a container, then list databases/tables, inspect schema, run queries, and trigger backups.
+Detect and operate **databases running inside managed containers**: recognise the engine (Postgres, MySQL/MariaDB, …) from a container, then list databases/tables, inspect schema, run queries, and trigger backups.
 
 ## Files
 

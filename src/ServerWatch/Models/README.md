@@ -1,6 +1,6 @@
 # Models
 
-Plain data models — DTOs, records and enums passed between services, the UI, and the MCP layer. No behaviour beyond simple helpers.
+Plain data models, DTOs, records and enums passed between services, the UI, and the MCP layer. No behaviour beyond simple helpers.
 
 ## Files
 

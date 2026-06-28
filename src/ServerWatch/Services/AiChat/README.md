@@ -1,6 +1,6 @@
 # Services/AiChat
 
-The **read-only advisor chat** in the UI — an assistant that answers questions and gives guidance about your infrastructure but takes **no actions**. (For an agent that *acts*, see [`../Agent/`](../Agent/).)
+The **read-only advisor chat** in the UI, an assistant that answers questions and gives guidance about your infrastructure but takes **no actions**. (For an agent that *acts*, see [`../Agent/`](../Agent/).)
 
 ## Files
 

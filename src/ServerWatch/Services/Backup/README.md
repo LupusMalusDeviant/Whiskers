@@ -1,6 +1,6 @@
 # Services/Backup
 
-Docker **volume backups** — create and manage backups of container volumes.
+Docker **volume backups**: create and manage backups of container volumes.
 
 ## Files
 

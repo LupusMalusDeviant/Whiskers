@@ -9,7 +9,7 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | Folder | Responsibility |
 |---|---|
 | [`Docker/`](Docker/) | Docker Engine connections (local, SSH-tunnel, TCP/mTLS) and all container/image/network operations |
-| [`Server/`](Server/) | Host-level operations — shell command execution (SSH-free over mTLS), firewall, Nginx, systemd, SSL |
+| [`Server/`](Server/) | Host-level operations, shell command execution (SSH-free over mTLS), firewall, Nginx, systemd, SSL |
 | [`ServerConfig/`](ServerConfig/) | The fleet registry: which servers exist and how to reach each one |
 | [`Terminal/`](Terminal/) | Interactive web-terminal sessions (host and container) |
 | [`Persistence/`](Persistence/) | SQLite (EF Core) database context and generic JSON file stores |
@@ -60,6 +60,6 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 
 ## Conventions
 
-- **Interface-first** — every service is consumed through its `IFoo` interface; the concrete `Foo` is bound in DI. Hosted/background services are dual-registered (concrete singleton + interface forwarder + `AddHostedService`).
-- **Persistence** — durable state goes through [`Persistence/`](Persistence/) (SQLite for time-series/structured data, JSON file stores for config) under `/app/data`.
+- **Interface-first**: every service is consumed through its `IFoo` interface; the concrete `Foo` is bound in DI. Hosted/background services are dual-registered (concrete singleton + interface forwarder + `AddHostedService`).
+- **Persistence**: durable state goes through [`Persistence/`](Persistence/) (SQLite for time-series/structured data, JSON file stores for config) under `/app/data`.
 - **English** comments and XML docs throughout.

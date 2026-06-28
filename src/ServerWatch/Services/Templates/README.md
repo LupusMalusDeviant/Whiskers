@@ -1,6 +1,6 @@
 # Services/Templates
 
-The built-in **app deployment templates** that power the App Store — standardised image/port/env/volume presets so common apps deploy in one click.
+The built-in **app deployment templates** that power the App Store, standardised image/port/env/volume presets so common apps deploy in one click.
 
 ## Files
 

@@ -10,7 +10,7 @@ Authentication itself (Google OAuth / OIDC) is wired in [`Program.cs`](../../Pro
 |---|---|
 | `ICurrentUserService.cs` / `CurrentUserService.cs` | Resolves the current authenticated user (email, role) from the request context. |
 | `IRoleService.cs` / `RoleService.cs` | Maps users to roles (e.g. Admin/User) and resolves a role's permission level. |
-| `IWhitelistService.cs` / `WhitelistService.cs` | The email whitelist — who may sign in; managed in the UI, applied without restart. |
+| `IWhitelistService.cs` / `WhitelistService.cs` | The email whitelist, who may sign in; managed in the UI, applied without restart. |
 
 ## Related
 

@@ -1,6 +1,6 @@
 # Services/Webhooks
 
-CI/CD **webhook** handling — registers webhook endpoints and processes incoming triggers (e.g. redeploy a container when a pipeline pushes a new image).
+CI/CD **webhook** handling, registers webhook endpoints and processes incoming triggers (e.g. redeploy a container when a pipeline pushes a new image).
 
 ## Files
 

@@ -1,6 +1,6 @@
 # Services/Agent
 
-The **acting agent**: you give it an operations task in natural language and it plans and executes using ServerWatch's own MCP tools. It is provider-agnostic (OpenAI, OpenRouter, Ollama, Gemini, Anthropic, and Claude Code) and bounded by inescapable [guardrails](Guardrails/) enforced at the tool-execution boundary — never in the prompt.
+The **acting agent**: you give it an operations task in natural language and it plans and executes using ServerWatch's own MCP tools. It is provider-agnostic (OpenAI, OpenRouter, Ollama, Gemini, Anthropic, and Claude Code) and bounded by inescapable [guardrails](Guardrails/) enforced at the tool-execution boundary, never in the prompt.
 
 Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razor`](../../Components/Pages/Agent.razor)) and the `instruct_agent` MCP tool ([`../../Mcp/Tools/AgentTools.cs`](../../Mcp/Tools/AgentTools.cs)). The agent inherits exactly the rights of whoever triggered it (web user or MCP key) and can never exceed them.
 
@@ -19,15 +19,15 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 | `AgentPrincipalResolver.cs` | Derives the `AgentPrincipal` from the HTTP context (bearer MCP key or cookie web user), mirroring `McpPermissionCheck`. |
 | `AgentSettingsStore.cs` | Writes the UI-editable provider settings to `/app/data/agent-settings.json` (a reload-on-change config source). |
 | `AgentTranscriptStore.cs` | Per-user persistence of the agent conversation (survives reloads; seeds new sessions with context). |
-| `IClaudeCodeRuntime.cs` | Interface for the Claude Code runtime (deliberately **not** an LLM provider — it brings its own loop). |
+| `IClaudeCodeRuntime.cs` | Interface for the Claude Code runtime (deliberately **not** an LLM provider, it brings its own loop). |
 | `ClaudeCodeRuntime.cs` | Orchestrates the Claude Code CLI as a subprocess, configured via `--mcp-config` to point back at ServerWatch's `/mcp` endpoint so its tool calls run through the same guardrail gate. |
 | `ClaudeCodeOutputParser.cs` | Pure, testable translation of Claude Code stream-json lines into `AgentEvent`s. |
 
 ## Subfolders
 
-- [`Guardrails/`](Guardrails/) — the code-enforced security policy, presets and rule engine.
-- [`Providers/`](Providers/) — one LLM wire-format implementation per provider.
-- [`Triggers/`](Triggers/) — AI triggers: run the agent autonomously on events.
+- [`Guardrails/`](Guardrails/): the code-enforced security policy, presets and rule engine.
+- [`Providers/`](Providers/): one LLM wire-format implementation per provider.
+- [`Triggers/`](Triggers/): AI triggers: run the agent autonomously on events.
 
 ## Related
 

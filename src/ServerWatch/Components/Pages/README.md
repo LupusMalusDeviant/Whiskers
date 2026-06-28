@@ -6,7 +6,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Dashboard.razor` | The main live dashboard — all containers, health, metrics, update badges. |
+| `Dashboard.razor` | The main live dashboard, all containers, health, metrics, update badges. |
 | `ContainerDetail.razor` | Deep view of one container: overview, stats, logs, health, terminal, env, and (for DB containers) a database tab. |
 | `ContainerGraph.razor` | Visual graph of containers and their relationships. |
 | `ContainerDiff.razor` | Compare container configurations. |
@@ -41,10 +41,10 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `ScheduledTasks.razor` | Cron-style scheduled tasks. |
 | `Webhooks.razor` | CI/CD webhooks. |
 | `LogSearch.razor` | Log search and alerts. |
-| `Cves.razor` | CVE dashboard — **one row per CVE** (de-duplicated), expandable to all affected container/server instances with OS context + a verified flag; shows how long each CVE has been open and whether a fix exists. |
+| `Cves.razor` | CVE dashboard, **one row per CVE** (de-duplicated), expandable to all affected container/server instances with OS context + a verified flag; shows how long each CVE has been open and whether a fix exists. |
 | `AuditLog.razor` | Audit trail of privileged actions. |
 | `AgentHistory.razor` | Observability dashboard for every agent/MCP tool call (`/agent-history`): filter by actor, tool, period, writes-only or denies-only; row click opens `AgentCallDetailDialog`. Backed by [`IMcpCallLogStore`](../../Services/Observability/). |
-| `AgentCallDetailDialog.razor` | Detail dialog for a single recorded tool call — metadata, redacted parameters, result summary, error. |
+| `AgentCallDetailDialog.razor` | Detail dialog for a single recorded tool call, metadata, redacted parameters, result summary, error. |
 | `Agent.razor` | The acting agent's chat/console (markdown rendering, file attachments, provider + system-prompt editor). |
 | `Guardrails.razor` | Multi-preset guardrail editor (per-preset tool grid + mode, free-text rules). |
 | `Approvals.razor` | Human-in-the-Loop **Freigaben** (`/approvals`): live list of pending agent confirmations with Genehmigen/Ablehnen, plus recently-decided history. Backed by [`IApprovalStore`](../../Services/Agent/Approvals/). |
@@ -54,7 +54,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Settings.razor` | All configuration — auth, whitelist, MCP keys, notifications, integrations, agent, guardrails, vault. |
+| `Settings.razor` | All configuration, auth, whitelist, MCP keys, notifications, integrations, agent, guardrails, vault. |
 | `Login.razor` | Sign-in page. |
 | `Error.razor` | Error page. |
 

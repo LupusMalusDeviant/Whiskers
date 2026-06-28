@@ -1,6 +1,6 @@
 # Agent / Approvals
 
-**Human-in-the-Loop** — the central registry of pending approvals. When an agent tool call hits a guardrail `Confirm` verdict, the agent flow pauses and a human must approve or reject it before the tool runs.
+**Human-in-the-Loop**: the central registry of pending approvals. When an agent tool call hits a guardrail `Confirm` verdict, the agent flow pauses and a human must approve or reject it before the tool runs.
 
 ## How it fits together
 
@@ -18,8 +18,8 @@ Approvals are **not** persisted: the resolver targets a live in-process `AgentSe
 
 | File | Purpose |
 |---|---|
-| `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore` — create / list / resolve / cancel pending approvals, with a `Changed` event for the bell + page and automatic expiry. Registered interface-first as a singleton. |
-| `ApprovalCoordinator.cs` | `IApprovalCoordinator` + `ApprovalCoordinator` — bridges a `Confirm` verdict into an approval: registers it in the store (resolver wired to the waiting session) and pushes a notification (in-app bell + Mattermost/Matrix if active). Used by [`Agent.razor`](../../../Components/Pages/Agent.razor) on `ConfirmationRequired`. |
+| `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore`, create / list / resolve / cancel pending approvals, with a `Changed` event for the bell + page and automatic expiry. Registered interface-first as a singleton. |
+| `ApprovalCoordinator.cs` | `IApprovalCoordinator` + `ApprovalCoordinator`, bridges a `Confirm` verdict into an approval: registers it in the store (resolver wired to the waiting session) and pushes a notification (in-app bell + Mattermost/Matrix if active). Used by [`Agent.razor`](../../../Components/Pages/Agent.razor) on `ConfirmationRequired`. |
 
 ## Related
 

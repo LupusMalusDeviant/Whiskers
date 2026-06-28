@@ -1,6 +1,6 @@
 # Services/AuditLog
 
-An append-only **audit trail** of privileged actions — who did what, when, and through which surface (web user or MCP key / agent). Every write/admin action records an actor derived from the request context.
+An append-only **audit trail** of privileged actions, who did what, when, and through which surface (web user or MCP key / agent). Every write/admin action records an actor derived from the request context.
 
 ## Files
 

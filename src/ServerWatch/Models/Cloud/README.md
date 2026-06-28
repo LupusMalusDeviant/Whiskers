@@ -6,7 +6,7 @@ Provider-agnostic models for out-of-band cloud control ([`../../Services/Cloud/`
 
 | File | Purpose |
 |---|---|
-| `CloudServerInfo.cs` | A cloud VM as seen through a provider API — id, status, IP, type, and metrics, normalised across providers. |
+| `CloudServerInfo.cs` | A cloud VM as seen through a provider API, id, status, IP, type, and metrics, normalised across providers. |
 
 ## Related
 

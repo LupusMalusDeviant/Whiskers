@@ -8,7 +8,7 @@ Like Hetzner, credentials are **per ServerWatch server**, so the bearer token is
 
 | File | Purpose |
 |---|---|
-| `IHostingerService.cs` / `HostingerApiService.cs` | Hostinger VPS API client: list/get servers, power actions, snapshots and metrics — token supplied per call. |
+| `IHostingerService.cs` / `HostingerApiService.cs` | Hostinger VPS API client: list/get servers, power actions, snapshots and metrics, token supplied per call. |
 
 ## Related
 

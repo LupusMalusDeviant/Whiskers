@@ -1,6 +1,6 @@
 # Observability
 
-Governance recording for the agent/MCP layer — **every** tool call ServerWatch executes is captured here so it can be reviewed in the **Agent-History** dashboard (`/agent-history`).
+Governance recording for the agent/MCP layer, **every** tool call ServerWatch executes is captured here so it can be reviewed in the **Agent-History** dashboard (`/agent-history`).
 
 ## What gets recorded
 
@@ -10,14 +10,14 @@ For each call: timestamp, actor + actor type, tool name, required permission lev
 
 | Path | Recorded by | Actor type |
 |---|---|---|
-| In-process agent (web chat, `instruct_agent`, AI triggers) | [`AgentToolInvoker`](../Agent/AgentToolInvoker.cs) — at every return path, with full params + verdict + result + duration | `agent-web`, `agent-mcp`, `trigger` |
-| External / direct MCP `tools/call` (e.g. Claude Code calling a tool itself) | [`McpCallLogMiddleware`](../../Mcp/McpCallLogMiddleware.cs) — sniffs the JSON-RPC body on `POST /mcp` | `mcp-direct` |
+| In-process agent (web chat, `instruct_agent`, AI triggers) | [`AgentToolInvoker`](../Agent/AgentToolInvoker.cs): at every return path, with full params + verdict + result + duration | `agent-web`, `agent-mcp`, `trigger` |
+| External / direct MCP `tools/call` (e.g. Claude Code calling a tool itself) | [`McpCallLogMiddleware`](../../Mcp/McpCallLogMiddleware.cs): sniffs the JSON-RPC body on `POST /mcp` | `mcp-direct` |
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `McpCallLogStore.cs` | `IMcpCallLogStore` + `McpCallLogStore` — records and queries tool-call entries. Writes through a scoped `MetricsDbContext` (safe to call from singletons). Query filters: actor, tool, verdict, writes-only, since. |
+| `McpCallLogStore.cs` | `IMcpCallLogStore` + `McpCallLogStore`, records and queries tool-call entries. Writes through a scoped `MetricsDbContext` (safe to call from singletons). Query filters: actor, tool, verdict, writes-only, since. |
 
 ## Related
 

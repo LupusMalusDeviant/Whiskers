@@ -8,7 +8,7 @@ Tailscale mesh.
 ## Hard rule: nothing public
 
 Every port (`9100`, `8428`) listens **only** on the host's Tailscale IP. `TS_IP` is required in the
-compose files for exactly this reason — no `0.0.0.0`.
+compose files for exactly this reason, no `0.0.0.0`.
 
 **DoD check per host:**
 ```sh
@@ -34,7 +34,7 @@ rebuilds).
 ## Metric contract (what ServerWatch queries)
 
 Each scrape target carries `server="<id>"` (= ServerWatch `ServerConfig.Id`, a stable id, NOT the
-display name). `PrometheusMetricsSource` filters on it. Only HOST metrics (node_exporter) —
+display name). `PrometheusMetricsSource` filters on it. Only HOST metrics (node_exporter)
 container stats come from the Docker API.
 
 | Metric | PromQL (simplified) |

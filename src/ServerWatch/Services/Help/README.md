@@ -1,6 +1,6 @@
 # Services / Help
 
-Supplies the content for the in-app **Hilfe** page (`/help`) — a complete user handbook.
+Supplies the content for the in-app **Hilfe** page (`/help`), a complete user handbook.
 
 | File | Purpose |
 |---|---|

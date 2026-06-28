@@ -1,6 +1,6 @@
 # wwwroot
 
-Static web assets served directly to the browser — styles, icons, the PWA manifest/service worker, and JavaScript interop.
+Static web assets served directly to the browser, styles, icons, the PWA manifest/service worker, and JavaScript interop.
 
 ## Files
 
@@ -13,7 +13,7 @@ Static web assets served directly to the browser — styles, icons, the PWA mani
 
 ## Subfolder
 
-- [`js/`](js/) — JavaScript interop modules called from Blazor components.
+- [`js/`](js/): JavaScript interop modules called from Blazor components.
 
 ## Related
 
