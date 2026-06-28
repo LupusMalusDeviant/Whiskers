@@ -1,8 +1,8 @@
 # Mcp/Tools
 
-The MCP **tool definitions**: the operations exposed to AI agents. Each file is a `[McpServerToolType]` class whose `[McpServerTool]` static methods become snake_case tools (e.g. `GetContainerDetails` → `get_container_details`). Each method gates itself with `McpPermissionCheck` ([`../McpPermissionCheck.cs`](../McpPermissionCheck.cs)) and delegates to the relevant [`Services/`](../../Services/) implementation.
+The MCP **tool definitions**: the operations exposed to AI agents. Each file is a `[McpServerToolType]` class whose `[McpServerTool]` static methods become snake_case tools (e.g. `GetContainerDetails` > `get_container_details`). Each method gates itself with `McpPermissionCheck` ([`../McpPermissionCheck.cs`](../McpPermissionCheck.cs)) and delegates to the relevant [`Services/`](../../Services/) implementation.
 
-The canonical tool→permission-level map lives in [`../../Models/McpPermission.cs`](../../Models/McpPermission.cs); the full live list is in the UI under *Settings → MCP*.
+The canonical tool > permission-level map lives in [`../../Models/McpPermission.cs`](../../Models/McpPermission.cs); the full live list is in the UI under *Settings > MCP*.
 
 ## Files
 

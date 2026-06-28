@@ -4,7 +4,7 @@
 
 The bootstrap authenticates with **either an uploaded SSH key or a transient root/SSH password** (fed to `sshpass` via the `SSHPASS` env var, never persisted, `ServerConfig.SshPassword` is `[JsonIgnore]`). On success both are dropped: the password is cleared from memory and the key deleted from disk (`IServerConfigService.DeleteSshKeyAsync`), so **no standing credential remains**. Reachable from the server add/edit dialog (**„Speichern & Onboarden"**) or the per-row onboarding button.
 
-See [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) → *Onboarding a new server* for the full step sequence.
+See [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) > *Onboarding a new server* for the full step sequence.
 
 ## Files
 

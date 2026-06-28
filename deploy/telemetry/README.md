@@ -2,7 +2,7 @@
 
 Push/scrape-based host metrics instead of SSH `/proc`-exec. See `../../docs/ARCHITECTURE.md`.
 
-**Stack:** `node_exporter` on every host → VictoriaMetrics on the controller, scraped only over the
+**Stack:** `node_exporter` on every host > VictoriaMetrics on the controller, scraped only over the
 Tailscale mesh.
 
 ## Hard rule: nothing public

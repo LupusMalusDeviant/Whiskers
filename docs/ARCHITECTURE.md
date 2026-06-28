@@ -20,7 +20,7 @@ ServerWatch splits what it does into three independent planes, each moved off SS
 
 | Plane | What | Transport |
 |---|---|---|
-| **Telemetry** | host CPU/RAM/disk, container stats | `node_exporter` → a Prometheus-compatible TSDB (VictoriaMetrics), pull/scrape over the mesh |
+| **Telemetry** | host CPU/RAM/disk, container stats | `node_exporter` > a Prometheus-compatible TSDB (VictoriaMetrics), pull/scrape over the mesh |
 | **Docker control** | list / restart / deploy / inspect containers, images, networks | the Docker Engine API over **mTLS**, fronted by a verb-whitelisting proxy |
 | **Shell** | `execute_command`, `systemctl`, `journalctl`, nginx/firewall edits | a one-shot privileged `nsenter` container launched over the **same mTLS Docker channel** |
 

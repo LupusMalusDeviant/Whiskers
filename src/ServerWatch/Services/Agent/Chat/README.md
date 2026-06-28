@@ -13,7 +13,7 @@ The agent writes one of these tokens inline; everything else stays plain markdow
 | `[[status:server:<id>]]` | Status card for a server |
 | `[[status:container:<id>]]` | Status card for a container |
 
-Metric aliases: `mem`, `memory`, `ram` → memory; anything else / omitted → CPU. Tokens are case-insensitive.
+Metric aliases: `mem`, `memory`, `ram` > memory; anything else / omitted > CPU. Tokens are case-insensitive.
 
 The grammar is **fixed and closed**: the `<id>` group cannot contain `:` or `]`, and anything that doesn't match a known shape (e.g. `[[bogus]]`, `[[chart:cluster:…]]`) stays plain text. The model can never inject arbitrary components or HTML this way, only this small set is ever rendered.
 

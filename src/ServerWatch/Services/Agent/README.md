@@ -10,7 +10,7 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 |---|---|
 | `IAgentService.cs` | Public surface: `IAgentService` (create/resume sessions) and `IAgentSession` (drive a turn, resolve confirmations, expose history). |
 | `AgentService.cs` | Creates/manages bounded in-memory `AgentSession`s, resolves the provider from settings, holds the German system prompt. |
-| `AgentSession.cs` | Drives the agentic loop for one conversation: stream the provider → run tool calls through the guardrail gate → pause on Confirm → feed results back, until Stop or `MaxToolIterations`. Enforces the per-session action rate limit. |
+| `AgentSession.cs` | Drives the agentic loop for one conversation: stream the provider > run tool calls through the guardrail gate > pause on Confirm > feed results back, until Stop or `MaxToolIterations`. Enforces the per-session action rate limit. |
 | `IAgentTooling.cs` | Interfaces for the tool layer: `IAgentToolRegistry`, `IAgentToolCatalog`, `IAgentToolInvoker`, `IAgentPrincipalResolver`. |
 | `AgentToolRegistry.cs` | Discovers the `[McpServerTool]` methods once via reflection, derives LLM function schemas, cross-checks against the canonical permission levels. Excludes agent-disallowed tools (e.g. `instruct_agent`). |
 | `AgentToolCatalog.cs` | Returns the function definitions visible to a principal given role + guardrails (hard-blocked tools are never shown to the model). |

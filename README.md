@@ -65,10 +65,10 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - Host shell commands without SSH over the same mTLS channel (a one-shot privileged `nsenter` container)
 - **No stored SSH key** in steady state, the central attack surface is removed
 - Own PKI (step-ca) for client/server certificates
-- Telemetry via `node_exporter` → VictoriaMetrics (Prometheus-compatible)
+- Telemetry via `node_exporter` > VictoriaMetrics (Prometheus-compatible)
 - **One-click onboarding** of new servers (from the add/edit dialog): bootstraps over a single SSH connection authenticated by an **SSH key _or_ a root password**, installs Docker if missing, brings up Tailscale (login link surfaced in the app), deploys telemetry + the mTLS proxy, switches the host to SSH-free mTLS, and **auto-deletes the bootstrap credentials** afterwards
 
-→ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ### Cloud control (out-of-band)
 - Provider-agnostic power / snapshot / metrics control (Hetzner, Hostinger) via the provider API, works even when SSH/Docker is temporarily unreachable
@@ -167,7 +167,7 @@ ServerWatch is configured entirely through environment variables (`.env`). The m
 See [.env.example](.env.example) for the full, commented list.
 
 ### Notable runtime details
-- **Email whitelist**: managed in the UI under *Settings → Authentication*; changes apply without a restart.
+- **Email whitelist**: managed in the UI under *Settings > Authentication*; changes apply without a restart.
 - **MCP API key**: auto-generated on first start and printed to the container logs; stored in `/app/data/api-keys.json` (persisted in the Docker volume).
 - **Data persistence**: SQLite, JSON stores and certificates live under `/app/data` (a bind-mount / volume); never in the image.
 
@@ -202,7 +202,7 @@ ServerWatch ships an integrated MCP server so AI agents (e.g. Claude Code) can o
 - **Cloud (out-of-band)**: Hetzner & Hostinger power/snapshot/metrics
 - **Agent**: `instruct_agent` (delegate a natural-language task to the in-process agent)
 
-The complete, current list with permission levels is in the web UI under *Settings → MCP*.
+The complete, current list with permission levels is in the web UI under *Settings > MCP*.
 
 ---
 
@@ -225,7 +225,7 @@ ServerWatch manages hosts across three independent planes, each moved off SSH:
 
 | Plane | What | Transport |
 |---|---|---|
-| **Telemetry** | host CPU/RAM/disk, container stats | `node_exporter` → VictoriaMetrics (pull over the mesh) |
+| **Telemetry** | host CPU/RAM/disk, container stats | `node_exporter` > VictoriaMetrics (pull over the mesh) |
 | **Docker control** | list/restart/deploy/inspect | Docker Engine API over **mTLS** + verb-whitelisting proxy |
 | **Shell** | `execute_command`, systemd, journald, edits | one-shot privileged `nsenter` container over the same mTLS channel |
 

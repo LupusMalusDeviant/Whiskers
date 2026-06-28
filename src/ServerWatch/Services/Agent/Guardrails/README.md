@@ -8,7 +8,7 @@ Aggregation is **most-restrictive-wins**: any `Deny` beats everything, otherwise
 
 | File | Purpose |
 |---|---|
-| `IAgentGuardrailEngine.cs` | `IAgentGuardrailEngine` (evaluate a request → decision) and `IGuardrailRule` (a single testable rule), plus the `GuardrailRequest` / `GuardrailDecision` / `GuardrailVerdict` types. |
+| `IAgentGuardrailEngine.cs` | `IAgentGuardrailEngine` (evaluate a request > decision) and `IGuardrailRule` (a single testable rule), plus the `GuardrailRequest` / `GuardrailDecision` / `GuardrailVerdict` types. |
 | `GuardrailEngine.cs` | Aggregates all rules with most-restrictive-wins; `CreateDefault()` wires the built-in rule set in evaluation order. |
 | `BuiltInGuardrailRules.cs` | The built-in rules: `PrincipalCeilingRule` (≤ trigger rights), `ReadOnlyModeRule` (kill switch), `ToolDenyListRule`, `ToolAllowListRule`, `ProtectedResourceRule` (glob), `ForbiddenArgumentRule` (regex), `ConfirmationRule` (hybrid autonomy). |
 | `IGuardrailStore.cs` | `IGuardrailStore` (load/save policy, change event) and `IGuardrailRuleCatalog` (rule descriptors for the UI). |

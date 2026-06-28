@@ -8,7 +8,7 @@ first-class concern of the design, please treat findings accordingly.
 
 **Please report vulnerabilities privately, do not open a public issue.**
 
-Use GitHub's private reporting: **Security → Advisories → "Report a vulnerability"** on this
+Use GitHub's private reporting: **Security > Advisories > "Report a vulnerability"** on this
 repository. Include:
 
 - a description and impact assessment,
@@ -45,7 +45,7 @@ fixes. There is no long-term-support branch yet.
 
 - Set `AUTH_DISABLED=false` and put a real IdP (Google OAuth or OIDC) in front, or keep the app on a
   trusted private network only.
-- Keep the email whitelist tight; review roles under *Settings → Authentication*.
+- Keep the email whitelist tight; review roles under *Settings > Authentication*.
 - Issue MCP API keys with the **least** permission level needed.
 - Keep the agent's guardrail presets restrictive; only widen autonomy deliberately.
 - Set a strong `VAULT_KEY` and protect the `/app/data` volume (it holds plaintext provider keys by

@@ -2,7 +2,7 @@
 
 Vulnerability scanning. A background monitor periodically scans both **host OS packages** and **container images** for known CVEs and stores the latest findings per server/container for the UI and MCP tools.
 
-Findings are **de-duplicated per CVE-ID** for display (one CVE → all real affected instances behind it), each instance is confirmed by the scanner against the actually-installed package version (a `Verified` flag separates real CVE matches from synthetic pending-update markers), carries its **OS context** (image OS from Trivy, host OS from `ServerSystemInfo`), and has an **age** ("open for N days") that survives restarts via a small persisted first-seen table.
+Findings are **de-duplicated per CVE-ID** for display (one CVE > all real affected instances behind it), each instance is confirmed by the scanner against the actually-installed package version (a `Verified` flag separates real CVE matches from synthetic pending-update markers), carries its **OS context** (image OS from Trivy, host OS from `ServerSystemInfo`), and has an **age** ("open for N days") that survives restarts via a small persisted first-seen table.
 
 ## Files
 
