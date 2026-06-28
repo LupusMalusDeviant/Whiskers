@@ -5,7 +5,7 @@ namespace ServerWatch.Services.Help;
 /// <summary>
 /// The complete in-app user handbook. Content lives here as Markdown prose plus a handful of
 /// hand-drawn, theme-aware SVG diagrams; UI-heavy chapters carry screenshot placeholders that can
-/// be swapped for real captures later. Pure static content — no external state.
+/// be swapped for real captures later. Pure static content, no external state.
 /// </summary>
 public sealed class HelpContentService : IHelpContentService
 {
@@ -23,7 +23,7 @@ public sealed class HelpContentService : IHelpContentService
                 new("Was ist ServerWatch?", """
                     **ServerWatch** ist deine zentrale Web-Steuerung für eine Flotte von Docker-Hosts:
                     Container, Images, Netzwerke, Datenbanken, Firewall, Nginx, systemd, SSL, Metriken und
-                    Logs — alles an einem Ort. Dieselben Fähigkeiten stehen optional einer **KI** über einen
+                    Logs, alles an einem Ort. Dieselben Fähigkeiten stehen optional einer **KI** über einen
                     abgesicherten **MCP-Endpunkt** zur Verfügung (siehe Kapitel *KI-Agent* und *MCP-Server*).
 
                     Designziel ist **SSH-schlüsselfreier Betrieb**: Hosts werden über ein privates Mesh mit
@@ -34,19 +34,19 @@ public sealed class HelpContentService : IHelpContentService
                     ServerWatch nutzt **Single Sign-On** (z. B. Google OIDC). Nur freigegebene E-Mail-Adressen
                     erhalten Zugang. Deine Rolle bestimmt, was du darfst:
 
-                    - **Viewer** — alles ansehen, keine Änderungen.
-                    - **Operator** — Container starten/stoppen/neustarten, Befehle ausführen.
-                    - **Admin** — alles inkl. Server anlegen, Guardrails, Einstellungen, Löschen.
+                    - **Viewer**: alles ansehen, keine Änderungen.
+                    - **Operator**: Container starten/stoppen/neustarten, Befehle ausführen.
+                    - **Admin**: alles inkl. Server anlegen, Guardrails, Einstellungen, Löschen.
                     """),
                 new("Der Aufbau der Oberfläche", """
                     Die Oberfläche besteht aus vier Bereichen:
 
-                    1. **Sidebar (links)** — die Navigation, nach Themen gruppiert (Übersicht, Deployment,
+                    1. **Sidebar (links)**: die Navigation, nach Themen gruppiert (Übersicht, Deployment,
                        Infrastruktur, Automatisierung) plus *Einstellungen* und *Hilfe*.
-                    2. **Topbar (oben)** — die **Glocke** (Benachrichtigungen), das **Paletten-Icon**
+                    2. **Topbar (oben)**: die **Glocke** (Benachrichtigungen), das **Paletten-Icon**
                        (Theme wechseln) und dein Profil/Abmelden.
-                    3. **Inhaltsbereich** — die jeweils geöffnete Seite.
-                    4. **KI-Widget (unten rechts)** — der schwebende Agent-Chat, auf jeder Seite verfügbar
+                    3. **Inhaltsbereich**: die jeweils geöffnete Seite.
+                    4. **KI-Widget (unten rechts)**: der schwebende Agent-Chat, auf jeder Seite verfügbar
                        (wenn der Agent aktiviert ist).
                     """,
                     Diagram("Aufbau der ServerWatch-Oberfläche", SvgLayout)),
@@ -68,7 +68,7 @@ public sealed class HelpContentService : IHelpContentService
                     Shot("Dashboard mit Server-Karten und aufgeklappten Container-Gruppen")),
                 new("Schnell zur richtigen Stelle", """
                     Viele Stellen verlinken direkt: Klickst du z. B. eine **Image-Update-Benachrichtigung** an,
-                    landest du sofort auf der Detailseite des betroffenen Containers — auch wenn er auf einem
+                    landest du sofort auf der Detailseite des betroffenen Containers, auch wenn er auf einem
                     anderen Server läuft.
                     """),
             }),
@@ -80,15 +80,15 @@ public sealed class HelpContentService : IHelpContentService
                 new("Die Detailansicht", """
                     Die Container-Detailseite bündelt alles in Tabs:
 
-                    - **Übersicht** — ID, Image, Ports, Labels, Erstellzeit.
-                    - **Statistiken** — Live-CPU/RAM/Netz/Disk plus historische Verlaufs-Charts (1 h bis 7 Tage).
-                    - **Logs** — Live-Logfenster mit Filter.
-                    - **Zustand** — Health-Historie (Status, Exit-Code).
-                    - **Terminal** — interaktive Shell im Container (wo unterstützt).
-                    - **Umgebungsvariablen** — laufende Variablen (sensible maskiert) und — bei Compose —
+                    - **Übersicht**: ID, Image, Ports, Labels, Erstellzeit.
+                    - **Statistiken**: Live-CPU/RAM/Netz/Disk plus historische Verlaufs-Charts (1 h bis 7 Tage).
+                    - **Logs**: Live-Logfenster mit Filter.
+                    - **Zustand**: Health-Historie (Status, Exit-Code).
+                    - **Terminal**: interaktive Shell im Container (wo unterstützt).
+                    - **Umgebungsvariablen**: laufende Variablen (sensible maskiert) und, bei Compose, 
                       die `.env`-Datei bearbeitbar.
-                    - **Datenbank** — nur bei DB-Containern: Query-Builder, Tabellen-Browser, Backup, Migration/Seed.
-                    - **CVEs** — die Sicherheitslücken im Image.
+                    - **Datenbank**: nur bei DB-Containern: Query-Builder, Tabellen-Browser, Backup, Migration/Seed.
+                    - **CVEs**: die Sicherheitslücken im Image.
                     """,
                     Shot("Container-Detailseite mit Tab-Leiste")),
                 new("Aktionen", """
@@ -97,7 +97,7 @@ public sealed class HelpContentService : IHelpContentService
                     """),
                 new("Umgebungsvariablen ändern", """
                     Im Tab *Umgebungsvariablen* kannst du bei Compose-Projekten die `.env` bearbeiten.
-                    Sensible Keys (Passwörter, Tokens) bleiben maskiert — zum Überschreiben auf das Stift-Symbol.
+                    Sensible Keys (Passwörter, Tokens) bleiben maskiert, zum Überschreiben auf das Stift-Symbol.
                     **Achtung:** Speichern startet den Container neu (kurze Downtime).
                     """),
             }),
@@ -108,15 +108,15 @@ public sealed class HelpContentService : IHelpContentService
             {
                 new("Wie der Scan funktioniert", """
                     Der **CVE-Monitor** scannt Container-Images (Trivy) und das Host-OS auf bekannte
-                    Schwachstellen. Jede CVE erscheint **einmal** — alle betroffenen Container/Server stehen
+                    Schwachstellen. Jede CVE erscheint **einmal**: alle betroffenen Container/Server stehen
                     dahinter, statt dieselbe CVE dutzendfach zu listen.
 
                     Pro Finding siehst du **Schweregrad** (Critical/High/Medium/Low), die **CVE-ID** (verlinkt),
-                    das betroffene **Paket**, die installierte Version und — falls vorhanden — die **Fix-Version**.
+                    das betroffene **Paket**, die installierte Version und, falls vorhanden, die **Fix-Version**.
                     """,
                     Shot("CVE-Monitor mit deduplizierter Findings-Liste")),
                 new("Alter & Scan-Intervall", """
-                    Zu jeder CVE wird das **Alter** geführt — sowohl seit wann sie in *deiner* Umgebung
+                    Zu jeder CVE wird das **Alter** geführt, sowohl seit wann sie in *deiner* Umgebung
                     auftaucht als auch das offizielle Veröffentlichungsdatum. So erkennst du Altlasten.
 
                     Der Scan läuft **nicht** bei jedem Seitenaufruf, sondern im Hintergrund (Standard alle 12 h)
@@ -124,7 +124,7 @@ public sealed class HelpContentService : IHelpContentService
                     """),
                 new("Fixes einspielen", """
                     „Fix available" heißt: Es gibt eine gepatchte Paketversion. Bei Images bedeutet das meist
-                    ein **Image-Update** (neueres Tag ziehen + Container neu erstellen) — siehe *Deployment*.
+                    ein **Image-Update** (neueres Tag ziehen + Container neu erstellen), siehe *Deployment*.
                     Beachte: Manchmal ist der Fix upstream noch nicht in ein lauffähiges Image eingeflossen.
                     """),
             }),
@@ -142,7 +142,7 @@ public sealed class HelpContentService : IHelpContentService
                 new("Alarm-Regeln", """
                     Unter **Alert-Regeln** legst du Muster an, auf die ServerWatch das Log laufend prüft. Jede
                     Regel hat **Name**, **Muster** (Text oder Regex), **Container** (oder *Alle*) und **Severity**
-                    (error/critical). Schlägt eine Regel an, kommt eine Benachrichtigung — und optional ein
+                    (error/critical). Schlägt eine Regel an, kommt eine Benachrichtigung, und optional ein
                     **AI-Trigger** (siehe *AI-Trigger*), der den Agenten automatisch reagieren lässt.
 
                     Tipp: Halte Muster eng genug, um Rauschen zu vermeiden, aber so, dass echte
@@ -155,10 +155,10 @@ public sealed class HelpContentService : IHelpContentService
             new List<HelpSection>
             {
                 new("Wie ServerWatch Server erreicht", """
-                    ServerWatch spricht jeden Host über die **Docker-API** an — entweder lokal, über einen
+                    ServerWatch spricht jeden Host über die **Docker-API** an, entweder lokal, über einen
                     **SSH-Tunnel** oder über **TCP mit gegenseitigem TLS (mTLS)**. Für Host-Befehle (Firewall,
                     Nginx, systemd …) startet es einen kurzlebigen, privilegierten Helfer-Container, der per
-                    `nsenter` in den Host springt — **ohne** dauerhaften SSH-Schlüssel.
+                    `nsenter` in den Host springt, **ohne** dauerhaften SSH-Schlüssel.
                     """,
                     Diagram("Verbindungs-Architektur", SvgArchitecture)),
                 new("Einen Server hinzufügen", """
@@ -170,27 +170,27 @@ public sealed class HelpContentService : IHelpContentService
 
                     Beim **Speichern** baut ServerWatch die Verbindung gleich auf und **testet sie** (kurzes
                     Timeout): Klappt es, schließt der Dialog mit der Container-Zahl; klappt es nicht, bleibt er
-                    offen und zeigt den Fehler — so wird kein toter Server unbemerkt gespeichert. Ein nicht
+                    offen und zeigt den Fehler, so wird kein toter Server unbemerkt gespeichert. Ein nicht
                     erreichbarer Host wird im Dashboard als **„nicht erreichbar"** markiert, statt die ganze
                     Übersicht leer zu machen.
                     """,
                     Shot("Server-Anlegen-Formular mit Verbindungstyp und Cloud-Provider")),
-                new("Onboarding — SSH-frei werden", """
+                new("Onboarding, SSH-frei werden", """
                     Für einen frischen Host bringt dich **„Speichern & Onboarden"** (bei Verbindungstyp **SSH**)
-                    in einem Rutsch ins Mesh: Über **eine einmalige SSH-Bootstrap-Verbindung** — wahlweise mit
-                    **SSH-Key oder Root-Passwort** — installiert ServerWatch (falls nötig) Docker, bringt Tailscale
+                    in einem Rutsch ins Mesh: Über **eine einmalige SSH-Bootstrap-Verbindung**: wahlweise mit
+                    **SSH-Key oder Root-Passwort**: installiert ServerWatch (falls nötig) Docker, bringt Tailscale
                     hoch (der Login-Link erscheint direkt in der App), deployt Telemetrie + den **mTLS-Proxy** und
                     stellt den Host auf **TCP+mTLS** um.
 
-                    Danach ist der Server **SSH-frei** — und die Bootstrap-Zugangsdaten werden **automatisch
+                    Danach ist der Server **SSH-frei**: und die Bootstrap-Zugangsdaten werden **automatisch
                     entfernt**: das Passwort aus dem Speicher, der SSH-Key von der Platte. Es bleibt kein stehender
                     Zugang übrig.
                     """),
                 new("Cloud, Netzwerke, Backups", """
-                    - **Cloud** — Power on/off, Reboot, Snapshots und Metriken direkt beim Provider, selbst wenn
+                    - **Cloud**: Power on/off, Reboot, Snapshots und Metriken direkt beim Provider, selbst wenn
                       SSH/Docker mal nicht erreichbar ist. Funktioniert sobald pro Server Provider + API-Key gesetzt sind.
-                    - **Netzwerke** — Docker-Netzwerke anlegen, Container verbinden/trennen.
-                    - **Backups** — Volume-Backups als komprimierte Archive; vor riskanten Aktionen empfohlen.
+                    - **Netzwerke**: Docker-Netzwerke anlegen, Container verbinden/trennen.
+                    - **Backups**: Volume-Backups als komprimierte Archive; vor riskanten Aktionen empfohlen.
                     """),
             }),
 
@@ -200,12 +200,12 @@ public sealed class HelpContentService : IHelpContentService
             {
                 new("Container bereitstellen", """
                     Unter **Deployment → Bereitstellen** startest du einen neuen Container: Image, Name, Ports,
-                    Volumes, Umgebungsvariablen und Restart-Policy — wie ein geführtes `docker run`.
+                    Volumes, Umgebungsvariablen und Restart-Policy, wie ein geführtes `docker run`.
                     """,
                     Shot("Bereitstellen-Formular")),
                 new("Compose-Editor & App Store", """
-                    - **Compose Editor** — `docker-compose.yml` direkt im Browser bearbeiten und deployen.
-                    - **App Store** — kuratierte Vorlagen (Redis, Nginx, Ghost …) als Startpunkt; Platzhalter
+                    - **Compose Editor**: `docker-compose.yml` direkt im Browser bearbeiten und deployen.
+                    - **App Store**: kuratierte Vorlagen (Redis, Nginx, Ghost …) als Startpunkt; Platzhalter
                       wie `{PROJECT}`/`{PORT}` werden beim Deploy ersetzt.
                     """),
             }),
@@ -225,15 +225,15 @@ public sealed class HelpContentService : IHelpContentService
                     die **aktuell geöffnete Seite** (liest den angezeigten Inhalt) und kann auf Wunsch einen
                     **Screenshot** ans Vision-Modell mitschicken.
 
-                    - **Deaktiviert/Berater** — der Agent erklärt und schlägt vor, führt aber nichts aus.
-                    - **Aktiviert/handelnd** — der Agent darf Werkzeuge benutzen (Container neu starten, Befehle
-                      ausführen …) — immer begrenzt durch die **Guardrails** und ggf. **Freigaben**.
+                    - **Deaktiviert/Berater**: der Agent erklärt und schlägt vor, führt aber nichts aus.
+                    - **Aktiviert/handelnd**: der Agent darf Werkzeuge benutzen (Container neu starten, Befehle
+                      ausführen …), immer begrenzt durch die **Guardrails** und ggf. **Freigaben**.
                     """,
                     Diagram("Berater → handelnder Agent (mit Guardrail-Grenze)", SvgAgent)),
                 new("Das Widget bedienen", """
                     Das Fenster ist **verschiebbar** (am Kopf ziehen) und **größenveränderbar** (untere Ecke).
                     Eingabe mit **Enter** senden, **Shift+Enter** für eine neue Zeile. Antworten können
-                    **Live-Widgets** enthalten — z. B. ein CPU/RAM-Chart oder eine Status-Karte direkt im Chat.
+                    **Live-Widgets** enthalten, z. B. ein CPU/RAM-Chart oder eine Status-Karte direkt im Chat.
                     """),
             }),
 
@@ -243,16 +243,16 @@ public sealed class HelpContentService : IHelpContentService
             {
                 new("Was Guardrails tun", """
                     **Guardrails** sind eine **unumgängliche** Policy, die am **Werkzeug-Boundary** durchgesetzt
-                    wird — nicht bloß im Prompt. Selbst wenn das Modell etwas Verbotenes versucht, wird es im Code
+                    wird, nicht bloß im Prompt. Selbst wenn das Modell etwas Verbotenes versucht, wird es im Code
                     geblockt. Nur **Admins** können Guardrails ändern.
                     """,
                     Shot("Guardrails-Seite mit Preset-Auswahl und Werkzeug-Raster")),
                 new("Presets & Werkzeug-Modi", """
                     Du legst mehrere **Presets** an und schaltest das aktive um. Pro Werkzeug wählst du den Modus:
 
-                    - **Erlauben** — frei nutzbar.
-                    - **Bestätigen** — erzeugt eine **Freigabe** (siehe nächstes Kapitel), bevor es läuft.
-                    - **Sperren** — komplett verboten.
+                    - **Erlauben**: frei nutzbar.
+                    - **Bestätigen**: erzeugt eine **Freigabe** (siehe nächstes Kapitel), bevor es läuft.
+                    - **Sperren**: komplett verboten.
                     """),
             }),
 
@@ -263,7 +263,7 @@ public sealed class HelpContentService : IHelpContentService
                 new("Wie Freigaben funktionieren", """
                     Wenn der Agent eine Aktion auslöst, die laut Guardrail eine **Bestätigung** braucht,
                     entsteht eine **Freigabe**: Was, von welchem Agenten/Akteur, welches Werkzeug, mit welchen
-                    Parametern — plus optionalem Diff. Du bekommst eine Push-Benachrichtigung an die Glocke
+                    Parametern, plus optionalem Diff. Du bekommst eine Push-Benachrichtigung an die Glocke
                     (und ggf. Mattermost/Matrix).
                     """,
                     Shot("Freigaben-Seite mit ausstehenden Anfragen")),
@@ -300,7 +300,7 @@ public sealed class HelpContentService : IHelpContentService
                     ein ungesunder Container) mit einem autonomen Agent-Lauf. Du legst fest, **wann** er feuert und
                     **welche Anweisung** der Agent dann bekommt.
 
-                    Auch hier gilt: Der autonome Lauf ist durch **Guardrails** und **Freigaben** begrenzt —
+                    Auch hier gilt: Der autonome Lauf ist durch **Guardrails** und **Freigaben** begrenzt, 
                     heikle Schritte landen weiterhin zur Bestätigung bei dir.
                     """,
                     Shot("AI-Trigger-Liste mit Auslöser und Anweisung")),
@@ -318,7 +318,7 @@ public sealed class HelpContentService : IHelpContentService
                     Shot("Geöffnete Benachrichtigungs-Liste")),
                 new("Kanäle & Deep-Links", """
                     Neben der In-App-Glocke kann ServerWatch zusätzlich an **Mattermost** oder **Matrix** senden.
-                    Viele Benachrichtigungen sind **klickbar** und springen direkt zur richtigen Stelle —
+                    Viele Benachrichtigungen sind **klickbar** und springen direkt zur richtigen Stelle, 
                     z. B. ein Image-Update direkt zum betroffenen Container.
                     """),
             }),
@@ -328,7 +328,7 @@ public sealed class HelpContentService : IHelpContentService
             new List<HelpSection>
             {
                 new("Einstellungen ändern", """
-                    Unter **Einstellungen** passt du das Verhalten an — gruppiert nach Themen. Dazu gehören
+                    Unter **Einstellungen** passt du das Verhalten an, gruppiert nach Themen. Dazu gehören
                     **Metrik-Alarme**: Schwellen für CPU/RAM, bei deren Überschreiten du benachrichtigt wirst.
                     Einstellungen sind nur für **Admins** schreibbar.
                     """,
@@ -341,16 +341,16 @@ public sealed class HelpContentService : IHelpContentService
             {
                 new("Was MCP ist", """
                     ServerWatch stellt seine Fähigkeiten über das **Model Context Protocol (MCP)** bereit. Ein
-                    externer KI-Client (z. B. **Claude Code**) verbindet sich mit dem MCP-Endpunkt und kann dann —
-                    im Rahmen seiner Berechtigung — Container listen, Logs lesen, Befehle ausführen usw.
+                    externer KI-Client (z. B. **Claude Code**) verbindet sich mit dem MCP-Endpunkt und kann dann, 
+                    im Rahmen seiner Berechtigung, Container listen, Logs lesen, Befehle ausführen usw.
                     """,
                     Diagram("MCP-Fluss: KI-Client → Berechtigung → Werkzeuge → Server", SvgMcp)),
                 new("API-Keys & Berechtigungen", """
                     In den **Einstellungen → MCP** legst du **API-Keys** an. Jeder Key hat eine Stufe:
 
-                    - **Read** — nur lesen (listen, inspizieren, Logs).
-                    - **Write** — zusätzlich verändern (start/stop, deploy, Befehle).
-                    - **Admin** — alles.
+                    - **Read**: nur lesen (listen, inspizieren, Logs).
+                    - **Write**: zusätzlich verändern (start/stop, deploy, Befehle).
+                    - **Admin**: alles.
 
                     Alternativ schränkst du einen Key auf eine **explizite Werkzeugliste** ein. Jeder Aufruf
                     landet in der **Agent-History**.
@@ -367,12 +367,12 @@ public sealed class HelpContentService : IHelpContentService
                     """,
                     Shot("Topologie-Graph der Container und Netzwerke")),
                 new("Vergleichen & Audit-Protokoll", """
-                    - **Vergleichen** — stellt Konfigurationen/Zustände gegenüber, um Abweichungen zu finden.
-                    - **Audit-Protokoll** — lückenlose Historie aller *Benutzer*-Aktionen (wer hat wann was
+                    - **Vergleichen**: stellt Konfigurationen/Zustände gegenüber, um Abweichungen zu finden.
+                    - **Audit-Protokoll**: lückenlose Historie aller *Benutzer*-Aktionen (wer hat wann was
                       gestartet/gestoppt/geändert). Ergänzt die *Agent-History* (KI-Aktionen).
                     """),
                 new("Statusberichte (Health)", """
-                    **Übersicht → Statusberichte** fasst den Gesundheitszustand der Flotte zusammen — ungesunde
+                    **Übersicht → Statusberichte** fasst den Gesundheitszustand der Flotte zusammen, ungesunde
                     Container, Restart-Loops und auffällige Hosts auf einen Blick.
                     """),
             }),
@@ -396,7 +396,7 @@ public sealed class HelpContentService : IHelpContentService
         <svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;font-family:inherit;">
           <rect x="8" y="8" width="624" height="284" rx="12" fill="var(--sw-bg-secondary)" stroke="var(--sw-glass-border)"/>
           <rect x="8" y="8" width="624" height="36" rx="12" fill="var(--sw-bg-glass-strong)" stroke="var(--sw-glass-border)"/>
-          <text x="24" y="31" fill="var(--sw-text-secondary)" font-size="13">Topbar — Glocke · Theme · Profil</text>
+          <text x="24" y="31" fill="var(--sw-text-secondary)" font-size="13">Topbar, Glocke · Theme · Profil</text>
           <circle cx="560" cy="26" r="6" fill="var(--sw-accent-primary)"/>
           <circle cx="588" cy="26" r="6" fill="var(--sw-text-muted)"/>
           <circle cx="610" cy="26" r="6" fill="var(--sw-text-muted)"/>
@@ -407,7 +407,7 @@ public sealed class HelpContentService : IHelpContentService
           <rect x="34" y="138" width="110" height="10" rx="5" fill="var(--sw-glass-hover)"/>
           <rect x="34" y="156" width="90" height="10" rx="5" fill="var(--sw-glass-hover)"/>
           <rect x="190" y="56" width="430" height="224" rx="10" fill="var(--sw-bg-elevated)" stroke="var(--sw-glass-border)"/>
-          <text x="206" y="84" fill="var(--sw-text-primary)" font-size="13" font-weight="600">Inhaltsbereich — die geöffnete Seite</text>
+          <text x="206" y="84" fill="var(--sw-text-primary)" font-size="13" font-weight="600">Inhaltsbereich, die geöffnete Seite</text>
           <rect x="206" y="100" width="398" height="60" rx="8" fill="var(--sw-bg-secondary)" stroke="var(--sw-glass-border)"/>
           <rect x="206" y="172" width="190" height="90" rx="8" fill="var(--sw-bg-secondary)" stroke="var(--sw-glass-border)"/>
           <rect x="414" y="172" width="190" height="90" rx="8" fill="var(--sw-bg-secondary)" stroke="var(--sw-glass-border)"/>
