@@ -13,6 +13,11 @@ public class CompositeNotificationService : INotificationService
 {
     private readonly IMattermostNotificationService _mattermost;
     private readonly IMatrixNotificationService _matrix;
+    private readonly ITelegramNotificationService _telegram;
+    private readonly INtfyNotificationService _ntfy;
+    private readonly IDiscordNotificationService _discord;
+    private readonly IEmailNotificationService _email;
+    private readonly IWebhookNotificationService _webhook;
     private readonly IInAppNotificationStore _inApp;
     private readonly IServiceProvider _sp;
     private readonly ILogger<CompositeNotificationService> _logger;
@@ -20,12 +25,22 @@ public class CompositeNotificationService : INotificationService
     public CompositeNotificationService(
         IMattermostNotificationService mattermost,
         IMatrixNotificationService matrix,
+        ITelegramNotificationService telegram,
+        INtfyNotificationService ntfy,
+        IDiscordNotificationService discord,
+        IEmailNotificationService email,
+        IWebhookNotificationService webhook,
         IInAppNotificationStore inApp,
         IServiceProvider sp,
         ILogger<CompositeNotificationService> logger)
     {
         _mattermost = mattermost;
         _matrix = matrix;
+        _telegram = telegram;
+        _ntfy = ntfy;
+        _discord = discord;
+        _email = email;
+        _webhook = webhook;
         _inApp = inApp;
         _sp = sp;
         _logger = logger;
@@ -40,6 +55,11 @@ public class CompositeNotificationService : INotificationService
 
         tasks.Add(SafeSend("Mattermost", () => _mattermost.SendAsync(evt)));
         tasks.Add(SafeSend("Matrix", () => _matrix.SendAsync(evt)));
+        tasks.Add(SafeSend("Telegram", () => _telegram.SendAsync(evt)));
+        tasks.Add(SafeSend("ntfy", () => _ntfy.SendAsync(evt)));
+        tasks.Add(SafeSend("Discord", () => _discord.SendAsync(evt)));
+        tasks.Add(SafeSend("Email", () => _email.SendAsync(evt)));
+        tasks.Add(SafeSend("Webhook", () => _webhook.SendAsync(evt)));
         tasks.Add(SafeSend("AI-Trigger", () => _sp.GetRequiredService<IAiTriggerDispatcher>().OnEventAsync(evt)));
 
         await Task.WhenAll(tasks);
@@ -55,6 +75,21 @@ public class CompositeNotificationService : INotificationService
 
         try { await _matrix.SendTestAsync(); }
         catch (Exception ex) { errors.Add($"Matrix: {ex.Message}"); }
+
+        try { await _telegram.SendTestAsync(); }
+        catch (Exception ex) { errors.Add($"Telegram: {ex.Message}"); }
+
+        try { await _ntfy.SendTestAsync(); }
+        catch (Exception ex) { errors.Add($"ntfy: {ex.Message}"); }
+
+        try { await _discord.SendTestAsync(); }
+        catch (Exception ex) { errors.Add($"Discord: {ex.Message}"); }
+
+        try { await _email.SendTestAsync(); }
+        catch (Exception ex) { errors.Add($"Email: {ex.Message}"); }
+
+        try { await _webhook.SendTestAsync(); }
+        catch (Exception ex) { errors.Add($"Webhook: {ex.Message}"); }
 
         if (errors.Count > 0)
             throw new AggregateException($"Some providers failed: {string.Join("; ", errors)}");

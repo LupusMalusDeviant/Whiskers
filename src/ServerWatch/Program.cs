@@ -50,6 +50,11 @@ builder.Services.Configure<GoogleAuthSettings>(builder.Configuration.GetSection(
 builder.Services.Configure<TerminalSettings>(builder.Configuration.GetSection(TerminalSettings.SectionName));
 builder.Services.Configure<HealthMonitorSettings>(builder.Configuration.GetSection(HealthMonitorSettings.SectionName));
 builder.Services.Configure<ServerWatch.Configuration.MatrixSettings>(builder.Configuration.GetSection(ServerWatch.Configuration.MatrixSettings.SectionName));
+builder.Services.Configure<TelegramSettings>(builder.Configuration.GetSection(TelegramSettings.SectionName));
+builder.Services.Configure<NtfySettings>(builder.Configuration.GetSection(NtfySettings.SectionName));
+builder.Services.Configure<DiscordSettings>(builder.Configuration.GetSection(DiscordSettings.SectionName));
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
+builder.Services.Configure<WebhookNotificationSettings>(builder.Configuration.GetSection(WebhookNotificationSettings.SectionName));
 
 // Server config + Docker services
 builder.Services.AddSingleton<ServerWatch.Services.ServerConfig.IServerConfigService, ServerConfigService>();
@@ -68,6 +73,20 @@ builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMattermostNoti
 builder.Services.AddHttpClient<MatrixNotificationService>();
 builder.Services.AddSingleton<MatrixNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMatrixNotificationService>(sp => sp.GetRequiredService<MatrixNotificationService>());
+// Additional channels (Telegram, ntfy, Discord, Email, generic webhook) — same composite fan-out.
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.TelegramNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.TelegramNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.ITelegramNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.TelegramNotificationService>());
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.NtfyNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.NtfyNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.INtfyNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.NtfyNotificationService>());
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.DiscordNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.DiscordNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.IDiscordNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.DiscordNotificationService>());
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.IEmailNotificationService, ServerWatch.Services.Notifications.EmailNotificationService>();
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.WebhookNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.WebhookNotificationService>();
+builder.Services.AddSingleton<ServerWatch.Services.Notifications.IWebhookNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.WebhookNotificationService>());
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IInAppNotificationStore, ServerWatch.Services.Notifications.InAppNotificationStore>();
 builder.Services.AddSingleton<INotificationService, CompositeNotificationService>();
 

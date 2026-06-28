@@ -21,6 +21,11 @@
 @inject IOptionsMonitor<ServerWatch.Configuration.MetricAlertSettings> MetricAlertOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.ImageUpdateSettings> ImageUpdateOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.AiChatSettings> AiChatOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.TelegramSettings> TelegramOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.NtfySettings> NtfyOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.DiscordSettings> DiscordOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.EmailSettings> EmailOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.WebhookNotificationSettings> WebhookOptions
 @inject ServerWatch.Services.Persistence.IAppSettingsStore AppSettings
 @inject IConfiguration Configuration
 
@@ -74,6 +79,58 @@ else
 
         <MudDivider Class="my-3" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveNotifications">Benachrichtigungen speichern</MudButton>
+    </MudExpansionPanel>
+
+    @* Additional notification channels (Telegram / ntfy / Discord / Email / Webhook) *@
+    <MudExpansionPanel Text="Weitere Benachrichtigungskanäle" Icon="@Icons.Material.Filled.Campaign">
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Telegram</MudText>
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_tgEnabled" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgToken" Label="Bot-Token" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgChat" Label="Chat-ID" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        </MudGrid>
+
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">ntfy</MudText>
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_ntfyEnabled" /></MudItem>
+            <MudItem xs="12" md="5"><MudTextField @bind-Value="_ntfyServer" Label="Server-URL" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="https://ntfy.sh" /></MudItem>
+            <MudItem xs="12" md="4"><MudTextField @bind-Value="_ntfyTopic" Label="Topic" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="3"><MudTextField @bind-Value="_ntfyToken" Label="Token (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+        </MudGrid>
+
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Discord</MudText>
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_dcEnabled" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_dcWebhook" Label="Webhook-URL" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+        </MudGrid>
+
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Email (SMTP)</MudText>
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_mailEnabled" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailHost" Label="SMTP-Host" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6" md="3"><MudNumericField @bind-Value="_mailPort" Label="Port" Min="1" Max="65535" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6" md="3" Class="d-flex align-center"><MudSwitch T="bool" Color="Color.Primary" Label="SSL/TLS" @bind-Value="_mailSsl" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailUser" Label="Benutzer" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailPass" Label="Passwort" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailFrom" Label="Absender (From)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailTo" Label="Empfänger (kommagetrennt)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        </MudGrid>
+
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Generischer Webhook</MudText>
+        <MudGrid>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_whEnabled" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_whUrl" Label="URL (POST JSON)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        </MudGrid>
+
+        <MudDivider Class="my-3" />
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveChannels">Kanäle speichern</MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send" OnClick="TestChannels">Testbenachrichtigung senden</MudButton>
+        </MudStack>
     </MudExpansionPanel>
 
     @* Health Monitoring *@
@@ -537,6 +594,12 @@ else
     private bool _iuEnabled = true; private int _iuInterval = 6; private bool _iuNotify = true;
     private bool _termEnabled = true; private string _termShell = "/bin/bash"; private int _termMaxSessions = 5; private int _termIdle = 30;
     private bool _aiEnabled; private string _aiProvider = "openai"; private string _aiModel = ""; private string _aiApiUrl = ""; private string _aiApiKey = "";
+    // Additional notification channels
+    private bool _tgEnabled; private string _tgToken = ""; private string _tgChat = "";
+    private bool _ntfyEnabled; private string _ntfyServer = "https://ntfy.sh"; private string _ntfyTopic = ""; private string _ntfyToken = "";
+    private bool _dcEnabled; private string _dcWebhook = "";
+    private bool _mailEnabled; private string _mailHost = ""; private int _mailPort = 587; private bool _mailSsl = true; private string _mailUser = ""; private string _mailPass = ""; private string _mailFrom = ""; private string _mailTo = "";
+    private bool _whEnabled; private string _whUrl = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -583,6 +646,11 @@ else
         _termEnabled = t.Enabled; _termShell = t.DefaultShell; _termMaxSessions = t.MaxSessions; _termIdle = t.IdleTimeoutMinutes;
         var ai = AiChatOptions.CurrentValue;
         _aiEnabled = ai.Enabled; _aiProvider = ai.Provider; _aiModel = ai.Model; _aiApiUrl = ai.ApiUrl ?? ""; _aiApiKey = ai.ApiKey;
+        var tg = TelegramOptions.CurrentValue; _tgEnabled = tg.Enabled; _tgToken = tg.BotToken; _tgChat = tg.ChatId;
+        var nt = NtfyOptions.CurrentValue; _ntfyEnabled = nt.Enabled; _ntfyServer = nt.ServerUrl; _ntfyTopic = nt.Topic; _ntfyToken = nt.Token;
+        var dc = DiscordOptions.CurrentValue; _dcEnabled = dc.Enabled; _dcWebhook = dc.WebhookUrl;
+        var ml = EmailOptions.CurrentValue; _mailEnabled = ml.Enabled; _mailHost = ml.Host; _mailPort = ml.Port; _mailSsl = ml.UseSsl; _mailUser = ml.Username; _mailPass = ml.Password; _mailFrom = ml.From; _mailTo = ml.To;
+        var wh = WebhookOptions.CurrentValue; _whEnabled = wh.Enabled; _whUrl = wh.Url;
     }
 
     private async Task SaveNotifications()
@@ -675,6 +743,46 @@ else
         });
         await Audit("aichat");
         Snackbar.Add("AI-Chat gespeichert (gilt sofort).", Severity.Success);
+    }
+
+    private async Task SaveChannels()
+    {
+        await AppSettings.SaveSectionAsync("Telegram", new TelegramSettings
+        {
+            Enabled = _tgEnabled, BotToken = _tgToken?.Trim() ?? "", ChatId = _tgChat?.Trim() ?? "",
+            ThrottleMinutes = TelegramOptions.CurrentValue.ThrottleMinutes,
+        });
+        await AppSettings.SaveSectionAsync("Ntfy", new NtfySettings
+        {
+            Enabled = _ntfyEnabled, ServerUrl = string.IsNullOrWhiteSpace(_ntfyServer) ? "https://ntfy.sh" : _ntfyServer.Trim(),
+            Topic = _ntfyTopic?.Trim() ?? "", Token = _ntfyToken?.Trim() ?? "", ThrottleMinutes = NtfyOptions.CurrentValue.ThrottleMinutes,
+        });
+        await AppSettings.SaveSectionAsync("Discord", new DiscordSettings
+        {
+            Enabled = _dcEnabled, WebhookUrl = _dcWebhook?.Trim() ?? "", ThrottleMinutes = DiscordOptions.CurrentValue.ThrottleMinutes,
+        });
+        await AppSettings.SaveSectionAsync("Email", new EmailSettings
+        {
+            Enabled = _mailEnabled, Host = _mailHost?.Trim() ?? "", Port = _mailPort, UseSsl = _mailSsl,
+            Username = _mailUser?.Trim() ?? "", Password = _mailPass ?? "", From = _mailFrom?.Trim() ?? "",
+            To = _mailTo?.Trim() ?? "", ThrottleMinutes = EmailOptions.CurrentValue.ThrottleMinutes,
+        });
+        await AppSettings.SaveSectionAsync("WebhookNotification", new WebhookNotificationSettings
+        {
+            Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
+        });
+        await Audit("notification-channels");
+        Snackbar.Add("Kanäle gespeichert (gelten sofort).", Severity.Success);
+    }
+
+    private async Task TestChannels()
+    {
+        try
+        {
+            await NotificationService.SendTestAsync();
+            Snackbar.Add("Testbenachrichtigung an alle konfigurierten Kanäle gesendet (vorher speichern!).", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Test teilweise fehlgeschlagen: {ex.Message}", Severity.Warning); }
     }
 
     private async Task Audit(string section)
