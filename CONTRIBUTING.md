@@ -7,7 +7,7 @@ and pull requests are very welcome.
 
 - **Open an issue first** for anything non-trivial (a feature, a refactor, a behavioural change),
   so we can agree on the approach before you invest time.
-- **Security issues:** please do **not** open a public issue — follow [SECURITY.md](SECURITY.md).
+- **Security issues:** please do **not** open a public issue, follow [SECURITY.md](SECURITY.md).
 - Be respectful. Assume good intent.
 
 ## Development setup
@@ -26,11 +26,11 @@ For local development without SSO, set `Auth__Disabled=true` and
 
 - **Build clean:** `dotnet build` with **0 warnings / 0 errors**.
 - **Tests green:** `dotnet test` (add tests for new behaviour where it makes sense).
-- **Boot it:** start the app in `Development` once — `ValidateOnBuild` aggregates the whole DI
+- **Boot it:** start the app in `Development` once, `ValidateOnBuild` aggregates the whole DI
   graph at startup and catches registration mistakes that the build alone misses.
 - **Keep docs in sync:** new DI services go behind an `IFoo` interface and are registered
   interface-first; update the relevant per-folder `README.md` in the **same** commit.
-- **No secrets** in the diff (`.env`, `vault*.json`, `data/`, keys, certificates are gitignored —
+- **No secrets** in the diff (`.env`, `vault*.json`, `data/`, keys, certificates are gitignored,
   keep it that way).
 - Keep commits focused and write a clear commit message describing the *why*.
 

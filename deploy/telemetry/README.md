@@ -34,7 +34,7 @@ rebuilds).
 ## Metric contract (what ServerWatch queries)
 
 Each scrape target carries `server="<id>"` (= ServerWatch `ServerConfig.Id`, a stable id, NOT the
-display name). `PrometheusMetricsSource` filters on it. Only HOST metrics (node_exporter)
+display name). `PrometheusMetricsSource` filters on it. Only HOST metrics (node_exporter),
 container stats come from the Docker API.
 
 | Metric | PromQL (simplified) |

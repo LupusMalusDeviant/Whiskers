@@ -2,11 +2,11 @@
 
 ServerWatch is infrastructure-management software: it reaches into Docker hosts, runs host
 commands, manages firewalls/Nginx/systemd, and exposes an MCP server to AI agents. Security is a
-first-class concern of the design — please treat findings accordingly.
+first-class concern of the design, please treat findings accordingly.
 
 ## Reporting a vulnerability
 
-**Please report vulnerabilities privately — do not open a public issue.**
+**Please report vulnerabilities privately, do not open a public issue.**
 
 Use GitHub's private reporting: **Security → Advisories → "Report a vulnerability"** on this
 repository. Include:
@@ -31,15 +31,15 @@ fixes. There is no long-term-support branch yet.
 
 ## Security model (summary)
 
-- **No standing SSH key** for managed hosts in steady state — management runs over a private
+- **No standing SSH key** for managed hosts in steady state, management runs over a private
   WireGuard mesh with mutual-TLS Docker access. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-- **Management ports are mesh-bound** — nothing management-related is exposed to the public internet
+- **Management ports are mesh-bound**: nothing management-related is exposed to the public internet
   by design.
 - **MCP access is gated per API key** as Read / Write / Admin.
 - **The acting agent is bounded by code-enforced guardrails** evaluated at the tool boundary (not in
   the prompt) and can never exceed the rights of whoever/whatever triggered it.
 - **Secrets** (`.env`, API keys, tokens, certificates, the encrypted vault, the SQLite DB) live under
-  `/app/data` / `.env` — both gitignored and volume-mounted, never baked into the image or committed.
+  `/app/data` / `.env`, both gitignored and volume-mounted, never baked into the image or committed.
 
 ## Hardening checklist for operators
 
@@ -50,4 +50,4 @@ fixes. There is no long-term-support branch yet.
 - Keep the agent's guardrail presets restrictive; only widen autonomy deliberately.
 - Set a strong `VAULT_KEY` and protect the `/app/data` volume (it holds plaintext provider keys by
   design choice and the data-protection keys).
-- Keep dependencies current — Dependabot config ships in `.github/dependabot.yml`.
+- Keep dependencies current, Dependabot config ships in `.github/dependabot.yml`.

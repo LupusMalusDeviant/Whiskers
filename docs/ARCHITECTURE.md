@@ -1,7 +1,7 @@
-# Architecture — Mesh + mTLS, SSH-key-free operation
+# Architecture, Mesh + mTLS, SSH-key-free operation
 
 ServerWatch manages a fleet of Docker hosts. This document describes how it does so
-**without storing a standing SSH key** — the design that replaces "one private key on the
+**without storing a standing SSH key**: the design that replaces "one private key on the
 controller unlocks every server" with short, auditable, certificate-gated paths over a private
 mesh.
 
@@ -29,7 +29,7 @@ None of the three uses SSH at steady state.
 ## Foundation: a private mesh
 
 All hosts join a WireGuard-based mesh (Tailscale). Every management port below is bound **only** to
-the host's mesh IP — never a public interface. The controller reaches hosts over the mesh; nothing
+the host's mesh IP, never a public interface. The controller reaches hosts over the mesh; nothing
 management-related is exposed to the internet.
 
 ## Telemetry plane (pull, no credential inbound)
@@ -69,7 +69,7 @@ against the CA (custom root trust; server-presented intermediates are added to t
 ## Shell plane (SSH-free, over the same mTLS channel)
 
 Running an arbitrary host command without SSH: ServerWatch creates a **one-shot privileged
-container** via the mTLS Docker API that enters the host namespaces and runs the command —
+container** via the mTLS Docker API that enters the host namespaces and runs the command:
 
 ```
 docker run --rm --privileged --pid=host alpine \
@@ -81,8 +81,8 @@ It then reads the container's logs (the command output) and removes it. This is 
 standing key can be deleted entirely.
 
 Trade-off: the mTLS channel becomes the single management path (recovery is via the cloud provider's
-console). Keeping SSH as an independent break-glass — using short-lived SSH certificates from the
-same CA instead of a standing key — is a valid alternative; this design favours "no SSH at all".
+console). Keeping SSH as an independent break-glass, using short-lived SSH certificates from the
+same CA instead of a standing key, is a valid alternative; this design favours "no SSH at all".
 
 ## PKI
 
@@ -102,10 +102,10 @@ via the `SSHPASS` env var; `ServerConfig.SshPassword` is `[JsonIgnore]`, so it l
 The onboarding orchestrator then runs, end to end, with live progress in the UI:
 
 1. install Tailscale, bring it up, and **surface the interactive login link in the app** (the user
-   clicks it to authorise the node), then wait until the node joins and gets a mesh IP — this step is
+   clicks it to authorise the node), then wait until the node joins and gets a mesh IP, this step is
    **re-run-safe**: if the node is already authenticated it reuses the existing mesh IP instead of
    waiting for a login link that won't reappear;
-2. **ensure Docker is installed** (a fresh VPS often isn't — install via the official convenience
+2. **ensure Docker is installed** (a fresh VPS often isn't, install via the official convenience
    script if `docker` is missing), since the following steps run `docker compose`;
 3. deploy `node_exporter` (mesh-only);
 4. issue a per-host server certificate from the CA;
@@ -113,13 +113,13 @@ The onboarding orchestrator then runs, end to end, with live progress in the UI:
 6. add the host to the scrape config and reload the TSDB;
 7. switch the server to `TCP+mTLS` + Prometheus metrics and verify over mTLS.
 
-On success the **bootstrap credentials are dropped automatically** — the password is cleared from
-memory and the SSH key deleted from disk (`IServerConfigService.DeleteSshKeyAsync`) — leaving the
+On success the **bootstrap credentials are dropped automatically**: the password is cleared from
+memory and the SSH key deleted from disk (`IServerConfigService.DeleteSshKeyAsync`), leaving the
 server fully mesh + mTLS, SSH-free, with no standing credential.
 
 ## What's where
 
-- `deploy/telemetry/` — compose files for `node_exporter` (per host) and VictoriaMetrics + a scrape
+- `deploy/telemetry/`, compose files for `node_exporter` (per host) and VictoriaMetrics + a scrape
   config template, plus a sample Tailscale ACL. All mesh-bound; bind addresses are templated.
 - Certificates and per-host runtime config live **on the hosts** and in the controller's gitignored
-  `data/` directory — never in this repository.
+  `data/` directory, never in this repository.
