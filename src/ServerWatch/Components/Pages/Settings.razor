@@ -20,7 +20,9 @@
 @inject ServerWatch.Services.Cve.ICveMonitorService CveMonitor
 @inject IOptionsMonitor<ServerWatch.Configuration.MetricAlertSettings> MetricAlertOptions
 @inject IOptionsMonitor<ServerWatch.Configuration.ImageUpdateSettings> ImageUpdateOptions
+@inject IOptionsMonitor<ServerWatch.Configuration.AiChatSettings> AiChatOptions
 @inject ServerWatch.Services.Persistence.IAppSettingsStore AppSettings
+@inject IConfiguration Configuration
 
 <PageTitle>Einstellungen - ServerWatch</PageTitle>
 
@@ -177,22 +179,68 @@ else
     <MudExpansionPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
         <MudGrid>
             <MudItem xs="12">
-                <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert"
-                           Value="@TerminalOptions.CurrentValue.Enabled" ReadOnly="true" />
+                <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_termEnabled" />
             </MudItem>
-            <MudItem xs="12" md="4">
-                <MudTextField Value="@TerminalOptions.CurrentValue.DefaultShell" Label="Standard-Shell"
-                              Variant="Variant.Outlined" ReadOnly="true" />
+            <MudItem xs="12" md="3">
+                <MudTextField @bind-Value="_termShell" Label="Standard-Shell" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
-            <MudItem xs="12" md="4">
-                <MudTextField Value="@TerminalOptions.CurrentValue.MaxSessions" Label="Max. Sitzungen"
-                              Variant="Variant.Outlined" ReadOnly="true" />
+            <MudItem xs="12" md="3">
+                <MudNumericField @bind-Value="_termMaxSessions" Label="Max. Sitzungen" Min="1" Max="50" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
-            <MudItem xs="12" md="4">
-                <MudTextField Value="@TerminalOptions.CurrentValue.IdleTimeoutMinutes" Label="Leerlauf-Timeout (Minuten)"
-                              Variant="Variant.Outlined" ReadOnly="true" />
+            <MudItem xs="12" md="3">
+                <MudNumericField @bind-Value="_termIdle" Label="Leerlauf-Timeout (Minuten)" Min="1" Max="1440" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
         </MudGrid>
+        <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveTerminal"
+                   StartIcon="@Icons.Material.Filled.Save" Class="mt-3">Terminal speichern</MudButton>
+    </MudExpansionPanel>
+
+    @* AI advisor chat *@
+    <MudExpansionPanel Text="AI-Chat (Berater)" Icon="@Icons.Material.Filled.Chat">
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            Schreibgeschützter Berater-Chat (keine Aktionen). Der API-Key wird im Klartext unter /app/data gespeichert — wie bei servers.json.
+        </MudAlert>
+        <MudGrid>
+            <MudItem xs="12">
+                <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_aiEnabled" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudSelect T="string" @bind-Value="_aiProvider" Label="Provider" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("openai")">OpenAI / kompatibel</MudSelectItem>
+                    <MudSelectItem Value="@("anthropic")">Anthropic</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_aiModel" Label="Modell" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="z.B. gpt-4o-mini" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_aiApiUrl" Label="API-URL (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Provider-Default wenn leer" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_aiApiKey" Label="API-Key" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" />
+            </MudItem>
+        </MudGrid>
+        <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveAiChat"
+                   StartIcon="@Icons.Material.Filled.Save" Class="mt-3">AI-Chat speichern</MudButton>
+    </MudExpansionPanel>
+
+    @* Restart-only / environment settings — read-only (set via .env, applied on restart) *@
+    <MudExpansionPanel Text="Umgebung (Neustart erforderlich)" Icon="@Icons.Material.Filled.Dns">
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            Diese Werte kommen aus Umgebungsvariablen (<code>.env</code>) und werden erst nach einem Neustart wirksam — hier nur zur Ansicht.
+            Das Host-Binding (<code>HOST_BIND</code>/<code>HOST_PORT</code>) liegt auf Compose-Ebene und ist im Container nicht sichtbar.
+        </MudAlert>
+        <MudSimpleTable Dense="true" Hover="true" Striped="true">
+            <tbody>
+                <tr><td>Login deaktiviert (AUTH_DISABLED)</td><td>@(Configuration["Auth:Disabled"] ?? "false")</td></tr>
+                <tr><td>Google OAuth</td><td>@(string.IsNullOrWhiteSpace(Configuration["GoogleAuth:ClientId"]) ? "nicht konfiguriert" : "konfiguriert")</td></tr>
+                <tr><td>OIDC aktiviert</td><td>@(Configuration["Oidc:Enabled"] ?? "false")</td></tr>
+                <tr><td>OIDC Authority</td><td>@(string.IsNullOrWhiteSpace(Configuration["Oidc:Authority"]) ? "—" : Configuration["Oidc:Authority"])</td></tr>
+                <tr><td>OIDC Anzeigename</td><td>@(string.IsNullOrWhiteSpace(Configuration["Oidc:DisplayName"]) ? "—" : Configuration["Oidc:DisplayName"])</td></tr>
+                <tr><td>PathBase</td><td>@(string.IsNullOrWhiteSpace(Configuration["PathBase"]) ? "(root)" : Configuration["PathBase"])</td></tr>
+                <tr><td>VPN-Provider</td><td>@(string.IsNullOrWhiteSpace(Configuration["Vpn:Provider"]) ? "none" : Configuration["Vpn:Provider"])</td></tr>
+            </tbody>
+        </MudSimpleTable>
     </MudExpansionPanel>
 
     @* MCP Permissions *@
@@ -487,6 +535,8 @@ else
     private bool _cveEnabled; private int _cveInterval = 12; private bool _cveScanContainers = true; private bool _cveScanOs = true; private bool _cveOsIds = true;
     private string _cveTrivy = "aquasec/trivy:latest"; private bool _cveNotify = true; private string _cveSeverity = "High"; private int _cveMaxScans = 3;
     private bool _iuEnabled = true; private int _iuInterval = 6; private bool _iuNotify = true;
+    private bool _termEnabled = true; private string _termShell = "/bin/bash"; private int _termMaxSessions = 5; private int _termIdle = 30;
+    private bool _aiEnabled; private string _aiProvider = "openai"; private string _aiModel = ""; private string _aiApiUrl = ""; private string _aiApiKey = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -529,6 +579,10 @@ else
         _cveTrivy = cv.TrivyImage; _cveNotify = cv.NotifyOnFinding; _cveSeverity = cv.NotifySeverity; _cveMaxScans = cv.MaxConcurrentScans;
         var iu = ImageUpdateOptions.CurrentValue;
         _iuEnabled = iu.Enabled; _iuInterval = iu.CheckIntervalHours; _iuNotify = iu.NotifyOnUpdate;
+        var t = TerminalOptions.CurrentValue;
+        _termEnabled = t.Enabled; _termShell = t.DefaultShell; _termMaxSessions = t.MaxSessions; _termIdle = t.IdleTimeoutMinutes;
+        var ai = AiChatOptions.CurrentValue;
+        _aiEnabled = ai.Enabled; _aiProvider = ai.Provider; _aiModel = ai.Model; _aiApiUrl = ai.ApiUrl ?? ""; _aiApiKey = ai.ApiKey;
     }
 
     private async Task SaveNotifications()
@@ -594,6 +648,33 @@ else
         });
         await Audit("imageupdate");
         Snackbar.Add("Image-Updates gespeichert.", Severity.Success);
+    }
+
+    private async Task SaveTerminal()
+    {
+        await AppSettings.SaveSectionAsync("Terminal", new TerminalSettings
+        {
+            Enabled = _termEnabled,
+            DefaultShell = string.IsNullOrWhiteSpace(_termShell) ? "/bin/bash" : _termShell.Trim(),
+            MaxSessions = _termMaxSessions,
+            IdleTimeoutMinutes = _termIdle,
+        });
+        await Audit("terminal");
+        Snackbar.Add("Terminal gespeichert (neue Sitzungen gelten sofort).", Severity.Success);
+    }
+
+    private async Task SaveAiChat()
+    {
+        await AppSettings.SaveSectionAsync("AiChat", new AiChatSettings
+        {
+            Enabled = _aiEnabled,
+            Provider = string.IsNullOrWhiteSpace(_aiProvider) ? "openai" : _aiProvider,
+            Model = _aiModel?.Trim() ?? "",
+            ApiUrl = string.IsNullOrWhiteSpace(_aiApiUrl) ? null : _aiApiUrl.Trim(),
+            ApiKey = _aiApiKey ?? "",
+        });
+        await Audit("aichat");
+        Snackbar.Add("AI-Chat gespeichert (gilt sofort).", Severity.Success);
     }
 
     private async Task Audit(string section)

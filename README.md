@@ -323,10 +323,6 @@ Beta is feature-rich but not finished. Planned / not-yet-implemented:
   CPU/RAM thresholds + a simple rolling-z-score outlier).
 - Disk-usage alerts (e.g. > 90%).
 
-**Settings**
-- Bring the remaining env settings into the UI (Terminal, AI chat, agent, MCP throttle); surface the
-  restart-only settings (auth providers, `PATH_BASE`, host binding) read-only with a clear note.
-
 **Fleet & deployment**
 - Server groups / tags; richer Compose templates.
 - Lightweight Kubernetes (**k3s**) support, discover and operate k3s clusters alongside Docker hosts.

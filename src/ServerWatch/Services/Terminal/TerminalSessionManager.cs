@@ -9,17 +9,19 @@ namespace ServerWatch.Services.Terminal;
 public class TerminalSessionManager : ITerminalSessionManager, IDisposable
 {
     private readonly ConcurrentDictionary<string, TerminalSession> _sessions = new();
-    private readonly TerminalSettings _settings;
+    // IOptionsMonitor (not IOptions) so UI-edited Terminal settings apply live (new sessions/cleanup
+    // pick up CurrentValue; existing sessions keep their shell). See Settings.razor.
+    private readonly IOptionsMonitor<TerminalSettings> _settings;
     private readonly IServerConfigService _serverConfigService;
     private readonly ILogger<TerminalSessionManager> _logger;
     private readonly Timer _cleanupTimer;
 
     public TerminalSessionManager(
-        IOptions<TerminalSettings> settings,
+        IOptionsMonitor<TerminalSettings> settings,
         IServerConfigService serverConfigService,
         ILogger<TerminalSessionManager> logger)
     {
-        _settings = settings.Value;
+        _settings = settings;
         _serverConfigService = serverConfigService;
         _logger = logger;
         _cleanupTimer = new Timer(CleanupIdleSessions, null,
@@ -28,11 +30,11 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
 
     public TerminalSession CreateSession(string? containerId = null, string? serverId = null)
     {
-        if (!_settings.Enabled)
+        if (!_settings.CurrentValue.Enabled)
             throw new InvalidOperationException("Terminal is disabled");
 
-        if (_sessions.Count >= _settings.MaxSessions)
-            throw new InvalidOperationException($"Maximum terminal sessions ({_settings.MaxSessions}) reached");
+        if (_sessions.Count >= _settings.CurrentValue.MaxSessions)
+            throw new InvalidOperationException($"Maximum terminal sessions ({_settings.CurrentValue.MaxSessions}) reached");
 
         // For remote servers, use SSH + docker exec
         if (serverId != null)
@@ -79,7 +81,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         }
 
         var localSession = new TerminalSession { ContainerId = containerId };
-        localSession.Start(_settings.DefaultShell, containerId);
+        localSession.Start(_settings.CurrentValue.DefaultShell, containerId);
         _sessions[localSession.SessionId] = localSession;
 
         _logger.LogInformation("Terminal session {SessionId} created (container: {ContainerId})",
@@ -90,11 +92,11 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
 
     public TerminalSession CreateSshSession(ServerWatch.Models.ServerConfig server)
     {
-        if (!_settings.Enabled)
+        if (!_settings.CurrentValue.Enabled)
             throw new InvalidOperationException("Terminal is disabled");
 
-        if (_sessions.Count >= _settings.MaxSessions)
-            throw new InvalidOperationException($"Maximum terminal sessions ({_settings.MaxSessions}) reached");
+        if (_sessions.Count >= _settings.CurrentValue.MaxSessions)
+            throw new InvalidOperationException($"Maximum terminal sessions ({_settings.CurrentValue.MaxSessions}) reached");
 
         var session = new TerminalSession();
 
@@ -117,7 +119,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         }
         else if (server.ConnectionType == ConnectionType.Local)
         {
-            session.Start(_settings.DefaultShell, null);
+            session.Start(_settings.CurrentValue.DefaultShell, null);
         }
         else if (server.ConnectionType == ConnectionType.TCP)
         {
@@ -159,7 +161,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
 
     private void CleanupIdleSessions(object? state)
     {
-        var timeout = TimeSpan.FromMinutes(_settings.IdleTimeoutMinutes);
+        var timeout = TimeSpan.FromMinutes(_settings.CurrentValue.IdleTimeoutMinutes);
         foreach (var (id, session) in _sessions)
         {
             if (DateTime.UtcNow - session.LastActivityAt > timeout || !session.IsRunning)
