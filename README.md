@@ -79,7 +79,10 @@ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Notifications (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, Email/SMTP, and a generic outbound webhook) on:
   - container unhealthy / stopped / OOM
   - restart loops
+  - sustained high CPU / RAM / host-disk usage (+ optional anomaly detection)
+  - new CVE findings
   - image updates available
+- **Persistent in-app notification feed** with a filterable history page (survives restarts)
 - Health reports with history
 
 ### Security scanning
