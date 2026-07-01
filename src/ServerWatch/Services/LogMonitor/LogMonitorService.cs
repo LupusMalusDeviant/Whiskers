@@ -22,6 +22,17 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(60);
 
+    // Our own container must never be scanned for log alerts. ServerWatch logs its own
+    // "Log alert triggered: … {matchedLine}" and "Trivy scan failed … FATAL" lines; when an
+    // "all containers" rule reads those back they re-match the pattern and create a
+    // self-amplifying trigger loop (this is what ran the "Echte Fehler" rule up to 133×).
+    // Self-monitoring, if ever wanted, must be a deliberate out-of-band mechanism, not this.
+    // Override the excluded name(s) via SERVERWATCH_SELF_CONTAINERS (comma-separated).
+    private static readonly HashSet<string> SelfContainerNames = new(
+        (Environment.GetEnvironmentVariable("SERVERWATCH_SELF_CONTAINERS") ?? "serverwatch")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+        StringComparer.OrdinalIgnoreCase);
+
     public LogMonitorService(
         IServiceScopeFactory scopeFactory,
         IDockerService docker,
@@ -67,6 +78,9 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
         foreach (var container in containers)
         {
             if (ct.IsCancellationRequested) break;
+
+            // Never scan our own logs — breaks the self-amplifying alert feedback loop.
+            if (SelfContainerNames.Contains(container.Name)) continue;
 
             var applicableRules = rules.Where(r =>
                 r.ContainerId == null || r.ContainerId == container.Id || r.ContainerName == container.Name).ToList();

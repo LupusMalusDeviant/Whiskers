@@ -56,8 +56,14 @@ public class TrivyScanner : ITrivyScanner
         var trivyImage = _settings.CurrentValue.TrivyImage;
         // We scan ALL severities and filter at notify/display time. Trivy DB persists in
         // a named volume so subsequent scans are fast.
+        // Mount the host Docker socket so Trivy's "docker" image source can scan
+        // locally-built images that exist only in the daemon with no registry to pull from
+        // (e.g. compose-built app images like `rabenhof-web`, `serverwatch-web`). Without it
+        // Trivy fails those with a FATAL "unable to find the specified image". Registry
+        // images continue to resolve exactly as before.
         var cmd =
-            $"docker run --rm -v {CacheVolume}:/root/.cache/trivy {trivyImage} " +
+            $"docker run --rm -v {CacheVolume}:/root/.cache/trivy " +
+            $"-v /var/run/docker.sock:/var/run/docker.sock {trivyImage} " +
             $"image --format json --quiet --no-progress --timeout 8m " +
             ShellUtils.Quote(image);
 
