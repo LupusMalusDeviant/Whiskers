@@ -81,7 +81,7 @@ public class OsCveScanner : IOsCveScanner
             if (settings.EnableOsCveIds)
             {
                 var cves = await GetCveIdsFromChangelogAsync(
-                    serverId, p.Pkg, settings.OsChangelogTimeoutSeconds, ct);
+                    serverId, p.Pkg, p.OldVer, settings.OsChangelogTimeoutSeconds, ct);
 
                 if (cves.Count == 0)
                 {
@@ -130,26 +130,65 @@ public class OsCveScanner : IOsCveScanner
     }
 
     private async Task<List<string>> GetCveIdsFromChangelogAsync(
-        string serverId, string pkg, int timeoutSec, CancellationToken ct)
+        string serverId, string pkg, string installedVer, int timeoutSec, CancellationToken ct)
     {
-        // apt-get changelog doesn't need root. Pipe through grep -oE for CVE-IDs only,
-        // then sort -u for de-dup. Tail-cap to a reasonable line count to handle huge
-        // changelogs.
+        // apt-get changelog doesn't need root. We fetch the raw changelog (capped) and parse
+        // it in-process so we attribute ONLY the CVEs from stanzas NEWER than the installed
+        // version — i.e. the ones this pending update actually fixes. Grepping the entire
+        // changelog (curl's goes back to 2005) and tagging every historical CVE onto a single
+        // point-update was the cause of thousands of bogus "High" findings.
         var cmd =
-            $"apt-get changelog {ShellUtils.Quote(pkg)} 2>/dev/null | head -c 200000 | " +
-            "grep -oE 'CVE-[0-9]{4}-[0-9]+' | sort -u || true";
+            $"apt-get changelog {ShellUtils.Quote(pkg)} 2>/dev/null | head -c 200000 || true";
         var exec = await _executor.ExecuteAsync(
             serverId, cmd, TimeSpan.FromSeconds(timeoutSec), ct);
 
         if (string.IsNullOrWhiteSpace(exec.Output))
             return new List<string>();
 
-        return exec.Output
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.Trim())
-            .Where(l => CveIdRegex.IsMatch(l))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return ExtractNewCveIds(exec.Output, installedVer);
+    }
+
+    // First line of a Debian/Ubuntu changelog stanza, e.g.
+    //   curl (8.5.0-2ubuntu10.10) noble-security; urgency=medium
+    // Stanza bodies and the "-- maintainer" trailer are indented, so only true headers
+    // start at column 0 with "<pkg> (<version>)".
+    private static readonly Regex ChangelogHeaderRegex = new(
+        @"^\S+\s+\((?<ver>[^)]+)\)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Returns the distinct CVE IDs mentioned in changelog stanzas strictly NEWER than
+    /// <paramref name="installedVer"/>. Walks newest→oldest and stops at the installed
+    /// version's stanza (those fixes are already applied). A 5-stanza backstop bounds the
+    /// scan if the installed version isn't present in the (capped) changelog.
+    /// </summary>
+    public static List<string> ExtractNewCveIds(string changelog, string installedVer)
+    {
+        var installed = StripEpoch(installedVer).Trim();
+        var cves = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var stanzas = 0;
+
+        foreach (var line in changelog.Split('\n'))
+        {
+            var header = ChangelogHeaderRegex.Match(line);
+            if (header.Success)
+            {
+                var ver = StripEpoch(header.Groups["ver"].Value).Trim();
+                if (ver == installed) break;   // reached the installed release — stop
+                if (++stanzas > 5) break;       // backstop against runaway over-attribution
+                continue;
+            }
+            foreach (Match m in CveIdRegex.Matches(line))
+                if (seen.Add(m.Value)) cves.Add(m.Value);
+        }
+        return cves;
+    }
+
+    // Drop a leading "epoch:" so changelog and apt versions compare equal (e.g. "1:2.3" → "2.3").
+    private static string StripEpoch(string v)
+    {
+        var i = v.IndexOf(':');
+        return i >= 0 ? v[(i + 1)..] : v;
     }
 
     private static CveFinding BuildFinding(string serverId, AptPackage p, string? cveId)
@@ -158,9 +197,10 @@ public class OsCveScanner : IOsCveScanner
         {
             ServerId = serverId,
             Source = CveSource.Os,
-            // Pending security updates count as HIGH by default. Precise CVE severity
-            // would require an NVD/USN lookup — out of scope for the initial version.
-            Severity = CveSeverity.High,
+            // Pending OS security updates default to MEDIUM: apt alone doesn't reveal the real
+            // per-CVE severity, and hardcoding High flooded the dashboard with false High
+            // findings. Precise severity would need an NVD/USN lookup (future enhancement).
+            Severity = CveSeverity.Medium,
             Package = p.Pkg,
             InstalledVersion = p.OldVer,
             FixedVersion = p.NewVer,
