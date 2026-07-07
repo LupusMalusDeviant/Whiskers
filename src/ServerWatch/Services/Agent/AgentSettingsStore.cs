@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using ServerWatch.Configuration;
+using ServerWatch.Models;
+using ServerWatch.Models.Agent;
 
 namespace ServerWatch.Services.Agent;
 
@@ -10,7 +12,7 @@ namespace ServerWatch.Services.Agent;
 /// Note: ApiKey is stored in plaintext under /app/data (same choice as servers.json); the editor is admin-only.</summary>
 public interface IAgentSettingsStore
 {
-    Task SaveAsync(AgentSettings settings);
+    Task SaveAsync(AgentSettings settings, AgentPrincipal editor);
 }
 
 public sealed class AgentSettingsStore : IAgentSettingsStore
@@ -20,8 +22,10 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
     public AgentSettingsStore(string? path = null)
         => _path = path ?? "/app/data/agent-settings.json";
 
-    public async Task SaveAsync(AgentSettings settings)
+    public async Task SaveAsync(AgentSettings settings, AgentPrincipal editor)
     {
+        RequireAdmin(editor);
+
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
@@ -35,6 +39,7 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
                 ["Endpoint"] = settings.Endpoint ?? "",
                 ["ApiKey"] = settings.ApiKey,
                 ["MaxToolIterations"] = settings.MaxToolIterations,
+                ["MaxTokens"] = settings.MaxTokens,
                 ["SystemPrompt"] = settings.SystemPrompt,
             }
         };
@@ -42,5 +47,14 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
         var tmp = _path + ".tmp";
         await File.WriteAllTextAsync(tmp, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         File.Move(tmp, _path, overwrite: true);
+    }
+
+    // The agent settings include the provider API key + system prompt (an injection vector) — persisting
+    // them is admin-only, mirroring the guardrail store.
+    private static void RequireAdmin(AgentPrincipal editor)
+    {
+        if (editor.PermissionLevel != McpPermissionLevels.Admin)
+            throw new UnauthorizedAccessException(
+                $"Agent-Einstellungen dürfen nur von Admins geändert werden ({editor.DisplayName} ist '{editor.PermissionLevel}').");
     }
 }

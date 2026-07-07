@@ -54,6 +54,16 @@ public class AgentSessionTests
         public GuardrailDecision Evaluate(GuardrailRequest request) => Decision;
     }
 
+    private sealed class FakeGuardrailStore : IGuardrailStore
+    {
+        public FakeGuardrailStore(GuardrailPolicy current) => Current = current;
+        public GuardrailPolicy Current { get; set; }
+        public GuardrailConfig Config => new();
+        public Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SaveAsync(GuardrailPolicy policy, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public event Action? Changed { add { } remove { } }
+    }
+
     // ---- Helpers -----------------------------------------------------------
 
     private static readonly AgentToolRegistry Registry = new();
@@ -165,6 +175,40 @@ public class AgentSessionTests
         Assert.Equal("frühere antwort", h[1].Text);
         Assert.Contains(h, m => m.Role == AgentRole.User && m.Text == "neu");
         Assert.Contains(h, m => m.Role == AgentRole.Assistant && m.Text == "neue antwort");
+    }
+
+    [Fact] // MIT-33: the LIVE guardrail policy (store) reaches an open session, not the frozen context policy
+    public async Task Live_store_policy_action_limit_is_enforced()
+    {
+        var store = new FakeGuardrailStore(new GuardrailPolicy { MaxActionsPerSession = 0 });
+        var invoker = new FakeInvoker();
+        var session = new AgentSession(Context(), new FakeProvider(ToolTurn("stop_container"), TextTurn("done")),
+            new FakeCatalog(), invoker, new FakeEngine(), Registry,
+            new AgentSettings { Model = "x", MaxToolIterations = 2 }, "system", seedHistory: null, guardrailStore: store);
+
+        var events = await Collect(session, "go");
+
+        Assert.Equal(0, invoker.Calls); // live limit=0 blocks execution although the engine allowed it
+        Assert.Contains(events, e => e is AgentEvent.ToolExecuted t && t.Result.IsError);
+    }
+
+    [Fact] // MIT-32: one active run per session
+    public async Task Second_concurrent_send_is_rejected()
+    {
+        var session = Session(new FakeProvider(TextTurn("A")), new FakeInvoker(), new FakeEngine());
+
+        // Start the first run and advance it once so it is active (suspended mid-stream), not yet finished.
+        var first = session.SendAsync("first").GetAsyncEnumerator();
+        Assert.True(await first.MoveNextAsync());
+
+        // A second send while the first is still active must be rejected, not interleaved.
+        var second = new List<AgentEvent>();
+        await foreach (var ev in session.SendAsync("second")) second.Add(ev);
+        Assert.Contains(second, ev => ev is AgentEvent.Failed);
+
+        // Drain the first so it releases the guard.
+        while (await first.MoveNextAsync()) { }
+        await first.DisposeAsync();
     }
 
     [Fact]

@@ -47,4 +47,29 @@ public class AgentTranscriptStoreTests
     {
         Assert.Empty(await TempStore().LoadAsync("nobody@nowhere"));
     }
+
+    [Fact] // MIT-31: sanitize before persisting/re-seeding
+    public async Task Save_drops_leading_tool_orphan_toolcalls_redacts_and_strips_images()
+    {
+        var store = TempStore();
+        var messages = new List<AgentMessage>
+        {
+            new(AgentRole.Tool, "leading orphan", ToolCallId: "old", ToolName: "x"),          // leading Tool → dropped
+            new(AgentRole.User, "hi", ImageBase64: "AAAA", ImageMediaType: "image/png"),      // image → stripped
+            new(AgentRole.Assistant, "thinking",
+                ToolCalls: new[] { new AgentToolCall("c1", "t", "{}"), new AgentToolCall("c2", "t", "{}") }), // c2 unanswered → stripped
+            new(AgentRole.Tool, "MYSQL_PWD=sup3rs3cret done", ToolCallId: "c1", ToolName: "t"),// secret → redacted
+        };
+
+        await store.SaveAsync("u@x", messages);
+        var loaded = await store.LoadAsync("u@x");
+
+        Assert.Equal(AgentRole.User, loaded[0].Role);               // leading Tool dropped
+        Assert.Null(loaded[0].ImageBase64);                          // screenshot stripped
+        var assistant = loaded.Single(m => m.Role == AgentRole.Assistant);
+        Assert.Single(assistant.ToolCalls!);                         // only the answered c1 survives
+        Assert.Equal("c1", assistant.ToolCalls![0].Id);
+        var tool = loaded.Last(m => m.Role == AgentRole.Tool);
+        Assert.DoesNotContain("sup3rs3cret", tool.Text);             // tool output redacted
+    }
 }

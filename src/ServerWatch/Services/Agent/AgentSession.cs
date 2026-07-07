@@ -14,20 +14,21 @@ namespace ServerWatch.Services.Agent;
 /// here (stateful, hence not in the stateless engine).</summary>
 public sealed class AgentSession : IAgentSession
 {
-    private const int MaxTokens = 1024;
-
     private readonly AgentContext _context;
     private readonly IAgentLlmProvider _provider;
     private readonly IAgentToolCatalog _catalog;
     private readonly IAgentToolInvoker _invoker;
     private readonly IAgentGuardrailEngine _guardrails;
+    private readonly IGuardrailStore? _guardrailStore;
     private readonly IAgentToolRegistry _registry;
     private readonly AgentSettings _settings;
     private readonly string _systemPrompt;
 
     private readonly List<AgentMessage> _history = new();
+    private readonly object _historyLock = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pending = new();
     private int _actionCount;
+    private int _sending;
 
     public string SessionId => _context.SessionId;
     public AgentRunState State { get; private set; } = AgentRunState.Idle;
@@ -35,20 +36,25 @@ public sealed class AgentSession : IAgentSession
     public AgentSession(
         AgentContext context, IAgentLlmProvider provider, IAgentToolCatalog catalog,
         IAgentToolInvoker invoker, IAgentGuardrailEngine guardrails, IAgentToolRegistry registry,
-        AgentSettings settings, string systemPrompt, IReadOnlyList<AgentMessage>? seedHistory = null)
+        AgentSettings settings, string systemPrompt, IReadOnlyList<AgentMessage>? seedHistory = null,
+        IGuardrailStore? guardrailStore = null)
     {
         _context = context;
         _provider = provider;
         _catalog = catalog;
         _invoker = invoker;
         _guardrails = guardrails;
+        _guardrailStore = guardrailStore;
         _registry = registry;
         _settings = settings;
         _systemPrompt = systemPrompt;
         if (seedHistory is { Count: > 0 }) _history.AddRange(seedHistory);
     }
 
-    public IReadOnlyList<AgentMessage> History => _history.ToList();
+    public IReadOnlyList<AgentMessage> History => HistorySnapshot();
+
+    private void AddHistory(AgentMessage m) { lock (_historyLock) { _history.Add(m); } }
+    private List<AgentMessage> HistorySnapshot() { lock (_historyLock) { return _history.ToList(); } }
 
     public Task ResolveConfirmationAsync(string toolCallId, bool approved, CancellationToken ct = default)
     {
@@ -61,7 +67,26 @@ public sealed class AgentSession : IAgentSession
         string userMessage, string? imageBase64 = null, string? imageMediaType = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        _history.Add(new AgentMessage(AgentRole.User, userMessage,
+        // One active run per session — a second concurrent SendAsync is rejected so two runs can never
+        // interleave _history (which would corrupt it / desync the provider transcript).
+        if (Interlocked.CompareExchange(ref _sending, 1, 0) != 0)
+        {
+            yield return new AgentEvent.Failed("Diese Session ist bereits aktiv.");
+            yield break;
+        }
+        try
+        {
+            await foreach (var ev in RunAsync(userMessage, imageBase64, imageMediaType, ct))
+                yield return ev;
+        }
+        finally { Interlocked.Exchange(ref _sending, 0); }
+    }
+
+    private async IAsyncEnumerable<AgentEvent> RunAsync(
+        string userMessage, string? imageBase64, string? imageMediaType,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        AddHistory(new AgentMessage(AgentRole.User, userMessage,
             ImageBase64: string.IsNullOrEmpty(imageBase64) ? null : imageBase64,
             ImageMediaType: imageMediaType ?? "image/png"));
         var tools = _catalog.GetVisibleTools(_context);
@@ -71,7 +96,7 @@ public sealed class AgentSession : IAgentSession
         {
             State = AgentRunState.Thinking;
             var request = new AgentCompletionRequest(
-                _settings.Model, _systemPrompt, _history.ToList(), tools, MaxTokens, 0.2, AgentToolChoice.Auto);
+                _settings.Model, _systemPrompt, HistorySnapshot(), tools, _settings.MaxTokens, 0.2, AgentToolChoice.Auto);
 
             var text = new StringBuilder();
             var calls = new List<AgentToolCall>();
@@ -88,7 +113,7 @@ public sealed class AgentSession : IAgentSession
                 if (delta.Final is { } final) stop = final;
             }
 
-            _history.Add(new AgentMessage(AgentRole.Assistant,
+            AddHistory(new AgentMessage(AgentRole.Assistant,
                 text.Length > 0 ? text.ToString() : null,
                 calls.Count > 0 ? calls : null));
 
@@ -117,12 +142,19 @@ public sealed class AgentSession : IAgentSession
                     State = AgentRunState.AwaitingConfirmation;
                     var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                     _pending[call.Id] = tcs;
-                    yield return new AgentEvent.ConfirmationRequired(call, decision.Reason);
 
                     bool? approved;
-                    try { approved = await tcs.Task.WaitAsync(ct); }
-                    catch (OperationCanceledException) { approved = null; }
-                    _pending.TryRemove(call.Id, out _);
+                    try
+                    {
+                        yield return new AgentEvent.ConfirmationRequired(call, decision.Reason);
+                        try { approved = await tcs.Task.WaitAsync(ct); }
+                        catch (OperationCanceledException) { approved = null; }
+                    }
+                    finally
+                    {
+                        // Runs even if the enumerator is disposed mid-confirmation → no leaked _pending entry.
+                        _pending.TryRemove(call.Id, out _);
+                    }
                     State = AgentRunState.Running;
 
                     if (approved is null) yield break;             // abgebrochen
@@ -133,14 +165,14 @@ public sealed class AgentSession : IAgentSession
                     }
                 }
 
-                if (_actionCount >= _context.Policy.MaxActionsPerSession)
+                if (_actionCount >= LivePolicy.MaxActionsPerSession)
                 {
                     yield return RecordResult(call, new AgentToolResult(call.Id,
-                        $"Aktions-Limit dieser Session erreicht ({_context.Policy.MaxActionsPerSession}).", true, decision));
+                        $"Aktions-Limit dieser Session erreicht ({LivePolicy.MaxActionsPerSession}).", true, decision));
                     continue;
                 }
 
-                var result = await _invoker.InvokeAsync(call, _context, ct);
+                var result = await _invoker.InvokeAsync(call, LiveContext, ct);
                 _actionCount++;
                 yield return RecordResult(call, result);
             }
@@ -152,10 +184,15 @@ public sealed class AgentSession : IAgentSession
 
     private AgentEvent RecordResult(AgentToolCall call, AgentToolResult result)
     {
-        _history.Add(new AgentMessage(AgentRole.Tool, result.Content,
+        AddHistory(new AgentMessage(AgentRole.Tool, result.Content,
             ToolCallId: call.Id, IsError: result.IsError, ToolName: call.Name));
         return new AgentEvent.ToolExecuted(result);
     }
+
+    // The guardrail policy in effect right now: the live store (so a Read-only kill-switch reaches an
+    // already-open session) or — absent a store (pinned-preset trigger runs / tests) — the session context.
+    private GuardrailPolicy LivePolicy => _guardrailStore?.Current ?? _context.Policy;
+    private AgentContext LiveContext => _context with { Policy = LivePolicy };
 
     private GuardrailDecision Evaluate(AgentToolCall call)
     {
@@ -164,6 +201,6 @@ public sealed class AgentSession : IAgentSession
                 "Unbekanntes Tool — der Invoker meldet den Fehler.", Array.Empty<string>());
 
         var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
-        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, entry.RequiredLevel, args, _context));
+        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, entry.RequiredLevel, args, LiveContext));
     }
 }

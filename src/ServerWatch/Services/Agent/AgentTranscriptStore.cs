@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using ServerWatch.Models.Agent;
 using ServerWatch.Services.Persistence;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Agent;
 
@@ -23,13 +25,19 @@ public sealed class AgentTranscriptStore : IAgentTranscriptStore
 {
     private const int KeepLast = 60;
     private readonly string _basePath;
+    // Cache one JsonFileStore per path so its per-instance write-semaphore actually serializes concurrent
+    // saves for the same user — a fresh store per call made that lock useless (lost update / IOException).
+    private readonly ConcurrentDictionary<string, JsonFileStore<AgentTranscript>> _stores = new();
 
     public AgentTranscriptStore(string? basePath = null)
         => _basePath = basePath ?? "/app/data/agent-chat";
 
+    private JsonFileStore<AgentTranscript> StoreFor(string userEmail)
+        => _stores.GetOrAdd(GetPath(userEmail), p => new JsonFileStore<AgentTranscript>(p));
+
     public async Task<List<AgentMessage>> LoadAsync(string userEmail)
     {
-        var store = new JsonFileStore<AgentTranscript>(GetPath(userEmail));
+        var store = StoreFor(userEmail);
         if (!store.Exists()) return new();
         var transcript = await store.LoadAsync();
         return transcript.Messages;
@@ -37,8 +45,44 @@ public sealed class AgentTranscriptStore : IAgentTranscriptStore
 
     public async Task SaveAsync(string userEmail, IReadOnlyList<AgentMessage> messages)
     {
-        var store = new JsonFileStore<AgentTranscript>(GetPath(userEmail));
-        await store.SaveAsync(new AgentTranscript { Messages = messages.TakeLast(KeepLast).ToList() });
+        var store = StoreFor(userEmail);
+        await store.SaveAsync(new AgentTranscript { Messages = SanitizeForPersistence(messages) });
+    }
+
+    // Keep the last N messages, then make the window safe to persist AND re-seed: drop orphaned tool pairs
+    // (a dangling tool_use/tool_result 400s the next provider request), redact tool outputs, and strip
+    // base64 screenshots (prompt bloat + possible secrets).
+    private static List<AgentMessage> SanitizeForPersistence(IReadOnlyList<AgentMessage> messages)
+    {
+        var trimmed = messages.TakeLast(KeepLast).ToList();
+
+        // Drop leading Tool messages — after truncation the assistant tool_use they answer may be gone.
+        var start = 0;
+        while (start < trimmed.Count && trimmed[start].Role == AgentRole.Tool) start++;
+        trimmed = trimmed.Skip(start).ToList();
+
+        // Tool-call ids that still have a matching Tool result in the kept window.
+        var answered = trimmed
+            .Where(m => m.Role == AgentRole.Tool && m.ToolCallId != null)
+            .Select(m => m.ToolCallId!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var result = new List<AgentMessage>(trimmed.Count);
+        foreach (var original in trimmed)
+        {
+            var m = original;
+            if (m.Role == AgentRole.Assistant && m.ToolCalls is { Count: > 0 })
+            {
+                var kept = m.ToolCalls.Where(tc => answered.Contains(tc.Id)).ToList();
+                m = m with { ToolCalls = kept.Count > 0 ? kept : null };
+            }
+            if (m.Role == AgentRole.Tool && m.Text != null)
+                m = m with { Text = SecretRedactor.Redact(m.Text) };
+            if (m.ImageBase64 != null)
+                m = m with { ImageBase64 = null, ImageMediaType = null };
+            result.Add(m);
+        }
+        return result;
     }
 
     public Task ClearAsync(string userEmail)

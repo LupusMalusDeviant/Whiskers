@@ -97,6 +97,16 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-18 — VPN-Enrollment-Secrets in argv.** `VpnProcessRunner.RunAsync` bekommt einen optionalen env-Dict-Parameter; Tailscale übergibt den Auth-Key via `TS_AUTHKEY`, NetBird via `NB_SETUP_KEY` (statt `--authkey`/`--setup-key` in argv).
 - _Tests:_ `SecretHygieneTests` (Redaction hides `-p<pw>` / `MYSQL_PWD=` / `PGPASSWORD=` / keyed secrets). Kein Ctor-/Interface-Change → kein Boot.
   _Dateien: `Services/Database/DatabaseService.cs`, `Services/Server/HostCommandExecutor.cs`, `Program.cs`, `Services/Vpn/VpnProcessRunner.cs`, `Services/Vpn/Providers/{Tailscale,Netbird}VpnProvider.cs`, per-Ordner-READMEs (Database/Vpn/Notifications)._
+### ServerWatch-a3jo — Agent-Internals (Threadsafety, Live-Guardrails, Transcript, Runtime)
+
+- **MIT-31 — Transcript-Sanitize.** `AgentTranscriptStore.SaveAsync` bereinigt das Fenster vor Persist/Re-Seed: führende Tool-Messages + verwaiste Assistant-ToolCalls entfernt (kein Provider-400), Tool-Outputs via `SecretRedactor` redigiert, base64-Screenshots verworfen.
+- **MIT-40 — Store-Cache.** Ein `JsonFileStore` pro Pfad (ConcurrentDictionary) → die Semaphore serialisiert parallele Saves wirklich.
+- **MIT-32 — Session-Threadsafety.** `_history`-Zugriffe unter Lock; `SendAsync` mit Interlocked-Reentrancy-Guard (zweiter paralleler Send → `Failed`).
+- **MIT-33 — Live-Guardrails.** Die Session evaluiert gegen `IGuardrailStore.Current` (Kill-Switch/Limits greifen mid-run); Trigger-Runs behalten ihr gepinntes Preset (optionaler Store, Fallback auf `context.Policy`).
+- **MIT-41 — ClaudeCodeRuntime-Härtung** (Stub, noch ohne Caller): `--permission-mode default` + `--disallowedTools Edit,Write,Bash,NotebookEdit`; kein `?? ApiKey`-Fallback (ohne McpKey kein Start); Principal-Level vs. Key-Level geprüft; temp MCP-Config chmod 600.
+- **NIED-21 — Agent-Sammelfinding (8):** .1 pending-leak try/finally · .2 Eviction (id,session)-Tupel + ReferenceEquals · .3 ApprovalStore exactly-once (Interlocked) · .4 TargetInvocationException entpackt · .5 Guardrail-Legacy-Migration → SafeDefault statt Default-Policy · .6 AiChat-Save atomar · .7 Anthropic-Seed ohne führende Assistant-Turns · .8 AgentSettingsStore.SaveAsync admin-only.
+- **OPT-11.5 — MaxTokens** aus `AgentSettings` (Default 4096) statt hartkodiert 1024.
+- _Tests:_ TranscriptStore-Sanitize (Round-Trip), Session-Reentrancy + Live-Policy-Limit, AgentSettings-RequireAdmin; bestehende Agent-Tests bleiben grün. DI per Boot validiert (Ctor/Interface-Changes).
 
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
