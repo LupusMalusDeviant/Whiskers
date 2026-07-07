@@ -49,6 +49,21 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 
 - **NIED-20.6** — `Webhooks.razor.TestWebhook` verlangt jetzt die Operator-Rolle.
 
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-07q1 — Cleanup: Dead-Code, Templates, SSL/Terminal-Bugs (NIED-23, NIED-19, NIED-10, NIED-11)
+
+- **NIED-23 — Toter Code entfernt.** `DockerConnectionFactory` (kein Aufrufer, keine Registrierung), die `IDockerConnectionManager.Client`-Property (kein Aufrufer — aus Interface + Impl) und der unbenutzte `ConfigExport`-Service (nur in Program.cs registriert, kein UI/MCP-Aufrufer) inkl. Registrierung + Ordner gelöscht; leeres `Auth/`-Verzeichnis entfernt; Docker-README bereinigt. **ConfigExport = gelöscht** (das Bean erlaubt löschen-oder-verdrahten; Cleanup-Thema, vermeidet eine neue Admin-Export-Fläche; der Export war bereits secret-frei und ist trivial aus Git wiederherstellbar).
+  _Dateien: `Services/Docker/DockerConnectionFactory.cs` (gelöscht), `Services/Docker/IDockerConnectionManager.cs`, `Services/Docker/DockerConnectionManager.cs`, `Services/ConfigExport/*` (gelöscht), `Program.cs`, `Services/Docker/README.md`._
+- **NIED-19 — Kaputte Templates repariert.** Plausible: `DATABASE_URL` + `CLICKHOUSE_DATABASE_URL` ergänzt, PG-Passwort jetzt Pflicht-Var `{DB_PASSWORD}` (kein hartkodiertes `postgres`), CE-Init-`command`, überschreibbare `BASE_URL`. n8n: das in n8n 1.x entfernte `N8N_BASIC_AUTH_*` raus (Owner-Setup via UI, im Compose kommentiert), `N8N_ENCRYPTION_KEY` als Pflicht. Rocket.Chat: MongoDB als Replica-Set (`bitnami/mongodb` mit `MONGODB_REPLICA_SET_MODE=primary`/`rs0`) — ohne Replica-Set startet Rocket.Chat gar nicht.
+  _Dateien: `Services/Templates/TemplateService.cs`._
+- **NIED-10 — SSL-Ablauf-Fehlalarm.** `SslCertificate.ExpiresAt` ist jetzt `DateTime?`; ein unparsebares certbot-Datum lässt den Ablauf „unbekannt" statt `DateTime.MinValue` (das jedes solche Zertifikat als „läuft bald ab" markierte). `DaysUntilExpiry`/`IsExpiringSoon` sind null-sicher; UI + MCP-Tool zeigen „unbekannt".
+  _Dateien: `Services/Server/SslCertService.cs`, `Components/Pages/SslCerts.razor`, `Mcp/Tools/ServerTools.cs`._
+- **NIED-11 — Terminal-Edge-Cases.** `LastActivityAt` wird jetzt auch bei Output aktualisiert (`TerminalSession.Touch()` im server-seitigen Read-Loop) — ein Terminal mit laufendem Output wird nicht mehr idle-gekillt. Das Max-Sessions-Limit wird atomar geprüft (`RegisterSession` unter Lock) statt Count-dann-Add (TOCTOU).
+  _Dateien: `Services/Terminal/TerminalSession.cs`, `Services/Terminal/TerminalSessionManager.cs`, `Components/Pages/Terminal.razor`._
+
+**Verifikation (Branch `feat/ServerWatch-07q1-cleanup-dead-code-templates`):** Build 0 Fehler, `dotnet test` 133/133 (10 neu: `TemplateServiceTests`, `SslCertificateTests` inkl. Parse-Fehler-Regression, `TerminalSessionTests`). App in Development gebootet — „Application started" (DI-Graph nach Entfernen der ConfigExport-Registrierung + des `Client`-Interface-Members validiert). Der Terminal-Cap-Race-Fix ist ein Lock (prozess-startende Sessions sind auf der Dev-Box nicht unit-testbar) → durch Build + Boot + Review abgedeckt.
+
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
 - **HOCH-11** — SSH `StrictHostKeyChecking=no` → `accept-new`: Aussperr-Risiko bei Host-Key-Wechsel + Off-Limits-Netzwerk-Layer. Siehe [ADR 0002](../adr/0002-ssh-host-key-verification-deferred.md). Braucht ausdrückliche Freigabe.
