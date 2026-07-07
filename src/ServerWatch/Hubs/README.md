@@ -7,7 +7,8 @@ SignalR hubs, the real-time bridge between the server and the Blazor UI. They pu
 | File | Purpose |
 |---|---|
 | `ContainerHub.cs` | Streams live container state / stats / health to the dashboard and detail pages. |
-| `TerminalHub.cs` | Bidirectional terminal I/O, relays keystrokes and output between the browser and a [`Terminal/`](../Services/Terminal/) session. |
+
+> The web terminal does **not** use a SignalR hub. The terminal pages drive [`Terminal/`](../Services/Terminal/) sessions directly; the former `TerminalHub` was removed (unused by any client and exposed an unauthenticated shell).
 
 ## Related
 

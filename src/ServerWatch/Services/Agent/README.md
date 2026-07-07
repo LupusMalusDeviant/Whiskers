@@ -14,7 +14,7 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 | `IAgentTooling.cs` | Interfaces for the tool layer: `IAgentToolRegistry`, `IAgentToolCatalog`, `IAgentToolInvoker`, `IAgentPrincipalResolver`. |
 | `AgentToolRegistry.cs` | Discovers the `[McpServerTool]` methods once via reflection, derives LLM function schemas, cross-checks against the canonical permission levels. Excludes agent-disallowed tools (e.g. `instruct_agent`). |
 | `AgentToolCatalog.cs` | Returns the function definitions visible to a principal given role + guardrails (hard-blocked tools are never shown to the model). |
-| `AgentToolInvoker.cs` | Executes exactly one tool call **after** the guardrail gate; invokes the real MCP method via reflection under a synthetic HttpContext that records the agent in the audit log. |
+| `AgentToolInvoker.cs` | Executes exactly one tool call **after** the guardrail gate; invokes the real MCP method via reflection under a synthetic HttpContext. The context uses the `AgentSynthetic` scheme carrying the caller's real MCP level as a claim (enforced by tool-internal `McpPermissionCheck` — defense in depth, **not** synthetic Admin) and records the agent in the audit log. |
 | `AgentArgumentBinder.cs` | Converts LLM JSON argument values into the .NET parameter types of tool methods (tolerant of LLM quirks, no silent data loss). |
 | `AgentPrincipalResolver.cs` | Derives the `AgentPrincipal` from the HTTP context (bearer MCP key or cookie web user), mirroring `McpPermissionCheck`. |
 | `AgentSettingsStore.cs` | Writes the UI-editable provider settings to `/app/data/agent-settings.json` (a reload-on-change config source). |

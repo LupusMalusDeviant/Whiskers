@@ -3,8 +3,10 @@
 **AI triggers**: run the agent autonomously when an event occurs. A dispatcher taps every
 `NotificationEvent` (via [`../../Notifications/CompositeNotificationService.cs`](../../Notifications/CompositeNotificationService.cs))
 and, for each enabled matching trigger, starts an agent run under the trigger's chosen guardrail
-preset (admin principal, so the preset is the ceiling), auto-approving confirmations up to the
-preset level. The result is sent as a notification (`agent_action`) and written to the audit log.
+preset. The run's principal is capped at the trigger's configured `MaxLevel` (default **write** —
+never a synthetic admin) so the `PrincipalCeilingRule` bounds it, and any guardrail confirmation is
+**denied**, never auto-approved (no human is watching an unattended run). The result is sent as a
+notification (`agent_action`) and written to the audit log.
 
 Safety: recursion guard (ignores its own `agent_action` events), per-container cooldown, and a
 concurrency cap. Runs only when the agent is enabled.
