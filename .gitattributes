@@ -11,3 +11,4 @@ docker-compose*.yml text eol=lf
 
 # Default: let Git handle detection.
 *              text=auto
+*.sh text eol=lf

@@ -49,3 +49,12 @@ docker-compose.override.yml
 
 ## Internal notes (keep TODO.md public as project status)
 .plan.md
+
+# Factory runtime / local-only state
+.claude/lessons-learned.md
+.claude/.lessons-queue
+.claude/.lessons-processed
+.claude/.auto-drive-state
+.claude/.locks/
+.claude/auto-drive.off
+.claude/gate-guard.off
