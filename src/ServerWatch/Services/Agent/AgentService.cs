@@ -43,6 +43,7 @@ public sealed class AgentService : IAgentService
     private readonly IAgentToolCatalog _catalog;
     private readonly IAgentToolInvoker _invoker;
     private readonly IAgentGuardrailEngine _guardrails;
+    private readonly IGuardrailStore? _guardrailStore;
     private readonly IAgentToolRegistry _registry;
 
     // Bounded in-memory session management: bounded so long-running processes (instruct_agent
@@ -54,7 +55,7 @@ public sealed class AgentService : IAgentService
     public AgentService(
         IAgentProviderFactory factory, IOptionsMonitor<AgentSettings> settings,
         IAgentToolCatalog catalog, IAgentToolInvoker invoker, IAgentGuardrailEngine guardrails,
-        IAgentToolRegistry registry)
+        IAgentToolRegistry registry, IGuardrailStore? guardrailStore = null)
     {
         _factory = factory;
         _settings = settings;
@@ -62,6 +63,7 @@ public sealed class AgentService : IAgentService
         _invoker = invoker;
         _guardrails = guardrails;
         _registry = registry;
+        _guardrailStore = guardrailStore;
     }
 
     public Task<IAgentSession> StartSessionAsync(
@@ -71,7 +73,7 @@ public sealed class AgentService : IAgentService
         var provider = _factory.Resolve(settings);
         // Empty configured prompt → fall back to the built-in default.
         var prompt = string.IsNullOrWhiteSpace(settings.SystemPrompt) ? SystemPrompt : settings.SystemPrompt;
-        var session = new AgentSession(context, provider, _catalog, _invoker, _guardrails, _registry, settings, prompt, seedHistory);
+        var session = new AgentSession(context, provider, _catalog, _invoker, _guardrails, _registry, settings, prompt, seedHistory, _guardrailStore);
         _sessions[context.SessionId] = session;
         _order.Enqueue(context.SessionId);
         while (_sessions.Count > MaxSessions && _order.TryDequeue(out var oldId))

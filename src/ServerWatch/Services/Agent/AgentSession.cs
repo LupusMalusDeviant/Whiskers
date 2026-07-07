@@ -19,6 +19,7 @@ public sealed class AgentSession : IAgentSession
     private readonly IAgentToolCatalog _catalog;
     private readonly IAgentToolInvoker _invoker;
     private readonly IAgentGuardrailEngine _guardrails;
+    private readonly IGuardrailStore? _guardrailStore;
     private readonly IAgentToolRegistry _registry;
     private readonly AgentSettings _settings;
     private readonly string _systemPrompt;
@@ -35,13 +36,15 @@ public sealed class AgentSession : IAgentSession
     public AgentSession(
         AgentContext context, IAgentLlmProvider provider, IAgentToolCatalog catalog,
         IAgentToolInvoker invoker, IAgentGuardrailEngine guardrails, IAgentToolRegistry registry,
-        AgentSettings settings, string systemPrompt, IReadOnlyList<AgentMessage>? seedHistory = null)
+        AgentSettings settings, string systemPrompt, IReadOnlyList<AgentMessage>? seedHistory = null,
+        IGuardrailStore? guardrailStore = null)
     {
         _context = context;
         _provider = provider;
         _catalog = catalog;
         _invoker = invoker;
         _guardrails = guardrails;
+        _guardrailStore = guardrailStore;
         _registry = registry;
         _settings = settings;
         _systemPrompt = systemPrompt;
@@ -155,14 +158,14 @@ public sealed class AgentSession : IAgentSession
                     }
                 }
 
-                if (_actionCount >= _context.Policy.MaxActionsPerSession)
+                if (_actionCount >= LivePolicy.MaxActionsPerSession)
                 {
                     yield return RecordResult(call, new AgentToolResult(call.Id,
-                        $"Aktions-Limit dieser Session erreicht ({_context.Policy.MaxActionsPerSession}).", true, decision));
+                        $"Aktions-Limit dieser Session erreicht ({LivePolicy.MaxActionsPerSession}).", true, decision));
                     continue;
                 }
 
-                var result = await _invoker.InvokeAsync(call, _context, ct);
+                var result = await _invoker.InvokeAsync(call, LiveContext, ct);
                 _actionCount++;
                 yield return RecordResult(call, result);
             }
@@ -179,6 +182,11 @@ public sealed class AgentSession : IAgentSession
         return new AgentEvent.ToolExecuted(result);
     }
 
+    // The guardrail policy in effect right now: the live store (so a Read-only kill-switch reaches an
+    // already-open session) or — absent a store (pinned-preset trigger runs / tests) — the session context.
+    private GuardrailPolicy LivePolicy => _guardrailStore?.Current ?? _context.Policy;
+    private AgentContext LiveContext => _context with { Policy = LivePolicy };
+
     private GuardrailDecision Evaluate(AgentToolCall call)
     {
         if (!_registry.Tools.TryGetValue(call.Name, out var entry))
@@ -186,6 +194,6 @@ public sealed class AgentSession : IAgentSession
                 "Unbekanntes Tool — der Invoker meldet den Fehler.", Array.Empty<string>());
 
         var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
-        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, entry.RequiredLevel, args, _context));
+        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, entry.RequiredLevel, args, LiveContext));
     }
 }
