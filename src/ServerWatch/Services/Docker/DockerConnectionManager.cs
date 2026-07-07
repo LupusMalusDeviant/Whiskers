@@ -223,19 +223,33 @@ public class DockerConnectionManager : IDockerConnectionManager
             credentials.ServerCertificateValidationCallback = (_, cert, presentedChain, _) =>
             {
                 if (cert is null) return false;
-                using var chain = new X509Chain();
-                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.AddRange(trustAnchors);
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                // Also trust any intermediates the server presents, so the chain can build to the root.
-                if (presentedChain is not null)
-                    foreach (var element in presentedChain.ChainElements)
-                        chain.ChainPolicy.ExtraStore.Add(element.Certificate);
-                return chain.Build(cert as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(cert.Export(X509ContentType.Cert)));
+                var cert2 = cert as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(cert.Export(X509ContentType.Cert));
+                return ValidateMtlsServerCert(cert2, trustAnchors, presentedChain, server.TcpHost);
             };
         }
 
         return credentials;
+    }
+
+    /// <summary>Validates the server's mTLS certificate: the chain must build to the configured custom CA
+    /// AND the certificate's identity must match the host we intended to reach (NIED-13). Without the
+    /// hostname check any certificate our CA signed would be accepted, letting a MITM impersonate the
+    /// Docker host. Fails closed on an empty expected host.</summary>
+    public static bool ValidateMtlsServerCert(
+        X509Certificate2 serverCert, X509Certificate2Collection trustAnchors, X509Chain? presentedChain, string? expectedHost)
+    {
+        using var chain = new X509Chain();
+        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        chain.ChainPolicy.CustomTrustStore.AddRange(trustAnchors);
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        // Also trust any intermediates the server presents, so the chain can build to the root.
+        if (presentedChain is not null)
+            foreach (var element in presentedChain.ChainElements)
+                chain.ChainPolicy.ExtraStore.Add(element.Certificate);
+
+        var chainOk = chain.Build(serverCert);
+        var hostnameOk = !string.IsNullOrEmpty(expectedHost) && serverCert.MatchesHostname(expectedHost);
+        return chainOk && hostnameOk;
     }
 
     public void Dispose()
