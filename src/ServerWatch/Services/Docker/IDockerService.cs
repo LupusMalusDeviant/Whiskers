@@ -11,7 +11,7 @@ public interface IDockerService
     Task StopContainerAsync(string containerId, string? serverId = null);
     Task RestartContainerAsync(string containerId, string? serverId = null);
     Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null);
-    Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null);
+    Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null);
     Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null);
     Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null);
     Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null);
