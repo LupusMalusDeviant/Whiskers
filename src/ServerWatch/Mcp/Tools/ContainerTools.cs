@@ -467,7 +467,7 @@ public class ContainerTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "deploy_compose");
         if (denied != null) return denied;
-        if (string.IsNullOrWhiteSpace(projectName) || !System.Text.RegularExpressions.Regex.IsMatch(projectName, @"^[a-zA-Z0-9._-]+$"))
+        if (!McpInputValidation.IsSafeProjectName(projectName))
             return "Error: Invalid project name.";
 
         if (string.IsNullOrWhiteSpace(composeContent))
@@ -478,7 +478,7 @@ public class ContainerTools
         var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(composeContent));
 
         var setupResult = await executor.ExecuteAsync(serverId,
-            $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml",
+            $"mkdir -p {ShellUtils.Quote(dir)} && echo '{b64}' | base64 -d > {ShellUtils.Quote(dir + "/docker-compose.yml")}",
             TimeSpan.FromSeconds(10));
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
@@ -490,7 +490,7 @@ public class ContainerTools
 
         // Run docker compose up
         var deployResult = await executor.ExecuteAsync(serverId,
-            $"cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+            $"cd {ShellUtils.Quote(dir)} && docker compose pull 2>&1 && docker compose up -d 2>&1",
             TimeSpan.FromMinutes(5));
 
         await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, serverId: serverId, success: deployResult.Success);
