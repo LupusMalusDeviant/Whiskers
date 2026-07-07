@@ -134,7 +134,7 @@ public class ContainerHealthMonitor : BackgroundService
             }
 
             // Detect restart loops
-            if (prevState != "running" && state == "running")
+            if (IsRestart(prevState, state))
             {
                 var timestamps = _restartTimestamps.GetOrAdd(key, _ => new List<DateTime>());
                 timestamps.Add(DateTime.UtcNow);
@@ -157,7 +157,11 @@ public class ContainerHealthMonitor : BackgroundService
                 }
             }
         }
-        _previousStates[key] = state;
+        // Don't overwrite the last known state with "unknown" (a transient inspect failure, e.g. a
+        // flapping SSH tunnel) — otherwise the next real "running" reads as a restart and a real stop
+        // is missed.
+        if (state != "unknown")
+            _previousStates[key] = state;
     }
 
     /// <summary>Send notification only if per-container prefs allow it.</summary>
@@ -180,4 +184,10 @@ public class ContainerHealthMonitor : BackgroundService
             return ("unknown", 0, false);
         }
     }
+
+    /// <summary>A restart is a container now <c>running</c> that was previously in a real stopped state.
+    /// A prior <c>unknown</c> → <c>running</c> (e.g. a flapping SSH-tunnel inspect) is NOT a restart — that
+    /// was the source of phantom restart-loop alerts.</summary>
+    public static bool IsRestart(string? prevState, string state)
+        => state == "running" && prevState is "exited" or "restarting" or "created" or "dead";
 }
