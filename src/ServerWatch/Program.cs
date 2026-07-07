@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 using ServerWatch.Components;
 using ServerWatch.Configuration;
+using ServerWatch.Utils;
 using ServerWatch.Hubs;
 using ServerWatch.Mcp;
 using ServerWatch.Mcp.Tools;
@@ -446,8 +447,17 @@ var forwardedHeadersOptions = new ForwardedHeadersOptions
     ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
         | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
 };
+// Trust forwarded headers ONLY from configured proxy networks. Leaving both lists empty makes
+// ASP.NET Core skip the known-proxy check entirely (trust-all), which lets any client spoof
+// X-Forwarded-For and corrupt the SourceIp recorded for webhooks/audit. Defaults to loopback +
+// RFC1918 + Tailscale CGNAT; override via ForwardedHeaders:TrustedNetworks (array of CIDRs).
 forwardedHeadersOptions.KnownIPNetworks.Clear();
 forwardedHeadersOptions.KnownProxies.Clear();
+foreach (var network in ForwardedHeadersConfig.ParseTrustedNetworks(
+             app.Configuration.GetSection("ForwardedHeaders:TrustedNetworks").Get<string[]>()))
+{
+    forwardedHeadersOptions.KnownIPNetworks.Add(network);
+}
 app.UseForwardedHeaders(forwardedHeadersOptions);
 
 // Support reverse proxy with subpath
@@ -545,9 +555,23 @@ app.MapPost("/api/webhooks/{webhookId}", async (string webhookId, HttpContext ct
     return success ? Results.Ok(new { status = "ok", output }) : Results.BadRequest(new { status = "error", output });
 });
 
-// Prometheus metrics endpoint (no auth)
+// Prometheus metrics endpoint. Gated by a static scrape token (Metrics:ScrapeToken) because the
+// payload is the full multi-server container inventory. With no token configured the endpoint stays
+// disabled (opt-in) rather than served openly — the safe default for the hardened host-network profile.
+var metricsScrapeToken = app.Services
+    .GetRequiredService<Microsoft.Extensions.Options.IOptions<MetricsSettings>>().Value.ScrapeToken;
 app.MapGet("/metrics", async (HttpContext ctx) =>
 {
+    switch (MetricsScrapeAuth.Check(metricsScrapeToken, ctx.Request.Headers.Authorization.ToString()))
+    {
+        case MetricsScrapeAuthResult.Disabled:
+            ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        case MetricsScrapeAuthResult.Unauthorized:
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+    }
+
     var docker = ctx.RequestServices.GetRequiredService<ServerWatch.Services.Docker.IDockerService>();
     var sb = new System.Text.StringBuilder();
 
