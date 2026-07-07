@@ -28,9 +28,15 @@ public class SystemdService : ISystemdService
 
     public async Task<List<SystemdUnit>> ListServicesAsync(string serverId)
     {
-        // --plain produces whitespace-separated columns: UNIT LOAD ACTIVE SUB DESCRIPTION...
-        var result = await _executor.ExecuteAsync(serverId,
+        // Fire both queries concurrently (running units vs. unit-file enabled state) — they're
+        // independent, so we avoid a second sequential SSH round-trip. --plain produces whitespace-
+        // separated columns: UNIT LOAD ACTIVE SUB DESCRIPTION...
+        var unitsTask = _executor.ExecuteAsync(serverId,
             "systemctl list-units --type=service --no-pager --no-legend --plain 2>/dev/null");
+        var filesTask = _executor.ExecuteAsync(serverId,
+            "systemctl list-unit-files --type=service --no-pager --no-legend --plain 2>/dev/null");
+        var result = await unitsTask;
+        var enabledResult = await filesTask;
 
         var units = new List<SystemdUnit>();
 
@@ -39,10 +45,6 @@ public class SystemdService : ISystemdService
             _logger.LogWarning("systemctl list-units failed on {ServerId}: {Error}", serverId, result.Error);
             return units;
         }
-
-        // Query enabled state for all services in one call to avoid N+1 commands
-        var enabledResult = await _executor.ExecuteAsync(serverId,
-            "systemctl list-unit-files --type=service --no-pager --no-legend --plain 2>/dev/null");
 
         var enabledMap = ParseUnitFiles(enabledResult.Output);
 
