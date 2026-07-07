@@ -655,7 +655,7 @@ else
                                         @(_seedFileName ?? "SQL / CSV / JSON hochladen")
                                     </MudButton>
                                     <InputFile id="seed-upload" OnChange="OnSeedFileSelected" style="display:none;"
-                                               accept=".sql,.csv,.json,.dump,.gz" />
+                                               accept=".sql,.json,.dump,.gz" />
                                     @if (_seedFileName != null)
                                     {
                                         <MudChip T="string" Size="Size.Small" Color="Color.Info">@_seedFileName</MudChip>

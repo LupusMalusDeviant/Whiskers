@@ -12,6 +12,7 @@
 @inject ServerWatch.Services.Auth.IRoleService RoleService
 @inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
+@inject Microsoft.JSInterop.IJSRuntime JS
 @inject ServerWatch.Services.Vault.IVaultService VaultService
 @inject ServerWatch.Services.Mcp.IMcpPermissionService McpPermissionService
 @inject ISnackbar Snackbar
@@ -818,8 +819,10 @@ else
 
     private async Task CopyKey(string key)
     {
-        // JS interop for clipboard would be better, but for now use snackbar
-        Snackbar.Add($"Schlüssel: {key}", Severity.Info);
+        // Copy to the clipboard via JS — never echo the key value in a toast.
+        try { await JS.InvokeVoidAsync("swClipboard.copy", key); }
+        catch { /* clipboard unavailable */ }
+        Snackbar.Add("Schlüssel in die Zwischenablage kopiert.", Severity.Success);
     }
 
     private Color GetLevelColor(string level) => level switch

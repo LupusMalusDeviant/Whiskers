@@ -5,7 +5,6 @@
                      Min="10" Max="5000" Style="max-width: 120px;" Margin="Margin.Dense" />
     <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="RefreshLogs" Color="Color.Primary"
                StartIcon="@Icons.Material.Filled.Refresh">Refresh</MudButton>
-    <MudSwitch T="bool" @bind-Value="_follow" Label="Follow" Color="Color.Primary" />
 </MudStack>
 <MudPaper Class="pa-3" Style="@($"height: {Height}; overflow-y: auto; background: #1a1a2e; border-radius: 4px;")">
     <pre style="font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; color: #d4d4d4; white-space: pre-wrap; word-break: break-all; margin: 0;">@_logs</pre>
@@ -18,7 +17,6 @@
 
     private string _logs = "Loading...";
     private int _tailLines = 200;
-    private bool _follow;
 
     protected override async Task OnParametersSetAsync()
     {

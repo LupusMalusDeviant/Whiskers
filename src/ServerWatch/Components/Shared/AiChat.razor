@@ -278,10 +278,15 @@
     private async Task Resolve(bool approved)
     {
         var id = _pendingApprovalId;
+        var confirm = _pendingConfirm;
         _pendingConfirm = null;
         _pendingApprovalId = null;
         StateHasChanged();
-        if (id is not null) await ApprovalStore.ResolveAsync(id, approved, _userEmail);
+        if (id is not null)
+            await ApprovalStore.ResolveAsync(id, approved, _userEmail);
+        else if (_session is not null && confirm is not null)
+            // Fallback: resolve the session confirmation directly, else the chat hangs until expiry.
+            await _session.ResolveConfirmationAsync(confirm.Call.Id, approved);
     }
 
     private async Task<AgentContext> BuildContextAsync()
