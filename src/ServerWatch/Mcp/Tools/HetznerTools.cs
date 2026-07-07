@@ -3,6 +3,7 @@ using System.ComponentModel;
 using ServerWatch.Services.Cloud;
 using ServerWatch.Services.Hetzner;
 using ServerWatch.Services.Mcp;
+using ServerWatch.Services.AuditLog;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -18,7 +19,7 @@ public class HetznerTools
     [McpServerTool, Description("Enable Hetzner rescue mode on a server (by ServerWatch name or id), then it must be reset to boot into rescue. Returns the temporary root password. Recovery when the OS won't boot.")]
     public static async Task<string> HetznerEnableRescue(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner,
+        ICloudControlService cloud, IHetznerService hetzner, IAuditLogService auditLog,
         [Description("ServerWatch server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_rescue");
@@ -27,6 +28,12 @@ public class HetznerTools
         var ctx = await cloud.HetznerContextAsync(server);
         if (ctx == null) return NotHetzner(server);
         var resp = await hetzner.EnableRescueAsync(ctx.Value.token, ctx.Value.server.Id);
+
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        // A root credential was issued to the caller — record THAT, never the password itself.
+        await auditLog.LogAsync(actor, actorType, "hetzner.rescue_enable", "cloud-server",
+            ctx.Value.server.Id.ToString(), ctx.Value.server.Name, "rescue enabled / root credential issued");
+
         return $"Rescue-Mode für {ctx.Value.server.Name} aktiviert. Jetzt cloud_hard_reset ausführen, um hineinzubooten.\n" +
                $"Temporäres root-Passwort: {resp?.RootPassword ?? "(nicht zurückgegeben)"}";
     }

@@ -3,6 +3,8 @@ using System.ComponentModel;
 using ServerWatch.Models;
 using ServerWatch.Services.Mcp;
 using ServerWatch.Services.Scheduler;
+using ServerWatch.Services.AuditLog;
+using ServerWatch.Utils;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -32,6 +34,7 @@ public class SchedulerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISchedulerService scheduler,
+        IAuditLogService auditLog,
         [Description("Task name")] string name,
         [Description("Cron expression (e.g., '0 2 * * *' for daily at 2am)")] string cronExpression,
         [Description("Task type: ContainerRestart, DbBackup, VolumeBackup, CustomCommand, Cleanup")] string taskType,
@@ -70,6 +73,13 @@ public class SchedulerTools
             Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null
         });
 
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        // A CustomCommand may embed a secret — redact it before it reaches the audit log.
+        var auditDetails = type == ScheduledTaskType.CustomCommand && !string.IsNullOrEmpty(command)
+            ? $"type={type}, cron={cronExpression}, command={SecretRedactor.Redact(command)}"
+            : $"type={type}, cron={cronExpression}";
+        await auditLog.LogAsync(actor, actorType, "scheduler.create", "scheduled-task", task.TaskId, task.Name, auditDetails, serverId);
+
         return $"Task created:\n  Name: {task.Name}\n  Type: {task.TaskType}\n  Cron: {task.CronExpression}\n  Next run: {task.NextRun?.ToString("g")}";
     }
 
@@ -78,12 +88,16 @@ public class SchedulerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISchedulerService scheduler,
+        IAuditLogService auditLog,
         [Description("Task ID to delete")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "delete_scheduled_task");
         if (denied != null) return denied;
 
+        var target = (await scheduler.GetTasksAsync()).FirstOrDefault(t => t.TaskId == taskId);
         await scheduler.DeleteTaskAsync(taskId);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "scheduler.delete", "scheduled-task", taskId, target?.Name ?? taskId);
         return $"Task '{taskId}' deleted.";
     }
 
@@ -92,6 +106,7 @@ public class SchedulerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISchedulerService scheduler,
+        IAuditLogService auditLog,
         [Description("Task ID to run")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "run_scheduled_task");
@@ -108,6 +123,8 @@ public class SchedulerTools
         }
 
         var (success, output) = await scheduler.RunNowAsync(taskId);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "scheduler.run", "scheduled-task", taskId, target.Name, $"success={success}", success: success);
         return success ? $"Task completed successfully:\n{output}" : $"Task failed:\n{output}";
     }
 }

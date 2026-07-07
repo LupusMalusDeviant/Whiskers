@@ -60,6 +60,14 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-14 — ServerConfigService.** `SaveSshKeyAsync`/`DeleteSshKeyAsync` arbeiten auf `GetServer(id)?.Clone()` statt das gecachte Live-Objekt zu mutieren.
 - _Zusätzlich:_ DI-safe optionaler `storePath`-Ctor-Seam + neue `ConcurrencyCacheAliasingTests` (Aliasing, Concurrency, Fehlerpfad, Secret-Safety); 131/131 Tests.
   _Dateien: `Services/Auth/RoleService.cs`, `Services/Vault/VaultService.cs`, `Services/ServerConfig/ServerConfigService.cs`, per-Ordner-READMEs (Auth/Vault/ServerConfig)._
+### ServerWatch-wjhf — Audit-Log: fail-safe Fallback + Coverage
+
+- **MIT-4 — Audit fail-open.** `AuditLogService.LogAsync` loggt bei Schreibfehler (DB locked/Disk voll) den kompletten Eintrag strukturiert auf Error, statt nur "Failed to write audit log entry" — die Fakten überleben.
+- **MIT-3 — Vault-Audit.** `Settings.razor` loggt `vault.set`/`vault.delete` (Key-Namen only); das Inline-Delete wurde in `DeleteVaultSecret` extrahiert. Neuer `AuditVault`-Helper.
+- **MIT-7 — Scheduler-Audit.** `SchedulerTools` Create/Run/Delete bekommen einen DI-injizierten `IAuditLogService`-Tool-Param und schreiben `scheduler.create`/`run`/`delete`; CustomCommand via `SecretRedactor.Redact` redigiert.
+- **NIED-4 — Rescue-Audit.** `HetznerEnableRescue` loggt `hetzner.rescue_enable` ("root credential issued") — das temporäre Passwort geht nur an den Aufrufer, nie in den Audit-Log.
+- _Tests:_ Fail-safe-Fallback (throwing ScopeFactory + capturing Logger) + Redaction-Test; MCP-Tool-Wiring durch Build + DI-Boot + ServerTools-Muster gedeckt.
+  _Dateien: `Services/AuditLog/AuditLogService.cs`, `Components/Pages/Settings.razor`, `Mcp/Tools/SchedulerTools.cs`, `Mcp/Tools/HetznerTools.cs`, `Services/AuditLog/README.md`._
 
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 

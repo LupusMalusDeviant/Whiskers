@@ -496,7 +496,7 @@ else
                             </MudTd>
                             <MudTd>
                                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                               OnClick="@(async () => { await VaultService.DeleteSecretAsync(context.Key); LoadVault(); })" />
+                                               OnClick="@(async () => await DeleteVaultSecret(context.Key))" />
                             </MudTd>
                         </RowTemplate>
                     </MudTable>
@@ -985,10 +985,12 @@ else
     private async Task AddVaultSecret()
     {
         if (string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue)) return;
+        var key = _newVaultKey.Trim();
         try
         {
-            await VaultService.SetSecretAsync(_newVaultKey.Trim(), _newVaultValue);
-            Snackbar.Add($"Secret '{_newVaultKey}' gespeichert.", Severity.Success);
+            await VaultService.SetSecretAsync(key, _newVaultValue);
+            await AuditVault("vault.set", key);
+            Snackbar.Add($"Secret '{key}' gespeichert.", Severity.Success);
             _newVaultKey = ""; _newVaultValue = "";
             LoadVault();
         }
@@ -996,6 +998,24 @@ else
         {
             Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
         }
+    }
+
+    private async Task DeleteVaultSecret(string key)
+    {
+        await VaultService.DeleteSecretAsync(key);
+        await AuditVault("vault.delete", key);
+        LoadVault();
+    }
+
+    // Audit a vault mutation — key NAMES only, never values.
+    private async Task AuditVault(string action, string key)
+    {
+        try
+        {
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", action, "vault", key, key);
+        }
+        catch { }
     }
 
     // === CVE Monitor ===

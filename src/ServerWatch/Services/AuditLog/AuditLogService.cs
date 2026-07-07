@@ -45,7 +45,13 @@ public class AuditLogService : IAuditLogService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to write audit log entry");
+            // Fail-safe: the audit backend is down (DB locked, disk full) but the destructive action already
+            // happened — the full entry must survive in the app log instead of vanishing. Callers never put
+            // raw secrets into `details` (key names / redacted commands only), so echoing it here is safe.
+            _logger.LogError(ex,
+                "AUDIT WRITE FAILED: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} " +
+                "(target={TargetId}, server={ServerId}, success={Success}, details={Details})",
+                actorType, actor, action, targetType, targetName, targetId, serverId, success, details);
         }
     }
 
