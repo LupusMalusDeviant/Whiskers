@@ -340,6 +340,7 @@
     private readonly ApexCharts.ApexChartOptions<MetricPoint> _memChartOptions = CreateChartOptions("#9C27B0");
     private bool _loading = true;
     private Timer? _refreshTimer;
+    private int _refreshing; // reentrancy guard for the periodic refresh (MIT-34 / OPT-9)
     private int _refreshCount;
     private AppRole _role = AppRole.Viewer;
 
@@ -379,11 +380,18 @@
             await InvokeAsync(StateHasChanged);
         });
 
-        // Periodic refresh
+        // Periodic refresh. Guard reentrancy (a slow refresh must not stack) and catch everything — an
+        // InvokeAsync(StateHasChanged) after circuit teardown throws in this async-void callback.
         _refreshTimer = new Timer(async _ =>
         {
-            await RefreshAll();
-            await InvokeAsync(StateHasChanged);
+            if (Interlocked.Exchange(ref _refreshing, 1) == 1) return;
+            try
+            {
+                await RefreshAll();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch { /* circuit torn down or transient refresh error */ }
+            finally { _refreshing = 0; }
         }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 

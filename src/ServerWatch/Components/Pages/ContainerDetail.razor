@@ -930,6 +930,7 @@ else
     private bool _initialLoadDone;
     private ContainerStats? _stats;
     private Timer? _refreshTimer;
+    private int _refreshing; // reentrancy guard for the periodic refresh (MIT-34)
     private int _activeTab;
 
     // Chart state
@@ -1038,12 +1039,20 @@ else
         _ = LoadChartData();
         _refreshTimer = new Timer(async _ =>
         {
-            // Only refresh stats when NOT on terminal tab to avoid interference
-            if (_activeTab != 4)
+            // Guard reentrancy (a slow load must not stack) and catch everything — InvokeAsync after
+            // circuit teardown throws in this async-void callback.
+            if (Interlocked.Exchange(ref _refreshing, 1) == 1) return;
+            try
             {
-                await LoadContainer();
-                await InvokeAsync(StateHasChanged);
+                // Only refresh stats when NOT on terminal tab to avoid interference
+                if (_activeTab != 4)
+                {
+                    await LoadContainer();
+                    await InvokeAsync(StateHasChanged);
+                }
             }
+            catch { /* circuit torn down or transient load error */ }
+            finally { _refreshing = 0; }
         }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
     }
 
