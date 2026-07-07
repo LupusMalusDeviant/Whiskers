@@ -55,6 +55,20 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 - **KRIT-3 Schritt 2** — Fallback-Authorization-Policy: könnte `/mcp` brechen; Auth-Middleware Off-Limits.
 - **HOCH-12 Teil 2** — secretlose Webhooks ablehnen: braucht Secret-Management-UI, sonst Feature unbrauchbar.
 
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-0txk — Background-Loops (False-Restarts, Cron-Death-Loop, Log-Re-Alerts, Notification-Timeouts)
+
+- **MIT-10** — Health-Monitor zählt einen Restart nur noch bei `running` aus einem echten Stop-Zustand (`IsRestart`), und überschreibt den gemerkten State nie mit `unknown` → keine Phantom-Restart-Loop-Alerts bei flappenden SSH-Tunneln (schützt auch die Stop-Erkennung). _Dateien: `Services/HealthMonitor/ContainerHealthMonitor.cs`._
+- **MIT-11** — ungültiger Cron deaktiviert den Task (mit Log) statt alle 30s zu werfen (`TryParseCron`); Executor-Fehler deaktivieren den Task NICHT. _Dateien: `Services/Scheduler/SchedulerService.cs`._
+- **MIT-12** — Log-Monitor holt nur Zeilen seit dem letzten Check (`since`-Overload auf `GetContainerLogsAsync`, Baseline = now bei Erstsicht) → eine alte ERROR-Zeile re-alarmiert nicht mehr; totes `_logOffsets` entfernt. _Dateien: `Services/Docker/IDockerService.cs`, `DockerService.cs`, `Services/LogMonitor/LogMonitorService.cs`._
+- **MIT-15** — 15s-Timeout auf allen Notification-HttpClients + Ein-Mal-Retry in `SafeSend` (testbarer `NotificationRetry`) → ein langsamer Endpunkt blockiert keine Loop mehr ~100s; Log nur Provider-Name. _Dateien: `Program.cs`, `Services/Notifications/CompositeNotificationService.cs`, `NotificationRetry.cs`._
+- **NIED-6** — per-Container-Dictionaries (Health/Metrics/Log) werden je Zyklus auf die Live-Menge geprunt; Throttler sweept alte Einträge; AI-Trigger-`_lastRun` cappt bei 1000. _Dateien: `ContainerHealthMonitor.cs`, `MetricsCollectorService.cs`, `LogMonitorService.cs`, `NotificationThrottler.cs`, `AiTriggerDispatcher.cs`._
+- **NIED-7** — Scheduler feuert Tasks non-blocking (`Task.Run` + per-taskId In-Flight-Guard), persistiert `NextRun` vor Start (TryAdd nach dem Save → kein Guard-Leak); „Cron = UTC" in der UI. _Dateien: `Services/Scheduler/SchedulerService.cs`, `Components/Pages/ScheduledTasks.razor`._
+- **NIED-8** — Throttle-Fenster wird pro Aufruf aus den Live-Settings gelesen statt beim Konstruieren eingefroren (`IsThrottled(…, minutes)`); alle 8 Provider übergeben `ThrottleMinutes`. _Dateien: `NotificationThrottler.cs` + 8 Provider._
+
+**Verifikation Bean 10:** Build 0 Fehler; `dotnet test` 145/145 (neue Tests: `HealthRestartHeuristicTests`, `CronValidationTests`, `NotificationRetryTests`, `NotificationThrottlerTests`); App in Development gebootet — DI-Graph sauber, alle Background-Monitore gestartet. Prozess-/Loop-Pfade (MIT-12, NIED-6/7) via Build + Boot + Review.
+
 ## Verifikation
 
 - `dotnet build src/ServerWatch/ServerWatch.csproj` → 0 Fehler.
