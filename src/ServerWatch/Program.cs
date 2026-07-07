@@ -686,6 +686,19 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS "IX_ServerMetrics_ServerId_Timestamp" ON "ServerMetrics" ("ServerId", "Timestamp");
         CREATE INDEX IF NOT EXISTS "IX_ServerMetrics_Timestamp" ON "ServerMetrics" ("Timestamp");
 
+        CREATE TABLE IF NOT EXISTS "AlertHistory" (
+            "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "ServerId" TEXT NOT NULL,
+            "ContainerId" TEXT NOT NULL,
+            "ContainerName" TEXT NOT NULL,
+            "AlertType" TEXT NOT NULL,
+            "Message" TEXT NOT NULL,
+            "Timestamp" TEXT NOT NULL,
+            "Resolved" INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_AlertHistory_Timestamp" ON "AlertHistory" ("Timestamp");
+        CREATE INDEX IF NOT EXISTS "IX_AlertHistory_ServerId_AlertType" ON "AlertHistory" ("ServerId", "AlertType");
+
         CREATE TABLE IF NOT EXISTS "AuditLog" (
             "Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             "Timestamp" TEXT NOT NULL,
