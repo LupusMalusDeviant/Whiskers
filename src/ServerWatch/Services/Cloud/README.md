@@ -10,6 +10,11 @@ It resolves a ServerWatch server's configured provider + per-server API key, fin
 |---|---|
 | `ICloudControlService.cs` / `CloudControlService.cs` | Provider-agnostic control plane: resolves provider + credentials, matches the server in the account, and dispatches power/snapshot/metrics calls to the provider-specific client. |
 
+## Behaviour notes
+
+- **Weak-resolution warning:** the VM is matched by public IP; when that fails and only a name-match succeeds (common, since `SshHost` is often a mesh address ≠ the cloud public IP), the result carries a `Note` that power/reset responses surface with ⚠️ — so a destructive op on the wrong VM is visible.
+- **Hostinger has no hard reset:** `cloud_hard_reset` on a Hostinger VM triggers a graceful RESTART and says so explicitly (may be ineffective on a hung system); Hetzner does a real power-cycle.
+
 ## Related
 
 - Provider clients: [`../Hetzner/`](../Hetzner/), [`../Hostinger/`](../Hostinger/)
