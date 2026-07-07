@@ -29,7 +29,7 @@ public class MattermostNotificationService : IMattermostNotificationService
         if (!config.Enabled || string.IsNullOrWhiteSpace(config.WebhookUrl))
             return;
 
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType))
+        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes))
             return;
 
         try

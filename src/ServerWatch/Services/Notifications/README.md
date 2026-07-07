@@ -20,7 +20,8 @@ Each channel has its own interface (distinct strategies) so the composite can en
 | `IEmailNotificationService.cs` / `EmailNotificationService.cs` | Email (SMTP) channel via `System.Net.Mail`. |
 | `IWebhookNotificationService.cs` / `WebhookNotificationService.cs` | Generic outbound webhook (POSTs a JSON event). Distinct from the inbound [`../Webhooks/`](../Webhooks/). |
 | `IContainerNotificationPrefsService.cs` / `ContainerNotificationPrefsService.cs` | Per-container notification preferences (which events should notify). |
-| `NotificationThrottler.cs` | Suppresses duplicate/flapping notifications within a time window. |
+| `NotificationThrottler.cs` | Suppresses duplicate/flapping notifications within a time window (read live from settings per call, so a changed window takes effect immediately; the map self-prunes so it can't grow unbounded). |
+| `NotificationRetry.cs` | Retries a send once on failure and never propagates (safe inside a monitoring loop). With the per-client 15s HttpClient timeout, this bounds how long a slow endpoint can delay a background cycle. |
 | `InAppNotificationStore.cs` | `IInAppNotificationStore`, the bell feed + persistent history (no external channel needed); fed by the composite. Keeps an in-memory cache for the bell's live updates AND write-through-persists every event to SQLite (`NotificationEntity`), hydrating on startup so the history survives restarts. Formats each event into an `InAppNotification` (title, severity) with a relative, path-base-safe `Link`, and serves the filtered/paged query for the `/notifications` page ([`../../Components/Pages/NotificationsLog.razor`](../../Components/Pages/NotificationsLog.razor)). |
 
 ## Secret hygiene

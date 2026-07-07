@@ -172,6 +172,13 @@ public class MetricsCollectorService : BackgroundService
         await db.AuditLog.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
         await db.McpToolCalls.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
 
+        // Bound the in-memory alert-state map: drop per-container entries whose container is gone.
+        // "disk:{server}" keys are kept — one per server, stable.
+        var liveIds = containers.Select(c => c.Id).ToHashSet();
+        foreach (var kv in _alert.ToArray())
+            if (!kv.Key.StartsWith("disk:", StringComparison.Ordinal) && !liveIds.Contains(kv.Key))
+                _alert.TryRemove(kv.Key, out _);
+
         _logger.LogDebug("Collected metrics for {ContainerCount} containers; pruned data before {Cutoff}",
             metrics.Count, cutoff);
     }

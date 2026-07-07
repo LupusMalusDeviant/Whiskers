@@ -209,14 +209,19 @@ public class DockerService : IDockerService
             new ContainerRemoveParameters { Force = force });
     }
 
-    public async Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null)
+    public async Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null)
     {
         var client = await GetClient(serverId);
         var logParams = new ContainerLogsParameters
         {
             ShowStdout = true,
             ShowStderr = true,
-            Tail = tailLines.ToString(),
+            // With a since-timestamp, return every line after it (log monitoring wants all new lines, not
+            // just the tail); otherwise keep the tail limit.
+            Tail = since.HasValue ? "all" : tailLines.ToString(),
+            Since = since.HasValue
+                ? ((DateTimeOffset)DateTime.SpecifyKind(since.Value, DateTimeKind.Utc)).ToUnixTimeSeconds().ToString()
+                : null,
             Timestamps = true
         };
 

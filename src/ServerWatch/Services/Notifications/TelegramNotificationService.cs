@@ -24,7 +24,7 @@ public class TelegramNotificationService : ITelegramNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.BotToken) || string.IsNullOrWhiteSpace(c.ChatId)) return;
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType)) return;
+        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes)) return;
         try
         {
             await PostAsync(c, NotificationFormatter.PlainText(evt));

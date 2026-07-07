@@ -6,7 +6,7 @@ Cron-style **scheduled tasks**. A background scheduler fires due tasks, and an e
 
 | File | Purpose |
 |---|---|
-| `ISchedulerService.cs` / `SchedulerService.cs` | Background service that tracks scheduled tasks and triggers them when due; CRUD for the task list. |
+| `ISchedulerService.cs` / `SchedulerService.cs` | Background service that tracks scheduled tasks and triggers them when due — fired non-blocking (`Task.Run`) with a per-task in-flight guard and `NextRun` persisted before start, so one slow task can't block or re-trigger others. A task whose cron won't parse is disabled instead of retried every 30s. Cron times are UTC. CRUD for the task list. |
 | `ITaskExecutor.cs` / `TaskExecutor.cs` | Executes a single scheduled task and records the outcome; applies backup retention (`maxBackups`) for `VolumeBackup` **and** `DbBackup` tasks. |
 
 ## Security & retention notes

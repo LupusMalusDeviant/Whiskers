@@ -68,27 +68,27 @@ builder.Services.AddSingleton<IHealthStore, InMemoryHealthStore>();
 builder.Services.AddHostedService<ContainerHealthMonitor>();
 
 // Notifications (Mattermost + Matrix via composite)
-builder.Services.AddHttpClient<MattermostNotificationService>();
+builder.Services.AddHttpClient<MattermostNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<MattermostNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMattermostNotificationService>(sp => sp.GetRequiredService<MattermostNotificationService>());
-builder.Services.AddHttpClient<MatrixNotificationService>();
+builder.Services.AddHttpClient<MatrixNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<MatrixNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IMatrixNotificationService>(sp => sp.GetRequiredService<MatrixNotificationService>());
 // Additional channels (Telegram, ntfy, Discord, Email, generic webhook) — same composite fan-out.
-builder.Services.AddHttpClient<ServerWatch.Services.Notifications.TelegramNotificationService>();
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.TelegramNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.TelegramNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.ITelegramNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.TelegramNotificationService>());
-builder.Services.AddHttpClient<ServerWatch.Services.Notifications.NtfyNotificationService>();
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.NtfyNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.NtfyNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.INtfyNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.NtfyNotificationService>());
-builder.Services.AddHttpClient<ServerWatch.Services.Notifications.DiscordNotificationService>();
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.DiscordNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.DiscordNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IDiscordNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.DiscordNotificationService>());
-builder.Services.AddHttpClient<ServerWatch.Services.Notifications.SlackNotificationService>();
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.SlackNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.SlackNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.ISlackNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.SlackNotificationService>());
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IEmailNotificationService, ServerWatch.Services.Notifications.EmailNotificationService>();
-builder.Services.AddHttpClient<ServerWatch.Services.Notifications.WebhookNotificationService>();
+builder.Services.AddHttpClient<ServerWatch.Services.Notifications.WebhookNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.WebhookNotificationService>();
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IWebhookNotificationService>(sp => sp.GetRequiredService<ServerWatch.Services.Notifications.WebhookNotificationService>());
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IInAppNotificationStore, ServerWatch.Services.Notifications.InAppNotificationStore>();

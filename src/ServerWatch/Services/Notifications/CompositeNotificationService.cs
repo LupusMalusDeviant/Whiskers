@@ -104,13 +104,10 @@ public class CompositeNotificationService : INotificationService
 
     private async Task SafeSend(string provider, Func<Task> action)
     {
-        try
-        {
-            await action();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Notification provider {Provider} failed", provider);
-        }
+        // Retry once on failure; the per-client 15s HttpClient timeout (Program.cs) bounds each attempt so a
+        // slow endpoint can't stall the loop. Log only the provider name (never the payload/URL).
+        var (ok, last) = await NotificationRetry.TrySendAsync(action, maxAttempts: 2);
+        if (!ok)
+            _logger.LogError(last, "Notification provider {Provider} failed after retry", provider);
     }
 }

@@ -18,7 +18,9 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
     private readonly INotificationService _notifications;
     private readonly ILogger<LogMonitorService> _logger;
     private readonly ConcurrentDictionary<string, DateTime> _cooldowns = new();
-    private readonly ConcurrentDictionary<string, int> _logOffsets = new(); // container → last checked line count
+    // Per-container timestamp of the last log check, so we fetch only NEW lines and an old ERROR line
+    // doesn't re-alert every cycle.
+    private readonly ConcurrentDictionary<string, DateTime> _lastLogCheck = new();
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(60);
 
@@ -89,8 +91,11 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
 
             try
             {
-                // Get last 50 lines (only new since last check would be ideal, but tail is simpler)
-                var logs = await _docker.GetContainerLogsAsync(container.Id, 50);
+                // Fetch only lines since our last check so an old ERROR line doesn't re-alert every cycle;
+                // on first sight, baseline to now so historical logs aren't alerted.
+                var since = _lastLogCheck.TryGetValue(container.Id, out var last) ? last : DateTime.UtcNow;
+                var logs = await _docker.GetContainerLogsAsync(container.Id, 50, since: since);
+                _lastLogCheck[container.Id] = DateTime.UtcNow;
                 var lines = logs.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
                 foreach (var rule in applicableRules)
@@ -152,6 +157,16 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
                 _logger.LogDebug(ex, "Failed to check logs for {Container}", container.Name);
             }
         }
+
+        // Bound the per-container maps: drop entries for containers no longer in the list.
+        var liveIds = containers.Select(c => c.Id).ToHashSet();
+        foreach (var kv in _cooldowns.ToArray())
+        {
+            var parts = kv.Key.Split(':', 2); // "ruleId:containerId"
+            if (parts.Length == 2 && !liveIds.Contains(parts[1])) _cooldowns.TryRemove(kv.Key, out _);
+        }
+        foreach (var id in _lastLogCheck.Keys)
+            if (!liveIds.Contains(id)) _lastLogCheck.TryRemove(id, out _);
     }
 
     // === Public API ===

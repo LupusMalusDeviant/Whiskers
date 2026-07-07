@@ -23,7 +23,7 @@ public class EmailNotificationService : IEmailNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return;
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType)) return;
+        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes)) return;
         try
         {
             var (title, _) = NotificationFormatter.Describe(evt);

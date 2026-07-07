@@ -24,7 +24,7 @@ public class NtfyNotificationService : INtfyNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.ServerUrl) || string.IsNullOrWhiteSpace(c.Topic)) return;
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType)) return;
+        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes)) return;
         try
         {
             var (_, severity) = NotificationFormatter.Describe(evt);
