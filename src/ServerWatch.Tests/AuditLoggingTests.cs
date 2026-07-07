@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ServerWatch.Services.AuditLog;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Tests;
 
@@ -24,6 +25,21 @@ public class AuditLoggingTests
         Assert.NotNull(err.Exception);
         foreach (var expected in new[] { "alice@example.com", "web", "vault.delete", "vault", "api-key", "prod-1" })
             Assert.Contains(expected, err.Message);
+    }
+
+    // ---------------------------------------------------------------- MIT-7: audit stays secret-safe
+
+    [Fact]
+    public void SecretRedactor_strips_secrets_from_a_scheduler_custom_command()
+    {
+        // The scheduler audit logs command={SecretRedactor.Redact(command)} — verify the redaction the
+        // wiring relies on actually hides the secret for a representative CustomCommand.
+        var raw = "mysql -uroot -psup3rs3cret -e 'select 1' && export TOKEN=abc123def";
+        var red = SecretRedactor.Redact(raw);
+
+        Assert.DoesNotContain("sup3rs3cret", red);
+        Assert.DoesNotContain("abc123def", red);
+        Assert.Contains("-p***", red);
     }
 
     // --- test doubles ---
