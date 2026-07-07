@@ -26,9 +26,9 @@ public class VaultService : IVaultService
     private VaultData _data = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public VaultService(IConfiguration configuration, ILogger<VaultService> logger)
+    public VaultService(IConfiguration configuration, ILogger<VaultService> logger, string? storePath = null)
     {
-        _store = new JsonFileStore<VaultData>("/app/data/vault.json");
+        _store = new JsonFileStore<VaultData>(storePath ?? "/app/data/vault.json");
         _logger = logger;
 
         _passphrase = configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY");
@@ -87,17 +87,23 @@ public class VaultService : IVaultService
 
     public List<VaultEntry> ListSecrets()
     {
-        // Return metadata only — values are never exposed in the list
-        return _data.Entries.Select(e => new VaultEntry
+        // Read under the same lock the writers use, so the enumeration never observes a concurrent
+        // Add/Remove mid-flight. Return metadata only — values are never exposed in the list.
+        _lock.Wait();
+        try
         {
-            Key = e.Key,
-            ContainerId = e.ContainerId,
-            ContainerName = e.ContainerName,
-            CreatedAt = e.CreatedAt,
-            UpdatedAt = e.UpdatedAt,
-            RotateAfterDays = e.RotateAfterDays,
-            EncryptedValue = "" // Never expose
-        }).ToList();
+            return _data.Entries.Select(e => new VaultEntry
+            {
+                Key = e.Key,
+                ContainerId = e.ContainerId,
+                ContainerName = e.ContainerName,
+                CreatedAt = e.CreatedAt,
+                UpdatedAt = e.UpdatedAt,
+                RotateAfterDays = e.RotateAfterDays,
+                EncryptedValue = "" // Never expose
+            }).ToList();
+        }
+        finally { _lock.Release(); }
     }
 
     public async Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null, int? rotateAfterDays = null)
@@ -140,15 +146,23 @@ public class VaultService : IVaultService
     public string? GetSecret(string key)
     {
         if (_masterKey == null) return null;
-        var entry = _data.Entries.FirstOrDefault(e => e.Key == key);
-        if (entry == null) return null;
 
-        try { return Decrypt(entry.EncryptedValue); }
-        catch (Exception ex)
+        // Same lock as the writers: the entry lookup can't race a concurrent Add/Remove. Decrypt runs
+        // under the lock (CPU-only, no re-entrant vault call, so no deadlock).
+        _lock.Wait();
+        try
         {
-            _logger.LogError(ex, "Vault decrypt failed for key {Key} — wrong VAULT_KEY or corrupted/tampered entry", key);
-            return null;
+            var entry = _data.Entries.FirstOrDefault(e => e.Key == key);
+            if (entry == null) return null;
+
+            try { return Decrypt(entry.EncryptedValue); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Vault decrypt failed for key {Key} — wrong VAULT_KEY or corrupted/tampered entry", key);
+                return null;
+            }
         }
+        finally { _lock.Release(); }
     }
 
     public async Task DeleteSecretAsync(string key)
@@ -164,11 +178,16 @@ public class VaultService : IVaultService
 
     public List<VaultEntry> GetExpiringSecrets()
     {
-        var now = DateTime.UtcNow;
-        return _data.Entries.Where(e =>
-            e.RotateAfterDays.HasValue &&
-            (e.UpdatedAt ?? e.CreatedAt).AddDays(e.RotateAfterDays.Value) <= now
-        ).ToList();
+        _lock.Wait();
+        try
+        {
+            var now = DateTime.UtcNow;
+            return _data.Entries.Where(e =>
+                e.RotateAfterDays.HasValue &&
+                (e.UpdatedAt ?? e.CreatedAt).AddDays(e.RotateAfterDays.Value) <= now
+            ).ToList();
+        }
+        finally { _lock.Release(); }
     }
 
     private string Encrypt(string plainText)
