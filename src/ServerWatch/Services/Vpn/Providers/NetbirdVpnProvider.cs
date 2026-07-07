@@ -49,9 +49,13 @@ public class NetbirdVpnProvider : IVpnProvider
         var args = "up";
         if (!string.IsNullOrWhiteSpace(nb.ManagementUrl)) args += $" --management-url {nb.ManagementUrl}";
         if (!string.IsNullOrWhiteSpace(_settings.Hostname)) args += $" --hostname {_settings.Hostname}";
-        if (!string.IsNullOrWhiteSpace(nb.SetupKey)) args += $" --setup-key {nb.SetupKey}";
 
-        var up = await VpnProcessRunner.RunAsync("netbird", args, ct, 60000);
+        // Pass the setup key via NB_SETUP_KEY (env), never --setup-key in argv (would show in the process list).
+        var env = !string.IsNullOrWhiteSpace(nb.SetupKey)
+            ? new Dictionary<string, string> { ["NB_SETUP_KEY"] = nb.SetupKey }
+            : null;
+
+        var up = await VpnProcessRunner.RunAsync("netbird", args, ct, 60000, env);
         if (up.Success)
             _logger.LogInformation("[vpn:netbird] connected");
         else if (string.IsNullOrWhiteSpace(nb.SetupKey))

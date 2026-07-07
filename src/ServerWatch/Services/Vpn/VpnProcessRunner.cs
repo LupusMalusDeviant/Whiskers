@@ -12,7 +12,8 @@ internal static class VpnProcessRunner
     }
 
     /// <summary>Run a command to completion, capturing output. Returns exit code 127 if the binary is missing.</summary>
-    public static async Task<Result> RunAsync(string file, string arguments, CancellationToken ct, int timeoutMs = 30000)
+    public static async Task<Result> RunAsync(string file, string arguments, CancellationToken ct, int timeoutMs = 30000,
+        IReadOnlyDictionary<string, string>? env = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -23,6 +24,10 @@ internal static class VpnProcessRunner
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        // Enrollment secrets are passed via env, never argv, so they don't appear in the process list.
+        if (env != null)
+            foreach (var kv in env)
+                psi.Environment[kv.Key] = kv.Value;
 
         using var proc = new Process { StartInfo = psi };
         var stdout = new StringBuilder();

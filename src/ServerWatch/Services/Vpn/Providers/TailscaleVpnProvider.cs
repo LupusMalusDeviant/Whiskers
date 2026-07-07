@@ -56,9 +56,13 @@ public class TailscaleVpnProvider : IVpnProvider
         var args = $"{SocketArg} up --hostname={hostname}";
         if (_settings.AcceptRoutes) args += " --accept-routes";
         if (!string.IsNullOrWhiteSpace(ts.LoginServer)) args += $" --login-server={ts.LoginServer}";
-        if (!string.IsNullOrWhiteSpace(ts.AuthKey)) args += $" --authkey={ts.AuthKey}";
 
-        var up = await VpnProcessRunner.RunAsync("tailscale", args, ct, 60000);
+        // Pass the auth key via TS_AUTHKEY (env), never --authkey in argv (would show in the process list).
+        var env = !string.IsNullOrWhiteSpace(ts.AuthKey)
+            ? new Dictionary<string, string> { ["TS_AUTHKEY"] = ts.AuthKey }
+            : null;
+
+        var up = await VpnProcessRunner.RunAsync("tailscale", args, ct, 60000, env);
         if (up.Success)
             _logger.LogInformation("[vpn:tailscale] connected as {Hostname}", hostname);
         else if (string.IsNullOrWhiteSpace(ts.AuthKey))
