@@ -41,7 +41,7 @@ public class MetricsQueryService : IMetricsQueryService
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var since = DateTime.UtcNow - period;
 
-        return await db.ContainerMetrics
+        return Downsample(await db.ContainerMetrics
             .Where(m => m.ContainerId == containerId && m.ServerId == serverId && m.Timestamp >= since)
             .OrderBy(m => m.Timestamp)
             .Select(m => new MetricPoint
@@ -49,7 +49,7 @@ public class MetricsQueryService : IMetricsQueryService
                 Timestamp = m.Timestamp,
                 Value = m.MemoryLimitBytes > 0 ? (double)m.MemoryUsageBytes / m.MemoryLimitBytes * 100 : 0
             })
-            .ToListAsync();
+            .ToListAsync(), 100);
     }
 
     public async Task<List<MetricPoint>> GetServerCpuHistoryAsync(string serverId, TimeSpan period)
