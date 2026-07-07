@@ -250,8 +250,21 @@ public class AiChatService : IAiChatService
             var dbs = containers.Where(c => c.IsDatabase).Select(c => $"{c.Name} ({c.DatabaseType}, {c.State})");
             var projects = containers.Select(c => c.ComposeProject).Distinct().Where(p => p != "Standalone");
 
-            var containerList = string.Join("\n", containers.Select(c =>
+            // Cap the detailed list so a large fleet can't blow the model context — prioritise the
+            // interesting containers (unhealthy, then stopped). The aggregate counts above stay full,
+            // and small fleets keep their original order.
+            const int maxDetailed = 50;
+            var detailed = containers.AsEnumerable();
+            if (containers.Count > maxDetailed)
+                detailed = containers
+                    .OrderByDescending(c => c.HealthStatus == "unhealthy")
+                    .ThenByDescending(c => c.State != "running")
+                    .Take(maxDetailed);
+
+            var containerList = string.Join("\n", detailed.Select(c =>
                 $"  - {c.Name}: Image={c.Image}, Status={c.State}, Health={c.HealthStatus}, Projekt={c.ComposeProject}, Server={c.ServerName}{(c.IsDatabase ? $", DB={c.DatabaseType}" : "")}"));
+            if (containers.Count > maxDetailed)
+                containerList += $"\n  … und {containers.Count - maxDetailed} weitere (nach Priorität gekürzt)";
 
             return $"""
                 Server: {containers.Select(c => c.ServerName).Distinct().Count()} Server
