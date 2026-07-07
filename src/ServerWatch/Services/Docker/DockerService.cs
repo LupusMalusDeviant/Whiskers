@@ -42,26 +42,50 @@ public class DockerService : IDockerService
         var containers = await _connectionManager.ExecuteAsync(serverId, c =>
             c.Containers.ListContainersAsync(new ContainersListParameters { All = all }));
 
-        return containers.Select(c => new ContainerInfo
+        return containers.Select(c => ToContainerInfo(c, server?.Id ?? "local", server?.Name ?? "Local")).ToList();
+    }
+
+    private ContainerInfo ToContainerInfo(ContainerListResponse c, string serverId, string serverName) => new()
+    {
+        Id = c.ID,
+        Name = c.Names.FirstOrDefault()?.TrimStart('/') ?? c.ID[..12],
+        Image = c.Image,
+        Status = c.Status,
+        State = c.State,
+        Created = c.Created,
+        HealthStatus = ExtractHealthStatus(c.Status),
+        Labels = c.Labels != null ? new Dictionary<string, string>(c.Labels) : new(),
+        Ports = c.Ports?.Select(p => new PortMapping
         {
-            Id = c.ID,
-            Name = c.Names.FirstOrDefault()?.TrimStart('/') ?? c.ID[..12],
-            Image = c.Image,
-            Status = c.Status,
-            State = c.State,
-            Created = c.Created,
-            HealthStatus = ExtractHealthStatus(c.Status),
-            Labels = c.Labels != null ? new Dictionary<string, string>(c.Labels) : new(),
-            Ports = c.Ports?.Select(p => new PortMapping
+            IP = p.IP ?? "",
+            PrivatePort = p.PrivatePort,
+            PublicPort = p.PublicPort,
+            Type = p.Type
+        }).ToList() ?? new(),
+        ServerId = serverId,
+        ServerName = serverName
+    };
+
+    /// <summary>Single-container inspect (via an id filter) for the detail-page poll — avoids listing every
+    /// container on the server each tick.</summary>
+    public async Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null)
+    {
+        var server = serverId != null
+            ? _serverConfigService.GetServer(serverId)
+            : _serverConfigService.GetDefaultServer();
+
+        var containers = await _connectionManager.ExecuteAsync(serverId, c =>
+            c.Containers.ListContainersAsync(new ContainersListParameters
             {
-                IP = p.IP ?? "",
-                PrivatePort = p.PrivatePort,
-                PublicPort = p.PublicPort,
-                Type = p.Type
-            }).ToList() ?? new(),
-            ServerId = server?.Id ?? "local",
-            ServerName = server?.Name ?? "Local"
-        }).ToList();
+                All = true,
+                Filters = new Dictionary<string, IDictionary<string, bool>>
+                {
+                    ["id"] = new Dictionary<string, bool> { [id] = true }
+                }
+            }));
+
+        var match = containers.FirstOrDefault();
+        return match == null ? null : ToContainerInfo(match, server?.Id ?? "local", server?.Name ?? "Local");
     }
 
     public async Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true)

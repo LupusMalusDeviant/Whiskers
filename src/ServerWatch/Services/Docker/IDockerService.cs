@@ -6,6 +6,7 @@ public interface IDockerService
 {
     Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null);
     Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true);
+    Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null);
     Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null);
     Task StartContainerAsync(string containerId, string? serverId = null);
     Task StopContainerAsync(string containerId, string? serverId = null);

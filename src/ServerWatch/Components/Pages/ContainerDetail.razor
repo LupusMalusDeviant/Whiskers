@@ -1053,7 +1053,7 @@ else
             }
             catch { /* circuit torn down or transient load error */ }
             finally { _refreshing = 0; }
-        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5)); // OPT-9: single-inspect + longer interval
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1171,9 +1171,10 @@ else
             }
             else
             {
-                var containers = await DockerService.ListContainersAsync(serverId: _resolvedServerId);
-                _container = containers.FirstOrDefault(c => c.Id == ContainerId)
-                             ?? containers.FirstOrDefault(c => MatchesId(c.Id, ContainerId));
+                // Single-container inspect (id filter) instead of listing every container each poll (OPT-9).
+                _container = await DockerService.GetContainerAsync(ContainerId, _resolvedServerId)
+                             ?? (await DockerService.ListContainersAsync(serverId: _resolvedServerId))
+                                 .FirstOrDefault(c => MatchesId(c.Id, ContainerId));
             }
 
             if (_container?.State == "running")
