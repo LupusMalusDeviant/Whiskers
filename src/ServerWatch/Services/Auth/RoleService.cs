@@ -10,9 +10,9 @@ public class RoleService : IRoleService
     private UserRoleData _data = new();
     private readonly ReaderWriterLockSlim _lock = new();
 
-    public RoleService(ILogger<RoleService> logger)
+    public RoleService(ILogger<RoleService> logger, string? storePath = null)
     {
-        _store = new JsonFileStore<UserRoleData>("/app/data/roles.json");
+        _store = new JsonFileStore<UserRoleData>(storePath ?? "/app/data/roles.json");
         _logger = logger;
     }
 
@@ -55,26 +55,22 @@ public class RoleService : IRoleService
     public UserRoleData GetRoleData()
     {
         _lock.EnterReadLock();
-        try
-        {
-            return new UserRoleData
-            {
-                DefaultRole = _data.DefaultRole,
-                Roles = _data.Roles.Select(r => new UserRoleEntry { Email = r.Email, Role = r.Role }).ToList()
-            };
-        }
+        try { return Snapshot(_data); }
         finally { _lock.ExitReadLock(); }
     }
 
     public async Task SaveRoleDataAsync(UserRoleData data)
     {
-        await _store.SaveAsync(data);
-        SetData(data);
-        _logger.LogInformation("Roles updated: {Count} entries, default={Default}", data.Roles.Count, data.DefaultRole);
+        // Clone before persisting/caching so the caller's mutable object can't alias the enforcement state.
+        var copy = Snapshot(data);
+        await _store.SaveAsync(copy);
+        SetData(copy);
+        _logger.LogInformation("Roles updated: {Count} entries, default={Default}", copy.Roles.Count, copy.DefaultRole);
     }
 
     public async Task SetRoleAsync(string email, AppRole role)
     {
+        UserRoleData snapshot;
         _lock.EnterWriteLock();
         try
         {
@@ -83,23 +79,35 @@ public class RoleService : IRoleService
                 existing.Role = role;
             else
                 _data.Roles.Add(new UserRoleEntry { Email = email, Role = role });
+            // Snapshot inside the lock; persist outside — never serialize the live list another writer may mutate.
+            snapshot = Snapshot(_data);
         }
         finally { _lock.ExitWriteLock(); }
 
-        await _store.SaveAsync(_data);
+        await _store.SaveAsync(snapshot);
     }
 
     public async Task RemoveRoleAsync(string email)
     {
+        UserRoleData snapshot;
         _lock.EnterWriteLock();
         try
         {
             _data.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+            snapshot = Snapshot(_data);
         }
         finally { _lock.ExitWriteLock(); }
 
-        await _store.SaveAsync(_data);
+        await _store.SaveAsync(snapshot);
     }
+
+    // Deep copy: cached/persisted state can never be aliased by a caller's mutable object, and
+    // serialization never enumerates a list another writer is concurrently mutating.
+    private static UserRoleData Snapshot(UserRoleData src) => new()
+    {
+        DefaultRole = src.DefaultRole,
+        Roles = src.Roles.Select(r => new UserRoleEntry { Email = r.Email, Role = r.Role }).ToList()
+    };
 
     private void SetData(UserRoleData data)
     {
