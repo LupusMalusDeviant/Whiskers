@@ -129,8 +129,9 @@ else if (_left != null || _right != null)
                 var leftVal = _leftEnv.FirstOrDefault(e => e.Key == key).Value ?? "(nicht gesetzt)";
                 var rightVal = _rightEnv.FirstOrDefault(e => e.Key == key).Value ?? "(nicht gesetzt)";
 
-                // Mask sensitive values
-                var isSensitive = new[] { "KEY", "SECRET", "PASSWORD", "TOKEN" }.Any(kw => key.Contains(kw, StringComparison.OrdinalIgnoreCase));
+                // Mask sensitive values — sensitive key OR a value carrying inline credentials (e.g. DATABASE_URL).
+                var isSensitive = ServerWatch.Utils.EnvMasking.ShouldMask(key, leftVal)
+                    || ServerWatch.Utils.EnvMasking.ShouldMask(key, rightVal);
                 if (isSensitive)
                 {
                     var same = leftVal == rightVal;

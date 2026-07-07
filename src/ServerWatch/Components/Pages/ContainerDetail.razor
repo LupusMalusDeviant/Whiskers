@@ -251,7 +251,9 @@ else
             }
         </MudTabPanel>
 
-        @* Environment Variables Tab *@
+        @* Environment Variables Tab — Operator+ only, so a Viewer can't read env (MIT-37) *@
+        @if (_role >= AppRole.Operator)
+        {
         <MudTabPanel Text="Umgebungsvariablen" Icon="@Icons.Material.Filled.Code">
             @if (!_envLoaded)
             {
@@ -277,7 +279,7 @@ else
                     <RowTemplate>
                         <MudTd DataLabel="Variable"><code>@context.Key</code></MudTd>
                         <MudTd DataLabel="Wert">
-                            @if (IsSensitiveKey(context.Key))
+                            @if (ServerWatch.Utils.EnvMasking.ShouldMask(context.Key, context.Value))
                             {
                                 <code style="color: #888;">••••••••</code>
                                 <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Style="vertical-align: middle; color: #888; margin-left: 4px;" />
@@ -383,6 +385,7 @@ else
                 }
             }
         </MudTabPanel>
+        }
 
         @* Database Tab - only visible for database containers *@
         @if (_container.IsDatabase)
@@ -995,15 +998,7 @@ else
             ? _containerEnv
             : _containerEnv.Where(e => e.Key.Contains(_envSearch, StringComparison.OrdinalIgnoreCase));
 
-    // Keywords that indicate a sensitive env var (case-insensitive match on key)
-    private static readonly string[] SensitiveKeywords = [
-        "KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL", "AUTH",
-        "PRIVATE", "API_KEY", "APIKEY", "ACCESS_KEY", "PASSPHRASE"
-    ];
-
-    private static bool IsSensitiveKey(string key) =>
-        SensitiveKeywords.Any(kw => key.Contains(kw, StringComparison.OrdinalIgnoreCase));
-
+    // Sensitivity decision (key keywords + credential-in-URL values) lives in ServerWatch.Utils.EnvMasking.
     private static string MaskOrShowValue(string value, bool sensitive) =>
         string.IsNullOrEmpty(value) ? "(leer)" : sensitive ? "••••••••" : value;
 
@@ -1352,7 +1347,7 @@ else
                                 OriginalValue = val,
                                 IsNew = false,
                                 IsEditing = false,
-                                IsSensitive = IsSensitiveKey(key)
+                                IsSensitive = ServerWatch.Utils.EnvMasking.ShouldMask(key, val)
                             });
                         }
                     }
