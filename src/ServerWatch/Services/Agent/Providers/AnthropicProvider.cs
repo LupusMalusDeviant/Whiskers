@@ -37,7 +37,9 @@ public sealed class AnthropicProvider : IAgentLlmProvider
         httpReq.Headers.Add("anthropic-version", AnthropicVersion);
 
         using var response = await _http.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException(
+                $"Anthropic {(int)response.StatusCode}: {ProviderError.Extract(await response.Content.ReadAsStringAsync(ct))}");
 
         var accumulator = new AnthropicStreamAccumulator();
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -80,7 +82,9 @@ public sealed class AnthropicProvider : IAgentLlmProvider
         req.Headers.Add("anthropic-version", AnthropicVersion);
 
         using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException(
+                $"Anthropic {(int)resp.StatusCode}: {ProviderError.Extract(await resp.Content.ReadAsStringAsync(ct))}");
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);

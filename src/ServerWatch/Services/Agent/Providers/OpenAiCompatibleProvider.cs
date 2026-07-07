@@ -38,7 +38,9 @@ public sealed class OpenAiCompatibleProvider : IAgentLlmProvider
             httpReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
 
         using var response = await _http.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException(
+                $"LLM {(int)response.StatusCode}: {ProviderError.Extract(await response.Content.ReadAsStringAsync(ct))}");
 
         var accumulator = new OpenAiStreamAccumulator();
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -76,7 +78,9 @@ public sealed class OpenAiCompatibleProvider : IAgentLlmProvider
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
 
         using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException(
+                $"LLM {(int)resp.StatusCode}: {ProviderError.Extract(await resp.Content.ReadAsStringAsync(ct))}");
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);

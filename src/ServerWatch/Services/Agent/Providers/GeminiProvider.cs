@@ -39,7 +39,7 @@ public sealed class GeminiProvider : IAgentLlmProvider
         using var response = await _http.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead, ct);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException(
-                $"Gemini {(int)response.StatusCode}: {ExtractError(await response.Content.ReadAsStringAsync(ct))}");
+                $"Gemini {(int)response.StatusCode}: {ProviderError.Extract(await response.Content.ReadAsStringAsync(ct))}");
 
         var accumulator = new GeminiStreamAccumulator();
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -67,24 +67,6 @@ public sealed class GeminiProvider : IAgentLlmProvider
             yield return new AgentStreamDelta(ToolCallDelta: call);
 
         yield return new AgentStreamDelta(Final: accumulator.StopReason());
-    }
-
-    /// <summary>Pulls the human-readable <c>error.message</c> out of a Gemini error body so the agent
-    /// shows the real reason (e.g. "model not found", "contents.parts must not be empty") instead of a
-    /// bare "400 (Bad Request)". Falls back to the raw (trimmed) body.</summary>
-    private static string ExtractError(string body)
-    {
-        if (string.IsNullOrWhiteSpace(body)) return "(leere Antwort)";
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("error", out var err)
-                && err.TryGetProperty("message", out var msg)
-                && msg.GetString() is { } m && m.Length > 0)
-                return m.Length > 500 ? m[..500] + "…" : m;
-        }
-        catch (JsonException) { /* not JSON — fall through */ }
-        return body.Length > 500 ? body[..500] + "…" : body;
     }
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)
