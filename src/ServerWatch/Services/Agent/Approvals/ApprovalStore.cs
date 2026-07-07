@@ -47,7 +47,14 @@ public sealed class ApprovalStore : IApprovalStore
 
     public event Action? Changed;
 
-    private sealed record Entry(Approval Approval, Func<bool, Task> Resolver);
+    private sealed class Entry
+    {
+        public Entry(Approval approval, Func<bool, Task> resolver) { Approval = approval; Resolver = resolver; }
+        public Approval Approval { get; }
+        public Func<bool, Task> Resolver { get; }
+        // 0 = not yet resolved; flipped to 1 via Interlocked so the resolver runs exactly once.
+        public int Resolved;
+    }
 
     public Approval Create(ApprovalRequest request, Func<bool, Task> resolver)
     {
@@ -106,6 +113,10 @@ public sealed class ApprovalStore : IApprovalStore
             return false;
         }
 
+        // Exactly-once: only the thread that flips Resolved 0→1 performs the transition + resolver.
+        if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0)
+            return false;
+
         Mark(entry.Approval, approved ? ApprovalStatus.Approved : ApprovalStatus.Rejected, resolvedBy);
         await SafeResolve(entry, approved);
         Changed?.Invoke();
@@ -121,6 +132,7 @@ public sealed class ApprovalStore : IApprovalStore
 
         foreach (var entry in affected)
         {
+            if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0) continue;
             Mark(entry.Approval, ApprovalStatus.Cancelled, "system");
             await SafeResolve(entry, false);
         }
@@ -134,6 +146,7 @@ public sealed class ApprovalStore : IApprovalStore
 
         foreach (var entry in overdue)
         {
+            if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0) continue;
             Mark(entry.Approval, ApprovalStatus.Expired, "system");
             _ = SafeResolve(entry, false); // unblock the waiting session; deny on timeout
         }

@@ -50,7 +50,7 @@ public sealed class AgentService : IAgentService
     // creates a session per call) cannot grow without limit. Insertion-order eviction.
     private const int MaxSessions = 200;
     private readonly ConcurrentDictionary<string, AgentSession> _sessions = new();
-    private readonly ConcurrentQueue<string> _order = new();
+    private readonly ConcurrentQueue<(string Id, AgentSession Session)> _order = new();
 
     public AgentService(
         IAgentProviderFactory factory, IOptionsMonitor<AgentSettings> settings,
@@ -75,9 +75,14 @@ public sealed class AgentService : IAgentService
         var prompt = string.IsNullOrWhiteSpace(settings.SystemPrompt) ? SystemPrompt : settings.SystemPrompt;
         var session = new AgentSession(context, provider, _catalog, _invoker, _guardrails, _registry, settings, prompt, seedHistory, _guardrailStore);
         _sessions[context.SessionId] = session;
-        _order.Enqueue(context.SessionId);
-        while (_sessions.Count > MaxSessions && _order.TryDequeue(out var oldId))
-            _sessions.TryRemove(oldId, out _);
+        _order.Enqueue((context.SessionId, session));
+        while (_sessions.Count > MaxSessions && _order.TryDequeue(out var old))
+        {
+            // Only evict if the queued session is still the current one for that id — a re-created session
+            // with the same id (a stale queue entry) must never evict the fresh one.
+            if (_sessions.TryGetValue(old.Id, out var cur) && ReferenceEquals(cur, old.Session))
+                _sessions.TryRemove(old.Id, out _);
+        }
         return Task.FromResult<IAgentSession>(session);
     }
 

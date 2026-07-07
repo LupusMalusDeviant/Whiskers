@@ -142,12 +142,19 @@ public sealed class AgentSession : IAgentSession
                     State = AgentRunState.AwaitingConfirmation;
                     var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                     _pending[call.Id] = tcs;
-                    yield return new AgentEvent.ConfirmationRequired(call, decision.Reason);
 
                     bool? approved;
-                    try { approved = await tcs.Task.WaitAsync(ct); }
-                    catch (OperationCanceledException) { approved = null; }
-                    _pending.TryRemove(call.Id, out _);
+                    try
+                    {
+                        yield return new AgentEvent.ConfirmationRequired(call, decision.Reason);
+                        try { approved = await tcs.Task.WaitAsync(ct); }
+                        catch (OperationCanceledException) { approved = null; }
+                    }
+                    finally
+                    {
+                        // Runs even if the enumerator is disposed mid-confirmation → no leaked _pending entry.
+                        _pending.TryRemove(call.Id, out _);
+                    }
                     State = AgentRunState.Running;
 
                     if (approved is null) yield break;             // abgebrochen

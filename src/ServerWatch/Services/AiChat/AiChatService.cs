@@ -45,7 +45,10 @@ public class ChatHistoryStore : IChatHistoryStore
         var toSave = messages.TakeLast(50).ToList();
         var json = System.Text.Json.JsonSerializer.Serialize(new UserChatHistory { Messages = toSave },
             new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
-        await File.WriteAllTextAsync(path, json);
+        // Atomic write: a crash mid-write must not leave a truncated/corrupt history file.
+        var tmp = path + ".tmp";
+        await File.WriteAllTextAsync(tmp, json);
+        File.Move(tmp, path, overwrite: true);
     }
 
     public async Task ClearAsync(string userEmail)
@@ -162,7 +165,12 @@ public class AiChatService : IAiChatService
         var messages = new List<object> { new { role = "system", content = systemMsg } };
         if (history != null)
         {
-            foreach (var msg in history.TakeLast(10)) // Keep last 10 messages
+            // Anthropic requires the transcript to start with a user turn — after truncation the window may
+            // begin with an assistant reply, so drop leading assistant turns and keep only user/assistant.
+            var recent = history.TakeLast(10)
+                .Where(m => m.Role is "user" or "assistant")
+                .SkipWhile(m => m.Role == "assistant");
+            foreach (var msg in recent)
                 messages.Add(new { role = msg.Role, content = msg.Content });
         }
         messages.Add(new { role = "user", content = userMessage });

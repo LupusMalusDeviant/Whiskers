@@ -140,6 +140,18 @@ public sealed class GuardrailStore : IGuardrailStore
         try
         {
             var json = await File.ReadAllTextAsync(_filePath);
+            // A blank/unrelated JSON deserializes into a DEFAULT GuardrailPolicy that silently drops
+            // SafeDefault's protections (ProtectedResources / ForbiddenArgPatterns). Only trust the file
+            // as a legacy policy if it actually carries at least one known policy property.
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "MaxAutonomousLevel", "ReadOnlyMode", "RequireConfirmationForWrites", "ToolDenyList",
+                "ToolAllowList", "ToolMode", "ProtectedResources", "ForbiddenArgPatterns", "MaxActionsPerSession"
+            };
+            if (!doc.RootElement.EnumerateObject().Any(p => known.Contains(p.Name))) return null;
+
             return System.Text.Json.JsonSerializer.Deserialize<GuardrailPolicy>(json,
                 new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         }

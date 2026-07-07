@@ -475,6 +475,7 @@
 
     private async Task SaveLlm()
     {
+        if (!_isAdmin) { Snackbar.Add("Nur Admins dürfen die Agent-Einstellungen ändern.", Severity.Error); return; }
         await SettingsStore.SaveAsync(new AgentSettings
         {
             Enabled = _llmEnabled,
@@ -485,7 +486,7 @@
             MaxToolIterations = _llmIterations,
             // Store empty when unchanged from default, so it keeps tracking the built-in prompt.
             SystemPrompt = _systemPrompt.Trim() == DefaultSystemPrompt.Trim() ? "" : _systemPrompt,
-        });
+        }, await BuildPrincipalAsync());
         Snackbar.Add("Provider gespeichert.", Severity.Success);
     }
 

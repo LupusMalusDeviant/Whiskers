@@ -74,6 +74,14 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null);
             return new AgentToolResult(call.Id, output, false, decision);
         }
+        catch (TargetInvocationException tie) when (tie.InnerException is not null)
+        {
+            // Reflection wraps the tool's real exception — surface the inner message, not the wrapper's.
+            var inner = tie.InnerException;
+            _logger?.LogError(inner, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, inner.Message);
+            return Error(call.Id, $"Fehler bei '{entry.Name}': {inner.Message}", decision);
+        }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
