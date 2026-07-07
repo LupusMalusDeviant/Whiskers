@@ -29,6 +29,14 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 - [`Providers/`](Providers/): one LLM wire-format implementation per provider.
 - [`Triggers/`](Triggers/): AI triggers: run the agent autonomously on events.
 
+## Robustness & security notes (2026-07)
+
+- **Live guardrails:** an open session evaluates every tool call against the *current* policy (`IGuardrailStore.Current`), so an admin's Read-only kill-switch / tightened limits take effect mid-run — trigger runs keep their deliberately pinned preset.
+- **Session concurrency:** one active run per session (a concurrent `SendAsync` is rejected with `Failed`); the history is mutated/snapshotted under a lock.
+- **Transcript persistence:** the saved window is sanitised — orphaned tool_use/tool_result pairs dropped (no provider 400 on re-seed), tool outputs redacted, base64 screenshots stripped; one cached `JsonFileStore` per user so its lock actually serializes.
+- **Admin-only settings:** persisting the provider settings (`ApiKey` + `SystemPrompt`) requires an Admin editor.
+- **ClaudeCodeRuntime** (stub, not yet wired): `--permission-mode default`, only the guardrailed MCP tools allowed, no MCP-key fallback, temp MCP config is `chmod 600`.
+
 ## Related
 
 - Models: [`../../Models/Agent/`](../../Models/Agent/) (`AgentDtos`, `AgentRuntime`)
