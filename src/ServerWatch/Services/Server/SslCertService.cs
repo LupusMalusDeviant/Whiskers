@@ -7,10 +7,13 @@ public class SslCertificate
 {
     public string Domain { get; set; } = "";
     public string CertName { get; set; } = "";
-    public DateTime ExpiresAt { get; set; }
+    // Null when the expiry date could not be parsed from the certbot output. An unparsed date used to
+    // default to DateTime.MinValue, which made every such cert look long-expired and fire a false
+    // "expiring soon" alarm; "unknown" must be distinct from "expiring soon".
+    public DateTime? ExpiresAt { get; set; }
     public DateTime IssuedAt { get; set; }
-    public int DaysUntilExpiry => (int)(ExpiresAt - DateTime.UtcNow).TotalDays;
-    public bool IsExpiringSoon => DaysUntilExpiry <= 14;
+    public int? DaysUntilExpiry => ExpiresAt is { } e ? (int)(e - DateTime.UtcNow).TotalDays : null;
+    public bool IsExpiringSoon => DaysUntilExpiry is { } d && d <= 14;
     public string Issuer { get; set; } = "";
     public List<string> Domains { get; set; } = new();
 }
@@ -98,6 +101,11 @@ public class SslCertService : ISslCertService
                         CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var expiry))
                 {
                     current.ExpiresAt = expiry.ToUniversalTime();
+                }
+                else
+                {
+                    _logger.LogDebug("Could not parse SSL expiry '{DateStr}' for {CertName} on {ServerId}; leaving expiry unknown",
+                        dateStr, current.CertName, serverId);
                 }
                 continue;
             }

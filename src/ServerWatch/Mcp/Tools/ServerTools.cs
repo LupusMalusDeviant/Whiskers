@@ -315,7 +315,9 @@ public class ServerTools
         var certs = await ssl.ListCertificatesAsync(serverId);
         if (!certs.Any()) return "No SSL certificates found.";
 
-        var lines = certs.Select(c => $"- {c.CertName}: {string.Join(", ", c.Domains)} — Expires: {c.ExpiresAt:yyyy-MM-dd} ({c.DaysUntilExpiry} days){(c.IsExpiringSoon ? " ⚠️" : "")}");
+        var lines = certs.Select(c => c.ExpiresAt is { } exp
+            ? $"- {c.CertName}: {string.Join(", ", c.Domains)} — Expires: {exp:yyyy-MM-dd} ({c.DaysUntilExpiry} days){(c.IsExpiringSoon ? " ⚠️" : "")}"
+            : $"- {c.CertName}: {string.Join(", ", c.Domains)} — Expires: unknown");
         return $"SSL certificates:\n{string.Join('\n', lines)}";
     }
 

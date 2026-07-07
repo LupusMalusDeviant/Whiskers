@@ -43,12 +43,12 @@ else
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@d</MudChip>
                 }
             </MudTd>
-            <MudTd>@context.ExpiresAt.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@(context.ExpiresAt?.ToString("yyyy-MM-dd") ?? "unbekannt")</MudTd>
             <MudTd>
                 <MudChip T="string" Size="Size.Small"
-                         Color="@(context.DaysUntilExpiry <= 7 ? Color.Error : context.IsExpiringSoon ? Color.Warning : Color.Success)"
+                         Color="@(context.DaysUntilExpiry is not { } d ? Color.Default : d <= 7 ? Color.Error : context.IsExpiringSoon ? Color.Warning : Color.Success)"
                          Variant="Variant.Filled">
-                    @context.DaysUntilExpiry Tage
+                    @(context.DaysUntilExpiry is { } days ? $"{days} Tage" : "Ablauf unbekannt")
                 </MudChip>
             </MudTd>
             <MudTd>
