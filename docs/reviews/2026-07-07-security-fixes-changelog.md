@@ -49,11 +49,27 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 
 - **NIED-20.6** — `Webhooks.razor.TestWebhook` verlangt jetzt die Operator-Rolle.
 
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-vcvv — Optimierungen (OPT-2/4/5/6/7/8/10/11.{1,2,3,4,6,7})
+
+Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
+- **OPT-4/5 (DockerService).** `GetContainerStatsAsync` nutzt statische `JsonSerializerOptions` statt eine pro Aufruf; `RunHostShellAsync` cacht die Host-Shell-Image-Präsenz pro Server (TTL 1h) und drosselt den Leftover-Sweep (≤1×/5 min).
+- **OPT-2/11.2 (MetricsCollectorService).** Prune läuft nur noch stündlich (`_lastPrune`-Gate) statt in jedem 30s-Zyklus; der Container-Stats-Fan-out ist mit `SemaphoreSlim(8)` begrenzt.
+- **OPT-6 (Nginx/Systemd).** Die je zwei unabhängigen Read-Kommandos in `ListSitesAsync`/`ListServicesAsync` laufen jetzt nebenläufig (der Executor startet pro Call einen eigenen Prozess/Container, SSH multiplext → nebenläufigkeitssicher). Write-/Enable-/Disable-Pfade bleiben sequenziell.
+- **OPT-7 (Program.cs).** Registry/Hetzner/Hostinger-Typed-Clients bekommen einen `SocketsHttpHandler` mit `PooledConnectionLifetime = 5min` (rotiert Verbindungen → kein Stale-DNS, auch bei einem captured Client); die doppelte `RegistryClient`-Singleton-Registrierung entfernt (IRegistryClient bleibt Singleton mit geteiltem Cache).
+- **OPT-8 (CloudControlService).** `ListAllAsync` gruppiert nach `(Provider, Token)` und listet jeden Account **einmal** statt einmal pro Server (schont das Hetzner-Ratelimit). Match/Map in verbatim ausgelagerte Helfer — gleiches beobachtbares Ergebnis.
+- **OPT-10 (LogMonitorService).** Aktive Regex-Regeln werden einmal pro Zyklus kompiliert (Dict nach Pattern) statt pro Logzeile jedes Containers; ungültige Patterns werden hier verworfen statt pro Zeile zu werfen.
+- **OPT-11.1/.3/.4/.6/.7.** Container-Memory-History wird wie CPU downsampled; `Cves.FilteredGroups()` einmal pro Render; `InAppNotificationStore` trimmt die persistierte Historie periodisch (nicht bei jedem Insert); der AiChat-Modellkontext kappt das Inventar auf 50 (unhealthy/gestoppt priorisiert); Provider-Fehler zeigen `error.message` statt bloßem Status (neuer, unit-getesteter Helfer `Agent/Providers/ProviderError`).
+
+**Verifikation (Branch `feat/ServerWatch-vcvv-optimizations`):** Build 0 Fehler, `dotnet test` 130/130 (7 neu: `ProviderErrorTests` inkl. Fehlerpfad + No-Secret-Leak). App in Development gebootet — „Application started" (DI-Graph nach dem OPT-7-Registrierungsumbau validiert: Registry/Hetzner/Hostinger lösen sauber auf). Beans-übergreifend: **OPT-11.5** (MaxTokens) → Bean 6, **OPT-1** → Bean 7, **OPT-3/OPT-9** → Bean 12.
+
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
 - **HOCH-11** — SSH `StrictHostKeyChecking=no` → `accept-new`: Aussperr-Risiko bei Host-Key-Wechsel + Off-Limits-Netzwerk-Layer. Siehe [ADR 0002](../adr/0002-ssh-host-key-verification-deferred.md). Braucht ausdrückliche Freigabe.
 - **KRIT-3 Schritt 2** — Fallback-Authorization-Policy: könnte `/mcp` brechen; Auth-Middleware Off-Limits.
 - **HOCH-12 Teil 2** — secretlose Webhooks ablehnen: braucht Secret-Management-UI, sonst Feature unbrauchbar.
+- **OPT-12** — `CancellationToken` durch Hetzner/Hostinger fädeln: reine Plumbing-Änderung (~70 Signaturen + 2 Interfaces) ohne aktuellen Aufrufer, der ein Token übergibt. Als fokussierter Follow-up zurückgestellt (2026-07-08); Einstiegspunkt `_http.SendAsync(req, ct)` in den privaten `SendAsync`-Helpern.
 
 ## Verifikation
 
