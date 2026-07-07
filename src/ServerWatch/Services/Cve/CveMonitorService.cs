@@ -47,6 +47,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
 
         while (!ct.IsCancellationRequested)
         {
+            var cycleFailed = false;
             try
             {
                 if (_settings.CurrentValue.Enabled)
@@ -65,21 +66,33 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "CVE monitor cycle failed");
+                cycleFailed = true;
             }
 
-            // Sleep until the next scan is due (based on the last scan time), not a flat interval from start.
             var iv = TimeSpan.FromHours(Math.Max(1, _settings.CurrentValue.CheckIntervalHours));
-            var wait = _store.LastScanAt is { } l ? iv - (DateTime.UtcNow - l) : iv;
-            if (wait < TimeSpan.FromMinutes(1)) wait = iv;
+            TimeSpan wait;
+            if (cycleFailed)
+                // After a failure, retry soon instead of waiting the full interval.
+                wait = TimeSpan.FromMinutes(15);
+            else
+            {
+                // Sleep until the next scan is due (based on the last scan time), not a flat interval from start.
+                wait = _store.LastScanAt is { } l ? iv - (DateTime.UtcNow - l) : iv;
+                if (wait < TimeSpan.FromMinutes(1)) wait = iv;
+            }
             try { await Task.Delay(wait, ct); }
             catch (OperationCanceledException) { break; }
         }
     }
 
+    // Atomic scan gate (0 = idle, 1 = scanning). A manual trigger and the background loop must never run
+    // overlapping full scans; the bool _store.IsScanning is kept only as the UI indicator.
+    private int _scanning;
+
     /// <summary>Run a single scan cycle across all enabled servers. Public for manual triggers.</summary>
     public async Task RunOneCycleAsync(CancellationToken ct = default)
     {
-        if (_store.IsScanning)
+        if (Interlocked.CompareExchange(ref _scanning, 1, 0) != 0)
         {
             _logger.LogInformation("CVE scan cycle already in progress — skipping");
             return;
@@ -200,20 +213,29 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                         finally { semaphore.Release(); }
                     });
                     await Task.WhenAll(tasks);
+
+                    // Drop phantom entries for containers that no longer exist (recreated/deleted). The live
+                    // set is authoritative because the listing above succeeded; the OS key is preserved.
+                    var liveKeys = containers.Select(c => CveFindingsStore.Key(server.Id, c.Id)).ToHashSet();
+                    _store.PruneServer(server.Id, liveKeys);
                 }
             }
 
             _store.LastScanAt = DateTime.UtcNow;
 
-            // Persist first-seen for every current finding so the "open for N days" age survives restarts.
+            // Persist first-seen for every current finding so the "open for N days" age survives restarts,
+            // then drop first-seen rows for vulnerabilities that are gone AND older than the retention window.
             try
             {
-                var allIdentities = _store.GetAll()
+                var current = _store.GetAll()
                     .SelectMany(r => r.Findings)
-                    .Select(f => (f.IdentityKey, f.CveId));
-                await ageStore.RecordSeenAsync(allIdentities, ct);
+                    .Select(f => (f.IdentityKey, f.CveId))
+                    .ToList();
+                await ageStore.RecordSeenAsync(current, ct);
+                var liveKeys = current.Select(x => x.IdentityKey).ToHashSet();
+                await ageStore.PruneStaleAsync(liveKeys, DateTime.UtcNow.AddDays(-30), ct);
             }
-            catch (Exception ex) { _logger.LogDebug(ex, "Recording CVE first-seen failed"); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Recording/pruning CVE first-seen failed"); }
 
             // Persist results + last-scan time so a restart doesn't trigger a re-scan or re-notify.
             await _store.SaveAsync();
@@ -240,6 +262,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
         finally
         {
             _store.IsScanning = false;
+            Interlocked.Exchange(ref _scanning, 0);
         }
     }
 

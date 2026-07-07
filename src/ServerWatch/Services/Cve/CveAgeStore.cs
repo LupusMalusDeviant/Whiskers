@@ -13,6 +13,11 @@ public interface ICveAgeStore
 
     /// <summary>IdentityKey → first-seen timestamp, for computing age.</summary>
     Task<IReadOnlyDictionary<string, DateTime>> GetFirstSeenAsync(CancellationToken ct = default);
+
+    /// <summary>Deletes first-seen rows whose IdentityKey is absent from <paramref name="liveKeys"/> AND
+    /// whose FirstSeenUtc is older than <paramref name="olderThanUtc"/> — bounds CveFirstSeen growth across
+    /// container recreates without losing the age of anything still present or recent.</summary>
+    Task PruneStaleAsync(IReadOnlySet<string> liveKeys, DateTime olderThanUtc, CancellationToken ct = default);
 }
 
 public sealed class CveAgeStore : ICveAgeStore
@@ -75,6 +80,28 @@ public sealed class CveAgeStore : ICveAgeStore
         {
             _logger?.LogWarning(ex, "Failed to read CVE first-seen timestamps");
             return new Dictionary<string, DateTime>();
+        }
+    }
+
+    public async Task PruneStaleAsync(IReadOnlySet<string> liveKeys, DateTime olderThanUtc, CancellationToken ct = default)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            // Only rows past the retention cutoff are candidates; of those, delete the ones no longer present.
+            var candidates = await db.CveFirstSeen
+                .Where(e => e.FirstSeenUtc < olderThanUtc)
+                .ToListAsync(ct);
+            var stale = candidates.Where(e => !liveKeys.Contains(e.IdentityKey)).ToList();
+            if (stale.Count == 0) return;
+            db.CveFirstSeen.RemoveRange(stale);
+            await db.SaveChangesAsync(ct);
+            _logger?.LogInformation("Pruned {Count} stale CVE first-seen row(s)", stale.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to prune stale CVE first-seen rows");
         }
     }
 }

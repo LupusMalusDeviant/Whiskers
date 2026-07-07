@@ -135,6 +135,14 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-13** (⚠️ off-limits, per ausdrücklicher Freigabe 2026-07-07) — mTLS-Callback prüft zusätzlich den Hostnamen (`cert.MatchesHostname(server.TcpHost)`, `chainOk && hostnameOk`, fail-closed). Test beweist die Ablehnung eines gültig-signierten Certs mit falschem Host. **Deploy-Hinweis:** ein Server-Cert ohne zu `TcpHost` passenden SAN kann sich danach nicht mehr verbinden. _Dateien: `Services/Docker/DockerConnectionManager.cs`._
 
 **Verifikation Bean 8:** Build 0 Fehler; `dotnet test` 136/136 bestanden (neue Tests: `DockerConnectionFailureTests`, `ComposeFileParserPortTests`, `DockerMtlsHostnameTests`); App in Development gebootet — DI-Graph sauber (Interface-Signatur MIT-16 geändert). Prozess-/Tunnel-Pfade (MIT-17/18, NIED-9) durch Build + Boot + Review verifiziert.
+### ServerWatch-zcgp — CVE-Monitor (Scan-Race, Stale-Prune, Locale, Fail-Backoff)
+
+- **MIT-8** — atomares Scan-Gate (`Interlocked.CompareExchange`) statt Bool-Check-then-set → manueller Trigger und Background-Loop können keine überlappenden Voll-Scans mehr fahren; `_store.IsScanning` bleibt nur UI-Indikator. _Dateien: `Services/Cve/CveMonitorService.cs`._
+- **MIT-9** — Phantom-Prune: nach den Container-Scans je Server werden gespeicherte Container-Keys, die nicht mehr existieren, entfernt (`PruneServer`, OS-Key nie); löst das unbegrenzte Wachstum in Store/UI/`cve-findings.json` bei Recreates. Persist-Pfad jetzt injizierbar (Testbarkeit). _Dateien: `Services/Cve/CveFindingsStore.cs`, `ICveFindingsStore.cs`, `CveMonitorService.cs`._
+- **MIT-13** — beide apt-Kommandos mit `LC_ALL=C.UTF-8` → auf deutschen Hosts nicht mehr stillschweigend 0 Findings. _Dateien: `Services/Cve/OsCveScanner.cs`._
+- **NIED-5** — (a) 15-min-Backoff nach Fehlzyklus statt vollem Intervall; (b) `PruneStaleAsync` löscht `CveFirstSeen`-Zeilen, deren Key weg ist UND älter als 30 Tage (temp-SQLite-Test beweist: nur stale+alt). _Dateien: `Services/Cve/CveMonitorService.cs`, `CveAgeStore.cs`._
+
+**Verifikation Bean 9:** Build 0 Fehler; `dotnet test` 128/128 (neue Tests: `CveFindingsStorePruneTests`, `OsCveScannerLocaleTests`, `CveAgePruneTests`); App in Development gebootet, DI-Graph sauber. Keep-Previous-on-Failure (HOCH-7) unverändert — kein falscher „clean"-Zustand.
 
 ## Verifikation
 

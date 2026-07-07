@@ -12,10 +12,9 @@ namespace ServerWatch.Services.Cve;
 /// </summary>
 public class CveFindingsStore : ICveFindingsStore
 {
-    private const string PersistPath = "/app/data/cve-findings.json";
-
     private readonly ConcurrentDictionary<string, CveScanResult> _results = new();
     private readonly ILogger<CveFindingsStore>? _logger;
+    private readonly string _persistPath;
 
     public DateTime? LastScanAt { get; set; }
     public bool IsScanning { get; set; }
@@ -26,14 +25,15 @@ public class CveFindingsStore : ICveFindingsStore
         public DateTime? LastScanAt { get; set; }
     }
 
-    public CveFindingsStore(ILogger<CveFindingsStore>? logger = null)
+    public CveFindingsStore(ILogger<CveFindingsStore>? logger = null, string? persistPath = null)
     {
         _logger = logger;
+        _persistPath = persistPath ?? "/app/data/cve-findings.json";
         try
         {
-            if (File.Exists(PersistPath))
+            if (File.Exists(_persistPath))
             {
-                var model = JsonSerializer.Deserialize<PersistModel>(File.ReadAllText(PersistPath));
+                var model = JsonSerializer.Deserialize<PersistModel>(File.ReadAllText(_persistPath));
                 if (model is not null)
                 {
                     foreach (var kv in model.Results) _results[kv.Key] = kv.Value;
@@ -51,15 +51,15 @@ public class CveFindingsStore : ICveFindingsStore
     {
         try
         {
-            var dir = Path.GetDirectoryName(PersistPath);
+            var dir = Path.GetDirectoryName(_persistPath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             var model = new PersistModel { Results = new Dictionary<string, CveScanResult>(_results), LastScanAt = LastScanAt };
-            await File.WriteAllTextAsync(PersistPath, JsonSerializer.Serialize(model));
+            await File.WriteAllTextAsync(_persistPath, JsonSerializer.Serialize(model));
         }
         catch (Exception ex) { _logger?.LogWarning(ex, "Failed to persist CVE findings"); }
     }
 
-    private static string Key(string serverId, string? containerId)
+    public static string Key(string serverId, string? containerId)
         => $"{serverId}:{containerId ?? "os"}";
 
     public void Set(CveScanResult result)
@@ -76,6 +76,23 @@ public class CveFindingsStore : ICveFindingsStore
 
     public void Remove(string serverId, string? containerId)
         => _results.TryRemove(Key(serverId, containerId), out _);
+
+    /// <summary>Removes stored CONTAINER results of a server whose key is not in <paramref name="liveKeys"/>
+    /// (a recreated/deleted container leaves a phantom entry otherwise). The OS target key is never pruned.
+    /// Only call with an authoritative live set (a successful container listing). Returns the count removed.</summary>
+    public int PruneServer(string serverId, IReadOnlySet<string> liveKeys)
+    {
+        var osKey = Key(serverId, null);
+        var removed = 0;
+        foreach (var kv in _results.ToArray())
+        {
+            if (kv.Value.ServerId != serverId) continue;
+            if (kv.Key == osKey) continue;            // never prune the OS target
+            if (liveKeys.Contains(kv.Key)) continue;  // still present
+            if (_results.TryRemove(kv.Key, out _)) removed++;
+        }
+        return removed;
+    }
 
     public void Clear() => _results.Clear();
 
