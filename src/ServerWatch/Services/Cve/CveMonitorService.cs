@@ -47,6 +47,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
 
         while (!ct.IsCancellationRequested)
         {
+            var cycleFailed = false;
             try
             {
                 if (_settings.CurrentValue.Enabled)
@@ -65,12 +66,20 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "CVE monitor cycle failed");
+                cycleFailed = true;
             }
 
-            // Sleep until the next scan is due (based on the last scan time), not a flat interval from start.
             var iv = TimeSpan.FromHours(Math.Max(1, _settings.CurrentValue.CheckIntervalHours));
-            var wait = _store.LastScanAt is { } l ? iv - (DateTime.UtcNow - l) : iv;
-            if (wait < TimeSpan.FromMinutes(1)) wait = iv;
+            TimeSpan wait;
+            if (cycleFailed)
+                // After a failure, retry soon instead of waiting the full interval.
+                wait = TimeSpan.FromMinutes(15);
+            else
+            {
+                // Sleep until the next scan is due (based on the last scan time), not a flat interval from start.
+                wait = _store.LastScanAt is { } l ? iv - (DateTime.UtcNow - l) : iv;
+                if (wait < TimeSpan.FromMinutes(1)) wait = iv;
+            }
             try { await Task.Delay(wait, ct); }
             catch (OperationCanceledException) { break; }
         }
@@ -214,15 +223,19 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
 
             _store.LastScanAt = DateTime.UtcNow;
 
-            // Persist first-seen for every current finding so the "open for N days" age survives restarts.
+            // Persist first-seen for every current finding so the "open for N days" age survives restarts,
+            // then drop first-seen rows for vulnerabilities that are gone AND older than the retention window.
             try
             {
-                var allIdentities = _store.GetAll()
+                var current = _store.GetAll()
                     .SelectMany(r => r.Findings)
-                    .Select(f => (f.IdentityKey, f.CveId));
-                await ageStore.RecordSeenAsync(allIdentities, ct);
+                    .Select(f => (f.IdentityKey, f.CveId))
+                    .ToList();
+                await ageStore.RecordSeenAsync(current, ct);
+                var liveKeys = current.Select(x => x.IdentityKey).ToHashSet();
+                await ageStore.PruneStaleAsync(liveKeys, DateTime.UtcNow.AddDays(-30), ct);
             }
-            catch (Exception ex) { _logger.LogDebug(ex, "Recording CVE first-seen failed"); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Recording/pruning CVE first-seen failed"); }
 
             // Persist results + last-scan time so a restart doesn't trigger a re-scan or re-notify.
             await _store.SaveAsync();
