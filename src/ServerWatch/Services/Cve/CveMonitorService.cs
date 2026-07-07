@@ -76,10 +76,14 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
         }
     }
 
+    // Atomic scan gate (0 = idle, 1 = scanning). A manual trigger and the background loop must never run
+    // overlapping full scans; the bool _store.IsScanning is kept only as the UI indicator.
+    private int _scanning;
+
     /// <summary>Run a single scan cycle across all enabled servers. Public for manual triggers.</summary>
     public async Task RunOneCycleAsync(CancellationToken ct = default)
     {
-        if (_store.IsScanning)
+        if (Interlocked.CompareExchange(ref _scanning, 1, 0) != 0)
         {
             _logger.LogInformation("CVE scan cycle already in progress — skipping");
             return;
@@ -240,6 +244,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
         finally
         {
             _store.IsScanning = false;
+            Interlocked.Exchange(ref _scanning, 0);
         }
     }
 
