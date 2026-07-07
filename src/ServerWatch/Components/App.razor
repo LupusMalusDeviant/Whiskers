@@ -38,14 +38,15 @@
 <body>
     <Routes @rendermode="InteractiveServer" />
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    @* Vendored locally (no CDN dependency, works air-gapped, no supply-chain injection) — see wwwroot/js/vendor/. *@
+    <script src="js/vendor/xterm.min.js"></script>
+    <script src="js/vendor/xterm-addon-fit.min.js"></script>
+    <script src="js/vendor/xterm-addon-web-links.min.js"></script>
+    <link rel="stylesheet" href="js/vendor/xterm.css" />
     <script src="js/terminal-interop.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+    <script src="js/vendor/vis-network.min.js"></script>
     <script src="js/graph-interop.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="js/vendor/html2canvas.min.js"></script>
     <script src="js/theme-interop.js"></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script>
