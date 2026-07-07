@@ -73,6 +73,16 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
         var rules = await db.LogAlertRules.Where(r => r.Enabled).ToListAsync(ct);
         if (!rules.Any()) return;
 
+        // Compile the regex rules once per cycle (keyed by pattern) instead of re-parsing each pattern
+        // for every log line of every container. Invalid patterns are dropped here with a warning.
+        var compiledRegexes = new Dictionary<string, Regex>();
+        foreach (var r in rules.Where(r => r.IsRegex))
+        {
+            if (compiledRegexes.ContainsKey(r.Pattern)) continue;
+            try { compiledRegexes[r.Pattern] = new Regex(r.Pattern, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1)); }
+            catch (ArgumentException ex) { _logger.LogWarning(ex, "Invalid log-alert regex '{Pattern}' — skipped", r.Pattern); }
+        }
+
         var containers = await _docker.ListContainersAsync(all: false);
 
         foreach (var container in containers)
@@ -108,7 +118,7 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
                     foreach (var line in lines)
                     {
                         bool hit = rule.IsRegex
-                            ? Regex.IsMatch(line, rule.Pattern, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1))
+                            ? compiledRegexes.TryGetValue(rule.Pattern, out var rx) && rx.IsMatch(line)
                             : line.Contains(rule.Pattern, StringComparison.OrdinalIgnoreCase);
 
                         if (hit)
