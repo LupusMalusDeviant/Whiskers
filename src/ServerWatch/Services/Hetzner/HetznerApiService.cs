@@ -81,6 +81,25 @@ public class HetznerApiService : IHetznerService
         throw new HttpRequestException(message, null, response.StatusCode);
     }
 
+    // Hetzner paginates lists at max 50/page. Fetch every page (page=1,2,…) until a short page, so an
+    // account with >50 servers/snapshots/types is returned in full — a partial list would let the cloud
+    // name-fallback resolver miss existing servers. Bounded by a sane page cap.
+    private async Task<List<TItem>> ListAllPagesAsync<TResponse, TItem>(
+        string token, string basePath, Func<TResponse, List<TItem>> select) where TResponse : new()
+    {
+        const int perPage = 50;
+        var all = new List<TItem>();
+        for (var page = 1; page <= 100; page++)
+        {
+            var sep = basePath.Contains('?') ? "&" : "?";
+            var resp = await SendAsync<TResponse>(token, HttpMethod.Get, $"{basePath}{sep}page={page}&per_page={perPage}");
+            var items = select(resp);
+            all.AddRange(items);
+            if (items.Count < perPage) break;
+        }
+        return all;
+    }
+
     public async Task<bool> TestConnectionAsync(string token)
     {
         try
@@ -95,8 +114,8 @@ public class HetznerApiService : IHetznerService
         }
     }
 
-    public async Task<List<HetznerServer>> ListServersAsync(string token)
-        => (await SendAsync<HetznerServersResponse>(token, HttpMethod.Get, "/servers?per_page=50&sort=name")).Servers;
+    public Task<List<HetznerServer>> ListServersAsync(string token)
+        => ListAllPagesAsync<HetznerServersResponse, HetznerServer>(token, "/servers?sort=name", r => r.Servers);
 
     public async Task<HetznerServer?> GetServerAsync(string token, long id)
     {
@@ -125,8 +144,8 @@ public class HetznerApiService : IHetznerService
         => await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/create_image",
             new { description = string.IsNullOrWhiteSpace(description) ? null : description, type = "snapshot" });
 
-    public async Task<List<HetznerImage>> ListSnapshotsAsync(string token)
-        => (await SendAsync<HetznerImagesResponse>(token, HttpMethod.Get, "/images?type=snapshot&per_page=50&sort=created:desc")).Images;
+    public Task<List<HetznerImage>> ListSnapshotsAsync(string token)
+        => ListAllPagesAsync<HetznerImagesResponse, HetznerImage>(token, "/images?type=snapshot&sort=created:desc", r => r.Images);
 
     public async Task<HetznerImage?> GetImageAsync(string token, long imageId)
     {
@@ -149,8 +168,8 @@ public class HetznerApiService : IHetznerService
     public async Task<HetznerAction?> DisableBackupsAsync(string token, long id)
         => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/disable_backup")).Action;
 
-    public async Task<List<HetznerServerType>> ListServerTypesAsync(string token)
-        => (await SendAsync<HetznerServerTypesResponse>(token, HttpMethod.Get, "/server_types?per_page=100")).ServerTypes;
+    public Task<List<HetznerServerType>> ListServerTypesAsync(string token)
+        => ListAllPagesAsync<HetznerServerTypesResponse, HetznerServerType>(token, "/server_types", r => r.ServerTypes);
 
     public async Task<HetznerAction?> ChangeServerTypeAsync(string token, long id, string serverType, bool upgradeDisk)
         => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/change_type",
