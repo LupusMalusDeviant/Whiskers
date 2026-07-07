@@ -14,8 +14,6 @@ namespace ServerWatch.Services.Agent;
 /// here (stateful, hence not in the stateless engine).</summary>
 public sealed class AgentSession : IAgentSession
 {
-    private const int MaxTokens = 1024;
-
     private readonly AgentContext _context;
     private readonly IAgentLlmProvider _provider;
     private readonly IAgentToolCatalog _catalog;
@@ -71,7 +69,7 @@ public sealed class AgentSession : IAgentSession
         {
             State = AgentRunState.Thinking;
             var request = new AgentCompletionRequest(
-                _settings.Model, _systemPrompt, _history.ToList(), tools, MaxTokens, 0.2, AgentToolChoice.Auto);
+                _settings.Model, _systemPrompt, _history.ToList(), tools, _settings.MaxTokens, 0.2, AgentToolChoice.Auto);
 
             var text = new StringBuilder();
             var calls = new List<AgentToolCall>();
