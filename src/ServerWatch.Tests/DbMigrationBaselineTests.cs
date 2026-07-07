@@ -97,6 +97,24 @@ public sealed class DbMigrationBaselineTests : IDisposable
     }
 
     [Fact]
+    public async Task AfterInit_JournalModeIsWal()
+    {
+        var path = NewDbPath();
+
+        await using (var db = Ctx(path))
+            await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        // WAL persists in the database header, so a fresh connection sees it too.
+        await using var check = Ctx(path);
+        var conn = check.Database.GetDbConnection();
+        await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA journal_mode;";
+        var mode = (string?)await cmd.ExecuteScalarAsync();
+        Assert.Equal("wal", mode, ignoreCase: true);
+    }
+
+    [Fact]
     public async Task SecondRun_Idempotent()
     {
         var path = NewDbPath();

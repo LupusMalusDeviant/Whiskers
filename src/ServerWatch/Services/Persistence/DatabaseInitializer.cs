@@ -47,6 +47,11 @@ public static class DatabaseInitializer
             // after InitialCreate (none today). Up-to-date DB: no-op.
             await db.Database.MigrateAsync(ct);
 
+            // OPT-1: WAL lets readers (UI/agent) run concurrently with the 30s metric writes instead of
+            // blocking on "database is locked". journal_mode=WAL persists in the DB header; synchronous is
+            // best-effort per connection. Must run outside a transaction — none is active here.
+            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", ct);
+
             var total = (await db.Database.GetAppliedMigrationsAsync(ct)).Count();
             logger.LogInformation("Metrics DB ready ({Count} migration(s) applied).", total);
         }
