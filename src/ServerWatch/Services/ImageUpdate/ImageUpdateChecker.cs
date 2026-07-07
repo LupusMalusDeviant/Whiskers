@@ -129,6 +129,12 @@ public class ImageUpdateChecker : BackgroundService
         }
     }
 
+    /// <summary>True for a digest-pinned image (<c>repo@sha256:…</c>) — a pin has no "newer" version.
+    /// The old guard (<c>&amp;&amp; !image.Contains(':')</c>) could never fire because <c>@sha256:</c> itself
+    /// contains a colon.</summary>
+    public static bool IsDigestPinned(string image)
+        => image.Contains("@sha256:", StringComparison.Ordinal);
+
     private async Task<ImageUpdateInfo?> CheckSingleImageAsync(
         IDockerService docker, ContainerInfo container, CancellationToken ct)
     {
@@ -136,8 +142,8 @@ public class ImageUpdateChecker : BackgroundService
         {
             var image = container.Image;
 
-            // Skip images with digest-only references (no tag to check)
-            if (image.Contains("@sha256:") && !image.Contains(':'))
+            // Skip digest-pinned images — a pin is a pin, there's no newer version to check.
+            if (IsDigestPinned(image))
                 return null;
 
             // Get local digest
