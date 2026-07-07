@@ -55,6 +55,19 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 - **KRIT-3 Schritt 2** — Fallback-Authorization-Policy: könnte `/mcp` brechen; Auth-Middleware Off-Limits.
 - **HOCH-12 Teil 2** — secretlose Webhooks ablehnen: braucht Secret-Management-UI, sonst Feature unbrauchbar.
 
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-ekuc — Docker/SSH-Lifecycle (Client-Invalidation, Tunnel, Cancel, Compose-Ports, mTLS)
+
+- **MIT-16** — instanz-bewusste Client-Invalidierung (`InvalidateClient(serverId, ifCurrent)` via atomarem `TryRemove(KeyValuePair)`), sodass ein Retry keinen frisch aufgebauten Client killt; `ObjectDisposedException` zählt jetzt als Connection-Failure (Retry). _Dateien: `Services/Docker/DockerConnectionManager.cs`, `IDockerConnectionManager.cs`._
+- **MIT-17** — SSH-Tunnel-stderr wird für die Lebensdauer im Hintergrund gedraint (redigiert), damit ein voller Pipe-Buffer den „lebendigen" Tunnel nicht einfriert. _Dateien: `Services/Docker/SshTunnelManager.cs`._
+- **MIT-18** — externer Cancel (nicht nur Timeout) killt jetzt den Prozessbaum + observed die Read-Tasks; „cancelled"-Result; Timeout-Log redigiert. _Dateien: `Services/Server/HostCommandExecutor.cs`._
+- **MIT-19** — Compose-Parser behandelt `ip:host:container` (Bind-IP → `PortBinding.HostIP`, neues `DeploymentRequest.PortBindIps`) und Einzelport; malformte Syntax schlägt laut fehl statt stillem Drop. _Dateien: `Services/Deployment/ComposeFileParser.cs`, `Models/DeploymentRequest.cs`, `Services/Docker/DockerService.cs`._
+- **NIED-9** — Port-Wahl + Spawn + Readiness in einer 3-Versuch-Retry-Schleife bei Bind-Race (TOCTOU). _Dateien: `Services/Docker/SshTunnelManager.cs`._
+- **NIED-13** (⚠️ off-limits, per ausdrücklicher Freigabe 2026-07-07) — mTLS-Callback prüft zusätzlich den Hostnamen (`cert.MatchesHostname(server.TcpHost)`, `chainOk && hostnameOk`, fail-closed). Test beweist die Ablehnung eines gültig-signierten Certs mit falschem Host. **Deploy-Hinweis:** ein Server-Cert ohne zu `TcpHost` passenden SAN kann sich danach nicht mehr verbinden. _Dateien: `Services/Docker/DockerConnectionManager.cs`._
+
+**Verifikation Bean 8:** Build 0 Fehler; `dotnet test` 136/136 bestanden (neue Tests: `DockerConnectionFailureTests`, `ComposeFileParserPortTests`, `DockerMtlsHostnameTests`); App in Development gebootet — DI-Graph sauber (Interface-Signatur MIT-16 geändert). Prozess-/Tunnel-Pfade (MIT-17/18, NIED-9) durch Build + Boot + Review verifiziert.
+
 ## Verifikation
 
 - `dotnet build src/ServerWatch/ServerWatch.csproj` → 0 Fehler.
