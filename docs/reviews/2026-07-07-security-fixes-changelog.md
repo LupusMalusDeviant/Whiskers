@@ -55,6 +55,17 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 - **KRIT-3 Schritt 2** — Fallback-Authorization-Policy: könnte `/mcp` brechen; Auth-Middleware Off-Limits.
 - **HOCH-12 Teil 2** — secretlose Webhooks ablehnen: braucht Secret-Management-UI, sonst Feature unbrauchbar.
 
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-zcgp — CVE-Monitor (Scan-Race, Stale-Prune, Locale, Fail-Backoff)
+
+- **MIT-8** — atomares Scan-Gate (`Interlocked.CompareExchange`) statt Bool-Check-then-set → manueller Trigger und Background-Loop können keine überlappenden Voll-Scans mehr fahren; `_store.IsScanning` bleibt nur UI-Indikator. _Dateien: `Services/Cve/CveMonitorService.cs`._
+- **MIT-9** — Phantom-Prune: nach den Container-Scans je Server werden gespeicherte Container-Keys, die nicht mehr existieren, entfernt (`PruneServer`, OS-Key nie); löst das unbegrenzte Wachstum in Store/UI/`cve-findings.json` bei Recreates. Persist-Pfad jetzt injizierbar (Testbarkeit). _Dateien: `Services/Cve/CveFindingsStore.cs`, `ICveFindingsStore.cs`, `CveMonitorService.cs`._
+- **MIT-13** — beide apt-Kommandos mit `LC_ALL=C.UTF-8` → auf deutschen Hosts nicht mehr stillschweigend 0 Findings. _Dateien: `Services/Cve/OsCveScanner.cs`._
+- **NIED-5** — (a) 15-min-Backoff nach Fehlzyklus statt vollem Intervall; (b) `PruneStaleAsync` löscht `CveFirstSeen`-Zeilen, deren Key weg ist UND älter als 30 Tage (temp-SQLite-Test beweist: nur stale+alt). _Dateien: `Services/Cve/CveMonitorService.cs`, `CveAgeStore.cs`._
+
+**Verifikation Bean 9:** Build 0 Fehler; `dotnet test` 128/128 (neue Tests: `CveFindingsStorePruneTests`, `OsCveScannerLocaleTests`, `CveAgePruneTests`); App in Development gebootet, DI-Graph sauber. Keep-Previous-on-Failure (HOCH-7) unverändert — kein falscher „clean"-Zustand.
+
 ## Verifikation
 
 - `dotnet build src/ServerWatch/ServerWatch.csproj` → 0 Fehler.
