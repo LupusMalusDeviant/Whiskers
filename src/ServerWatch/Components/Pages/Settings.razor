@@ -902,6 +902,13 @@ else
 
     private async Task SaveWhitelist()
     {
+        // An enabled whitelist with zero entries denies everyone (fail-closed) — refuse to save that state
+        // so an admin can't accidentally lock the whole instance (including themselves) out.
+        if (_whitelistEnabled && _whitelistEmails.Count == 0)
+        {
+            Snackbar.Add("Eine aktivierte Whitelist ohne Einträge würde alle aussperren. Bitte mindestens eine E-Mail hinzufügen oder die Whitelist deaktivieren.", Severity.Error);
+            return;
+        }
         _savingWhitelist = true;
         try
         {

@@ -52,8 +52,12 @@ public static class McpPermissionCheck
     /// <summary>Maps the authenticated web user's AppRole to an MCP permission level string.</summary>
     private static string WebUserLevel(HttpContext httpContext)
     {
+        // In-process agent tool execution: enforce the caller's real level from the claim, never admin.
+        if (httpContext.User.Identity?.AuthenticationType == AuthConstants.AgentSyntheticScheme)
+            return McpPermissionLevels.Normalize(httpContext.User.FindFirst(AuthConstants.McpLevelClaim)?.Value);
+
         // AUTH_DISABLED trusted-LAN mode → synthetic Admin (matches CurrentUserService).
-        if (httpContext.User.Identity?.AuthenticationType == "AuthDisabled")
+        if (httpContext.User.Identity?.AuthenticationType == AuthConstants.AuthDisabledScheme)
             return McpPermissionLevels.Admin;
 
         var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;

@@ -41,8 +41,10 @@ public class CveFinding
     [JsonIgnore]
     public bool HasFix => !string.IsNullOrWhiteSpace(FixedVersion);
 
-    /// <summary>Stable identity key for diffing (same vuln in same place across scans).</summary>
+    /// <summary>Stable identity key for diffing (same vuln in same place across scans). Keyed on the
+    /// container NAME, not the ID: a container recreate (every image update) changes the ID but keeps the
+    /// name, so an ID-based key would reset the persisted age and re-notify every CVE on each update.</summary>
     [JsonIgnore]
     public string IdentityKey =>
-        $"{ServerId}|{Source}|{ContainerId ?? "-"}|{Package}|{CveId}";
+        $"{ServerId}|{Source}|{ContainerName ?? "-"}|{Package}|{CveId}";
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using ServerWatch.Models;
 using ServerWatch.Models.Agent;
 
 namespace ServerWatch.Services.Agent.Approvals;
@@ -22,8 +23,11 @@ public interface IApprovalStore
 
     Approval? Get(string approvalId);
 
-    /// <summary>Approve/reject a pending approval. Invokes its resolver. Returns false if not pending.</summary>
-    Task<bool> ResolveAsync(string approvalId, bool approved, string? resolvedBy);
+    /// <summary>Approve/reject a pending approval. Invokes its resolver. Returns false if not pending.
+    /// When <paramref name="resolverLevel"/> is supplied (read/write/admin), the resolver must hold at
+    /// least the approval's own level — a lower-privileged user cannot approve a higher-privileged action.
+    /// Pass null only for system-internal resolves (expiry/cancel).</summary>
+    Task<bool> ResolveAsync(string approvalId, bool approved, string? resolvedBy, string? resolverLevel = null);
 
     /// <summary>Cancels any pending approvals for a session that ended/aborted (resolver gets false).</summary>
     Task CancelForSessionAsync(string sessionId);
@@ -87,10 +91,20 @@ public sealed class ApprovalStore : IApprovalStore
     public Approval? Get(string approvalId) =>
         _entries.TryGetValue(approvalId, out var e) ? e.Approval : null;
 
-    public async Task<bool> ResolveAsync(string approvalId, bool approved, string? resolvedBy)
+    public async Task<bool> ResolveAsync(string approvalId, bool approved, string? resolvedBy, string? resolverLevel = null)
     {
         if (!_entries.TryGetValue(approvalId, out var entry) || entry.Approval.Status != ApprovalStatus.Pending)
             return false;
+
+        // Approving is itself a privileged action: a resolver may only approve an action whose level it
+        // could perform. Rejecting is always allowed (it only makes things safer).
+        if (approved && resolverLevel != null
+            && !McpPermissionLevels.HasAccess(resolverLevel, entry.Approval.Level))
+        {
+            _logger?.LogWarning("Approval {Id} ({Tool}, level={Level}) approval denied: resolver level {ResolverLevel} is insufficient",
+                approvalId, entry.Approval.ToolName, entry.Approval.Level, resolverLevel);
+            return false;
+        }
 
         Mark(entry.Approval, approved ? ApprovalStatus.Approved : ApprovalStatus.Rejected, resolvedBy);
         await SafeResolve(entry, approved);

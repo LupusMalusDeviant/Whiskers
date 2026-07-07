@@ -55,10 +55,11 @@ public class AgentTools
                     sb.AppendLine($"[{(t.Result.IsError ? "Tool-Fehler" : "Tool")}] {Truncate(t.Result.Content)}");
                     break;
                 case AgentEvent.ConfirmationRequired c:
-                    // MCP origin: the external human is already steering via their own agent, so
-                    // we auto-confirm here. Deny rules / trigger ceiling still apply hard.
-                    await session.ResolveConfirmationAsync(c.Call.Id, true);
-                    sb.AppendLine($"[auto-bestätigt: {c.Call.Name}]");
+                    // A Confirm verdict marks an action above the caller's autonomous level. There is no
+                    // interactive human on the MCP path, so it is denied — never auto-approved. The caller
+                    // must perform the action explicitly (e.g. via the web UI) if it is intended.
+                    await session.ResolveConfirmationAsync(c.Call.Id, false);
+                    sb.AppendLine($"[Bestätigung erforderlich, nicht autonom ausgeführt: {c.Call.Name}]");
                     break;
                 case AgentEvent.Failed f:
                     sb.AppendLine($"[Fehler] {f.Message}");

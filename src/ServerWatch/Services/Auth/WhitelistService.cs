@@ -53,8 +53,12 @@ public class WhitelistService : IWhitelistService
         _lock.EnterReadLock();
         try
         {
-            if (!_cached.Enabled || _cached.Emails.Count == 0)
+            // Not enabled = whitelist off, allow everyone. Enabled but empty = deny all (an admin who
+            // cleared the last entry must not silently open the instance to every Google account).
+            if (!_cached.Enabled)
                 return true;
+            if (_cached.Emails.Count == 0)
+                return false;
 
             return _cached.Emails.Contains(email, StringComparer.OrdinalIgnoreCase);
         }
@@ -83,9 +87,17 @@ public class WhitelistService : IWhitelistService
 
     public async Task SaveWhitelistAsync(WhitelistData data)
     {
-        await _store.SaveAsync(data);
-        SetCache(data);
-        _logger.LogInformation("Whitelist updated: {Count} emails, enabled={Enabled}", data.Emails.Count, data.Enabled);
+        // Deep-copy before persisting/caching so the enforcement snapshot never aliases a caller-owned
+        // list (e.g. the Settings page's live edit buffer). Otherwise later, unsaved UI edits would take
+        // effect immediately and a concurrent mutation could throw during the auth-path re-check.
+        var copy = new WhitelistData
+        {
+            Enabled = data.Enabled,
+            Emails = new List<string>(data.Emails)
+        };
+        await _store.SaveAsync(copy);
+        SetCache(copy);
+        _logger.LogInformation("Whitelist updated: {Count} emails, enabled={Enabled}", copy.Emails.Count, copy.Enabled);
     }
 
     private void SetCache(WhitelistData data)

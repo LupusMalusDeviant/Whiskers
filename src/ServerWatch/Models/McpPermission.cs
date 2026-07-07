@@ -41,6 +41,16 @@ public static class McpPermissionLevels
     public static bool HasAccess(string keyLevel, string requiredLevel)
         => GetRank(keyLevel) >= GetRank(requiredLevel);
 
+    /// <summary>Coerces arbitrary (config-supplied) level text to a known level. Unknown/empty values
+    /// fail safe to the least privilege (read), so a malformed ceiling can never widen access.</summary>
+    public static string Normalize(string? level) => (level?.Trim().ToLowerInvariant()) switch
+    {
+        Read => Read,
+        Write => Write,
+        Admin => Admin,
+        _ => Read
+    };
+
     public static readonly Dictionary<string, string> DefaultToolLevels = new()
     {
         // Read tools

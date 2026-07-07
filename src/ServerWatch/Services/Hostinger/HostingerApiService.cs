@@ -141,5 +141,14 @@ public class HostingerApiService : IHostingerService
     public Task CreateSnapshotAsync(string token, long id) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/snapshot");
     public Task DeleteSnapshotAsync(string token, long id) => SendAsync(token, HttpMethod.Delete, $"/virtual-machines/{id}/snapshot");
 
-    public Task<string> GetMetricsRawAsync(string token, long id) => SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}/metrics");
+    public Task<string> GetMetricsRawAsync(string token, long id)
+    {
+        // date_from/date_to are REQUIRED by the Hostinger metrics endpoint; without them the API rejects
+        // the request and every metrics call fails. Default to the last 24h.
+        var to = DateTime.UtcNow;
+        var from = to.AddHours(-24);
+        var q = $"?date_from={Uri.EscapeDataString(from.ToString("yyyy-MM-ddTHH:mm:ssZ"))}"
+              + $"&date_to={Uri.EscapeDataString(to.ToString("yyyy-MM-ddTHH:mm:ssZ"))}";
+        return SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}/metrics{q}");
+    }
 }

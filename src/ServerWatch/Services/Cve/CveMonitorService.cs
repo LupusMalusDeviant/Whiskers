@@ -132,9 +132,21 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                         if (osByServer.TryGetValue(server.Id, out var hostOs))
                             foreach (var f in osResult.Findings)
                                 f.OsContext ??= hostOs;
-                        var news = DiffFindings(prev, osResult);
-                        _store.Set(osResult);
-                        if (news.Count > 0) newPerTarget.Add((osResult, news));
+                        // Only overwrite stored results when the scan actually succeeded. A failed scan
+                        // returns an empty Findings list with Error set; storing it would wipe the good
+                        // previous results (target shows "clean") and make the next successful scan re-report
+                        // every existing CVE as new.
+                        if (osResult.Error is null)
+                        {
+                            var news = DiffFindings(prev, osResult);
+                            _store.Set(osResult);
+                            if (news.Count > 0) newPerTarget.Add((osResult, news));
+                        }
+                        else
+                        {
+                            _logger.LogWarning("OS CVE scan on {Server} failed ({Error}) — keeping previous results",
+                                server.Id, osResult.Error);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -166,9 +178,19 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                             var prev = _store.Get(server.Id, c.Id);
                             var result = await trivyScanner.ScanContainerImageAsync(
                                 server.Id, c.Id, c.Name, c.Image, ct);
-                            var news = DiffFindings(prev, result);
-                            _store.Set(result);
-                            if (news.Count > 0) newPerTarget.Add((result, news));
+                            // Keep previous results on scan failure (see OS branch above) to avoid a false
+                            // "clean" state and a re-notification storm on the next successful scan.
+                            if (result.Error is null)
+                            {
+                                var news = DiffFindings(prev, result);
+                                _store.Set(result);
+                                if (news.Count > 0) newPerTarget.Add((result, news));
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Container CVE scan for {Container} on {Server} failed ({Error}) — keeping previous results",
+                                    c.Name, server.Id, result.Error);
+                            }
                         }
                         catch (Exception ex)
                         {

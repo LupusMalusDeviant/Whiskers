@@ -10,6 +10,10 @@ public class DatabaseService : IDatabaseService
     private readonly IHostCommandExecutor _hostExec;
     private readonly ILogger<DatabaseService> _logger;
 
+    // Host-side directory the dumps are copied to. Same location volume backups use, so both survive a
+    // container recreate (the DB container's own /tmp does not).
+    private const string HostBackupDir = "/app/data/backups";
+
     public DatabaseService(IHostCommandExecutor hostExec, ILogger<DatabaseService> logger)
     {
         _hostExec = hostExec;
@@ -164,11 +168,28 @@ public class DatabaseService : IDatabaseService
         if (exitCode != 0)
             return (false, "", 0, stderr.Trim());
 
-        // Get file size
-        var (sizeOut, _, _) = await ExecInContainer(containerId, new[] { "stat", "-c", "%s", dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath }, serverId);
-        long.TryParse(sizeOut.Trim(), out var size);
+        // The dump currently lives in the container's /tmp, which is lost on the next container recreate
+        // (image update, redeploy). Copy it out to the host backup dir and delete the in-container copy so
+        // the backup is actually durable. The file name is derived from a timestamp + DB name; quote it.
+        var containerFile = dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath;
+        var hostFileName = dbType == DatabaseType.MongoDB ? $"{fileName}.gz" : fileName;
+        var hostPath = $"{HostBackupDir}/{hostFileName}";
+        var sid = serverId ?? "local";
 
-        return (true, dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath, size, "");
+        await _hostExec.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(HostBackupDir)}", TimeSpan.FromSeconds(5));
+        var cp = await _hostExec.ExecuteAsync(sid,
+            $"docker cp {ShellUtils.Quote(containerId + ":" + containerFile)} {ShellUtils.Quote(hostPath)} 2>&1",
+            TimeSpan.FromMinutes(5));
+        // Best-effort cleanup of the in-container temp file regardless of cp outcome.
+        await ExecInContainer(containerId, new[] { "rm", "-f", containerFile }, serverId);
+
+        if (!cp.Success)
+            return (false, "", 0, $"Dump erstellt, aber Kopieren auf den Host schlug fehl: {cp.Output} {cp.Error}".Trim());
+
+        var sizeResult = await _hostExec.ExecuteAsync(sid, $"stat -c %s {ShellUtils.Quote(hostPath)}", TimeSpan.FromSeconds(5));
+        long.TryParse(sizeResult.Output.Trim(), out var size);
+
+        return (true, hostPath, size, "");
     }
 
     private static string[] BuildQueryCommand(DatabaseType dbType, DatabaseCredentials creds, string query) => dbType switch

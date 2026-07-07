@@ -21,6 +21,11 @@ public class AiTrigger
     /// <summary>Name of the guardrail preset that governs the autonomous run.</summary>
     public string GuardrailPreset { get; set; } = "Standard";
 
+    /// <summary>Permission ceiling for the autonomous run (read/write/admin). The agent principal is
+    /// built with this level so the PrincipalCeilingRule caps trigger runs; it must never be silently
+    /// elevated to admin. Defaults to write — admin requires an explicit, deliberate choice.</summary>
+    public string MaxLevel { get; set; } = McpPermissionLevels.Write;
+
     /// <summary>Minimum seconds between runs of this trigger (per container) — avoids storms.</summary>
     public int CooldownSeconds { get; set; } = 300;
 }

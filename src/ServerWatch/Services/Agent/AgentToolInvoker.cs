@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ServerWatch.Models;
 using ServerWatch.Models.Agent;
 using ServerWatch.Services.Agent.Guardrails;
+using ServerWatch.Services.Auth;
 using ServerWatch.Services.Observability;
 using ServerWatch.Utils;
 
@@ -203,9 +204,10 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         return values;
     }
 
-    /// <summary>Synthetic context: AuthDisabled ⇒ the tool-internal CheckAccess calls pass through
-    /// (the real gate is the guardrail engine, strictly ≤ principal). The email claim makes the
-    /// agent visible in the audit log.</summary>
+    /// <summary>Synthetic context for tool-internal CheckAccess. Uses a dedicated AgentSynthetic scheme
+    /// carrying the caller's real MCP level as a claim — NOT the "AuthDisabled" admin scheme — so
+    /// tool-internal RBAC is enforced at the caller's level (defense in depth alongside the guardrail
+    /// engine). The email claim makes the agent visible in the audit log.</summary>
     private static DefaultHttpContext BuildSyntheticContext(IServiceProvider sp, AgentPrincipal principal)
     {
         var actor = "agent:" + (principal.UserEmail ?? principal.McpKeyId ?? principal.DisplayName);
@@ -213,7 +215,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             new Claim(ClaimTypes.Email, actor),
             new Claim(ClaimTypes.Name, principal.DisplayName),
-        }, authenticationType: "AuthDisabled");
+            new Claim(AuthConstants.McpLevelClaim, principal.PermissionLevel),
+        }, authenticationType: AuthConstants.AgentSyntheticScheme);
         return new DefaultHttpContext
         {
             RequestServices = sp,

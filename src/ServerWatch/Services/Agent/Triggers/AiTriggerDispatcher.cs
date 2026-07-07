@@ -13,10 +13,10 @@ using ServerWatch.Services.Notifications;
 namespace ServerWatch.Services.Agent.Triggers;
 
 /// <summary>Watches every notification event and, for each enabled matching trigger, runs the agent
-/// autonomously under the trigger's guardrail preset (admin principal so the preset is the ceiling),
-/// auto-approving confirmations up to what the preset allows. Result → notification + audit.
-/// Resolves its dependencies lazily from the root provider to avoid a DI cycle with the notification
-/// service that calls it.</summary>
+/// autonomously under the trigger's guardrail preset. The principal is capped at the trigger's
+/// configured MaxLevel (default write) so the PrincipalCeilingRule bounds the run; confirmations are
+/// denied, never auto-approved (no human is watching). Result → notification + audit. Resolves its
+/// dependencies lazily from the root provider to avoid a DI cycle with the notification service.</summary>
 public interface IAiTriggerDispatcher
 {
     Task OnEventAsync(NotificationEvent evt);
@@ -92,9 +92,11 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
                          ?? guardrails.Config.Presets.FirstOrDefault();
             var policy = preset?.Policy ?? GuardrailPolicy.SafeDefault();
 
-            // Admin principal so the chosen preset (not a role ceiling) is the limiter.
+            // The principal is capped at the trigger's configured ceiling (default write) so the
+            // PrincipalCeilingRule constrains an unattended run — never a synthetic admin.
+            var level = McpPermissionLevels.Normalize(t.MaxLevel);
             var principal = new AgentPrincipal(
-                AgentPrincipalKind.McpKey, $"ai-trigger:{t.Name}", McpPermissionLevels.Admin, null,
+                AgentPrincipalKind.McpKey, $"ai-trigger:{t.Name}", level, null,
                 McpKeyId: "ai-trigger");
             var ctx = new AgentContext(Guid.NewGuid().ToString("N"), principal, AgentOrigin.Trigger, policy);
 
@@ -108,7 +110,10 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
                         sb.Append(d.Text);
                         break;
                     case AgentEvent.ConfirmationRequired c:
-                        await session.ResolveConfirmationAsync(c.Call.Id, true);   // auto-approve up to preset level
+                        // An action that surfaces as Confirm is above the preset's autonomous level. No human
+                        // is watching a trigger run, so it must be denied, never auto-approved.
+                        await session.ResolveConfirmationAsync(c.Call.Id, false);
+                        sb.AppendLine($"[nicht autonom erlaubt: {c.Call.Name}]");
                         break;
                     case AgentEvent.Failed f:
                         sb.Append($"\n[Fehler] {f.Message}");

@@ -178,6 +178,9 @@ else
 
     private async Task TestWebhook(ServerWatch.Models.WebhookEntity wh)
     {
+        // Triggering runs restart/rebuild/deploy on the host — gate it behind Operator so a Viewer
+        // cannot fire host actions from the UI.
+        if (!Require(AppRole.Operator)) return;
         Snackbar.Add($"Webhook '{wh.Name}' wird getestet...", Severity.Info);
         var (success, output) = await WebhookService.TriggerAsync(wh.WebhookId);
         Snackbar.Add(success ? $"OK: {output}" : $"Fehler: {output}", success ? Severity.Success : Severity.Error);

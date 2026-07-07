@@ -510,7 +510,6 @@ app.MapGet("/logout", async (HttpContext ctx) =>
 
 // SignalR hubs
 app.MapHub<ContainerHub>("/hubs/containers");
-app.MapHub<TerminalHub>("/hubs/terminal");
 
 // Records external/direct MCP tool calls (callers that bypass the in-process agent) for Agent-History.
 app.UseMiddleware<ServerWatch.Mcp.McpCallLogMiddleware>();

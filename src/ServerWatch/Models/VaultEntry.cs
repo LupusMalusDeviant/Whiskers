@@ -14,4 +14,8 @@ public class VaultEntry
 public class VaultData
 {
     public List<VaultEntry> Entries { get; set; } = new();
+
+    /// <summary>Base64 random salt for the PBKDF2 key derivation. Generated once on first use and
+    /// persisted so the derived key is stable across restarts. Null on legacy vaults (pre-KDF).</summary>
+    public string? KdfSalt { get; set; }
 }

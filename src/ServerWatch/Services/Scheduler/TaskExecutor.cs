@@ -84,8 +84,8 @@ public class TaskExecutor : ITaskExecutor
 
         if (!success) return (false, error);
 
-        // Retention cleanup
-        await ApplyRetention(task, config);
+        // Retention cleanup (pass the resolved DB name — config["database"] may have been empty)
+        await ApplyRetention(task, config, database);
 
         return (true, $"DB backup: {filePath} ({sizeBytes / 1024}KB)");
     }
@@ -128,7 +128,7 @@ public class TaskExecutor : ITaskExecutor
         return (result.Success, result.Success ? $"Cleanup done:\n{result.Output}" : result.Error);
     }
 
-    private async Task ApplyRetention(ScheduledTaskEntity task, Dictionary<string, string> config)
+    private async Task ApplyRetention(ScheduledTaskEntity task, Dictionary<string, string> config, string? dbName = null)
     {
         try
         {
@@ -137,10 +137,25 @@ public class TaskExecutor : ITaskExecutor
 
             if (task.TaskType == ScheduledTaskType.VolumeBackup && !string.IsNullOrEmpty(task.TargetId))
             {
-                var backups = await _backupService.ListBackupsAsync(task.ServerId, task.TargetId);
+                // Scope to this server so retention never touches another host's backups of a same-named volume.
+                var backups = await _backupService.ListBackupsAsync(task.ServerId ?? "local", task.TargetId);
                 var toDelete = backups.OrderByDescending(b => b.CreatedAt).Skip(maxBackups);
                 foreach (var b in toDelete)
                     await _backupService.DeleteBackupAsync(b.BackupId);
+            }
+            else if (task.TaskType == ScheduledTaskType.DbBackup && !string.IsNullOrWhiteSpace(dbName))
+            {
+                // DB dumps are host files named "{db}_{timestamp}.sql[.gz]" and are not tracked in the DB,
+                // so prune them on the host. Validate the DB name to a safe charset before it enters the shell.
+                if (!SafeDbName.IsMatch(dbName))
+                {
+                    _logger.LogWarning("DB-backup retention skipped for task {Name}: unsafe database name '{Db}'", task.Name, dbName);
+                    return;
+                }
+                var sid = task.ServerId ?? "local";
+                var glob = $"{HostBackupDir}/{dbName}_*.sql*";
+                var script = $"ls -1t {glob} 2>/dev/null | tail -n +{maxBackups + 1} | xargs -r rm -f";
+                await _executor.ExecuteAsync(sid, script, TimeSpan.FromSeconds(15));
             }
         }
         catch (Exception ex)
@@ -148,6 +163,13 @@ public class TaskExecutor : ITaskExecutor
             _logger.LogWarning(ex, "Retention cleanup failed for task {Name}", task.Name);
         }
     }
+
+    private const string HostBackupDir = "/app/data/backups";
+
+    // DB name embedded into a host shell glob for retention pruning: alphanumeric start, then
+    // alphanumerics plus _ . - only. Anything else is rejected (no pruning) rather than risking injection.
+    private static readonly System.Text.RegularExpressions.Regex SafeDbName =
+        new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private static Dictionary<string, string> ParseConfig(string? json)
     {

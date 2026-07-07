@@ -93,11 +93,33 @@ public class VolumeBackupService : IVolumeBackupService
         ValidateName(volume, "volume name");
         ValidateName(backup.FileName, "backup file name");
 
-        // The inner `sh -c` script is itself single-quoted for the host shell; the file name is validated
-        // to a safe charset above, so embedding it inside the inner script is safe.
-        var innerScript = $"rm -rf /data/* && tar xzf {ShellUtils.Quote("/backup/" + backup.FileName)} -C /data";
+        var quotedFile = ShellUtils.Quote("/backup/" + backup.FileName);
+        var quotedBackupRo = ShellUtils.Quote(BackupDir + ":/backup");
+
+        // 1. Verify the archive exists and is a readable, intact gzip tar BEFORE touching the live volume.
+        //    Without this, a missing/truncated/corrupt backup would still get past the wipe below and
+        //    destroy the volume with nothing to restore.
+        var verify = await _executor.ExecuteAsync(backup.ServerId,
+            $"docker run --rm -v {quotedBackupRo}:ro alpine tar tzf {quotedFile} > /dev/null 2>&1",
+            TimeSpan.FromMinutes(5));
+        if (!verify.Success)
+            throw new Exception($"Restore aborted: backup archive '{backup.FileName}' is missing or unreadable — the target volume was left untouched.");
+
+        // 2. Take an automatic safety backup of the current volume state so the wipe is reversible.
+        try
+        {
+            await BackupVolumeAsync(volume, "", backup.ServerId, $"pre-restore safety ({backup.FileName})");
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Restore aborted: could not create a pre-restore safety backup of '{volume}' ({ex.Message}). The target volume was left untouched.");
+        }
+
+        // 3. Clear the volume (including dotfiles, which `rm -rf /data/*` would leave behind) and extract.
+        //    The inner `sh -c` script is single-quoted for the host shell; the file name is validated above.
+        var innerScript = $"find /data -mindepth 1 -delete && tar xzf {quotedFile} -C /data";
         var result = await _executor.ExecuteAsync(backup.ServerId,
-            $"docker run --rm -v {ShellUtils.Quote(volume + ":/data")} -v {ShellUtils.Quote(BackupDir + ":/backup")} alpine sh -c {ShellUtils.Quote(innerScript)} 2>&1",
+            $"docker run --rm -v {ShellUtils.Quote(volume + ":/data")} -v {quotedBackupRo} alpine sh -c {ShellUtils.Quote(innerScript)} 2>&1",
             TimeSpan.FromMinutes(10));
 
         if (!result.Success)

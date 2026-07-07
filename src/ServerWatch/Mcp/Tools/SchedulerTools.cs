@@ -46,6 +46,15 @@ public class SchedulerTools
         if (!Enum.TryParse<ScheduledTaskType>(taskType, true, out var type))
             return $"Invalid task type: {taskType}. Valid: ContainerRestart, DbBackup, VolumeBackup, CustomCommand, Cleanup";
 
+        // A CustomCommand task runs an arbitrary command through the same host executor as execute_command
+        // (root on the host for serverId=local). Creating one must therefore require the same Admin level,
+        // otherwise a Write-level key could schedule root commands and bypass the execute_command gate.
+        if (type == ScheduledTaskType.CustomCommand)
+        {
+            var deniedCmd = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_command");
+            if (deniedCmd != null) return deniedCmd;
+        }
+
         var config = new Dictionary<string, string>();
         if (maxBackups > 0) config["maxBackups"] = maxBackups.ToString();
         if (!string.IsNullOrEmpty(command)) config["command"] = command;
@@ -87,6 +96,16 @@ public class SchedulerTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "run_scheduled_task");
         if (denied != null) return denied;
+
+        // Running a CustomCommand task executes an arbitrary host command; gate it at the same Admin level
+        // as execute_command so run_scheduled_task cannot be used to bypass that boundary.
+        var target = (await scheduler.GetTasksAsync()).FirstOrDefault(t => t.TaskId == taskId);
+        if (target is null) return $"Task '{taskId}' not found.";
+        if (target.TaskType == ScheduledTaskType.CustomCommand)
+        {
+            var deniedCmd = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_command");
+            if (deniedCmd != null) return deniedCmd;
+        }
 
         var (success, output) = await scheduler.RunNowAsync(taskId);
         return success ? $"Task completed successfully:\n{output}" : $"Task failed:\n{output}";

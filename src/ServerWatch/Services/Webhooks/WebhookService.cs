@@ -5,6 +5,7 @@ using ServerWatch.Models;
 using ServerWatch.Services.Docker;
 using ServerWatch.Services.Persistence;
 using ServerWatch.Services.Server;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Webhooks;
 
@@ -138,8 +139,14 @@ public class WebhookService : IWebhookService
     private async Task<(bool, string)> DeployCompose(WebhookEntity webhook)
     {
         var sid = webhook.ServerId ?? "local";
+        // TargetId is the compose project directory. Require an absolute path and single-quote it for the
+        // host shell — otherwise a crafted value would be executed as an arbitrary root command (and paths
+        // with spaces would break). Every other host-command site in the codebase quotes; this one must too.
+        var dir = webhook.TargetId ?? "";
+        if (!dir.StartsWith('/'))
+            return (false, "Deploy target must be an absolute path.");
         var result = await _executor.ExecuteAsync(sid,
-            $"cd {webhook.TargetId} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+            $"cd {ShellUtils.Quote(dir)} && docker compose pull 2>&1 && docker compose up -d 2>&1",
             TimeSpan.FromMinutes(5));
         return (result.Success, result.Success ? result.Output : result.Error);
     }

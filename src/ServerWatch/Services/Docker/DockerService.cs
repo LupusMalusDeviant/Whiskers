@@ -398,9 +398,7 @@ public class DockerService : IDockerService
     public async Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null)
     {
         var client = await GetClient(serverId);
-        var parts = imageName.Split(':');
-        var repo = parts[0];
-        var tag = parts.Length > 1 ? parts[1] : "latest";
+        var (repo, tag) = ParseImageReference(imageName);
 
         await client.Images.CreateImageAsync(
             new ImagesCreateParameters { FromImage = repo, Tag = tag },
@@ -409,6 +407,24 @@ public class DockerService : IDockerService
             {
                 progress?.Report(msg.Status ?? "");
             }));
+    }
+
+    /// <summary>Splits a Docker image reference into (repo, tag) for the Images.CreateImage call. A naive
+    /// Split(':') breaks references with a registry port (host:5000/app) or a digest (repo@sha256:...),
+    /// so only treat a ':' that comes after the last '/' as the tag separator, and pass a digest through
+    /// as the tag (the Docker API accepts a digest in the Tag field).</summary>
+    internal static (string Repo, string Tag) ParseImageReference(string imageName)
+    {
+        var atIdx = imageName.IndexOf('@');
+        if (atIdx >= 0)
+            return (imageName[..atIdx], imageName[(atIdx + 1)..]);   // repo + "sha256:..."
+
+        var slashIdx = imageName.LastIndexOf('/');
+        var colonIdx = imageName.LastIndexOf(':');
+        if (colonIdx > slashIdx)   // colon belongs to the tag, not a registry port
+            return (imageName[..colonIdx], imageName[(colonIdx + 1)..]);
+
+        return (imageName, "latest");
     }
 
     public async Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null)
@@ -693,13 +709,20 @@ public class DockerService : IDockerService
         }
         catch { } // May already be stopped
 
-        // 4. Remove old container
-        progress?.Report("Removing old container...");
-        await client.Containers.RemoveContainerAsync(containerId,
-            new ContainerRemoveParameters { Force = true });
+        // 4. Rename the old container out of the way instead of removing it, so a failed create/start can
+        //    be rolled back. Removing first (the previous behaviour) destroyed the container permanently if
+        //    step 5/6 threw (name conflict, invalid multi-network config, tunnel drop mid-flight).
+        var oldName = $"{name}-old-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        progress?.Report("Renaming old container...");
+        await client.Containers.RenameContainerAsync(containerId,
+            new ContainerRenameParameters { NewName = oldName }, CancellationToken.None);
 
-        // 5. Create new container with same settings
-        progress?.Report("Creating new container...");
+        // 5. Create the new container. Attach only the FIRST network at create time — engines older than
+        //    API 1.44 reject a multi-network EndpointsConfig on create — then connect the rest afterwards.
+        var allNetworks = inspect.NetworkSettings?.Networks?
+            .ToDictionary(kv => kv.Key, kv => kv.Value) ?? new();
+        var firstNetwork = allNetworks.Take(1).ToDictionary(kv => kv.Key, kv => kv.Value);
+
         var createParams = new CreateContainerParameters
         {
             Image = image,
@@ -711,23 +734,61 @@ public class DockerService : IDockerService
             Labels = config.Labels,
             WorkingDir = config.WorkingDir,
             HostConfig = hostConfig,
-            NetworkingConfig = new NetworkingConfig
-            {
-                EndpointsConfig = inspect.NetworkSettings?.Networks?
-                    .ToDictionary(kv => kv.Key, kv => kv.Value) ?? new()
-            }
+            NetworkingConfig = new NetworkingConfig { EndpointsConfig = firstNetwork }
         };
 
-        var response = await client.Containers.CreateContainerAsync(createParams);
+        string newId;
+        try
+        {
+            progress?.Report("Creating new container...");
+            var response = await client.Containers.CreateContainerAsync(createParams);
+            newId = response.ID;
 
-        // 6. Start new container
-        progress?.Report("Starting new container...");
-        await client.Containers.StartContainerAsync(response.ID, new ContainerStartParameters());
+            // Connect any remaining networks the old container had.
+            foreach (var (netName, endpoint) in allNetworks.Skip(1))
+            {
+                await client.Networks.ConnectNetworkAsync(netName,
+                    new NetworkConnectParameters { Container = newId, EndpointConfig = endpoint });
+            }
 
-        progress?.Report($"Container updated successfully (new ID: {response.ID[..12]})");
-        _logger.LogInformation("Container {Name} recreated: {OldId} → {NewId}", name, containerId[..12], response.ID[..12]);
+            // 6. Start new container
+            progress?.Report("Starting new container...");
+            await client.Containers.StartContainerAsync(newId, new ContainerStartParameters());
+        }
+        catch (Exception ex)
+        {
+            // Roll back: restore the old container's name and restart it so recreate never loses a container.
+            _logger.LogError(ex, "Recreate of {Name} failed — rolling back to the previous container", name);
+            progress?.Report("Recreate failed — rolling back...");
+            try
+            {
+                await client.Containers.RenameContainerAsync(containerId,
+                    new ContainerRenameParameters { NewName = name }, CancellationToken.None);
+                await client.Containers.StartContainerAsync(containerId, new ContainerStartParameters());
+            }
+            catch (Exception rollbackEx)
+            {
+                _logger.LogError(rollbackEx, "Rollback of {Name} failed; old container remains as {OldName}", name, oldName);
+            }
+            throw;
+        }
 
-        return response.ID;
+        // 7. Success — remove the renamed old container.
+        progress?.Report("Removing old container...");
+        try
+        {
+            await client.Containers.RemoveContainerAsync(containerId,
+                new ContainerRemoveParameters { Force = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "New container {Name} is up but removing the old one ({OldName}) failed", name, oldName);
+        }
+
+        progress?.Report($"Container updated successfully (new ID: {newId[..12]})");
+        _logger.LogInformation("Container {Name} recreated: {OldId} → {NewId}", name, containerId[..12], newId[..12]);
+
+        return newId;
     }
 
     public async Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null)

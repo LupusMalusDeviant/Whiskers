@@ -1,10 +1,12 @@
 @page "/approvals"
 @attribute [Authorize]
 @implements IDisposable
+@using ServerWatch.Models
 @using ServerWatch.Models.Agent
 @using ServerWatch.Services.Agent.Approvals
 @inject IApprovalStore ApprovalStore
 @inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
 
 <PageTitle>Freigaben - ServerWatch</PageTitle>
 
@@ -144,7 +146,10 @@ else
         try
         {
             var by = await CurrentUser.GetEmailAsync() ?? "web";
-            await ApprovalStore.ResolveAsync(approvalId, approved, by);
+            var level = RoleToLevel(await CurrentUser.GetRoleAsync());
+            var ok = await ApprovalStore.ResolveAsync(approvalId, approved, by, level);
+            if (!ok && approved)
+                Snackbar.Add("Keine Berechtigung, diese Aktion zu genehmigen — deine Rolle ist niedriger als die angeforderte Berechtigungsstufe.", Severity.Error);
         }
         finally
         {
@@ -152,6 +157,13 @@ else
         }
         // Store raises Changed → list refreshes.
     }
+
+    private static string RoleToLevel(AppRole role) => role switch
+    {
+        AppRole.Admin => McpPermissionLevels.Admin,
+        AppRole.Operator => McpPermissionLevels.Write,
+        _ => McpPermissionLevels.Read,
+    };
 
     private static Color LevelColor(string level) => level switch
     {
