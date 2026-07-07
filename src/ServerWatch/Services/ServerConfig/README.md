@@ -4,6 +4,8 @@ The **fleet registry**: which Docker hosts exist and how to reach each one. Ever
 
 A server config carries its connection type (`Local`, `SSH`, or `TCP`), transport details (SSH host/user/key material, or TCP + mTLS certificate paths with `TcpUseTls`), and its metrics source. Records are persisted as JSON under `/app/data`.
 
+**Concurrency:** reads are lock-free over an immutable snapshot; every write (add/update/remove and the SSH-key changes) builds a new list under a lock — working on a `Clone()` of the target record — and swaps the reference atomically, so a reader never observes a half-applied change.
+
 ## Files
 
 | File | Purpose |

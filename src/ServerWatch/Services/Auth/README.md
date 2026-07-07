@@ -16,6 +16,7 @@ Authentication itself (Google OAuth / OIDC) is wired in [`Program.cs`](../../Pro
 ## Behaviour notes
 
 - **Whitelist semantics:** disabled ⇒ everyone allowed; enabled **and non-empty** ⇒ only listed emails; enabled **and empty** ⇒ deny all (fail-closed). The Settings UI refuses to save an enabled+empty whitelist so an admin can't lock themselves out. `SaveWhitelistAsync` deep-copies the incoming data so the enforcement snapshot never aliases a caller-owned list.
+- **Role updates are snapshot-isolated:** `RoleService` clones role data before caching/persisting and snapshots under its write-lock before serializing — an unsaved UI edit never mutates the live enforcement list, and a concurrent write can't corrupt serialization (same discipline as the whitelist).
 - **Synthetic agent identity:** agent tool execution runs under `AgentSyntheticScheme` carrying the caller's real MCP level in `McpLevelClaim`; tool-internal `McpPermissionCheck` enforces that level rather than granting Admin. This is deliberately **not** the `AuthDisabled` admin scheme.
 
 ## Related

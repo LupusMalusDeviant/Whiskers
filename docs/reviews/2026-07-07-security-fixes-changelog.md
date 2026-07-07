@@ -49,6 +49,18 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 
 - **NIED-20.6** — `Webhooks.razor.TestWebhook` verlangt jetzt die Operator-Rolle.
 
+## Mittel & Niedrig — Bean-Abarbeitung (ab 2026-07-07)
+
+Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün, DI per Development-Boot validiert.
+
+### ServerWatch-sdn3 — Concurrency & Cache-Aliasing (Auth/Config/Vault)
+
+- **MIT-1 — RoleService Aliasing/Lock.** `SaveRoleDataAsync` klont vor Cache/Persist; `SetRoleAsync`/`RemoveRoleAsync` bauen den Snapshot im Write-Lock und persistieren ihn danach — nie mehr die Live-Liste serialisieren, die ein paralleler Writer mutiert.
+- **MIT-2 — VaultService Lesepfade.** `ListSecrets`/`GetSecret`/`GetExpiringSecrets` laufen jetzt unter demselben Lock wie die Writer (kein transientes `null`/`InvalidOperationException` bei paralleler Mutation).
+- **NIED-14 — ServerConfigService.** `SaveSshKeyAsync`/`DeleteSshKeyAsync` arbeiten auf `GetServer(id)?.Clone()` statt das gecachte Live-Objekt zu mutieren.
+- _Zusätzlich:_ DI-safe optionaler `storePath`-Ctor-Seam + neue `ConcurrencyCacheAliasingTests` (Aliasing, Concurrency, Fehlerpfad, Secret-Safety); 131/131 Tests.
+  _Dateien: `Services/Auth/RoleService.cs`, `Services/Vault/VaultService.cs`, `Services/ServerConfig/ServerConfigService.cs`, per-Ordner-READMEs (Auth/Vault/ServerConfig)._
+
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
 - **HOCH-11** — SSH `StrictHostKeyChecking=no` → `accept-new`: Aussperr-Risiko bei Host-Key-Wechsel + Off-Limits-Netzwerk-Layer. Siehe [ADR 0002](../adr/0002-ssh-host-key-verification-deferred.md). Braucht ausdrückliche Freigabe.

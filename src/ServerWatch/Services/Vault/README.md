@@ -6,6 +6,8 @@ Each secret is stored as `g1:` + base64(`nonce ‖ tag ‖ ciphertext`). The GCM
 
 **Migration:** legacy entries written by the previous unauthenticated AES-256-CBC scheme (key = `SHA256(VAULT_KEY)`, no salt) are transparently decrypted and re-encrypted to GCM on the first `InitializeAsync` after upgrade. The re-encrypted file is saved once; no manual step is required. See [ADR 0001](../../../docs/adr/0001-vault-aead-gcm-pbkdf2.md).
 
+**Concurrency:** the reads (`ListSecrets`/`GetSecret`/`GetExpiringSecrets`) run under the same lock as the writers (`SetSecretAsync`/`DeleteSecretAsync`), so a lookup or listing never races a concurrent set/delete.
+
 ## Files
 
 | File | Purpose |
