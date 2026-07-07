@@ -49,6 +49,20 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 
 - **NIED-20.6** — `Webhooks.razor.TestWebhook` verlangt jetzt die Operator-Rolle.
 
+## Mittel & Niedrig — Bean-Abarbeitung (ab 2026-07-07)
+
+Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün.
+
+### ServerWatch-izcu — MCP-Tool Input-Validation & Injection-Härtung
+
+- **MIT-6 — deploy_compose Path-Traversal.** Neuer `McpInputValidation.IsSafeProjectName` (Leading-Alnum, Safe-Charset, `..`-Verbot) ersetzt die schwache Regex; das Ziel-Verzeichnis wird zusätzlich per `ShellUtils.Quote` in mkdir/cd gequotet.
+- **NIED-2 — Container-ID-Ambiguität.** Neuer `McpInputValidation.Resolve`: exakter Id/Name-Match, sonst eindeutiger Id-Präfix; Mehrdeutigkeit/No-Match → klarer Fehler statt Aktion am falschen Container. Alle 10 Inline-Sites (ContainerTools 8, DatabaseTools 2) umgestellt (kein `?? containerId`-Fallback mehr).
+- **NIED-12 — Options-Injection.** `SafeServiceNameRegex`/`SafeCertNameRegex` verlangen ein führendes alphanumerisches Zeichen (kein `-` am Anfang → kein systemctl/certbot-Flag).
+- **NIED-3 — ReDoS.** Die Match-Pfade (LogSearchService 2s, Monitor-Loop 1s) waren bereits time-bounded; der Validierungs-Compile in `CreateRuleAsync` bekommt defense-in-depth ebenfalls ein matchTimeout.
+- _Tests:_ `McpInputValidationTests` (Projektname-Validierung, Resolver: exakt/Präfix/mehrdeutig/No-Match). Kein DI-/Ctor-Change → kein Boot nötig.
+- ⚠️ **NIED-1 (Bearer-Scheme case) NICHT umgesetzt** — auth-middleware-nah, zurückgestellt bis zur ausdrücklichen Freigabe.
+  _Dateien: `Mcp/Tools/McpInputValidation.cs` (neu), `Mcp/Tools/ContainerTools.cs`, `Mcp/Tools/DatabaseTools.cs`, `Services/Server/SystemdService.cs`, `Services/Server/SslCertService.cs`, `Services/LogMonitor/LogMonitorService.cs`, `Mcp/Tools/README.md`._
+
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
 - **HOCH-11** — SSH `StrictHostKeyChecking=no` → `accept-new`: Aussperr-Risiko bei Host-Key-Wechsel + Off-Limits-Netzwerk-Layer. Siehe [ADR 0002](../adr/0002-ssh-host-key-verification-deferred.md). Braucht ausdrückliche Freigabe.
