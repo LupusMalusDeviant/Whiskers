@@ -12,12 +12,14 @@ public class NotificationThrottler
         _throttleMinutes = throttleMinutes;
     }
 
-    public bool IsThrottled(string containerId, string eventType)
+    // The window is passed per call (from live settings) rather than frozen at construction, so a changed
+    // ThrottleMinutes takes effect without recreating the provider. 0 = never throttle.
+    public bool IsThrottled(string containerId, string eventType, int minutes)
     {
         var key = $"{containerId}:{eventType}";
         if (_lastSent.TryGetValue(key, out var lastTime))
         {
-            return DateTime.UtcNow - lastTime < TimeSpan.FromMinutes(_throttleMinutes);
+            return DateTime.UtcNow - lastTime < TimeSpan.FromMinutes(Math.Max(0, minutes));
         }
         return false;
     }

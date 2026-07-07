@@ -31,7 +31,7 @@ public class MatrixNotificationService : IMatrixNotificationService
             string.IsNullOrWhiteSpace(config.AccessToken) || string.IsNullOrWhiteSpace(config.RoomId))
             return;
 
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType))
+        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes))
             return;
 
         try
