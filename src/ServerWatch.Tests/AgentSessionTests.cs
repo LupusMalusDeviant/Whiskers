@@ -167,6 +167,25 @@ public class AgentSessionTests
         Assert.Contains(h, m => m.Role == AgentRole.Assistant && m.Text == "neue antwort");
     }
 
+    [Fact] // MIT-32: one active run per session
+    public async Task Second_concurrent_send_is_rejected()
+    {
+        var session = Session(new FakeProvider(TextTurn("A")), new FakeInvoker(), new FakeEngine());
+
+        // Start the first run and advance it once so it is active (suspended mid-stream), not yet finished.
+        var first = session.SendAsync("first").GetAsyncEnumerator();
+        Assert.True(await first.MoveNextAsync());
+
+        // A second send while the first is still active must be rejected, not interleaved.
+        var second = new List<AgentEvent>();
+        await foreach (var ev in session.SendAsync("second")) second.Add(ev);
+        Assert.Contains(second, ev => ev is AgentEvent.Failed);
+
+        // Drain the first so it releases the guard.
+        while (await first.MoveNextAsync()) { }
+        await first.DisposeAsync();
+    }
+
     [Fact]
     public async Task Confirm_then_deny_skips_execution()
     {

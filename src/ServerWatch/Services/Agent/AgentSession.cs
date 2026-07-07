@@ -24,8 +24,10 @@ public sealed class AgentSession : IAgentSession
     private readonly string _systemPrompt;
 
     private readonly List<AgentMessage> _history = new();
+    private readonly object _historyLock = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pending = new();
     private int _actionCount;
+    private int _sending;
 
     public string SessionId => _context.SessionId;
     public AgentRunState State { get; private set; } = AgentRunState.Idle;
@@ -46,7 +48,10 @@ public sealed class AgentSession : IAgentSession
         if (seedHistory is { Count: > 0 }) _history.AddRange(seedHistory);
     }
 
-    public IReadOnlyList<AgentMessage> History => _history.ToList();
+    public IReadOnlyList<AgentMessage> History => HistorySnapshot();
+
+    private void AddHistory(AgentMessage m) { lock (_historyLock) { _history.Add(m); } }
+    private List<AgentMessage> HistorySnapshot() { lock (_historyLock) { return _history.ToList(); } }
 
     public Task ResolveConfirmationAsync(string toolCallId, bool approved, CancellationToken ct = default)
     {
@@ -59,7 +64,26 @@ public sealed class AgentSession : IAgentSession
         string userMessage, string? imageBase64 = null, string? imageMediaType = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        _history.Add(new AgentMessage(AgentRole.User, userMessage,
+        // One active run per session — a second concurrent SendAsync is rejected so two runs can never
+        // interleave _history (which would corrupt it / desync the provider transcript).
+        if (Interlocked.CompareExchange(ref _sending, 1, 0) != 0)
+        {
+            yield return new AgentEvent.Failed("Diese Session ist bereits aktiv.");
+            yield break;
+        }
+        try
+        {
+            await foreach (var ev in RunAsync(userMessage, imageBase64, imageMediaType, ct))
+                yield return ev;
+        }
+        finally { Interlocked.Exchange(ref _sending, 0); }
+    }
+
+    private async IAsyncEnumerable<AgentEvent> RunAsync(
+        string userMessage, string? imageBase64, string? imageMediaType,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        AddHistory(new AgentMessage(AgentRole.User, userMessage,
             ImageBase64: string.IsNullOrEmpty(imageBase64) ? null : imageBase64,
             ImageMediaType: imageMediaType ?? "image/png"));
         var tools = _catalog.GetVisibleTools(_context);
@@ -69,7 +93,7 @@ public sealed class AgentSession : IAgentSession
         {
             State = AgentRunState.Thinking;
             var request = new AgentCompletionRequest(
-                _settings.Model, _systemPrompt, _history.ToList(), tools, _settings.MaxTokens, 0.2, AgentToolChoice.Auto);
+                _settings.Model, _systemPrompt, HistorySnapshot(), tools, _settings.MaxTokens, 0.2, AgentToolChoice.Auto);
 
             var text = new StringBuilder();
             var calls = new List<AgentToolCall>();
@@ -86,7 +110,7 @@ public sealed class AgentSession : IAgentSession
                 if (delta.Final is { } final) stop = final;
             }
 
-            _history.Add(new AgentMessage(AgentRole.Assistant,
+            AddHistory(new AgentMessage(AgentRole.Assistant,
                 text.Length > 0 ? text.ToString() : null,
                 calls.Count > 0 ? calls : null));
 
@@ -150,7 +174,7 @@ public sealed class AgentSession : IAgentSession
 
     private AgentEvent RecordResult(AgentToolCall call, AgentToolResult result)
     {
-        _history.Add(new AgentMessage(AgentRole.Tool, result.Content,
+        AddHistory(new AgentMessage(AgentRole.Tool, result.Content,
             ToolCallId: call.Id, IsError: result.IsError, ToolName: call.Name));
         return new AgentEvent.ToolExecuted(result);
     }
