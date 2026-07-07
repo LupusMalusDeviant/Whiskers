@@ -76,7 +76,7 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
 
             policy.LastChecked = now;
 
-            var container = containers.FirstOrDefault(c => c.Name == policy.ContainerName || c.Id == policy.ContainerId);
+            var container = containers.FirstOrDefault(c => MatchesPolicy(c, policy));
             if (container == null) continue;
 
             // Check if update is available
@@ -171,12 +171,19 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
         return await db.UpdatePolicies.OrderBy(p => p.ContainerName).ToListAsync();
     }
 
+    // Match a container to an auto-update policy. Scoped by ServerId (empty ServerId = any server, for
+    // back-compat) so a same-named container on another host is never recreated; id-match before name-match.
+    public static bool MatchesPolicy(ContainerInfo container, UpdatePolicyEntity policy)
+        => (string.IsNullOrEmpty(policy.ServerId) || container.ServerId == policy.ServerId)
+           && (container.Id == policy.ContainerId || container.Name == policy.ContainerName);
+
     public async Task SetPolicyAsync(UpdatePolicyEntity policy)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 
-        var existing = await db.UpdatePolicies.FirstOrDefaultAsync(p => p.ContainerId == policy.ContainerId);
+        var existing = await db.UpdatePolicies.FirstOrDefaultAsync(
+            p => p.ContainerId == policy.ContainerId && p.ServerId == policy.ServerId);
         if (existing != null)
         {
             existing.AutoUpdate = policy.AutoUpdate;
