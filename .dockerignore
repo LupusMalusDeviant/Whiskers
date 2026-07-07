@@ -5,3 +5,9 @@
 .git/
 .gitignore
 .claude/
+
+# Keep secrets out of the build context so a COPY can never bake them into an image layer.
+# The .env.example template carries no secrets and is re-included for reference.
+.env
+.env.*
+!.env.example

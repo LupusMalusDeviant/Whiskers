@@ -9,7 +9,7 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | `GoogleAuthSettings.cs` | Google OAuth 2.0 credentials. |
 | `OidcSettings.cs` | Generic OpenID Connect provider settings. |
 | `DockerSettings.cs` | Docker connection defaults. |
-| `MetricsSettings.cs` | Metric collection cadence / retention. |
+| `MetricsSettings.cs` | Metric collection cadence / retention; `ScrapeToken` gates the Prometheus `/metrics` endpoint (disabled when unset). |
 | `HealthMonitorSettings.cs` | Health-monitor thresholds. |
 | `ImageUpdateSettings.cs` | Image-update check cadence. |
 | `CveMonitorSettings.cs` | CVE scan cadence. |

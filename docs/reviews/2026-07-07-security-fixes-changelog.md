@@ -107,12 +107,25 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-21 — Agent-Sammelfinding (8):** .1 pending-leak try/finally · .2 Eviction (id,session)-Tupel + ReferenceEquals · .3 ApprovalStore exactly-once (Interlocked) · .4 TargetInvocationException entpackt · .5 Guardrail-Legacy-Migration → SafeDefault statt Default-Policy · .6 AiChat-Save atomar · .7 Anthropic-Seed ohne führende Assistant-Turns · .8 AgentSettingsStore.SaveAsync admin-only.
 - **OPT-11.5 — MaxTokens** aus `AgentSettings` (Default 4096) statt hartkodiert 1024.
 - _Tests:_ TranscriptStore-Sanitize (Round-Trip), Session-Reentrancy + Live-Policy-Limit, AgentSettings-RequireAdmin; bestehende Agent-Tests bleiben grün. DI per Boot validiert (Ctor/Interface-Changes).
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-9916 — Config/Deploy-Hardening (MIT-38, NIED-24, NIED-25.1)
+
+- **MIT-38 — Forwarded-Header-Trust + `/metrics`-Gate.** ForwardedHeaders vertraut nur noch konfigurierten Proxy-Netzen (`ForwardedHeaders:TrustedNetworks`; Default Loopback + RFC1918 + `100.64.0.0/10`). Leere/ungültige Config fällt auf sichere Defaults zurück und lässt die Liste nie leer werden — der Known-Proxy-Check wird nie versehentlich abgeschaltet (kein Trust-all → kein `X-Forwarded-For`-Spoofing der `SourceIp`). `/metrics` ist per statischem Bearer-Token (`Metrics:ScrapeToken`, konstantzeitiger Vergleich) gegated; ohne Token ist der Endpoint deaktiviert (404, opt-in) statt offen. Neue reine, unit-getestete Helfer `Utils/ForwardedHeadersConfig` + `Utils/MetricsScrapeAuth`.
+  _Dateien: `Program.cs`, `Configuration/MetricsSettings.cs`, `Utils/ForwardedHeadersConfig.cs` (neu), `Utils/MetricsScrapeAuth.cs` (neu)._
+- **NIED-24 — `.dockerignore`.** `.env` + `.env.*` vom Build-Context ausgeschlossen (`.env.example` re-inkludiert), damit ein `COPY` keine Secrets in ein Image-Layer backen kann.
+  _Dateien: `.dockerignore`._
+- **NIED-25.1 — Image-Pinning.** Trust-kritische Images per echtem Registry-Digest gepinnt: `tecnativa/docker-socket-proxy:0.3.0`, `alpine:3.22`, `aquasec/trivy:0.72.0` (jeweils neuestes Stable, Multi-Arch-Index-Digests live aus der Registry aufgelöst). Nur die `image:`-Zeile des Socket-Proxy geändert — die Off-Limits-Verb-Whitelist bleibt unangetastet.
+  _Dateien: `docker-compose.hardened.yml`, `Services/Backup/VolumeBackupService.cs` (ein `BackupImage`-const für beide Aufrufe), `appsettings.json`._
+
+**Verifikation (Branch `feat/ServerWatch-9916-config-deploy-hardening`):** Build 0 Fehler, `dotnet test` 139/139 (16 neue Tests: `ForwardedHeadersConfigTests`, `MetricsScrapeAuthTests`). App in Development gebootet — „Application started" (Composition-Root-Änderung: `IOptions<MetricsSettings>`-Auflösung + ForwardedHeaders-Config-Read validiert). NIED-25.2 (Antiforgery-Reihenfolge) zurückgestellt — siehe unten.
 
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
 - **HOCH-11** — SSH `StrictHostKeyChecking=no` → `accept-new`: Aussperr-Risiko bei Host-Key-Wechsel + Off-Limits-Netzwerk-Layer. Siehe [ADR 0002](../adr/0002-ssh-host-key-verification-deferred.md). Braucht ausdrückliche Freigabe.
 - **KRIT-3 Schritt 2** — Fallback-Authorization-Policy: könnte `/mcp` brechen; Auth-Middleware Off-Limits.
 - **HOCH-12 Teil 2** — secretlose Webhooks ablehnen: braucht Secret-Management-UI, sonst Feature unbrauchbar.
+- **NIED-25.2** — `UseAntiforgery` hinter `UseAuthorization` verschieben: Auth-Middleware-Reihenfolge (Off-Limits), kein belegtes Live-Leck (Antiforgery schützt weiterhin); Regressionsrisiko für Blazor-Circuit/Form-Posts/MCP ohne Browser-Session kaum verifizierbar. Auf Nutzer-Entscheidung (2026-07-07) zurückgestellt.
 
 ## Mittel & Niedrig — Bean-Abarbeitung
 

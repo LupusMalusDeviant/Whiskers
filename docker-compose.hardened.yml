@@ -26,7 +26,10 @@ services:
   # Restricted Docker API: the app talks to THIS, never to the raw socket. Verb whitelist keeps
   # exec/swarm/secrets off; container-create stays on so deploys work (the known root-equiv residual).
   socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    # Pinned by digest (supply-chain hardening); 0.3.0 is the newest release. The verb whitelist
+    # below is the security boundary, so this image must not float. Re-pin via:
+    #   docker manifest inspect tecnativa/docker-socket-proxy:0.3.0
+    image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
     container_name: serverwatch-socket-proxy
     environment:
       CONTAINERS: 1
