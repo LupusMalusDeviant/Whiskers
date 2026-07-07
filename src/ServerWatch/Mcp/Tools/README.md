@@ -19,6 +19,11 @@ The canonical tool > permission-level map lives in [`../../Models/McpPermission.
 | `CloudTools.cs` | Out-of-band cloud control (provider-agnostic) |
 | `HetznerTools.cs` | Hetzner-specific extras (rescue, backups, snapshots, server type) |
 | `AgentTools.cs` | `instruct_agent`, delegate a natural-language task to the in-process agent |
+| `McpInputValidation.cs` | Boundary input-validation helpers (safe project name, unambiguous container resolution) |
+
+## Behaviour notes
+
+- **Input validation** at the boundary (`McpInputValidation.cs`): `deploy_compose` rejects unsafe project names (`..` / leading-non-alphanumeric) and quotes the target directory; container ids resolve to a **unique** match (exact id/name, else a single id-prefix) — an ambiguous prefix or no match returns a clear error instead of acting on the wrong container.
 
 ## Related
 

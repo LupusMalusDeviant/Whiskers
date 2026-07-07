@@ -46,8 +46,8 @@ public class ContainerTools
             return "Container ID is required.";
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        if (container == null) return $"Container not found: {containerId}";
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
 
         var stats = await docker.GetContainerStatsAsync(container.Id, serverId);
         var sb = new System.Text.StringBuilder();
@@ -90,8 +90,9 @@ public class ContainerTools
 
         // Find the container to resolve name to ID
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        var id = container?.Id ?? containerId;
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        var id = container.Id;
         var logs = await docker.GetContainerLogsAsync(id, lines, serverId);
         return $"Logs for {container?.Name ?? containerId} (last {lines} lines):\n{logs}";
     }
@@ -111,8 +112,9 @@ public class ContainerTools
             return "Container ID or name is required.";
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        var id = container?.Id ?? containerId;
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        var id = container.Id;
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
         {
@@ -142,8 +144,9 @@ public class ContainerTools
             return "Container ID or name is required.";
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        var id = container?.Id ?? containerId;
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        var id = container.Id;
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
         {
@@ -173,8 +176,9 @@ public class ContainerTools
             return "Container ID or name is required.";
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        var id = container?.Id ?? containerId;
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        var id = container.Id;
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
         {
@@ -205,8 +209,9 @@ public class ContainerTools
             return "Container ID or name is required.";
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        var id = container?.Id ?? containerId;
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        var id = container.Id;
 
         var messages = new List<string>();
         var progress = new Progress<string>(msg => messages.Add(msg));
@@ -344,8 +349,9 @@ public class ContainerTools
             return "Container ID or name is required.";
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        var id = container?.Id ?? containerId;
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        var id = container.Id;
 
         var envVars = await docker.GetContainerEnvAsync(id, serverId);
 
@@ -378,8 +384,8 @@ public class ContainerTools
             return "Environment variables are required.";
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        if (container == null) return $"Container not found: {containerId}";
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
 
         // Find compose working dir
         string? workingDir = null;
@@ -467,7 +473,7 @@ public class ContainerTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "deploy_compose");
         if (denied != null) return denied;
-        if (string.IsNullOrWhiteSpace(projectName) || !System.Text.RegularExpressions.Regex.IsMatch(projectName, @"^[a-zA-Z0-9._-]+$"))
+        if (!McpInputValidation.IsSafeProjectName(projectName))
             return "Error: Invalid project name.";
 
         if (string.IsNullOrWhiteSpace(composeContent))
@@ -478,7 +484,7 @@ public class ContainerTools
         var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(composeContent));
 
         var setupResult = await executor.ExecuteAsync(serverId,
-            $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml",
+            $"mkdir -p {ShellUtils.Quote(dir)} && echo '{b64}' | base64 -d > {ShellUtils.Quote(dir + "/docker-compose.yml")}",
             TimeSpan.FromSeconds(10));
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
@@ -490,7 +496,7 @@ public class ContainerTools
 
         // Run docker compose up
         var deployResult = await executor.ExecuteAsync(serverId,
-            $"cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+            $"cd {ShellUtils.Quote(dir)} && docker compose pull 2>&1 && docker compose up -d 2>&1",
             TimeSpan.FromMinutes(5));
 
         await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, serverId: serverId, success: deployResult.Success);

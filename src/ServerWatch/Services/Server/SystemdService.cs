@@ -17,8 +17,9 @@ public class SystemdService : ISystemdService
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<SystemdService> _logger;
 
-    // Safe service name: letters, digits, dots, underscores, hyphens, @
-    private static readonly Regex SafeServiceNameRegex = new(@"^[a-zA-Z0-9._@-]+$", RegexOptions.Compiled);
+    // Safe service name: must start with a letter/digit (a leading '-' would be an option-injection into
+    // systemctl), then letters, digits, dots, underscores, hyphens, @.
+    private static readonly Regex SafeServiceNameRegex = new(@"^[a-zA-Z0-9][a-zA-Z0-9._@-]*$", RegexOptions.Compiled);
 
     public SystemdService(IHostCommandExecutor executor, ILogger<SystemdService> logger)
     {
