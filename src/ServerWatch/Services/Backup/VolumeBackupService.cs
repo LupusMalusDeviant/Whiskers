@@ -14,6 +14,10 @@ public class VolumeBackupService : IVolumeBackupService
     private readonly ILogger<VolumeBackupService> _logger;
     private const string BackupDir = "/app/data/backups";
 
+    // Throwaway helper container for backup/restore, pinned by digest (supply-chain hardening) so a
+    // moved 'alpine' tag can't swap in a different image. Re-pin via: docker manifest inspect alpine:3.22
+    private const string BackupImage = "alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce";
+
     // Docker volume/container names and backup file names: must start alphanumeric, then
     // alphanumerics plus _ . - only. Rejects anything that could break out of the shell command.
     private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
@@ -47,7 +51,7 @@ public class VolumeBackupService : IVolumeBackupService
 
         // Create backup using a temporary alpine container
         var result = await _executor.ExecuteAsync(sid,
-            $"docker run --rm -v {ShellUtils.Quote(volumeName + ":/data")} -v {ShellUtils.Quote(BackupDir + ":/backup")} alpine tar czf {ShellUtils.Quote("/backup/" + fileName)} -C /data . 2>&1",
+            $"docker run --rm -v {ShellUtils.Quote(volumeName + ":/data")} -v {ShellUtils.Quote(BackupDir + ":/backup")} {BackupImage} tar czf {ShellUtils.Quote("/backup/" + fileName)} -C /data . 2>&1",
             TimeSpan.FromMinutes(10));
 
         if (!result.Success)
@@ -100,7 +104,7 @@ public class VolumeBackupService : IVolumeBackupService
         //    Without this, a missing/truncated/corrupt backup would still get past the wipe below and
         //    destroy the volume with nothing to restore.
         var verify = await _executor.ExecuteAsync(backup.ServerId,
-            $"docker run --rm -v {quotedBackupRo}:ro alpine tar tzf {quotedFile} > /dev/null 2>&1",
+            $"docker run --rm -v {quotedBackupRo}:ro {BackupImage} tar tzf {quotedFile} > /dev/null 2>&1",
             TimeSpan.FromMinutes(5));
         if (!verify.Success)
             throw new Exception($"Restore aborted: backup archive '{backup.FileName}' is missing or unreadable — the target volume was left untouched.");
