@@ -198,7 +198,7 @@ public class AiChatService : IAiChatService
         var response = await _httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
 
-        var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
+        using var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
         return json?.RootElement
             .GetProperty("choices")[0]
             .GetProperty("message")
@@ -232,7 +232,7 @@ public class AiChatService : IAiChatService
         var response = await _httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
 
-        var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
+        using var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
         return json?.RootElement
             .GetProperty("content")[0]
             .GetProperty("text")

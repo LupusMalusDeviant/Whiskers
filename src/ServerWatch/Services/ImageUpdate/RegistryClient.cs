@@ -160,7 +160,7 @@ public class RegistryClient : IRegistryClient
             if (!response.IsSuccessStatusCode) return null;
 
             var json = await response.Content.ReadAsStringAsync();
-            var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json);
             return doc.RootElement.GetProperty("token").GetString();
         }
         catch (Exception ex)
