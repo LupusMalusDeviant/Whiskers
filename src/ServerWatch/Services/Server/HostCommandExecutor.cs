@@ -2,6 +2,7 @@ using System.Diagnostics;
 using ServerWatch.Models;
 using ServerWatch.Services.Docker;
 using ServerWatch.Services.ServerConfig;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Server;
 
@@ -66,7 +67,7 @@ public class HostCommandExecutor : IHostCommandExecutor
         // quotes, $vars and && all behave as intended.
         var args = new[] { "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command };
 
-        _logger.LogDebug("Executing local command via nsenter: {Command}", command);
+        _logger.LogDebug("Executing local command via nsenter: {Command}", SecretRedactor.Redact(command));
 
         return await RunProcessAsync("nsenter", args, timeout, ct);
     }
@@ -76,7 +77,7 @@ public class HostCommandExecutor : IHostCommandExecutor
     // without any SSH key.
     private async Task<CommandResult> ExecuteViaDockerAsync(string serverId, string command, TimeSpan timeout)
     {
-        _logger.LogDebug("Executing host command on {ServerId} via mTLS Docker (nsenter container): {Command}", serverId, command);
+        _logger.LogDebug("Executing host command on {ServerId} via mTLS Docker (nsenter container): {Command}", serverId, SecretRedactor.Redact(command));
         try
         {
             var (output, error, exitCode) = await _docker.RunHostShellAsync(command, serverId, timeout);
@@ -135,7 +136,7 @@ public class HostCommandExecutor : IHostCommandExecutor
         args.Add(command);
 
         _logger.LogDebug("Executing SSH command on {Host} ({Auth}): {Command}",
-            server.SshHost, usePassword ? "password" : "key", command);
+            server.SshHost, usePassword ? "password" : "key", SecretRedactor.Redact(command));
 
         if (usePassword)
             // sshpass -e reads the password from SSHPASS — never on the command line / process list.

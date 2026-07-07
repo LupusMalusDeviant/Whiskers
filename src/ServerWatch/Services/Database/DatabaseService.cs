@@ -198,7 +198,7 @@ public class DatabaseService : IDatabaseService
         DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", creds.Database, "-e", query),
         DatabaseType.MongoDB => new[] { "mongosh", "--quiet", creds.Database, "--eval", query },
         DatabaseType.Redis => new[] { "redis-cli" }.Concat(query.Split(' ')).ToArray(),
-        DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "-p", creds.Password, query },
+        DatabaseType.Neo4j => new[] { "sh", "-c", $"NEO4J_PASSWORD={Sq(creds.Password)} cypher-shell -u {Sq(creds.User)} {Sq(query)}" },
         _ => new[] { "echo", "Unsupported database type" }
     };
 
@@ -207,11 +207,16 @@ public class DatabaseService : IDatabaseService
 
     private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs)
     {
-        var cmd = new List<string> { "mysql", "-u", creds.User };
+        // Pass the password via MYSQL_PWD (env), never -p<pw> in argv, so it can't appear in the container's
+        // process list. The whole invocation runs through `sh -c`; every value is Sq-quoted (mirrors
+        // BackupDatabaseAsync).
+        var sb = new System.Text.StringBuilder();
         if (!string.IsNullOrEmpty(creds.Password))
-            cmd.Add($"-p{creds.Password}");
-        cmd.AddRange(extraArgs);
-        return cmd.ToArray();
+            sb.Append($"MYSQL_PWD={Sq(creds.Password)} ");
+        sb.Append($"mysql -u {Sq(creds.User)}");
+        foreach (var arg in extraArgs)
+            sb.Append(' ').Append(Sq(arg));
+        return new[] { "sh", "-c", sb.ToString() };
     }
 
     private static QueryResult ParseQueryResult(string output, DatabaseType dbType, double durationMs)
