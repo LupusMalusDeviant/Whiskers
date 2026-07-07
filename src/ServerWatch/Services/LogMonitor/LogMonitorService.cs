@@ -165,9 +165,10 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
 
     public async Task<LogAlertRuleEntity> CreateRuleAsync(LogAlertRuleEntity rule)
     {
-        // Validate regex
+        // Validate regex. The timeout is defense-in-depth only — this compiles (it does not match), and the
+        // actual match paths (LogSearchService and the monitor loop) already run every pattern under a timeout.
         if (rule.IsRegex)
-            _ = new Regex(rule.Pattern); // throws on invalid
+            _ = new Regex(rule.Pattern, RegexOptions.None, TimeSpan.FromSeconds(1)); // throws on invalid
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
