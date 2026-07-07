@@ -26,6 +26,8 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
 - Keyless Tailscale SSH for the web terminal is a separate per-server flag — see `ServerConfig.TailscaleSsh`
   and [`../Terminal/`](../Terminal/). Decoupling the VPN does not affect it: with `none`, connectivity is
   provided by the host/sidecar and the flag still works.
+- Enrollment secrets are passed to the CLIs via environment variables (`TS_AUTHKEY` for Tailscale,
+  `NB_SETUP_KEY` for NetBird), never on the command line, so they don't appear in the host process list.
 
 ## Related
 

@@ -23,6 +23,10 @@ Each channel has its own interface (distinct strategies) so the composite can en
 | `NotificationThrottler.cs` | Suppresses duplicate/flapping notifications within a time window. |
 | `InAppNotificationStore.cs` | `IInAppNotificationStore`, the bell feed + persistent history (no external channel needed); fed by the composite. Keeps an in-memory cache for the bell's live updates AND write-through-persists every event to SQLite (`NotificationEntity`), hydrating on startup so the history survives restarts. Formats each event into an `InAppNotification` (title, severity) with a relative, path-base-safe `Link`, and serves the filtered/paged query for the `/notifications` page ([`../../Components/Pages/NotificationsLog.razor`](../../Components/Pages/NotificationsLog.razor)). |
 
+## Secret hygiene
+
+The capability-bearing channels put their secret in the request URL (Telegram bot token in the path; Discord/Slack/Mattermost/ntfy/webhook secret URLs). Those `System.Net.Http.HttpClient.*` logger categories are raised to Warning in `Program.cs`, so the default HttpClient request logging can't write the token/URL to the app log.
+
 ## Related
 
 - Event sources: [`../HealthMonitor/`](../HealthMonitor/), [`../LogMonitor/`](../LogMonitor/), [`../ImageUpdate/`](../ImageUpdate/)

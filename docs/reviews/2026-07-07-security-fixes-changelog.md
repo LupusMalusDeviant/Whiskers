@@ -49,6 +49,18 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 
 - **NIED-20.6** — `Webhooks.razor.TestWebhook` verlangt jetzt die Operator-Rolle.
 
+## Mittel & Niedrig — Bean-Abarbeitung (ab 2026-07-07)
+
+Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün.
+
+### ServerWatch-b9qw — Secret-Hygiene (argv & Logs)
+
+- **MIT-39 — DB-Passwörter in argv + Debug-Logs.** `BuildMysqlCmd` (alle MySQL-Pfade) und der Neo4j-Zweig übergeben das Passwort via `MYSQL_PWD`/`NEO4J_PASSWORD` unter `sh -c` (Sq-gequotet, wie `BackupDatabaseAsync`) statt `-p<pw>` in argv → nicht mehr in der Container-Prozessliste. Die drei rohen `LogDebug`-Kommandos in `HostCommandExecutor` laufen durch `SecretRedactor.Redact`. (ContainerDetail-DB-Kommandos waren bereits env-var-sicher.)
+- **MIT-14 — Notification-Tokens in Logs.** Sechs capability-tragende Notification-HttpClients (Telegram/Discord/Slack/Mattermost/ntfy/Webhook) werden auf `System.Net.Http.HttpClient.<Name>` = Warning gefiltert, sodass die volle Request-URI (mit Token/Secret-URL) nicht mehr auf Information geloggt wird.
+- **NIED-18 — VPN-Enrollment-Secrets in argv.** `VpnProcessRunner.RunAsync` bekommt einen optionalen env-Dict-Parameter; Tailscale übergibt den Auth-Key via `TS_AUTHKEY`, NetBird via `NB_SETUP_KEY` (statt `--authkey`/`--setup-key` in argv).
+- _Tests:_ `SecretHygieneTests` (Redaction hides `-p<pw>` / `MYSQL_PWD=` / `PGPASSWORD=` / keyed secrets). Kein Ctor-/Interface-Change → kein Boot.
+  _Dateien: `Services/Database/DatabaseService.cs`, `Services/Server/HostCommandExecutor.cs`, `Program.cs`, `Services/Vpn/VpnProcessRunner.cs`, `Services/Vpn/Providers/{Tailscale,Netbird}VpnProvider.cs`, per-Ordner-READMEs (Database/Vpn/Notifications)._
+
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
 - **HOCH-11** — SSH `StrictHostKeyChecking=no` → `accept-new`: Aussperr-Risiko bei Host-Key-Wechsel + Off-Limits-Netzwerk-Layer. Siehe [ADR 0002](../adr/0002-ssh-host-key-verification-deferred.md). Braucht ausdrückliche Freigabe.
