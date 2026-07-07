@@ -496,7 +496,7 @@ else
                             </MudTd>
                             <MudTd>
                                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                               OnClick="@(async () => { await VaultService.DeleteSecretAsync(context.Key); LoadVault(); })" />
+                                               OnClick="@(() => DeleteVaultSecret(context.Key))" />
                             </MudTd>
                         </RowTemplate>
                     </MudTable>
@@ -840,6 +840,7 @@ else
 
     private async Task AddApiKey()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         var newKey = await McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel);
         // Reload from service to avoid duplicates from reference sharing
@@ -902,6 +903,7 @@ else
 
     private async Task SaveWhitelist()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         // An enabled whitelist with zero entries denies everyone (fail-closed) — refuse to save that state
         // so an admin can't accidentally lock the whole instance (including themselves) out.
         if (_whitelistEnabled && _whitelistEmails.Count == 0)
@@ -969,6 +971,7 @@ else
 
     private async Task SaveRoles()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         await RoleService.SaveRoleDataAsync(new ServerWatch.Models.UserRoleData { Roles = _roleEntries });
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         await AuditLog.LogAsync(actor, "web", "config.save", "config", "roles", "Benutzerrollen");
@@ -982,8 +985,16 @@ else
         _vaultEntries = VaultService.ListSecrets();
     }
 
+    private async Task DeleteVaultSecret(string key)
+    {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
+        await VaultService.DeleteSecretAsync(key);
+        LoadVault();
+    }
+
     private async Task AddVaultSecret()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue)) return;
         try
         {
