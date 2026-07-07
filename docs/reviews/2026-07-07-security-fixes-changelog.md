@@ -55,6 +55,18 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 - **KRIT-3 Schritt 2** — Fallback-Authorization-Policy: könnte `/mcp` brechen; Auth-Middleware Off-Limits.
 - **HOCH-12 Teil 2** — secretlose Webhooks ablehnen: braucht Secret-Management-UI, sonst Feature unbrauchbar.
 
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-4x67 — DB-Persistenz (AlertHistory, Migrations, Metrics-Settings, WAL, Redis)
+
+- **MIT-27** — `AlertHistory` in die Startup-DDL aufgenommen; die 30-s-Prune-Schleife wirft nicht mehr `no such table` und Audit-/MCP-Pruning läuft wieder. _Dateien: `Program.cs`._
+- **MIT-29** — EF-Core-Migrations eingeführt (`MigrateAsync` statt `EnsureCreated` + Raw-DDL). `DatabaseInitializer` baselined Legacy-`EnsureCreated`-DBs nicht-destruktiv (heilen → `InitialCreate` stempeln → migrieren), Design-Time-Factory + `Migrations/InitialCreate`, belegt durch `DbMigrationBaselineTests`. Siehe [ADR 0003](../adr/0003-ef-core-migrations-baseline.md). _Dateien: `Program.cs`, `Services/Persistence/DatabaseInitializer.cs`, `MetricsDbContextFactory.cs`, `Migrations/`._
+- **MIT-28** — `MetricsCollectorService` liest jetzt `IOptionsMonitor<MetricsSettings>` (Intervall/Retention/Enable, reload-on-change, mit Floors gegen 0/negativ); `Metrics__*`/`MetricAlert__*` in beiden Compose-Dateien gemappt + `METRICS_*`-Block in `.env.example`. _Dateien: `Services/Metrics/MetricsCollectorService.cs`, `docker-compose.yml`, `docker-compose.hardened.yml`, `.env.example`._
+- **NIED-22** — Redis „list databases" liefert nummerierte Logik-DBs (`0..N-1`) statt der Anzahl als Name (pure `ParseRedisDatabaseList`). _Dateien: `Services/Database/DatabaseService.cs`._
+- **OPT-1** — SQLite WAL (`journal_mode=WAL` + `synchronous=NORMAL`) im `DatabaseInitializer`. _Dateien: `Services/Persistence/DatabaseInitializer.cs`._
+
+**Verifikation Bean 7:** Build 0 Fehler; `dotnet test` 133/133 bestanden; App in Development gebootet — DI-Graph sauber (trotz geänderter `MetricsCollectorService`-Ctor) und der Legacy-Baseline-Pfad lief korrekt gegen eine reale Bestands-Dev-DB. **Deploy-Hinweis:** vor dem ersten migrations-fähigen Deploy eine Kopie von `data/metrics.db` ziehen — nicht-destruktiv per Konstruktion, aber Gürtel-und-Hosenträger.
+
 ## Verifikation
 
 - `dotnet build src/ServerWatch/ServerWatch.csproj` → 0 Fehler.
