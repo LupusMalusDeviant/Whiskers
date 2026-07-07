@@ -109,17 +109,22 @@ public class DockerConnectionManager : IDockerConnectionManager
                 ?? throw new InvalidOperationException("No default server configured");
             _logger.LogWarning(ex,
                 "Docker operation on '{ServerId}' failed with a connection error; rebuilding tunnel and retrying once", id);
-            InvalidateClient(id);
+            // Invalidate only the exact client instance this call used — a parallel caller may have
+            // already rebuilt a fresh client for this server, and we must not tear that healthy one down.
+            InvalidateClient(id, ifCurrent: client);
             client = await GetClientAsync(serverId);
             return await operation(client);
         }
     }
 
-    private static bool IsConnectionFailure(Exception ex)
+    /// <summary>True when the exception (or any inner exception) is a transport-level failure that a
+    /// tunnel rebuild + retry can recover from. Includes <see cref="ObjectDisposedException"/>: a client
+    /// disposed out from under an in-flight call must retry against a fresh one, not surface the dispose.</summary>
+    public static bool IsConnectionFailure(Exception ex)
     {
         for (Exception? e = ex; e != null; e = e.InnerException)
         {
-            if (e is SocketException or HttpRequestException or TimeoutException or IOException)
+            if (e is SocketException or HttpRequestException or TimeoutException or IOException or ObjectDisposedException)
                 return true;
         }
         return false;
@@ -144,11 +149,26 @@ public class DockerConnectionManager : IDockerConnectionManager
         }
     }
 
-    public void InvalidateClient(string serverId)
+    /// <summary>Tears down a cached client + its tunnel. When <paramref name="ifCurrent"/> is supplied the
+    /// removal is instance-aware — it disposes only if the cached client is still that exact instance
+    /// (atomic <c>TryRemove(KeyValuePair)</c>), so a retry can't dispose a fresh client another caller just
+    /// built. <c>null</c> = unconditional teardown (used under the build lock before rebuilding).</summary>
+    public void InvalidateClient(string serverId, DockerClient? ifCurrent = null)
     {
-        if (_clients.TryRemove(serverId, out var client))
+        if (ifCurrent is null)
         {
-            client.Dispose();
+            if (_clients.TryRemove(serverId, out var client))
+            {
+                client.Dispose();
+                _sshTunnelManager.CloseTunnel(serverId);
+            }
+            return;
+        }
+
+        // Only remove+dispose when the cached value is still the instance the caller used.
+        if (_clients.TryRemove(new KeyValuePair<string, DockerClient>(serverId, ifCurrent)))
+        {
+            ifCurrent.Dispose();
             _sshTunnelManager.CloseTunnel(serverId);
         }
     }
@@ -203,19 +223,33 @@ public class DockerConnectionManager : IDockerConnectionManager
             credentials.ServerCertificateValidationCallback = (_, cert, presentedChain, _) =>
             {
                 if (cert is null) return false;
-                using var chain = new X509Chain();
-                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.AddRange(trustAnchors);
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                // Also trust any intermediates the server presents, so the chain can build to the root.
-                if (presentedChain is not null)
-                    foreach (var element in presentedChain.ChainElements)
-                        chain.ChainPolicy.ExtraStore.Add(element.Certificate);
-                return chain.Build(cert as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(cert.Export(X509ContentType.Cert)));
+                var cert2 = cert as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(cert.Export(X509ContentType.Cert));
+                return ValidateMtlsServerCert(cert2, trustAnchors, presentedChain, server.TcpHost);
             };
         }
 
         return credentials;
+    }
+
+    /// <summary>Validates the server's mTLS certificate: the chain must build to the configured custom CA
+    /// AND the certificate's identity must match the host we intended to reach (NIED-13). Without the
+    /// hostname check any certificate our CA signed would be accepted, letting a MITM impersonate the
+    /// Docker host. Fails closed on an empty expected host.</summary>
+    public static bool ValidateMtlsServerCert(
+        X509Certificate2 serverCert, X509Certificate2Collection trustAnchors, X509Chain? presentedChain, string? expectedHost)
+    {
+        using var chain = new X509Chain();
+        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        chain.ChainPolicy.CustomTrustStore.AddRange(trustAnchors);
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        // Also trust any intermediates the server presents, so the chain can build to the root.
+        if (presentedChain is not null)
+            foreach (var element in presentedChain.ChainElements)
+                chain.ChainPolicy.ExtraStore.Add(element.Certificate);
+
+        var chainOk = chain.Build(serverCert);
+        var hostnameOk = !string.IsNullOrEmpty(expectedHost) && serverCert.MatchesHostname(expectedHost);
+        return chainOk && hostnameOk;
     }
 
     public void Dispose()

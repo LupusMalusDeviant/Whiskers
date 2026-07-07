@@ -362,7 +362,9 @@ public class DockerService : IDockerService
             exposedPorts[key] = default;
             portBindings[key] = new List<PortBinding>
             {
-                new() { HostPort = hostPort }
+                // HostIP absent/empty = bind all interfaces (Docker default); a loopback bind from
+                // `ip:host:container` compose syntax restricts publishing to that one interface.
+                new() { HostPort = hostPort, HostIP = request.PortBindIps.GetValueOrDefault(hostPort) }
             };
         }
 

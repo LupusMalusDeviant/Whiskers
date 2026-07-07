@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using ServerWatch.Models;
 using ServerWatch.Services.ServerConfig;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Docker;
 
@@ -27,7 +28,6 @@ public class SshTunnelManager : ISshTunnelManager
         // Close stale tunnel
         CloseTunnel(server.Id);
 
-        var localPort = GetAvailablePort();
         var keyPath = _serverConfig.GetSshKeyPath(server);
 
         // Validate the key is present and readable by THIS process before spawning ssh, so a
@@ -51,14 +51,64 @@ public class SshTunnelManager : ISshTunnelManager
             }
         }
 
-        // Options chosen so a broken tunnel dies fast and cleanly instead of lingering as a dead
-        // forward:
-        //   ExitOnForwardFailure  — if the local forward can't be bound, ssh exits immediately
-        //                           (surfaces as a clear error rather than a silently dead port).
-        //   ServerAliveInterval/CountMax — probe the peer every 15s, give up after 3 misses (~45s)
-        //                           so a half-dead connection terminates and gets rebuilt.
-        //   TCPKeepAlive          — detect dropped peers even when the link is idle.
-        //   BatchMode             — never block on an interactive prompt (would hang forever).
+        // Picking a free port (GetAvailablePort) releases it again before ssh binds it — a TOCTOU race
+        // where another process can grab the port in between. Retry a few times with a fresh port when ssh
+        // reports a bind failure (ExitOnForwardFailure makes it exit immediately in that case).
+        const int maxAttempts = 3;
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var localPort = GetAvailablePort();
+            var process = StartSshProcess(server, keyPath, localPort);
+
+            // Wait until the forwarded port actually accepts connections (up to ~10s) rather than
+            // guessing with a fixed delay — a slow handshake would otherwise leave us with a client
+            // pointed at a port that isn't listening yet.
+            if (await WaitForPortAsync(localPort, process, TimeSpan.FromSeconds(10)))
+            {
+                // Drain stderr for the tunnel's lifetime. Without this the pipe buffer fills on a chatty
+                // ssh (keepalive/known-hosts warnings) and the process blocks on write — the tunnel then
+                // looks alive (HasExited == false) while forwarding nothing, the exact "all SSH servers
+                // unreachable" freeze. Redact each line in case ssh echoes a sensitive argument.
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (await process.StandardError.ReadLineAsync() is { } line)
+                            _logger.LogDebug("ssh[{Server}]: {Line}", server.Name, SecretRedactor.Redact(line));
+                    }
+                    catch { /* stream closed on tunnel teardown */ }
+                });
+
+                var tunnel = new SshTunnel(server.Id, localPort, process);
+                _tunnels[server.Id] = tunnel;
+                _logger.LogInformation("SSH tunnel established for {ServerName} on local port {Port}", server.Name, localPort);
+                return localPort;
+            }
+
+            var error = process.HasExited ? await process.StandardError.ReadToEndAsync() : "tunnel did not open the local port in time";
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            process.Dispose();
+            lastError = new InvalidOperationException($"SSH tunnel failed for {server.Name}: {error}");
+            _logger.LogWarning("SSH tunnel attempt {Attempt}/{Max} for {ServerName} on port {Port} failed: {Error}",
+                attempt, maxAttempts, server.Name, localPort, SecretRedactor.Redact(error));
+
+            var portRace = error.Contains("bind", StringComparison.OrdinalIgnoreCase)
+                || error.Contains("Address already in use", StringComparison.OrdinalIgnoreCase)
+                || error.Contains("cannot listen", StringComparison.OrdinalIgnoreCase);
+            if (!portRace)
+                break; // not a port collision — a fresh port won't help, fail fast
+        }
+
+        throw lastError ?? new InvalidOperationException($"SSH tunnel failed for {server.Name}");
+    }
+
+    /// <summary>Builds and starts one ssh port-forward process. Options chosen so a broken tunnel dies
+    /// fast and cleanly: ExitOnForwardFailure (exit immediately if the local forward can't bind),
+    /// ServerAlive* keepalives (terminate a half-dead link after ~45s), BatchMode (never block on a
+    /// prompt). StrictHostKeyChecking stays as-is (HOCH-11 / ADR-0002).</summary>
+    private static Process StartSshProcess(Models.ServerConfig server, string? keyPath, int localPort)
+    {
         var args = new List<string>();
         if (!string.IsNullOrEmpty(keyPath))
         {
@@ -91,26 +141,8 @@ public class SshTunnelManager : ISshTunnelManager
             psi.ArgumentList.Add(arg);
 
         var process = new Process { StartInfo = psi };
-
         process.Start();
-
-        // Wait until the forwarded port actually accepts connections (up to ~10s) rather than
-        // guessing with a fixed delay — a slow handshake would otherwise leave us with a client
-        // pointed at a port that isn't listening yet.
-        var ready = await WaitForPortAsync(localPort, process, TimeSpan.FromSeconds(10));
-        if (!ready)
-        {
-            string error = process.HasExited ? await process.StandardError.ReadToEndAsync() : "tunnel did not open the local port in time";
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-            process.Dispose();
-            throw new InvalidOperationException($"SSH tunnel failed for {server.Name}: {error}");
-        }
-
-        var tunnel = new SshTunnel(server.Id, localPort, process);
-        _tunnels[server.Id] = tunnel;
-
-        _logger.LogInformation("SSH tunnel established for {ServerName} on local port {Port}", server.Name, localPort);
-        return localPort;
+        return process;
     }
 
     public void CloseTunnel(string serverId)

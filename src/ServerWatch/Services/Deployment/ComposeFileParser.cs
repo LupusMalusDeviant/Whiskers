@@ -60,16 +60,33 @@ public static class ComposeFileParser
                     ContainerName = serviceDef.TryGetValue("container_name", out var cn) ? cn?.ToString() : name
                 };
 
-                // Parse ports
+                // Parse ports. Compose accepts "container", "host:container" and "ip:host:container"
+                // (each with an optional "/proto" suffix). Never silently drop a form — a dropped port
+                // means a stack that deploys "successfully" while publishing nothing.
                 if (serviceDef.TryGetValue("ports", out var portsObj) && portsObj is List<object> ports)
                 {
                     foreach (var port in ports)
                     {
                         var portStr = port.ToString()!;
                         var parts = portStr.Split(':');
-                        if (parts.Length == 2)
+                        switch (parts.Length)
                         {
-                            request.PortMappings[parts[0]] = parts[1].Split('/')[0];
+                            case 1: // "80" — publish the container port on the same host port.
+                            {
+                                var p = parts[0].Split('/')[0];
+                                request.PortMappings[p] = p;
+                                break;
+                            }
+                            case 2: // "8080:80"
+                                request.PortMappings[parts[0]] = parts[1].Split('/')[0];
+                                break;
+                            case 3: // "127.0.0.1:8080:80" — interface bind (loopback) + host + container.
+                                request.PortMappings[parts[1]] = parts[2].Split('/')[0];
+                                request.PortBindIps[parts[1]] = parts[0];
+                                break;
+                            default:
+                                result.Errors.Add($"Service '{name}': port syntax '{portStr}' not supported");
+                                break;
                         }
                     }
                 }
