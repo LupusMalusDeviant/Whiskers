@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using ServerWatch.Configuration;
 using ServerWatch.Models;
 using ServerWatch.Services.Auth;
 using ServerWatch.Services.Vault;
@@ -117,5 +119,44 @@ public class ConcurrencyCacheAliasingTests
 
         await Task.WhenAll(tasks); // pre-fix: unlocked reads threw InvalidOperationException mid-mutation
         _ = svc.ListSecrets();     // still usable afterwards
+    }
+
+    // ---------------------------------------------------------------- NIED-14: ServerConfigService
+
+    private static ServerWatch.Services.ServerConfig.ServerConfigService NewServerConfig()
+        => new(
+            Options.Create(new DockerSettings()),
+            NullLogger<ServerWatch.Services.ServerConfig.ServerConfigService>.Instance,
+            TempStore());
+
+    [Fact]
+    public async Task ServerConfigService_DeleteSshKey_does_not_mutate_previously_read_reference()
+    {
+        var svc = NewServerConfig();
+        await svc.AddServerAsync(new ServerConfig { Id = "s1", Name = "S1", SshKeyFileName = "id_rsa" });
+
+        var before = svc.GetServer("s1")!; // reference into the cache before the change
+
+        await svc.DeleteSshKeyAsync("s1");
+
+        Assert.Equal("id_rsa", before.SshKeyFileName);    // previously-read reference untouched (clone)
+        Assert.Null(svc.GetServer("s1")!.SshKeyFileName); // stored config actually cleared
+    }
+
+    [Fact]
+    public async Task ServerConfigService_concurrent_update_and_read_never_throws()
+    {
+        var svc = NewServerConfig();
+        await svc.AddServerAsync(new ServerConfig { Id = "s1", Name = "S1" });
+        var tasks = new List<Task>();
+        for (var i = 0; i < 50; i++)
+        {
+            var n = i;
+            tasks.Add(Task.Run(() => svc.UpdateServerAsync(new ServerConfig { Id = "s1", Name = $"n{n}" })));
+            tasks.Add(Task.Run(() => { _ = svc.GetServers(); _ = svc.GetServer("s1"); }));
+        }
+
+        await Task.WhenAll(tasks);
+        Assert.NotNull(svc.GetServer("s1"));
     }
 }

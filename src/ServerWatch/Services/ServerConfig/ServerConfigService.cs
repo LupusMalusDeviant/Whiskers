@@ -15,9 +15,9 @@ public class ServerConfigService : IServerConfigService
 
     private const string SshKeysBasePath = "/app/data/ssh-keys";
 
-    public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger)
+    public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger, string? storePath = null)
     {
-        _store = new JsonFileStore<ServerConfigData>("/app/data/servers.json");
+        _store = new JsonFileStore<ServerConfigData>(storePath ?? "/app/data/servers.json");
         _dockerSettings = dockerSettings;
         _logger = logger;
     }
@@ -164,8 +164,8 @@ public class ServerConfigService : IServerConfigService
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-        // Update server config
-        var server = GetServer(serverId);
+        // Update server config on a clone — never mutate the cached live object the lock-free readers see.
+        var server = GetServer(serverId)?.Clone();
         if (server != null)
         {
             server.SshKeyFileName = fileName;
@@ -188,7 +188,7 @@ public class ServerConfigService : IServerConfigService
         try { if (Directory.Exists(keyDir)) Directory.Delete(keyDir, true); }
         catch { /* best effort */ }
 
-        var server = GetServer(serverId);
+        var server = GetServer(serverId)?.Clone();
         if (server != null && server.SshKeyFileName != null)
         {
             server.SshKeyFileName = null;
