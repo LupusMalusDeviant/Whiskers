@@ -55,6 +55,18 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 - **KRIT-3 Schritt 2** — Fallback-Authorization-Policy: könnte `/mcp` brechen; Auth-Middleware Off-Limits.
 - **HOCH-12 Teil 2** — secretlose Webhooks ablehnen: braucht Secret-Management-UI, sonst Feature unbrauchbar.
 
+## Mittel & Niedrig — Bean-Abarbeitung
+
+### ServerWatch-z07v — Image-Update & Registry (Token-Flow, Digest-Pin, Race, Repeat-Notifications)
+
+- **MIT-23** — registry-agnostischer Bearer-Token-Flow: bei 401 wird der `WWW-Authenticate: Bearer`-Challenge geparst (`ParseBearerChallenge`), ein Token vom Realm geholt und der Manifest-HEAD einmal wiederholt → GHCR/Quay/LSCR melden echten Update-Status statt „could not reach registry". Token wird nie geloggt. _Dateien: `Services/ImageUpdate/RegistryClient.cs`._
+- **MIT-24** — Digest-gepinnte Images (`@sha256:`) werden nicht mehr fälschlich als Update gemeldet (`IsDigestPinned` ersetzt den nie feuernden Guard). _Dateien: `Services/ImageUpdate/ImageUpdateChecker.cs`._
+- **MIT-25** — der Parallel-Check-Akkumulator ist `ConcurrentBag` statt `List<T>` (keine verlorenen Einträge / kein Growth-Crash). _Dateien: `Services/ImageUpdate/ImageUpdateChecker.cs`._
+- **NIED-15** — ein Update benachrichtigt einmal statt jede Runde (Dedup gegen den vorherigen `_store.Get`-State); in AutoUpdate sind Start-/Fehler-Notifications in eigenes try/catch gewrappt, sodass `UpdateHistory.Add` + `SaveChangesAsync` immer laufen. _Dateien: `Services/ImageUpdate/ImageUpdateChecker.cs`, `Services/AutoUpdate/AutoUpdateService.cs`._
+- **NIED-16** — alle `JsonDocument`-Instanzen mit `using var` (String vor Dispose extrahiert). _Dateien: `Services/ImageUpdate/RegistryClient.cs`, `Services/AiChat/AiChatService.cs`._
+
+**Verifikation Bean 11:** Build 0 Fehler; `dotnet test` 134/134 (neue Tests: `RegistryChallengeTests`, `ImageUpdatePinTests`); App in Development gebootet, DI-Graph sauber. MIT-25/NIED-15/16 (Loop-/HTTP-/DB-Pfade) via Build + Boot + Review.
+
 ## Verifikation
 
 - `dotnet build src/ServerWatch/ServerWatch.csproj` → 0 Fehler.
