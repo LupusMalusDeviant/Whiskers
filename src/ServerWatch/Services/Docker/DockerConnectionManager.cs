@@ -125,25 +125,6 @@ public class DockerConnectionManager : IDockerConnectionManager
         return false;
     }
 
-    /// <summary>
-    /// Backward compatibility — returns default server's client synchronously.
-    /// Used only for the local socket which doesn't need async setup.
-    /// </summary>
-    public DockerClient Client
-    {
-        get
-        {
-            var server = _serverConfig.GetDefaultServer();
-            if (server == null)
-                throw new InvalidOperationException("No default server configured");
-
-            return _clients.GetOrAdd(server.Id, _ =>
-            {
-                return new DockerClientConfiguration(new Uri(server.SocketPath)).CreateClient();
-            });
-        }
-    }
-
     public void InvalidateClient(string serverId)
     {
         if (_clients.TryRemove(serverId, out var client))

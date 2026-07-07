@@ -8,6 +8,5 @@ public interface IDockerConnectionManager : IDisposable
 {
     Task<DockerClient> GetClientAsync(string? serverId = null);
     Task<T> ExecuteAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation);
-    DockerClient Client { get; }
     void InvalidateClient(string serverId);
 }
