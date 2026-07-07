@@ -12,6 +12,7 @@
 @inject ServerWatch.Services.Auth.IRoleService RoleService
 @inject ServerWatch.Services.Auth.ICurrentUserService CurrentUser
 @inject ServerWatch.Services.AuditLog.IAuditLogService AuditLog
+@inject Microsoft.JSInterop.IJSRuntime JS
 @inject ServerWatch.Services.Vault.IVaultService VaultService
 @inject ServerWatch.Services.Mcp.IMcpPermissionService McpPermissionService
 @inject ISnackbar Snackbar
@@ -818,8 +819,10 @@ else
 
     private async Task CopyKey(string key)
     {
-        // JS interop for clipboard would be better, but for now use snackbar
-        Snackbar.Add($"Schlüssel: {key}", Severity.Info);
+        // Copy to the clipboard via JS — never echo the key value in a toast.
+        try { await JS.InvokeVoidAsync("swClipboard.copy", key); }
+        catch { /* clipboard unavailable */ }
+        Snackbar.Add("Schlüssel in die Zwischenablage kopiert.", Severity.Success);
     }
 
     private Color GetLevelColor(string level) => level switch
@@ -840,6 +843,7 @@ else
 
     private async Task AddApiKey()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         var newKey = await McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel);
         // Reload from service to avoid duplicates from reference sharing
@@ -902,6 +906,7 @@ else
 
     private async Task SaveWhitelist()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         // An enabled whitelist with zero entries denies everyone (fail-closed) — refuse to save that state
         // so an admin can't accidentally lock the whole instance (including themselves) out.
         if (_whitelistEnabled && _whitelistEmails.Count == 0)
@@ -969,6 +974,7 @@ else
 
     private async Task SaveRoles()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         await RoleService.SaveRoleDataAsync(new ServerWatch.Models.UserRoleData { Roles = _roleEntries });
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         await AuditLog.LogAsync(actor, "web", "config.save", "config", "roles", "Benutzerrollen");
@@ -982,8 +988,17 @@ else
         _vaultEntries = VaultService.ListSecrets();
     }
 
+    private async Task DeleteVaultSecret(string key)
+    {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
+        await VaultService.DeleteSecretAsync(key);
+        await AuditVault("vault.delete", key);
+        LoadVault();
+    }
+
     private async Task AddVaultSecret()
     {
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue)) return;
         var key = _newVaultKey.Trim();
         try
@@ -998,13 +1013,6 @@ else
         {
             Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
         }
-    }
-
-    private async Task DeleteVaultSecret(string key)
-    {
-        await VaultService.DeleteSecretAsync(key);
-        await AuditVault("vault.delete", key);
-        LoadVault();
     }
 
     // Audit a vault mutation — key NAMES only, never values.

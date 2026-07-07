@@ -254,7 +254,8 @@
 
     private static readonly MarkdownPipeline MdPipeline =
         new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
-    private static string RenderMarkdown(string? text) => Markdown.ToHtml(text ?? "", MdPipeline);
+    private static string RenderMarkdown(string? text)
+        => ServerWatch.Utils.MarkdownSanitizer.NeutralizeUnsafeHrefs(Markdown.ToHtml(text ?? "", MdPipeline));
     private static string FormatSize(int chars) => chars < 1024 ? $"{chars} B" : $"{chars / 1024} KB";
 
     private IAgentSession? _session;

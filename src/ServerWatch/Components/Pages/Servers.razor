@@ -54,7 +54,7 @@
                     @($"{context.TcpHost}:{context.TcpPort}")
                     break;
                 case ServerWatch.Models.ConnectionType.SSH:
-                    @($"{context.SshUser}@@@{context.SshHost}:{context.SshPort}")
+                    @($"{context.SshUser}@{context.SshHost}:{context.SshPort}")
                     break;
             }
         </MudTd>

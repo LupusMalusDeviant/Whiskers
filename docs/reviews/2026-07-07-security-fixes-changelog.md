@@ -163,6 +163,19 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-16** — alle `JsonDocument`-Instanzen mit `using var` (String vor Dispose extrahiert). _Dateien: `Services/ImageUpdate/RegistryClient.cs`, `Services/AiChat/AiChatService.cs`._
 
 **Verifikation Bean 11:** Build 0 Fehler; `dotnet test` 134/134 (neue Tests: `RegistryChallengeTests`, `ImageUpdatePinTests`); App in Development gebootet, DI-Graph sauber. MIT-25/NIED-15/16 (Loop-/HTTP-/DB-Pfade) via Build + Boot + Review.
+### ServerWatch-4wua — Blazor-UI (XSS, Env-Masking, RBAC, SRI, Timer, Deep-Link, Kleinbugs, Perf)
+
+- **MIT-35** (Security/XSS) — `MarkdownSanitizer.NeutralizeUnsafeHrefs` filtert nicht-`http(s)`/`mailto`/`#`-Hrefs aus gerendertem LLM-Markdown → ein `[x](javascript:…)` ist inert. Nur `Agent.razor` (Markdig); `AiChat.razor` rendert keine Links (safe). _Dateien: `Utils/MarkdownSanitizer.cs`, `Components/Pages/Agent.razor`._
+- **MIT-37** (Security) — `EnvMasking.ShouldMask` maskiert sensible Keys UND Werte mit Inline-Credentials (`://user:pass@`, inkl. leerer-User Redis-URIs); Env-Tab hinter `AppRole.Operator`. URL/URI werteseitig (nicht als Blanket-Keywords), damit harmlose Config-URLs sichtbar bleiben. _Dateien: `Utils/EnvMasking.cs`, `ContainerDetail.razor`, `ContainerDiff.razor`._
+- **MIT-43(b)** (Security/RBAC) — Live-Admin-Recheck (`CurrentUser.HasRoleAsync`) als erste Zeile von `SaveWhitelist`/`SaveRoles`/`AddVaultSecret`/`AddApiKey` + neue gegatete `DeleteVaultSecret` (Rolle nicht mehr nur per-Circuit gesnapshottet). MIT-43(a) war Teil HOCH-4. _Dateien: `Settings.razor`._
+- **MIT-36** (Security/Supply-Chain) — xterm/vis-network/html2canvas lokal nach `wwwroot/js/vendor/` gevendort (kein CDN-Load ohne SRI, air-gapped funktioniert). _Dateien: `App.razor`, `wwwroot/js/vendor/*`._
+- **MIT-34** — beide `async void`-Refresh-Timer (Dashboard 5s, ContainerDetail) mit try/catch (Circuit-Teardown) + `Interlocked`-Reentrancy-Guard. _Dateien: `Dashboard.razor`, `ContainerDetail.razor`._
+- **MIT-42** — Chart-Deep-Links nutzen `_resolvedServerId` (nicht den Routen-Param) + Reload nach Cross-Server-Discovery. _Dateien: `ContainerDetail.razor`._
+- **NIED-20** (1/2/3/4/5/7; 6 war schon done) — Servers `@@@`→`@`; LogViewer toter Follow-Switch entfernt; ContainerDetail CSV-Placeholder aus Accept; AiChat Approval-Session-Fallback; theme-interop Drag-Listener einmalig (kein Leak); Settings MCP-Key → Clipboard statt Toast. _Dateien: `Servers.razor`, `LogViewer.razor`, `ContainerDetail.razor`, `Shared/AiChat.razor`, `theme-interop.js`, `Settings.razor`._
+- **OPT-3** — `ChatWidget` Identity-Key-Guard in `OnParametersSetAsync` stoppt den Re-Query-Sturm bei Streaming. _Dateien: `Shared/ChatWidget.razor`._
+- **OPT-9** — `IDockerService.GetContainerAsync` (Single-Inspect via id-Filter) für den Detail-Poll + Intervall 5s; Dashboard-Fan-out bereits durch MIT-34-Guard bounded. _Dateien: `IDockerService.cs`, `DockerService.cs`, `ContainerDetail.razor`._
+
+**Verifikation Bean 12:** Build 0 Fehler; `dotnet test` 143/143 (neue Tests: `MarkdownSanitizerTests` inkl. Markdig-Round-Trip, `EnvMaskingTests`); App in Development gebootet — DI-Graph sauber (Interface + `IJSRuntime` + gevendorte Assets laden). UI-/Timer-/JS-Pfade via Build + Boot + Review. **Zurückgestellt:** breiter „leer=unverändert"-Secret-Feld-Retrofit (NIED-20.7 Teil 2) + `StateHasChanged`-only-on-change (OPT-9) — als fokussierter Follow-up.
 
 ## Verifikation
 

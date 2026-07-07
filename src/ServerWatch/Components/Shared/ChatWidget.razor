@@ -100,9 +100,16 @@ else
 
     private string ShortId => Spec is null ? "" : Spec.Id.Length > 12 ? Spec.Id[..12] : Spec.Id;
 
+    private string? _loadedKey;
+
     protected override async Task OnParametersSetAsync()
     {
         if (Spec is null) return;
+        // Skip the re-fetch storm: streaming token deltas re-render the parent (and every widget) many
+        // times a second. Only reload when the widget's identity actually changed.
+        var key = $"{Spec.Kind}|{Spec.Target}|{Spec.Metric}|{Spec.Id}|{Window}";
+        if (key == _loadedKey) return;
+        _loadedKey = key;
         if (Spec.Kind == ChatWidgetKind.Chart) await LoadChartAsync();
         else await LoadStatusAsync();
     }
