@@ -58,11 +58,21 @@ public class SchedulerService : BackgroundService, ISchedulerService
         {
             if (ct.IsCancellationRequested) break;
 
+            // A task whose cron won't parse is disabled (with a log) instead of erroring every 30s forever.
+            if (!TryParseCron(task.CronExpression, out var cron))
+            {
+                _logger.LogWarning("Disabling scheduled task '{Name}': invalid cron expression '{Cron}'",
+                    task.Name, task.CronExpression);
+                task.Enabled = false;
+                task.LastResult = $"FEHLER: ungültiger Cron-Ausdruck '{task.CronExpression}'";
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+
             // Calculate next run
             try
             {
-                var cron = CrontabSchedule.Parse(task.CronExpression, new CrontabSchedule.ParseOptions { IncludingSeconds = false });
-                var nextRun = cron.GetNextOccurrence(now);
+                var nextRun = cron!.GetNextOccurrence(now);
 
                 // If this is the first run (NextRun was null), set NextRun and skip execution
                 if (task.NextRun == null)
@@ -110,6 +120,21 @@ public class SchedulerService : BackgroundService, ISchedulerService
                 task.LastRun = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
             }
+        }
+    }
+
+    /// <summary>Parses a cron expression, returning false instead of throwing on an invalid one.</summary>
+    public static bool TryParseCron(string expression, out CrontabSchedule? schedule)
+    {
+        try
+        {
+            schedule = CrontabSchedule.Parse(expression, new CrontabSchedule.ParseOptions { IncludingSeconds = false });
+            return true;
+        }
+        catch
+        {
+            schedule = null;
+            return false;
         }
     }
 
