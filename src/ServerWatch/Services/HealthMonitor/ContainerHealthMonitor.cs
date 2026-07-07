@@ -57,6 +57,12 @@ public class ContainerHealthMonitor : BackgroundService
                     await ProcessContainer(container);
                 }
 
+                // Bound the per-container maps: drop entries for containers that no longer exist.
+                var liveKeys = containers.Select(CompositeKey).ToHashSet();
+                PruneToLive(_previousStates, liveKeys);
+                PruneToLive(_restartTimestamps, liveKeys);
+                PruneToLive(_previousHealth, liveKeys);
+
                 await _hubContext.Clients.All.SendAsync("ContainerListUpdated", containers, ct);
             }
             catch (Exception ex)
@@ -70,6 +76,12 @@ public class ContainerHealthMonitor : BackgroundService
 
     private static string CompositeKey(ContainerInfo container)
         => $"{container.ServerId}:{container.Id}";
+
+    private static void PruneToLive<TValue>(ConcurrentDictionary<string, TValue> map, IReadOnlySet<string> liveKeys)
+    {
+        foreach (var key in map.Keys)
+            if (!liveKeys.Contains(key)) map.TryRemove(key, out _);
+    }
 
     private async Task ProcessContainer(ContainerInfo container)
     {

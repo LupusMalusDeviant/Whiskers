@@ -62,6 +62,16 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
 
             _ = RunTriggerAsync(t, evt);   // fire-and-forget; bounded by the concurrency gate
         }
+
+        // Bound _lastRun (keyed trigger|container, so recreated containers grow it): once it's large, drop
+        // entries older than the longest cooldown — they can no longer suppress anything.
+        if (_lastRun.Count > 1000)
+        {
+            var maxCooldown = _store.Triggers.Select(x => x.CooldownSeconds).DefaultIfEmpty(0).Max();
+            var cutoff = now.AddSeconds(-Math.Max(3600, maxCooldown));
+            foreach (var kv in _lastRun)
+                if (kv.Value < cutoff) _lastRun.TryRemove(kv.Key, out _);
+        }
         return Task.CompletedTask;
     }
 

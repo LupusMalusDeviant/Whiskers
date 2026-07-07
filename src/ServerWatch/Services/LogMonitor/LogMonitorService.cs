@@ -157,6 +157,16 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
                 _logger.LogDebug(ex, "Failed to check logs for {Container}", container.Name);
             }
         }
+
+        // Bound the per-container maps: drop entries for containers no longer in the list.
+        var liveIds = containers.Select(c => c.Id).ToHashSet();
+        foreach (var kv in _cooldowns.ToArray())
+        {
+            var parts = kv.Key.Split(':', 2); // "ruleId:containerId"
+            if (parts.Length == 2 && !liveIds.Contains(parts[1])) _cooldowns.TryRemove(kv.Key, out _);
+        }
+        foreach (var id in _lastLogCheck.Keys)
+            if (!liveIds.Contains(id)) _lastLogCheck.TryRemove(id, out _);
     }
 
     // === Public API ===

@@ -25,6 +25,12 @@ public class NotificationThrottler
     public void Record(string containerId, string eventType)
     {
         var key = $"{containerId}:{eventType}";
-        _lastSent[key] = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        _lastSent[key] = now;
+
+        // Keep the map bounded: an entry can't affect throttling once it's older than twice the window.
+        var cutoff = now - TimeSpan.FromMinutes(2 * Math.Max(1, _throttleMinutes));
+        foreach (var kv in _lastSent)
+            if (kv.Value < cutoff) _lastSent.TryRemove(kv.Key, out _);
     }
 }
