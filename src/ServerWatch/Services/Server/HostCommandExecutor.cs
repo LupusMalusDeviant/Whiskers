@@ -2,6 +2,7 @@ using System.Diagnostics;
 using ServerWatch.Models;
 using ServerWatch.Services.Docker;
 using ServerWatch.Services.ServerConfig;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Server;
 
@@ -186,12 +187,24 @@ public class HostCommandExecutor : IHostCommandExecutor
                     Error = stderr
                 };
             }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                // Timed out (not externally cancelled)
-                _logger.LogWarning("Command timed out after {Timeout}: {FileName} {Arguments}", timeout, fileName, string.Join(' ', psi.ArgumentList));
-                try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-                return new CommandResult { ExitCode = -1, Error = $"Command timed out after {timeout.TotalSeconds}s" };
+                // Cancelled — by our timeout (CancelAfter) OR by the caller's token. Either way kill the
+                // whole process tree so an aborted `ufw disable` / `systemctl stop` can't keep running,
+                // and observe the read tasks so they don't fault unobserved.
+                var timedOut = !ct.IsCancellationRequested;
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+                try { await Task.WhenAll(stdoutTask, stderrTask); } catch { /* reads cancel with the token */ }
+
+                if (timedOut)
+                {
+                    _logger.LogWarning("Command timed out after {Timeout}: {FileName} {Arguments}",
+                        timeout, fileName, SecretRedactor.Redact(string.Join(' ', psi.ArgumentList)));
+                    return new CommandResult { ExitCode = -1, Error = $"Command timed out after {timeout.TotalSeconds}s" };
+                }
+
+                _logger.LogWarning("Command cancelled: {FileName}", fileName);
+                return new CommandResult { ExitCode = -1, Error = "Command cancelled" };
             }
         }
         catch (Exception ex)
