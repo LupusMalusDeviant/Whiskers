@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using ServerWatch.Models;
 using ServerWatch.Services.ServerConfig;
+using ServerWatch.Utils;
 
 namespace ServerWatch.Services.Docker;
 
@@ -105,6 +106,20 @@ public class SshTunnelManager : ISshTunnelManager
             process.Dispose();
             throw new InvalidOperationException($"SSH tunnel failed for {server.Name}: {error}");
         }
+
+        // Drain stderr for the tunnel's lifetime. Without this the pipe buffer fills on a chatty ssh
+        // (keepalive/known-hosts warnings) and the process blocks on write — the tunnel then looks alive
+        // (HasExited == false) while forwarding nothing, the exact "all SSH servers unreachable" freeze.
+        // Redact each line in case ssh echoes a sensitive argument.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (await process.StandardError.ReadLineAsync() is { } line)
+                    _logger.LogDebug("ssh[{Server}]: {Line}", server.Name, SecretRedactor.Redact(line));
+            }
+            catch { /* stream closed on tunnel teardown */ }
+        });
 
         var tunnel = new SshTunnel(server.Id, localPort, process);
         _tunnels[server.Id] = tunnel;
