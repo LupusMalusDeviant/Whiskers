@@ -46,6 +46,10 @@ public class CloudControlService : ICloudControlService
         => _serverConfig.GetServers().FirstOrDefault(c => c.Id == idOrName)
            ?? _serverConfig.GetServers().FirstOrDefault(c => c.Name.Equals(idOrName, StringComparison.OrdinalIgnoreCase));
 
+    // Surfaced when a destructive/power op resolved its target only by name (the IP match failed) — the
+    // SshHost is often a mesh/Tailscale address ≠ the cloud public IP, so name-match is easy to get wrong.
+    private const string NameMatchNote = "per Namensabgleich aufgelöst (IP-Abgleich fehlgeschlagen — Ziel ggf. nicht eindeutig)";
+
     /// <summary>Resolves the provider VM/server matching this ServerWatch server by public IP.</summary>
     public async Task<CloudServerInfo?> ResolveAsync(ServerWatch.Models.ServerConfig sw)
     {
@@ -57,8 +61,8 @@ public class CloudControlService : ICloudControlService
         if (sw.CloudProvider == CloudProvider.Hetzner)
         {
             var servers = await _hetzner.ListServersAsync(token);
-            var match = servers.FirstOrDefault(s => s.Ipv4 != null && s.Ipv4 == ip)
-                        ?? servers.FirstOrDefault(s => s.Name.Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
+            var byIp = servers.FirstOrDefault(s => s.Ipv4 != null && s.Ipv4 == ip);
+            var match = byIp ?? servers.FirstOrDefault(s => s.Name.Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
             if (match == null) return null;
             return new CloudServerInfo
             {
@@ -72,15 +76,16 @@ public class CloudControlService : ICloudControlService
                 Type = match.ServerType?.Name,
                 Location = match.Datacenter?.Location?.City ?? match.Datacenter?.Location?.Name,
                 TrafficPercent = match.TrafficUsedPercent,
-                BackupsEnabled = match.BackupsEnabled
+                BackupsEnabled = match.BackupsEnabled,
+                Note = byIp == null ? NameMatchNote : null
             };
         }
 
         if (sw.CloudProvider == CloudProvider.Hostinger)
         {
             var vms = await _hostinger.ListVmsAsync(token);
-            var match = vms.FirstOrDefault(v => v.PrimaryIpv4 != null && v.PrimaryIpv4 == ip)
-                        ?? vms.FirstOrDefault(v => (v.Hostname ?? "").Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
+            var byIp = vms.FirstOrDefault(v => v.PrimaryIpv4 != null && v.PrimaryIpv4 == ip);
+            var match = byIp ?? vms.FirstOrDefault(v => (v.Hostname ?? "").Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
             if (match == null) return null;
             return new CloudServerInfo
             {
@@ -92,7 +97,8 @@ public class CloudControlService : ICloudControlService
                 Status = match.State ?? "unknown",
                 Ipv4 = match.PrimaryIpv4,
                 Type = match.Plan ?? (match.Cpus.HasValue ? $"{match.Cpus} vCPU / {match.Memory} MB" : null),
-                Location = null
+                Location = null,
+                Note = byIp == null ? NameMatchNote : null
             };
         }
 
@@ -194,12 +200,14 @@ public class CloudControlService : ICloudControlService
         Func<string, long, Task> hostingerAction)
     {
         var (sw, info) = await ContextAsync(idOrName);
+        // Surface a weak (name-only) target resolution so a destructive op on the wrong VM is visible.
+        var noteSuffix = info.Note != null ? $"\n⚠️ {info.Note}" : "";
         if (info.Provider == CloudProvider.Hetzner)
         {
             var a = await hetznerAction(sw.CloudApiKey!, info.CloudId);
-            return $"{info.Name} ({info.Provider}): {verb}. (Aktion: {a?.Status ?? "ausgelöst"})";
+            return $"{info.Name} ({info.Provider}): {verb}. (Aktion: {a?.Status ?? "ausgelöst"}){noteSuffix}";
         }
         await hostingerAction(sw.CloudApiKey!, info.CloudId);
-        return $"{info.Name} ({info.Provider}): {verb}. (ausgelöst)";
+        return $"{info.Name} ({info.Provider}): {verb}. (ausgelöst){noteSuffix}";
     }
 }
