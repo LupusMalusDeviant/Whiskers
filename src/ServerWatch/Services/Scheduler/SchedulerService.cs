@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using NCrontab;
 using ServerWatch.Models;
@@ -11,6 +12,8 @@ public class SchedulerService : BackgroundService, ISchedulerService
     private readonly ITaskExecutor _executor;
     private readonly ILogger<SchedulerService> _logger;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
+    // Per-taskId in-flight guard so the same task never runs twice concurrently.
+    private readonly ConcurrentDictionary<string, byte> _running = new();
 
     public SchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -82,35 +85,20 @@ public class SchedulerService : BackgroundService, ISchedulerService
                     continue;
                 }
 
-                // Execute the task
-                _logger.LogInformation("Running scheduled task: {Name} (Type: {Type})", task.Name, task.TaskType);
-                var startedAt = DateTime.UtcNow;
-
-                var (success, output) = await _executor.ExecuteAsync(task);
-
-                // Update task record
-                task.LastRun = startedAt;
-                task.LastResult = success ? output : $"FEHLER: {output}";
-                task.LastSuccess = success;
+                // Persist NextRun/LastRun BEFORE starting so a long-running task doesn't re-trigger on the
+                // next 30s tick (it's no longer "due", and the in-flight guard backs that up).
+                task.LastRun = DateTime.UtcNow;
                 task.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
-
-                // Save run history
-                db.TaskRunHistory.Add(new TaskRunHistoryEntity
-                {
-                    TaskId = task.TaskId,
-                    TaskName = task.Name,
-                    TaskType = task.TaskType,
-                    StartedAt = startedAt,
-                    CompletedAt = DateTime.UtcNow,
-                    Success = success,
-                    Output = success ? output : null,
-                    Error = success ? null : output
-                });
-
                 await db.SaveChangesAsync(ct);
 
-                _logger.LogInformation("Task {Name} completed: success={Success}, next run: {NextRun}",
-                    task.Name, success, task.NextRun);
+                // Fire without blocking the loop, but never run the same task twice at once. TryAdd AFTER the
+                // save so a failed persist can't leak the in-flight guard.
+                if (!_running.TryAdd(task.TaskId, 0))
+                    continue;
+
+                _logger.LogInformation("Running scheduled task: {Name} (Type: {Type})", task.Name, task.TaskType);
+                var taskId = task.TaskId;
+                _ = Task.Run(() => RunTaskAsync(taskId), CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -120,6 +108,47 @@ public class SchedulerService : BackgroundService, ISchedulerService
                 task.LastRun = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
             }
+        }
+    }
+
+    /// <summary>Runs one due task in the background (its own DB scope), recording the result + history and
+    /// clearing the in-flight guard when done. NextRun/LastRun were already persisted by the caller.</summary>
+    private async Task RunTaskAsync(string taskId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var task = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
+            if (task == null) return;
+
+            var startedAt = task.LastRun ?? DateTime.UtcNow;
+            var (success, output) = await _executor.ExecuteAsync(task);
+
+            task.LastResult = success ? output : $"FEHLER: {output}";
+            task.LastSuccess = success;
+            db.TaskRunHistory.Add(new TaskRunHistoryEntity
+            {
+                TaskId = task.TaskId,
+                TaskName = task.Name,
+                TaskType = task.TaskType,
+                StartedAt = startedAt,
+                CompletedAt = DateTime.UtcNow,
+                Success = success,
+                Output = success ? output : null,
+                Error = success ? null : output
+            });
+            await db.SaveChangesAsync();
+
+            _logger.LogInformation("Task {Name} completed: success={Success}", task.Name, success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Scheduled task {TaskId} failed", taskId);
+        }
+        finally
+        {
+            _running.TryRemove(taskId, out _);
         }
     }
 

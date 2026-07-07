@@ -207,7 +207,7 @@ else
 
             <MudTextField @bind-Value="_formCron" Label="Cron-Zeitplan" Variant="Variant.Outlined" Class="mb-3"
                           Style="font-family: 'JetBrains Mono', monospace;"
-                          HelperText="Format: Min Std Tag Monat Wochentag (z.B. 0 2 * * * = täglich 02:00)" />
+                          HelperText="Format: Min Std Tag Monat Wochentag (z.B. 0 2 * * * = täglich 02:00). Zeiten sind UTC." />
 
             <MudStack Row="true" Spacing="1" Class="mb-3">
                 <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 2 * * *")">Täglich 02:00</MudButton>
