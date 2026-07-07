@@ -46,7 +46,8 @@ public class OsCveScanner : IOsCveScanner
         //    we still try to list whatever is in the existing cache.
         var update = await _executor.ExecuteAsync(
             serverId,
-            "sudo apt-get update -q -y 2>&1 | tail -3",
+            // LC_ALL=C.UTF-8 keeps apt output English so the upgradable regex matches on non-English hosts.
+            "LC_ALL=C.UTF-8 sudo apt-get update -q -y 2>&1 | tail -3",
             TimeSpan.FromMinutes(2),
             ct);
         if (!update.Success)
@@ -54,7 +55,7 @@ public class OsCveScanner : IOsCveScanner
                 serverId, update.ExitCode, Truncate(update.Error ?? update.Output, 200));
 
         // 2. List upgradable security-pocket packages.
-        var listCmd = "apt list --upgradable 2>/dev/null | grep -E -- '-security[ /]' || true";
+        var listCmd = "LC_ALL=C.UTF-8 apt list --upgradable 2>/dev/null | grep -E -- '-security[ /]' || true";
         var list = await _executor.ExecuteAsync(serverId, listCmd, TimeSpan.FromSeconds(30), ct);
         if (list.ExitCode is not 0 and not 1)
         {
