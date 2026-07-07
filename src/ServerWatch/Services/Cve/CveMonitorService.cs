@@ -204,6 +204,11 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                         finally { semaphore.Release(); }
                     });
                     await Task.WhenAll(tasks);
+
+                    // Drop phantom entries for containers that no longer exist (recreated/deleted). The live
+                    // set is authoritative because the listing above succeeded; the OS key is preserved.
+                    var liveKeys = containers.Select(c => CveFindingsStore.Key(server.Id, c.Id)).ToHashSet();
+                    _store.PruneServer(server.Id, liveKeys);
                 }
             }
 

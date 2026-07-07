@@ -12,6 +12,12 @@ public interface ICveFindingsStore
     IReadOnlyList<CveScanResult> GetForServer(string serverId);
     IReadOnlyList<CveScanResult> GetAll();
     void Remove(string serverId, string? containerId);
+
+    /// <summary>Removes stored container results of a server whose key is absent from <paramref name="liveKeys"/>
+    /// (phantom entries left by recreated/deleted containers). The OS target key is never pruned. Only call
+    /// with an authoritative live set (a successful container listing). Returns the count removed.</summary>
+    int PruneServer(string serverId, IReadOnlySet<string> liveKeys);
+
     void Clear();
     Task SaveAsync();
     CveSummary SummarizeServer(string serverId);
