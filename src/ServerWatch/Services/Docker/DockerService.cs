@@ -17,6 +17,12 @@ public class DockerService : IDockerService
     private readonly ILogger<DockerService> _logger;
     private readonly MemoryCache _statsCache = new(new MemoryCacheOptions());
     private static readonly TimeSpan StatsCacheDuration = TimeSpan.FromSeconds(3);
+    // Reused across every stats deserialize instead of allocating a fresh options object per call.
+    private static readonly System.Text.Json.JsonSerializerOptions StatsJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower
+    };
 
     public DockerService(
         IDockerConnectionManager connectionManager,
@@ -147,12 +153,7 @@ public class DockerService : IDockerService
             if (string.IsNullOrWhiteSpace(json))
                 return null;
 
-            var stats = System.Text.Json.JsonSerializer.Deserialize<DockerStatsResponse>(json,
-                new System.Text.Json.JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true,
-                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower
-                });
+            var stats = System.Text.Json.JsonSerializer.Deserialize<DockerStatsResponse>(json, StatsJsonOptions);
 
             if (stats == null)
                 return null;
@@ -284,19 +285,33 @@ public class DockerService : IDockerService
         var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
         var client = await GetClient(serverId);
 
-        // Opportunistically clear any helper containers leaked by a previously interrupted run.
-        _ = SweepHostShellLeftoversAsync(client);
+        var cacheScope = serverId ?? "local";
 
-        // Ensure the helper image exists on the target (pull once if missing).
-        try
+        // Opportunistically clear helper containers leaked by a previously interrupted run — but at most
+        // once every few minutes per server, not on every command (the leftovers are already dead).
+        var sweepKey = $"hostshellsweep:{cacheScope}";
+        if (!_statsCache.TryGetValue(sweepKey, out _))
         {
-            await client.Images.InspectImageAsync(HostShellImage);
+            _statsCache.Set(sweepKey, true, TimeSpan.FromMinutes(5));
+            _ = SweepHostShellLeftoversAsync(client);
         }
-        catch (DockerImageNotFoundException)
+
+        // Ensure the helper image exists on the target (pull once if missing). Cache the "present"
+        // result per server for an hour so subsequent commands skip the inspect round-trip.
+        var imageKey = $"hostshellimg:{cacheScope}";
+        if (!_statsCache.TryGetValue(imageKey, out _))
         {
-            await client.Images.CreateImageAsync(
-                new ImagesCreateParameters { FromImage = "alpine", Tag = "latest" },
-                null, new Progress<JSONMessage>());
+            try
+            {
+                await client.Images.InspectImageAsync(HostShellImage);
+            }
+            catch (DockerImageNotFoundException)
+            {
+                await client.Images.CreateImageAsync(
+                    new ImagesCreateParameters { FromImage = "alpine", Tag = "latest" },
+                    null, new Progress<JSONMessage>());
+            }
+            _statsCache.Set(imageKey, true, TimeSpan.FromHours(1));
         }
 
         var create = await client.Containers.CreateContainerAsync(new CreateContainerParameters

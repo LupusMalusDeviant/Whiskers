@@ -27,8 +27,11 @@ public class NginxService : INginxService
 
     public async Task<List<NginxSite>> ListSitesAsync(string serverId)
     {
-        var availableResult = await _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-available/ 2>/dev/null");
-        var enabledResult = await _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-enabled/ 2>/dev/null");
+        // Both listings are independent — fire them concurrently to save a sequential SSH round-trip.
+        var availableTask = _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-available/ 2>/dev/null");
+        var enabledTask = _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-enabled/ 2>/dev/null");
+        var availableResult = await availableTask;
+        var enabledResult = await enabledTask;
 
         var enabledSet = new HashSet<string>(
             ParseFileList(enabledResult.Output),

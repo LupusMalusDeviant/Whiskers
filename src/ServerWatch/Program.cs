@@ -116,9 +116,15 @@ builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 
 // Image update checking
 builder.Services.Configure<ImageUpdateSettings>(builder.Configuration.GetSection("ImageUpdate"));
-builder.Services.AddHttpClient<RegistryClient>();
+// Registry client: a typed HttpClient with a rotating primary handler so a long-lived resolution
+// doesn't pin a stale DNS answer. IRegistryClient stays the singleton (shared digest cache); the
+// concrete type is no longer *also* registered as a singleton — that pinned a captive HttpClient.
+builder.Services.AddHttpClient<RegistryClient>()
+    .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+    });
 builder.Services.AddSingleton<ServerWatch.Services.ImageUpdate.IImageUpdateStore, ImageUpdateStore>();
-builder.Services.AddSingleton<RegistryClient>();
 builder.Services.AddSingleton<ServerWatch.Services.ImageUpdate.IRegistryClient>(sp => sp.GetRequiredService<RegistryClient>());
 builder.Services.AddHostedService<ImageUpdateChecker>();
 
@@ -146,8 +152,18 @@ builder.Services.AddSingleton<ServerWatch.Services.Notifications.IContainerNotif
 builder.Services.AddSingleton<ServerWatch.Services.Vault.IVaultService, ServerWatch.Services.Vault.VaultService>();
 
 // Cloud provider integrations (per-server credentials, provider-agnostic dispatch)
-builder.Services.AddHttpClient<IHetznerService, HetznerApiService>();
-builder.Services.AddHttpClient<IHostingerService, HostingerApiService>();
+// Rotating primary handler (PooledConnectionLifetime) so these long-lived cloud clients re-resolve
+// DNS periodically instead of pinning a stale IP.
+builder.Services.AddHttpClient<IHetznerService, HetznerApiService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+    });
+builder.Services.AddHttpClient<IHostingerService, HostingerApiService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+    });
 builder.Services.AddSingleton<ServerWatch.Services.Cloud.ICloudControlService, ServerWatch.Services.Cloud.CloudControlService>();
 
 // Host command execution + server management

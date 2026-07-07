@@ -1,6 +1,7 @@
 using ServerWatch.Models;
 using ServerWatch.Models.Cloud;
 using ServerWatch.Models.Hetzner;
+using ServerWatch.Models.Hostinger;
 using ServerWatch.Services.Hetzner;
 using ServerWatch.Services.Hostinger;
 using ServerWatch.Services.ServerConfig;
@@ -56,71 +57,102 @@ public class CloudControlService : ICloudControlService
         var token = sw.CloudApiKey;
         if (string.IsNullOrWhiteSpace(token) || sw.CloudProvider == CloudProvider.None)
             return null;
-        var ip = HostOf(sw);
 
         if (sw.CloudProvider == CloudProvider.Hetzner)
-        {
-            var servers = await _hetzner.ListServersAsync(token);
-            var byIp = servers.FirstOrDefault(s => s.Ipv4 != null && s.Ipv4 == ip);
-            var match = byIp ?? servers.FirstOrDefault(s => s.Name.Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
-            if (match == null) return null;
-            return new CloudServerInfo
-            {
-                ServerWatchId = sw.Id,
-                ServerWatchName = sw.Name,
-                Provider = CloudProvider.Hetzner,
-                CloudId = match.Id,
-                Name = match.Name,
-                Status = match.Status,
-                Ipv4 = match.Ipv4,
-                Type = match.ServerType?.Name,
-                Location = match.Datacenter?.Location?.City ?? match.Datacenter?.Location?.Name,
-                TrafficPercent = match.TrafficUsedPercent,
-                BackupsEnabled = match.BackupsEnabled,
-                Note = byIp == null ? NameMatchNote : null
-            };
-        }
-
+            return MapHetzner(sw, await _hetzner.ListServersAsync(token));
         if (sw.CloudProvider == CloudProvider.Hostinger)
-        {
-            var vms = await _hostinger.ListVmsAsync(token);
-            var byIp = vms.FirstOrDefault(v => v.PrimaryIpv4 != null && v.PrimaryIpv4 == ip);
-            var match = byIp ?? vms.FirstOrDefault(v => (v.Hostname ?? "").Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
-            if (match == null) return null;
-            return new CloudServerInfo
-            {
-                ServerWatchId = sw.Id,
-                ServerWatchName = sw.Name,
-                Provider = CloudProvider.Hostinger,
-                CloudId = match.Id,
-                Name = match.Hostname ?? sw.Name,
-                Status = match.State ?? "unknown",
-                Ipv4 = match.PrimaryIpv4,
-                Type = match.Plan ?? (match.Cpus.HasValue ? $"{match.Cpus} vCPU / {match.Memory} MB" : null),
-                Location = null,
-                Note = byIp == null ? NameMatchNote : null
-            };
-        }
-
+            return MapHostinger(sw, await _hostinger.ListVmsAsync(token));
         return null;
+    }
+
+    // Match a ServerWatch server to a VM in a PRE-FETCHED account listing (public IP, then name) and
+    // project it. Pulled out of ResolveAsync so ListAllAsync can map many servers against a single
+    // per-account listing instead of listing the account once per server.
+    private static CloudServerInfo? MapHetzner(ServerWatch.Models.ServerConfig sw, List<HetznerServer> servers)
+    {
+        var ip = HostOf(sw);
+        var byIp = servers.FirstOrDefault(s => s.Ipv4 != null && s.Ipv4 == ip);
+        var match = byIp ?? servers.FirstOrDefault(s => s.Name.Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
+        if (match == null) return null;
+        return new CloudServerInfo
+        {
+            ServerWatchId = sw.Id,
+            ServerWatchName = sw.Name,
+            Provider = CloudProvider.Hetzner,
+            CloudId = match.Id,
+            Name = match.Name,
+            Status = match.Status,
+            Ipv4 = match.Ipv4,
+            Type = match.ServerType?.Name,
+            Location = match.Datacenter?.Location?.City ?? match.Datacenter?.Location?.Name,
+            TrafficPercent = match.TrafficUsedPercent,
+            BackupsEnabled = match.BackupsEnabled,
+            Note = byIp == null ? NameMatchNote : null
+        };
+    }
+
+    private static CloudServerInfo? MapHostinger(ServerWatch.Models.ServerConfig sw, List<HostingerVm> vms)
+    {
+        var ip = HostOf(sw);
+        var byIp = vms.FirstOrDefault(v => v.PrimaryIpv4 != null && v.PrimaryIpv4 == ip);
+        var match = byIp ?? vms.FirstOrDefault(v => (v.Hostname ?? "").Equals(sw.Name, StringComparison.OrdinalIgnoreCase));
+        if (match == null) return null;
+        return new CloudServerInfo
+        {
+            ServerWatchId = sw.Id,
+            ServerWatchName = sw.Name,
+            Provider = CloudProvider.Hostinger,
+            CloudId = match.Id,
+            Name = match.Hostname ?? sw.Name,
+            Status = match.State ?? "unknown",
+            Ipv4 = match.PrimaryIpv4,
+            Type = match.Plan ?? (match.Cpus.HasValue ? $"{match.Cpus} vCPU / {match.Memory} MB" : null),
+            Location = null,
+            Note = byIp == null ? NameMatchNote : null
+        };
     }
 
     public async Task<List<CloudServerInfo>> ListAllAsync()
     {
-        var tasks = CloudServers().Select(async sw =>
-        {
-            try { return await ResolveAsync(sw); }
-            catch (Exception ex)
+        // Group by (provider, token) so an account with N ServerWatch servers is listed ONCE instead of
+        // N times (fewer API calls; kinder to the Hetzner rate limit). Mapping within an account is
+        // CPU-only against that single listing. A no-match is omitted; an account-listing failure marks
+        // all of that account's servers as errored — same observable result as the old per-server loop.
+        var tasks = CloudServers()
+            .GroupBy(sw => (sw.CloudProvider, sw.CloudApiKey))
+            .Select(async account =>
             {
-                _logger.LogWarning(ex, "Cloud resolve failed for {Server}", sw.Name);
-                return new CloudServerInfo
+                var (provider, token) = account.Key;
+                var results = new List<CloudServerInfo>();
+                try
                 {
-                    ServerWatchId = sw.Id, ServerWatchName = sw.Name, Provider = sw.CloudProvider,
-                    Name = sw.Name, Status = "error", Note = ex.Message
-                };
-            }
-        });
-        return (await Task.WhenAll(tasks)).Where(x => x != null).Cast<CloudServerInfo>().ToList();
+                    if (provider == CloudProvider.Hetzner)
+                    {
+                        var servers = await _hetzner.ListServersAsync(token!);
+                        foreach (var sw in account)
+                            if (MapHetzner(sw, servers) is { } info) results.Add(info);
+                    }
+                    else if (provider == CloudProvider.Hostinger)
+                    {
+                        var vms = await _hostinger.ListVmsAsync(token!);
+                        foreach (var sw in account)
+                            if (MapHostinger(sw, vms) is { } info) results.Add(info);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Cloud resolve failed for account ({Provider})", provider);
+                    foreach (var sw in account)
+                        results.Add(new CloudServerInfo
+                        {
+                            ServerWatchId = sw.Id, ServerWatchName = sw.Name, Provider = sw.CloudProvider,
+                            Name = sw.Name, Status = "error", Note = ex.Message
+                        });
+                }
+                return results;
+            });
+
+        return (await Task.WhenAll(tasks)).SelectMany(r => r).ToList();
     }
 
     // ─────────────────────────── Actions ───────────────────────────

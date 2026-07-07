@@ -28,6 +28,8 @@ public sealed class InAppNotificationStore : IInAppNotificationStore
 {
     private const int MaxItems = 100;       // in-memory cache for the bell dropdown
     private const int MaxPersisted = 2000;  // hard cap on the persisted history
+    private const int TrimInterval = 200;   // trim the persisted history every N inserts, not every one
+    private int _sinceTrim = TrimInterval;  // start "due" so the first persist trims cross-restart growth
     private readonly List<InAppNotification> _items = new();
     private readonly object _lock = new();
     private readonly IServiceScopeFactory _scopeFactory;
@@ -142,10 +144,16 @@ public sealed class InAppNotificationStore : IInAppNotificationStore
                 Title = n.Title, Detail = n.Detail, Severity = n.Severity, Link = n.Link, Read = false,
             });
             db.SaveChanges();
-            // Trim the persisted history to the hard cap (keep the newest MaxPersisted rows).
-            db.Database.ExecuteSqlRaw(
-                "DELETE FROM \"Notifications\" WHERE \"Id\" NOT IN (SELECT \"Id\" FROM \"Notifications\" ORDER BY \"Id\" DESC LIMIT {0})",
-                MaxPersisted);
+            // Trim the persisted history to the hard cap only periodically — running the NOT IN scan on
+            // every insert is wasteful (the cap is a soft ceiling). The first persist after startup also
+            // trims, so growth from many short sessions can't accumulate unbounded.
+            if (Interlocked.Increment(ref _sinceTrim) >= TrimInterval)
+            {
+                Interlocked.Exchange(ref _sinceTrim, 0);
+                db.Database.ExecuteSqlRaw(
+                    "DELETE FROM \"Notifications\" WHERE \"Id\" NOT IN (SELECT \"Id\" FROM \"Notifications\" ORDER BY \"Id\" DESC LIMIT {0})",
+                    MaxPersisted);
+            }
         });
     }
 
