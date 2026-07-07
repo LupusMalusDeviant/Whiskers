@@ -1164,6 +1164,9 @@ else
                 {
                     _discoveredServerId = match.ServerId;
                     _container = match;
+                    // Charts were first loaded before discovery (against "local"); reload now that the real
+                    // server is known so a notification deep-link shows the correct server's history.
+                    _ = LoadChartData();
                 }
             }
             else
@@ -1255,7 +1258,7 @@ else
     {
         try
         {
-            var sid = string.IsNullOrEmpty(ServerId) || ServerId == "local" ? "local" : ServerId;
+            var sid = _resolvedServerId ?? "local"; // use the resolved/discovered server, not the raw route param
             var period = _chartPeriod switch
             {
                 "1h" => TimeSpan.FromHours(1),
