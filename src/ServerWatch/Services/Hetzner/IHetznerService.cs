@@ -23,6 +23,7 @@ public interface IHetznerService
 
     Task<HetznerActionResponse?> CreateSnapshotAsync(string token, long id, string? description);
     Task<List<HetznerImage>> ListSnapshotsAsync(string token);
+    Task<HetznerImage?> GetImageAsync(string token, long imageId);
     Task DeleteImageAsync(string token, long imageId);
 
     Task<HetznerAction?> EnableBackupsAsync(string token, long id);

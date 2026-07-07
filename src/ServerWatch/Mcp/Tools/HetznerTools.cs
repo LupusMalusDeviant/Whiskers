@@ -4,6 +4,7 @@ using ServerWatch.Services.Cloud;
 using ServerWatch.Services.Hetzner;
 using ServerWatch.Services.Mcp;
 using ServerWatch.Services.AuditLog;
+using ServerWatch.Models.Hetzner;
 using Microsoft.AspNetCore.Http;
 
 namespace ServerWatch.Mcp.Tools;
@@ -133,9 +134,21 @@ public class HetznerTools
 
         var ctx = await cloud.HetznerContextAsync(server);
         if (ctx == null) return NotHetzner(server);
+
+        // Load the image first and refuse anything that isn't a snapshot — a mistyped id must never delete
+        // a backup or a custom/system image (irreversible).
+        var image = await hetzner.GetImageAsync(ctx.Value.token, imageId);
+        if (!IsDeletableSnapshot(image))
+            return image is null
+                ? $"Kein Image #{imageId} in diesem Account gefunden — nichts gelöscht."
+                : $"Verweigert: Image #{imageId} hat Typ '{image.Type}', kein Snapshot. Backups und System-Images sind geschützt.";
+
         await hetzner.DeleteImageAsync(ctx.Value.token, imageId);
-        return $"Snapshot #{imageId} gelöscht.";
+        return $"Snapshot #{imageId} ({image!.Description ?? "ohne Beschreibung"}, erstellt {image.Created}) gelöscht.";
     }
+
+    /// <summary>Only a Hetzner image of type "snapshot" may be deleted here — backups/system images are protected.</summary>
+    public static bool IsDeletableSnapshot(HetznerImage? img) => img is not null && img.Type == "snapshot";
 
     private static string NotHetzner(string server)
         => $"'{server}' ist kein konfigurierter Hetzner-Server (Provider/Key prüfen, oder IP-Abgleich fehlgeschlagen).";

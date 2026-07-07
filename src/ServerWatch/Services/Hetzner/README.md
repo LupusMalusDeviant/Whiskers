@@ -10,6 +10,11 @@ Credentials are **per ServerWatch server** (each may live in a different Hetzner
 |---|---|
 | `IHetznerService.cs` / `HetznerApiService.cs` | Hetzner Cloud API client: power actions, snapshots, server metrics, rescue mode, backups, server-type changes, each call takes the per-server project token. |
 
+## Behaviour notes
+
+- **`hetzner_delete_snapshot` is snapshot-only:** it loads the image first (`GetImageAsync`) and refuses anything whose `type` isn't `"snapshot"` — backups and system/custom images are protected from an accidental id typo.
+- **List endpoints paginate:** servers / snapshots / server-types are fetched page-by-page (`per_page=50`, the API max) until a short page, so an account with >50 entries is returned in full.
+
 ## Related
 
 - Provider-agnostic dispatch: [`../Cloud/`](../Cloud/)

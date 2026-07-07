@@ -8,6 +8,10 @@ Scheduled **automatic container updates**. When an image update is detected ([`.
 |---|---|
 | `IAutoUpdateService.cs` / `AutoUpdateService.cs` | Background auto-update of container images; exposes the policy and update history for the UI. |
 
+## Behaviour notes
+
+- **Server-scoped matching:** a policy applies only to its own `ServerId` — a same-named container on another host is never auto-recreated (id-match before name-match; an empty policy `ServerId` matches any host for back-compat).
+
 ## Related
 
 - Update detection: [`../ImageUpdate/`](../ImageUpdate/)

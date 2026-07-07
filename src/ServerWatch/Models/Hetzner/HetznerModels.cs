@@ -208,6 +208,11 @@ public class HetznerImagesResponse
     [JsonPropertyName("images")] public List<HetznerImage> Images { get; set; } = new();
 }
 
+public class HetznerImageResponse
+{
+    [JsonPropertyName("image")] public HetznerImage? Image { get; set; }
+}
+
 public class HetznerServerTypesResponse
 {
     [JsonPropertyName("server_types")] public List<HetznerServerType> ServerTypes { get; set; } = new();

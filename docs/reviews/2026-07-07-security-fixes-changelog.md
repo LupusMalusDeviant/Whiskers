@@ -79,6 +79,15 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - _Tests:_ `McpInputValidationTests` (Projektname-Validierung, Resolver: exakt/Präfix/mehrdeutig/No-Match). Kein DI-/Ctor-Change → kein Boot nötig.
 - ⚠️ **NIED-1 (Bearer-Scheme case) NICHT umgesetzt** — auth-middleware-nah, zurückgestellt bis zur ausdrücklichen Freigabe.
   _Dateien: `Mcp/Tools/McpInputValidation.cs` (neu), `Mcp/Tools/ContainerTools.cs`, `Mcp/Tools/DatabaseTools.cs`, `Services/Server/SystemdService.cs`, `Services/Server/SslCertService.cs`, `Services/LogMonitor/LogMonitorService.cs`, `Mcp/Tools/README.md`._
+### ServerWatch-gny5 — Destruktiv-Op-Zielauflösung (Cloud/AutoUpdate/Hetzner)
+
+- **MIT-22 — Hetzner-Snapshot-Löschung.** Neuer `IHetznerService.GetImageAsync` (GET `/images/{id}`, 404→null) + `HetznerImageResponse`; `hetzner_delete_snapshot` lädt das Image und verweigert null oder `Type != "snapshot"` (Backups/System-Images geschützt). Helper `IsDeletableSnapshot`.
+- **MIT-20 — AutoUpdate falscher Host.** Neuer `AutoUpdateService.MatchesPolicy` (ServerId-scoped, Id-Match vor Name-Match); der Cross-Server-Match und der `SetPolicy`-Lookup sind jetzt auf `policy.ServerId` begrenzt — kein Recreate eines gleichnamigen Containers auf einem anderen Host.
+- **MIT-21 — Cloud Namens-Fallback.** `ResolveAsync` setzt bei Namens-Fallback (IP-Match fehlgeschlagen) ein `Note`; `DispatchAsync`/`HardReset` geben es mit ⚠️ aus.
+- **MIT-26 — Hetzner-Pagination.** Neuer `ListAllPagesAsync`-Helper (page-Loop, `per_page=50`) für Servers/Snapshots/ServerTypes; `per_page=100` (>API-Max) entfernt.
+- **NIED-17 — Hostinger Hard-Reset.** `HardResetAsync` sagt für Hostinger explizit „kein Hard-Reset — Neustart ausgelöst (evtl. wirkungslos)"; Hetzner unverändert.
+- _Tests:_ `DestructiveOpTargetingTests` (IsDeletableSnapshot snapshot/backup/system/null; MatchesPolicy same-server/empty/id-vs-name). MIT-21/26/NIED-17 durch Build + DI-Boot + Inspektion (HTTP-Stubs fehlen). Interface-Change (MIT-22) → App gebootet.
+  _Dateien: `Services/Hetzner/{IHetznerService,HetznerApiService}.cs`, `Models/Hetzner/HetznerModels.cs`, `Mcp/Tools/HetznerTools.cs`, `Services/AutoUpdate/AutoUpdateService.cs`, `Services/Cloud/CloudControlService.cs`, per-Ordner-READMEs (Hetzner/Cloud/AutoUpdate)._
 
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
