@@ -128,6 +128,18 @@ public class HetznerApiService : IHetznerService
     public async Task<List<HetznerImage>> ListSnapshotsAsync(string token)
         => (await SendAsync<HetznerImagesResponse>(token, HttpMethod.Get, "/images?type=snapshot&per_page=50&sort=created:desc")).Images;
 
+    public async Task<HetznerImage?> GetImageAsync(string token, long imageId)
+    {
+        try
+        {
+            return (await SendAsync<HetznerImageResponse>(token, HttpMethod.Get, $"/images/{imageId}")).Image;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
     public async Task DeleteImageAsync(string token, long imageId)
         => await SendAsync(token, HttpMethod.Delete, $"/images/{imageId}");
 
