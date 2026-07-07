@@ -113,12 +113,14 @@
         </MudGrid>
     </MudPaper>
 
+    @* Compute the filtered set once per render instead of re-filtering at each usage below. *@
+    @{ var filtered = FilteredGroups(); }
     <MudText Typo="Typo.body2" Style="color:#888;" Class="mb-2">
-        @FilteredGroups().Count eindeutige CVEs (von @_allGroups.Count gesamt) — eine Zeile pro CVE, aufklappen für betroffene Container/Server.
+        @filtered.Count eindeutige CVEs (von @_allGroups.Count gesamt) — eine Zeile pro CVE, aufklappen für betroffene Container/Server.
     </MudText>
 
     @* One row per CVE; expand to see all affected instances *@
-    <MudTable Items="@FilteredGroups()" Hover="true" Dense="true" Striped="true" Class="mt-1"
+    <MudTable Items="@filtered" Hover="true" Dense="true" Striped="true" Class="mt-1"
               T="CveGroup" OnRowClick="ToggleRow">
         <HeaderContent>
             <MudTh Style="width:32px;"></MudTh>
