@@ -88,6 +88,15 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-17 — Hostinger Hard-Reset.** `HardResetAsync` sagt für Hostinger explizit „kein Hard-Reset — Neustart ausgelöst (evtl. wirkungslos)"; Hetzner unverändert.
 - _Tests:_ `DestructiveOpTargetingTests` (IsDeletableSnapshot snapshot/backup/system/null; MatchesPolicy same-server/empty/id-vs-name). MIT-21/26/NIED-17 durch Build + DI-Boot + Inspektion (HTTP-Stubs fehlen). Interface-Change (MIT-22) → App gebootet.
   _Dateien: `Services/Hetzner/{IHetznerService,HetznerApiService}.cs`, `Models/Hetzner/HetznerModels.cs`, `Mcp/Tools/HetznerTools.cs`, `Services/AutoUpdate/AutoUpdateService.cs`, `Services/Cloud/CloudControlService.cs`, per-Ordner-READMEs (Hetzner/Cloud/AutoUpdate)._
+Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün.
+
+### ServerWatch-b9qw — Secret-Hygiene (argv & Logs)
+
+- **MIT-39 — DB-Passwörter in argv + Debug-Logs.** `BuildMysqlCmd` (alle MySQL-Pfade) und der Neo4j-Zweig übergeben das Passwort via `MYSQL_PWD`/`NEO4J_PASSWORD` unter `sh -c` (Sq-gequotet, wie `BackupDatabaseAsync`) statt `-p<pw>` in argv → nicht mehr in der Container-Prozessliste. Die drei rohen `LogDebug`-Kommandos in `HostCommandExecutor` laufen durch `SecretRedactor.Redact`. (ContainerDetail-DB-Kommandos waren bereits env-var-sicher.)
+- **MIT-14 — Notification-Tokens in Logs.** Sechs capability-tragende Notification-HttpClients (Telegram/Discord/Slack/Mattermost/ntfy/Webhook) werden auf `System.Net.Http.HttpClient.<Name>` = Warning gefiltert, sodass die volle Request-URI (mit Token/Secret-URL) nicht mehr auf Information geloggt wird.
+- **NIED-18 — VPN-Enrollment-Secrets in argv.** `VpnProcessRunner.RunAsync` bekommt einen optionalen env-Dict-Parameter; Tailscale übergibt den Auth-Key via `TS_AUTHKEY`, NetBird via `NB_SETUP_KEY` (statt `--authkey`/`--setup-key` in argv).
+- _Tests:_ `SecretHygieneTests` (Redaction hides `-p<pw>` / `MYSQL_PWD=` / `PGPASSWORD=` / keyed secrets). Kein Ctor-/Interface-Change → kein Boot.
+  _Dateien: `Services/Database/DatabaseService.cs`, `Services/Server/HostCommandExecutor.cs`, `Program.cs`, `Services/Vpn/VpnProcessRunner.cs`, `Services/Vpn/Providers/{Tailscale,Netbird}VpnProvider.cs`, per-Ordner-READMEs (Database/Vpn/Notifications)._
 
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 

@@ -94,6 +94,16 @@ builder.Services.AddSingleton<ServerWatch.Services.Notifications.IWebhookNotific
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IInAppNotificationStore, ServerWatch.Services.Notifications.InAppNotificationStore>();
 builder.Services.AddSingleton<INotificationService, CompositeNotificationService>();
 
+// Keep capability-bearing notification URLs (Telegram bot token in the path, Discord/Slack/Mattermost/
+// ntfy/webhook secret URLs) out of the HttpClient request log — the default HttpClient logger writes the
+// full request URI at Information level. Raise these categories to Warning so the URL isn't logged.
+foreach (var httpClientName in new[]
+         {
+             "TelegramNotificationService", "MattermostNotificationService", "DiscordNotificationService",
+             "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService"
+         })
+    builder.Logging.AddFilter($"System.Net.Http.HttpClient.{httpClientName}", Microsoft.Extensions.Logging.LogLevel.Warning);
+
 // Terminal
 builder.Services.AddSingleton<ITerminalSessionManager, TerminalSessionManager>();
 

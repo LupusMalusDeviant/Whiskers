@@ -11,6 +11,8 @@ Detect and operate **databases running inside managed containers**: recognise th
 
 **Backup durability (2026-07):** `BackupDatabaseAsync` dumps to the DB container's `/tmp`, then **copies the dump out to the host** (`/app/data/backups`, via `docker cp`) and removes the in-container copy. Previously the dump stayed in the container's `/tmp` and was silently lost on the next container recreate (image update / redeploy). The returned path is the durable host path.
 
+**Secret hygiene (2026-07):** database passwords are passed to the CLI via environment variables (`MYSQL_PWD` / `PGPASSWORD` / `NEO4J_PASSWORD`) under `sh -c`, never as a `-p<pw>` argv, so they don't appear in the container's process list. The host-command debug logs are redacted (`SecretRedactor`).
+
 ## Related
 
 - Container access: [`../Docker/`](../Docker/)
