@@ -13,40 +13,52 @@ public class MetricsCollectorService : BackgroundService
 {
     private readonly IServiceProvider _services;
     private readonly IOptionsMonitor<MetricAlertSettings> _alertSettings;
+    private readonly IOptionsMonitor<MetricsSettings> _metricsSettings;
     private readonly ILogger<MetricsCollectorService> _logger;
     private readonly ConcurrentDictionary<string, AlertState> _alert = new();
 
     public MetricsCollectorService(
         IServiceProvider services,
         IOptionsMonitor<MetricAlertSettings> alertSettings,
+        IOptionsMonitor<MetricsSettings> metricsSettings,
         ILogger<MetricsCollectorService> logger)
     {
         _services = services;
         _alertSettings = alertSettings;
+        _metricsSettings = metricsSettings;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        _logger.LogInformation("Metrics collector started (interval: 30s)");
+        var startup = _metricsSettings.CurrentValue;
+        _logger.LogInformation("Metrics collector started (interval: {Interval}s, retention: {Retention}d, enabled: {Enabled})",
+            startup.CollectionIntervalSeconds, startup.RetentionDays, startup.Enabled);
         await Task.Delay(TimeSpan.FromSeconds(10), ct); // startup delay
 
         while (!ct.IsCancellationRequested)
         {
-            try
+            // Re-read every cycle so reload-on-change settings take effect without a restart.
+            var cfg = _metricsSettings.CurrentValue;
+            if (cfg.Enabled)
             {
-                await CollectMetricsAsync(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Metrics collection failed");
+                try
+                {
+                    await CollectMetricsAsync(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Metrics collection failed");
+                }
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+            // Floor the interval so a 0/negative misconfiguration cannot spin a hot loop.
+            var intervalSeconds = Math.Max(5, cfg.CollectionIntervalSeconds);
+            await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), ct);
         }
     }
 
@@ -148,8 +160,9 @@ public class MetricsCollectorService : BackgroundService
 
         await db.SaveChangesAsync(ct);
 
-        // Prune old data (keep 7 days)
-        var cutoff = now.AddDays(-7);
+        // Prune old data (metrics retention window; floored so a 0/negative value cannot wipe live data).
+        var retentionDays = Math.Max(1, _metricsSettings.CurrentValue.RetentionDays);
+        var cutoff = now.AddDays(-retentionDays);
         await db.ContainerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
         await db.ServerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
         await db.AlertHistory.Where(a => a.Timestamp < cutoff).ExecuteDeleteAsync(ct);

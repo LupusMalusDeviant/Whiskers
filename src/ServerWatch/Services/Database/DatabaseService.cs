@@ -62,11 +62,34 @@ public class DatabaseService : IDatabaseService
         var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId);
         if (exitCode != 0) return new();
 
+        // Redis has no named databases — only numbered logical DBs. Translate the configured count into
+        // indices instead of letting the generic parser return the count itself as a "database name".
+        if (dbType == DatabaseType.Redis)
+            return ParseRedisDatabaseList(stdout);
+
         return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("+-") && !l.StartsWith("Database") && !l.StartsWith("databases"))
             .Select(l => l.Trim('|', ' '))
             .Where(l => !string.IsNullOrWhiteSpace(l))
             .ToList();
+    }
+
+    /// <summary>Turns the output of <c>redis-cli CONFIG GET databases</c> (the key name plus the configured
+    /// count, e.g. "databases\n16") into the list of numbered logical databases ("0".."N-1"). Redis addresses
+    /// databases by index via <c>SELECT n</c>, not by name. Falls back to a single db0 when the count can't be
+    /// parsed — Redis always has at least database 0.</summary>
+    public static List<string> ParseRedisDatabaseList(string stdout)
+    {
+        var count = (stdout ?? string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.Trim('|', ' ', '"', '\t'))
+            .Where(l => int.TryParse(l, out _))
+            .Select(int.Parse)
+            .DefaultIfEmpty(0)
+            .Last();
+
+        if (count <= 0) count = 1; // at least db0
+        return Enumerable.Range(0, count).Select(i => i.ToString()).ToList();
     }
 
     public async Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
