@@ -137,10 +137,19 @@ public class CloudControlService : ICloudControlService
         (t, id) => _hetzner.RebootAsync(t, id),
         (t, id) => _hostinger.RestartAsync(t, id));
 
-    public Task<string> HardResetAsync(string idOrName) => DispatchAsync(idOrName, "hart zurücksetzen",
-        (t, id) => _hetzner.ResetAsync(t, id),
-        // Hostinger exposes no hard power-cycle — fall back to a restart.
-        (t, id) => _hostinger.RestartAsync(t, id));
+    public async Task<string> HardResetAsync(string idOrName)
+    {
+        var (sw, info) = await ContextAsync(idOrName);
+        var noteSuffix = info.Note != null ? $"\n⚠️ {info.Note}" : "";
+        if (info.Provider == CloudProvider.Hetzner)
+        {
+            var a = await _hetzner.ResetAsync(sw.CloudApiKey!, info.CloudId);
+            return $"{info.Name} ({info.Provider}): hart zurücksetzen. (Aktion: {a?.Status ?? "ausgelöst"}){noteSuffix}";
+        }
+        // Hostinger exposes no hard power-cycle — a graceful restart is the closest, but won't help a hung VM.
+        await _hostinger.RestartAsync(sw.CloudApiKey!, info.CloudId);
+        return $"{info.Name} ({info.Provider}): kein Hard-Reset verfügbar — stattdessen NEUSTART ausgelöst (bei hängendem System evtl. wirkungslos).{noteSuffix}";
+    }
 
     public async Task<string> CreateSnapshotAsync(string idOrName, string? description)
     {
