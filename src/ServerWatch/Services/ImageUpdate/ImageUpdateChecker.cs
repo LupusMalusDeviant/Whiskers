@@ -63,7 +63,8 @@ public class ImageUpdateChecker : BackgroundService
             var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<ContainerHub>>();
 
             var containers = await docker.ListAllContainersAsync(all: false);
-            var newUpdates = new List<ImageUpdateInfo>();
+            // ConcurrentBag: up to 5 parallel checks call .Add — a List<T> would lose entries or crash on growth.
+            var newUpdates = new System.Collections.Concurrent.ConcurrentBag<ImageUpdateInfo>();
 
             // Check each container in parallel (max 5 concurrent)
             var semaphore = new SemaphoreSlim(5);
@@ -75,8 +76,11 @@ public class ImageUpdateChecker : BackgroundService
                     var info = await CheckSingleImageAsync(docker, container, ct);
                     if (info != null)
                     {
+                        // Read the prior state BEFORE overwriting, so we only notify when an update FIRST
+                        // appears — not on every cycle while it stays available.
+                        var prev = _store.Get(container.Id, container.ServerId);
                         _store.Set(info);
-                        if (info.UpdateAvailable)
+                        if (info.UpdateAvailable && prev?.UpdateAvailable != true)
                             newUpdates.Add(info);
                     }
                 }
@@ -129,6 +133,12 @@ public class ImageUpdateChecker : BackgroundService
         }
     }
 
+    /// <summary>True for a digest-pinned image (<c>repo@sha256:…</c>) — a pin has no "newer" version.
+    /// The old guard (<c>&amp;&amp; !image.Contains(':')</c>) could never fire because <c>@sha256:</c> itself
+    /// contains a colon.</summary>
+    public static bool IsDigestPinned(string image)
+        => image.Contains("@sha256:", StringComparison.Ordinal);
+
     private async Task<ImageUpdateInfo?> CheckSingleImageAsync(
         IDockerService docker, ContainerInfo container, CancellationToken ct)
     {
@@ -136,8 +146,8 @@ public class ImageUpdateChecker : BackgroundService
         {
             var image = container.Image;
 
-            // Skip images with digest-only references (no tag to check)
-            if (image.Contains("@sha256:") && !image.Contains(':'))
+            // Skip digest-pinned images — a pin is a pin, there's no newer version to check.
+            if (IsDigestPinned(image))
                 return null;
 
             // Get local digest

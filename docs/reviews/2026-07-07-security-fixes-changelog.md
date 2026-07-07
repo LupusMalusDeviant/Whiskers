@@ -154,6 +154,15 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-8** — Throttle-Fenster wird pro Aufruf aus den Live-Settings gelesen statt beim Konstruieren eingefroren (`IsThrottled(…, minutes)`); alle 8 Provider übergeben `ThrottleMinutes`. _Dateien: `NotificationThrottler.cs` + 8 Provider._
 
 **Verifikation Bean 10:** Build 0 Fehler; `dotnet test` 145/145 (neue Tests: `HealthRestartHeuristicTests`, `CronValidationTests`, `NotificationRetryTests`, `NotificationThrottlerTests`); App in Development gebootet — DI-Graph sauber, alle Background-Monitore gestartet. Prozess-/Loop-Pfade (MIT-12, NIED-6/7) via Build + Boot + Review.
+### ServerWatch-z07v — Image-Update & Registry (Token-Flow, Digest-Pin, Race, Repeat-Notifications)
+
+- **MIT-23** — registry-agnostischer Bearer-Token-Flow: bei 401 wird der `WWW-Authenticate: Bearer`-Challenge geparst (`ParseBearerChallenge`), ein Token vom Realm geholt und der Manifest-HEAD einmal wiederholt → GHCR/Quay/LSCR melden echten Update-Status statt „could not reach registry". Token wird nie geloggt. _Dateien: `Services/ImageUpdate/RegistryClient.cs`._
+- **MIT-24** — Digest-gepinnte Images (`@sha256:`) werden nicht mehr fälschlich als Update gemeldet (`IsDigestPinned` ersetzt den nie feuernden Guard). _Dateien: `Services/ImageUpdate/ImageUpdateChecker.cs`._
+- **MIT-25** — der Parallel-Check-Akkumulator ist `ConcurrentBag` statt `List<T>` (keine verlorenen Einträge / kein Growth-Crash). _Dateien: `Services/ImageUpdate/ImageUpdateChecker.cs`._
+- **NIED-15** — ein Update benachrichtigt einmal statt jede Runde (Dedup gegen den vorherigen `_store.Get`-State); in AutoUpdate sind Start-/Fehler-Notifications in eigenes try/catch gewrappt, sodass `UpdateHistory.Add` + `SaveChangesAsync` immer laufen. _Dateien: `Services/ImageUpdate/ImageUpdateChecker.cs`, `Services/AutoUpdate/AutoUpdateService.cs`._
+- **NIED-16** — alle `JsonDocument`-Instanzen mit `using var` (String vor Dispose extrahiert). _Dateien: `Services/ImageUpdate/RegistryClient.cs`, `Services/AiChat/AiChatService.cs`._
+
+**Verifikation Bean 11:** Build 0 Fehler; `dotnet test` 134/134 (neue Tests: `RegistryChallengeTests`, `ImageUpdatePinTests`); App in Development gebootet, DI-Graph sauber. MIT-25/NIED-15/16 (Loop-/HTTP-/DB-Pfade) via Build + Boot + Review.
 
 ## Verifikation
 

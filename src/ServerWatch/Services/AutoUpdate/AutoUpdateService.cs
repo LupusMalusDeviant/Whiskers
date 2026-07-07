@@ -89,16 +89,20 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
 
             _logger.LogInformation("Auto-update triggered for {Container} (opt-in policy)", container.Name);
 
-            // Notify before update
+            // Notify before update — a notification failure must not abort the update.
             if (policy.NotifyBeforeUpdate)
             {
-                await _notifications.SendAsync(new NotificationEvent
+                try
                 {
-                    ContainerId = container.Id,
-                    ContainerName = container.Name,
-                    Image = container.Image,
-                    EventType = "auto_update_start"
-                });
+                    await _notifications.SendAsync(new NotificationEvent
+                    {
+                        ContainerId = container.Id,
+                        ContainerName = container.Name,
+                        Image = container.Image,
+                        EventType = "auto_update_start"
+                    });
+                }
+                catch (Exception nex) { _logger.LogWarning(nex, "Auto-update start notification failed for {Container}", container.Name); }
             }
 
             // Perform update
@@ -147,14 +151,18 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
                 _logger.LogError(ex, "Auto-update failed for {Container}", container.Name);
 
                 // TODO: Rollback would go here — requires storing old image reference
-                // For now, notify about failure
-                await _notifications.SendAsync(new NotificationEvent
+                // Notify about failure — wrapped so a notify error can't skip the history save below.
+                try
                 {
-                    ContainerId = container.Id,
-                    ContainerName = container.Name,
-                    Image = container.Image,
-                    EventType = "auto_update_failed"
-                });
+                    await _notifications.SendAsync(new NotificationEvent
+                    {
+                        ContainerId = container.Id,
+                        ContainerName = container.Name,
+                        Image = container.Image,
+                        EventType = "auto_update_failed"
+                    });
+                }
+                catch (Exception nex) { _logger.LogWarning(nex, "Auto-update failure notification failed for {Container}", container.Name); }
             }
 
             db.UpdateHistory.Add(history);

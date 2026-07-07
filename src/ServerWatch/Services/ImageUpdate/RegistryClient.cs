@@ -1,5 +1,7 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace ServerWatch.Services.ImageUpdate;
@@ -37,26 +39,30 @@ public class RegistryClient : IRegistryClient
 
             var (registry, repo, tag) = parsed.Value;
 
-            string? token = null;
-            if (registry == "registry-1.docker.io")
+            var url = $"https://{registry}/v2/{repo}/manifests/{tag}";
+
+            // Docker Hub: pre-fetch an anonymous pull token (its manifest endpoint always requires one).
+            string? token = registry == "registry-1.docker.io" ? await GetDockerHubTokenAsync(repo) : null;
+
+            var response = await SendManifestHeadAsync(url, token);
+
+            // Registry-agnostic bearer flow: GHCR/Quay/LSCR (and Docker Hub if the pre-fetch missed) answer
+            // 401 with a WWW-Authenticate: Bearer challenge. Fetch a token from its realm and retry once.
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                token = await GetDockerHubTokenAsync(repo);
-                if (token == null) return null;
+                var bearer = response.Headers.WwwAuthenticate.FirstOrDefault(h =>
+                    string.Equals(h.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase));
+                if (bearer?.Parameter is { } param)
+                {
+                    var challengeToken = await GetRegistryTokenAsync(ParseBearerChallenge(param));
+                    if (challengeToken != null)
+                    {
+                        response.Dispose();
+                        response = await SendManifestHeadAsync(url, challengeToken);
+                    }
+                }
             }
 
-            var url = $"https://{registry}/v2/{repo}/manifests/{tag}";
-            var request = new HttpRequestMessage(HttpMethod.Head, url);
-
-            // Accept manifest v2 and OCI index for multi-arch images
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.docker.distribution.manifest.v2+json"));
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.docker.distribution.manifest.list.v2+json"));
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.oci.image.index.v1+json"));
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.oci.image.manifest.v1+json"));
-
-            if (token != null)
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-            var response = await _http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Registry returned {StatusCode} for {Image}", response.StatusCode, imageRef);
@@ -154,12 +160,68 @@ public class RegistryClient : IRegistryClient
             if (!response.IsSuccessStatusCode) return null;
 
             var json = await response.Content.ReadAsStringAsync();
-            var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json);
             return doc.RootElement.GetProperty("token").GetString();
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to get Docker Hub token for {Repo}", repo);
+            return null;
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendManifestHeadAsync(string url, string? token)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Head, url);
+        // Accept manifest v2 and OCI index for multi-arch images.
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.docker.distribution.manifest.v2+json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.docker.distribution.manifest.list.v2+json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.oci.image.index.v1+json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.oci.image.manifest.v1+json"));
+        if (token != null)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await _http.SendAsync(request);
+    }
+
+    private static readonly Regex ChallengeRegex = new(@"(?<key>\w+)=""(?<val>[^""]*)""", RegexOptions.Compiled);
+
+    /// <summary>Parses a <c>Bearer realm="…",service="…",scope="…"</c> WWW-Authenticate parameter into its
+    /// key/value pairs (quotes stripped) — the registry-agnostic OCI token-flow challenge.</summary>
+    public static Dictionary<string, string> ParseBearerChallenge(string parameter)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(parameter)) return result;
+        foreach (Match m in ChallengeRegex.Matches(parameter))
+            result[m.Groups["key"].Value] = m.Groups["val"].Value;
+        return result;
+    }
+
+    /// <summary>Fetches an anonymous pull token from a registry's auth realm (from the parsed challenge).
+    /// Returns null on any failure so the caller degrades to "unknown" rather than a crash/false update.</summary>
+    private async Task<string?> GetRegistryTokenAsync(IReadOnlyDictionary<string, string> challenge)
+    {
+        if (!challenge.TryGetValue("realm", out var realm) || string.IsNullOrWhiteSpace(realm))
+            return null;
+        try
+        {
+            var query = new List<string>();
+            if (challenge.TryGetValue("service", out var service)) query.Add($"service={Uri.EscapeDataString(service)}");
+            if (challenge.TryGetValue("scope", out var scope)) query.Add($"scope={Uri.EscapeDataString(scope)}");
+            var url = query.Count > 0 ? $"{realm}?{string.Join("&", query)}" : realm;
+
+            var response = await _http.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("token", out var t)) return t.GetString();
+            if (doc.RootElement.TryGetProperty("access_token", out var at)) return at.GetString();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Realm only — never log the token.
+            _logger.LogDebug(ex, "Failed to fetch registry token from realm {Realm}", realm);
             return null;
         }
     }
