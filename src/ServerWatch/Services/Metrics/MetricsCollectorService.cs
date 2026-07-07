@@ -15,6 +15,8 @@ public class MetricsCollectorService : BackgroundService
     private readonly IOptionsMonitor<MetricAlertSettings> _alertSettings;
     private readonly ILogger<MetricsCollectorService> _logger;
     private readonly ConcurrentDictionary<string, AlertState> _alert = new();
+    private DateTime _lastPrune;                 // OPT-2: prune at most hourly, not every 30s cycle
+    private const int MaxStatsConcurrency = 8;   // OPT-11.2: bound the per-container stats fan-out
 
     public MetricsCollectorService(
         IServiceProvider services,
@@ -65,9 +67,12 @@ public class MetricsCollectorService : BackgroundService
         // reads below go through IMetricsSource so Prometheus-configured servers bypass SSH.
         var containers = await docker.ListAllContainersAsync(all: false);
 
-        // Collect container stats in parallel
+        // Collect container stats in parallel, but bounded so a large fleet can't fan out into
+        // hundreds of concurrent stats calls at once.
+        using var statsGate = new SemaphoreSlim(MaxStatsConcurrency);
         var statsTasks = containers.Select(async c =>
         {
+            await statsGate.WaitAsync(ct);
             try
             {
                 var stats = await metricsSource.GetContainerStatsAsync(c.ServerId, c.Id, c.Name);
@@ -98,6 +103,10 @@ public class MetricsCollectorService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to collect stats for container {ContainerId} on {ServerId}", c.Id, c.ServerId);
+            }
+            finally
+            {
+                statsGate.Release();
             }
             return null;
         });
@@ -148,19 +157,23 @@ public class MetricsCollectorService : BackgroundService
 
         await db.SaveChangesAsync(ct);
 
-        // Prune old data (keep 7 days)
-        var cutoff = now.AddDays(-7);
-        await db.ContainerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-        await db.ServerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-        await db.AlertHistory.Where(a => a.Timestamp < cutoff).ExecuteDeleteAsync(ct);
+        // Prune old data at most once an hour — the retention windows are days, so pruning on every
+        // 30s cycle just burns 5 ExecuteDelete round-trips for nothing.
+        if (now - _lastPrune > TimeSpan.FromHours(1))
+        {
+            _lastPrune = now;
+            var cutoff = now.AddDays(-7);
+            await db.ContainerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
+            await db.ServerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
+            await db.AlertHistory.Where(a => a.Timestamp < cutoff).ExecuteDeleteAsync(ct);
 
-        // Audit log + MCP tool-call log have a longer retention (90 days). Timestamp is indexed.
-        var cutoff90d = DateTime.UtcNow.AddDays(-90);
-        await db.AuditLog.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
-        await db.McpToolCalls.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
+            // Audit log + MCP tool-call log have a longer retention (90 days). Timestamp is indexed.
+            var cutoff90d = now.AddDays(-90);
+            await db.AuditLog.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
+            await db.McpToolCalls.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
+        }
 
-        _logger.LogDebug("Collected metrics for {ContainerCount} containers; pruned data before {Cutoff}",
-            metrics.Count, cutoff);
+        _logger.LogDebug("Collected metrics for {ContainerCount} containers", metrics.Count);
     }
 
     /// <summary>Per-container threshold (sustained high CPU/RAM) + simple anomaly (rolling z-score).
