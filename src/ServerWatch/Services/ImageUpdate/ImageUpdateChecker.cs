@@ -63,7 +63,8 @@ public class ImageUpdateChecker : BackgroundService
             var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<ContainerHub>>();
 
             var containers = await docker.ListAllContainersAsync(all: false);
-            var newUpdates = new List<ImageUpdateInfo>();
+            // ConcurrentBag: up to 5 parallel checks call .Add — a List<T> would lose entries or crash on growth.
+            var newUpdates = new System.Collections.Concurrent.ConcurrentBag<ImageUpdateInfo>();
 
             // Check each container in parallel (max 5 concurrent)
             var semaphore = new SemaphoreSlim(5);
