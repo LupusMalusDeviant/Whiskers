@@ -70,6 +70,20 @@ services:
       - ImageSearch__Harbor__BaseUrl=${HARBOR_URL:-}
       - ImageSearch__Harbor__Username=${HARBOR_USERNAME:-}
       - ImageSearch__Harbor__Password=${HARBOR_PASSWORD:-}
+      # Metrics collection (sample interval / retention / on-off) + metric-alert thresholds → AI triggers.
+      - Metrics__Enabled=${METRICS_ENABLED:-true}
+      - Metrics__CollectionIntervalSeconds=${METRICS_COLLECTIONINTERVALSECONDS:-30}
+      - Metrics__RetentionDays=${METRICS_RETENTIONDAYS:-7}
+      - MetricAlert__Enabled=${METRICALERT_ENABLED:-true}
+      - MetricAlert__CpuPercent=${METRICALERT_CPUPERCENT:-90}
+      - MetricAlert__MemoryPercent=${METRICALERT_MEMORYPERCENT:-90}
+      - MetricAlert__DiskPercent=${METRICALERT_DISKPERCENT:-90}
+      - MetricAlert__SustainedMinutes=${METRICALERT_SUSTAINEDMINUTES:-3}
+      - MetricAlert__CooldownMinutes=${METRICALERT_COOLDOWNMINUTES:-15}
+      - MetricAlert__AnomalyEnabled=${METRICALERT_ANOMALYENABLED:-false}
+      - MetricAlert__AnomalyWindow=${METRICALERT_ANOMALYWINDOW:-20}
+      - MetricAlert__AnomalySigma=${METRICALERT_ANOMALYSIGMA:-3}
+      - MetricAlert__AnomalyFloorPercent=${METRICALERT_ANOMALYFLOORPERCENT:-40}
     restart: unless-stopped
 
 volumes:
