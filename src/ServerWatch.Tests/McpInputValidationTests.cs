@@ -1,4 +1,5 @@
 using ServerWatch.Mcp.Tools;
+using ServerWatch.Models;
 
 namespace ServerWatch.Tests;
 
@@ -29,4 +30,43 @@ public class McpInputValidationTests
     [InlineData("a b")]          // whitespace
     public void IsSafeProjectName_rejects_traversal_and_unsafe_names(string? name)
         => Assert.False(McpInputValidation.IsSafeProjectName(name));
+
+    // ---------------------------------------------------------------- NIED-2: container resolution
+
+    private static ContainerInfo C(string id, string name) => new() { Id = id, Name = name };
+
+    [Fact]
+    public void Resolve_exact_id_or_name_wins()
+    {
+        var list = new List<ContainerInfo> { C("abc123", "web"), C("abcdef", "db") };
+        Assert.Equal("abc123", McpInputValidation.Resolve(list, "abc123").Container?.Id);
+        Assert.Equal("abcdef", McpInputValidation.Resolve(list, "db").Container?.Id);
+    }
+
+    [Fact]
+    public void Resolve_unique_prefix_resolves()
+    {
+        var list = new List<ContainerInfo> { C("abc123", "web"), C("xyz789", "db") };
+        var (container, error) = McpInputValidation.Resolve(list, "abc");
+        Assert.Null(error);
+        Assert.Equal("abc123", container?.Id);
+    }
+
+    [Fact]
+    public void Resolve_ambiguous_prefix_returns_error_and_no_container()
+    {
+        var list = new List<ContainerInfo> { C("abc123", "web"), C("abc999", "db") };
+        var (container, error) = McpInputValidation.Resolve(list, "abc");
+        Assert.Null(container);
+        Assert.Contains("mbiguous", error); // "Ambiguous ..."
+    }
+
+    [Fact]
+    public void Resolve_no_match_returns_error_never_the_raw_id()
+    {
+        var list = new List<ContainerInfo> { C("abc123", "web") };
+        var (container, error) = McpInputValidation.Resolve(list, "nope");
+        Assert.Null(container);
+        Assert.NotNull(error);
+    }
 }

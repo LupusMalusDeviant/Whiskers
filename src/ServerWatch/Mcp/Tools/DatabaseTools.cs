@@ -24,8 +24,8 @@ public class DatabaseTools
         if (denied != null) return denied;
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        if (container == null) return $"Container not found: {containerId}";
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return resolveError ?? $"Container not found: {containerId}";
 
         if (!container.IsDatabase)
             return $"Container '{container.Name}' (Image: {container.Image}) is not a database container.";
@@ -177,8 +177,8 @@ public class DatabaseTools
         IDockerService docker, string containerId, string? serverId)
     {
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
-        var container = containers.FirstOrDefault(c => c.Id == containerId || c.Name == containerId || c.Id.StartsWith(containerId));
-        if (container == null) return (null, null, $"Container not found: {containerId}");
+        var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
+        if (container is null) return (null, null, resolveError ?? $"Container not found: {containerId}");
         if (!container.IsDatabase) return (null, null, $"Container '{container.Name}' is not a database.");
 
         var env = await docker.GetContainerEnvAsync(container.Id, serverId);
