@@ -76,8 +76,11 @@ public class ImageUpdateChecker : BackgroundService
                     var info = await CheckSingleImageAsync(docker, container, ct);
                     if (info != null)
                     {
+                        // Read the prior state BEFORE overwriting, so we only notify when an update FIRST
+                        // appears — not on every cycle while it stays available.
+                        var prev = _store.Get(container.Id, container.ServerId);
                         _store.Set(info);
-                        if (info.UpdateAvailable)
+                        if (info.UpdateAvailable && prev?.UpdateAvailable != true)
                             newUpdates.Add(info);
                     }
                 }
