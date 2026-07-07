@@ -3,7 +3,9 @@ using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using ServerWatch.Configuration;
+using ServerWatch.Models;
 using ServerWatch.Models.Agent;
+using ServerWatch.Services.Mcp;
 
 namespace ServerWatch.Services.Agent;
 
@@ -15,14 +17,17 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
 {
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IConfiguration _config;
+    private readonly IMcpPermissionService? _permissionService;
     private readonly ILogger<ClaudeCodeRuntime>? _logger;
     private readonly Lazy<bool> _available;
 
     public ClaudeCodeRuntime(
-        IOptionsMonitor<AgentSettings> settings, IConfiguration config, ILogger<ClaudeCodeRuntime>? logger = null)
+        IOptionsMonitor<AgentSettings> settings, IConfiguration config,
+        IMcpPermissionService? permissionService = null, ILogger<ClaudeCodeRuntime>? logger = null)
     {
         _settings = settings;
         _config = config;
+        _permissionService = permissionService;
         _logger = logger;
         _available = new Lazy<bool>(DetectCli);
     }
@@ -38,7 +43,21 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
             yield break;
         }
 
-        var mcpConfigPath = WriteMcpConfig();
+        var mcpKey = _config["Agent:ClaudeCode:McpKey"];
+        if (string.IsNullOrWhiteSpace(mcpKey))
+        {
+            yield return new AgentEvent.Failed("Agent:ClaudeCode:McpKey ist nicht konfiguriert — Claude Code wird nicht gestartet.");
+            yield break;
+        }
+        // The agent must never exceed the caller's rights: the configured MCP key's level must be ≤ the principal's.
+        var keyConfig = _permissionService?.ValidateKey(mcpKey);
+        if (keyConfig != null && !McpPermissionLevels.HasAccess(context.Principal.PermissionLevel, keyConfig.PermissionLevel))
+        {
+            yield return new AgentEvent.Failed("Der konfigurierte Claude-Code-Key hat mehr Rechte als der Aufrufer — abgelehnt.");
+            yield break;
+        }
+
+        var mcpConfigPath = WriteMcpConfig(mcpKey);
         var process = StartProcess(userMessage, mcpConfigPath);
         if (process == null)
         {
@@ -103,9 +122,12 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
         psi.ArgumentList.Add("--mcp-config");
         psi.ArgumentList.Add(mcpConfigPath);
         psi.ArgumentList.Add("--permission-mode");
-        psi.ArgumentList.Add("acceptEdits");
+        psi.ArgumentList.Add("default");
         psi.ArgumentList.Add("--allowedTools");
         psi.ArgumentList.Add("mcp__serverwatch");
+        // Never let the CLI touch the local filesystem/shell — only our guardrailed MCP tools.
+        psi.ArgumentList.Add("--disallowedTools");
+        psi.ArgumentList.Add("Edit,Write,Bash,NotebookEdit");
 
         try { return Process.Start(psi); }
         catch (Exception ex) { _logger?.LogError(ex, "Claude-Code-Start fehlgeschlagen"); return null; }
@@ -113,10 +135,9 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
 
     /// <summary>Writes a temporary MCP config that points Claude Code at our /mcp endpoint with the
     /// agent key. This makes role/guardrails apply server-side.</summary>
-    private string WriteMcpConfig()
+    private string WriteMcpConfig(string key)
     {
         var url = _config["Agent:ClaudeCode:McpUrl"] ?? "http://localhost:8080/mcp";
-        var key = _config["Agent:ClaudeCode:McpKey"] ?? _settings.CurrentValue.ApiKey;
 
         var json = new JsonObject
         {
@@ -133,6 +154,9 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
 
         var path = Path.Combine(Path.GetTempPath(), $"serverwatch-agent-mcp-{Guid.NewGuid():N}.json");
         File.WriteAllText(path, json.ToJsonString());
+        // The file holds a bearer key — make it owner-only (Linux; the app runs in Linux containers).
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         return path;
     }
 
