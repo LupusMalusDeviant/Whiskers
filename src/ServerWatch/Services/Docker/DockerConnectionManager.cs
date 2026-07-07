@@ -130,25 +130,6 @@ public class DockerConnectionManager : IDockerConnectionManager
         return false;
     }
 
-    /// <summary>
-    /// Backward compatibility — returns default server's client synchronously.
-    /// Used only for the local socket which doesn't need async setup.
-    /// </summary>
-    public DockerClient Client
-    {
-        get
-        {
-            var server = _serverConfig.GetDefaultServer();
-            if (server == null)
-                throw new InvalidOperationException("No default server configured");
-
-            return _clients.GetOrAdd(server.Id, _ =>
-            {
-                return new DockerClientConfiguration(new Uri(server.SocketPath)).CreateClient();
-            });
-        }
-    }
-
     /// <summary>Tears down a cached client + its tunnel. When <paramref name="ifCurrent"/> is supplied the
     /// removal is instance-aware — it disposes only if the cached client is still that exact instance
     /// (atomic <c>TryRemove(KeyValuePair)</c>), so a retry can't dispose a fresh client another caller just

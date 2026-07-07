@@ -142,9 +142,6 @@ builder.Services.AddScoped<ServerWatch.Services.Auth.ICurrentUserService, Server
 // Notification prefs per container
 builder.Services.AddSingleton<ServerWatch.Services.Notifications.IContainerNotificationPrefsService, ServerWatch.Services.Notifications.ContainerNotificationPrefsService>();
 
-// Config export
-builder.Services.AddSingleton<ServerWatch.Services.ConfigExport.IConfigExportService, ServerWatch.Services.ConfigExport.ConfigExportService>();
-
 // Secret vault
 builder.Services.AddSingleton<ServerWatch.Services.Vault.IVaultService, ServerWatch.Services.Vault.VaultService>();
 

@@ -83,6 +83,8 @@
                 var bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length);
                 if (bytesRead == 0) break;
 
+                // Streaming output is activity too — keep the session from being idle-killed mid-output.
+                _session?.Touch();
                 var text = new string(buffer, 0, bytesRead);
                 await InvokeAsync(async () =>
                 {

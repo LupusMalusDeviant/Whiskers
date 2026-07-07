@@ -12,6 +12,9 @@ public class TerminalSession : IAsyncDisposable
     public DateTime LastActivityAt { get; set; } = DateTime.UtcNow;
     public bool IsRunning => Process is { HasExited: false };
 
+    /// <summary>Marks the session active now (input OR output) so the idle sweep doesn't reap it.</summary>
+    public void Touch() => LastActivityAt = DateTime.UtcNow;
+
     public void Start(string shell, string? containerId = null)
     {
         string fileName;
@@ -97,7 +100,7 @@ public class TerminalSession : IAsyncDisposable
     {
         if (Process?.StandardInput != null)
         {
-            LastActivityAt = DateTime.UtcNow;
+            Touch();
             await Process.StandardInput.WriteAsync(data);
             await Process.StandardInput.FlushAsync();
         }

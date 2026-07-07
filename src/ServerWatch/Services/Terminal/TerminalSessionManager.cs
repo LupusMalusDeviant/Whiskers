@@ -9,6 +9,8 @@ namespace ServerWatch.Services.Terminal;
 public class TerminalSessionManager : ITerminalSessionManager, IDisposable
 {
     private readonly ConcurrentDictionary<string, TerminalSession> _sessions = new();
+    // Serializes the session-cap check with the insert (see RegisterSession).
+    private readonly object _capLock = new();
     // IOptionsMonitor (not IOptions) so UI-edited Terminal settings apply live (new sessions/cleanup
     // pick up CurrentValue; existing sessions keep their shell). See Settings.razor.
     private readonly IOptionsMonitor<TerminalSettings> _settings;
@@ -50,7 +52,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
                     server.SshUser ?? "root",
                     keyPath,
                     containerId);
-                _sessions[session.SessionId] = session;
+                RegisterSession(session);
                 _logger.LogInformation("Terminal session {SessionId} created (SSH docker exec, container: {ContainerId})",
                     session.SessionId, containerId);
                 return session;
@@ -66,7 +68,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
                     throw new InvalidOperationException("Tailscale SSH: kein Host (TcpHost/SshHost) konfiguriert.");
                 var session = new TerminalSession { ContainerId = containerId };
                 session.StartSshDockerExec(tsHost!, 22, "root", null, containerId); // keyPath null = keyless
-                _sessions[session.SessionId] = session;
+                RegisterSession(session);
                 _logger.LogInformation("Terminal session {SessionId} created (Tailscale SSH docker exec, container: {ContainerId})",
                     session.SessionId, containerId);
                 return session;
@@ -82,7 +84,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
 
         var localSession = new TerminalSession { ContainerId = containerId };
         localSession.Start(_settings.CurrentValue.DefaultShell, containerId);
-        _sessions[localSession.SessionId] = localSession;
+        RegisterSession(localSession);
 
         _logger.LogInformation("Terminal session {SessionId} created (container: {ContainerId})",
             localSession.SessionId, containerId ?? "host");
@@ -132,11 +134,29 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
             throw new InvalidOperationException($"Terminal not supported for connection type {server.ConnectionType}");
         }
 
-        _sessions[session.SessionId] = session;
+        RegisterSession(session);
         _logger.LogInformation("SSH terminal session {SessionId} created for server {ServerName}",
             session.SessionId, server.Name);
 
         return session;
+    }
+
+    // Atomically enforce MaxSessions: the cap check and the insert must be a single critical section,
+    // otherwise two concurrent CreateSession calls can both pass a Count check and overshoot the cap
+    // (TOCTOU). The early Count checks in the Create* methods stay only as a cheap fast-fail.
+    private void RegisterSession(TerminalSession session)
+    {
+        lock (_capLock)
+        {
+            if (_sessions.Count < _settings.CurrentValue.MaxSessions)
+            {
+                _sessions[session.SessionId] = session;
+                return;
+            }
+        }
+        // Over cap (lost a create race) — tear down the just-started process outside the lock and reject.
+        _ = session.DisposeAsync();
+        throw new InvalidOperationException($"Maximum terminal sessions ({_settings.CurrentValue.MaxSessions}) reached");
     }
 
     public TerminalSession? GetSession(string sessionId)
