@@ -21,12 +21,12 @@ any public disclosure (coordinated disclosure).
 
 ## Supported versions
 
-ServerWatch is currently **beta** (`0.9.0-beta`). Only the latest release / `main` receives security
+ServerWatch is currently **beta** (`0.11.0`). Only the latest release / `main` receives security
 fixes. There is no long-term-support branch yet.
 
 | Version | Supported |
 |---|---|
-| `0.9.x` (beta) | ✅ latest only |
+| `0.11.x` (beta) | ✅ latest only |
 | `< 0.9` | ❌ |
 
 ## Security model (summary)

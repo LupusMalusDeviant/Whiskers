@@ -10,13 +10,13 @@ ServerWatch gives you a live, web-based control plane for a fleet of Docker host
 
 Its headline design goal is **SSH-key-free operation**: hosts are managed over a private WireGuard mesh with mutual-TLS Docker access, so there is no standing private key for an attacker to steal. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
-[![Version](https://img.shields.io/badge/version-0.10.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.11.0-orange.svg)](#)
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4.svg)](https://learn.microsoft.com/aspnet/core/blazor/)
 
-> ⚠️ **Beta (`0.10.0`).** ServerWatch is under active development and not yet API-stable.
+> ⚠️ **Beta (`0.11.0`).** ServerWatch is under active development and not yet API-stable.
 > Run it on a trusted network, review the [security policy](SECURITY.md), and expect breaking
 > changes before `1.0`.
 
@@ -306,6 +306,7 @@ dotnet run --project src/ServerWatch/ServerWatch.csproj
 - All management ports are mesh-bound; nothing management-related is exposed to the internet by design.
 - Secrets live in `.env` and `/app/data` (both gitignored / volume-mounted), never in the image or repository.
 - MCP access is gated by per-key Read/Write/Admin permissions; the acting agent is bounded by code-enforced guardrails.
+- **Full-repo security review & remediation** (see the [security-fixes changelog](docs/reviews/2026-07-07-security-fixes-changelog.md)): all critical and high findings, plus most medium/low issues and performance optimizations, are fixed — e.g. per-key RBAC enforced on **every** path (including the agent and MCP), the secret vault moved to **AES-256-GCM + PBKDF2** with transparent migration, schema managed by **EF Core migrations**, trust-critical images **pinned by digest**, forwarded-header trust restricted, and the Prometheus `/metrics` endpoint gated behind a scrape token.
 
 If you discover a security issue, please report it privately, see [SECURITY.md](SECURITY.md).
 

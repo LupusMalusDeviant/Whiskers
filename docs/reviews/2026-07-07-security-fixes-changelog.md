@@ -1,7 +1,7 @@
 # Changelog — Security-Review-Fixes (2026-07-07)
 
-Umsetzung der kritischen und hohen Findings aus dem [Full-Repo-Review 2026-07-06](2026-07-06-full-repo-review.md).
-Build grün, 123/123 Unit-Tests bestehen. Kein Deploy (erfolgt manuell durch den Benutzer).
+Umsetzung aller kritischen und hohen sowie der meisten mittleren/niedrigen Findings und Optimierungen aus dem internen Full-Repo-Review (2026-07-06).
+Build grün; die Test-Suite ist im Zuge der Umsetzung von 123 auf **279** Unit-Tests gewachsen. Kein Deploy (erfolgt manuell durch den Benutzer).
 
 Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommentare auf Englisch.
 
