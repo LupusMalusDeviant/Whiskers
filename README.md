@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="src/ServerWatch/wwwroot/brand.png" alt="ServerWatch logo" width="150" height="150" />
+  <img src="src/Whiskers/wwwroot/brand.png" alt="Whiskers logo" width="150" height="150" />
 </p>
 
-<h1 align="center">ServerWatch</h1>
+<h1 align="center">Whiskers</h1>
 
 <p align="center"><strong>A Docker &amp; server management dashboard with a built-in Model Context Protocol (MCP) server for AI-driven infrastructure operations.</strong></p>
 
-ServerWatch gives you a live, web-based control plane for a fleet of Docker hosts, containers, images, networks, databases, firewalls, Nginx, systemd, SSL, metrics and logs, and exposes the same capabilities to AI agents (such as Claude Code) through an authenticated MCP endpoint with per-key Read/Write/Admin permissions.
+Whiskers gives you a live, web-based control plane for a fleet of Docker hosts, containers, images, networks, databases, firewalls, Nginx, systemd, SSL, metrics and logs, and exposes the same capabilities to AI agents (such as Claude Code) through an authenticated MCP endpoint with per-key Read/Write/Admin permissions.
 
 Its headline design goal is **SSH-key-free operation**: hosts are managed over a private WireGuard mesh with mutual-TLS Docker access, so there is no standing private key for an attacker to steal. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
@@ -16,7 +16,7 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4.svg)](https://learn.microsoft.com/aspnet/core/blazor/)
 
-> ⚠️ **Beta (`0.11.0`).** ServerWatch is under active development and not yet API-stable.
+> ⚠️ **Beta (`0.11.0`).** Whiskers is under active development and not yet API-stable.
 > Run it on a trusted network, review the [security policy](SECURITY.md), and expect breaking
 > changes before `1.0`.
 
@@ -121,8 +121,8 @@ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 ### Docker (recommended)
 
 ```bash
-git clone https://github.com/LupusMalusDeviant/ServerWatch.git
-cd ServerWatch
+git clone https://github.com/LupusMalusDeviant/Whiskers.git
+cd Whiskers
 cp .env.example .env
 # edit .env and fill in values
 docker compose up -d
@@ -155,7 +155,7 @@ When serving under a subpath, set `PATH_BASE=/serverwatch` in `.env`.
 
 ### Deployment profiles
 
-- **Full** (`docker-compose.yml`, default): privileged + host PID namespace so ServerWatch can manage
+- **Full** (`docker-compose.yml`, default): privileged + host PID namespace so Whiskers can manage
   its **own** host (firewall/Nginx/systemd/`execute_command` via `nsenter`) and run an in-container VPN.
 - **Hardened** (`docker-compose.hardened.yml`): for monitoring **remote** hosts only — non-root, no
   `privileged`, dropped capabilities, read-only rootfs, and Docker access through a verb-restricted
@@ -167,7 +167,7 @@ See **[docs/container-hardening.md](docs/container-hardening.md)** for the full 
 
 ## Configuration
 
-ServerWatch is configured entirely through environment variables (`.env`). The most important groups:
+Whiskers is configured entirely through environment variables (`.env`). The most important groups:
 
 | Group | Keys | Notes |
 |---|---|---|
@@ -192,7 +192,7 @@ See [.env.example](.env.example) for the full, commented list.
 
 ## MCP server
 
-ServerWatch ships an integrated MCP server so AI agents (e.g. Claude Code) can operate your infrastructure. Add it to your MCP client:
+Whiskers ships an integrated MCP server so AI agents (e.g. Claude Code) can operate your infrastructure. Add it to your MCP client:
 
 ```json
 {
@@ -225,20 +225,20 @@ The complete, current list with permission levels is in the web UI under *Settin
 
 ## AI agent (optional)
 
-Beyond the MCP server (which serves *external* agents), ServerWatch has an **in-process acting agent**: you describe an operations task in natural language and it plans and executes using ServerWatch's own tools. It supports multiple LLM providers (OpenAI, OpenRouter, Ollama, Gemini, Anthropic, and Claude Code) selectable in the UI.
+Beyond the MCP server (which serves *external* agents), Whiskers has an **in-process acting agent**: you describe an operations task in natural language and it plans and executes using Whiskers's own tools. It supports multiple LLM providers (OpenAI, OpenRouter, Ollama, Gemini, Anthropic, and Claude Code) selectable in the UI.
 
 Its safety model is enforced in code, not in the prompt:
 - **Guardrails** (a separate, admin-only `guardrails.json`) define inescapable Allow/Confirm/Deny rules evaluated at the tool boundary, "most-restrictive wins".
 - The agent **inherits the rights of whoever triggered it** (web user or MCP key) and can never exceed them.
 - **Hybrid autonomy**: reads run autonomously; writes/admin actions require confirmation.
 
-See [src/ServerWatch/Services/Agent/](src/ServerWatch/Services/Agent/) for the implementation.
+See [src/Whiskers/Services/Agent/](src/Whiskers/Services/Agent/) for the implementation.
 
 ---
 
 ## Architecture
 
-ServerWatch manages hosts across three independent planes, each moved off SSH:
+Whiskers manages hosts across three independent planes, each moved off SSH:
 
 | Plane | What | Transport |
 |---|---|---|
@@ -255,9 +255,9 @@ The full design, PKI, onboarding flow, trade-offs, is documented in **[docs/ARCH
 Each source folder carries its own `README.md` describing the files within. High-level map:
 
 ```
-ServerWatch/
+Whiskers/
 ├── src/
-│   ├── ServerWatch/            # the application
+│   ├── Whiskers/            # the application
 │   │   ├── Components/         # Blazor UI (Pages, Layout, Shared)
 │   │   ├── Configuration/      # strongly-typed settings classes
 │   │   ├── Hubs/               # SignalR hubs (container + terminal streams)
@@ -267,7 +267,7 @@ ServerWatch/
 │   │   ├── Utils/              # small helpers (secret redaction, shell quoting)
 │   │   ├── wwwroot/            # static assets
 │   │   └── Program.cs          # composition root (DI, middleware, MCP, auth)
-│   └── ServerWatch.Tests/      # xUnit test suite
+│   └── Whiskers.Tests/      # xUnit test suite
 ├── deploy/telemetry/           # mesh/mTLS deploy templates (node_exporter, VictoriaMetrics, Tailscale ACL)
 ├── docs/ARCHITECTURE.md        # SSH-key-free architecture
 ├── Dockerfile
@@ -275,7 +275,7 @@ ServerWatch/
 └── README.md
 ```
 
-The `Services/` tree is the heart of the app, see [src/ServerWatch/Services/README.md](src/ServerWatch/Services/README.md) for a guided tour of every service folder.
+The `Services/` tree is the heart of the app, see [src/Whiskers/Services/README.md](src/Whiskers/Services/README.md) for a guided tour of every service folder.
 
 ### Code conventions
 - **Interface-first**: services are defined behind an `IFoo` interface and registered in DI; consumers depend on the interface.
@@ -289,13 +289,13 @@ Requirements: the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```bash
 # build
-dotnet build src/ServerWatch/ServerWatch.csproj
+dotnet build src/Whiskers/Whiskers.csproj
 
 # run tests
-dotnet test src/ServerWatch.Tests/ServerWatch.Tests.csproj
+dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj
 
 # run locally (listens on :8080)
-dotnet run --project src/ServerWatch/ServerWatch.csproj
+dotnet run --project src/Whiskers/Whiskers.csproj
 ```
 
 ---
@@ -345,7 +345,7 @@ Have a request? Open an issue.
 ## Contributing
 
 Issues and pull requests are welcome. Please:
-- keep changes interface-first and add/extend tests under `src/ServerWatch.Tests/`;
+- keep changes interface-first and add/extend tests under `src/Whiskers.Tests/`;
 - run `dotnet build` (0 warnings) and `dotnet test` before opening a PR;
 - write in-code comments and docs in English.
 
@@ -355,4 +355,4 @@ Issues and pull requests are welcome. Please:
 
 Apache License 2.0, see [LICENSE](LICENSE).
 
-Copyright © 2026 ServerWatch Contributors
+Copyright © 2026 Whiskers Contributors

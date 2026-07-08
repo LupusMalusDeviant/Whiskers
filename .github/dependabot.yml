@@ -2,14 +2,14 @@ version: 2
 updates:
   # .NET dependencies (main app + tests)
   - package-ecosystem: "nuget"
-    directory: "/src/ServerWatch"
+    directory: "/src/Whiskers"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies"]
 
   - package-ecosystem: "nuget"
-    directory: "/src/ServerWatch.Tests"
+    directory: "/src/Whiskers.Tests"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3

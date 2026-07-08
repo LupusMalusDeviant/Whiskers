@@ -1,0 +1,107 @@
+@using Whiskers.Models
+@implements IDisposable
+@inject Whiskers.Services.Notifications.IInAppNotificationStore Store
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+@* The activator is a plain MudMenu Icon button — the exact pattern the (working) theme menu uses.
+   The MudBadge only wraps it to show the unread count; it does not intercept the click. *@
+<MudBadge Content="@Store.UnreadCount" Max="99" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true" Class="sw-notify-badge">
+    <MudMenu Icon="@(Store.UnreadCount > 0 ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
+             Color="Color.Inherit" title="Benachrichtigungen"
+             OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+        <div style="min-width:340px; max-width:440px;">
+            <div style="display:flex; align-items:center; padding:8px 12px;">
+                <MudText Typo="Typo.subtitle2">Benachrichtigungen</MudText>
+                <MudSpacer />
+                @if (Store.Recent.Count > 0)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Clear">Leeren</MudButton>
+                }
+            </div>
+            <MudDivider />
+            @if (Store.Recent.Count == 0)
+            {
+                <div style="padding:24px; text-align:center; color:rgba(255,255,255,0.4);">Keine Benachrichtigungen</div>
+            }
+            else
+            {
+                <div style="max-height:420px; overflow-y:auto;">
+                    @foreach (var n in Store.Recent)
+                    {
+                        <MudMenuItem OnClick="@(() => OnRowClick(n))" Style="white-space:normal;">
+                            <div style="display:flex; gap:10px; align-items:flex-start; max-width:420px;">
+                                <MudIcon Icon="@SevIcon(n.Severity)" Color="@SevColor(n.Severity)" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto;" />
+                                <div style="min-width:0; flex:1;">
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">@n.Title</MudText>
+                                    <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.6); white-space:pre-wrap; display:block;">@Truncate(n.Detail)</MudText>
+                                    <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.3);">@n.Timestamp.ToLocalTime().ToString("dd.MM HH:mm")</MudText>
+                                </div>
+                                @if (n.Link is not null)
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto; color:rgba(255,255,255,0.3);" />
+                                }
+                            </div>
+                        </MudMenuItem>
+                    }
+                </div>
+            }
+            <MudDivider />
+            <div style="display:flex; justify-content:center; padding:6px;">
+                <MudButton Size="Size.Small" Variant="Variant.Text" FullWidth="true"
+                           OnClick="@(() => Nav.NavigateTo("notifications"))">Alle anzeigen</MudButton>
+            </div>
+        </div>
+    </MudMenu>
+</MudBadge>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Store.Changed += OnChanged;
+        Store.Added += OnAdded;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnAdded(InAppNotification n) => InvokeAsync(() =>
+    {
+        Snackbar.Add(n.Title, SevToast(n.Severity));
+        StateHasChanged();
+    });
+
+    private void OnOpenChanged(bool open)
+    {
+        if (open) Store.MarkAllRead();
+    }
+
+    private void OnRowClick(InAppNotification n)
+    {
+        if (n.Link is null) return;   // "" = dashboard (path-base safe); null = not navigable
+        Nav.NavigateTo(n.Link);       // MudMenuItem auto-closes the menu
+    }
+
+    private void Clear() => Store.Clear();
+
+    public void Dispose()
+    {
+        Store.Changed -= OnChanged;
+        Store.Added -= OnAdded;
+    }
+
+    private static string Truncate(string s) => s.Length > 180 ? s[..180] + "…" : s;
+
+    private static Severity SevToast(string s) => s switch
+    {
+        "Error" => Severity.Error, "Warning" => Severity.Warning, "Success" => Severity.Success, _ => Severity.Info,
+    };
+    private static Color SevColor(string s) => s switch
+    {
+        "Error" => Color.Error, "Warning" => Color.Warning, "Success" => Color.Success, _ => Color.Info,
+    };
+    private static string SevIcon(string s) => s switch
+    {
+        "Error" => Icons.Material.Filled.Error, "Warning" => Icons.Material.Filled.Warning,
+        "Success" => Icons.Material.Filled.CheckCircle, _ => Icons.Material.Filled.Info,
+    };
+}

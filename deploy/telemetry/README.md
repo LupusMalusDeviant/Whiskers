@@ -24,16 +24,16 @@ curl --max-time 5 http://<public-ip>:9100/metrics   # MUST time out / be refused
 3. On the controller: fill `scrape.yml` with the host targets, deploy `victoriametrics/`.
 4. Verify: `curl http://<controller-mesh-ip>:8428/api/v1/query?query=up` lists every target as `1`.
 
-> ServerWatch's onboarding wizard automates all of the above for a newly-added server.
+> Whiskers's onboarding wizard automates all of the above for a newly-added server.
 
 ## Persistence
 
 VictoriaMetrics storage lives under `/opt/serverwatch-telemetry/vm-storage` (bind-mount, survives
 rebuilds).
 
-## Metric contract (what ServerWatch queries)
+## Metric contract (what Whiskers queries)
 
-Each scrape target carries `server="<id>"` (= ServerWatch `ServerConfig.Id`, a stable id, NOT the
+Each scrape target carries `server="<id>"` (= Whiskers `ServerConfig.Id`, a stable id, NOT the
 display name). `PrometheusMetricsSource` filters on it. Only HOST metrics (node_exporter),
 container stats come from the Docker API.
 

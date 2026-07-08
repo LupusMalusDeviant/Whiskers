@@ -1,13 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# ServerWatch — FULL deployment (default). Runs as root, privileged, with host PID
+# Whiskers — FULL deployment (default). Runs as root, privileged, with host PID
 # namespace so it can manage its OWN host's shell (firewall/nginx/systemd/
 # execute_command) via `nsenter -t 1` and run the in-container VPN daemon.
 #
 # `privileged: true` + `pid: host` are required for the nsenter host-shell plane;
 # the docker.sock mount + /dev/net/tun + /proc are for Docker ops, the VPN and host
-# metrics. This is the right profile when ServerWatch manages the box it runs on.
+# metrics. This is the right profile when Whiskers manages the box it runs on.
 #
-# If ServerWatch only monitors REMOTE hosts (mesh + mTLS) and should not have these
+# If Whiskers only monitors REMOTE hosts (mesh + mTLS) and should not have these
 # privileges, use the locked-down profile instead: docker-compose.hardened.yml
 # (non-root, no privileged, socket-proxy, dropped caps). See docs/container-hardening.md.
 # ─────────────────────────────────────────────────────────────────────────────

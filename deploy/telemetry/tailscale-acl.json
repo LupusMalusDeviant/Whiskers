@@ -1,5 +1,5 @@
 // Sample Tailscale ACL for the mesh + mTLS setup.
-// Only the ServerWatch controller node (tag:serverwatch) may reach the telemetry / Docker-proxy
+// Only the Whiskers controller node (tag:serverwatch) may reach the telemetry / Docker-proxy
 // ports of the managed hosts (tag:swhost). Admins keep full access for maintenance.
 // Apply at https://login.tailscale.com/admin/acls
 //

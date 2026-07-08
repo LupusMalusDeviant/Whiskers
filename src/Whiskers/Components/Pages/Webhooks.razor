@@ -1,0 +1,217 @@
+@page "/webhooks"
+@attribute [Authorize]
+@inject Whiskers.Services.Webhooks.IWebhookService WebhookService
+@inject IDockerService DockerService
+@inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+
+<PageTitle>Webhooks - Whiskers</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Webhook" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Webhooks & CI/CD Trigger</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Automatische Deployments und Benachrichtigungen</MudText>
+        </div>
+        <MudSpacer />
+        @if (_role >= AppRole.Admin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="ShowCreateDialog">Webhook erstellen</MudButton>
+        }
+    </MudStack>
+</div>
+
+<MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+    Webhooks können von GitHub, GitLab oder anderen CI/CD-Systemen aufgerufen werden um Container automatisch neu zu starten oder zu deployen.
+</MudAlert>
+
+@if (!_webhooks.Any())
+{
+    <MudAlert Severity="Severity.Info">Noch keine Webhooks konfiguriert.</MudAlert>
+}
+else
+{
+    <MudTable Items="@_webhooks" Dense="true" Hover="true" Striped="true" Elevation="0">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>URL</MudTh>
+            <MudTh>Aktion</MudTh>
+            <MudTh>Ziel</MudTh>
+            <MudTh>Ausgelöst</MudTh>
+            <MudTh>Aktionen</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><strong>@context.Name</strong></MudTd>
+            <MudTd>
+                <code style="font-size: 0.75rem; word-break: break-all;">
+                    @($"{Nav.BaseUri}api/webhooks/{context.WebhookId}")
+                </code>
+            </MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Color="@GetActionColor(context.Action)" Variant="Variant.Outlined">@context.Action</MudChip></MudTd>
+            <MudTd><code>@context.TargetId</code></MudTd>
+            <MudTd>@context.TriggerCount×</MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
+                               OnClick="@(() => TestWebhook(context))" title="Testen" />
+                @if (_role >= AppRole.Admin)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => DeleteWebhook(context))" title="Löschen" />
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+<MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+        <TitleContent>Webhook erstellen</TitleContent>
+        <DialogContent>
+            <MudTextField @bind-Value="_formName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect T="string" Value="_formServerId" ValueChanged="OnWebhookServerChanged" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var srv in _servers)
+                {
+                    <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_formAction" Label="Aktion" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="@("restart")">Container neustarten</MudSelectItem>
+                <MudSelectItem Value="@("rebuild")">Container neu bauen (Pull + Recreate)</MudSelectItem>
+                <MudSelectItem Value="@("deploy")">Compose Deploy (Pull + Up)</MudSelectItem>
+            </MudSelect>
+            @if (_formAction is "restart" or "rebuild")
+            {
+                <MudSelect T="string" @bind-Value="_formTarget" Label="Container" Variant="Variant.Outlined" Class="mb-3">
+                    @foreach (var c in _containers)
+                    {
+                        <MudSelectItem Value="@c.Name">@c.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            else
+            {
+                <MudTextField @bind-Value="_formTarget" Label="Compose-Verzeichnis" Variant="Variant.Outlined" Class="mb-3"
+                              Placeholder="/opt/deployments/my-app" Style="font-family: 'JetBrains Mono', monospace;" />
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateWebhook"
+                       Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formTarget))">Erstellen</MudButton>
+        </DialogActions>
+    </MudDialog>
+
+@code {
+    private List<Whiskers.Models.WebhookEntity> _webhooks = new();
+    private List<Whiskers.Models.ContainerInfo> _containers = new();
+    private bool _showDialog;
+    private string _formName = "";
+    private string _formAction = "restart";
+    private string _formTarget = "";
+    private List<Whiskers.Models.ServerConfig> _servers = new();
+    private string _formServerId = "local";
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
+        _servers = ServerConfigService.GetEnabledServers();
+        _webhooks = await WebhookService.GetWebhooksAsync();
+    }
+
+    private async Task ShowCreateDialog()
+    {
+        _formName = ""; _formAction = "restart"; _formTarget = "";
+        _formServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
+        await LoadContainersForServer();
+        _showDialog = true;
+    }
+
+    private async Task OnWebhookServerChanged(string serverId)
+    {
+        _formServerId = serverId;
+        _formTarget = "";
+        await LoadContainersForServer();
+    }
+
+    private async Task LoadContainersForServer()
+    {
+        var sid = _formServerId == "local" ? null : _formServerId;
+        _containers = (await DockerService.ListContainersAsync(all: false, serverId: sid)).ToList();
+    }
+
+    private async Task CreateWebhook()
+    {
+        if (!Require(AppRole.Admin)) return;
+        try
+        {
+            var wh = await WebhookService.CreateWebhookAsync(new Whiskers.Models.WebhookEntity
+            {
+                Name = _formName,
+                Action = _formAction,
+                TargetType = _formAction == "deploy" ? "compose" : "container",
+                TargetId = _formTarget,
+                ServerId = _formServerId
+            });
+            Snackbar.Add($"Webhook '{_formName}' erstellt. URL: /api/webhooks/{wh.WebhookId}", Severity.Success);
+            _showDialog = false;
+            _webhooks = await WebhookService.GetWebhooksAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task TestWebhook(Whiskers.Models.WebhookEntity wh)
+    {
+        // Triggering runs restart/rebuild/deploy on the host — gate it behind Operator so a Viewer
+        // cannot fire host actions from the UI.
+        if (!Require(AppRole.Operator)) return;
+        Snackbar.Add($"Webhook '{wh.Name}' wird getestet...", Severity.Info);
+        var (success, output) = await WebhookService.TriggerAsync(wh.WebhookId);
+        Snackbar.Add(success ? $"OK: {output}" : $"Fehler: {output}", success ? Severity.Success : Severity.Error);
+        _webhooks = await WebhookService.GetWebhooksAsync();
+    }
+
+    private async Task DeleteWebhook(Whiskers.Models.WebhookEntity wh)
+    {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Webhook löschen",
+            $"Webhook '{wh.Name}' wirklich löschen? Die zugehörige URL wird ungültig und kann nicht mehr ausgelöst werden.",
+            yesText: "Löschen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+        try
+        {
+            await WebhookService.DeleteWebhookAsync(wh.WebhookId);
+            Snackbar.Add("Webhook gelöscht.", Severity.Success);
+            _webhooks = await WebhookService.GetWebhooksAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static Color GetActionColor(string action) => action switch
+    {
+        "restart" => Color.Primary,
+        "rebuild" => Color.Warning,
+        "deploy" => Color.Tertiary,
+        _ => Color.Default
+    };
+}

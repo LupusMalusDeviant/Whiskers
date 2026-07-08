@@ -1,6 +1,6 @@
 # Security Policy
 
-ServerWatch is infrastructure-management software: it reaches into Docker hosts, runs host
+Whiskers is infrastructure-management software: it reaches into Docker hosts, runs host
 commands, manages firewalls/Nginx/systemd, and exposes an MCP server to AI agents. Security is a
 first-class concern of the design, please treat findings accordingly.
 
@@ -21,7 +21,7 @@ any public disclosure (coordinated disclosure).
 
 ## Supported versions
 
-ServerWatch is currently **beta** (`0.11.0`). Only the latest release / `main` receives security
+Whiskers is currently **beta** (`0.11.0`). Only the latest release / `main` receives security
 fixes. There is no long-term-support branch yet.
 
 | Version | Supported |
@@ -52,7 +52,7 @@ fixes. There is no long-term-support branch yet.
   design choice and the data-protection keys).
 - Keep dependencies current, Dependabot config ships in `.github/dependabot.yml`.
 - **Run the least-privileged container profile that fits.** The default `docker-compose.yml` is
-  privileged because it can manage its own host (nsenter host-shell). If ServerWatch only monitors
+  privileged because it can manage its own host (nsenter host-shell). If Whiskers only monitors
   *remote* hosts, deploy `docker-compose.hardened.yml` instead (non-root, no `privileged`, dropped
   capabilities, read-only rootfs, Docker via a verb-restricted socket-proxy). See
   [docs/container-hardening.md](docs/container-hardening.md).

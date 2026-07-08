@@ -1,9 +1,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
-COPY src/ServerWatch/ServerWatch.csproj ./ServerWatch/
-RUN dotnet restore ./ServerWatch/ServerWatch.csproj
-COPY src/ServerWatch/ ./ServerWatch/
-WORKDIR /src/ServerWatch
+COPY src/Whiskers/Whiskers.csproj ./Whiskers/
+RUN dotnet restore ./Whiskers/Whiskers.csproj
+COPY src/Whiskers/ ./Whiskers/
+WORKDIR /src/Whiskers
 RUN dotnet publish -c Release -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

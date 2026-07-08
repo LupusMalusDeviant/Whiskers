@@ -1,0 +1,187 @@
+@page "/firewall/{ServerId}"
+@attribute [Authorize]
+@inject Whiskers.Services.Server.IFirewallService FirewallService
+@inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+
+<PageTitle>Firewall - Whiskers</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
+    <MudText Typo="Typo.h5">Firewall</MudText>
+    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
+    <MudSpacer />
+    @if (_role >= AppRole.Admin)
+    {
+        <MudSwitch T="bool" Value="@_firewallActive" ValueChanged="ToggleFirewall" Color="Color.Success"
+                   Label="@(_firewallActive ? "Aktiv" : "Inaktiv")" />
+    }
+    else
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@(_firewallActive ? "Aktiv" : "Inaktiv")</MudChip>
+    }
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="@_rules" Dense="true" Hover="true" Striped="true" Elevation="2">
+        <ToolBarContent>
+            <MudText Typo="Typo.h6">Regeln</MudText>
+            <MudSpacer />
+            @if (_role >= AppRole.Admin)
+            {
+                <MudButton StartIcon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
+                           OnClick="OpenAddDialog">Regel hinzufügen</MudButton>
+            }
+            <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Default" Variant="Variant.Outlined"
+                       OnClick="LoadRules" Class="ml-2">Aktualisieren</MudButton>
+        </ToolBarContent>
+        <HeaderContent>
+            <MudTh>#</MudTh>
+            <MudTh>Port</MudTh>
+            <MudTh>Aktion</MudTh>
+            <MudTh>Richtung</MudTh>
+            <MudTh>Von</MudTh>
+            <MudTh>Aktionen</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Number</MudTd>
+            <MudTd><MudText Style="font-family: monospace;">@context.Port</MudText></MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Action.Contains("ALLOW") ? Color.Success : Color.Error)"
+                         Variant="Variant.Filled">@context.Action</MudChip>
+            </MudTd>
+            <MudTd>@context.Direction</MudTd>
+            <MudTd>@context.From</MudTd>
+            <MudTd>
+                @if (_role >= AppRole.Admin)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteRule(context.Number))" />
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-4">Keine Firewall-Regeln konfiguriert.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    [Parameter] public string ServerId { get; set; } = "";
+
+    private string _serverName = "";
+    private bool _loading = true;
+    private bool _firewallActive;
+    private List<Whiskers.Services.Server.FirewallRule> _rules = new();
+    private AppRole _role = AppRole.Viewer;
+
+    private bool Require(AppRole required)
+    {
+        if (_role < required)
+        {
+            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            return false;
+        }
+        return true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
+        var server = ServerConfigService.GetServer(ServerId);
+        _serverName = server?.Name ?? ServerId;
+        await LoadRules();
+    }
+
+    private async Task LoadRules()
+    {
+        _loading = true;
+        try
+        {
+            var status = await FirewallService.GetStatusAsync(ServerId);
+            _firewallActive = status.Active;
+            _rules = status.Rules;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Laden der Firewall-Regeln: {ex.Message}", Severity.Error);
+        }
+        _loading = false;
+    }
+
+    private async Task ToggleFirewall(bool enable)
+    {
+        if (!Require(AppRole.Admin)) return;
+
+        // Disabling the firewall exposes the host — confirm explicitly.
+        if (!enable)
+        {
+            var confirmed = await DialogService.ShowMessageBoxAsync(
+                "Firewall deaktivieren", "Firewall wirklich deaktivieren? Alle Ports werden für eingehende Verbindungen geöffnet und der Server ist ungeschützt.",
+                yesText: "Deaktivieren", cancelText: "Abbrechen");
+            if (confirmed != true) return;
+        }
+
+        try
+        {
+            var result = await FirewallService.SetStatusAsync(ServerId, enable);
+            if (result.Success)
+            {
+                _firewallActive = enable;
+                Snackbar.Add($"Firewall {(enable ? "aktiviert" : "deaktiviert")}", Severity.Success);
+                await LoadRules();
+            }
+            else
+                Snackbar.Add($"Fehler: {result.Error}", Severity.Error);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task DeleteRule(int ruleNumber)
+    {
+        if (!Require(AppRole.Admin)) return;
+
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Regel löschen", $"Firewall-Regel #{ruleNumber} entfernen?", yesText: "Löschen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+
+        try
+        {
+            var result = await FirewallService.RemoveRuleAsync(ServerId, ruleNumber);
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", "firewall.remove", "firewall", ruleNumber.ToString(), $"Rule #{ruleNumber}", serverId: ServerId, success: result.Success);
+            if (result.Success)
+            {
+                Snackbar.Add("Regel entfernt", Severity.Success);
+                await LoadRules();
+            }
+            else
+                Snackbar.Add($"Fehler: {result.Error}", Severity.Error);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task OpenAddDialog()
+    {
+        if (!Require(AppRole.Admin)) return;
+
+        var parameters = new DialogParameters<AddFirewallRuleDialog>
+        {
+            { x => x.ServerId, ServerId }
+        };
+        var dialog = await DialogService.ShowAsync<AddFirewallRuleDialog>("Firewall-Regel hinzufügen", parameters);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled)
+            await LoadRules();
+    }
+}

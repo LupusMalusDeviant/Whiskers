@@ -1,0 +1,191 @@
+@page "/audit-log"
+@attribute [Authorize]
+@inject Whiskers.Services.AuditLog.IAuditLogService AuditLogService
+
+<PageTitle>Audit-Protokoll - Whiskers</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">Audit-Protokoll</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Alle Aktionen und Änderungen nachverfolgen</MudText>
+        </div>
+    </MudStack>
+</div>
+
+<MudStack Row="true" Class="mb-4" Spacing="2">
+    <MudSelect T="string" Value="@_actionFilter" ValueChanged="OnActionFilterChanged"
+               Label="Aktion" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;" Clearable="true">
+        <MudSelectItem Value="@("container")">Container</MudSelectItem>
+        <MudSelectItem Value="@("server")">Server</MudSelectItem>
+        <MudSelectItem Value="@("config")">Konfiguration</MudSelectItem>
+        <MudSelectItem Value="@("env")">Umgebungsvariablen</MudSelectItem>
+        <MudSelectItem Value="@("firewall")">Firewall</MudSelectItem>
+        <MudSelectItem Value="@("nginx")">Nginx</MudSelectItem>
+        <MudSelectItem Value="@("network")">Netzwerke</MudSelectItem>
+        <MudSelectItem Value="@("backup")">Backups</MudSelectItem>
+        <MudSelectItem Value="@("deploy")">Deployment</MudSelectItem>
+    </MudSelect>
+    <MudSelect T="string" Value="@_targetTypeFilter" ValueChanged="OnTargetTypeFilterChanged"
+               Label="Zieltyp" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;" Clearable="true">
+        <MudSelectItem Value="@("container")">Container</MudSelectItem>
+        <MudSelectItem Value="@("server")">Server</MudSelectItem>
+        <MudSelectItem Value="@("config")">Konfiguration</MudSelectItem>
+        <MudSelectItem Value="@("firewall")">Firewall</MudSelectItem>
+        <MudSelectItem Value="@("nginx")">Nginx</MudSelectItem>
+        <MudSelectItem Value="@("network")">Netzwerk</MudSelectItem>
+        <MudSelectItem Value="@("volume")">Volume</MudSelectItem>
+    </MudSelect>
+    <MudSpacer />
+    <MudText Typo="Typo.body2" Class="align-self-center" Style="color: #888;">
+        @_totalCount Einträge
+    </MudText>
+</MudStack>
+
+<MudTable Items="@_entries" Dense="true" Hover="true" Striped="true" Loading="@_loading"
+          FixedHeader="true" Height="calc(100vh - 280px)">
+    <HeaderContent>
+        <MudTh Style="width: 160px;">Zeitpunkt</MudTh>
+        <MudTh Style="width: 160px;">Akteur</MudTh>
+        <MudTh Style="width: 200px;">Aktion</MudTh>
+        <MudTh>Ziel</MudTh>
+        <MudTh Style="width: 80px;">Status</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Zeitpunkt">
+            <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                @context.Timestamp.ToLocalTime().ToString("dd.MM.yy HH:mm:ss")
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="Akteur">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     Color="@GetActorColor(context.ActorType)">
+                @context.Actor
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Aktion">
+            <MudChip T="string" Size="Size.Small" Color="@GetActionColor(context.Action)">
+                @FormatAction(context.Action)
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Ziel">
+            <code>@context.TargetName</code>
+            @if (!string.IsNullOrEmpty(context.Details))
+            {
+                <MudTooltip Text="@context.Details">
+                    <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small"
+                             Style="vertical-align: middle; color: #888; margin-left: 4px;" />
+                </MudTooltip>
+            }
+        </MudTd>
+        <MudTd DataLabel="Status">
+            @if (context.Success)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+            }
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@if (_totalCount > _pageSize)
+{
+    <MudStack Row="true" Class="mt-3" Justify="Justify.Center">
+        <MudPagination Count="@((int)Math.Ceiling(_totalCount / (double)_pageSize))"
+                       Selected="@(_currentPage + 1)"
+                       SelectedChanged="OnPageChanged" />
+    </MudStack>
+}
+
+@code {
+    private List<Whiskers.Models.AuditLogEntity> _entries = new();
+    private bool _loading = true;
+    private string? _actionFilter;
+    private string? _targetTypeFilter;
+    private int _totalCount;
+    private int _currentPage;
+    private const int _pageSize = 50;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _totalCount = await AuditLogService.GetTotalCountAsync(_actionFilter, _targetTypeFilter);
+        _entries = await AuditLogService.GetRecentAsync(_pageSize, _currentPage * _pageSize, _actionFilter, _targetTypeFilter);
+        _loading = false;
+    }
+
+    private async Task OnActionFilterChanged(string value)
+    {
+        _actionFilter = value;
+        _currentPage = 0;
+        await LoadData();
+    }
+
+    private async Task OnTargetTypeFilterChanged(string value)
+    {
+        _targetTypeFilter = value;
+        _currentPage = 0;
+        await LoadData();
+    }
+
+    private async Task OnPageChanged(int page)
+    {
+        _currentPage = page - 1;
+        await LoadData();
+    }
+
+    private static Color GetActorColor(string actorType) => actorType switch
+    {
+        "web" => Color.Primary,
+        "mcp" => Color.Tertiary,
+        "system" => Color.Default,
+        _ => Color.Default
+    };
+
+    private static Color GetActionColor(string action) => action switch
+    {
+        var a when a.Contains("delete") || a.Contains("remove") || a.Contains("stop") => Color.Error,
+        var a when a.Contains("start") || a.Contains("create") || a.Contains("add") || a.Contains("deploy") => Color.Success,
+        var a when a.Contains("update") || a.Contains("restart") || a.Contains("set") || a.Contains("save") => Color.Warning,
+        _ => Color.Info
+    };
+
+    private static string FormatAction(string action) => action switch
+    {
+        "container.start" => "Container gestartet",
+        "container.stop" => "Container gestoppt",
+        "container.restart" => "Container neugestartet",
+        "container.remove" => "Container entfernt",
+        "container.update" => "Container aktualisiert",
+        "env.save" => "Env-Vars gespeichert",
+        "server.add" => "Server hinzugefügt",
+        "server.update" => "Server bearbeitet",
+        "server.remove" => "Server entfernt",
+        "deploy.app" => "App deployed",
+        "deploy.compose" => "Compose deployed",
+        "config.save" => "Konfiguration gespeichert",
+        "firewall.add" => "Firewall-Regel hinzugefügt",
+        "firewall.remove" => "Firewall-Regel entfernt",
+        "nginx.update" => "Nginx aktualisiert",
+        "systemd.manage" => "Systemd-Service verwaltet",
+        "ssl.renew" => "SSL erneuert",
+        "network.create" => "Netzwerk erstellt",
+        "network.remove" => "Netzwerk entfernt",
+        "backup.create" => "Backup erstellt",
+        "backup.restore" => "Backup wiederhergestellt",
+        "backup.delete" => "Backup gelöscht",
+        "command.execute" => "Befehl ausgeführt",
+        _ => action
+    };
+}

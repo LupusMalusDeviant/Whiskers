@@ -1,7 +1,7 @@
 # 0001 — Vault: authentifizierte Verschlüsselung (AES-256-GCM) mit PBKDF2-Schlüsselableitung
 
 - **Status:** Akzeptiert (2026-07-07)
-- **Betrifft:** `src/ServerWatch/Services/Vault/VaultService.cs`, `src/ServerWatch/Models/VaultEntry.cs`
+- **Betrifft:** `src/Whiskers/Services/Vault/VaultService.cs`, `src/Whiskers/Models/VaultEntry.cs`
 - **Bezug:** Full-Repo-Review 2026-07-06, Finding HOCH-4; Sicherheits-Leitplanke „keine selbstgebaute/unauth. Krypto" (CLAUDE.md)
 
 ## Kontext

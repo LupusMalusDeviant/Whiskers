@@ -1,6 +1,6 @@
 # Container hardening
 
-ServerWatch ships in two deployment profiles. Which one is appropriate depends on **what the
+Whiskers ships in two deployment profiles. Which one is appropriate depends on **what the
 container is allowed to do to the host it runs on** — not on a generic "more secure" toggle.
 
 | | `docker-compose.yml` (full) | `docker-compose.hardened.yml` (locked-down) |
@@ -17,7 +17,7 @@ container is allowed to do to the host it runs on** — not on a generic "more s
 
 ## Why "full" needs the privileges it asks for
 
-ServerWatch can manage **the host it runs on** through the Linux "host-shell" plane: it runs
+Whiskers can manage **the host it runs on** through the Linux "host-shell" plane: it runs
 `nsenter -t 1 -m -u -i -n -p -- …` to enter PID 1's namespaces and execute on the host. That is
 what powers firewall rules, Nginx config, systemd control and `execute_command` for the *local*
 server. Entering another process's namespaces requires `privileged` (or at least `SYS_ADMIN` +
@@ -31,7 +31,7 @@ full profile by design.
 
 ## What the hardened profile changes — and what it costs
 
-The locked-down profile is for the common case where ServerWatch is a **monitoring/control plane for
+The locked-down profile is for the common case where Whiskers is a **monitoring/control plane for
 remote hosts** and is not expected to reach into its own host's shell.
 
 - **Non-root (uid 10001).** The image already contains this user (`Dockerfile`); the hardened compose
@@ -47,7 +47,7 @@ remote hosts** and is not expected to reach into its own host's shell.
 - **VPN on the host.** Set `Vpn__Provider=none` (the default) and run Tailscale/NetBird on the host or
   in a dedicated sidecar. The container shares host networking to reach the mesh. Keyless
   Tailscale-SSH for the web terminal still works because the host provides the connectivity. See
-  [`../src/ServerWatch/Services/Vpn/README.md`](../src/ServerWatch/Services/Vpn/README.md).
+  [`../src/Whiskers/Services/Vpn/README.md`](../src/Whiskers/Services/Vpn/README.md).
 
 ## The Docker socket-proxy
 
@@ -58,16 +58,16 @@ sidecar holds the socket (read-only) and exposes a **verb-whitelisted** HTTP API
 over loopback TCP.
 
 The whitelist keeps `exec`, `swarm`, `secrets` and `configs` **off** while allowing the
-container/image/network/volume operations ServerWatch needs. Point the built-in **local** server at
+container/image/network/volume operations Whiskers needs. Point the built-in **local** server at
 the proxy (Settings → Servers, or `servers.json`): set its `SocketPath` to `http://127.0.0.1:2375`.
 
 > **Residual risk, stated honestly:** container *create* must stay enabled so deploys work, and the
 > proxy does not filter the `privileged` flag on creation — so a fully compromised app could still
 > create a privileged container. The proxy raises the bar (no `exec` into existing containers, no
-> swarm/secret access) but is not a complete sandbox. For ServerWatch's own fleet this is mitigated
+> swarm/secret access) but is not a complete sandbox. For Whiskers's own fleet this is mitigated
 > further by the mTLS + mesh design — see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-This is the same socket-proxy + ghostunnel/mTLS pattern ServerWatch already uses to reach **remote**
+This is the same socket-proxy + ghostunnel/mTLS pattern Whiskers already uses to reach **remote**
 Docker daemons without SSH; the hardened profile applies it to the **local** daemon too.
 
 ## Roadmap: towards a distroless image

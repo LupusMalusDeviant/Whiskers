@@ -1,0 +1,25 @@
+@inject Whiskers.Services.Auth.IRoleService RoleService
+
+@* Only renders child content if the current user has the required role *@
+@if (_hasAccess)
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter] public Whiskers.Models.AppRole RequiredRole { get; set; } = Whiskers.Models.AppRole.Operator;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _hasAccess;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState != null)
+        {
+            var state = await AuthState;
+            var email = state.User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+            _hasAccess = RoleService.HasRole(email, RequiredRole);
+        }
+    }
+}

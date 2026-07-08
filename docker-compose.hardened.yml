@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# ServerWatch — HARDENED / locked-down deployment posture.
+# Whiskers — HARDENED / locked-down deployment posture.
 #
-# Use this instead of docker-compose.yml when ServerWatch does NOT manage its own
+# Use this instead of docker-compose.yml when Whiskers does NOT manage its own
 # host's shell (firewall/nginx/systemd/execute_command on the LOCAL host) — i.e. it
 # monitors remote hosts over the mesh + mTLS and, at most, talks to the local Docker
 # daemon through a restricted socket-proxy.

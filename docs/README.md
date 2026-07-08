@@ -9,11 +9,11 @@
 
 ## Code documentation
 
-Every source folder under [`../src/ServerWatch/`](../src/ServerWatch/) carries its own `README.md` describing the files within. Start points:
+Every source folder under [`../src/Whiskers/`](../src/Whiskers/) carries its own `README.md` describing the files within. Start points:
 
-- [src/ServerWatch/README.md](../src/ServerWatch/README.md): application project layout
-- [Services/README.md](../src/ServerWatch/Services/README.md): a guided tour of every service
-- [Mcp/README.md](../src/ServerWatch/Mcp/README.md): the MCP server and its tools
+- [src/Whiskers/README.md](../src/Whiskers/README.md): application project layout
+- [Services/README.md](../src/Whiskers/Services/README.md): a guided tour of every service
+- [Mcp/README.md](../src/Whiskers/Mcp/README.md): the MCP server and its tools
 
 ## Conventions
 

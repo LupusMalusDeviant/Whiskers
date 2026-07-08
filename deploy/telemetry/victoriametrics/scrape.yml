@@ -1,6 +1,6 @@
 # VictoriaMetrics scrape config. One node_exporter target per host, addressed by its mesh IP.
-# The `server` label MUST equal the ServerWatch ServerConfig.Id (a stable id like "host-a") —
-# PrometheusMetricsSource filters on it. Replace the placeholders with your hosts; ServerWatch's
+# The `server` label MUST equal the Whiskers ServerConfig.Id (a stable id like "host-a") —
+# PrometheusMetricsSource filters on it. Replace the placeholders with your hosts; Whiskers's
 # onboarding wizard appends new hosts here automatically.
 
 global:

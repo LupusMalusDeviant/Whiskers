@@ -1,0 +1,89 @@
+@using Whiskers.Models
+
+<MudDialog>
+    <DialogContent>
+        @if (Entry is not null)
+        {
+            <MudStack Spacing="3" Style="min-width: 320px;">
+                <MudSimpleTable Dense="true" Bordered="false" Striped="true" Style="background: transparent;">
+                    <tbody>
+                        <tr><td><b>Zeitpunkt</b></td><td>@Entry.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td></tr>
+                        <tr><td><b>Akteur</b></td><td>@Entry.Actor <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@Entry.ActorType</MudChip></td></tr>
+                        <tr><td><b>Tool</b></td><td><code>@Entry.ToolName</code></td></tr>
+                        <tr><td><b>Level</b></td><td>@Entry.Level</td></tr>
+                        <tr>
+                            <td><b>Verdict</b></td>
+                            <td><MudChip T="string" Size="Size.Small" Color="@VerdictColor(Entry.Verdict)">@Entry.Verdict</MudChip></td>
+                        </tr>
+                        <tr>
+                            <td><b>Status</b></td>
+                            <td>
+                                @if (Entry.Success)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Erfolg</MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error">Fehler</MudChip>
+                                }
+                            </td>
+                        </tr>
+                        <tr><td><b>Dauer</b></td><td>@Entry.DurationMs ms</td></tr>
+                        @if (!string.IsNullOrEmpty(Entry.ServerId))
+                        {
+                            <tr><td><b>Server</b></td><td>@Entry.ServerId</td></tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+
+                <div>
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Parameter (Secrets redacted)</MudText>
+                    <pre class="sw-call-detail">@(string.IsNullOrWhiteSpace(Entry.ParamsJson) ? "—" : Entry.ParamsJson)</pre>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(Entry.ResultSummary))
+                {
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Class="mb-1">Ergebnis</MudText>
+                        <pre class="sw-call-detail">@Entry.ResultSummary</pre>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(Entry.Error))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Variant="Variant.Outlined">@Entry.Error</MudAlert>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog?.Close())">Schließen</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .sw-call-detail {
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 260px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 0.8rem;
+        margin: 0;
+    }
+</style>
+
+@code {
+    [CascadingParameter] IMudDialogInstance? MudDialog { get; set; }
+    [Parameter] public McpToolCallEntity? Entry { get; set; }
+
+    private static Color VerdictColor(string verdict) => verdict switch
+    {
+        "deny" => Color.Error,
+        "confirm" => Color.Warning,
+        "allow" => Color.Success,
+        _ => Color.Default,
+    };
+}

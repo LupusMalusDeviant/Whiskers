@@ -7,8 +7,8 @@ set -e
 # unset, existing deployments keep their current behavior unchanged.
 if [ -n "$VPN_PROVIDER" ]; then
     echo "[entrypoint] VPN_PROVIDER='$VPN_PROVIDER' set — VPN handled in-app, skipping legacy bring-up."
-    echo "[entrypoint] Starting ServerWatch..."
-    exec dotnet ServerWatch.dll
+    echo "[entrypoint] Starting Whiskers..."
+    exec dotnet Whiskers.dll
 fi
 
 # --- Legacy Tailscale bring-up (used when VPN_PROVIDER is unset) ---
@@ -35,5 +35,5 @@ else
 fi
 
 # Start the .NET application
-echo "[entrypoint] Starting ServerWatch..."
-exec dotnet ServerWatch.dll
+echo "[entrypoint] Starting Whiskers..."
+exec dotnet Whiskers.dll

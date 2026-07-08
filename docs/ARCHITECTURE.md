@@ -1,6 +1,6 @@
 # Architecture, Mesh + mTLS, SSH-key-free operation
 
-ServerWatch manages a fleet of Docker hosts. This document describes how it does so
+Whiskers manages a fleet of Docker hosts. This document describes how it does so
 **without storing a standing SSH key**: the design that replaces "one private key on the
 controller unlocks every server" with short, auditable, certificate-gated paths over a private
 mesh.
@@ -16,7 +16,7 @@ host on the controller. If the controller is compromised, **every** server falls
 
 ## The three planes
 
-ServerWatch splits what it does into three independent planes, each moved off SSH:
+Whiskers splits what it does into three independent planes, each moved off SSH:
 
 | Plane | What | Transport |
 |---|---|---|
@@ -35,12 +35,12 @@ management-related is exposed to the internet.
 ## Telemetry plane (pull, no credential inbound)
 
 Each host runs `node_exporter` bound to `<mesh-ip>:9100`. A central VictoriaMetrics instance scrapes
-all hosts over the mesh. ServerWatch reads host metrics from the TSDB instead of `exec`-ing into the
-host's `/proc` over SSH. Each scrape target carries a stable `server` label (the ServerWatch server
+all hosts over the mesh. Whiskers reads host metrics from the TSDB instead of `exec`-ing into the
+host's `/proc` over SSH. Each scrape target carries a stable `server` label (the Whiskers server
 id) that queries filter on.
 
 ```
-node_exporter (host-a, host-b, …)  ──scrape──▶  VictoriaMetrics  ──query──▶  ServerWatch
+node_exporter (host-a, host-b, …)  ──scrape──▶  VictoriaMetrics  ──query──▶  Whiskers
         (mesh-only :9100)                         (mesh-only :8428)
 ```
 
@@ -49,13 +49,13 @@ node_exporter (host-a, host-b, …)  ──scrape──▶  VictoriaMetrics  ─
 On each host:
 
 ```
-ServerWatch ──mTLS──▶ ghostunnel ──plaintext(local)──▶ docker-socket-proxy ──▶ /var/run/docker.sock
+Whiskers ──mTLS──▶ ghostunnel ──plaintext(local)──▶ docker-socket-proxy ──▶ /var/run/docker.sock
    (client cert)      (server cert, mesh-only :2376)     (HAProxy verb allow-list)
 ```
 
 - **ghostunnel** terminates mutual TLS: it requires a client certificate whose CN is the controller,
   signed by the fleet CA. Bound to the mesh IP only.
-- **docker-socket-proxy** allows only the API sections ServerWatch needs
+- **docker-socket-proxy** allows only the API sections Whiskers needs
   (`CONTAINERS`, `IMAGES`, `NETWORKS`, `VOLUMES`, `INFO`, `VERSION`, `POST`) and **denies the rest**
   (`EXEC=0`, `SWARM=0`, `SECRETS=0`, `CONFIGS=0`, ...). Container **exec-start** (`/exec/*`) is blocked,
   so even though exec-create slips through the broad `/containers` rule, the exec can never run.
@@ -68,7 +68,7 @@ against the CA (custom root trust; server-presented intermediates are added to t
 
 ## Shell plane (SSH-free, over the same mTLS channel)
 
-Running an arbitrary host command without SSH: ServerWatch creates a **one-shot privileged
+Running an arbitrary host command without SSH: Whiskers creates a **one-shot privileged
 container** via the mTLS Docker API that enters the host namespaces and runs the command:
 
 ```
@@ -87,7 +87,7 @@ same CA instead of a standing key, is a valid alternative; this design favours "
 ## PKI
 
 A small online CA (step-ca) issues:
-- one **client** certificate for ServerWatch (CN = the controller),
+- one **client** certificate for Whiskers (CN = the controller),
 - one **server** certificate per host (SAN = the host's mesh IP) for its ghostunnel,
 all chaining to a shared root + intermediate. Certs are leaf+intermediate bundles; the CA bundle
 (root+intermediate) is distributed to each ghostunnel so a leaf-only client still verifies. The same

@@ -1,7 +1,7 @@
 # 0003 — EF-Core-Migrations mit Baseline für Bestands-Datenbanken
 
 - **Status:** Akzeptiert (2026-07-07)
-- **Betrifft:** `src/ServerWatch/Program.cs`, `src/ServerWatch/Services/Persistence/DatabaseInitializer.cs`, `src/ServerWatch/Services/Persistence/MetricsDbContextFactory.cs`, `src/ServerWatch/Migrations/`
+- **Betrifft:** `src/Whiskers/Program.cs`, `src/Whiskers/Services/Persistence/DatabaseInitializer.cs`, `src/Whiskers/Services/Persistence/MetricsDbContextFactory.cs`, `src/Whiskers/Migrations/`
 - **Bezug:** Full-Repo-Review 2026-07-06, Findings MIT-27 (fehlende `AlertHistory`-DDL) und MIT-29 (keine Migrations-Story)
 
 ## Kontext

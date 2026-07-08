@@ -1,6 +1,6 @@
-# Contributing to ServerWatch
+# Contributing to Whiskers
 
-Thanks for your interest in ServerWatch! It's an early-stage (`0.x`) project, so issues, ideas
+Thanks for your interest in Whiskers! It's an early-stage (`0.x`) project, so issues, ideas
 and pull requests are very welcome.
 
 ## Ground rules
@@ -12,10 +12,10 @@ and pull requests are very welcome.
 
 ## Development setup
 
-ServerWatch is an ASP.NET Core 10 / Blazor Server app.
+Whiskers is an ASP.NET Core 10 / Blazor Server app.
 
 ```bash
-cd src/ServerWatch
+cd src/Whiskers
 dotnet run            # or: docker compose up -d --build  (from the repo root)
 ```
 

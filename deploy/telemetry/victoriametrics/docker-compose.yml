@@ -1,5 +1,5 @@
 # VictoriaMetrics (single-node, built-in scraping) on the controller host.
-# Scrapes every host's node_exporter over the mesh. Query API for ServerWatch: http://<mesh-ip>:8428
+# Scrapes every host's node_exporter over the mesh. Query API for Whiskers: http://<mesh-ip>:8428
 # Deploy:  TS_IP=<controller-mesh-ip> docker compose up -d
 
 services:

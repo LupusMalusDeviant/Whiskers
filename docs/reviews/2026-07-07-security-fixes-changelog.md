@@ -51,16 +51,16 @@ Konvention: keine Claude-Attribution in Commits (Projektregel). In-Code-Kommenta
 
 ## Mittel & Niedrig — Bean-Abarbeitung (ab 2026-07-07)
 
-Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün, DI per Development-Boot validiert.
+Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/Whiskers-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün, DI per Development-Boot validiert.
 
-### ServerWatch-sdn3 — Concurrency & Cache-Aliasing (Auth/Config/Vault)
+### Whiskers-sdn3 — Concurrency & Cache-Aliasing (Auth/Config/Vault)
 
 - **MIT-1 — RoleService Aliasing/Lock.** `SaveRoleDataAsync` klont vor Cache/Persist; `SetRoleAsync`/`RemoveRoleAsync` bauen den Snapshot im Write-Lock und persistieren ihn danach — nie mehr die Live-Liste serialisieren, die ein paralleler Writer mutiert.
 - **MIT-2 — VaultService Lesepfade.** `ListSecrets`/`GetSecret`/`GetExpiringSecrets` laufen jetzt unter demselben Lock wie die Writer (kein transientes `null`/`InvalidOperationException` bei paralleler Mutation).
 - **NIED-14 — ServerConfigService.** `SaveSshKeyAsync`/`DeleteSshKeyAsync` arbeiten auf `GetServer(id)?.Clone()` statt das gecachte Live-Objekt zu mutieren.
 - _Zusätzlich:_ DI-safe optionaler `storePath`-Ctor-Seam + neue `ConcurrencyCacheAliasingTests` (Aliasing, Concurrency, Fehlerpfad, Secret-Safety); 131/131 Tests.
   _Dateien: `Services/Auth/RoleService.cs`, `Services/Vault/VaultService.cs`, `Services/ServerConfig/ServerConfigService.cs`, per-Ordner-READMEs (Auth/Vault/ServerConfig)._
-### ServerWatch-wjhf — Audit-Log: fail-safe Fallback + Coverage
+### Whiskers-wjhf — Audit-Log: fail-safe Fallback + Coverage
 
 - **MIT-4 — Audit fail-open.** `AuditLogService.LogAsync` loggt bei Schreibfehler (DB locked/Disk voll) den kompletten Eintrag strukturiert auf Error, statt nur "Failed to write audit log entry" — die Fakten überleben.
 - **MIT-3 — Vault-Audit.** `Settings.razor` loggt `vault.set`/`vault.delete` (Key-Namen only); das Inline-Delete wurde in `DeleteVaultSecret` extrahiert. Neuer `AuditVault`-Helper.
@@ -68,9 +68,9 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-4 — Rescue-Audit.** `HetznerEnableRescue` loggt `hetzner.rescue_enable` ("root credential issued") — das temporäre Passwort geht nur an den Aufrufer, nie in den Audit-Log.
 - _Tests:_ Fail-safe-Fallback (throwing ScopeFactory + capturing Logger) + Redaction-Test; MCP-Tool-Wiring durch Build + DI-Boot + ServerTools-Muster gedeckt.
   _Dateien: `Services/AuditLog/AuditLogService.cs`, `Components/Pages/Settings.razor`, `Mcp/Tools/SchedulerTools.cs`, `Mcp/Tools/HetznerTools.cs`, `Services/AuditLog/README.md`._
-Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün.
+Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/Whiskers-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün.
 
-### ServerWatch-izcu — MCP-Tool Input-Validation & Injection-Härtung
+### Whiskers-izcu — MCP-Tool Input-Validation & Injection-Härtung
 
 - **MIT-6 — deploy_compose Path-Traversal.** Neuer `McpInputValidation.IsSafeProjectName` (Leading-Alnum, Safe-Charset, `..`-Verbot) ersetzt die schwache Regex; das Ziel-Verzeichnis wird zusätzlich per `ShellUtils.Quote` in mkdir/cd gequotet.
 - **NIED-2 — Container-ID-Ambiguität.** Neuer `McpInputValidation.Resolve`: exakter Id/Name-Match, sonst eindeutiger Id-Präfix; Mehrdeutigkeit/No-Match → klarer Fehler statt Aktion am falschen Container. Alle 10 Inline-Sites (ContainerTools 8, DatabaseTools 2) umgestellt (kein `?? containerId`-Fallback mehr).
@@ -79,7 +79,7 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - _Tests:_ `McpInputValidationTests` (Projektname-Validierung, Resolver: exakt/Präfix/mehrdeutig/No-Match). Kein DI-/Ctor-Change → kein Boot nötig.
 - ⚠️ **NIED-1 (Bearer-Scheme case) NICHT umgesetzt** — auth-middleware-nah, zurückgestellt bis zur ausdrücklichen Freigabe.
   _Dateien: `Mcp/Tools/McpInputValidation.cs` (neu), `Mcp/Tools/ContainerTools.cs`, `Mcp/Tools/DatabaseTools.cs`, `Services/Server/SystemdService.cs`, `Services/Server/SslCertService.cs`, `Services/LogMonitor/LogMonitorService.cs`, `Mcp/Tools/README.md`._
-### ServerWatch-gny5 — Destruktiv-Op-Zielauflösung (Cloud/AutoUpdate/Hetzner)
+### Whiskers-gny5 — Destruktiv-Op-Zielauflösung (Cloud/AutoUpdate/Hetzner)
 
 - **MIT-22 — Hetzner-Snapshot-Löschung.** Neuer `IHetznerService.GetImageAsync` (GET `/images/{id}`, 404→null) + `HetznerImageResponse`; `hetzner_delete_snapshot` lädt das Image und verweigert null oder `Type != "snapshot"` (Backups/System-Images geschützt). Helper `IsDeletableSnapshot`.
 - **MIT-20 — AutoUpdate falscher Host.** Neuer `AutoUpdateService.MatchesPolicy` (ServerId-scoped, Id-Match vor Name-Match); der Cross-Server-Match und der `SetPolicy`-Lookup sind jetzt auf `policy.ServerId` begrenzt — kein Recreate eines gleichnamigen Containers auf einem anderen Host.
@@ -88,16 +88,16 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-17 — Hostinger Hard-Reset.** `HardResetAsync` sagt für Hostinger explizit „kein Hard-Reset — Neustart ausgelöst (evtl. wirkungslos)"; Hetzner unverändert.
 - _Tests:_ `DestructiveOpTargetingTests` (IsDeletableSnapshot snapshot/backup/system/null; MatchesPolicy same-server/empty/id-vs-name). MIT-21/26/NIED-17 durch Build + DI-Boot + Inspektion (HTTP-Stubs fehlen). Interface-Change (MIT-22) → App gebootet.
   _Dateien: `Services/Hetzner/{IHetznerService,HetznerApiService}.cs`, `Models/Hetzner/HetznerModels.cs`, `Mcp/Tools/HetznerTools.cs`, `Services/AutoUpdate/AutoUpdateService.cs`, `Services/Cloud/CloudControlService.cs`, per-Ordner-READMEs (Hetzner/Cloud/AutoUpdate)._
-Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün.
+Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/Whiskers-<id>-…`-Branches, ein Finding = ein Commit). Build grün, Tests grün.
 
-### ServerWatch-b9qw — Secret-Hygiene (argv & Logs)
+### Whiskers-b9qw — Secret-Hygiene (argv & Logs)
 
 - **MIT-39 — DB-Passwörter in argv + Debug-Logs.** `BuildMysqlCmd` (alle MySQL-Pfade) und der Neo4j-Zweig übergeben das Passwort via `MYSQL_PWD`/`NEO4J_PASSWORD` unter `sh -c` (Sq-gequotet, wie `BackupDatabaseAsync`) statt `-p<pw>` in argv → nicht mehr in der Container-Prozessliste. Die drei rohen `LogDebug`-Kommandos in `HostCommandExecutor` laufen durch `SecretRedactor.Redact`. (ContainerDetail-DB-Kommandos waren bereits env-var-sicher.)
 - **MIT-14 — Notification-Tokens in Logs.** Sechs capability-tragende Notification-HttpClients (Telegram/Discord/Slack/Mattermost/ntfy/Webhook) werden auf `System.Net.Http.HttpClient.<Name>` = Warning gefiltert, sodass die volle Request-URI (mit Token/Secret-URL) nicht mehr auf Information geloggt wird.
 - **NIED-18 — VPN-Enrollment-Secrets in argv.** `VpnProcessRunner.RunAsync` bekommt einen optionalen env-Dict-Parameter; Tailscale übergibt den Auth-Key via `TS_AUTHKEY`, NetBird via `NB_SETUP_KEY` (statt `--authkey`/`--setup-key` in argv).
 - _Tests:_ `SecretHygieneTests` (Redaction hides `-p<pw>` / `MYSQL_PWD=` / `PGPASSWORD=` / keyed secrets). Kein Ctor-/Interface-Change → kein Boot.
   _Dateien: `Services/Database/DatabaseService.cs`, `Services/Server/HostCommandExecutor.cs`, `Program.cs`, `Services/Vpn/VpnProcessRunner.cs`, `Services/Vpn/Providers/{Tailscale,Netbird}VpnProvider.cs`, per-Ordner-READMEs (Database/Vpn/Notifications)._
-### ServerWatch-a3jo — Agent-Internals (Threadsafety, Live-Guardrails, Transcript, Runtime)
+### Whiskers-a3jo — Agent-Internals (Threadsafety, Live-Guardrails, Transcript, Runtime)
 
 - **MIT-31 — Transcript-Sanitize.** `AgentTranscriptStore.SaveAsync` bereinigt das Fenster vor Persist/Re-Seed: führende Tool-Messages + verwaiste Assistant-ToolCalls entfernt (kein Provider-400), Tool-Outputs via `SecretRedactor` redigiert, base64-Screenshots verworfen.
 - **MIT-40 — Store-Cache.** Ein `JsonFileStore` pro Pfad (ConcurrentDictionary) → die Semaphore serialisiert parallele Saves wirklich.
@@ -109,7 +109,7 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - _Tests:_ TranscriptStore-Sanitize (Round-Trip), Session-Reentrancy + Live-Policy-Limit, AgentSettings-RequireAdmin; bestehende Agent-Tests bleiben grün. DI per Boot validiert (Ctor/Interface-Changes).
 ## Mittel & Niedrig — Bean-Abarbeitung
 
-### ServerWatch-9916 — Config/Deploy-Hardening (MIT-38, NIED-24, NIED-25.1)
+### Whiskers-9916 — Config/Deploy-Hardening (MIT-38, NIED-24, NIED-25.1)
 
 - **MIT-38 — Forwarded-Header-Trust + `/metrics`-Gate.** ForwardedHeaders vertraut nur noch konfigurierten Proxy-Netzen (`ForwardedHeaders:TrustedNetworks`; Default Loopback + RFC1918 + `100.64.0.0/10`). Leere/ungültige Config fällt auf sichere Defaults zurück und lässt die Liste nie leer werden — der Known-Proxy-Check wird nie versehentlich abgeschaltet (kein Trust-all → kein `X-Forwarded-For`-Spoofing der `SourceIp`). `/metrics` ist per statischem Bearer-Token (`Metrics:ScrapeToken`, konstantzeitiger Vergleich) gegated; ohne Token ist der Endpoint deaktiviert (404, opt-in) statt offen. Neue reine, unit-getestete Helfer `Utils/ForwardedHeadersConfig` + `Utils/MetricsScrapeAuth`.
   _Dateien: `Program.cs`, `Configuration/MetricsSettings.cs`, `Utils/ForwardedHeadersConfig.cs` (neu), `Utils/MetricsScrapeAuth.cs` (neu)._
@@ -118,10 +118,10 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-25.1 — Image-Pinning.** Trust-kritische Images per echtem Registry-Digest gepinnt: `tecnativa/docker-socket-proxy:0.3.0`, `alpine:3.22`, `aquasec/trivy:0.72.0` (jeweils neuestes Stable, Multi-Arch-Index-Digests live aus der Registry aufgelöst). Nur die `image:`-Zeile des Socket-Proxy geändert — die Off-Limits-Verb-Whitelist bleibt unangetastet.
   _Dateien: `docker-compose.hardened.yml`, `Services/Backup/VolumeBackupService.cs` (ein `BackupImage`-const für beide Aufrufe), `appsettings.json`._
 
-**Verifikation (Branch `feat/ServerWatch-9916-config-deploy-hardening`):** Build 0 Fehler, `dotnet test` 139/139 (16 neue Tests: `ForwardedHeadersConfigTests`, `MetricsScrapeAuthTests`). App in Development gebootet — „Application started" (Composition-Root-Änderung: `IOptions<MetricsSettings>`-Auflösung + ForwardedHeaders-Config-Read validiert). NIED-25.2 (Antiforgery-Reihenfolge) zurückgestellt — siehe unten.
+**Verifikation (Branch `feat/Whiskers-9916-config-deploy-hardening`):** Build 0 Fehler, `dotnet test` 139/139 (16 neue Tests: `ForwardedHeadersConfigTests`, `MetricsScrapeAuthTests`). App in Development gebootet — „Application started" (Composition-Root-Änderung: `IOptions<MetricsSettings>`-Auflösung + ForwardedHeaders-Config-Read validiert). NIED-25.2 (Antiforgery-Reihenfolge) zurückgestellt — siehe unten.
 ## Mittel & Niedrig — Bean-Abarbeitung
 
-### ServerWatch-07q1 — Cleanup: Dead-Code, Templates, SSL/Terminal-Bugs (NIED-23, NIED-19, NIED-10, NIED-11)
+### Whiskers-07q1 — Cleanup: Dead-Code, Templates, SSL/Terminal-Bugs (NIED-23, NIED-19, NIED-10, NIED-11)
 
 - **NIED-23 — Toter Code entfernt.** `DockerConnectionFactory` (kein Aufrufer, keine Registrierung), die `IDockerConnectionManager.Client`-Property (kein Aufrufer — aus Interface + Impl) und der unbenutzte `ConfigExport`-Service (nur in Program.cs registriert, kein UI/MCP-Aufrufer) inkl. Registrierung + Ordner gelöscht; leeres `Auth/`-Verzeichnis entfernt; Docker-README bereinigt. **ConfigExport = gelöscht** (das Bean erlaubt löschen-oder-verdrahten; Cleanup-Thema, vermeidet eine neue Admin-Export-Fläche; der Export war bereits secret-frei und ist trivial aus Git wiederherstellbar).
   _Dateien: `Services/Docker/DockerConnectionFactory.cs` (gelöscht), `Services/Docker/IDockerConnectionManager.cs`, `Services/Docker/DockerConnectionManager.cs`, `Services/ConfigExport/*` (gelöscht), `Program.cs`, `Services/Docker/README.md`._
@@ -132,10 +132,10 @@ Umsetzung der verbleibenden Findings, ein Bean pro Cluster (`feat/ServerWatch-<i
 - **NIED-11 — Terminal-Edge-Cases.** `LastActivityAt` wird jetzt auch bei Output aktualisiert (`TerminalSession.Touch()` im server-seitigen Read-Loop) — ein Terminal mit laufendem Output wird nicht mehr idle-gekillt. Das Max-Sessions-Limit wird atomar geprüft (`RegisterSession` unter Lock) statt Count-dann-Add (TOCTOU).
   _Dateien: `Services/Terminal/TerminalSession.cs`, `Services/Terminal/TerminalSessionManager.cs`, `Components/Pages/Terminal.razor`._
 
-**Verifikation (Branch `feat/ServerWatch-07q1-cleanup-dead-code-templates`):** Build 0 Fehler, `dotnet test` 133/133 (10 neu: `TemplateServiceTests`, `SslCertificateTests` inkl. Parse-Fehler-Regression, `TerminalSessionTests`). App in Development gebootet — „Application started" (DI-Graph nach Entfernen der ConfigExport-Registrierung + des `Client`-Interface-Members validiert). Der Terminal-Cap-Race-Fix ist ein Lock (prozess-startende Sessions sind auf der Dev-Box nicht unit-testbar) → durch Build + Boot + Review abgedeckt.
+**Verifikation (Branch `feat/Whiskers-07q1-cleanup-dead-code-templates`):** Build 0 Fehler, `dotnet test` 133/133 (10 neu: `TemplateServiceTests`, `SslCertificateTests` inkl. Parse-Fehler-Regression, `TerminalSessionTests`). App in Development gebootet — „Application started" (DI-Graph nach Entfernen der ConfigExport-Registrierung + des `Client`-Interface-Members validiert). Der Terminal-Cap-Race-Fix ist ein Lock (prozess-startende Sessions sind auf der Dev-Box nicht unit-testbar) → durch Build + Boot + Review abgedeckt.
 ## Mittel & Niedrig — Bean-Abarbeitung
 
-### ServerWatch-vcvv — Optimierungen (OPT-2/4/5/6/7/8/10/11.{1,2,3,4,6,7})
+### Whiskers-vcvv — Optimierungen (OPT-2/4/5/6/7/8/10/11.{1,2,3,4,6,7})
 
 Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 - **OPT-4/5 (DockerService).** `GetContainerStatsAsync` nutzt statische `JsonSerializerOptions` statt eine pro Aufruf; `RunHostShellAsync` cacht die Host-Shell-Image-Präsenz pro Server (TTL 1h) und drosselt den Leftover-Sweep (≤1×/5 min).
@@ -146,7 +146,7 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 - **OPT-10 (LogMonitorService).** Aktive Regex-Regeln werden einmal pro Zyklus kompiliert (Dict nach Pattern) statt pro Logzeile jedes Containers; ungültige Patterns werden hier verworfen statt pro Zeile zu werfen.
 - **OPT-11.1/.3/.4/.6/.7.** Container-Memory-History wird wie CPU downsampled; `Cves.FilteredGroups()` einmal pro Render; `InAppNotificationStore` trimmt die persistierte Historie periodisch (nicht bei jedem Insert); der AiChat-Modellkontext kappt das Inventar auf 50 (unhealthy/gestoppt priorisiert); Provider-Fehler zeigen `error.message` statt bloßem Status (neuer, unit-getesteter Helfer `Agent/Providers/ProviderError`).
 
-**Verifikation (Branch `feat/ServerWatch-vcvv-optimizations`):** Build 0 Fehler, `dotnet test` 130/130 (7 neu: `ProviderErrorTests` inkl. Fehlerpfad + No-Secret-Leak). App in Development gebootet — „Application started" (DI-Graph nach dem OPT-7-Registrierungsumbau validiert: Registry/Hetzner/Hostinger lösen sauber auf). Beans-übergreifend: **OPT-11.5** (MaxTokens) → Bean 6, **OPT-1** → Bean 7, **OPT-3/OPT-9** → Bean 12.
+**Verifikation (Branch `feat/Whiskers-vcvv-optimizations`):** Build 0 Fehler, `dotnet test` 130/130 (7 neu: `ProviderErrorTests` inkl. Fehlerpfad + No-Secret-Leak). App in Development gebootet — „Application started" (DI-Graph nach dem OPT-7-Registrierungsumbau validiert: Registry/Hetzner/Hostinger lösen sauber auf). Beans-übergreifend: **OPT-11.5** (MaxTokens) → Bean 6, **OPT-1** → Bean 7, **OPT-3/OPT-9** → Bean 12.
 
 ## Bewusst zurückgestellt (Begründung im Review-Doc / ADR)
 
@@ -157,7 +157,7 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 
 ## Mittel & Niedrig — Bean-Abarbeitung
 
-### ServerWatch-4x67 — DB-Persistenz (AlertHistory, Migrations, Metrics-Settings, WAL, Redis)
+### Whiskers-4x67 — DB-Persistenz (AlertHistory, Migrations, Metrics-Settings, WAL, Redis)
 
 - **MIT-27** — `AlertHistory` in die Startup-DDL aufgenommen; die 30-s-Prune-Schleife wirft nicht mehr `no such table` und Audit-/MCP-Pruning läuft wieder. _Dateien: `Program.cs`._
 - **MIT-29** — EF-Core-Migrations eingeführt (`MigrateAsync` statt `EnsureCreated` + Raw-DDL). `DatabaseInitializer` baselined Legacy-`EnsureCreated`-DBs nicht-destruktiv (heilen → `InitialCreate` stempeln → migrieren), Design-Time-Factory + `Migrations/InitialCreate`, belegt durch `DbMigrationBaselineTests`. Siehe [ADR 0003](../adr/0003-ef-core-migrations-baseline.md). _Dateien: `Program.cs`, `Services/Persistence/DatabaseInitializer.cs`, `MetricsDbContextFactory.cs`, `Migrations/`._
@@ -166,7 +166,7 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 - **OPT-1** — SQLite WAL (`journal_mode=WAL` + `synchronous=NORMAL`) im `DatabaseInitializer`. _Dateien: `Services/Persistence/DatabaseInitializer.cs`._
 
 **Verifikation Bean 7:** Build 0 Fehler; `dotnet test` 133/133 bestanden; App in Development gebootet — DI-Graph sauber (trotz geänderter `MetricsCollectorService`-Ctor) und der Legacy-Baseline-Pfad lief korrekt gegen eine reale Bestands-Dev-DB. **Deploy-Hinweis:** vor dem ersten migrations-fähigen Deploy eine Kopie von `data/metrics.db` ziehen — nicht-destruktiv per Konstruktion, aber Gürtel-und-Hosenträger.
-### ServerWatch-ekuc — Docker/SSH-Lifecycle (Client-Invalidation, Tunnel, Cancel, Compose-Ports, mTLS)
+### Whiskers-ekuc — Docker/SSH-Lifecycle (Client-Invalidation, Tunnel, Cancel, Compose-Ports, mTLS)
 
 - **MIT-16** — instanz-bewusste Client-Invalidierung (`InvalidateClient(serverId, ifCurrent)` via atomarem `TryRemove(KeyValuePair)`), sodass ein Retry keinen frisch aufgebauten Client killt; `ObjectDisposedException` zählt jetzt als Connection-Failure (Retry). _Dateien: `Services/Docker/DockerConnectionManager.cs`, `IDockerConnectionManager.cs`._
 - **MIT-17** — SSH-Tunnel-stderr wird für die Lebensdauer im Hintergrund gedraint (redigiert), damit ein voller Pipe-Buffer den „lebendigen" Tunnel nicht einfriert. _Dateien: `Services/Docker/SshTunnelManager.cs`._
@@ -176,7 +176,7 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 - **NIED-13** (⚠️ off-limits, per ausdrücklicher Freigabe 2026-07-07) — mTLS-Callback prüft zusätzlich den Hostnamen (`cert.MatchesHostname(server.TcpHost)`, `chainOk && hostnameOk`, fail-closed). Test beweist die Ablehnung eines gültig-signierten Certs mit falschem Host. **Deploy-Hinweis:** ein Server-Cert ohne zu `TcpHost` passenden SAN kann sich danach nicht mehr verbinden. _Dateien: `Services/Docker/DockerConnectionManager.cs`._
 
 **Verifikation Bean 8:** Build 0 Fehler; `dotnet test` 136/136 bestanden (neue Tests: `DockerConnectionFailureTests`, `ComposeFileParserPortTests`, `DockerMtlsHostnameTests`); App in Development gebootet — DI-Graph sauber (Interface-Signatur MIT-16 geändert). Prozess-/Tunnel-Pfade (MIT-17/18, NIED-9) durch Build + Boot + Review verifiziert.
-### ServerWatch-zcgp — CVE-Monitor (Scan-Race, Stale-Prune, Locale, Fail-Backoff)
+### Whiskers-zcgp — CVE-Monitor (Scan-Race, Stale-Prune, Locale, Fail-Backoff)
 
 - **MIT-8** — atomares Scan-Gate (`Interlocked.CompareExchange`) statt Bool-Check-then-set → manueller Trigger und Background-Loop können keine überlappenden Voll-Scans mehr fahren; `_store.IsScanning` bleibt nur UI-Indikator. _Dateien: `Services/Cve/CveMonitorService.cs`._
 - **MIT-9** — Phantom-Prune: nach den Container-Scans je Server werden gespeicherte Container-Keys, die nicht mehr existieren, entfernt (`PruneServer`, OS-Key nie); löst das unbegrenzte Wachstum in Store/UI/`cve-findings.json` bei Recreates. Persist-Pfad jetzt injizierbar (Testbarkeit). _Dateien: `Services/Cve/CveFindingsStore.cs`, `ICveFindingsStore.cs`, `CveMonitorService.cs`._
@@ -184,7 +184,7 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 - **NIED-5** — (a) 15-min-Backoff nach Fehlzyklus statt vollem Intervall; (b) `PruneStaleAsync` löscht `CveFirstSeen`-Zeilen, deren Key weg ist UND älter als 30 Tage (temp-SQLite-Test beweist: nur stale+alt). _Dateien: `Services/Cve/CveMonitorService.cs`, `CveAgeStore.cs`._
 
 **Verifikation Bean 9:** Build 0 Fehler; `dotnet test` 128/128 (neue Tests: `CveFindingsStorePruneTests`, `OsCveScannerLocaleTests`, `CveAgePruneTests`); App in Development gebootet, DI-Graph sauber. Keep-Previous-on-Failure (HOCH-7) unverändert — kein falscher „clean"-Zustand.
-### ServerWatch-0txk — Background-Loops (False-Restarts, Cron-Death-Loop, Log-Re-Alerts, Notification-Timeouts)
+### Whiskers-0txk — Background-Loops (False-Restarts, Cron-Death-Loop, Log-Re-Alerts, Notification-Timeouts)
 
 - **MIT-10** — Health-Monitor zählt einen Restart nur noch bei `running` aus einem echten Stop-Zustand (`IsRestart`), und überschreibt den gemerkten State nie mit `unknown` → keine Phantom-Restart-Loop-Alerts bei flappenden SSH-Tunneln (schützt auch die Stop-Erkennung). _Dateien: `Services/HealthMonitor/ContainerHealthMonitor.cs`._
 - **MIT-11** — ungültiger Cron deaktiviert den Task (mit Log) statt alle 30s zu werfen (`TryParseCron`); Executor-Fehler deaktivieren den Task NICHT. _Dateien: `Services/Scheduler/SchedulerService.cs`._
@@ -195,7 +195,7 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 - **NIED-8** — Throttle-Fenster wird pro Aufruf aus den Live-Settings gelesen statt beim Konstruieren eingefroren (`IsThrottled(…, minutes)`); alle 8 Provider übergeben `ThrottleMinutes`. _Dateien: `NotificationThrottler.cs` + 8 Provider._
 
 **Verifikation Bean 10:** Build 0 Fehler; `dotnet test` 145/145 (neue Tests: `HealthRestartHeuristicTests`, `CronValidationTests`, `NotificationRetryTests`, `NotificationThrottlerTests`); App in Development gebootet — DI-Graph sauber, alle Background-Monitore gestartet. Prozess-/Loop-Pfade (MIT-12, NIED-6/7) via Build + Boot + Review.
-### ServerWatch-z07v — Image-Update & Registry (Token-Flow, Digest-Pin, Race, Repeat-Notifications)
+### Whiskers-z07v — Image-Update & Registry (Token-Flow, Digest-Pin, Race, Repeat-Notifications)
 
 - **MIT-23** — registry-agnostischer Bearer-Token-Flow: bei 401 wird der `WWW-Authenticate: Bearer`-Challenge geparst (`ParseBearerChallenge`), ein Token vom Realm geholt und der Manifest-HEAD einmal wiederholt → GHCR/Quay/LSCR melden echten Update-Status statt „could not reach registry". Token wird nie geloggt. _Dateien: `Services/ImageUpdate/RegistryClient.cs`._
 - **MIT-24** — Digest-gepinnte Images (`@sha256:`) werden nicht mehr fälschlich als Update gemeldet (`IsDigestPinned` ersetzt den nie feuernden Guard). _Dateien: `Services/ImageUpdate/ImageUpdateChecker.cs`._
@@ -204,7 +204,7 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 - **NIED-16** — alle `JsonDocument`-Instanzen mit `using var` (String vor Dispose extrahiert). _Dateien: `Services/ImageUpdate/RegistryClient.cs`, `Services/AiChat/AiChatService.cs`._
 
 **Verifikation Bean 11:** Build 0 Fehler; `dotnet test` 134/134 (neue Tests: `RegistryChallengeTests`, `ImageUpdatePinTests`); App in Development gebootet, DI-Graph sauber. MIT-25/NIED-15/16 (Loop-/HTTP-/DB-Pfade) via Build + Boot + Review.
-### ServerWatch-4wua — Blazor-UI (XSS, Env-Masking, RBAC, SRI, Timer, Deep-Link, Kleinbugs, Perf)
+### Whiskers-4wua — Blazor-UI (XSS, Env-Masking, RBAC, SRI, Timer, Deep-Link, Kleinbugs, Perf)
 
 - **MIT-35** (Security/XSS) — `MarkdownSanitizer.NeutralizeUnsafeHrefs` filtert nicht-`http(s)`/`mailto`/`#`-Hrefs aus gerendertem LLM-Markdown → ein `[x](javascript:…)` ist inert. Nur `Agent.razor` (Markdig); `AiChat.razor` rendert keine Links (safe). _Dateien: `Utils/MarkdownSanitizer.cs`, `Components/Pages/Agent.razor`._
 - **MIT-37** (Security) — `EnvMasking.ShouldMask` maskiert sensible Keys UND Werte mit Inline-Credentials (`://user:pass@`, inkl. leerer-User Redis-URIs); Env-Tab hinter `AppRole.Operator`. URL/URI werteseitig (nicht als Blanket-Keywords), damit harmlose Config-URLs sichtbar bleiben. _Dateien: `Utils/EnvMasking.cs`, `ContainerDetail.razor`, `ContainerDiff.razor`._
@@ -221,6 +221,6 @@ Alle verhaltenserhaltend (regression-safe), je Datei ein Commit.
 
 ## Verifikation
 
-- `dotnet build src/ServerWatch/ServerWatch.csproj` → 0 Fehler.
-- `dotnet test src/ServerWatch.Tests` → 123/123 bestanden.
+- `dotnet build src/Whiskers/Whiskers.csproj` → 0 Fehler.
+- `dotnet test src/Whiskers.Tests` → 123/123 bestanden.
 - Kein App-Boot durchgeführt; es wurden keine DI-Registrierungen oder Konstruktor-Abhängigkeiten geändert (DI-Graph unverändert). Vor dem Deploy dennoch einmal booten (Development/ValidateOnBuild).

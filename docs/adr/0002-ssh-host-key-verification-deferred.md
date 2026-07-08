@@ -1,7 +1,7 @@
 # 0002 — SSH-Host-Key-Verifizierung: Umstellung auf `accept-new` zurückgestellt
 
 - **Status:** Offen / zurückgestellt — braucht ausdrückliche Freigabe (2026-07-07)
-- **Betrifft:** `src/ServerWatch/Services/Docker/SshTunnelManager.cs`, `src/ServerWatch/Services/Server/HostCommandExecutor.cs`, `src/ServerWatch/Services/Terminal/TerminalSession.cs`
+- **Betrifft:** `src/Whiskers/Services/Docker/SshTunnelManager.cs`, `src/Whiskers/Services/Server/HostCommandExecutor.cs`, `src/Whiskers/Services/Terminal/TerminalSession.cs`
 - **Bezug:** Full-Repo-Review 2026-07-06, Finding HOCH-11
 
 ## Kontext
