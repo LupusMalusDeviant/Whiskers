@@ -79,6 +79,10 @@ builder.Services.AddSingleton<Whiskers.Services.LogMonitor.ILogMonitorService, W
 // VolumeBackup tasks), so it needs a default when the VolumeBackups module is off — otherwise ValidateOnBuild
 // can't construct TaskExecutor. The module registers the real service in the loop below and wins. (RoadToSAP §2.1)
 builder.Services.AddSingleton<Whiskers.Services.Backup.IVolumeBackupService, Whiskers.Services.Backup.NoopVolumeBackupService>();
+// And for webhooks: the inbound /api/webhooks/{id} endpoint (below, in Core) resolves IWebhookService per
+// request, so it needs a default when the Webhooks module is off. The module registers the real service in
+// the loop below and wins; with it off, a trigger answers 400 instead of 500. (RoadToSAP §2.1)
+builder.Services.AddSingleton<Whiskers.Services.Webhooks.IWebhookService, Whiskers.Services.Webhooks.NoopWebhookService>();
 
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
@@ -245,8 +249,8 @@ builder.Services.AddHostedService<Whiskers.Services.Vpn.VpnBootstrapHostedServic
 // Auto-update (opt-in only)
 builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.AutoUpdate.AutoUpdateService, Whiskers.Services.AutoUpdate.IAutoUpdateService>();
 
-// Webhooks
-builder.Services.AddSingleton<Whiskers.Services.Webhooks.IWebhookService, Whiskers.Services.Webhooks.WebhookService>();
+// Webhooks (IWebhookService) moved to Modules/Webhooks (RoadToSAP Phase 1). Core keeps a NoopWebhookService
+// default (registered above) for the inbound /api/webhooks endpoint when the module is off.
 
 // Log search + monitor (ILogSearchService, hosted LogMonitorService) moved to Modules/LogMonitor
 // (RoadToSAP Phase 1). Core keeps a NoopLogMonitorService default (registered above) for when it's off.

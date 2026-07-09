@@ -7,6 +7,14 @@ CI/CD **webhook** handling, registers webhook endpoints and processes incoming t
 | File | Purpose |
 |---|---|
 | `IWebhookService.cs` / `WebhookService.cs` | Manages CI/CD webhooks and processes incoming webhook triggers. |
+| `NoopWebhookService.cs` | Core default `IWebhookService` for when the **Webhooks module** is off. Keeps the Core `POST /api/webhooks/{id}` endpoint's per-request resolution working; `TriggerAsync` fails gracefully (endpoint → 400, not 500), reads return empty, create throws. Real service wins by last-registration when the module is on (RoadToSAP Phase 1). |
+
+## Wiring
+
+This is the opt-in **Webhooks module** ([`../../Modules/Webhooks/`](../../Modules/Webhooks/), toggle
+`Features:webhooks:Enabled`): its `ConfigureServices` registers `IWebhookService` and owns the `webhooks` nav
+entry. The inbound `POST /api/webhooks/{id}` endpoint stays in Core (`Program.cs`) and resolves the service per
+request, so Core keeps the `NoopWebhookService` default above for when the module is off.
 
 ## Security notes
 
