@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Server;
@@ -12,7 +13,7 @@ public class VolumeBackupService : IVolumeBackupService
     private readonly IHostCommandExecutor _executor;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<VolumeBackupService> _logger;
-    private const string BackupDir = "/app/data/backups";
+    private readonly string _backupDir;
 
     // Throwaway helper container for backup/restore, pinned by digest (supply-chain hardening) so a
     // moved 'alpine' tag can't swap in a different image. Re-pin via: docker manifest inspect alpine:3.22
@@ -32,11 +33,13 @@ public class VolumeBackupService : IVolumeBackupService
     public VolumeBackupService(
         IHostCommandExecutor executor,
         IServiceScopeFactory scopeFactory,
-        ILogger<VolumeBackupService> logger)
+        ILogger<VolumeBackupService> logger,
+        DataPathOptions? dataPaths = null)
     {
         _executor = executor;
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _backupDir = (dataPaths ?? DataPathOptions.Default).BackupsDir;
     }
 
     public async Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null)
@@ -47,11 +50,11 @@ public class VolumeBackupService : IVolumeBackupService
         var fileName = $"{volumeName}_{timestamp}.tar.gz";
 
         // Ensure backup directory exists
-        await _executor.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(BackupDir)}", TimeSpan.FromSeconds(5));
+        await _executor.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(_backupDir)}", TimeSpan.FromSeconds(5));
 
         // Create backup using a temporary alpine container
         var result = await _executor.ExecuteAsync(sid,
-            $"docker run --rm -v {ShellUtils.Quote(volumeName + ":/data")} -v {ShellUtils.Quote(BackupDir + ":/backup")} {BackupImage} tar czf {ShellUtils.Quote("/backup/" + fileName)} -C /data . 2>&1",
+            $"docker run --rm -v {ShellUtils.Quote(volumeName + ":/data")} -v {ShellUtils.Quote(_backupDir + ":/backup")} {BackupImage} tar czf {ShellUtils.Quote("/backup/" + fileName)} -C /data . 2>&1",
             TimeSpan.FromMinutes(10));
 
         if (!result.Success)
@@ -59,7 +62,7 @@ public class VolumeBackupService : IVolumeBackupService
 
         // Get file size
         var sizeResult = await _executor.ExecuteAsync(sid,
-            $"stat -c %s {ShellUtils.Quote(BackupDir + "/" + fileName)}",
+            $"stat -c %s {ShellUtils.Quote(_backupDir + "/" + fileName)}",
             TimeSpan.FromSeconds(5));
 
         long sizeBytes = 0;
@@ -98,7 +101,7 @@ public class VolumeBackupService : IVolumeBackupService
         ValidateName(backup.FileName, "backup file name");
 
         var quotedFile = ShellUtils.Quote("/backup/" + backup.FileName);
-        var quotedBackupRo = ShellUtils.Quote(BackupDir + ":/backup");
+        var quotedBackupRo = ShellUtils.Quote(_backupDir + ":/backup");
 
         // 1. Verify the archive exists and is a readable, intact gzip tar BEFORE touching the live volume.
         //    Without this, a missing/truncated/corrupt backup would still get past the wipe below and
@@ -157,7 +160,7 @@ public class VolumeBackupService : IVolumeBackupService
         // Delete file
         ValidateName(backup.FileName, "backup file name");
         await _executor.ExecuteAsync(backup.ServerId,
-            $"rm -f {ShellUtils.Quote(BackupDir + "/" + backup.FileName)}",
+            $"rm -f {ShellUtils.Quote(_backupDir + "/" + backup.FileName)}",
             TimeSpan.FromSeconds(5));
 
         // Delete metadata

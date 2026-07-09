@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Docker;
 using Whiskers.Services.Server;
@@ -32,7 +33,7 @@ public class OnboardingService : IOnboardingService
     // migration); only the per-host SERVER cert is issued anew.
     private const string StepCaContainer = "step-ca";
     private const string DockerProxyPort = "2376";
-    private const string MtlsCertDirInContainer = "/app/data/mtls"; // client.crt/key + ca.crt (shared)
+    private readonly string _mtlsCertDir; // /app/data/mtls by default: client.crt/key + ca.crt (shared)
     private const string VmComposeDirOnHost = "/opt/telemetry-vm";   // holds scrape.yml + compose
     private const string ScrapeFileOnHost = "/opt/telemetry-vm/scrape.yml";
 
@@ -40,12 +41,14 @@ public class OnboardingService : IOnboardingService
         IHostCommandExecutor exec,
         IServerConfigService serverConfig,
         IDockerService docker,
-        ILogger<OnboardingService> logger)
+        ILogger<OnboardingService> logger,
+        DataPathOptions? dataPaths = null)
     {
         _exec = exec;
         _serverConfig = serverConfig;
         _docker = docker;
         _logger = logger;
+        _mtlsCertDir = (dataPaths ?? DataPathOptions.Default).MtlsDir;
     }
 
     public async Task<bool> OnboardServerAsync(string serverId, IProgress<string> progress, CancellationToken ct = default)
@@ -154,9 +157,9 @@ public class OnboardingService : IOnboardingService
             server.TcpHost = tsIp;
             server.TcpPort = int.Parse(DockerProxyPort);
             server.TcpUseTls = true;
-            server.TcpClientCertPath = $"{MtlsCertDirInContainer}/client.crt";
-            server.TcpClientKeyPath = $"{MtlsCertDirInContainer}/client.key";
-            server.TcpCaCertPath = $"{MtlsCertDirInContainer}/ca.crt";
+            server.TcpClientCertPath = $"{_mtlsCertDir}/client.crt";
+            server.TcpClientKeyPath = $"{_mtlsCertDir}/client.key";
+            server.TcpCaCertPath = $"{_mtlsCertDir}/ca.crt";
             server.MetricsSource = MetricsSourceKind.Prometheus;
             server.MetricsEndpoint = vmEndpoint;
             await _serverConfig.UpdateServerAsync(server);

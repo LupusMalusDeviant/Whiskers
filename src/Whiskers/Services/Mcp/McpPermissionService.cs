@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
 
@@ -12,10 +13,10 @@ public class McpPermissionService : IMcpPermissionService
     private McpPermissionData _data = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public McpPermissionService(ILogger<McpPermissionService> logger)
+    public McpPermissionService(ILogger<McpPermissionService> logger, DataPathOptions? dataPaths = null)
     {
         _logger = logger;
-        _store = new JsonFileStore<McpPermissionData>("/app/data/mcp-permissions.json");
+        _store = new JsonFileStore<McpPermissionData>((dataPaths ?? DataPathOptions.Default).McpPermissionsJson);
     }
 
     public async Task InitializeAsync()

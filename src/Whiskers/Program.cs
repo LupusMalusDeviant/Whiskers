@@ -29,19 +29,29 @@ using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Central data-directory resolver (WHISKERS_DATA_DIR, default /app/data). Built here at bootstrap
+// because the config layers, DataProtection keys and the DbContext connection string below all need
+// it before the DI container exists. The same instance is registered as a singleton (further down)
+// so every service resolves paths through it instead of hard-coding /app/data.
+var dataPaths = DataPathOptions.FromConfiguration(builder.Configuration);
+
 // UI-writable agent provider settings (overrides only Agent:* keys; reloadOnChange → IOptionsMonitor
 // picks up UI changes without a restart). As the last source, so the UI takes precedence over env/appsettings.
-builder.Configuration.AddJsonFile("/app/data/agent-settings.json", optional: true, reloadOnChange: true);
+builder.Configuration.AddJsonFile(dataPaths.AgentSettingsJson, optional: true, reloadOnChange: true);
 // UI-writable settings for all other sections (Mattermost, Matrix, HealthMonitor, CveMonitor,
 // ImageUpdate, MetricAlert, …). Last layer → overrides env; reloadOnChange → applied live.
-builder.Configuration.AddJsonFile("/app/data/app-settings.json", optional: true, reloadOnChange: true);
+builder.Configuration.AddJsonFile(dataPaths.AppSettingsJson, optional: true, reloadOnChange: true);
 
 // Path base for reverse proxy subpath
 var configuredPathBase = builder.Configuration["PathBase"] ?? "";
 
+// Register the data-path resolver so every consumer can inject it (DI fills the optional
+// DataPathOptions constructor parameter from this instance).
+builder.Services.AddSingleton(dataPaths);
+
 // Persist data protection keys so antiforgery tokens survive container restarts
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo("/app/data/keys"))
+    .PersistKeysToFileSystem(new DirectoryInfo(dataPaths.KeysDir))
     .SetApplicationName("ServerWatch");
 
 // Configuration
@@ -176,7 +186,7 @@ builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, W
 
 // SQLite metrics database
 builder.Services.AddDbContext<MetricsDbContext>(options =>
-    options.UseSqlite("Data Source=/app/data/metrics.db"),
+    options.UseSqlite(dataPaths.DbConnectionString),
     ServiceLifetime.Transient);
 builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
 builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
@@ -214,6 +224,13 @@ builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchService,
 // host/sidecar (or legacy entrypoint.sh); "tailscale"/"netbird" let the app manage it.
 builder.Services.Configure<Whiskers.Services.Vpn.VpnSettings>(
     builder.Configuration.GetSection(Whiskers.Services.Vpn.VpnSettings.SectionName));
+// Derive the mesh-VPN state paths from the central data directory when the operator hasn't set them
+// explicitly (keeps them in sync with WHISKERS_DATA_DIR instead of a second hard-coded /app/data).
+builder.Services.PostConfigure<Whiskers.Services.Vpn.VpnSettings>(s =>
+{
+    if (string.IsNullOrWhiteSpace(s.Tailscale.StateDir)) s.Tailscale.StateDir = dataPaths.TailscaleStateDir;
+    if (string.IsNullOrWhiteSpace(s.Netbird.ConfigPath)) s.Netbird.ConfigPath = dataPaths.NetbirdConfigPath;
+});
 builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Services.Vpn.Providers.TailscaleVpnProvider>();
 builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Services.Vpn.Providers.NetbirdVpnProvider>();
 builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Services.Vpn.Providers.NoopVpnProvider>();

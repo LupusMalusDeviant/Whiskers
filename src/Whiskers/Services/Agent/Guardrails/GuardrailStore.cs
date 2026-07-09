@@ -18,10 +18,10 @@ public sealed class GuardrailStore : IGuardrailStore
 
     public event Action? Changed;
 
-    public GuardrailStore(ILogger<GuardrailStore>? logger = null, string? filePath = null)
+    public GuardrailStore(ILogger<GuardrailStore>? logger = null, string? filePath = null, DataPathOptions? dataPaths = null)
     {
         _logger = logger;
-        _filePath = filePath ?? "/app/data/guardrails.json";
+        _filePath = filePath ?? (dataPaths ?? DataPathOptions.Default).GuardrailsJson;
         _store = new JsonFileStore<GuardrailConfig>(_filePath);
     }
 

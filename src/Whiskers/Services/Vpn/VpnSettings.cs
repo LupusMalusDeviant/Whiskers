@@ -25,7 +25,10 @@ public class VpnSettings
     {
         /// <summary>Auth key for unattended login (tskey-…). Empty = interactive/manual login.</summary>
         public string? AuthKey { get; set; }
-        public string StateDir { get; set; } = "/app/data/tailscale";
+        /// <summary>Persistent tailscaled state directory. Left empty here and filled from
+        /// <c>DataPathOptions</c> at startup (PostConfigure in Program.cs); an explicit
+        /// <c>Vpn:Tailscale:StateDir</c> setting still wins.</summary>
+        public string StateDir { get; set; } = "";
         public string Socket { get; set; } = "/var/run/tailscale/tailscaled.sock";
         /// <summary>Optional self-hosted control plane (Headscale), e.g. "https://headscale.example.com".</summary>
         public string? LoginServer { get; set; }
@@ -37,6 +40,9 @@ public class VpnSettings
         public string? SetupKey { get; set; }
         /// <summary>Optional self-hosted management URL, e.g. "https://netbird.example.com:33073".</summary>
         public string? ManagementUrl { get; set; }
-        public string ConfigPath { get; set; } = "/app/data/netbird/config.json";
+        /// <summary>Netbird config file path. Left empty here and filled from <c>DataPathOptions</c>
+        /// at startup (PostConfigure in Program.cs); an explicit <c>Vpn:Netbird:ConfigPath</c>
+        /// setting still wins.</summary>
+        public string ConfigPath { get; set; } = "";
     }
 }
