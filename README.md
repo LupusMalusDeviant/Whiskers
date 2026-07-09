@@ -186,7 +186,7 @@ See [.env.example](.env.example) for the full, commented list.
 
 ### Notable runtime details
 - **Email whitelist**: managed in the UI under *Settings > Authentication*; changes apply without a restart.
-- **MCP API key**: auto-generated on first start and printed to the container logs; stored in `/app/data/api-keys.json` (persisted in the Docker volume).
+- **MCP API key**: auto-generated on first start and written to `initial-mcp-key.txt` (mode `0600`, next to `api-keys.json` in the data volume) — **not** to the logs, which record only the file path. Retrieve it, then delete the file.
 - **Data persistence**: SQLite, JSON stores and certificates live under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`; a bind-mount / volume); never in the image.
 - **Health probes**: anonymous `/healthz` (liveness) and `/readyz` (readiness — metrics DB reachable + fleet config loaded) endpoints; the image ships a Docker `HEALTHCHECK` and Kubernetes can use them as probes. (`/health` without the `z` is the in-app status page.)
 
