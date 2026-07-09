@@ -58,6 +58,14 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(dataPaths.KeysDir))
     .SetApplicationName("ServerWatch");
 
+// Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
+// module's default) so their services, MCP tools and navigation all come from one list. The MCP-tool and
+// nav registrations further down read `modules`. Today the only module is the transitional
+// AllInOnePseudoModule (no-op ConfigureServices — inline registrations stay put), so this is behaviour-neutral.
+var modules = Whiskers.Modules.ModuleCatalog.DiscoverEnabled(builder.Configuration);
+foreach (var module in modules)
+    module.ConfigureServices(builder.Services, builder.Configuration);
+
 // Configuration
 builder.Services.Configure<DockerSettings>(builder.Configuration.GetSection(DockerSettings.SectionName));
 builder.Services.Configure<MattermostSettings>(builder.Configuration.GetSection(MattermostSettings.SectionName));
@@ -315,19 +323,12 @@ builder.Services.AddSingleton<Whiskers.Services.Backup.IVolumeBackupService, Whi
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<Whiskers.Mcp.IMcpApiKeyStore, McpApiKeyStore>();
 builder.Services.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, McpPermissionService>();
+// MCP tools come from the enabled modules (RoadToSAP Phase 1) instead of a fixed .WithTools<>() list, so a
+// disabled module's tools drop off the MCP surface automatically. Same 11 tool types + order today (all
+// carried by AllInOnePseudoModule.McpToolTypes), so this is behaviour-neutral.
 builder.Services.AddMcpServer()
     .WithHttpTransport()
-    .WithTools<ContainerTools>()
-    .WithTools<ServerTools>()
-    .WithTools<MonitoringTools>()
-    .WithTools<CloudTools>()
-    .WithTools<HetznerTools>()
-    .WithTools<NetworkTools>()
-    .WithTools<DatabaseTools>()
-    .WithTools<SchedulerTools>()
-    .WithTools<LogTools>()
-    .WithTools<CveTools>()
-    .WithTools<AgentTools>();
+    .WithTools(modules.SelectMany(m => m.McpToolTypes).ToArray());
 
 // MudBlazor
 // Localization (F2 i18n): resource tables live in Resources/*.resx; en is the default/fallback
@@ -496,14 +497,8 @@ builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>()
 builder.Services.AddInitializable<Whiskers.Services.Agent.Guardrails.GuardrailStore>();     // 80
 builder.Services.AddInitializable<Whiskers.Services.Agent.Triggers.AiTriggerStore>();       // 90
 
-// Module pipeline (RoadToSAP Phase 1). DiscoverEnabled returns the modules whose Features:<id>:Enabled
-// isn't false; each contributes its services via ConfigureServices, and the registry exposes their merged
-// navigation to NavMenu. Today the only module is the transitional AllInOnePseudoModule (ConfigureServices
-// is a no-op, registrations stay inline below), so this is behaviour-neutral — features are extracted into
-// real modules one PR at a time.
-var modules = Whiskers.Modules.ModuleCatalog.DiscoverEnabled(builder.Configuration);
-foreach (var module in modules)
-    module.ConfigureServices(builder.Services, builder.Configuration);
+// Nav registry from the enabled modules' merged NavItems (modules are discovered near the top of
+// Program.cs, next to where their services and MCP tools are wired).
 builder.Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(
     new Whiskers.Modules.ModuleRegistry(modules.SelectMany(m => m.NavItems).ToList()));
 
