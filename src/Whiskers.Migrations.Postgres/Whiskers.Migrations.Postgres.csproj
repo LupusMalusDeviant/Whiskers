@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The Npgsql provider these migrations are scaffolded against (timestamptz, bigint identity). -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same shared context/entities as the SQLite migrations; no app reference → no circular dep. -->
+    <ProjectReference Include="..\Whiskers.Data\Whiskers.Data.csproj" />
+  </ItemGroup>
+
+</Project>

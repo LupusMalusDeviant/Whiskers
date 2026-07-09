@@ -52,7 +52,11 @@ public static class DatabaseRegistration
                         "Database:Provider=postgres requires a connection string " +
                         "(Database:ConnectionString / WHISKERS_DB_CONNECTION / WHISKERS_DB_CONNECTION_FILE).");
                 builder.Services.AddDbContext<MetricsDbContext>(
-                    o => o.UseNpgsql(connectionString, npg => npg.EnableRetryOnFailure(3)),
+                    o => o.UseNpgsql(connectionString, npg =>
+                    {
+                        npg.EnableRetryOnFailure(3);
+                        npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
+                    }),
                     ServiceLifetime.Transient);
                 break;
 

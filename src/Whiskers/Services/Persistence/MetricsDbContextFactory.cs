@@ -11,10 +11,20 @@ public sealed class MetricsDbContextFactory : IDesignTimeDbContextFactory<Metric
 {
     public MetricsDbContext CreateDbContext(string[] args)
     {
-        var options = new DbContextOptionsBuilder<MetricsDbContext>()
-            // SQLite migrations live in Whiskers.Migrations.Sqlite, the context in Whiskers.Data (ADR-0004).
-            .UseSqlite("Data Source=serverwatch-design.db", sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite"))
-            .Options;
-        return new MetricsDbContext(options);
+        // Branch on the same env var the app uses, so `dotnet ef … add` scaffolds into the matching
+        // provider's migration assembly (ADR-0004). Connection strings here are throwaways — scaffolding
+        // reads the model, it never opens a database.
+        var provider = (Environment.GetEnvironmentVariable("WHISKERS_DB_PROVIDER") ?? "sqlite")
+            .Trim().ToLowerInvariant();
+
+        var builder = new DbContextOptionsBuilder<MetricsDbContext>();
+        if (provider == "postgres")
+            builder.UseNpgsql("Host=localhost;Database=whiskers_design",
+                npg => npg.MigrationsAssembly("Whiskers.Migrations.Postgres"));
+        else
+            builder.UseSqlite("Data Source=serverwatch-design.db",
+                sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite"));
+
+        return new MetricsDbContext(builder.Options);
     }
 }
