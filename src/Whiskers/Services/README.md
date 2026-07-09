@@ -62,7 +62,8 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 
 ## Conventions
 
-- **Interface-first**: every service is consumed through its `IFoo` interface; the concrete `Foo` is bound in DI. Hosted/background services are dual-registered (concrete singleton + interface forwarder + `AddHostedService`).
+- **Interface-first**: every service is consumed through its `IFoo` interface; the concrete `Foo` is bound in DI. Hosted/background services are dual-registered (concrete singleton + interface forwarder + `AddHostedService`) — see the [`AddSingletonWithInterface`](../Configuration/ServiceCollectionExtensions.cs) helpers.
+- **Async init**: a singleton that needs startup warm-up (loading a JSON store, seeding defaults) implements [`IInitializable`](IInitializable.cs) (`int Order` + `InitializeAsync(ct)`); `Program.cs` runs them all in ascending `Order` after `Build()`, rather than hand-wiring each call.
 - **Graceful shutdown**: each background service bounds its work cycle to the stopping token (`await Cycle(ct).WaitAsync(ct)`) so an in-flight Docker/registry call — which carries no token — is abandoned on stop instead of holding the host past its ~5s shutdown window. Idle waits already pass the token.
 - **Persistence**: durable state goes through [`Persistence/`](Persistence/) (SQLite for time-series/structured data, JSON file stores for config) under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`), resolved centrally by [`../Configuration/DataPathOptions.cs`](../Configuration/DataPathOptions.cs).
 - **English** comments and XML docs throughout.

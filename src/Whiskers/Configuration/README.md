@@ -9,6 +9,7 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | File | Section / purpose |
 |---|---|
 | `DataPathOptions.cs` | Central resolver for all data-directory paths (DB, JSON stores, DataProtection keys, `ssh-keys/`, `mtls/`, `backups/`). Root = `WHISKERS_DATA_DIR` (default `/app/data`). Built at bootstrap, injected as a plain singleton — **not** via `IOptions<T>`. |
+| `ServiceCollectionExtensions.cs` | DI registration helpers (RoadToSAP Phase 0), **not** a settings class: `AddSingletonWithInterface[AndHostedService]` collapse the concrete + interface-forwarder [+ hosted] idiom into one call; `AddInitializable<T>` registers a startup [`IInitializable`](../Services/IInitializable.cs). |
 | `GoogleAuthSettings.cs` | Google OAuth 2.0 credentials. |
 | `OidcSettings.cs` | Generic OpenID Connect provider settings. |
 | `DockerSettings.cs` | Docker connection defaults. |
