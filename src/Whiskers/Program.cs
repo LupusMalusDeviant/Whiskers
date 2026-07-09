@@ -66,26 +66,26 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(dataPaths.KeysDir))
     .SetApplicationName("ServerWatch");
 
+// Core default so every INotificationService consumer (CVE, Health, ImageUpdate, AutoUpdate, Metrics,
+// LogMonitor, AI triggers, approvals) resolves even when the Notifications module is off. That module
+// registers its CompositeNotificationService inside the loop below, which then wins by last-registration;
+// with the module off this Noop stays. MUST be registered BEFORE the module loop. (RoadToSAP §2.1)
+builder.Services.AddSingleton<INotificationService, NoopNotificationService>();
+
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
-// module's default) so their services, MCP tools and navigation all come from one list. The MCP-tool and
-// nav registrations further down read `modules`. Today the only module is the transitional
-// AllInOnePseudoModule (no-op ConfigureServices — inline registrations stay put), so this is behaviour-neutral.
+// module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
+// nav registrations further down read `modules`. Each enabled module's ConfigureServices moves its former
+// inline Program.cs registrations here verbatim (Terminal, Notifications, … extracted one PR at a time).
 var modules = Whiskers.Modules.ModuleCatalog.DiscoverEnabled(builder.Configuration);
 foreach (var module in modules)
     module.ConfigureServices(builder.Services, builder.Configuration);
 
 // Configuration
 builder.Services.Configure<DockerSettings>(builder.Configuration.GetSection(DockerSettings.SectionName));
-builder.Services.Configure<MattermostSettings>(builder.Configuration.GetSection(MattermostSettings.SectionName));
 builder.Services.Configure<GoogleAuthSettings>(builder.Configuration.GetSection(GoogleAuthSettings.SectionName));
 builder.Services.Configure<HealthMonitorSettings>(builder.Configuration.GetSection(HealthMonitorSettings.SectionName));
-builder.Services.Configure<Whiskers.Configuration.MatrixSettings>(builder.Configuration.GetSection(Whiskers.Configuration.MatrixSettings.SectionName));
-builder.Services.Configure<TelegramSettings>(builder.Configuration.GetSection(TelegramSettings.SectionName));
-builder.Services.Configure<NtfySettings>(builder.Configuration.GetSection(NtfySettings.SectionName));
-builder.Services.Configure<DiscordSettings>(builder.Configuration.GetSection(DiscordSettings.SectionName));
-builder.Services.Configure<SlackSettings>(builder.Configuration.GetSection(SlackSettings.SectionName));
-builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
-builder.Services.Configure<WebhookNotificationSettings>(builder.Configuration.GetSection(WebhookNotificationSettings.SectionName));
+// The 8 notification-channel settings (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, Email, Webhook)
+// moved into Modules/Notifications alongside their channel registrations (RoadToSAP Phase 1).
 
 // Server config + Docker services
 builder.Services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService, ServerConfigService>();
@@ -97,42 +97,11 @@ builder.Services.AddSingleton<IDockerService, DockerService>();
 builder.Services.AddSingleton<IHealthStore, InMemoryHealthStore>();
 builder.Services.AddHostedService<ContainerHealthMonitor>();
 
-// Notifications (Mattermost + Matrix via composite)
-builder.Services.AddHttpClient<MattermostNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddSingleton<MattermostNotificationService>();
-builder.Services.AddSingleton<Whiskers.Services.Notifications.IMattermostNotificationService>(sp => sp.GetRequiredService<MattermostNotificationService>());
-builder.Services.AddHttpClient<MatrixNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddSingleton<MatrixNotificationService>();
-builder.Services.AddSingleton<Whiskers.Services.Notifications.IMatrixNotificationService>(sp => sp.GetRequiredService<MatrixNotificationService>());
-// Additional channels (Telegram, ntfy, Discord, Email, generic webhook) — same composite fan-out.
-builder.Services.AddHttpClient<Whiskers.Services.Notifications.TelegramNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddSingleton<Whiskers.Services.Notifications.TelegramNotificationService>();
-builder.Services.AddSingleton<Whiskers.Services.Notifications.ITelegramNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.TelegramNotificationService>());
-builder.Services.AddHttpClient<Whiskers.Services.Notifications.NtfyNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddSingleton<Whiskers.Services.Notifications.NtfyNotificationService>();
-builder.Services.AddSingleton<Whiskers.Services.Notifications.INtfyNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.NtfyNotificationService>());
-builder.Services.AddHttpClient<Whiskers.Services.Notifications.DiscordNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddSingleton<Whiskers.Services.Notifications.DiscordNotificationService>();
-builder.Services.AddSingleton<Whiskers.Services.Notifications.IDiscordNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.DiscordNotificationService>());
-builder.Services.AddHttpClient<Whiskers.Services.Notifications.SlackNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddSingleton<Whiskers.Services.Notifications.SlackNotificationService>();
-builder.Services.AddSingleton<Whiskers.Services.Notifications.ISlackNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.SlackNotificationService>());
-builder.Services.AddSingleton<Whiskers.Services.Notifications.IEmailNotificationService, Whiskers.Services.Notifications.EmailNotificationService>();
-builder.Services.AddHttpClient<Whiskers.Services.Notifications.WebhookNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddSingleton<Whiskers.Services.Notifications.WebhookNotificationService>();
-builder.Services.AddSingleton<Whiskers.Services.Notifications.IWebhookNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.WebhookNotificationService>());
-// Expose each channel as INotificationChannel so CompositeNotificationService fans out over the set
-// (changeme C9). Registration order = the test-report order; keep it stable (Mattermost … Webhook).
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IMattermostNotificationService>());
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IMatrixNotificationService>());
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<ITelegramNotificationService>());
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<INtfyNotificationService>());
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IDiscordNotificationService>());
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<ISlackNotificationService>());
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IEmailNotificationService>());
-builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IWebhookNotificationService>());
+// In-app notification feed (bell + /notifications page). Stays in Core — NOT the Notifications module —
+// because it's the notification DATA store: the composite writes to it and the feed page/bell read it even
+// when the module is off. The 8 outbound channels + CompositeNotificationService live in
+// Modules/Notifications; when that module is enabled its composite fans out over the channels and this feed.
 builder.Services.AddSingleton<Whiskers.Services.Notifications.IInAppNotificationStore, Whiskers.Services.Notifications.InAppNotificationStore>();
-builder.Services.AddSingleton<INotificationService, CompositeNotificationService>();
 
 // Keep capability-bearing notification URLs (Telegram bot token in the path, Discord/Slack/Mattermost/
 // ntfy/webhook secret URLs) out of the HttpClient request log — the default HttpClient logger writes the

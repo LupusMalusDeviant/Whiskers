@@ -1,10 +1,10 @@
 # Modules
 
 The module framework from [RoadToSAP](../../../docs/roadmap/RoadToSAP.md): a lean **Core** plus **modules**
-that contribute features and can be switched on/off via `Features:{id}:Enabled`. **Phase 1** is now live —
-the pipeline (discovery → services → MCP tools → navigation) is wired and **behaviour-neutral**: today the
-only module is the transitional `AllInOnePseudoModule`, so nothing changes yet. Features are extracted into
-real `Modules/<Name>/` modules one PR at a time (Terminal first).
+that contribute features and can be switched on/off via `Features:{id}:Enabled`. **Phase 1** is live — the
+pipeline (discovery → services → MCP tools → navigation) is wired, and features are extracted into real
+`Modules/<Name>/` modules one PR at a time (Terminal was first, then Notifications). The transitional
+`AllInOnePseudoModule` still carries everything not yet extracted and shrinks with each module PR.
 
 ## Files
 
@@ -31,11 +31,11 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
 
 ## What's next
 
-- **Extract features into real modules**, one PR each. ✅ **Terminal** is done — the pilot
-  ([`Terminal/`](Terminal/), own README + [`docs/modules/terminal.md`](../../../docs/modules/terminal.md));
-  **Notifications** is next. Each module PR moves its registrations here verbatim, wraps its pages in
-  `ModuleGuard`, hides its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false` boots
-  cleanly.
+- **Extract features into real modules**, one PR each. ✅ **Terminal** (the pilot) and ✅ **Notifications** are
+  done — each has its own README + `docs/modules/<id>.md`. Each module PR moves its registrations here
+  verbatim, gates its pages/`Settings.razor` section when off, and proves `Features:<id>:Enabled=false` boots
+  cleanly. Next: the mechanical Wave-3 extractions (ImageSearch/AppStore, VolumeBackups, Webhooks, Scheduler,
+  LogMonitor) and host-management.
 - A `docs/modules/` index + an `ARCHITECTURE.md` "Module System" chapter (RoadToSAP §6 DoD).
 - **F2 (i18n):** each `NavItem.LocKey` (a German label today) becomes a real `IStringLocalizer` key.
 

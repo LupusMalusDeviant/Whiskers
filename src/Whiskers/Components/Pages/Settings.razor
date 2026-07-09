@@ -1,5 +1,6 @@
 @page "/settings"
 @using Whiskers.Configuration
+@using Microsoft.Extensions.DependencyInjection
 @attribute [Authorize]
 @inject IOptionsMonitor<Whiskers.Configuration.MattermostSettings> MattermostOptions
 @inject IOptionsMonitor<Whiskers.Configuration.HealthMonitorSettings> HealthOptions
@@ -8,7 +9,7 @@
 @inject IOptionsMonitor<Whiskers.Configuration.GoogleAuthSettings> AuthOptions
 @inject INotificationService NotificationService
 @inject IOptionsMonitor<Whiskers.Configuration.MatrixSettings> MatrixOptions
-@inject Whiskers.Services.Notifications.IMatrixNotificationService MatrixService
+@inject IServiceProvider ServiceProvider
 @inject IWhitelistService WhitelistService
 @inject Whiskers.Services.Auth.IRoleService RoleService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
@@ -55,6 +56,10 @@
 else
 {
 <MudExpansionPanels MultiExpansion="true">
+    @* RoadToSAP Phase 1: hide the channel + composite settings when the Notifications module is off. The
+       /notifications feed (bell + page) stays available — it's Core (the in-app store), not this module. *@
+    @if (ModuleRegistry.IsEnabled("notifications"))
+    {
     @* Notifications (Mattermost + Matrix) *@
     <MudExpansionPanel Text="Benachrichtigungen" Icon="@Icons.Material.Filled.Notifications" Expanded="true">
         <MudText Typo="Typo.subtitle2" Class="mb-2">Mattermost</MudText>
@@ -142,6 +147,7 @@ else
             <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send" OnClick="TestChannels">Testbenachrichtigung senden</MudButton>
         </MudStack>
     </MudExpansionPanel>
+    }
 
     @* Health Monitoring *@
     <MudExpansionPanel Text="Zustandsüberwachung" Icon="@Icons.Material.Filled.MonitorHeart">
@@ -956,9 +962,17 @@ else
 
     private async Task TestMatrix()
     {
+        // IMatrixNotificationService lives in the Notifications module — resolve it lazily so /settings still
+        // loads when that module is disabled (in which case the Matrix panel and this button aren't rendered).
+        var matrix = ServiceProvider.GetService<Whiskers.Services.Notifications.IMatrixNotificationService>();
+        if (matrix is null)
+        {
+            Snackbar.Add("Benachrichtigungsmodul ist deaktiviert.", Severity.Warning);
+            return;
+        }
         try
         {
-            await MatrixService.SendTestAsync();
+            await matrix.SendTestAsync();
             Snackbar.Add("Matrix-Testbenachrichtigung gesendet!", Severity.Success);
         }
         catch (Exception ex)

@@ -9,7 +9,9 @@ Each channel has its own interface (distinct strategies) so the composite can en
 | File | Purpose |
 |---|---|
 | `INotificationService.cs` | The notification surface consumers call (channel-agnostic). |
-| `CompositeNotificationService.cs` | Delegates each notification to all configured channels + the AI-trigger dispatcher. |
+| `INotificationChannel.cs` | The unifying channel contract (changeme C9): every channel implements it, so the composite fans out over `IEnumerable<INotificationChannel>` instead of hard-wiring each one. `Name` defaults to the type name minus `NotificationService`. |
+| `NoopNotificationService.cs` | Core default `INotificationService` that does nothing. Registered before the module loop so every consumer still resolves when the **Notifications module** is off; the module's composite wins by last-registration when on (RoadToSAP Phase 1). |
+| `CompositeNotificationService.cs` | Delegates each notification to all configured channels + the in-app feed + the AI-trigger dispatcher. |
 | `NotificationFormatter.cs` | Single source of truth: event → title / severity / detail / in-app link, shared by the store and the outbound channels. |
 | `IMattermostNotificationService.cs` / `MattermostNotificationService.cs` | Mattermost channel (webhook). |
 | `IMatrixNotificationService.cs` / `MatrixNotificationService.cs` | Matrix channel. |
@@ -27,6 +29,14 @@ Each channel has its own interface (distinct strategies) so the composite can en
 ## Secret hygiene
 
 The capability-bearing channels put their secret in the request URL (Telegram bot token in the path; Discord/Slack/Mattermost/ntfy/webhook secret URLs). Those `System.Net.Http.HttpClient.*` logger categories are raised to Warning in `Program.cs`, so the default HttpClient request logging can't write the token/URL to the app log.
+
+## Wiring
+
+These channel implementations live in Core, but their DI registration (the 8 channel settings, the
+`INotificationChannel`s and `CompositeNotificationService`) is the opt-in **Notifications module**
+([`../../Modules/Notifications/`](../../Modules/Notifications/), toggle `Features:notifications:Enabled`). The
+in-app feed store, per-container prefs and the HttpClient log-filter stay in Core so the bell + `/notifications`
+page keep working when the module is off.
 
 ## Related
 

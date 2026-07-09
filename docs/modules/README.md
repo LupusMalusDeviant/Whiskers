@@ -8,6 +8,7 @@ Toggle a module with `Features:{id}:Enabled` (e.g. `Features__terminal__Enabled=
 | Module | Id | Default | Nav | MCP tools |
 |---|---|---|---|---|
 | [Terminal](terminal.md) | `terminal` | on | — | — |
+| [Notifications](notifications.md) | `notifications` | on | — | — |
 
 Everything not yet extracted still lives in the transitional `AllInOnePseudoModule`; this index grows one row
-per module PR (Notifications is next).
+per module PR.
