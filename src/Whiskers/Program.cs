@@ -151,9 +151,7 @@ builder.Services.AddSingleton<Whiskers.Services.Cve.ICveAgeStore, Whiskers.Servi
 builder.Services.AddSingleton<Whiskers.Services.Cve.IOsCveScanner, OsCveScanner>();
 builder.Services.AddSingleton<Whiskers.Services.Cve.ITrivyScanner, TrivyScanner>();
 // Registered as Singleton AND HostedService — same instance — so UI can trigger manual scans.
-builder.Services.AddSingleton<CveMonitorService>();
-builder.Services.AddSingleton<Whiskers.Services.Cve.ICveMonitorService>(sp => sp.GetRequiredService<CveMonitorService>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CveMonitorService>());
+builder.Services.AddSingletonWithInterfaceAndHostedService<CveMonitorService, Whiskers.Services.Cve.ICveMonitorService>();
 
 // Auth whitelist + roles
 builder.Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, WhitelistService>();
@@ -217,9 +215,7 @@ builder.Services.AddSingleton<Whiskers.Services.Database.IDatabaseService, Whisk
 
 // Scheduler
 builder.Services.AddSingleton<Whiskers.Services.Scheduler.ITaskExecutor, Whiskers.Services.Scheduler.TaskExecutor>();
-builder.Services.AddSingleton<Whiskers.Services.Scheduler.SchedulerService>();
-builder.Services.AddSingleton<Whiskers.Services.Scheduler.ISchedulerService>(sp => sp.GetRequiredService<Whiskers.Services.Scheduler.SchedulerService>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Whiskers.Services.Scheduler.SchedulerService>());
+builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.Scheduler.SchedulerService, Whiskers.Services.Scheduler.ISchedulerService>();
 
 // App templates
 builder.Services.AddSingleton<Whiskers.Services.Templates.ITemplateService, Whiskers.Services.Templates.TemplateService>();
@@ -250,18 +246,14 @@ builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnService, Whiskers.Servic
 builder.Services.AddHostedService<Whiskers.Services.Vpn.VpnBootstrapHostedService>();
 
 // Auto-update (opt-in only)
-builder.Services.AddSingleton<Whiskers.Services.AutoUpdate.AutoUpdateService>();
-builder.Services.AddSingleton<Whiskers.Services.AutoUpdate.IAutoUpdateService>(sp => sp.GetRequiredService<Whiskers.Services.AutoUpdate.AutoUpdateService>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Whiskers.Services.AutoUpdate.AutoUpdateService>());
+builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.AutoUpdate.AutoUpdateService, Whiskers.Services.AutoUpdate.IAutoUpdateService>();
 
 // Webhooks
 builder.Services.AddSingleton<Whiskers.Services.Webhooks.IWebhookService, Whiskers.Services.Webhooks.WebhookService>();
 
 // Log monitoring
 builder.Services.AddSingleton<Whiskers.Services.LogMonitor.ILogSearchService, Whiskers.Services.LogMonitor.LogSearchService>();
-builder.Services.AddSingleton<Whiskers.Services.LogMonitor.LogMonitorService>();
-builder.Services.AddSingleton<Whiskers.Services.LogMonitor.ILogMonitorService>(sp => sp.GetRequiredService<Whiskers.Services.LogMonitor.LogMonitorService>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Whiskers.Services.LogMonitor.LogMonitorService>());
+builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.LogMonitor.LogMonitorService, Whiskers.Services.LogMonitor.ILogMonitorService>();
 
 // AI Chat
 builder.Services.Configure<Whiskers.Configuration.AiChatSettings>(builder.Configuration.GetSection(Whiskers.Configuration.AiChatSettings.SectionName));
@@ -278,9 +270,7 @@ builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentToolRegistry,
 // The guardrail engine is stateless → a shared default rule set is enough.
 builder.Services.AddSingleton<Whiskers.Services.Agent.Guardrails.IAgentGuardrailEngine>(
     Whiskers.Services.Agent.Guardrails.GuardrailEngine.CreateDefault());
-builder.Services.AddSingleton<Whiskers.Services.Agent.Guardrails.GuardrailStore>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Guardrails.IGuardrailStore>(
-    sp => sp.GetRequiredService<Whiskers.Services.Agent.Guardrails.GuardrailStore>());
+builder.Services.AddSingletonWithInterface<Whiskers.Services.Agent.Guardrails.GuardrailStore, Whiskers.Services.Agent.Guardrails.IGuardrailStore>();
 builder.Services.AddSingleton<Whiskers.Services.Agent.Guardrails.IGuardrailRuleCatalog,
     Whiskers.Services.Agent.Guardrails.GuardrailRuleCatalog>();
 builder.Services.AddSingleton<Whiskers.Services.Agent.Providers.IAgentProviderFactory,
@@ -307,9 +297,7 @@ builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentSettingsStore,
     Whiskers.Services.Agent.AgentSettingsStore>();
 
 // AI triggers (autonomous agent runs on events)
-builder.Services.AddSingleton<Whiskers.Services.Agent.Triggers.AiTriggerStore>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Triggers.IAiTriggerStore>(
-    sp => sp.GetRequiredService<Whiskers.Services.Agent.Triggers.AiTriggerStore>());
+builder.Services.AddSingletonWithInterface<Whiskers.Services.Agent.Triggers.AiTriggerStore, Whiskers.Services.Agent.Triggers.IAiTriggerStore>();
 builder.Services.AddSingleton<Whiskers.Services.Agent.Triggers.IAiTriggerDispatcher,
     Whiskers.Services.Agent.Triggers.AiTriggerDispatcher>();
 
