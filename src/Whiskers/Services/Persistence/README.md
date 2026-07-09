@@ -11,6 +11,7 @@ The storage primitives every other service builds on. Whiskers persists two ways
 | `DatabaseRegistration.cs` | `AddWhiskersDatabase` — reads `Database:Provider` / `WHISKERS_DB_PROVIDER` (+ `_CONNECTION` / `_CONNECTION_FILE` secret) and registers `MetricsDbContext` for SQLite or PostgreSQL, pinning the matching `MigrationsAssembly`. An unknown provider fails fast at startup. |
 | `DatabaseInitializer.cs` | Brings the schema up to date on startup. The SQLite path baselines legacy `EnsureCreated` databases onto migrations + enables WAL; the PostgreSQL path is a straight `MigrateAsync` (see below). |
 | `MetricsDbContextFactory.cs` | Design-time `IDesignTimeDbContextFactory` used only by `dotnet ef`; branches on `WHISKERS_DB_PROVIDER` so scaffolding targets the right migration assembly without booting the app host. |
+| `SqliteToPostgresMigrator.cs` | The one-time `--migrate-to-postgres` data copy (SQLite → a fresh PostgreSQL). Read-only on the source, aborts on a non-empty target; the provider-agnostic core is unit-tested. See below. |
 | `JsonFileStore.cs` | A small generic helper for atomic load/save of a typed object to a JSON file (used by the config/settings/policy stores). |
 | `AppSettingsStore.cs` | `IAppSettingsStore`, writes a config section into the data dir's `app-settings.json` (the last config layer, reload-on-change) so UI-edited settings apply live without a restart. |
 
@@ -22,6 +23,14 @@ Chosen at startup, SQLite by default:
 - **PostgreSQL**: `WHISKERS_DB_PROVIDER=postgres` + a connection string (`WHISKERS_DB_CONNECTION`, or `WHISKERS_DB_CONNECTION_FILE` for a mounted secret — the file wins). Ready-to-run overlay: [`deploy/docker-compose.postgres.yml`](../../../../deploy/docker-compose.postgres.yml).
 
 `DatabaseInitializer` branches on `db.Database.IsSqlite()`: SQLite keeps the legacy-baseline heal + WAL pragma; PostgreSQL just migrates (transient connect failures are absorbed by the provider's `EnableRetryOnFailure`). All `DateTime`s are normalized to UTC end-to-end so Npgsql's `timestamptz` mapping is happy — see `UtcDateTimeConverter` in `Whiskers.Data`.
+
+**Migrating existing data (SQLite → PostgreSQL):** a one-time, offline copy, never during normal boot:
+
+```
+dotnet Whiskers.dll --migrate-to-postgres "Host=…;Database=whiskers;Username=…;Password=…"
+```
+
+It migrates the target schema, verifies the target is **empty** (aborts otherwise — no merge), then copies all 15 tables in batches. The source is never modified — back up `metrics.db` first. Surrogate `Id`s are reassigned by the target (no FKs between tables); unique business keys are preserved. See `SqliteToPostgresMigrator`.
 
 ## Schema & migrations
 

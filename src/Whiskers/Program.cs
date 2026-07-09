@@ -39,6 +39,15 @@ var builder = WebApplication.CreateBuilder(args);
 // so every service resolves paths through it instead of hard-coding /app/data.
 var dataPaths = DataPathOptions.FromConfiguration(builder.Configuration);
 
+// One-time data migration CLI: `dotnet Whiskers.dll --migrate-to-postgres "<npgsql-conn>"`. Copies the
+// SQLite data into a fresh PostgreSQL database and exits WITHOUT booting the web host. The source is never
+// modified; the target must be empty (see SqliteToPostgresMigrator). Guarded so a normal boot is untouched.
+if (args is ["--migrate-to-postgres", ..])
+{
+    var targetConn = args.Length > 1 ? args[1] : "";
+    return await SqliteToPostgresMigrator.RunAsync(dataPaths, targetConn, Console.Out);
+}
+
 // UI-writable agent provider settings (overrides only Agent:* keys; reloadOnChange → IOptionsMonitor
 // picks up UI changes without a restart). As the last source, so the UI takes precedence over env/appsettings.
 builder.Configuration.AddJsonFile(dataPaths.AgentSettingsJson, optional: true, reloadOnChange: true);
@@ -759,3 +768,6 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+// Normal boot returns 0 on shutdown; the --migrate-to-postgres branch above returns its own exit code.
+return 0;
