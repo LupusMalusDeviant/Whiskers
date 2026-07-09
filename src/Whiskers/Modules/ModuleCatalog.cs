@@ -12,7 +12,8 @@ public static class ModuleCatalog
     private static IReadOnlyList<IWhiskersModule> All() => new IWhiskersModule[]
     {
         new AllInOnePseudoModule(),
-        // Real modules are appended here as features are extracted (Terminal is the first pilot).
+        new Terminal.TerminalModule(),
+        // Real modules are appended here as features are extracted (Terminal was the first pilot).
     };
 
     /// <summary>Returns the enabled modules. <c>Features:{Id}:Enabled</c> overrides

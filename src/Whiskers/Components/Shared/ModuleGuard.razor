@@ -1,0 +1,23 @@
+@inject Whiskers.Modules.IModuleRegistry ModuleRegistry
+
+@* Renders its child content only if the named module is enabled; otherwise shows a clean "disabled" notice
+   instead of letting the page fail on a missing service (RoadToSAP Phase 1). Because the child (which injects
+   the module's services) is only instantiated when enabled, a disabled module never triggers a DI error. *@
+@if (ModuleRegistry.IsEnabled(ModuleId))
+{
+    @ChildContent
+}
+else
+{
+    <MudAlert Severity="Severity.Info" Class="ma-4">
+        Dieses Modul ist deaktiviert. Aktiviere es über <code>Features:@(ModuleId):Enabled=true</code>
+        und starte Whiskers neu.
+    </MudAlert>
+}
+
+@code {
+    /// <summary>The module id to gate on (e.g. "terminal").</summary>
+    [Parameter, EditorRequired] public string ModuleId { get; set; } = "";
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,14 +1,18 @@
 namespace Whiskers.Modules;
 
 /// <summary>
-/// Aggregates cross-cutting metadata contributed by the enabled modules — starting, in Phase 0, with
-/// the navigation entries. RoadToSAP Phase 0 scaffolding: the registry is populated by a single
-/// all-in-one placeholder and is not yet consumed anywhere. Phase 1 makes <c>NavMenu.razor</c>
-/// (and later the MCP tool list) read from it, and grows the interface with the real module contract.
+/// Aggregates cross-cutting metadata from the enabled modules and answers "is this module on?".
+/// <c>NavMenu.razor</c> renders from <see cref="NavItems"/>; <c>ModuleGuard</c> gates a disabled module's
+/// pages via <see cref="IsEnabled"/> (RoadToSAP Phase 1).
 /// </summary>
 public interface IModuleRegistry
 {
-    /// <summary>Every module's navigation entries, unordered here (consumers group by
+    /// <summary>Every enabled module's navigation entries, unordered here (consumers group by
     /// <see cref="NavItem.Group"/> and sort by <see cref="NavItem.Order"/>).</summary>
     IReadOnlyList<NavItem> NavItems { get; }
+
+    /// <summary>True if the module with this id is enabled (i.e. part of the built module set). Lets a
+    /// page/component show a clean "module disabled" notice instead of failing when the module's services
+    /// aren't registered.</summary>
+    bool IsEnabled(string moduleId);
 }

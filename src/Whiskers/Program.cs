@@ -17,7 +17,6 @@ using Whiskers.Services.Metrics;
 using Whiskers.Services.Notifications;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Server;
-using Whiskers.Services.Terminal;
 using Whiskers.Services.Auth;
 using Whiskers.Services.ServerConfig;
 using Whiskers.Services.ImageUpdate;
@@ -79,7 +78,6 @@ foreach (var module in modules)
 builder.Services.Configure<DockerSettings>(builder.Configuration.GetSection(DockerSettings.SectionName));
 builder.Services.Configure<MattermostSettings>(builder.Configuration.GetSection(MattermostSettings.SectionName));
 builder.Services.Configure<GoogleAuthSettings>(builder.Configuration.GetSection(GoogleAuthSettings.SectionName));
-builder.Services.Configure<TerminalSettings>(builder.Configuration.GetSection(TerminalSettings.SectionName));
 builder.Services.Configure<HealthMonitorSettings>(builder.Configuration.GetSection(HealthMonitorSettings.SectionName));
 builder.Services.Configure<Whiskers.Configuration.MatrixSettings>(builder.Configuration.GetSection(Whiskers.Configuration.MatrixSettings.SectionName));
 builder.Services.Configure<TelegramSettings>(builder.Configuration.GetSection(TelegramSettings.SectionName));
@@ -135,9 +133,6 @@ foreach (var httpClientName in new[]
              "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService"
          })
     builder.Logging.AddFilter($"System.Net.Http.HttpClient.{httpClientName}", Microsoft.Extensions.Logging.LogLevel.Warning);
-
-// Terminal
-builder.Services.AddSingleton<ITerminalSessionManager, TerminalSessionManager>();
 
 // In-app user handbook (Hilfe page)
 builder.Services.AddSingleton<Whiskers.Services.Help.IHelpContentService, Whiskers.Services.Help.HelpContentService>();
@@ -508,7 +503,9 @@ builder.Services.AddInitializable<Whiskers.Services.Agent.Triggers.AiTriggerStor
 // Nav registry from the enabled modules' merged NavItems (modules are discovered near the top of
 // Program.cs, next to where their services and MCP tools are wired).
 builder.Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(
-    new Whiskers.Modules.ModuleRegistry(modules.SelectMany(m => m.NavItems).ToList()));
+    new Whiskers.Modules.ModuleRegistry(
+        modules.SelectMany(m => m.NavItems).ToList(),
+        modules.Select(m => m.Id)));
 
 var app = builder.Build();
 
