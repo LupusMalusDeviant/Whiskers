@@ -1,21 +1,47 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
+using Whiskers.Mcp.Tools;
 using Whiskers.Models;
 
 namespace Whiskers.Modules;
 
 /// <summary>
-/// Phase-0 placeholder that feeds the <see cref="IModuleRegistry"/> today's hard-coded navigation, so
-/// the registry can exist before any real module does. <c>NavMenu.razor</c> still renders its own
-/// hard-coded links right now — this scaffold is inert. Phase 1 flips <c>NavMenu.razor</c> to read
-/// <see cref="IModuleRegistry.NavItems"/> and retires the entries here as each feature becomes a real
-/// module. Kept in sync with <c>Components/Layout/NavMenu.razor</c> until then.
+/// Transitional "everything that isn't a real module yet" bucket (RoadToSAP Phase 1). It carries today's
+/// full navigation and MCP tool set so the module pipeline (discovery → nav registry → MCP tools) can be
+/// wired up <b>behaviour-neutrally</b> before any feature is extracted.
+///
+/// Its <see cref="ConfigureServices"/> is a no-op on purpose: the service registrations still live inline
+/// in <c>Program.cs</c> and move out one module PR at a time (Terminal first), at which point the matching
+/// nav/tool entries here are removed. This class is retired entirely once every feature is a real module.
+/// Kept in sync with <c>Components/Layout/NavMenu.razor</c> until NavMenu reads the registry.
 /// </summary>
-public static class AllInOnePseudoModule
+public sealed class AllInOnePseudoModule : IWhiskersModule
 {
+    public string Id => "all-in-one";
+    public string DisplayName => "Whiskers";
+    public bool EnabledByDefault => true;
+    public IReadOnlyList<string> DependsOn => Array.Empty<string>();
+
+    // No-op: registrations remain inline in Program.cs until each feature is extracted into its own module.
+    public void ConfigureServices(IServiceCollection services, IConfiguration config) { }
+
+    // No-op: the 9 per-service warm-ups still run through the IInitializable loop in Program.cs.
+    public Task InitializeAsync(IServiceProvider sp, CancellationToken ct) => Task.CompletedTask;
+
+    // Today's MCP tool set — mirrors the .WithTools<>() block in Program.cs. Entries move to their module
+    // as each feature is extracted; disabling that module then removes its tools everywhere.
+    public IReadOnlyList<Type> McpToolTypes { get; } = new[]
+    {
+        typeof(ContainerTools), typeof(ServerTools), typeof(MonitoringTools), typeof(CloudTools),
+        typeof(HetznerTools), typeof(NetworkTools), typeof(DatabaseTools), typeof(SchedulerTools),
+        typeof(LogTools), typeof(CveTools), typeof(AgentTools),
+    };
+
     // Roles are permissive (Viewer): today's nav shows every link to everyone and gates on the page
     // itself (RoleGuard), so mirroring that keeps behaviour identical. LocKey holds the current German
     // label until F2 (i18n) replaces it with a real localization key.
-    public static IReadOnlyList<NavItem> NavItems { get; } = new[]
+    public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
         // Übersicht
         new NavItem("",            "Dashboard",          Icons.Material.Filled.Dashboard,    "Übersicht",        AppRole.Viewer, 10),

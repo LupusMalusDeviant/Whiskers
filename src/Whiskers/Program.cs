@@ -496,10 +496,16 @@ builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>()
 builder.Services.AddInitializable<Whiskers.Services.Agent.Guardrails.GuardrailStore>();     // 80
 builder.Services.AddInitializable<Whiskers.Services.Agent.Triggers.AiTriggerStore>();       // 90
 
-// Module registry (RoadToSAP Phase 0 scaffold). Populated by the all-in-one placeholder and not yet
-// consumed anywhere — NavMenu.razor still renders its own hard-coded links. Phase 1 wires it up.
+// Module pipeline (RoadToSAP Phase 1). DiscoverEnabled returns the modules whose Features:<id>:Enabled
+// isn't false; each contributes its services via ConfigureServices, and the registry exposes their merged
+// navigation to NavMenu. Today the only module is the transitional AllInOnePseudoModule (ConfigureServices
+// is a no-op, registrations stay inline below), so this is behaviour-neutral — features are extracted into
+// real modules one PR at a time.
+var modules = Whiskers.Modules.ModuleCatalog.DiscoverEnabled(builder.Configuration);
+foreach (var module in modules)
+    module.ConfigureServices(builder.Services, builder.Configuration);
 builder.Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(
-    new Whiskers.Modules.ModuleRegistry(Whiskers.Modules.AllInOnePseudoModule.NavItems));
+    new Whiskers.Modules.ModuleRegistry(modules.SelectMany(m => m.NavItems).ToList()));
 
 var app = builder.Build();
 
