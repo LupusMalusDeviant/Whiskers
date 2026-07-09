@@ -491,6 +491,11 @@ builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>()
 builder.Services.AddInitializable<Whiskers.Services.Agent.Guardrails.GuardrailStore>();     // 80
 builder.Services.AddInitializable<Whiskers.Services.Agent.Triggers.AiTriggerStore>();       // 90
 
+// Module registry (RoadToSAP Phase 0 scaffold). Populated by the all-in-one placeholder and not yet
+// consumed anywhere — NavMenu.razor still renders its own hard-coded links. Phase 1 wires it up.
+builder.Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(
+    new Whiskers.Modules.ModuleRegistry(Whiskers.Modules.AllInOnePseudoModule.NavItems));
+
 var app = builder.Build();
 
 // Forwarded headers MUST come first so scheme (https) is detected before anything else
