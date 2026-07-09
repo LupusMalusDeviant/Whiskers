@@ -2,11 +2,12 @@ using System.Security.Cryptography;
 using System.Text;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Mcp;
 
-public class McpPermissionService : IMcpPermissionService
+public class McpPermissionService : IMcpPermissionService, IInitializable
 {
     private readonly JsonFileStore<McpPermissionData> _store;
     private readonly ILogger<McpPermissionService> _logger;
@@ -19,7 +20,9 @@ public class McpPermissionService : IMcpPermissionService
         _store = new JsonFileStore<McpPermissionData>((dataPaths ?? DataPathOptions.Default).McpPermissionsJson);
     }
 
-    public async Task InitializeAsync()
+    public int Order => 70;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         await _lock.WaitAsync();
         try

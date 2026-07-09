@@ -5,7 +5,7 @@ namespace Whiskers.Services.Auth;
 /// <summary>Manages the email allow-list that gates federated logins.</summary>
 public interface IWhitelistService
 {
-    Task InitializeAsync();
+    Task InitializeAsync(CancellationToken ct = default);
     bool IsEmailAllowed(string? email);
     WhitelistData GetWhitelist();
     Task SaveWhitelistAsync(WhitelistData data);

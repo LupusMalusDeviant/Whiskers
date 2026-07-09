@@ -479,6 +479,18 @@ builder.Services.AddSignalR(options =>
     options.MaximumReceiveMessageSize = 64 * 1024;
 });
 
+// Startup initializers — the loop after Build() runs each IInitializable's async warm-up in Order,
+// replacing the previously hand-wired InitializeAsync calls. Order values live on the services.
+builder.Services.AddInitializable<Whiskers.Services.Auth.IWhitelistService>();              // 10
+builder.Services.AddInitializable<Whiskers.Services.Auth.IRoleService>();                   // 20
+builder.Services.AddInitializable<Whiskers.Services.Notifications.IContainerNotificationPrefsService>(); // 30
+builder.Services.AddInitializable<Whiskers.Services.Vault.IVaultService>();                 // 40
+builder.Services.AddInitializable<Whiskers.Services.ServerConfig.IServerConfigService>();   // 50
+builder.Services.AddInitializable<Whiskers.Mcp.IMcpApiKeyStore>();                          // 60
+builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>();           // 70
+builder.Services.AddInitializable<Whiskers.Services.Agent.Guardrails.GuardrailStore>();     // 80
+builder.Services.AddInitializable<Whiskers.Services.Agent.Triggers.AiTriggerStore>();       // 90
+
 var app = builder.Build();
 
 // Forwarded headers MUST come first so scheme (https) is detected before anything else
@@ -698,35 +710,11 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// Initialize services that need async startup
-var whitelistService = app.Services.GetRequiredService<Whiskers.Services.Auth.IWhitelistService>();
-await whitelistService.InitializeAsync();
-
-var roleService = app.Services.GetRequiredService<Whiskers.Services.Auth.IRoleService>();
-await roleService.InitializeAsync();
-
-var notifPrefsService = app.Services.GetRequiredService<Whiskers.Services.Notifications.IContainerNotificationPrefsService>();
-await notifPrefsService.InitializeAsync();
-
-var vaultService = app.Services.GetRequiredService<Whiskers.Services.Vault.IVaultService>();
-await vaultService.InitializeAsync();
-
-var serverConfigService = app.Services.GetRequiredService<Whiskers.Services.ServerConfig.IServerConfigService>();
-await serverConfigService.InitializeAsync();
-
-var mcpApiKeyStore = app.Services.GetRequiredService<Whiskers.Mcp.IMcpApiKeyStore>();
-await mcpApiKeyStore.InitializeAsync();
-
-var mcpPermissionService = app.Services.GetRequiredService<Whiskers.Services.Mcp.IMcpPermissionService>();
-await mcpPermissionService.InitializeAsync();
-
-// Load guardrails (creates the restrictive SafeDefault on first run)
-var guardrailStore = app.Services.GetRequiredService<Whiskers.Services.Agent.Guardrails.GuardrailStore>();
-await guardrailStore.InitializeAsync();
-
-// Load AI triggers
-var aiTriggerStore = app.Services.GetRequiredService<Whiskers.Services.Agent.Triggers.AiTriggerStore>();
-await aiTriggerStore.InitializeAsync();
+// Run each IInitializable's async warm-up in ascending Order (whitelist → roles → notif-prefs →
+// vault → server-config → MCP key store → MCP permissions → guardrails → AI triggers). Replaces the
+// previously hand-wired InitializeAsync calls; the order lives on each service (see IInitializable).
+foreach (var initializable in app.Services.GetServices<Whiskers.Services.IInitializable>().OrderBy(i => i.Order))
+    await initializable.InitializeAsync(CancellationToken.None);
 
 // Bring the SQLite metrics database up to the current schema via EF Core migrations. On a legacy
 // EnsureCreated database (no migration history) this baselines onto migrations without recreating

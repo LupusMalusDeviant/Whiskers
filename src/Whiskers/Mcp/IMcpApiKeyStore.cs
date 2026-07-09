@@ -3,7 +3,7 @@ namespace Whiskers.Mcp;
 /// <summary>Legacy flat MCP API-key store (kept for backwards compatibility).</summary>
 public interface IMcpApiKeyStore
 {
-    Task InitializeAsync();
+    Task InitializeAsync(CancellationToken ct = default);
     bool ValidateKey(string key);
     IReadOnlySet<string> GetKeys();
     Task AddKeyAsync(string key);

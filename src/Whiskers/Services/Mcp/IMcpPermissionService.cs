@@ -5,7 +5,7 @@ namespace Whiskers.Services.Mcp;
 /// <summary>Validates MCP API keys and enforces per-tool permission levels.</summary>
 public interface IMcpPermissionService
 {
-    Task InitializeAsync();
+    Task InitializeAsync(CancellationToken ct = default);
     McpApiKeyConfig? ValidateKey(string key);
     bool IsToolAllowed(string key, string toolName);
     HashSet<string> GetAllowedTools(string key);

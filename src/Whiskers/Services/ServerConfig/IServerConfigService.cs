@@ -5,7 +5,7 @@ namespace Whiskers.Services.ServerConfig;
 /// <summary>Stores and serves the configured Docker hosts, plus their SSH key material.</summary>
 public interface IServerConfigService
 {
-    Task InitializeAsync();
+    Task InitializeAsync(CancellationToken ct = default);
 
     /// <summary>True once <see cref="InitializeAsync"/> has loaded (or seeded) the server registry.
     /// Backs the <c>/readyz</c> readiness probe.</summary>

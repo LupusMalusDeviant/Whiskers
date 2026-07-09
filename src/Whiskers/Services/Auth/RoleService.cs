@@ -1,10 +1,11 @@
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Auth;
 
-public class RoleService : IRoleService
+public class RoleService : IRoleService, IInitializable
 {
     private readonly JsonFileStore<UserRoleData> _store;
     private readonly ILogger<RoleService> _logger;
@@ -17,7 +18,9 @@ public class RoleService : IRoleService
         _logger = logger;
     }
 
-    public async Task InitializeAsync()
+    public int Order => 20;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_store.Exists())
         {

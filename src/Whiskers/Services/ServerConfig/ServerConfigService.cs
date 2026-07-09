@@ -1,11 +1,12 @@
 using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.ServerConfig;
 
-public class ServerConfigService : IServerConfigService
+public class ServerConfigService : IServerConfigService, IInitializable
 {
     private readonly JsonFileStore<ServerConfigData> _store;
     private readonly IOptions<DockerSettings> _dockerSettings;
@@ -27,7 +28,9 @@ public class ServerConfigService : IServerConfigService
     /// <inheritdoc />
     public bool IsInitialized { get; private set; }
 
-    public async Task InitializeAsync()
+    public int Order => 50;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_store.Exists())
         {

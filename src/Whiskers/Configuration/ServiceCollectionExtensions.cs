@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Whiskers.Services;
 
 namespace Whiskers.Configuration;
 
@@ -37,6 +38,19 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingletonWithInterface<TImpl, TIface>();
         services.AddHostedService(sp => sp.GetRequiredService<TImpl>());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers an already-registered singleton (resolved via <typeparamref name="TResolve"/>) as an
+    /// <see cref="IInitializable"/>, so the startup init loop warms it up. Forwards to the SAME instance;
+    /// <typeparamref name="TResolve"/> may be the service interface or the concrete type — whichever the
+    /// singleton is registered under — and its implementation must implement <see cref="IInitializable"/>.
+    /// </summary>
+    public static IServiceCollection AddInitializable<TResolve>(this IServiceCollection services)
+        where TResolve : class
+    {
+        services.AddSingleton<IInitializable>(sp => (IInitializable)sp.GetRequiredService<TResolve>());
         return services;
     }
 }

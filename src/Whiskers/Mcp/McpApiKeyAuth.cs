@@ -2,10 +2,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Whiskers.Configuration;
+using Whiskers.Services;
 
 namespace Whiskers.Mcp;
 
-public class McpApiKeyStore : IMcpApiKeyStore
+public class McpApiKeyStore : IMcpApiKeyStore, IInitializable
 {
     private readonly string _filePath;
     private HashSet<string> _keys = new();
@@ -17,7 +18,9 @@ public class McpApiKeyStore : IMcpApiKeyStore
         _logger = logger;
     }
 
-    public async Task InitializeAsync()
+    public int Order => 60;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (File.Exists(_filePath))
         {

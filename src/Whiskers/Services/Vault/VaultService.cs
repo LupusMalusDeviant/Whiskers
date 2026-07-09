@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Vault;
@@ -12,7 +13,7 @@ namespace Whiskers.Services.Vault;
 /// at rest in /app/data/vault.json as "g1:" + base64(nonce ‖ tag ‖ ciphertext). Legacy AES-CBC entries
 /// (unauthenticated, key = SHA256(passphrase)) are transparently migrated on load.
 /// </summary>
-public class VaultService : IVaultService
+public class VaultService : IVaultService, IInitializable
 {
     private const string GcmPrefix = "g1:";
     private const int NonceSize = 12;
@@ -41,7 +42,9 @@ public class VaultService : IVaultService
 
     public bool IsEnabled => _masterKey != null;
 
-    public async Task InitializeAsync()
+    public int Order => 40;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_store.Exists())
         {

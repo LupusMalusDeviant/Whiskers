@@ -1,10 +1,11 @@
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Notifications;
 
-public class ContainerNotificationPrefsService : IContainerNotificationPrefsService
+public class ContainerNotificationPrefsService : IContainerNotificationPrefsService, IInitializable
 {
     private readonly JsonFileStore<ContainerNotificationPrefs> _store;
     private ContainerNotificationPrefs _data = new();
@@ -15,7 +16,9 @@ public class ContainerNotificationPrefsService : IContainerNotificationPrefsServ
         _store = new JsonFileStore<ContainerNotificationPrefs>((dataPaths ?? DataPathOptions.Default).NotificationPrefsJson);
     }
 
-    public async Task InitializeAsync()
+    public int Order => 30;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_store.Exists())
             _data = await _store.LoadAsync();

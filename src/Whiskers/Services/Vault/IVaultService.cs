@@ -6,7 +6,7 @@ namespace Whiskers.Services.Vault;
 public interface IVaultService
 {
     bool IsEnabled { get; }
-    Task InitializeAsync();
+    Task InitializeAsync(CancellationToken ct = default);
     List<VaultEntry> ListSecrets();
     Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null, int? rotateAfterDays = null);
     string? GetSecret(string key);

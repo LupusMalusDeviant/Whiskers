@@ -1,10 +1,11 @@
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Auth;
 
-public class WhitelistService : IWhitelistService
+public class WhitelistService : IWhitelistService, IInitializable
 {
     private readonly JsonFileStore<WhitelistData> _store;
     private readonly IConfiguration _configuration;
@@ -19,7 +20,9 @@ public class WhitelistService : IWhitelistService
         _logger = logger;
     }
 
-    public async Task InitializeAsync()
+    public int Order => 10;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_store.Exists())
         {

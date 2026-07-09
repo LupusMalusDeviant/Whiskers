@@ -1,6 +1,7 @@
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Agent.Triggers;
@@ -15,12 +16,12 @@ public sealed class AiTriggerData
 public interface IAiTriggerStore
 {
     IReadOnlyList<AiTrigger> Triggers { get; }
-    Task InitializeAsync();
+    Task InitializeAsync(CancellationToken ct = default);
     Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor);
     event Action? Changed;
 }
 
-public sealed class AiTriggerStore : IAiTriggerStore
+public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
 {
     private readonly JsonFileStore<AiTriggerData> _store;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -33,7 +34,9 @@ public sealed class AiTriggerStore : IAiTriggerStore
 
     public IReadOnlyList<AiTrigger> Triggers => _triggers;
 
-    public async Task InitializeAsync()
+    public int Order => 90;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         await _lock.WaitAsync();
         try

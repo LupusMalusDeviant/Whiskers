@@ -1,6 +1,7 @@
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
+using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Agent.Guardrails;
@@ -8,7 +9,7 @@ namespace Whiskers.Services.Agent.Guardrails;
 /// <summary>Persists the guardrail presets in their OWN file (guardrails.json), separate from the
 /// agent settings path. Writing is admin-only — a compromised settings editor cannot relax the
 /// guardrails. The engine reads only the active preset's policy via <see cref="Current"/>.</summary>
-public sealed class GuardrailStore : IGuardrailStore
+public sealed class GuardrailStore : IGuardrailStore, IInitializable
 {
     private readonly JsonFileStore<GuardrailConfig> _store;
     private readonly string _filePath;
@@ -30,7 +31,9 @@ public sealed class GuardrailStore : IGuardrailStore
 
     /// <summary>Loads the config from disk; creates the SafeDefault on first run and migrates a
     /// legacy single-policy file into a "Standard" preset.</summary>
-    public async Task InitializeAsync()
+    public int Order => 80;
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         await _lock.WaitAsync();
         try
