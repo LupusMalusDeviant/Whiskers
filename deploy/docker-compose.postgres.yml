@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PostgreSQL overlay — use ON TOP OF docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+#
+# Starts a postgres service and points Whiskers at it via WHISKERS_DB_PROVIDER.
+# SQLite stays the zero-config default whenever this overlay is NOT used.
+# Set WHISKERS_DB_PASSWORD in your .env; the other DB_* values have defaults.
+# See docs/adr/0004-postgres-provider-support.md for the provider architecture.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: whiskers-db
+    environment:
+      - POSTGRES_DB=${WHISKERS_DB_NAME:-whiskers}
+      - POSTGRES_USER=${WHISKERS_DB_USER:-whiskers}
+      - POSTGRES_PASSWORD=${WHISKERS_DB_PASSWORD:?set WHISKERS_DB_PASSWORD in your .env}
+    volumes:
+      - whiskers-db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Gate the app's depends_on on a genuinely accepting server, not just a running container.
+      test: ["CMD-SHELL", "pg_isready -U ${WHISKERS_DB_USER:-whiskers} -d ${WHISKERS_DB_NAME:-whiskers}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  serverwatch:
+    environment:
+      - WHISKERS_DB_PROVIDER=postgres
+      - WHISKERS_DB_CONNECTION=Host=db;Port=5432;Database=${WHISKERS_DB_NAME:-whiskers};Username=${WHISKERS_DB_USER:-whiskers};Password=${WHISKERS_DB_PASSWORD:?set WHISKERS_DB_PASSWORD in your .env}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  whiskers-db-data:

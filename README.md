@@ -181,13 +181,14 @@ Whiskers is configured entirely through environment variables (`.env`). The most
 | Image search | `HARBOR_URL`, `HARBOR_USERNAME`, `HARBOR_PASSWORD` | Add a self-hosted Harbor marketplace (Docker Hub + GHCR are on by default) |
 | Host binding | `HOST_BIND`, `HOST_PORT` | The container always listens on `8080` internally |
 | Data directory | `WHISKERS_DATA_DIR` | Root for SQLite, JSON stores, keys & certificates (default `/app/data`); repoint at any volume / host path |
+| Database | `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION`, `WHISKERS_DB_CONNECTION_FILE` | `sqlite` (default, zero-config) or `postgres`. For Postgres set a connection string, or mount it as a file and point `_FILE` at it (the file wins over the plain value). Ready-to-run overlay: `deploy/docker-compose.postgres.yml`. |
 
 See [.env.example](.env.example) for the full, commented list.
 
 ### Notable runtime details
 - **Email whitelist**: managed in the UI under *Settings > Authentication*; changes apply without a restart.
 - **MCP API key**: auto-generated on first start and written to `initial-mcp-key.txt` (mode `0600`, next to `api-keys.json` in the data volume) — **not** to the logs, which record only the file path. Retrieve it, then delete the file.
-- **Data persistence**: SQLite, JSON stores and certificates live under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`; a bind-mount / volume); never in the image.
+- **Data persistence**: the metrics database (SQLite by default, or PostgreSQL — see the Database row above), JSON stores and certificates live under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`; a bind-mount / volume); never in the image. With PostgreSQL the relational data lives in Postgres instead, while JSON stores and keys stay under the data directory.
 - **Health probes**: anonymous `/healthz` (liveness) and `/readyz` (readiness — metrics DB reachable + fleet config loaded) endpoints; the image ships a Docker `HEALTHCHECK` and Kubernetes can use them as probes. (`/health` without the `z` is the in-app status page.)
 
 ---
