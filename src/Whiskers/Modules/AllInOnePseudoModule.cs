@@ -54,10 +54,8 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         new NavItem("notifications", "Benachrichtigungen", Icons.Material.Filled.Notifications, "Übersicht",     AppRole.Viewer, 70),
         new NavItem("audit-log",   "Audit-Protokoll",    Icons.Material.Filled.History,      "Übersicht",        AppRole.Viewer, 80),
 
-        // Deployment
-        new NavItem("deploy",      "Bereitstellen",      Icons.Material.Filled.RocketLaunch, "Deployment",       AppRole.Viewer, 110),
+        // Deployment ("deploy" + "apps" extracted to Modules/Deployment; "compose" stays Core — RoadToSAP Phase 1)
         new NavItem("compose",     "Compose Editor",     Icons.Material.Filled.EditNote,     "Deployment",       AppRole.Viewer, 120),
-        new NavItem("apps",        "App Store",          Icons.Material.Filled.Apps,         "Deployment",       AppRole.Viewer, 130),
 
         // Infrastruktur
         new NavItem("servers",     "Server",             Icons.Material.Filled.Storage,      "Infrastruktur",    AppRole.Viewer, 210),

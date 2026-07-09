@@ -15,6 +15,14 @@ results carry which marketplace they came from so the deploy uses the correct fu
 | `Providers/DockerHubSearchProvider.cs` | Docker Hub — full-text search + tag listing (anonymous, public images). |
 | `Providers/GhcrSearchProvider.cs` | GHCR — no anonymous full-text search, so resolves an exact `owner/repo` reference and lists tags via the Registry v2 API. |
 | `Providers/HarborSearchProvider.cs` | Self-hosted Harbor — opt-in via `ImageSearch:Harbor:BaseUrl`; uses Harbor's `/search` + artifacts APIs. |
+| `NoopImageSearchService.cs` | Core default `IImageSearchService` for when the **Deployment module** is off — returns no registries/results, so the AppStore page's injection is safe without a `*View` split. Real service wins by last-registration when on (RoadToSAP Phase 1). |
+
+## Wiring
+
+The image-search service, its settings and the three providers are registered by the opt-in **Deployment
+module** ([`../../Modules/Deployment/`](../../Modules/Deployment/), toggle `Features:deployment:Enabled`). Only
+the AppStore page consumes `IImageSearchService`, so Core keeps a `NoopImageSearchService` default for when the
+module is off.
 
 ## Related
 

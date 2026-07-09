@@ -8,6 +8,15 @@ Deploys workloads onto managed hosts, both single containers (from a form: image
 |---|---|
 | `IDeploymentService.cs` / `DeploymentService.cs` | Validates and executes deployments; returns a `DeploymentValidationResult` so the UI can surface problems before anything runs. |
 | `ComposeFileParser.cs` | Parses Docker Compose YAML into the structures the deployment service and the Compose editor work with. |
+| `NoopDeploymentService.cs` | Core default `IDeploymentService` for when the **Deployment module** is off. Keeps the Core, mixed `ContainerTools` resolvable; deploy operations **throw** (never fake a deploy), `ValidateCompose` reports invalid. Real service wins by last-registration when on (RoadToSAP Phase 1). |
+
+## Wiring
+
+This is the opt-in **Deployment module** ([`../../Modules/Deployment/`](../../Modules/Deployment/), toggle
+`Features:deployment:Enabled`; scoped registration). The `deploy_app`/`deploy_compose` MCP tools live in the
+Core, mixed `ContainerTools` (which also has list/restart/logs/…), so it can't move — hence the
+`NoopDeploymentService` default for when the module is off. The `/compose` editor is **not** part of this
+module (it uses only Docker + host services and stays Core).
 
 ## Related
 

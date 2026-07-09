@@ -91,6 +91,13 @@ builder.Services.AddSingleton<Whiskers.Services.Server.IFirewallService, Whisker
 builder.Services.AddSingleton<Whiskers.Services.Server.INginxService, Whiskers.Services.Server.NoopNginxService>();
 builder.Services.AddSingleton<Whiskers.Services.Server.ISystemdService, Whiskers.Services.Server.NoopSystemdService>();
 builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, Whiskers.Services.Server.NoopSslCertService>();
+// And for deployment/app-store: ContainerTools (mixed: core container ops + deploy_app/deploy_compose) stays
+// in Core and injects IDeploymentService/ITemplateService per call, and the AppStore page injects
+// IImageSearchService, so all three need defaults when the Deployment module is off. The module registers the
+// real services in the loop below and wins. IDeploymentService is scoped, matching the real one. (RoadToSAP §2.1)
+builder.Services.AddScoped<Whiskers.Services.Deployment.IDeploymentService, Whiskers.Services.Deployment.NoopDeploymentService>();
+builder.Services.AddSingleton<Whiskers.Services.Templates.ITemplateService, Whiskers.Services.Templates.NoopTemplateService>();
+builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchService, Whiskers.Services.ImageSearch.NoopImageSearchService>();
 
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
@@ -136,8 +143,8 @@ foreach (var httpClientName in new[]
 // In-app user handbook (Hilfe page)
 builder.Services.AddSingleton<Whiskers.Services.Help.IHelpContentService, Whiskers.Services.Help.HelpContentService>();
 
-// Deployment
-builder.Services.AddScoped<IDeploymentService, DeploymentService>();
+// Deployment (IDeploymentService) moved to Modules/Deployment (RoadToSAP Phase 1). Core keeps a
+// NoopDeploymentService default (registered above) for ContainerTools + the /deploy page when it's off.
 
 // Image update checking
 builder.Services.Configure<ImageUpdateSettings>(builder.Configuration.GetSection("ImageUpdate"));
@@ -224,16 +231,9 @@ builder.Services.AddSingleton<Whiskers.Services.Database.IDatabaseService, Whisk
 
 // Scheduler (ITaskExecutor + SchedulerService hosted) moved to Modules/Scheduler (RoadToSAP Phase 1).
 
-// App templates
-builder.Services.AddSingleton<Whiskers.Services.Templates.ITemplateService, Whiskers.Services.Templates.TemplateService>();
-
-// Multi-registry image search ("marketplaces") — Docker Hub + GHCR by default, Harbor opt-in via config.
-builder.Services.Configure<Whiskers.Services.ImageSearch.ImageSearchSettings>(
-    builder.Configuration.GetSection(Whiskers.Services.ImageSearch.ImageSearchSettings.SectionName));
-builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchProvider, Whiskers.Services.ImageSearch.Providers.DockerHubSearchProvider>();
-builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchProvider, Whiskers.Services.ImageSearch.Providers.GhcrSearchProvider>();
-builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchProvider, Whiskers.Services.ImageSearch.Providers.HarborSearchProvider>();
-builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchService, Whiskers.Services.ImageSearch.ImageSearchService>();
+// App templates + multi-registry image search ("marketplaces") moved to Modules/Deployment (RoadToSAP
+// Phase 1). Core keeps NoopTemplateService + NoopImageSearchService defaults (registered above) for
+// ContainerTools + the AppStore page when the module is off.
 
 // Mesh VPN provider abstraction (decoupled from the app image). Default provider "none" = VPN on
 // host/sidecar (or legacy entrypoint.sh); "tailscale"/"netbird" let the app manage it.

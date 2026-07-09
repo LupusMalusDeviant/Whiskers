@@ -11,6 +11,10 @@
 
 <PageTitle>App Store - Whiskers</PageTitle>
 
+@* RoadToSAP Phase 1: gated by the Deployment module; when off, ModuleGuard shows a "disabled" notice.
+   The ITemplateService / IImageSearchService injections resolve the Core no-op defaults either way. *@
+<ModuleGuard ModuleId="deployment">
+
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
         <div class="sw-page-icon">
@@ -332,6 +336,8 @@
             }
         </DialogActions>
     </MudDialog>
+
+</ModuleGuard>
 
 @code {
     private Whiskers.Models.AppTemplate? _selectedTemplate;

@@ -9,6 +9,10 @@
 
 <PageTitle>Bereitstellen - Whiskers</PageTitle>
 
+@* RoadToSAP Phase 1: gated by the Deployment module; when off, ModuleGuard shows a "disabled" notice.
+   The IDeploymentService injection resolves the Core no-op default either way. *@
+<ModuleGuard ModuleId="deployment">
+
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
         <div class="sw-page-icon">
@@ -183,6 +187,8 @@
         }
     </MudTabPanel>
 </MudTabs>
+
+</ModuleGuard>
 
 @code {
     private DeploymentRequest _formRequest = new() { RestartPolicy = "unless-stopped" };
