@@ -1,6 +1,6 @@
 namespace Whiskers.Services.Notifications;
 
 /// <summary>Discord incoming-webhook notification channel.</summary>
-public interface IDiscordNotificationService : INotificationService
+public interface IDiscordNotificationService : INotificationChannel
 {
 }

@@ -121,6 +121,16 @@ builder.Services.AddSingleton<Whiskers.Services.Notifications.IEmailNotification
 builder.Services.AddHttpClient<Whiskers.Services.Notifications.WebhookNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<Whiskers.Services.Notifications.WebhookNotificationService>();
 builder.Services.AddSingleton<Whiskers.Services.Notifications.IWebhookNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.WebhookNotificationService>());
+// Expose each channel as INotificationChannel so CompositeNotificationService fans out over the set
+// (changeme C9). Registration order = the test-report order; keep it stable (Mattermost … Webhook).
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IMattermostNotificationService>());
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IMatrixNotificationService>());
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<ITelegramNotificationService>());
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<INtfyNotificationService>());
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IDiscordNotificationService>());
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<ISlackNotificationService>());
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IEmailNotificationService>());
+builder.Services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<IWebhookNotificationService>());
 builder.Services.AddSingleton<Whiskers.Services.Notifications.IInAppNotificationStore, Whiskers.Services.Notifications.InAppNotificationStore>();
 builder.Services.AddSingleton<INotificationService, CompositeNotificationService>();
 
