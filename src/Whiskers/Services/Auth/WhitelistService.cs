@@ -1,3 +1,4 @@
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
 
@@ -11,9 +12,9 @@ public class WhitelistService : IWhitelistService
     private WhitelistData _cached = new();
     private readonly ReaderWriterLockSlim _lock = new();
 
-    public WhitelistService(IConfiguration configuration, ILogger<WhitelistService> logger)
+    public WhitelistService(IConfiguration configuration, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null)
     {
-        _store = new JsonFileStore<WhitelistData>("/app/data/whitelist.json");
+        _store = new JsonFileStore<WhitelistData>((dataPaths ?? DataPathOptions.Default).WhitelistJson);
         _configuration = configuration;
         _logger = logger;
     }

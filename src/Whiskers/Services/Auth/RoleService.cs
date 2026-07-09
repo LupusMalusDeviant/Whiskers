@@ -1,3 +1,4 @@
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
 
@@ -10,9 +11,9 @@ public class RoleService : IRoleService
     private UserRoleData _data = new();
     private readonly ReaderWriterLockSlim _lock = new();
 
-    public RoleService(ILogger<RoleService> logger, string? storePath = null)
+    public RoleService(ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
-        _store = new JsonFileStore<UserRoleData>(storePath ?? "/app/data/roles.json");
+        _store = new JsonFileStore<UserRoleData>(storePath ?? (dataPaths ?? DataPathOptions.Default).RolesJson);
         _logger = logger;
     }
 

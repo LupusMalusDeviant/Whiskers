@@ -1,3 +1,4 @@
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Persistence;
@@ -27,8 +28,8 @@ public sealed class AiTriggerStore : IAiTriggerStore
 
     public event Action? Changed;
 
-    public AiTriggerStore(string? path = null)
-        => _store = new JsonFileStore<AiTriggerData>(path ?? "/app/data/ai-triggers.json");
+    public AiTriggerStore(string? path = null, DataPathOptions? dataPaths = null)
+        => _store = new JsonFileStore<AiTriggerData>(path ?? (dataPaths ?? DataPathOptions.Default).AiTriggersJson);
 
     public IReadOnlyList<AiTrigger> Triggers => _triggers;
 

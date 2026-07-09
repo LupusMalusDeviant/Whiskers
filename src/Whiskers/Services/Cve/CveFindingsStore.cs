@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Whiskers.Configuration;
 using Whiskers.Models.Cve;
 
 namespace Whiskers.Services.Cve;
@@ -25,10 +26,10 @@ public class CveFindingsStore : ICveFindingsStore
         public DateTime? LastScanAt { get; set; }
     }
 
-    public CveFindingsStore(ILogger<CveFindingsStore>? logger = null, string? persistPath = null)
+    public CveFindingsStore(ILogger<CveFindingsStore>? logger = null, string? persistPath = null, DataPathOptions? dataPaths = null)
     {
         _logger = logger;
-        _persistPath = persistPath ?? "/app/data/cve-findings.json";
+        _persistPath = persistPath ?? (dataPaths ?? DataPathOptions.Default).CveFindingsJson;
         try
         {
             if (File.Exists(_persistPath))

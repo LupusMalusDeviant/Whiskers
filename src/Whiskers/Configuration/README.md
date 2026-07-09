@@ -2,10 +2,13 @@
 
 Strongly-typed settings classes bound from configuration (env vars / `.env` / `appsettings` / the writable `agent-settings.json` and `app-settings.json`). Each maps to a section and is injected via `IOptions<T>` / `IOptionsMonitor<T>`. Binding is wired in [`Program.cs`](../Program.cs); the env-var names are documented in [`.env.example`](../../../.env.example). UI edits are written to `app-settings.json` (the last config layer, reload-on-change) by [`../Services/Persistence/AppSettingsStore.cs`](../Services/Persistence/AppSettingsStore.cs) so they apply live.
 
+**`DataPathOptions`** is the one exception to the `IOptions<T>` pattern below: it centralizes every path under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`) and is built at **bootstrap** — before the DI container exists — then registered as a plain singleton and injected directly. Consumers take it as an optional last constructor parameter (the container supplies the registered instance; an explicit path still wins, which keeps the test seams working).
+
 ## Files
 
 | File | Section / purpose |
 |---|---|
+| `DataPathOptions.cs` | Central resolver for all data-directory paths (DB, JSON stores, DataProtection keys, `ssh-keys/`, `mtls/`, `backups/`). Root = `WHISKERS_DATA_DIR` (default `/app/data`). Built at bootstrap, injected as a plain singleton — **not** via `IOptions<T>`. |
 | `GoogleAuthSettings.cs` | Google OAuth 2.0 credentials. |
 | `OidcSettings.cs` | Generic OpenID Connect provider settings. |
 | `DockerSettings.cs` | Docker connection defaults. |

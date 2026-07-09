@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Whiskers.Configuration;
 
 namespace Whiskers.Services.Persistence;
 
@@ -16,8 +17,8 @@ public sealed class AppSettingsStore : IAppSettingsStore
     private readonly string _path;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public AppSettingsStore(string? path = null)
-        => _path = path ?? "/app/data/app-settings.json";
+    public AppSettingsStore(string? path = null, DataPathOptions? dataPaths = null)
+        => _path = path ?? (dataPaths ?? DataPathOptions.Default).AppSettingsJson;
 
     public async Task SaveSectionAsync<T>(string section, T value)
     {

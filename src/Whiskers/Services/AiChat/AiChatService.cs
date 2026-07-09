@@ -22,7 +22,10 @@ public class UserChatHistory
 /// <summary>Persists chat history per user to /app/data/chat/{email-hash}.json</summary>
 public class ChatHistoryStore : IChatHistoryStore
 {
-    private const string BasePath = "/app/data/chat";
+    private readonly string _basePath;
+
+    public ChatHistoryStore(DataPathOptions? dataPaths = null)
+        => _basePath = (dataPaths ?? DataPathOptions.Default).ChatDir;
 
     public async Task<List<ChatMessage>> LoadAsync(string userEmail)
     {
@@ -39,7 +42,7 @@ public class ChatHistoryStore : IChatHistoryStore
 
     public async Task SaveAsync(string userEmail, List<ChatMessage> messages)
     {
-        Directory.CreateDirectory(BasePath);
+        Directory.CreateDirectory(_basePath);
         var path = GetPath(userEmail);
         // Keep last 50 messages per user
         var toSave = messages.TakeLast(50).ToList();
@@ -58,11 +61,11 @@ public class ChatHistoryStore : IChatHistoryStore
         await Task.CompletedTask;
     }
 
-    private static string GetPath(string email)
+    private string GetPath(string email)
     {
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(email.ToLowerInvariant())))[..16];
-        return Path.Combine(BasePath, $"{hash}.json");
+        return Path.Combine(_basePath, $"{hash}.json");
     }
 }
 

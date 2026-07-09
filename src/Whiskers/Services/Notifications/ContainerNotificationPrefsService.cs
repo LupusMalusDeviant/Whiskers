@@ -1,3 +1,4 @@
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
 
@@ -9,9 +10,9 @@ public class ContainerNotificationPrefsService : IContainerNotificationPrefsServ
     private ContainerNotificationPrefs _data = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public ContainerNotificationPrefsService()
+    public ContainerNotificationPrefsService(DataPathOptions? dataPaths = null)
     {
-        _store = new JsonFileStore<ContainerNotificationPrefs>("/app/data/notification-prefs.json");
+        _store = new JsonFileStore<ContainerNotificationPrefs>((dataPaths ?? DataPathOptions.Default).NotificationPrefsJson);
     }
 
     public async Task InitializeAsync()

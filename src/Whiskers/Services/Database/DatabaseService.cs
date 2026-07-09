@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Server;
 using Whiskers.Utils;
@@ -12,12 +13,13 @@ public class DatabaseService : IDatabaseService
 
     // Host-side directory the dumps are copied to. Same location volume backups use, so both survive a
     // container recreate (the DB container's own /tmp does not).
-    private const string HostBackupDir = "/app/data/backups";
+    private readonly string _hostBackupDir;
 
-    public DatabaseService(IHostCommandExecutor hostExec, ILogger<DatabaseService> logger)
+    public DatabaseService(IHostCommandExecutor hostExec, ILogger<DatabaseService> logger, DataPathOptions? dataPaths = null)
     {
         _hostExec = hostExec;
         _logger = logger;
+        _hostBackupDir = (dataPaths ?? DataPathOptions.Default).BackupsDir;
     }
 
     // Run a command in a container via `docker exec` on the HOST shell plane (nsenter / SSH) instead
@@ -196,10 +198,10 @@ public class DatabaseService : IDatabaseService
         // the backup is actually durable. The file name is derived from a timestamp + DB name; quote it.
         var containerFile = dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath;
         var hostFileName = dbType == DatabaseType.MongoDB ? $"{fileName}.gz" : fileName;
-        var hostPath = $"{HostBackupDir}/{hostFileName}";
+        var hostPath = $"{_hostBackupDir}/{hostFileName}";
         var sid = serverId ?? "local";
 
-        await _hostExec.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(HostBackupDir)}", TimeSpan.FromSeconds(5));
+        await _hostExec.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(_hostBackupDir)}", TimeSpan.FromSeconds(5));
         var cp = await _hostExec.ExecuteAsync(sid,
             $"docker cp {ShellUtils.Quote(containerId + ":" + containerFile)} {ShellUtils.Quote(hostPath)} 2>&1",
             TimeSpan.FromMinutes(5));

@@ -19,8 +19,8 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
 {
     private readonly string _path;
 
-    public AgentSettingsStore(string? path = null)
-        => _path = path ?? "/app/data/agent-settings.json";
+    public AgentSettingsStore(string? path = null, DataPathOptions? dataPaths = null)
+        => _path = path ?? (dataPaths ?? DataPathOptions.Default).AgentSettingsJson;
 
     public async Task SaveAsync(AgentSettings settings, AgentPrincipal editor)
     {

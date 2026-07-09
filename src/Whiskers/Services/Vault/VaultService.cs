@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
 
@@ -26,9 +27,9 @@ public class VaultService : IVaultService
     private VaultData _data = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public VaultService(IConfiguration configuration, ILogger<VaultService> logger, string? storePath = null)
+    public VaultService(IConfiguration configuration, ILogger<VaultService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
-        _store = new JsonFileStore<VaultData>(storePath ?? "/app/data/vault.json");
+        _store = new JsonFileStore<VaultData>(storePath ?? (dataPaths ?? DataPathOptions.Default).VaultJson);
         _logger = logger;
 
         _passphrase = configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY");

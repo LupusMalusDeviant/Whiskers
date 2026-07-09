@@ -63,5 +63,5 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 ## Conventions
 
 - **Interface-first**: every service is consumed through its `IFoo` interface; the concrete `Foo` is bound in DI. Hosted/background services are dual-registered (concrete singleton + interface forwarder + `AddHostedService`).
-- **Persistence**: durable state goes through [`Persistence/`](Persistence/) (SQLite for time-series/structured data, JSON file stores for config) under `/app/data`.
+- **Persistence**: durable state goes through [`Persistence/`](Persistence/) (SQLite for time-series/structured data, JSON file stores for config) under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`), resolved centrally by [`../Configuration/DataPathOptions.cs`](../Configuration/DataPathOptions.cs).
 - **English** comments and XML docs throughout.

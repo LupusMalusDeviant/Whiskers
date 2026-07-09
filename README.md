@@ -180,13 +180,14 @@ Whiskers is configured entirely through environment variables (`.env`). The most
 | Mesh VPN | `VPN_PROVIDER`, `TAILSCALE_AUTHKEY`, `NETBIRD_SETUP_KEY`, ... | Pluggable VPN bring-up (`none`/`tailscale`/`netbird`); empty = legacy in-container Tailscale |
 | Image search | `HARBOR_URL`, `HARBOR_USERNAME`, `HARBOR_PASSWORD` | Add a self-hosted Harbor marketplace (Docker Hub + GHCR are on by default) |
 | Host binding | `HOST_BIND`, `HOST_PORT` | The container always listens on `8080` internally |
+| Data directory | `WHISKERS_DATA_DIR` | Root for SQLite, JSON stores, keys & certificates (default `/app/data`); repoint at any volume / host path |
 
 See [.env.example](.env.example) for the full, commented list.
 
 ### Notable runtime details
 - **Email whitelist**: managed in the UI under *Settings > Authentication*; changes apply without a restart.
 - **MCP API key**: auto-generated on first start and printed to the container logs; stored in `/app/data/api-keys.json` (persisted in the Docker volume).
-- **Data persistence**: SQLite, JSON stores and certificates live under `/app/data` (a bind-mount / volume); never in the image.
+- **Data persistence**: SQLite, JSON stores and certificates live under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`; a bind-mount / volume); never in the image.
 
 ---
 

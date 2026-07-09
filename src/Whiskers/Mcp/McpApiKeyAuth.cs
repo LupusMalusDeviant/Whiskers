@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Whiskers.Configuration;
 
 namespace Whiskers.Mcp;
 
@@ -10,9 +11,9 @@ public class McpApiKeyStore : IMcpApiKeyStore
     private HashSet<string> _keys = new();
     private readonly ILogger<McpApiKeyStore> _logger;
 
-    public McpApiKeyStore(ILogger<McpApiKeyStore> logger)
+    public McpApiKeyStore(ILogger<McpApiKeyStore> logger, DataPathOptions? dataPaths = null)
     {
-        _filePath = "/app/data/api-keys.json";
+        _filePath = (dataPaths ?? DataPathOptions.Default).ApiKeysJson;
         _logger = logger;
     }
 

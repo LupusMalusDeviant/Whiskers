@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Backup;
 using Whiskers.Services.Database;
@@ -20,13 +21,15 @@ public class TaskExecutor : ITaskExecutor
         IDatabaseService dbService,
         IVolumeBackupService backupService,
         IHostCommandExecutor executor,
-        ILogger<TaskExecutor> logger)
+        ILogger<TaskExecutor> logger,
+        DataPathOptions? dataPaths = null)
     {
         _docker = docker;
         _dbService = dbService;
         _backupService = backupService;
         _executor = executor;
         _logger = logger;
+        _hostBackupDir = (dataPaths ?? DataPathOptions.Default).BackupsDir;
     }
 
     public async Task<(bool Success, string Output)> ExecuteAsync(ScheduledTaskEntity task)
@@ -153,7 +156,7 @@ public class TaskExecutor : ITaskExecutor
                     return;
                 }
                 var sid = task.ServerId ?? "local";
-                var glob = $"{HostBackupDir}/{dbName}_*.sql*";
+                var glob = $"{_hostBackupDir}/{dbName}_*.sql*";
                 var script = $"ls -1t {glob} 2>/dev/null | tail -n +{maxBackups + 1} | xargs -r rm -f";
                 await _executor.ExecuteAsync(sid, script, TimeSpan.FromSeconds(15));
             }
@@ -164,7 +167,7 @@ public class TaskExecutor : ITaskExecutor
         }
     }
 
-    private const string HostBackupDir = "/app/data/backups";
+    private readonly string _hostBackupDir;
 
     // DB name embedded into a host shell glob for retention pruning: alphanumeric start, then
     // alphanumerics plus _ . - only. Anything else is rejected (no pruning) rather than risking injection.

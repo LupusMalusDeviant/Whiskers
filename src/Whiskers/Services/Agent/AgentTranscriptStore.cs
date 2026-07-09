@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Whiskers.Configuration;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Persistence;
 using Whiskers.Utils;
@@ -29,8 +30,8 @@ public sealed class AgentTranscriptStore : IAgentTranscriptStore
     // saves for the same user — a fresh store per call made that lock useless (lost update / IOException).
     private readonly ConcurrentDictionary<string, JsonFileStore<AgentTranscript>> _stores = new();
 
-    public AgentTranscriptStore(string? basePath = null)
-        => _basePath = basePath ?? "/app/data/agent-chat";
+    public AgentTranscriptStore(string? basePath = null, DataPathOptions? dataPaths = null)
+        => _basePath = basePath ?? (dataPaths ?? DataPathOptions.Default).AgentChatDir;
 
     private JsonFileStore<AgentTranscript> StoreFor(string userEmail)
         => _stores.GetOrAdd(GetPath(userEmail), p => new JsonFileStore<AgentTranscript>(p));

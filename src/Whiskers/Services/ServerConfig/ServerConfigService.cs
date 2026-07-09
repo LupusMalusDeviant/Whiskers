@@ -13,11 +13,13 @@ public class ServerConfigService : IServerConfigService
     private ServerConfigData _cached = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    private const string SshKeysBasePath = "/app/data/ssh-keys";
+    private readonly string _sshKeysBasePath;
 
-    public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger, string? storePath = null)
+    public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
-        _store = new JsonFileStore<ServerConfigData>(storePath ?? "/app/data/servers.json");
+        var paths = dataPaths ?? DataPathOptions.Default;
+        _store = new JsonFileStore<ServerConfigData>(storePath ?? paths.ServersJson);
+        _sshKeysBasePath = paths.SshKeysDir;
         _dockerSettings = dockerSettings;
         _logger = logger;
     }
@@ -136,7 +138,7 @@ public class ServerConfigService : IServerConfigService
             _cached = newData;
 
             // Clean up SSH keys
-            var keyDir = Path.Combine(SshKeysBasePath, serverId);
+            var keyDir = Path.Combine(_sshKeysBasePath, serverId);
             if (Directory.Exists(keyDir))
                 Directory.Delete(keyDir, true);
         }
@@ -153,7 +155,7 @@ public class ServerConfigService : IServerConfigService
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("Ungültiger Dateiname");
 
-        var keyDir = Path.Combine(SshKeysBasePath, serverId);
+        var keyDir = Path.Combine(_sshKeysBasePath, serverId);
         Directory.CreateDirectory(keyDir);
 
         var keyPath = Path.Combine(keyDir, fileName);
@@ -178,13 +180,13 @@ public class ServerConfigService : IServerConfigService
         if (string.IsNullOrEmpty(server.SshKeyFileName))
             return null;
 
-        var path = Path.Combine(SshKeysBasePath, server.Id, server.SshKeyFileName);
+        var path = Path.Combine(_sshKeysBasePath, server.Id, server.SshKeyFileName);
         return File.Exists(path) ? path : null;
     }
 
     public async Task DeleteSshKeyAsync(string serverId)
     {
-        var keyDir = Path.Combine(SshKeysBasePath, serverId);
+        var keyDir = Path.Combine(_sshKeysBasePath, serverId);
         try { if (Directory.Exists(keyDir)) Directory.Delete(keyDir, true); }
         catch { /* best effort */ }
 
