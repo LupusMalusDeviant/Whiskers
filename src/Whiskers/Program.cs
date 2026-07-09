@@ -189,10 +189,9 @@ builder.Services.AddSingleton<Whiskers.Services.Server.ISystemdService, SystemdS
 builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, SslCertService>();
 builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
 
-// SQLite metrics database
-builder.Services.AddDbContext<MetricsDbContext>(options =>
-    options.UseSqlite(dataPaths.DbConnectionString),
-    ServiceLifetime.Transient);
+// Metrics database — SQLite (zero-config default) or PostgreSQL, selected by Database:Provider
+// (WHISKERS_DB_PROVIDER / _CONNECTION[_FILE]). SQLite default is byte-identical to before. (stableDB.md)
+builder.AddWhiskersDatabase(dataPaths);
 
 // Liveness/readiness health checks, surfaced at /healthz and /readyz below (Docker HEALTHCHECK +
 // K8s probes). Only readiness checks carry the "ready" tag; /healthz stays dependency-free.
