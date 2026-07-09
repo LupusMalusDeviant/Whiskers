@@ -12,7 +12,8 @@ public sealed class MetricsDbContextFactory : IDesignTimeDbContextFactory<Metric
     public MetricsDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<MetricsDbContext>()
-            .UseSqlite("Data Source=serverwatch-design.db")
+            // Migrations live in the Whiskers assembly, the context in Whiskers.Data (ADR-0004).
+            .UseSqlite("Data Source=serverwatch-design.db", sql => sql.MigrationsAssembly("Whiskers"))
             .Options;
         return new MetricsDbContext(options);
     }

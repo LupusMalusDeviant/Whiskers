@@ -30,4 +30,8 @@
     <PackageReference Include="NCrontab" Version="3.3.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Whiskers.Data\Whiskers.Data.csproj" />
+  </ItemGroup>
+
 </Project>

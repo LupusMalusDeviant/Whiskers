@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Whiskers.Data/Whiskers.Data.csproj" />
     <Project Path="src/Whiskers/Whiskers.csproj" />
   </Folder>
 </Solution>

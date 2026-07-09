@@ -39,8 +39,10 @@ public static class DatabaseRegistration
                 var sqliteCs = string.IsNullOrWhiteSpace(connectionString)
                     ? dataPaths.DbConnectionString
                     : connectionString;
+                // The context now lives in Whiskers.Data; its migrations stay in this (Whiskers) assembly,
+                // so EF must be told where to find them (ADR-0004 — Whiskers.Data extraction).
                 builder.Services.AddDbContext<MetricsDbContext>(
-                    o => o.UseSqlite(sqliteCs),
+                    o => o.UseSqlite(sqliteCs, sql => sql.MigrationsAssembly("Whiskers")),
                     ServiceLifetime.Transient);
                 break;
 
