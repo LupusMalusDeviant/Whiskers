@@ -70,7 +70,8 @@ public sealed class InAppNotificationStore : IInAppNotificationStore
     public void MarkAllRead()
     {
         Interlocked.Exchange(ref _unread, 0);
-        RunDb(db => db.Database.ExecuteSqlRaw("UPDATE \"Notifications\" SET \"Read\" = 1 WHERE \"Read\" = 0"));
+        // Provider-portable bulk update: the raw "Read" = 1 form is invalid against a Postgres boolean column.
+        RunDb(db => db.Notifications.Where(n => !n.Read).ExecuteUpdate(s => s.SetProperty(n => n.Read, true)));
         Changed?.Invoke();
     }
 

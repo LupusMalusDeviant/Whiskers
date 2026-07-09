@@ -27,33 +27,13 @@ public static class DatabaseInitializer
     {
         try
         {
-            var applied = (await db.Database.GetAppliedMigrationsAsync(ct)).ToList();
-
-            if (applied.Count == 0 && await TableExistsAsync(db, SentinelTable, ct))
-            {
-                // Legacy EnsureCreated database: tables exist but there is no migration history. Baseline it.
-                logger.LogWarning(
-                    "Metrics DB: legacy schema without migration history detected — baselining onto EF Core migrations.");
-
-                // 1. Heal — create any table the old hand-DDL forgot (notably AlertHistory) so the on-disk
-                //    schema matches InitialCreate before we mark InitialCreate as applied. Idempotent.
-                await db.Database.ExecuteSqlRawAsync(LegacyHealSql, ct);
-
-                // 2. Stamp — record InitialCreate as applied WITHOUT running its CREATE TABLEs (already present).
-                await StampBaselineAsync(db, ct);
-            }
-
-            // Fresh DB: applies InitialCreate (and any later migrations). Baselined DB: applies only migrations
-            // after InitialCreate (none today). Up-to-date DB: no-op.
-            await db.Database.MigrateAsync(ct);
-
-            // OPT-1: WAL lets readers (UI/agent) run concurrently with the 30s metric writes instead of
-            // blocking on "database is locked". journal_mode=WAL persists in the DB header; synchronous is
-            // best-effort per connection. Must run outside a transaction — none is active here.
-            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", ct);
-
-            var total = (await db.Database.GetAppliedMigrationsAsync(ct)).Count();
-            logger.LogInformation("Metrics DB ready ({Count} migration(s) applied).", total);
+            // SQLite carries the legacy-EnsureCreated baseline burden and the WAL pragma; PostgreSQL (and any
+            // other future provider) starts clean and only needs a straight, retrying migrate (ADR-0004). The
+            // sqlite_master probe and PRAGMA below are SQLite-only and would fail on Postgres.
+            if (db.Database.IsSqlite())
+                await InitializeSqliteAsync(db, logger, ct);
+            else
+                await MigrateAndLogAsync(db, logger, ct);
         }
         catch (Exception ex)
         {
@@ -61,6 +41,52 @@ public static class DatabaseInitializer
             logger.LogCritical(ex, "Metrics DB initialization failed — the schema could not be brought up to date.");
             throw;
         }
+    }
+
+    /// <summary>SQLite path: adopt a legacy EnsureCreated database onto migrations if needed, migrate, enable WAL.</summary>
+    private static async Task InitializeSqliteAsync(MetricsDbContext db, ILogger logger, CancellationToken ct)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(ct)).ToList();
+
+        if (applied.Count == 0 && await TableExistsAsync(db, SentinelTable, ct))
+        {
+            // Legacy EnsureCreated database: tables exist but there is no migration history. Baseline it.
+            logger.LogWarning(
+                "Metrics DB: legacy schema without migration history detected — baselining onto EF Core migrations.");
+
+            // 1. Heal — create any table the old hand-DDL forgot (notably AlertHistory) so the on-disk
+            //    schema matches InitialCreate before we mark InitialCreate as applied. Idempotent.
+            await db.Database.ExecuteSqlRawAsync(LegacyHealSql, ct);
+
+            // 2. Stamp — record InitialCreate as applied WITHOUT running its CREATE TABLEs (already present).
+            await StampBaselineAsync(db, ct);
+        }
+
+        // Fresh DB: applies InitialCreate (and any later migrations). Baselined DB: applies only migrations
+        // after InitialCreate (none today). Up-to-date DB: no-op.
+        await db.Database.MigrateAsync(ct);
+
+        // OPT-1: WAL lets readers (UI/agent) run concurrently with the 30s metric writes instead of
+        // blocking on "database is locked". journal_mode=WAL persists in the DB header; synchronous is
+        // best-effort per connection. Must run outside a transaction — none is active here.
+        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", ct);
+
+        await LogReadyAsync(db, logger, ct);
+    }
+
+    /// <summary>Non-SQLite path (PostgreSQL): a straight migrate. Transient connection failures are handled by
+    /// the provider's EnableRetryOnFailure execution strategy configured at registration — no legacy baseline
+    /// exists for these providers, and sqlite_master/WAL do not apply.</summary>
+    private static async Task MigrateAndLogAsync(MetricsDbContext db, ILogger logger, CancellationToken ct)
+    {
+        await db.Database.MigrateAsync(ct);
+        await LogReadyAsync(db, logger, ct);
+    }
+
+    private static async Task LogReadyAsync(MetricsDbContext db, ILogger logger, CancellationToken ct)
+    {
+        var total = (await db.Database.GetAppliedMigrationsAsync(ct)).Count();
+        logger.LogInformation("Metrics DB ready ({Count} migration(s) applied).", total);
     }
 
     /// <summary>Records the first (baseline) migration as applied on a legacy database without executing it.</summary>

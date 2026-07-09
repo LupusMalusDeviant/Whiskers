@@ -80,6 +80,12 @@ public class MetricsDbContext : DbContext
 
     public MetricsDbContext(DbContextOptions<MetricsDbContext> options) : base(options) { }
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        // Keep every DateTime UTC end-to-end (stableDB.md step 2 / U2). Applies to DateTime and DateTime?.
+        configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<ContainerMetricEntity>(e =>

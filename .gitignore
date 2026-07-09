@@ -42,6 +42,10 @@ data/
 *.sqlite-journal
 *.sqlite-shm
 *.sqlite-wal
+# ...but the *source project* dir Whiskers.Migrations.Sqlite ends in ".Sqlite" and would otherwise be
+# caught by the "*.sqlite" rule above (Windows core.ignorecase). Un-ignore the directory (its .cs/.csproj
+# are then tracked normally); bin/ and obj/ stay ignored by their own rules below.
+!src/Whiskers.Migrations.Sqlite/
 
 ## Deploy artifacts
 docker-compose.deploy.yml

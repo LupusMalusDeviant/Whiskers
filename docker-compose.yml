@@ -84,6 +84,17 @@ services:
       - MetricAlert__AnomalyWindow=${METRICALERT_ANOMALYWINDOW:-20}
       - MetricAlert__AnomalySigma=${METRICALERT_ANOMALYSIGMA:-3}
       - MetricAlert__AnomalyFloorPercent=${METRICALERT_ANOMALYFLOORPERCENT:-40}
+      # ── Database provider ──────────────────────────────────────────────────
+      # Default is SQLite (zero-config, under the data volume) — nothing to set.
+      # To use PostgreSQL, prefer the ready-to-run overlay:
+      #   docker compose -f docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+      # ...or point at your own server by uncommenting these (leave the provider
+      # UNSET for SQLite — an empty value is rejected, it is not "default"):
+      #   - WHISKERS_DB_PROVIDER=postgres
+      #   - WHISKERS_DB_CONNECTION=Host=db;Database=whiskers;Username=whiskers;Password=CHANGE_ME
+      # For a secret-managed password, mount a file and reference it instead of
+      # the inline connection string (the *_FILE value wins over the plain one):
+      #   - WHISKERS_DB_CONNECTION_FILE=/run/secrets/whiskers_db_conn
     restart: unless-stopped
     # Health: the image ships a HEALTHCHECK (curl http://localhost:8080/healthz) so `docker ps` shows
     # health status and compose can gate `depends_on` on it. Override the timing here if needed.

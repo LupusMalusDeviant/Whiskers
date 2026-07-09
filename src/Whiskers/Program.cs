@@ -39,6 +39,15 @@ var builder = WebApplication.CreateBuilder(args);
 // so every service resolves paths through it instead of hard-coding /app/data.
 var dataPaths = DataPathOptions.FromConfiguration(builder.Configuration);
 
+// One-time data migration CLI: `dotnet Whiskers.dll --migrate-to-postgres "<npgsql-conn>"`. Copies the
+// SQLite data into a fresh PostgreSQL database and exits WITHOUT booting the web host. The source is never
+// modified; the target must be empty (see SqliteToPostgresMigrator). Guarded so a normal boot is untouched.
+if (args is ["--migrate-to-postgres", ..])
+{
+    var targetConn = args.Length > 1 ? args[1] : "";
+    return await SqliteToPostgresMigrator.RunAsync(dataPaths, targetConn, Console.Out);
+}
+
 // UI-writable agent provider settings (overrides only Agent:* keys; reloadOnChange → IOptionsMonitor
 // picks up UI changes without a restart). As the last source, so the UI takes precedence over env/appsettings.
 builder.Configuration.AddJsonFile(dataPaths.AgentSettingsJson, optional: true, reloadOnChange: true);
@@ -197,10 +206,9 @@ builder.Services.AddSingleton<Whiskers.Services.Server.ISystemdService, SystemdS
 builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, SslCertService>();
 builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
 
-// SQLite metrics database
-builder.Services.AddDbContext<MetricsDbContext>(options =>
-    options.UseSqlite(dataPaths.DbConnectionString),
-    ServiceLifetime.Transient);
+// Metrics database — SQLite (zero-config default) or PostgreSQL, selected by Database:Provider
+// (WHISKERS_DB_PROVIDER / _CONNECTION[_FILE]). SQLite default is byte-identical to before. (stableDB.md)
+builder.AddWhiskersDatabase(dataPaths);
 
 // Liveness/readiness health checks, surfaced at /healthz and /readyz below (Docker HEALTHCHECK +
 // K8s probes). Only readiness checks carry the "ready" tag; /healthz stays dependency-free.
@@ -761,3 +769,6 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+// Normal boot returns 0 on shutdown; the --migrate-to-postgres branch above returns its own exit code.
+return 0;
