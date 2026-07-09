@@ -63,7 +63,7 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         new NavItem("servers",     "Server",             Icons.Material.Filled.Storage,      "Infrastruktur",    AppRole.Viewer, 210),
         new NavItem("cloud",       "Cloud",              Icons.Material.Filled.CloudQueue,   "Infrastruktur",    AppRole.Viewer, 220),
         new NavItem("networks",    "Netzwerke",          Icons.Material.Filled.Hub,          "Infrastruktur",    AppRole.Viewer, 230),
-        new NavItem("backups",     "Backups",            Icons.Material.Filled.Backup,       "Infrastruktur",    AppRole.Viewer, 240),
+        // "backups" extracted to Modules/VolumeBackups (RoadToSAP Phase 1).
 
         // Automatisierung  ("tasks" extracted to Modules/Scheduler — RoadToSAP Phase 1)
         new NavItem("webhooks",    "Webhooks",           Icons.Material.Filled.Webhook,      "Automatisierung",  AppRole.Viewer, 320),

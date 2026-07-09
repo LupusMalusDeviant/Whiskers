@@ -9,8 +9,17 @@ Docker **volume backups**: create and manage backups of container volumes. Backu
 | File | Purpose |
 |---|---|
 | `IVolumeBackupService.cs` / `VolumeBackupService.cs` | Creates, lists and restores Docker volume backups; restore validates the archive and takes a safety backup before wiping. |
+| `NoopVolumeBackupService.cs` | Core default `IVolumeBackupService` for when the **VolumeBackups module** is off. Keeps the Scheduler task executor's singleton graph resolvable; reads return empty but backup/restore **throw** (never fake a success) so a scheduled volume backup fails visibly. Real service wins by last-registration when the module is on (RoadToSAP Phase 1). |
+
+## Wiring
+
+This is the opt-in **VolumeBackups module** ([`../../Modules/VolumeBackups/`](../../Modules/VolumeBackups/),
+toggle `Features:volumebackups:Enabled`): its `ConfigureServices` registers `IVolumeBackupService` and owns the
+`backups` nav entry. The Scheduler module's `TaskExecutor` consumes this service, so Core keeps the
+`NoopVolumeBackupService` default above for when the module is off.
 
 ## Related
 
-- UI: [`../../Components/Pages/VolumeBackups.razor`](../../Components/Pages/VolumeBackups.razor)
+- UI: [`../../Components/Pages/VolumeBackups.razor`](../../Components/Pages/VolumeBackups.razor) (thin
+  `ModuleGuard` wrapper) → [`../../Components/Pages/VolumeBackupsView.razor`](../../Components/Pages/VolumeBackupsView.razor)
 - Container/volume operations: [`../Docker/`](../Docker/)

@@ -75,6 +75,10 @@ builder.Services.AddSingleton<INotificationService, NoopNotificationService>();
 // ILogMonitorService, so it needs a default when the LogMonitor module is off. The module registers the real
 // hosted LogMonitorService in the loop below, which then wins by last-registration. (RoadToSAP §2.1)
 builder.Services.AddSingleton<Whiskers.Services.LogMonitor.ILogMonitorService, Whiskers.Services.LogMonitor.NoopLogMonitorService>();
+// Same pattern for volume backups: the Scheduler module's TaskExecutor injects IVolumeBackupService (for
+// VolumeBackup tasks), so it needs a default when the VolumeBackups module is off — otherwise ValidateOnBuild
+// can't construct TaskExecutor. The module registers the real service in the loop below and wins. (RoadToSAP §2.1)
+builder.Services.AddSingleton<Whiskers.Services.Backup.IVolumeBackupService, Whiskers.Services.Backup.NoopVolumeBackupService>();
 
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
@@ -299,8 +303,8 @@ builder.Services.AddSingleton<Whiskers.Services.AuditLog.IAuditLogService, Whisk
 // MCP/agent observability (Agent History)
 builder.Services.AddSingleton<Whiskers.Services.Observability.IMcpCallLogStore, Whiskers.Services.Observability.McpCallLogStore>();
 
-// Volume backups
-builder.Services.AddSingleton<Whiskers.Services.Backup.IVolumeBackupService, Whiskers.Services.Backup.VolumeBackupService>();
+// Volume backups (IVolumeBackupService) moved to Modules/VolumeBackups (RoadToSAP Phase 1).
+// Core keeps a NoopVolumeBackupService default (registered above) for when it's off.
 
 // MCP Server + Permissions
 builder.Services.AddHttpContextAccessor();
