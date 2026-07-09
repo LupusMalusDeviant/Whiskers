@@ -10,9 +10,9 @@ public class McpApiKeyStore : IMcpApiKeyStore
     private HashSet<string> _keys = new();
     private readonly ILogger<McpApiKeyStore> _logger;
 
-    public McpApiKeyStore(ILogger<McpApiKeyStore> logger)
+    public McpApiKeyStore(ILogger<McpApiKeyStore> logger, string? filePath = null)
     {
-        _filePath = "/app/data/api-keys.json";
+        _filePath = filePath ?? "/app/data/api-keys.json";
         _logger = logger;
     }
 
@@ -27,11 +27,26 @@ public class McpApiKeyStore : IMcpApiKeyStore
         }
         else
         {
-            // Generate a default key on first run
+            // Generate a default admin-capable key on first run.
             var defaultKey = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
             _keys = new HashSet<string> { defaultKey };
             await SaveAsync();
-            _logger.LogInformation("Generated default MCP API key: {Key}", defaultKey);
+
+            // SECURITY: never print the key to the log — logs land in `docker logs` and aggregators
+            // (this used to LogInformation the key verbatim). Write it to a 0600 file next to
+            // api-keys.json and log only WHERE it is. The setup wizard (outOfTheBox W1) will surface it
+            // once and delete the file; until then the operator reads it from disk and removes it.
+            var keyFile = Path.Combine(Path.GetDirectoryName(_filePath)!, "initial-mcp-key.txt");
+            // Create + lock down the file BEFORE writing the secret, so the key never exists in a
+            // world-readable file. SetUnixFileMode has no effect target on Windows, hence the guard.
+            await File.WriteAllTextAsync(keyFile, string.Empty);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            await File.WriteAllTextAsync(keyFile, defaultKey);
+
+            _logger.LogWarning(
+                "Generated an initial MCP admin API key and wrote it to {Path} (mode 0600). " +
+                "Retrieve it, then delete that file. The key is NOT written to the log.", keyFile);
         }
     }
 

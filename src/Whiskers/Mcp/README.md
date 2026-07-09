@@ -10,7 +10,7 @@ Every MCP request carries a `Bearer <API-KEY>` header. The middleware authentica
 |---|---|
 | `McpBearerAuthMiddleware.cs` | Authenticates MCP requests by Bearer token before the Google OAuth challenge kicks in (so API clients aren't redirected to a login page). |
 | `McpCallLogMiddleware.cs` | Records every external/direct `tools/call` (callers that bypass the in-process agent) into the Agent-History log via [`IMcpCallLogStore`](../Services/Observability/). Sniffs the JSON-RPC envelope only, never alters the request, never throws. The in-process agent path is logged separately in [`AgentToolInvoker`](../Services/Agent/AgentToolInvoker.cs). |
-| `McpApiKeyAuth.cs` | `McpApiKeyStore`, the API-key store backing authentication. |
+| `McpApiKeyAuth.cs` | `McpApiKeyStore`, the API-key store backing authentication. On first run it generates an admin key and writes it to a `0600` `initial-mcp-key.txt` next to `api-keys.json` — **never to the log** (only the file path is logged). The setup wizard will later surface it once and delete the file. |
 | `IMcpApiKeyStore.cs` | Legacy flat API-key store interface (kept for backwards compatibility). |
 | `McpPermissionCheck.cs` | Helper called from inside tool methods: extracts the API key (or the web user's role) from the HTTP context and checks the required permission level. Returns a denial message or `null` if allowed. |
 
