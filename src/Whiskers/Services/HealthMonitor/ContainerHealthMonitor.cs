@@ -50,28 +50,35 @@ public class ContainerHealthMonitor : BackgroundService
         {
             try
             {
-                var containers = await _docker.ListAllContainersAsync(all: true);
-
-                foreach (var container in containers)
-                {
-                    await ProcessContainer(container);
-                }
-
-                // Bound the per-container maps: drop entries for containers that no longer exist.
-                var liveKeys = containers.Select(CompositeKey).ToHashSet();
-                PruneToLive(_previousStates, liveKeys);
-                PruneToLive(_restartTimestamps, liveKeys);
-                PruneToLive(_previousHealth, liveKeys);
-
-                await _hubContext.Clients.All.SendAsync("ContainerListUpdated", containers, ct);
+                // WaitAsync bounds the whole cycle to shutdown: an in-flight Docker call (which carries
+                // no cancellation token) is abandoned so the service still stops within the host window.
+                await RunHealthCycleAsync(ct).WaitAsync(ct);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Health check cycle failed");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(_settings.CheckIntervalSeconds), ct);
         }
+    }
+
+    private async Task RunHealthCycleAsync(CancellationToken ct)
+    {
+        var containers = await _docker.ListAllContainersAsync(all: true);
+
+        foreach (var container in containers)
+        {
+            await ProcessContainer(container);
+        }
+
+        // Bound the per-container maps: drop entries for containers that no longer exist.
+        var liveKeys = containers.Select(CompositeKey).ToHashSet();
+        PruneToLive(_previousStates, liveKeys);
+        PruneToLive(_restartTimestamps, liveKeys);
+        PruneToLive(_previousHealth, liveKeys);
+
+        await _hubContext.Clients.All.SendAsync("ContainerListUpdated", containers, ct);
     }
 
     private static string CompositeKey(ContainerInfo container)

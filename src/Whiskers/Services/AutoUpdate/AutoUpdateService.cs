@@ -44,7 +44,9 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
         {
             try
             {
-                await CheckAndUpdateAsync(stoppingToken);
+                // WaitAsync bounds the cycle to shutdown: RecreateContainerAsync pulls an image and can
+                // run for minutes with no cancellation token, so abandon it on stop rather than block.
+                await CheckAndUpdateAsync(stoppingToken).WaitAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
