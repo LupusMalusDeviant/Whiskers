@@ -10,7 +10,7 @@ A server config carries its connection type (`Local`, `SSH`, or `TCP`), transpor
 
 | File | Purpose |
 |---|---|
-| `IServerConfigService.cs` / `ServerConfigService.cs` | Stores and serves the configured Docker hosts plus their SSH key material; the single source of truth consumers resolve a server by id. |
+| `IServerConfigService.cs` / `ServerConfigService.cs` | Stores and serves the configured Docker hosts plus their SSH key material; the single source of truth consumers resolve a server by id. Exposes `IsInitialized` (true once the registry has loaded) for the `/readyz` readiness probe. |
 
 ## Related
 

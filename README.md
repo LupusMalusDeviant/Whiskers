@@ -187,6 +187,7 @@ See [.env.example](.env.example) for the full, commented list.
 - **Email whitelist**: managed in the UI under *Settings > Authentication*; changes apply without a restart.
 - **MCP API key**: auto-generated on first start and printed to the container logs; stored in `/app/data/api-keys.json` (persisted in the Docker volume).
 - **Data persistence**: SQLite, JSON stores and certificates live under `/app/data` (a bind-mount / volume); never in the image.
+- **Health probes**: anonymous `/healthz` (liveness) and `/readyz` (readiness — metrics DB reachable + fleet config loaded) endpoints; the image ships a Docker `HEALTHCHECK` and Kubernetes can use them as probes. (`/health` without the `z` is the in-app status page.)
 
 ---
 

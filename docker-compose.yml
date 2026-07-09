@@ -85,6 +85,8 @@ services:
       - MetricAlert__AnomalySigma=${METRICALERT_ANOMALYSIGMA:-3}
       - MetricAlert__AnomalyFloorPercent=${METRICALERT_ANOMALYFLOORPERCENT:-40}
     restart: unless-stopped
+    # Health: the image ships a HEALTHCHECK (curl http://localhost:8080/healthz) so `docker ps` shows
+    # health status and compose can gate `depends_on` on it. Override the timing here if needed.
 
 volumes:
   serverwatch-data:

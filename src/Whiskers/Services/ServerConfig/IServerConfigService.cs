@@ -6,6 +6,11 @@ namespace Whiskers.Services.ServerConfig;
 public interface IServerConfigService
 {
     Task InitializeAsync();
+
+    /// <summary>True once <see cref="InitializeAsync"/> has loaded (or seeded) the server registry.
+    /// Backs the <c>/readyz</c> readiness probe.</summary>
+    bool IsInitialized { get; }
+
     List<Models.ServerConfig> GetServers();
     List<Models.ServerConfig> GetEnabledServers();
     Models.ServerConfig? GetServer(string serverId);
