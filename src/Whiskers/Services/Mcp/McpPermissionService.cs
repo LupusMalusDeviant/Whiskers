@@ -56,7 +56,12 @@ public class McpPermissionService : IMcpPermissionService
                 };
                 data.ApiKeys.Add(defaultKey);
                 changed = true;
-                _logger.LogInformation("Generated default MCP API key: {Key} (Level: {Level})", defaultKey.Key, defaultKey.PermissionLevel);
+                // SECURITY (C6): never log the key value — logs land in `docker logs` / aggregators.
+                // Permission-system keys are managed in the UI (Settings → MCP-Rechte) and persisted in
+                // mcp-permissions.json, so the operator retrieves it there instead of from the log.
+                _logger.LogWarning(
+                    "Generated a default MCP API key (Level: {Level}). Manage it in the UI under " +
+                    "Settings → MCP; the key value is NOT written to the log.", defaultKey.PermissionLevel);
             }
 
             if (changed)
