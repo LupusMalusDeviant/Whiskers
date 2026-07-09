@@ -35,10 +35,11 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
   ✅ **Scheduler** (first with a nav entry + MCP tools), ✅ **LogMonitor** (first needing a no-op Core default
   for a cross-feature consumer), ✅ **VolumeBackups** (no-op for a cross-**module** consumer — the Scheduler
   task executor), and ✅ **Webhooks** (no-op for a Core `Program.cs` endpoint that can't move) are done — each
-  has its own README + `docs/modules/<id>.md`. Each module PR moves its registrations here verbatim, wraps its
-  pages in `ModuleGuard` / gates its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false`
-  boots cleanly. Next: **host-management** (Nginx/Systemd/Firewall/SslCerts) and **ImageSearch/AppStore +
-  Deployment**.
+  has its own README + `docs/modules/<id>.md`. ✅ **HostManagement** (Nginx/Systemd/Firewall/SslCerts as one
+  module — needs 4 Core no-ops because the mixed `ServerTools` MCP class stays Core) is also done. Each module
+  PR moves its registrations here verbatim, wraps its pages in `ModuleGuard` / gates its `Settings.razor`
+  section when off, and proves `Features:<id>:Enabled=false` boots cleanly. Next: **ImageSearch/AppStore +
+  Deployment** (the last, biggest extraction).
 - A `docs/modules/` index + an `ARCHITECTURE.md` "Module System" chapter (RoadToSAP §6 DoD).
 - **F2 (i18n):** each `NavItem.LocKey` (a German label today) becomes a real `IStringLocalizer` key.
 

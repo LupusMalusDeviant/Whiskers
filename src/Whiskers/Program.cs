@@ -83,6 +83,14 @@ builder.Services.AddSingleton<Whiskers.Services.Backup.IVolumeBackupService, Whi
 // request, so it needs a default when the Webhooks module is off. The module registers the real service in
 // the loop below and wins; with it off, a trigger answers 400 instead of 500. (RoadToSAP §2.1)
 builder.Services.AddSingleton<Whiskers.Services.Webhooks.IWebhookService, Whiskers.Services.Webhooks.NoopWebhookService>();
+// And for host management: ServerTools (an MCP class mixing core server ops with firewall/nginx/systemd/ssl
+// ops) can't be split under the byte-gleich rule, so it stays in Core and injects these four services per
+// call. Their no-op defaults keep that working when the HostManagement module is off; the module registers the
+// real services in the loop below and wins. (RoadToSAP §2.1)
+builder.Services.AddSingleton<Whiskers.Services.Server.IFirewallService, Whiskers.Services.Server.NoopFirewallService>();
+builder.Services.AddSingleton<Whiskers.Services.Server.INginxService, Whiskers.Services.Server.NoopNginxService>();
+builder.Services.AddSingleton<Whiskers.Services.Server.ISystemdService, Whiskers.Services.Server.NoopSystemdService>();
+builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, Whiskers.Services.Server.NoopSslCertService>();
 
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
@@ -184,12 +192,10 @@ builder.Services.AddHttpClient<IHostingerService, HostingerApiService>()
     });
 builder.Services.AddSingleton<Whiskers.Services.Cloud.ICloudControlService, Whiskers.Services.Cloud.CloudControlService>();
 
-// Host command execution + server management
+// Host command execution + server management. IHostCommandExecutor stays in Core (shared by many services).
+// The firewall/nginx/systemd/ssl services moved to Modules/HostManagement; Core keeps their Noop* defaults
+// (registered above) for ServerTools + the pages when that module is off. (RoadToSAP Phase 1)
 builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
-builder.Services.AddSingleton<Whiskers.Services.Server.IFirewallService, FirewallService>();
-builder.Services.AddSingleton<Whiskers.Services.Server.INginxService, NginxService>();
-builder.Services.AddSingleton<Whiskers.Services.Server.ISystemdService, SystemdService>();
-builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, SslCertService>();
 builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
 
 // Metrics database — SQLite (zero-config default) or PostgreSQL, selected by Database:Provider

@@ -10,6 +10,10 @@
 
 <PageTitle>Dienste - Whiskers</PageTitle>
 
+@* RoadToSAP Phase 1: gated by the HostManagement module; when off, ModuleGuard shows a "disabled" notice.
+   The ISystemdService injection resolves the Core no-op default either way. *@
+<ModuleGuard ModuleId="host-management">
+
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
         <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
@@ -93,6 +97,8 @@ else
             <MudButton OnClick="@(() => _showJournal = false)">Schließen</MudButton>
         </DialogActions>
     </MudDialog>
+
+</ModuleGuard>
 
 @code {
     [Parameter] public string ServerId { get; set; } = "";

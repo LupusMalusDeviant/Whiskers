@@ -10,6 +10,10 @@
 
 <PageTitle>Firewall - Whiskers</PageTitle>
 
+@* RoadToSAP Phase 1: gated by the HostManagement module. When off, ModuleGuard shows a "disabled" notice
+   instead of the firewall UI. The IFirewallService injection resolves the Core no-op default either way. *@
+<ModuleGuard ModuleId="host-management">
+
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
     <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
     <MudText Typo="Typo.h5">Firewall</MudText>
@@ -75,6 +79,8 @@ else
         </NoRecordsContent>
     </MudTable>
 }
+
+</ModuleGuard>
 
 @code {
     [Parameter] public string ServerId { get; set; } = "";

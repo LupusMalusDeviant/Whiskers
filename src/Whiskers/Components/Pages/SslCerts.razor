@@ -9,6 +9,10 @@
 
 <PageTitle>SSL-Zertifikate - Whiskers</PageTitle>
 
+@* RoadToSAP Phase 1: gated by the HostManagement module; when off, ModuleGuard shows a "disabled" notice.
+   The ISslCertService injection resolves the Core no-op default either way. *@
+<ModuleGuard ModuleId="host-management">
+
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
     <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
     <MudText Typo="Typo.h5">SSL-Zertifikate</MudText>
@@ -67,6 +71,8 @@ else
         </NoRecordsContent>
     </MudTable>
 }
+
+</ModuleGuard>
 
 @code {
     [Parameter] public string ServerId { get; set; } = "";

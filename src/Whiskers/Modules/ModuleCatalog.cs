@@ -18,6 +18,7 @@ public static class ModuleCatalog
         new LogMonitor.LogMonitorModule(),
         new VolumeBackups.VolumeBackupsModule(),
         new Webhooks.WebhooksModule(),
+        new HostManagement.HostManagementModule(),
         // Real modules are appended here as features are extracted (Terminal was the first pilot).
     };
 
