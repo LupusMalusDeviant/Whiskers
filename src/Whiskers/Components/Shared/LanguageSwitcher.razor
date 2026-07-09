@@ -1,0 +1,18 @@
+@inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
+
+@* F2 i18n: switches the UI culture. Navigates (full reload) to the anonymous /set-culture endpoint,
+   which sets the culture cookie and bounces back so the Blazor circuit restarts in the new culture. *@
+<MudMenu Icon="@Icons.Material.Filled.Translate" Color="Color.Inherit" title="@L["Language_Name"]"
+         AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+    <MudMenuItem OnClick="@(() => Switch("en"))">English</MudMenuItem>
+    <MudMenuItem OnClick="@(() => Switch("de"))">Deutsch</MudMenuItem>
+</MudMenu>
+
+@code {
+    private void Switch(string culture)
+    {
+        var redirect = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+        Nav.NavigateTo($"set-culture?culture={culture}&redirect={Uri.EscapeDataString(redirect)}", forceLoad: true);
+    }
+}

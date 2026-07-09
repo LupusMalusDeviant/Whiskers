@@ -26,6 +26,7 @@ using Whiskers.Services.Mcp;
 using Whiskers.Services.Hetzner;
 using Whiskers.Services.Hostinger;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Whiskers.HealthChecks;
@@ -329,6 +330,10 @@ builder.Services.AddMcpServer()
     .WithTools<AgentTools>();
 
 // MudBlazor
+// Localization (F2 i18n): resource tables live in Resources/*.resx; en is the default/fallback
+// culture, de is a full translation. Consumers inject IStringLocalizer<SharedResource>.
+builder.Services.AddLocalization(options => options.ResourcesPath = "Resources");
+
 builder.Services.AddMudServices();
 
 // Authentication — cookie session + optional federated providers (Google and/or generic OIDC),
@@ -528,6 +533,15 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
 
+// Request localization (F2 i18n): pick culture from the user's cookie, then Accept-Language, defaulting
+// to English. Runs early so Blazor rendering sees the right culture. Additive — it does NOT reorder the
+// auth middleware (UseAntiforgery → UseAuthentication → UseAuthorization) below.
+var supportedCultures = new[] { "en", "de" };
+app.UseRequestLocalization(new RequestLocalizationOptions()
+    .SetDefaultCulture("en")
+    .AddSupportedCultures(supportedCultures)
+    .AddSupportedUICultures(supportedCultures));
+
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.UseAuthentication();
@@ -570,6 +584,20 @@ app.MapHealthChecks("/readyz", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("ready"),
     ResponseWriter = writeHealthStatus
+}).AllowAnonymous();
+
+// Language switch (F2 i18n): write the culture cookie, then bounce back. Anonymous + additive; the full
+// reload restarts the Blazor circuit so it renders in the new culture. LocalRedirect blocks open-redirects.
+app.MapGet("/set-culture", (string? culture, string? redirect, HttpContext ctx) =>
+{
+    if (culture is "en" or "de")
+    {
+        ctx.Response.Cookies.Append(
+            CookieRequestCultureProvider.DefaultCookieName,
+            CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(culture)),
+            new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, Path = "/" });
+    }
+    return Results.LocalRedirect(string.IsNullOrEmpty(redirect) ? "/" : redirect);
 }).AllowAnonymous();
 
 // Auth endpoints

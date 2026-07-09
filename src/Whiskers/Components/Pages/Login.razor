@@ -2,6 +2,7 @@
 @layout Whiskers.Components.Layout.MainLayout
 @inject IConfiguration Config
 @inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
 
 <MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center" Style="height: 80vh;">
     <MudPaper Elevation="4" Class="pa-8 mx-auto" Style="width: 100%; max-width: 400px;">
@@ -10,13 +11,13 @@
                  style="filter: drop-shadow(0 2px 8px rgba(0,0,0,0.45));" />
             <MudText Typo="Typo.h4" Class="mb-2">Whiskers</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-6">
-                Container-Verwaltung
+                @L["Login_Subtitle"]
             </MudText>
 
             @if (!string.IsNullOrEmpty(_error))
             {
                 <MudAlert Severity="Severity.Error" Class="mb-4 mud-width-full">
-                    @(_error == "unauthorized" ? "Ihre E-Mail ist nicht autorisiert, auf diese Anwendung zuzugreifen." : _error)
+                    @(_error == "unauthorized" ? L["Login_Error_Unauthorized"].Value : _error)
                 </MudAlert>
             }
 
@@ -25,7 +26,7 @@
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
                            FullWidth="true" Href="login-google"
                            StartIcon="@Icons.Material.Filled.Login">
-                    Mit Google anmelden
+                    @L["Login_Button_Google"]
                 </MudButton>
             }
             @if (_oidcEnabled)
@@ -33,13 +34,13 @@
                 <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Large"
                            FullWidth="true" Href="login-oidc" Class="@(_googleEnabled ? "mt-3" : "")"
                            StartIcon="@Icons.Material.Filled.VpnKey">
-                    Mit @_oidcName anmelden
+                    @L["Login_Button_Oidc", _oidcName]
                 </MudButton>
             }
             @if (!_googleEnabled && !_oidcEnabled)
             {
                 <MudAlert Severity="Severity.Warning" Class="mud-width-full">
-                    Kein Login-Anbieter konfiguriert. Bitte Google oder OIDC in der Konfiguration aktivieren.
+                    @L["Login_NoProvider"]
                 </MudAlert>
             }
         </div>
