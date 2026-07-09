@@ -4,6 +4,7 @@
 @inject IOptionsMonitor<Whiskers.Configuration.MattermostSettings> MattermostOptions
 @inject IOptionsMonitor<Whiskers.Configuration.HealthMonitorSettings> HealthOptions
 @inject IOptionsMonitor<Whiskers.Configuration.TerminalSettings> TerminalOptions
+@inject Whiskers.Modules.IModuleRegistry ModuleRegistry
 @inject IOptionsMonitor<Whiskers.Configuration.GoogleAuthSettings> AuthOptions
 @inject INotificationService NotificationService
 @inject IOptionsMonitor<Whiskers.Configuration.MatrixSettings> MatrixOptions
@@ -243,6 +244,9 @@ else
         </MudGrid>
     </MudExpansionPanel>
 
+    @* RoadToSAP Phase 1: hide the Terminal settings when the Terminal module is disabled. *@
+    @if (ModuleRegistry.IsEnabled("terminal"))
+    {
     <MudExpansionPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
         <MudGrid>
             <MudItem xs="12">
@@ -261,6 +265,7 @@ else
         <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveTerminal"
                    StartIcon="@Icons.Material.Filled.Save" Class="mt-3">Terminal speichern</MudButton>
     </MudExpansionPanel>
+    }
 
     @* AI advisor chat *@
     <MudExpansionPanel Text="AI-Chat (Berater)" Icon="@Icons.Material.Filled.Chat">

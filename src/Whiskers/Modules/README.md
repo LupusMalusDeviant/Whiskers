@@ -31,9 +31,11 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
 
 ## What's next
 
-- **Extract features into real modules**, one PR each — **Terminal** is the pilot (`Modules/Terminal/`). Each
-  module PR moves its registrations here verbatim, adds a `ModuleGuard` around its pages, extracts its
-  `Settings.razor` section, and proves `Features:<id>:Enabled=false` boots cleanly.
+- **Extract features into real modules**, one PR each. ✅ **Terminal** is done — the pilot
+  ([`Terminal/`](Terminal/), own README + [`docs/modules/terminal.md`](../../../docs/modules/terminal.md));
+  **Notifications** is next. Each module PR moves its registrations here verbatim, wraps its pages in
+  `ModuleGuard`, hides its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false` boots
+  cleanly.
 - A `docs/modules/` index + an `ARCHITECTURE.md` "Module System" chapter (RoadToSAP §6 DoD).
 - **F2 (i18n):** each `NavItem.LocKey` (a German label today) becomes a real `IStringLocalizer` key.
 
