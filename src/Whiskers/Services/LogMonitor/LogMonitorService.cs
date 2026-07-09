@@ -56,7 +56,9 @@ public class LogMonitorService : BackgroundService, ILogMonitorService
         {
             try
             {
-                await CheckLogsAsync(stoppingToken);
+                // WaitAsync bounds the cycle to shutdown: per-container log fetches carry no token, so
+                // abandon an in-flight cycle on stop rather than block the host's shutdown window.
+                await CheckLogsAsync(stoppingToken).WaitAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

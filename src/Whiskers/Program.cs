@@ -120,6 +120,9 @@ builder.Services.Configure<ImageUpdateSettings>(builder.Configuration.GetSection
 // doesn't pin a stale DNS answer. IRegistryClient stays the singleton (shared digest cache); the
 // concrete type is no longer *also* registered as a singleton — that pinned a captive HttpClient.
 builder.Services.AddHttpClient<RegistryClient>()
+    // Explicit timeout (was unset → 100s default): bounds a hung registry so an in-flight image-update
+    // check can't stall the ImageUpdateChecker's shutdown far beyond this.
+    .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15))
     .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
     {
         PooledConnectionLifetime = TimeSpan.FromMinutes(5)

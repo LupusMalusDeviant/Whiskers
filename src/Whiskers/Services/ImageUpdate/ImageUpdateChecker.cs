@@ -45,7 +45,9 @@ public class ImageUpdateChecker : BackgroundService
 
         while (!ct.IsCancellationRequested)
         {
-            await CheckAllImagesAsync(ct);
+            // WaitAsync bounds the cycle to shutdown: registry/Docker digest calls carry no token, so
+            // abandon an in-flight check on stop instead of blocking the host's shutdown window.
+            await CheckAllImagesAsync(ct).WaitAsync(ct);
             await Task.Delay(TimeSpan.FromHours(_settings.CheckIntervalHours), ct);
         }
     }
