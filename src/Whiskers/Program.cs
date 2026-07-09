@@ -71,6 +71,10 @@ builder.Services.AddDataProtection()
 // registers its CompositeNotificationService inside the loop below, which then wins by last-registration;
 // with the module off this Noop stays. MUST be registered BEFORE the module loop. (RoadToSAP §2.1)
 builder.Services.AddSingleton<INotificationService, NoopNotificationService>();
+// Same soft-dependency pattern for log-alert rules: the Core AI-triggers page reads/creates rules via
+// ILogMonitorService, so it needs a default when the LogMonitor module is off. The module registers the real
+// hosted LogMonitorService in the loop below, which then wins by last-registration. (RoadToSAP §2.1)
+builder.Services.AddSingleton<Whiskers.Services.LogMonitor.ILogMonitorService, Whiskers.Services.LogMonitor.NoopLogMonitorService>();
 
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
@@ -240,9 +244,8 @@ builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.Aut
 // Webhooks
 builder.Services.AddSingleton<Whiskers.Services.Webhooks.IWebhookService, Whiskers.Services.Webhooks.WebhookService>();
 
-// Log monitoring
-builder.Services.AddSingleton<Whiskers.Services.LogMonitor.ILogSearchService, Whiskers.Services.LogMonitor.LogSearchService>();
-builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.LogMonitor.LogMonitorService, Whiskers.Services.LogMonitor.ILogMonitorService>();
+// Log search + monitor (ILogSearchService, hosted LogMonitorService) moved to Modules/LogMonitor
+// (RoadToSAP Phase 1). Core keeps a NoopLogMonitorService default (registered above) for when it's off.
 
 // AI Chat
 builder.Services.Configure<Whiskers.Configuration.AiChatSettings>(builder.Configuration.GetSection(Whiskers.Configuration.AiChatSettings.SectionName));

@@ -31,12 +31,12 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
 
 ## What's next
 
-- **Extract features into real modules**, one PR each. ✅ **Terminal** (the pilot), ✅ **Notifications**, and
-  ✅ **Scheduler** (first module with a nav entry + MCP tools) are done — each has its own README +
-  `docs/modules/<id>.md`. Each module PR moves its registrations here verbatim, wraps its pages in
-  `ModuleGuard` / gates its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false` boots
-  cleanly. Next: the remaining mechanical extractions (ImageSearch/AppStore, VolumeBackups, Webhooks,
-  LogMonitor) and host-management.
+- **Extract features into real modules**, one PR each. ✅ **Terminal** (the pilot), ✅ **Notifications**,
+  ✅ **Scheduler** (first with a nav entry + MCP tools), and ✅ **LogMonitor** (first needing a no-op Core
+  default for a cross-feature consumer) are done — each has its own README + `docs/modules/<id>.md`. Each
+  module PR moves its registrations here verbatim, wraps its pages in `ModuleGuard` / gates its
+  `Settings.razor` section when off, and proves `Features:<id>:Enabled=false` boots cleanly. Next: the
+  remaining mechanical extractions (ImageSearch/AppStore, VolumeBackups, Webhooks) and host-management.
 - A `docs/modules/` index + an `ARCHITECTURE.md` "Module System" chapter (RoadToSAP §6 DoD).
 - **F2 (i18n):** each `NavItem.LocKey` (a German label today) becomes a real `IStringLocalizer` key.
 

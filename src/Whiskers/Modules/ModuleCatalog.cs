@@ -15,6 +15,7 @@ public static class ModuleCatalog
         new Terminal.TerminalModule(),
         new Notifications.NotificationsModule(),
         new Scheduler.SchedulerModule(),
+        new LogMonitor.LogMonitorModule(),
         // Real modules are appended here as features are extracted (Terminal was the first pilot).
     };
 
