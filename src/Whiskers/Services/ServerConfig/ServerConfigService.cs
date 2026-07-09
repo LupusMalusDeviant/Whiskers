@@ -24,6 +24,9 @@ public class ServerConfigService : IServerConfigService
         _logger = logger;
     }
 
+    /// <inheritdoc />
+    public bool IsInitialized { get; private set; }
+
     public async Task InitializeAsync()
     {
         if (_store.Exists())
@@ -52,6 +55,8 @@ public class ServerConfigService : IServerConfigService
             await _store.SaveAsync(_cached);
             _logger.LogInformation("Created default local server config");
         }
+
+        IsInitialized = true;
     }
 
     public List<Models.ServerConfig> GetServers()

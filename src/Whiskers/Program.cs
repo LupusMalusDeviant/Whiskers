@@ -26,6 +26,9 @@ using Whiskers.Services.Mcp;
 using Whiskers.Services.Hetzner;
 using Whiskers.Services.Hostinger;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Whiskers.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -188,6 +191,12 @@ builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, W
 builder.Services.AddDbContext<MetricsDbContext>(options =>
     options.UseSqlite(dataPaths.DbConnectionString),
     ServiceLifetime.Transient);
+
+// Liveness/readiness health checks, surfaced at /healthz and /readyz below (Docker HEALTHCHECK +
+// K8s probes). Only readiness checks carry the "ready" tag; /healthz stays dependency-free.
+builder.Services.AddHealthChecks()
+    .AddCheck<DbReadyCheck>("db", tags: new[] { "ready" })
+    .AddCheck<ServerConfigReadyCheck>("serverconfig", tags: new[] { "ready" });
 builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
 builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
 builder.Services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore, Whiskers.Services.Persistence.AppSettingsStore>();
@@ -534,6 +543,26 @@ if (authDisabled)
 
 app.UseMiddleware<Whiskers.Mcp.McpBearerAuthMiddleware>();
 app.UseAuthorization();
+
+// Liveness/readiness probes for orchestrators (Docker HEALTHCHECK, K8s probes). Anonymous and
+// additive — this does NOT change the auth middleware order. The response body is the status word
+// only (no check names, descriptions or exceptions), so nothing internal leaks. /health is the
+// Blazor UI page, so these use /healthz + /readyz.
+Func<HttpContext, HealthReport, Task> writeHealthStatus = (ctx, report) =>
+{
+    ctx.Response.ContentType = "text/plain";
+    return ctx.Response.WriteAsync(report.Status.ToString());
+};
+app.MapHealthChecks("/healthz", new HealthCheckOptions
+{
+    Predicate = _ => false,                       // liveness: process is up; don't gate on dependencies
+    ResponseWriter = writeHealthStatus
+}).AllowAnonymous();
+app.MapHealthChecks("/readyz", new HealthCheckOptions
+{
+    Predicate = registration => registration.Tags.Contains("ready"),
+    ResponseWriter = writeHealthStatus
+}).AllowAnonymous();
 
 // Auth endpoints
 app.MapGet("/login-google", async (HttpContext ctx) =>

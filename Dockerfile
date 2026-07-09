@@ -28,11 +28,11 @@ RUN . /etc/os-release \
         | tee /etc/apt/sources.list.d/tailscale.list \
     && apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends tailscale \
-    # curl + gnupg are build-only (fetching the Tailscale repo key) — purge so they don't linger in
-    # the runtime image. docker.io (local container web-terminal `docker exec`), openssh-client/sshpass
-    # (Tailscale-SSH terminal + SSH fallback) and tailscale (legacy VPN bring-up) ARE runtime deps of
-    # the full profile and stay. ca-certificates stays (TLS).
-    && apt-get purge -y curl gnupg \
+    # gnupg is build-only (fetching the Tailscale repo key) — purge it. curl STAYS: it is the
+    # container HEALTHCHECK probe (see below) and is small. docker.io (local container web-terminal
+    # `docker exec`), openssh-client/sshpass (Tailscale-SSH terminal + SSH fallback) and tailscale
+    # (legacy VPN bring-up) ARE runtime deps of the full profile and stay. ca-certificates stays (TLS).
+    && apt-get purge -y gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
@@ -52,5 +52,10 @@ RUN groupadd -g 10001 serverwatch 2>/dev/null || true \
 
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
+
+# Container liveness probe: curl the anonymous /healthz endpoint (status word only). start-period
+# covers first-boot init + DB migration. Orchestrators like K8s use their own httpGet probes instead.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -fsS http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
