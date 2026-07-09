@@ -204,9 +204,7 @@ builder.Services.AddHostedService<MetricsCollectorService>();
 // Database service
 builder.Services.AddSingleton<Whiskers.Services.Database.IDatabaseService, Whiskers.Services.Database.DatabaseService>();
 
-// Scheduler
-builder.Services.AddSingleton<Whiskers.Services.Scheduler.ITaskExecutor, Whiskers.Services.Scheduler.TaskExecutor>();
-builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.Scheduler.SchedulerService, Whiskers.Services.Scheduler.ISchedulerService>();
+// Scheduler (ITaskExecutor + SchedulerService hosted) moved to Modules/Scheduler (RoadToSAP Phase 1).
 
 // App templates
 builder.Services.AddSingleton<Whiskers.Services.Templates.ITemplateService, Whiskers.Services.Templates.TemplateService>();

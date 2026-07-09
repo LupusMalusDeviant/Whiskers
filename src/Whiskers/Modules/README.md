@@ -12,7 +12,7 @@ pipeline (discovery → services → MCP tools → navigation) is wired, and fea
 |---|---|
 | `IWhiskersModule.cs` | The module contract: `Id`, `DisplayName`, `EnabledByDefault`, `DependsOn`, `ConfigureServices`, `NavItems`, `McpToolTypes`, `InitializeAsync`. Modules consume Core interfaces, never the reverse. |
 | `ModuleCatalog.cs` | The single **explicit** list of modules (no assembly scanning) + `DiscoverEnabled(config)`: filters by `Features:{id}:Enabled` (overrides `EnabledByDefault`) and fails fast on an unmet `DependsOn`. |
-| `AllInOnePseudoModule.cs` | Transitional "everything not yet a real module" bucket — carries today's 24 nav entries + 11 MCP tool classes with a **no-op** `ConfigureServices` (registrations stay inline in `Program.cs`). Shrinks as features are extracted; retired once empty. Kept in sync with [`../Components/Layout/NavMenu.razor`](../Components/Layout/NavMenu.razor). |
+| `AllInOnePseudoModule.cs` | Transitional "everything not yet a real module" bucket — carries the not-yet-extracted nav entries + MCP tool classes with a **no-op** `ConfigureServices` (registrations stay inline in `Program.cs`). Shrinks with each module PR (Scheduler took the `tasks` nav + `SchedulerTools`); retired once empty. Kept in sync with [`../Components/Layout/NavMenu.razor`](../Components/Layout/NavMenu.razor). |
 | `NavItem.cs` | A navigation entry a module contributes (`Href`, `LocKey`, `Icon`, `Group`, `MinRole`, `Order`). |
 | `NavLayout.cs` | Pure, unit-tested helper that turns the flat `NavItem` list into ordered sidebar groups + top-level entries (`NavGroup`). |
 | `IModuleRegistry.cs` / `ModuleRegistry.cs` | Exposes the enabled modules' merged `NavItems` to `NavMenu.razor`. |
@@ -31,10 +31,11 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
 
 ## What's next
 
-- **Extract features into real modules**, one PR each. ✅ **Terminal** (the pilot) and ✅ **Notifications** are
-  done — each has its own README + `docs/modules/<id>.md`. Each module PR moves its registrations here
-  verbatim, gates its pages/`Settings.razor` section when off, and proves `Features:<id>:Enabled=false` boots
-  cleanly. Next: the mechanical Wave-3 extractions (ImageSearch/AppStore, VolumeBackups, Webhooks, Scheduler,
+- **Extract features into real modules**, one PR each. ✅ **Terminal** (the pilot), ✅ **Notifications**, and
+  ✅ **Scheduler** (first module with a nav entry + MCP tools) are done — each has its own README +
+  `docs/modules/<id>.md`. Each module PR moves its registrations here verbatim, wraps its pages in
+  `ModuleGuard` / gates its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false` boots
+  cleanly. Next: the remaining mechanical extractions (ImageSearch/AppStore, VolumeBackups, Webhooks,
   LogMonitor) and host-management.
 - A `docs/modules/` index + an `ARCHITECTURE.md` "Module System" chapter (RoadToSAP §6 DoD).
 - **F2 (i18n):** each `NavItem.LocKey` (a German label today) becomes a real `IStringLocalizer` key.

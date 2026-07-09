@@ -14,7 +14,15 @@ Cron-style **scheduled tasks**. A background scheduler fires due tasks, and an e
 - **`CustomCommand` requires Admin.** A `CustomCommand` task runs an arbitrary command through the same host executor as `execute_command` (root on the host for `serverId=local`). Creating or manually running such a task via MCP therefore requires the `execute_command` (Admin) permission, not just the `Write`-level scheduler permission — otherwise the Admin gate on `execute_command` could be bypassed.
 - **Backup retention** deletes are scoped to the task's own server (`ServerId ?? "local"`) so a same-named volume on another host is never affected. `DbBackup` retention prunes host dump files `{db}_{timestamp}.sql*` in `/app/data/backups`; the DB name is charset-validated before it enters the shell.
 
+## Wiring
+
+The scheduler is the opt-in **Scheduler module** ([`../../Modules/Scheduler/`](../../Modules/Scheduler/),
+toggle `Features:scheduler:Enabled`). Its `ConfigureServices` registers `ITaskExecutor` + the hosted
+`SchedulerService`; the module also owns the `tasks` nav entry and the `SchedulerTools` MCP tools. When off,
+the background loop doesn't run, the tools/nav disappear and `/tasks` shows a disabled notice (`ModuleGuard`).
+
 ## Related
 
-- UI: [`../../Components/Pages/ScheduledTasks.razor`](../../Components/Pages/ScheduledTasks.razor)
+- UI: [`../../Components/Pages/ScheduledTasks.razor`](../../Components/Pages/ScheduledTasks.razor) (thin
+  `ModuleGuard` wrapper) → [`../../Components/Pages/ScheduledTasksView.razor`](../../Components/Pages/ScheduledTasksView.razor)
 - MCP tools: `list_scheduled_tasks`, `create_scheduled_task`, `delete_scheduled_task`, `run_scheduled_task`

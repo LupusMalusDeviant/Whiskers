@@ -34,8 +34,9 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
     public IReadOnlyList<Type> McpToolTypes { get; } = new[]
     {
         typeof(ContainerTools), typeof(ServerTools), typeof(MonitoringTools), typeof(CloudTools),
-        typeof(HetznerTools), typeof(NetworkTools), typeof(DatabaseTools), typeof(SchedulerTools),
+        typeof(HetznerTools), typeof(NetworkTools), typeof(DatabaseTools),
         typeof(LogTools), typeof(CveTools), typeof(AgentTools),
+        // SchedulerTools extracted to Modules/Scheduler (RoadToSAP Phase 1).
     };
 
     // Roles are permissive (Viewer): today's nav shows every link to everyone and gates on the page
@@ -64,8 +65,7 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         new NavItem("networks",    "Netzwerke",          Icons.Material.Filled.Hub,          "Infrastruktur",    AppRole.Viewer, 230),
         new NavItem("backups",     "Backups",            Icons.Material.Filled.Backup,       "Infrastruktur",    AppRole.Viewer, 240),
 
-        // Automatisierung
-        new NavItem("tasks",       "Geplante Tasks",     Icons.Material.Filled.Schedule,     "Automatisierung",  AppRole.Viewer, 310),
+        // Automatisierung  ("tasks" extracted to Modules/Scheduler — RoadToSAP Phase 1)
         new NavItem("webhooks",    "Webhooks",           Icons.Material.Filled.Webhook,      "Automatisierung",  AppRole.Viewer, 320),
         new NavItem("agent-history", "Agent-History",    Icons.Material.Filled.Policy,       "Automatisierung",  AppRole.Viewer, 330),
         new NavItem("agent",       "Agent",              Icons.Material.Filled.SmartToy,     "Automatisierung",  AppRole.Viewer, 340),

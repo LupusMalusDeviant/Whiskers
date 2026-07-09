@@ -14,6 +14,7 @@ public static class ModuleCatalog
         new AllInOnePseudoModule(),
         new Terminal.TerminalModule(),
         new Notifications.NotificationsModule(),
+        new Scheduler.SchedulerModule(),
         // Real modules are appended here as features are extracted (Terminal was the first pilot).
     };
 
