@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The SQLite provider these migrations were scaffolded against; brings EF Core Relational
+         (MigrationBuilder, ModelSnapshot base types) needed to compile the migration code. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Migrations reference the context + entities (namespace-preserved) but never the app,
+         so there is no circular dependency (ADR-0004). -->
+    <ProjectReference Include="..\Whiskers.Data\Whiskers.Data.csproj" />
+  </ItemGroup>
+
+</Project>

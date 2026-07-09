@@ -21,12 +21,12 @@ public sealed class DbMigrationBaselineTests : IDisposable
         return p;
     }
 
-    // The context lives in Whiskers.Data but its migrations stay in the Whiskers assembly (ADR-0004),
+    // The context lives in Whiskers.Data and the SQLite migrations in Whiskers.Migrations.Sqlite (ADR-0004),
     // so — exactly like production (DatabaseRegistration / MetricsDbContextFactory) — the test must point
     // EF at that migrations assembly, otherwise MigrateAsync/GetMigrations find nothing.
     private static MetricsDbContext Ctx(string dataSource) =>
         new(new DbContextOptionsBuilder<MetricsDbContext>()
-            .UseSqlite($"Data Source={dataSource}", sql => sql.MigrationsAssembly("Whiskers")).Options);
+            .UseSqlite($"Data Source={dataSource}", sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite")).Options);
 
     // Seeds a database shaped like a pre-migration deployment: a handful of real tables with rows,
     // deliberately WITHOUT AlertHistory and WITHOUT __EFMigrationsHistory (the legacy EnsureCreated state).

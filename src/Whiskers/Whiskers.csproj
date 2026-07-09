@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Whiskers.Data\Whiskers.Data.csproj" />
+    <ProjectReference Include="..\Whiskers.Migrations.Sqlite\Whiskers.Migrations.Sqlite.csproj" />
   </ItemGroup>
 
 </Project>
