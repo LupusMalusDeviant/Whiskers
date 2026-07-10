@@ -1,5 +1,7 @@
 using System.Linq;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Whiskers.Modules;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
@@ -10,7 +12,7 @@ namespace Whiskers.Tests;
 
 public class AgentToolRegistryTests
 {
-    private static readonly AgentToolRegistry Registry = new();
+    private static readonly AgentToolRegistry Registry = AgentToolTestHelpers.DefaultRegistry();
 
     [Theory]
     [InlineData("ListContainers", "list_containers")]
@@ -79,12 +81,31 @@ public class AgentToolRegistryTests
         Assert.Equal(McpPermissionLevels.Admin, Registry.Tools["execute_command"].RequiredLevel);
         Assert.Equal(McpPermissionLevels.Read, Registry.Tools["list_containers"].RequiredLevel);
     }
+
+    [Fact]
+    public void Disabled_module_hides_its_tools_from_the_agent()
+    {
+        // RoadToSAP §2.3: the registry now derives from the ENABLED modules (via IModuleRegistry), so turning a
+        // module off removes its tools from the agent's view too — not just from the external MCP surface.
+        static IReadOnlyList<Type> ToolTypes(params (string Key, string? Value)[] cfg) =>
+            ModuleCatalog.DiscoverEnabled(new ConfigurationBuilder()
+                    .AddInMemoryCollection(cfg.Select(c => new KeyValuePair<string, string?>(c.Key, c.Value))).Build())
+                .SelectMany(m => m.McpToolTypes).ToList();
+
+        var withScheduler = new AgentToolRegistry(ToolTypes());
+        Assert.Contains("run_scheduled_task", withScheduler.Tools.Keys);
+
+        var withoutScheduler = new AgentToolRegistry(ToolTypes(("Features:scheduler:Enabled", "false")));
+        Assert.DoesNotContain("run_scheduled_task", withoutScheduler.Tools.Keys);
+        // Core tools (from the always-on AllInOnePseudoModule) stay visible regardless.
+        Assert.Contains("list_containers", withoutScheduler.Tools.Keys);
+    }
 }
 
 public class AgentToolCatalogTests
 {
     private static readonly AgentToolCatalog Catalog =
-        new(new AgentToolRegistry(), GuardrailEngine.CreateDefault());
+        new(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault());
 
     private static AgentContext Context(string level, GuardrailPolicy policy) =>
         new("sess", new AgentPrincipal(AgentPrincipalKind.WebUser, "t", level, null, UserEmail: "t@x"),

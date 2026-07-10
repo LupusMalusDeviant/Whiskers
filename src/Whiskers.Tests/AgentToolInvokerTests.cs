@@ -55,7 +55,7 @@ public class AgentToolInvokerTests
             AgentOrigin.WebUi, GuardrailPolicy.SafeDefault());
 
     private static AgentToolInvoker Invoker(TrackingScopeFactory factory) =>
-        new(new AgentToolRegistry(), GuardrailEngine.CreateDefault(), factory);
+        new(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault(), factory);
 
     [Fact]
     public async Task Unknown_tool_returns_error_without_creating_scope()

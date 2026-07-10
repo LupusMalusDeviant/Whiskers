@@ -58,7 +58,7 @@ public class AgentServiceEvictionTests
     public async Task Oldest_sessions_are_evicted_beyond_the_cap()
     {
         var svc = new AgentService(new StubFactory(), new StubOptions(), new StubCatalog(),
-            new StubInvoker(), GuardrailEngine.CreateDefault(), new AgentToolRegistry());
+            new StubInvoker(), GuardrailEngine.CreateDefault(), AgentToolTestHelpers.DefaultRegistry());
 
         var ids = new List<string>();
         for (var i = 0; i < 260; i++)

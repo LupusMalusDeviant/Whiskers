@@ -21,6 +21,13 @@ public class AgentCompositionTests
         services.Configure<AgentSettings>(_ => { });
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 
+        // AgentToolRegistry now derives its tools from IModuleRegistry (RoadToSAP §2.3), so the agent-core
+        // graph needs one; feed it the default-enabled modules' tool types (mirrors Program.cs).
+        services.AddSingleton<Whiskers.Modules.IModuleRegistry>(
+            new Whiskers.Modules.ModuleRegistry(
+                Array.Empty<Whiskers.Modules.NavItem>(),
+                AgentToolTestHelpers.DefaultModuleToolTypes(),
+                Array.Empty<string>()));
         services.AddSingleton<IAgentToolRegistry, AgentToolRegistry>();
         services.AddSingleton<IAgentGuardrailEngine>(GuardrailEngine.CreateDefault());
         services.AddSingleton(sp => new GuardrailStore(

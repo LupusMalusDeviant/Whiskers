@@ -30,14 +30,25 @@ public sealed class AgentToolRegistry : IAgentToolRegistry
 
     public IReadOnlyDictionary<string, AgentToolEntry> Tools { get; }
 
-    public AgentToolRegistry() : this(typeof(McpPermissionLevels).Assembly) { }
+    /// <summary>DI constructor (RoadToSAP §2.3): the agent's tool set is derived from the ENABLED modules'
+    /// MCP tool classes via <see cref="Whiskers.Modules.IModuleRegistry"/>, so a disabled module's tools are
+    /// invisible to the agent — not merely unregistered at the MCP boundary. The permission/guardrail filtering
+    /// below (canonical level lookup + NonAgentTools) is unchanged.</summary>
+    public AgentToolRegistry(Whiskers.Modules.IModuleRegistry moduleRegistry)
+        : this(moduleRegistry.McpToolTypes) { }
 
-    public AgentToolRegistry(Assembly toolAssembly)
+    /// <summary>Builds the registry from an explicit set of <c>[McpServerToolType]</c> classes — the enabled
+    /// modules' tool types in production, a fixed set in tests. Replaces the former whole-assembly reflection
+    /// scan, which exposed the tools of disabled modules to the agent. (Takes <c>IReadOnlyList</c>, not
+    /// <c>IEnumerable</c>, so the DI container never treats this as an auto-resolvable ctor and picks the
+    /// <see cref="IModuleRegistry"/> one unambiguously.)</summary>
+    public AgentToolRegistry(IReadOnlyList<Type> toolTypes)
     {
         var dict = new Dictionary<string, AgentToolEntry>(StringComparer.Ordinal);
 
-        foreach (var type in toolAssembly.GetTypes())
+        foreach (var type in toolTypes)
         {
+            // Defensive: a module's McpToolTypes already lists only [McpServerToolType] classes.
             if (type.GetCustomAttribute<McpServerToolTypeAttribute>() == null) continue;
 
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))

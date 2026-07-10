@@ -440,6 +440,7 @@ builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>()
 builder.Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(
     new Whiskers.Modules.ModuleRegistry(
         modules.SelectMany(m => m.NavItems).ToList(),
+        modules.SelectMany(m => m.McpToolTypes).ToList(),
         modules.Select(m => m.Id)));
 
 var app = builder.Build();

@@ -66,7 +66,7 @@ public class AgentSessionTests
 
     // ---- Helpers -----------------------------------------------------------
 
-    private static readonly AgentToolRegistry Registry = new();
+    private static readonly AgentToolRegistry Registry = AgentToolTestHelpers.DefaultRegistry();
 
     private static AgentContext Context() => new("s1",
         new AgentPrincipal(AgentPrincipalKind.WebUser, "t", McpPermissionLevels.Admin, null, UserEmail: "t@x"),
