@@ -34,15 +34,33 @@ public static class AppThemes
     public static AppTheme Get(string? key) =>
         All.FirstOrDefault(t => t.Key == key) ?? All[0];
 
-    /// <summary>Builds a MudBlazor dark theme from an <see cref="AppTheme"/>. Status colours
-    /// (success/warning/error/info) stay constant across themes so health signals read the same.</summary>
+    /// <summary>Builds a MudBlazor theme (light + dark palette) from an <see cref="AppTheme"/>.
+    /// Status colours (success/warning/error/info) stay constant across themes so health signals
+    /// read the same. The light palette uses neutral zinc surfaces for every theme — only the
+    /// accents differ — mirroring the <c>html[data-mode="light"]</c> CSS variable block (F12).</summary>
     public static MudTheme ToMudTheme(this AppTheme t) => new()
     {
         PaletteLight = new PaletteLight
         {
             Primary = t.Primary,
             Secondary = t.Secondary,
-            AppbarBackground = t.BgPrimary,
+            Tertiary = t.Accent2,
+            Info = "#3b82f6",
+            Success = "#22c55e",
+            Warning = "#f59e0b",
+            Error = "#ef4444",
+            AppbarBackground = "#fafafa",
+            Background = "#f4f4f5",
+            Surface = "#ffffff",
+            DrawerBackground = "#fafafa",
+            TextPrimary = "#18181b",
+            TextSecondary = "#52525b",
+            ActionDefault = "#52525b",
+            DrawerText = "#52525b",
+            DrawerIcon = "#71717a",
+            TableStriped = "#f4f4f5",
+            Divider = "#e4e4e7",
+            LinesDefault = "#e4e4e7",
         },
         PaletteDark = new PaletteDark
         {

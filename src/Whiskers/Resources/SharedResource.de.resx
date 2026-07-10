@@ -155,4 +155,13 @@
   <data name="Language_Name" xml:space="preserve">
     <value>Sprache</value>
   </data>
+  <data name="Theme_Mode_Light" xml:space="preserve">
+    <value>Hell</value>
+  </data>
+  <data name="Theme_Mode_Dark" xml:space="preserve">
+    <value>Dunkel</value>
+  </data>
+  <data name="Theme_Mode_System" xml:space="preserve">
+    <value>System</value>
+  </data>
 </root>

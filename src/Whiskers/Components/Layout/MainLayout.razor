@@ -1,8 +1,9 @@
 @inherits LayoutComponentBase
 @inject IJSRuntime JS
 @inject Whiskers.Modules.IModuleRegistry ModuleRegistry
+@inject IStringLocalizer<SharedResource> L
 
-<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudThemeProvider @ref="_mudThemeProvider" Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
@@ -21,6 +22,27 @@
         <Whiskers.Components.Shared.NotificationBell />
         <MudMenu Icon="@Icons.Material.Filled.Palette" Color="Color.Inherit" title="Theme"
                  AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            @* F12: dark / light / system mode — independent of the accent theme below. *@
+            @foreach (var (mode, icon, label) in new[]
+            {
+                ("light", Icons.Material.Filled.LightMode, L["Theme_Mode_Light"].Value),
+                ("dark", Icons.Material.Filled.DarkMode, L["Theme_Mode_Dark"].Value),
+                ("system", Icons.Material.Filled.SettingsBrightness, L["Theme_Mode_System"].Value),
+            })
+            {
+                <MudMenuItem OnClick="@(() => SetModeAsync(mode))">
+                    <div style="display: flex; align-items: center; gap: 10px; min-width: 150px;">
+                        <MudIcon Icon="@icon" Size="Size.Small" />
+                        <span>@label</span>
+                        @if (_mode == mode)
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small"
+                                     Color="Color.Primary" Style="margin-left: auto;" />
+                        }
+                    </div>
+                </MudMenuItem>
+            }
+            <MudDivider />
             @foreach (var th in AppThemes.All)
             {
                 <MudMenuItem OnClick="@(() => SetThemeAsync(th.Key))">
@@ -41,11 +63,11 @@
         <LanguageSwitcher />
         <AuthorizeView>
             <Authorized>
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: rgba(255,255,255,0.6);">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-secondary);">
                     @context.User.Identity?.Name
                 </MudChip>
                 <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit"
-                               Href="logout" title="Abmelden" Style="color: rgba(255,255,255,0.4);" />
+                               Href="logout" title="Abmelden" Style="color: var(--sw-text-muted);" />
             </Authorized>
         </AuthorizeView>
     </MudAppBar>
@@ -78,6 +100,13 @@
     private string _themeKey = AppThemes.DefaultKey;
     private MudTheme _theme = AppThemes.Get(AppThemes.DefaultKey).ToMudTheme();
 
+    // F12 dark/light mode: "dark" | "light" | "system" (persisted in localStorage as "sw-mode").
+    // _isDarkMode is the RESOLVED value MudBlazor renders with; the data-mode attribute on <html>
+    // (set by swTheme JS) switches the CSS variable block in app.css in lockstep.
+    private string _mode = "system";
+    private bool _isDarkMode = true;
+    private MudThemeProvider _mudThemeProvider = default!;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -86,8 +115,40 @@
         {
             _themeKey = stored;
             _theme = AppThemes.Get(stored).ToMudTheme();
-            StateHasChanged();
         }
+
+        _mode = await JS.InvokeAsync<string?>("swTheme.getMode") ?? "system";
+        _isDarkMode = _mode switch
+        {
+            "light" => false,
+            "dark" => true,
+            _ => await _mudThemeProvider.GetSystemDarkModeAsync(),
+        };
+        // Follow OS preference changes live while in "system" mode.
+        await _mudThemeProvider.WatchSystemDarkModeAsync(OnSystemDarkModeChangedAsync);
+        await JS.InvokeVoidAsync("swTheme.applyDark", _isDarkMode);
+        StateHasChanged();
+    }
+
+    private async Task OnSystemDarkModeChangedAsync(bool systemIsDark)
+    {
+        if (_mode != "system") return;
+        _isDarkMode = systemIsDark;
+        await JS.InvokeVoidAsync("swTheme.applyDark", _isDarkMode);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SetModeAsync(string mode)
+    {
+        _mode = mode;
+        _isDarkMode = mode switch
+        {
+            "light" => false,
+            "dark" => true,
+            _ => await _mudThemeProvider.GetSystemDarkModeAsync(),
+        };
+        await JS.InvokeVoidAsync("swTheme.setMode", mode, _isDarkMode);
+        StateHasChanged();
     }
 
     private async Task SetThemeAsync(string key)

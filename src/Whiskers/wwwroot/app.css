@@ -12,6 +12,9 @@
     --sw-glass: rgba(255, 255, 255, 0.03);
     --sw-glass-border: rgba(255, 255, 255, 0.07);
     --sw-glass-hover: rgba(255, 255, 255, 0.06);
+    --sw-glass-faint: rgba(255, 255, 255, 0.02);
+    --sw-glass-border-strong: rgba(255, 255, 255, 0.12);
+    --sw-hover: rgba(255, 255, 255, 0.05);
 
     /* Primary accent (default: Ember orange) — overridden per theme below */
     --sw-accent-primary: #f97316;
@@ -25,8 +28,18 @@
 
     /* Translucent chrome (app bar / drawer) + ambient background glow */
     --sw-bg-glass-strong: rgba(9, 9, 11, 0.9);
+    --sw-bg-dialog: rgba(17, 17, 19, 0.97);
+    --sw-bg-panel: rgba(17, 17, 19, 0.6);
     --sw-ambient-1: rgba(249, 115, 22, 0.07);
     --sw-ambient-2: rgba(251, 191, 36, 0.05);
+
+    /* Misc surfaces that need a light-mode counterpart */
+    --sw-scrollbar: rgba(255, 255, 255, 0.12);
+    --sw-scrollbar-hover: rgba(255, 255, 255, 0.20);
+    --sw-code-bg: rgba(255, 255, 255, 0.08);
+    --sw-pre-bg: rgba(0, 0, 0, 0.35);
+    --sw-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.3);
+    --sw-shadow-hover: 0 4px 20px rgba(0, 0, 0, 0.3);
 
     /* Secondary accents */
     --sw-accent-green: #22c55e;
@@ -101,6 +114,34 @@ html[data-theme="rose"] {
     --sw-ambient-2: rgba(232, 121, 249, 0.06);
 }
 
+/* === Light mode (F12) — overrides the surface/text variables of whichever theme is active.
+   Placed AFTER the theme blocks so it wins at equal specificity; the accent variables
+   (--sw-accent-*, gradient, logo hue) stay theme-driven so the cat branding is unchanged.
+   Toggled via <html data-mode="light|dark"> (MainLayout + pre-paint script in App.razor). === */
+html[data-mode="light"] {
+    --sw-bg-primary: #f4f4f5;
+    --sw-bg-secondary: #fafafa;
+    --sw-bg-elevated: #ffffff;
+    --sw-glass: rgba(255, 255, 255, 0.65);
+    --sw-glass-border: rgba(9, 9, 11, 0.10);
+    --sw-glass-hover: rgba(9, 9, 11, 0.05);
+    --sw-glass-faint: rgba(9, 9, 11, 0.03);
+    --sw-glass-border-strong: rgba(9, 9, 11, 0.16);
+    --sw-hover: rgba(9, 9, 11, 0.04);
+    --sw-bg-glass-strong: rgba(250, 250, 250, 0.90);
+    --sw-bg-dialog: rgba(255, 255, 255, 0.98);
+    --sw-bg-panel: rgba(255, 255, 255, 0.75);
+    --sw-scrollbar: rgba(9, 9, 11, 0.18);
+    --sw-scrollbar-hover: rgba(9, 9, 11, 0.30);
+    --sw-code-bg: rgba(9, 9, 11, 0.07);
+    --sw-pre-bg: rgba(9, 9, 11, 0.05);
+    --sw-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
+    --sw-shadow-hover: 0 4px 20px rgba(0, 0, 0, 0.10);
+    --sw-text-primary: rgba(24, 24, 27, 0.92);
+    --sw-text-secondary: rgba(24, 24, 27, 0.60);
+    --sw-text-muted: rgba(24, 24, 27, 0.40);
+}
+
 html, body {
     margin: 0;
     padding: 0;
@@ -147,7 +188,7 @@ code, pre, .monospace {
 }
 .glass-card:hover {
     background: var(--sw-glass-hover) !important;
-    border-color: rgba(255, 255, 255, 0.10) !important;
+    border-color: var(--sw-glass-border-strong) !important;
 }
 
 /* === MudBlazor Overrides === */
@@ -177,7 +218,7 @@ code, pre, .monospace {
     font-size: 0.875rem !important;
 }
 .mud-nav-link:hover {
-    background: rgba(255, 255, 255, 0.05) !important;
+    background: var(--sw-hover) !important;
 }
 .mud-nav-link.active {
     background: var(--sw-accent-primary-soft) !important;
@@ -212,7 +253,7 @@ code, pre, .monospace {
     overflow: hidden;
 }
 .mud-table .mud-table-head .mud-table-cell {
-    background: rgba(255, 255, 255, 0.02) !important;
+    background: var(--sw-glass-faint) !important;
     color: var(--sw-text-secondary) !important;
     font-weight: 600 !important;
     font-size: 0.75rem !important;
@@ -227,7 +268,7 @@ code, pre, .monospace {
     background: rgba(249, 115, 22, 0.03) !important;
 }
 .mud-table .mud-table-cell {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+    border-bottom: 1px solid var(--sw-glass-faint) !important;
 }
 
 /* Cards & Paper */
@@ -236,13 +277,13 @@ code, pre, .monospace {
     backdrop-filter: blur(8px) !important;
     border: 1px solid var(--sw-glass-border) !important;
     border-radius: 10px !important;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: var(--sw-shadow-card) !important;
 }
 
 /* Chips */
 .mud-chip {
     backdrop-filter: blur(4px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid var(--sw-glass-border) !important;
     font-weight: 500 !important;
 }
 
@@ -252,7 +293,7 @@ code, pre, .monospace {
     border-radius: 6px !important;
 }
 .mud-input-outlined:hover .mud-input-outlined-border {
-    border-color: rgba(255, 255, 255, 0.12) !important;
+    border-color: var(--sw-glass-border-strong) !important;
 }
 .mud-input-outlined.mud-input-focused .mud-input-outlined-border {
     border-color: var(--sw-accent-primary) !important;
@@ -274,7 +315,7 @@ code, pre, .monospace {
     border-color: var(--sw-glass-border) !important;
 }
 .mud-button-outlined:hover {
-    background: rgba(255, 255, 255, 0.04) !important;
+    background: var(--sw-hover) !important;
 }
 
 /* Tabs */
@@ -295,7 +336,7 @@ code, pre, .monospace {
 
 /* Dialogs */
 .mud-dialog {
-    background: rgba(17, 17, 19, 0.97) !important;
+    background: var(--sw-bg-dialog) !important;
     backdrop-filter: blur(16px) !important;
     border: 1px solid var(--sw-glass-border) !important;
     border-radius: 12px !important;
@@ -312,8 +353,8 @@ code, pre, .monospace {
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.20); }
+::-webkit-scrollbar-thumb { background: var(--sw-scrollbar); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--sw-scrollbar-hover); }
 
 /* === Status === */
 .sw-status-running { color: var(--sw-accent-green); }
@@ -361,10 +402,10 @@ code, pre, .monospace {
 .sw-md li { margin: 0.2em 0; }
 .sw-md code {
     font-family: 'JetBrains Mono', monospace; font-size: 0.82em;
-    background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px;
+    background: var(--sw-code-bg); padding: 1px 5px; border-radius: 4px;
 }
 .sw-md pre {
-    background: rgba(0,0,0,0.35); border: 1px solid var(--sw-glass-border);
+    background: var(--sw-pre-bg); border: 1px solid var(--sw-glass-border);
     border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 0.6em 0;
 }
 .sw-md pre code { background: none; padding: 0; font-size: 0.8em; }
@@ -412,7 +453,7 @@ code, pre, .monospace {
 .sw-stat-card:hover {
     background: var(--sw-glass-hover) !important;
     transform: translateY(-1px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--sw-shadow-hover);
 }
 
 /* Stat card color variants — sw- prefix to avoid MudBlazor conflicts */
@@ -472,7 +513,7 @@ code, pre, .monospace {
     height: 40px;
     border-radius: 8px;
     background: var(--sw-accent-primary-soft);
-    border: 1px solid rgba(249, 115, 22, 0.15);
+    border: 1px solid var(--sw-accent-primary-glow);
     color: var(--sw-accent-primary);
     margin-right: 0.75rem;
     flex-shrink: 0;
@@ -500,7 +541,7 @@ code, pre, .monospace {
 }
 
 .sw-server-info-panel {
-    background: rgba(17, 17, 19, 0.6) !important;
+    background: var(--sw-bg-panel) !important;
     border: 1px solid var(--sw-glass-border) !important;
     border-radius: 8px !important;
     padding: 1rem !important;

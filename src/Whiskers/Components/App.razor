@@ -15,10 +15,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="@baseHref" />
     <script>
-        // Apply the saved theme before first paint (no flash of default colours).
+        // Apply the saved theme + dark/light mode before first paint (no flash of default colours).
         (function () {
             try { document.documentElement.setAttribute('data-theme', localStorage.getItem('sw-theme') || 'ember'); }
             catch (e) { document.documentElement.setAttribute('data-theme', 'ember'); }
+            var dark = true;
+            try {
+                var mode = localStorage.getItem('sw-mode') || 'system';
+                dark = mode === 'dark' || (mode === 'system' &&
+                    !(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches));
+            } catch (e) { }
+            document.documentElement.setAttribute('data-mode', dark ? 'dark' : 'light');
         })();
     </script>
     <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />

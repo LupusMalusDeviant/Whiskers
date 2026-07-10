@@ -1,5 +1,7 @@
 // Theme persistence + application. The chosen theme key is stored in localStorage and
 // reflected as <html data-theme="..."> so the CSS variable overrides in app.css apply.
+// The dark/light mode preference ("dark" | "light" | "system") is stored separately as
+// 'sw-mode' and reflected as <html data-mode="dark|light"> (resolved, never "system").
 window.swTheme = {
     set: function (key) {
         try { localStorage.setItem('sw-theme', key); } catch (e) { }
@@ -7,6 +9,18 @@ window.swTheme = {
     },
     get: function () {
         try { return localStorage.getItem('sw-theme'); } catch (e) { return null; }
+    },
+    getMode: function () {
+        try { return localStorage.getItem('sw-mode') || 'system'; } catch (e) { return 'system'; }
+    },
+    setMode: function (mode, isDark) {
+        try { localStorage.setItem('sw-mode', mode); } catch (e) { }
+        document.documentElement.setAttribute('data-mode', isDark ? 'dark' : 'light');
+    },
+    // Applies a resolved dark/light value without touching the stored preference
+    // (used when the OS preference changes while mode = "system").
+    applyDark: function (isDark) {
+        document.documentElement.setAttribute('data-mode', isDark ? 'dark' : 'light');
     }
 };
 
