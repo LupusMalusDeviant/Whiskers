@@ -4,6 +4,7 @@ using MudBlazor;
 using Whiskers.Mcp.Tools;
 using Whiskers.Models;
 using Whiskers.Services.Cloud;
+using Whiskers.Services.Cloud.Providers;
 using Whiskers.Services.Hetzner;
 using Whiskers.Services.Hostinger;
 
@@ -17,9 +18,11 @@ namespace Whiskers.Modules.CloudControl;
 /// <c>CloudTools</c>/<c>HetznerTools</c>, both dedicated, + <c>CloudControlService</c> itself), so no no-op
 /// defaults are needed; the `/cloud` page uses the thin-wrapper + <c>ModuleGuard</c> pattern instead.
 ///
-/// <b>Deferred (§3.6 assigns C10):</b> the <c>ICloudProvider</c> seam (making Hetzner/Hostinger pluggable
-/// providers behind a common contract, like <c>IVpnProvider</c>) is a separate refactor of destructive
-/// power/snapshot dispatch — not bundled here; this PR keeps the extraction byte-identical.</summary>
+/// <b>C10 done (§3.6):</b> Hetzner/Hostinger are now pluggable <see cref="Providers.ICloudProvider"/>
+/// implementations (multi-registration, selected by <c>ServerConfig.CloudProvider</c>) behind
+/// <c>CloudControlService</c>, with <see cref="Providers.IHetznerExtensions"/> for the Hetzner-only tools and
+/// CancellationTokens threaded through the clients (OPT-12). The enum stays the persisted key, so servers.json
+/// is unchanged; see <c>Services/Cloud/Providers/</c>.</summary>
 public sealed class CloudControlModule : IWhiskersModule
 {
     public string Id => "cloud-control";
@@ -50,6 +53,15 @@ public sealed class CloudControlModule : IWhiskersModule
             {
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5)
             });
+
+        // C10: provider seam. The API clients above stay as the HTTP layer; each provider adapts one to
+        // ICloudProvider (multi-registration → CloudControlService dispatches by ServerConfig.CloudProvider,
+        // no hard enum-switch). The Hetzner provider also serves IHetznerExtensions (same instance) for the
+        // Hetzner-only MCP tools (rescue, backups, snapshot management).
+        services.AddSingleton<HetznerCloudProvider>();
+        services.AddSingleton<ICloudProvider>(sp => sp.GetRequiredService<HetznerCloudProvider>());
+        services.AddSingleton<IHetznerExtensions>(sp => sp.GetRequiredService<HetznerCloudProvider>());
+        services.AddSingleton<ICloudProvider, HostingerCloudProvider>();
         services.AddSingleton<ICloudControlService, CloudControlService>();
     }
 }

@@ -1,7 +1,7 @@
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 using Whiskers.Services.Cloud;
-using Whiskers.Services.Hetzner;
+using Whiskers.Services.Cloud.Providers;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.AuditLog;
 using Whiskers.Models.Hetzner;
@@ -20,7 +20,7 @@ public class HetznerTools
     [McpServerTool, Description("Enable Hetzner rescue mode on a server (by Whiskers name or id), then it must be reset to boot into rescue. Returns the temporary root password. Recovery when the OS won't boot.")]
     public static async Task<string> HetznerEnableRescue(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner, IAuditLogService auditLog,
+        ICloudControlService cloud, IHetznerExtensions hetzner, IAuditLogService auditLog,
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_rescue");
@@ -42,7 +42,7 @@ public class HetznerTools
     [McpServerTool, Description("Disable Hetzner rescue mode on a server (by Whiskers name or id).")]
     public static async Task<string> HetznerDisableRescue(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner,
+        ICloudControlService cloud, IHetznerExtensions hetzner,
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_disable_rescue");
@@ -57,7 +57,7 @@ public class HetznerTools
     [McpServerTool, Description("Enable Hetzner automated daily backups for a server (by Whiskers name or id). Adds ~20% to the server price.")]
     public static async Task<string> HetznerEnableBackups(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner,
+        ICloudControlService cloud, IHetznerExtensions hetzner,
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_backups");
@@ -72,7 +72,7 @@ public class HetznerTools
     [McpServerTool, Description("Disable Hetzner automated backups for a server (by Whiskers name or id). Existing backups are deleted.")]
     public static async Task<string> HetznerDisableBackups(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner,
+        ICloudControlService cloud, IHetznerExtensions hetzner,
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_disable_backups");
@@ -87,7 +87,7 @@ public class HetznerTools
     [McpServerTool, Description("Change (resize) a Hetzner server's type, e.g. 'cx32' (by Whiskers name or id). The server must be powered off first. upgradeDisk=true also grows the disk (then a downgrade is no longer possible).")]
     public static async Task<string> HetznerChangeServerType(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner,
+        ICloudControlService cloud, IHetznerExtensions hetzner,
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server,
         [Description("Target server type name, e.g. cx32")] string serverType,
         [Description("Also upgrade the disk (irreversible). Default false.")] bool upgradeDisk = false)
@@ -107,7 +107,7 @@ public class HetznerTools
     [McpServerTool, Description("List Hetzner snapshots in the account of a given Whiskers server (by name or id).")]
     public static async Task<string> HetznerListSnapshots(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner,
+        ICloudControlService cloud, IHetznerExtensions hetzner,
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_list_snapshots");
@@ -125,7 +125,7 @@ public class HetznerTools
     [McpServerTool, Description("Delete a Hetzner snapshot/image by its numeric ID, in the account of a given Whiskers server. Irreversible.")]
     public static async Task<string> HetznerDeleteSnapshot(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerService hetzner,
+        ICloudControlService cloud, IHetznerExtensions hetzner,
         [Description("Whiskers server name or id (must be a Hetzner server, selects the account)")] string server,
         [Description("Snapshot/image numeric ID")] long imageId)
     {

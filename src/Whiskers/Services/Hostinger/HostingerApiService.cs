@@ -7,7 +7,8 @@ namespace Whiskers.Services.Hostinger;
 /// <summary>
 /// Client for the Hostinger VPS API (https://developers.hostinger.com/api/vps/v1). Bearer token per
 /// call (per-server credentials). List/get responses are parsed tolerantly: Hostinger sometimes
-/// wraps payloads in a "data" envelope and sometimes returns them bare.
+/// wraps payloads in a "data" envelope and sometimes returns them bare. Every call takes a
+/// CancellationToken (OPT-12), threaded through to the underlying HttpClient.
 /// </summary>
 public class HostingerApiService : IHostingerService
 {
@@ -40,18 +41,18 @@ public class HostingerApiService : IHostingerService
         return req;
     }
 
-    private async Task<string> SendRawAsync(string token, HttpMethod method, string path)
+    private async Task<string> SendRawAsync(string token, HttpMethod method, string path, CancellationToken ct = default)
     {
         using var req = Build(token, method, path);
-        using var resp = await _http.SendAsync(req);
+        using var resp = await _http.SendAsync(req, ct);
         await EnsureSuccess(resp);
-        return await resp.Content.ReadAsStringAsync();
+        return await resp.Content.ReadAsStringAsync(ct);
     }
 
-    private async Task SendAsync(string token, HttpMethod method, string path)
+    private async Task SendAsync(string token, HttpMethod method, string path, CancellationToken ct = default)
     {
         using var req = Build(token, method, path);
-        using var resp = await _http.SendAsync(req);
+        using var resp = await _http.SendAsync(req, ct);
         await EnsureSuccess(resp);
     }
 
@@ -80,11 +81,11 @@ public class HostingerApiService : IHostingerService
         return root;
     }
 
-    public async Task<bool> TestConnectionAsync(string token)
+    public async Task<bool> TestConnectionAsync(string token, CancellationToken ct = default)
     {
         try
         {
-            await ListVmsAsync(token);
+            await ListVmsAsync(token, ct);
             return true;
         }
         catch (Exception ex)
@@ -94,9 +95,9 @@ public class HostingerApiService : IHostingerService
         }
     }
 
-    public async Task<List<HostingerVm>> ListVmsAsync(string token)
+    public async Task<List<HostingerVm>> ListVmsAsync(string token, CancellationToken ct = default)
     {
-        var json = await SendRawAsync(token, HttpMethod.Get, "/virtual-machines");
+        var json = await SendRawAsync(token, HttpMethod.Get, "/virtual-machines", ct);
         if (string.IsNullOrWhiteSpace(json)) return new();
         using var doc = JsonDocument.Parse(json);
         var el = Unwrap(doc);
@@ -104,11 +105,11 @@ public class HostingerApiService : IHostingerService
         return JsonSerializer.Deserialize<List<HostingerVm>>(el.GetRawText(), JsonOptions) ?? new();
     }
 
-    public async Task<HostingerVm?> GetVmAsync(string token, long id)
+    public async Task<HostingerVm?> GetVmAsync(string token, long id, CancellationToken ct = default)
     {
         try
         {
-            var json = await SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}");
+            var json = await SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}", ct);
             if (string.IsNullOrWhiteSpace(json)) return null;
             using var doc = JsonDocument.Parse(json);
             return JsonSerializer.Deserialize<HostingerVm>(Unwrap(doc).GetRawText(), JsonOptions);
@@ -119,15 +120,15 @@ public class HostingerApiService : IHostingerService
         }
     }
 
-    public Task StartAsync(string token, long id) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/start");
-    public Task StopAsync(string token, long id) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/stop");
-    public Task RestartAsync(string token, long id) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/restart");
+    public Task StartAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/start", ct);
+    public Task StopAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/stop", ct);
+    public Task RestartAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/restart", ct);
 
-    public async Task<HostingerSnapshot?> GetSnapshotAsync(string token, long id)
+    public async Task<HostingerSnapshot?> GetSnapshotAsync(string token, long id, CancellationToken ct = default)
     {
         try
         {
-            var json = await SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}/snapshot");
+            var json = await SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}/snapshot", ct);
             if (string.IsNullOrWhiteSpace(json)) return null;
             using var doc = JsonDocument.Parse(json);
             return JsonSerializer.Deserialize<HostingerSnapshot>(Unwrap(doc).GetRawText(), JsonOptions);
@@ -138,10 +139,10 @@ public class HostingerApiService : IHostingerService
         }
     }
 
-    public Task CreateSnapshotAsync(string token, long id) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/snapshot");
-    public Task DeleteSnapshotAsync(string token, long id) => SendAsync(token, HttpMethod.Delete, $"/virtual-machines/{id}/snapshot");
+    public Task CreateSnapshotAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/snapshot", ct);
+    public Task DeleteSnapshotAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Delete, $"/virtual-machines/{id}/snapshot", ct);
 
-    public Task<string> GetMetricsRawAsync(string token, long id)
+    public Task<string> GetMetricsRawAsync(string token, long id, CancellationToken ct = default)
     {
         // date_from/date_to are REQUIRED by the Hostinger metrics endpoint; without them the API rejects
         // the request and every metrics call fails. Default to the last 24h.
@@ -149,6 +150,6 @@ public class HostingerApiService : IHostingerService
         var from = to.AddHours(-24);
         var q = $"?date_from={Uri.EscapeDataString(from.ToString("yyyy-MM-ddTHH:mm:ssZ"))}"
               + $"&date_to={Uri.EscapeDataString(to.ToString("yyyy-MM-ddTHH:mm:ssZ"))}";
-        return SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}/metrics{q}");
+        return SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}/metrics{q}", ct);
     }
 }

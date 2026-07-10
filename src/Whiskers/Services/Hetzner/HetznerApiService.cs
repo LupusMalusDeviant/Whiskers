@@ -9,7 +9,8 @@ namespace Whiskers.Services.Hetzner;
 /// <summary>
 /// Client for the Hetzner Cloud API (https://api.hetzner.cloud/v1). The token is supplied per call
 /// (credentials are per-server), so each request carries its own Authorization header — no shared
-/// mutable state on the HttpClient, safe for concurrent calls with different tokens.
+/// mutable state on the HttpClient, safe for concurrent calls with different tokens. Every call takes a
+/// CancellationToken (OPT-12), threaded through to the underlying HttpClient.SendAsync.
 /// </summary>
 public class HetznerApiService : IHetznerService
 {
@@ -31,20 +32,20 @@ public class HetznerApiService : IHetznerService
         _logger = logger;
     }
 
-    private async Task<T> SendAsync<T>(string token, HttpMethod method, string path, object? body = null) where T : new()
+    private async Task<T> SendAsync<T>(string token, HttpMethod method, string path, object? body = null, CancellationToken ct = default) where T : new()
     {
         using var req = BuildRequest(token, method, path, body);
-        using var resp = await _http.SendAsync(req);
+        using var resp = await _http.SendAsync(req, ct);
         await EnsureSuccess(resp);
-        var json = await resp.Content.ReadAsStringAsync();
+        var json = await resp.Content.ReadAsStringAsync(ct);
         if (string.IsNullOrWhiteSpace(json)) return new T();
         return JsonSerializer.Deserialize<T>(json, JsonOptions) ?? new T();
     }
 
-    private async Task SendAsync(string token, HttpMethod method, string path, object? body = null)
+    private async Task SendAsync(string token, HttpMethod method, string path, object? body = null, CancellationToken ct = default)
     {
         using var req = BuildRequest(token, method, path, body);
-        using var resp = await _http.SendAsync(req);
+        using var resp = await _http.SendAsync(req, ct);
         await EnsureSuccess(resp);
     }
 
@@ -85,14 +86,14 @@ public class HetznerApiService : IHetznerService
     // account with >50 servers/snapshots/types is returned in full — a partial list would let the cloud
     // name-fallback resolver miss existing servers. Bounded by a sane page cap.
     private async Task<List<TItem>> ListAllPagesAsync<TResponse, TItem>(
-        string token, string basePath, Func<TResponse, List<TItem>> select) where TResponse : new()
+        string token, string basePath, Func<TResponse, List<TItem>> select, CancellationToken ct = default) where TResponse : new()
     {
         const int perPage = 50;
         var all = new List<TItem>();
         for (var page = 1; page <= 100; page++)
         {
             var sep = basePath.Contains('?') ? "&" : "?";
-            var resp = await SendAsync<TResponse>(token, HttpMethod.Get, $"{basePath}{sep}page={page}&per_page={perPage}");
+            var resp = await SendAsync<TResponse>(token, HttpMethod.Get, $"{basePath}{sep}page={page}&per_page={perPage}", ct: ct);
             var items = select(resp);
             all.AddRange(items);
             if (items.Count < perPage) break;
@@ -100,11 +101,11 @@ public class HetznerApiService : IHetznerService
         return all;
     }
 
-    public async Task<bool> TestConnectionAsync(string token)
+    public async Task<bool> TestConnectionAsync(string token, CancellationToken ct = default)
     {
         try
         {
-            await SendAsync<HetznerServersResponse>(token, HttpMethod.Get, "/servers?per_page=1");
+            await SendAsync<HetznerServersResponse>(token, HttpMethod.Get, "/servers?per_page=1", ct: ct);
             return true;
         }
         catch (Exception ex)
@@ -114,14 +115,14 @@ public class HetznerApiService : IHetznerService
         }
     }
 
-    public Task<List<HetznerServer>> ListServersAsync(string token)
-        => ListAllPagesAsync<HetznerServersResponse, HetznerServer>(token, "/servers?sort=name", r => r.Servers);
+    public Task<List<HetznerServer>> ListServersAsync(string token, CancellationToken ct = default)
+        => ListAllPagesAsync<HetznerServersResponse, HetznerServer>(token, "/servers?sort=name", r => r.Servers, ct);
 
-    public async Task<HetznerServer?> GetServerAsync(string token, long id)
+    public async Task<HetznerServer?> GetServerAsync(string token, long id, CancellationToken ct = default)
     {
         try
         {
-            return (await SendAsync<HetznerServerResponse>(token, HttpMethod.Get, $"/servers/{id}")).Server;
+            return (await SendAsync<HetznerServerResponse>(token, HttpMethod.Get, $"/servers/{id}", ct: ct)).Server;
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -129,29 +130,29 @@ public class HetznerApiService : IHetznerService
         }
     }
 
-    public async Task<HetznerAction?> PowerOnAsync(string token, long id) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/poweron")).Action;
-    public async Task<HetznerAction?> ShutdownAsync(string token, long id) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/shutdown")).Action;
-    public async Task<HetznerAction?> RebootAsync(string token, long id) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/reboot")).Action;
-    public async Task<HetznerAction?> ResetAsync(string token, long id) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/reset")).Action;
+    public async Task<HetznerAction?> PowerOnAsync(string token, long id, CancellationToken ct = default) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/poweron", ct: ct)).Action;
+    public async Task<HetznerAction?> ShutdownAsync(string token, long id, CancellationToken ct = default) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/shutdown", ct: ct)).Action;
+    public async Task<HetznerAction?> RebootAsync(string token, long id, CancellationToken ct = default) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/reboot", ct: ct)).Action;
+    public async Task<HetznerAction?> ResetAsync(string token, long id, CancellationToken ct = default) => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/reset", ct: ct)).Action;
 
-    public async Task<HetznerActionResponse?> EnableRescueAsync(string token, long id)
-        => await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/enable_rescue", new { type = "linux64" });
+    public async Task<HetznerActionResponse?> EnableRescueAsync(string token, long id, CancellationToken ct = default)
+        => await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/enable_rescue", new { type = "linux64" }, ct);
 
-    public async Task<HetznerAction?> DisableRescueAsync(string token, long id)
-        => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/disable_rescue")).Action;
+    public async Task<HetznerAction?> DisableRescueAsync(string token, long id, CancellationToken ct = default)
+        => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/disable_rescue", ct: ct)).Action;
 
-    public async Task<HetznerActionResponse?> CreateSnapshotAsync(string token, long id, string? description)
+    public async Task<HetznerActionResponse?> CreateSnapshotAsync(string token, long id, string? description, CancellationToken ct = default)
         => await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/create_image",
-            new { description = string.IsNullOrWhiteSpace(description) ? null : description, type = "snapshot" });
+            new { description = string.IsNullOrWhiteSpace(description) ? null : description, type = "snapshot" }, ct);
 
-    public Task<List<HetznerImage>> ListSnapshotsAsync(string token)
-        => ListAllPagesAsync<HetznerImagesResponse, HetznerImage>(token, "/images?type=snapshot&sort=created:desc", r => r.Images);
+    public Task<List<HetznerImage>> ListSnapshotsAsync(string token, CancellationToken ct = default)
+        => ListAllPagesAsync<HetznerImagesResponse, HetznerImage>(token, "/images?type=snapshot&sort=created:desc", r => r.Images, ct);
 
-    public async Task<HetznerImage?> GetImageAsync(string token, long imageId)
+    public async Task<HetznerImage?> GetImageAsync(string token, long imageId, CancellationToken ct = default)
     {
         try
         {
-            return (await SendAsync<HetznerImageResponse>(token, HttpMethod.Get, $"/images/{imageId}")).Image;
+            return (await SendAsync<HetznerImageResponse>(token, HttpMethod.Get, $"/images/{imageId}", ct: ct)).Image;
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -159,28 +160,28 @@ public class HetznerApiService : IHetznerService
         }
     }
 
-    public async Task DeleteImageAsync(string token, long imageId)
-        => await SendAsync(token, HttpMethod.Delete, $"/images/{imageId}");
+    public async Task DeleteImageAsync(string token, long imageId, CancellationToken ct = default)
+        => await SendAsync(token, HttpMethod.Delete, $"/images/{imageId}", ct: ct);
 
-    public async Task<HetznerAction?> EnableBackupsAsync(string token, long id)
-        => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/enable_backup")).Action;
+    public async Task<HetznerAction?> EnableBackupsAsync(string token, long id, CancellationToken ct = default)
+        => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/enable_backup", ct: ct)).Action;
 
-    public async Task<HetznerAction?> DisableBackupsAsync(string token, long id)
-        => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/disable_backup")).Action;
+    public async Task<HetznerAction?> DisableBackupsAsync(string token, long id, CancellationToken ct = default)
+        => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/disable_backup", ct: ct)).Action;
 
-    public Task<List<HetznerServerType>> ListServerTypesAsync(string token)
-        => ListAllPagesAsync<HetznerServerTypesResponse, HetznerServerType>(token, "/server_types", r => r.ServerTypes);
+    public Task<List<HetznerServerType>> ListServerTypesAsync(string token, CancellationToken ct = default)
+        => ListAllPagesAsync<HetznerServerTypesResponse, HetznerServerType>(token, "/server_types", r => r.ServerTypes, ct);
 
-    public async Task<HetznerAction?> ChangeServerTypeAsync(string token, long id, string serverType, bool upgradeDisk)
+    public async Task<HetznerAction?> ChangeServerTypeAsync(string token, long id, string serverType, bool upgradeDisk, CancellationToken ct = default)
         => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/change_type",
-            new { server_type = serverType, upgrade_disk = upgradeDisk })).Action;
+            new { server_type = serverType, upgrade_disk = upgradeDisk }, ct)).Action;
 
-    public async Task<HetznerMetrics?> GetMetricsAsync(string token, long id, string type, DateTime start, DateTime end, int? step = null)
+    public async Task<HetznerMetrics?> GetMetricsAsync(string token, long id, string type, DateTime start, DateTime end, int? step = null, CancellationToken ct = default)
     {
         var s = start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
         var e = end.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
         var query = $"?type={Uri.EscapeDataString(type)}&start={Uri.EscapeDataString(s)}&end={Uri.EscapeDataString(e)}";
         if (step is > 0) query += $"&step={step}";
-        return (await SendAsync<HetznerMetricsResponse>(token, HttpMethod.Get, $"/servers/{id}/metrics{query}")).Metrics;
+        return (await SendAsync<HetznerMetricsResponse>(token, HttpMethod.Get, $"/servers/{id}/metrics{query}", ct: ct)).Metrics;
     }
 }
