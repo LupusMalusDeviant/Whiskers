@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject IJSRuntime JS
+@inject Whiskers.Modules.IModuleRegistry ModuleRegistry
 
 <MudThemeProvider Theme="_theme" IsDarkMode="true" />
 <MudPopoverProvider />
@@ -60,7 +61,13 @@
         </div>
     </MudMainContent>
 
-    <Whiskers.Components.Shared.AiChat />
+    @* The global AI-chat advisor widget belongs to the Agent module — render it only when that module is
+       enabled, so disabling the agent (Features:agent:Enabled=false) removes it app-wide instead of throwing
+       on every page from its @inject of the agent services. *@
+    @if (ModuleRegistry.IsEnabled("agent"))
+    {
+        <Whiskers.Components.Shared.AiChat />
+    }
 </MudLayout>
 
 @code {

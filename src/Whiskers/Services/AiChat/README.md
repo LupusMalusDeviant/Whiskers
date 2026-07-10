@@ -11,6 +11,13 @@ The **read-only advisor chat** in the UI, an assistant that answers questions an
 
 **Notes:** history is saved atomically (tmp + rename); the seed sent to the provider drops leading assistant turns and keeps only user/assistant messages, so Anthropic (which requires a user-first, alternating transcript) doesn't 400 on a truncated window.
 
+## Wiring
+
+Registered by the **Agent module** ([`../../Modules/Agent/`](../../Modules/Agent/), RoadToSAP Phase 1 §3.8), not
+inline in `Program.cs`. The global `<AiChat/>` widget is gated in `MainLayout` with
+`@if (ModuleRegistry.IsEnabled("agent"))`, so `Features:agent:Enabled=false` removes the advisor app-wide (and
+its `Settings.razor` panel) instead of throwing on every page.
+
 ## Related
 
 - Config: `AICHAT_*` in [`../../../.env.example`](../../../.env.example)

@@ -281,7 +281,9 @@ else
     </MudExpansionPanel>
     }
 
-    @* AI advisor chat *@
+    @* AI advisor chat — belongs to the Agent module (RoadToSAP Phase 1 §3.8); hidden when it's disabled. *@
+    @if (ModuleRegistry.IsEnabled("agent"))
+    {
     <MudExpansionPanel Text="AI-Chat (Berater)" Icon="@Icons.Material.Filled.Chat">
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
             Schreibgeschützter Berater-Chat (keine Aktionen). Der API-Key wird im Klartext unter /app/data gespeichert — wie bei servers.json.
@@ -309,6 +311,7 @@ else
         <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveAiChat"
                    StartIcon="@Icons.Material.Filled.Save" Class="mt-3">AI-Chat speichern</MudButton>
     </MudExpansionPanel>
+    }
 
     @* Restart-only / environment settings — read-only (set via .env, applied on restart) *@
     <MudExpansionPanel Text="Umgebung (Neustart erforderlich)" Icon="@Icons.Material.Filled.Dns">

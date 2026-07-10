@@ -41,14 +41,20 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
   dedicated `CveTools` moves with it; no-ops for the Core Dashboard/ContainerDetail/Settings consumers; the C8
   service-locator removal is deferred), and ✅ **CloudControl** (§3.6 — clean extraction, no no-ops; C10
   `ICloudProvider` seam deferred), and ✅ **ImageUpdate/AutoUpdate** (§3.7 — one module for both; no-op store
-  for the Core Dashboard + `ContainerTools` consumers; C12 rollback deferred) are done. **Last §3 module:**
-  Agent+AiChat (§3.8, +the `AgentToolRegistry`→`ModuleRegistry` change). Then the §6 DoD items. Each module PR moves its registrations here verbatim, wraps its
-  pages in `ModuleGuard` / gates its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false`
+  for the Core Dashboard + `ContainerTools` consumers; C12 rollback deferred) are done. ✅ **Agent+AiChat**
+  (§3.8, the last and largest §3 module — the acting agent, guardrails, approvals, the AI-chat advisor + AI
+  triggers; a Core `NoopAiTriggerDispatcher` for the notification composite's lazy dispatch, the global
+  `<AiChat/>` widget gated in `MainLayout`, and `agent-history` kept in Core as MCP-call observability; the
+  `AgentToolRegistry`→`ModuleRegistry` change stays deferred) is done — **all §3 modules are now extracted.**
+  Each module PR moved its registrations here verbatim, wrapped its
+  pages in `ModuleGuard` / gated its `Settings.razor` section when off, and proved `Features:<id>:Enabled=false`
   boots cleanly. What remains in the transitional `AllInOnePseudoModule` is the
-  lean Core surface (dashboard, health, CVE, graph, diff, notifications feed, audit log, compose editor,
-  servers/cloud/networks, agent/guardrails/approvals/ai-triggers, settings, help) plus the mixed MCP tool
+  lean Core surface (dashboard, health, graph, diff, notifications feed, audit log, compose editor,
+  servers/networks, agent-history, settings, help) plus the mixed MCP tool
   classes (`ContainerTools`, `ServerTools`) — these are Core, not pending extraction.
-- A `docs/modules/` index + an `ARCHITECTURE.md` "Module System" chapter (RoadToSAP §6 DoD).
+- **§6 DoD (in progress):** a `docs/modules/` index ✅ + an `ARCHITECTURE.md` "Module System" chapter ✅ + an
+  all-on/all-off/only-core matrix test ✅ + a `Modules/HelloWorld` example ✅; still open — `Program.cs` <150
+  lines and a full-app boot-matrix test (both follow the agent extraction).
 - **F2 (i18n):** each `NavItem.LocKey` (a German label today) becomes a real `IStringLocalizer` key.
 
 See RoadToSAP §2–3 for the full design and phasing.

@@ -35,8 +35,8 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
     {
         typeof(ContainerTools), typeof(ServerTools), typeof(MonitoringTools),
         typeof(NetworkTools), typeof(DatabaseTools),
-        typeof(AgentTools),
-        // Scheduler/Log/Cve tools → their modules; Cloud+Hetzner tools → Modules/CloudControl (RoadToSAP Phase 1).
+        // Scheduler/Log/Cve tools → their modules; Cloud+Hetzner tools → Modules/CloudControl;
+        // AgentTools (instruct_agent) → Modules/Agent (RoadToSAP Phase 1).
     };
 
     // Roles are permissive (Viewer): today's nav shows every link to everyone and gates on the page
@@ -62,12 +62,10 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         new NavItem("networks",    "Netzwerke",          Icons.Material.Filled.Hub,          "Infrastruktur",    AppRole.Viewer, 230),
         // "backups" extracted to Modules/VolumeBackups (RoadToSAP Phase 1).
 
-        // Automatisierung  ("tasks" → Modules/Scheduler, "webhooks" → Modules/Webhooks — RoadToSAP Phase 1)
+        // Automatisierung  ("tasks" → Modules/Scheduler, "webhooks" → Modules/Webhooks; agent + guardrails +
+        // approvals + ai-triggers → Modules/Agent — RoadToSAP Phase 1). "agent-history" stays Core: it reads
+        // the Core IMcpCallLogStore (MCP-call observability), which is independent of the acting agent.
         new NavItem("agent-history", "Agent-History",    Icons.Material.Filled.Policy,       "Automatisierung",  AppRole.Viewer, 330),
-        new NavItem("agent",       "Agent",              Icons.Material.Filled.SmartToy,     "Automatisierung",  AppRole.Viewer, 340),
-        new NavItem("guardrails",  "Guardrails",         Icons.Material.Filled.Shield,       "Automatisierung",  AppRole.Viewer, 350),
-        new NavItem("approvals",   "Freigaben",          Icons.Material.Filled.Approval,     "Automatisierung",  AppRole.Viewer, 360),
-        new NavItem("ai-triggers", "AI-Trigger",         Icons.Material.Filled.Bolt,         "Automatisierung",  AppRole.Viewer, 370),
 
         // Top-level (no group)
         new NavItem("settings",    "Einstellungen",      Icons.Material.Filled.Settings,     "",                 AppRole.Viewer, 900),

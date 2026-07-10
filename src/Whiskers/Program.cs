@@ -109,6 +109,11 @@ builder.Services.AddSingleton<Whiskers.Services.Cve.ICveAgeStore, Whiskers.Servi
 // module registers the real store in the loop below and wins. (RoadToSAP §2.1)
 builder.Services.AddSingleton<Whiskers.Services.ImageUpdate.IImageUpdateStore, Whiskers.Services.ImageUpdate.NoopImageUpdateStore>();
 
+// And for AI triggers: the notification composite (Modules/Notifications) lazily resolves IAiTriggerDispatcher
+// on every event (to avoid a DI cycle), so it needs a default when the Agent module is off. The Agent module
+// registers the real dispatcher in the loop below and wins. (RoadToSAP §2.1 / §3.8)
+builder.Services.AddSingleton<Whiskers.Services.Agent.Triggers.IAiTriggerDispatcher, Whiskers.Services.Agent.Triggers.NoopAiTriggerDispatcher>();
+
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
 // nav registrations further down read `modules`. Each enabled module's ConfigureServices moves its former
@@ -238,51 +243,10 @@ builder.Services.AddHostedService<Whiskers.Services.Vpn.VpnBootstrapHostedServic
 // Log search + monitor (ILogSearchService, hosted LogMonitorService) moved to Modules/LogMonitor
 // (RoadToSAP Phase 1). Core keeps a NoopLogMonitorService default (registered above) for when it's off.
 
-// AI Chat
-builder.Services.Configure<Whiskers.Configuration.AiChatSettings>(builder.Configuration.GetSection(Whiskers.Configuration.AiChatSettings.SectionName));
-builder.Services.AddHttpClient<Whiskers.Services.AiChat.AiChatService>();
-builder.Services.AddSingleton<Whiskers.Services.AiChat.AiChatService>();
-builder.Services.AddSingleton<Whiskers.Services.AiChat.IAiChatService>(sp => sp.GetRequiredService<Whiskers.Services.AiChat.AiChatService>());
-builder.Services.AddSingleton<Whiskers.Services.AiChat.IChatHistoryStore, Whiskers.Services.AiChat.ChatHistoryStore>();
-
-// Agent (acting multi-provider agent with inescapable guardrails)
-builder.Services.Configure<Whiskers.Configuration.AgentSettings>(
-    builder.Configuration.GetSection(Whiskers.Configuration.AgentSettings.SectionName));
-builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentToolRegistry,
-    Whiskers.Services.Agent.AgentToolRegistry>();
-// The guardrail engine is stateless → a shared default rule set is enough.
-builder.Services.AddSingleton<Whiskers.Services.Agent.Guardrails.IAgentGuardrailEngine>(
-    Whiskers.Services.Agent.Guardrails.GuardrailEngine.CreateDefault());
-builder.Services.AddSingletonWithInterface<Whiskers.Services.Agent.Guardrails.GuardrailStore, Whiskers.Services.Agent.Guardrails.IGuardrailStore>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Guardrails.IGuardrailRuleCatalog,
-    Whiskers.Services.Agent.Guardrails.GuardrailRuleCatalog>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Providers.IAgentProviderFactory,
-    Whiskers.Services.Agent.Providers.AgentProviderFactory>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentToolCatalog,
-    Whiskers.Services.Agent.AgentToolCatalog>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentToolInvoker,
-    Whiskers.Services.Agent.AgentToolInvoker>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentPrincipalResolver,
-    Whiskers.Services.Agent.AgentPrincipalResolver>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Approvals.IApprovalStore,
-    Whiskers.Services.Agent.Approvals.ApprovalStore>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Approvals.IApprovalCoordinator,
-    Whiskers.Services.Agent.Approvals.ApprovalCoordinator>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Chat.IChatWidgetParser,
-    Whiskers.Services.Agent.Chat.ChatWidgetParser>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentService,
-    Whiskers.Services.Agent.AgentService>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.IClaudeCodeRuntime,
-    Whiskers.Services.Agent.ClaudeCodeRuntime>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentTranscriptStore,
-    Whiskers.Services.Agent.AgentTranscriptStore>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.IAgentSettingsStore,
-    Whiskers.Services.Agent.AgentSettingsStore>();
-
-// AI triggers (autonomous agent runs on events)
-builder.Services.AddSingletonWithInterface<Whiskers.Services.Agent.Triggers.AiTriggerStore, Whiskers.Services.Agent.Triggers.IAiTriggerStore>();
-builder.Services.AddSingleton<Whiskers.Services.Agent.Triggers.IAiTriggerDispatcher,
-    Whiskers.Services.Agent.Triggers.AiTriggerDispatcher>();
+// AI Chat + the acting Agent (multi-provider, inescapable guardrails, approvals) + AI triggers moved to
+// Modules/Agent (RoadToSAP Phase 1 §3.8), incl. the GuardrailStore/AiTriggerStore IInitializable warm-ups.
+// Core keeps a NoopAiTriggerDispatcher default (registered above) for the notification composite when the
+// module is off; the agent-history page stays Core (it reads the Core IMcpCallLogStore, not the agent).
 
 // Audit log
 builder.Services.AddSingleton<Whiskers.Services.AuditLog.IAuditLogService, Whiskers.Services.AuditLog.AuditLogService>();
@@ -468,8 +432,8 @@ builder.Services.AddInitializable<Whiskers.Services.Vault.IVaultService>();     
 builder.Services.AddInitializable<Whiskers.Services.ServerConfig.IServerConfigService>();   // 50
 builder.Services.AddInitializable<Whiskers.Mcp.IMcpApiKeyStore>();                          // 60
 builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>();           // 70
-builder.Services.AddInitializable<Whiskers.Services.Agent.Guardrails.GuardrailStore>();     // 80
-builder.Services.AddInitializable<Whiskers.Services.Agent.Triggers.AiTriggerStore>();       // 90
+// GuardrailStore (80) + AiTriggerStore (90) warm-ups moved to Modules/Agent (RoadToSAP §3.8): the module
+// registers its own AddInitializable when enabled, so they run in Order then and drop out when the agent is off.
 
 // Nav registry from the enabled modules' merged NavItems (modules are discovered near the top of
 // Program.cs, next to where their services and MCP tools are wired).

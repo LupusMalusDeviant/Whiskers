@@ -37,6 +37,14 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 - **Admin-only settings:** persisting the provider settings (`ApiKey` + `SystemPrompt`) requires an Admin editor.
 - **ClaudeCodeRuntime** (stub, not yet wired): `--permission-mode default`, only the guardrailed MCP tools allowed, no MCP-key fallback, temp MCP config is `chmod 600`.
 
+## Wiring
+
+These services are registered by the **Agent module** ([`../../Modules/Agent/`](../../Modules/Agent/), RoadToSAP
+Phase 1 §3.8), not inline in `Program.cs`. `Features:agent:Enabled=false` unregisters the whole surface; Core
+keeps only a [`Triggers/NoopAiTriggerDispatcher`](Triggers/NoopAiTriggerDispatcher.cs) default for the
+notification composite's lazy dispatch. `agent-history` is **not** part of this module — it reads the Core
+`IMcpCallLogStore` (MCP-call observability) and stays Core.
+
 ## Related
 
 - Models: [`../../Models/Agent/`](../../Models/Agent/) (`AgentDtos`, `AgentRuntime`)
