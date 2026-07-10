@@ -1,5 +1,5 @@
+using System.Net;
 using System.Text;
-using System.Text.RegularExpressions;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Docker;
@@ -15,9 +15,15 @@ namespace Whiskers.Services.Onboarding;
 /// into the VictoriaMetrics scrape config, and switches the server to TCP+mTLS + Prometheus metrics.
 ///
 /// Every command runs through <see cref="IHostCommandExecutor"/>: on the NEW host over the SSH
-/// bootstrap connection, and on "local" (the controller host) for step-ca and the scrape config. Progress is
-/// reported as plain strings; the Tailscale login URL is reported with the <see cref="LinkMarker"/>
-/// prefix so the UI can render it as a clickable link.
+/// bootstrap connection, and on "local" (the controller host) for step-ca and the scrape config.
+/// Progress is reported as plain strings; the Tailscale login URL is reported with the
+/// <see cref="LinkMarker"/> prefix so the UI can render it as a clickable link.
+///
+/// W3: the run is tracked per <see cref="OnboardingStep"/> and returns an <see cref="OnboardingResult"/>
+/// with the failed step and an actionable hint. Every step is idempotent (existing installs are
+/// detected and skipped), so a re-run after any failure resumes safely. Command strings are built by
+/// <see cref="OnboardingCommands"/> (unit-tested; user input only ever passes through
+/// <see cref="OnboardingCommands.Slug"/> or base64).
 /// </summary>
 public class OnboardingService : IOnboardingService
 {
@@ -51,38 +57,52 @@ public class OnboardingService : IOnboardingService
         _mtlsCertDir = (dataPaths ?? DataPathOptions.Default).MtlsDir;
     }
 
-    public async Task<bool> OnboardServerAsync(string serverId, IProgress<string> progress, CancellationToken ct = default)
+    public async Task<OnboardingResult> OnboardServerAsync(string serverId, IProgress<string> progress, CancellationToken ct = default)
     {
-        var server = _serverConfig.GetServer(serverId);
-        if (server == null) { progress.Report("❌ Server nicht gefunden."); return false; }
+        var completed = new List<OnboardingStep>();
+        var step = OnboardingStep.Bootstrap;
 
-        var slug = Slug(server.Name);
+        var server = _serverConfig.GetServer(serverId);
+        if (server == null)
+        {
+            progress.Report("❌ Server nicht gefunden.");
+            return OnboardingResult.Fail(completed, step, "Server nicht gefunden.");
+        }
+
+        var slug = OnboardingCommands.Slug(server.Name);
         try
         {
             // 0) Bootstrap reachability ------------------------------------------------------------
+            step = OnboardingStep.Bootstrap;
             progress.Report("① Bootstrap-Verbindung prüfen…");
             await Sh(serverId, "echo ok", TimeSpan.FromSeconds(20), ct);
+            completed.Add(step);
 
             // 1) Install + start Tailscale ---------------------------------------------------------
+            step = OnboardingStep.TailscaleInstall;
             progress.Report("② Tailscale installieren…");
             await Sh(serverId, "command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sudo sh", TimeSpan.FromMinutes(3), ct);
             await ShTry(serverId, "sudo systemctl enable --now tailscaled", TimeSpan.FromSeconds(30), ct);
+            completed.Add(step);
 
             // 2) Bring up Tailscale. If the node is already authenticated (e.g. a re-run after a
-            // failed onboarding), skip the login dance entirely and reuse the existing tailnet IP.
+            // failed onboarding), skip the login dance entirely and reuse the existing tailnet IP —
+            // this is what makes a re-run a RESUME.
+            step = OnboardingStep.TailscaleLogin;
             string? tsIp = null;
             var already = await Sh(serverId, "tailscale status --json 2>/dev/null | grep -m1 '\"BackendState\"'", TimeSpan.FromSeconds(20), ct);
             if (already.Output.Contains("Running"))
             {
                 var ip0 = await Sh(serverId, "tailscale ip -4 2>/dev/null | head -1", TimeSpan.FromSeconds(20), ct);
                 tsIp = string.IsNullOrWhiteSpace(ip0.Output) ? null : ip0.Output.Trim();
+                if (tsIp != null) progress.Report("③ Node ist bereits im Tailnet — Login übersprungen (Resume).");
             }
 
             if (tsIp == null)
             {
                 progress.Report("③ Tailscale starten…");
                 await ShTry(serverId, "sudo systemctl reset-failed ts-up", TimeSpan.FromSeconds(10), ct);
-                await Sh(serverId, $"sudo systemd-run --collect --unit=ts-up tailscale up --accept-dns=false --hostname={slug}", TimeSpan.FromSeconds(20), ct);
+                await Sh(serverId, OnboardingCommands.TailscaleUp(slug), TimeSpan.FromSeconds(20), ct);
 
                 progress.Report("④ Auf Tailscale-Login warten…");
                 var loginUrl = await PollAsync(async () =>
@@ -92,11 +112,15 @@ public class OnboardingService : IOnboardingService
                     return string.IsNullOrEmpty(url) ? null : url;
                 }, attempts: 15, delay: TimeSpan.FromSeconds(3), ct);
 
-                if (loginUrl == null) { progress.Report("❌ Kein Tailscale-Login-Link gefunden (Timeout)."); return false; }
+                if (loginUrl == null)
+                {
+                    progress.Report("❌ Kein Tailscale-Login-Link gefunden (Timeout).");
+                    return Fail(progress, completed, step, "Kein Tailscale-Login-Link gefunden (Timeout).");
+                }
                 progress.Report($"{LinkMarker}{loginUrl}");
                 progress.Report("⏳ Bitte den Link öffnen und den Node im Browser bestätigen…");
 
-                // 3) Wait until the node is authenticated + has an IP ----------------------------------
+                // Wait until the node is authenticated + has an IP
                 tsIp = await PollAsync(async () =>
                 {
                     var st = await Sh(serverId, "tailscale status --json 2>/dev/null | grep -m1 '\"BackendState\"'", TimeSpan.FromSeconds(20), ct);
@@ -106,51 +130,70 @@ public class OnboardingService : IOnboardingService
                     return string.IsNullOrEmpty(v) ? null : v;
                 }, attempts: 100, delay: TimeSpan.FromSeconds(3), ct); // ~5 min for the user to click
 
-                if (tsIp == null) { progress.Report("❌ Node nicht verbunden (Timeout beim Login)."); return false; }
+                if (tsIp == null)
+                {
+                    progress.Report("❌ Node nicht verbunden (Timeout beim Login).");
+                    return Fail(progress, completed, step, "Node nicht verbunden (Timeout beim Login).");
+                }
             }
+
+            // The tailnet IP flows into shell commands and compose files below — accept only a real
+            // IP literal, never arbitrary command output.
+            if (!IPAddress.TryParse(tsIp, out _))
+            {
+                progress.Report($"❌ Unerwartete Tailscale-IP: '{tsIp}'");
+                return Fail(progress, completed, step, $"Unerwartete Tailscale-IP: '{tsIp}'");
+            }
+            completed.Add(step);
             progress.Report($"✅ Mit dem Tailnet verbunden: {tsIp}");
 
-            // 3b) Ensure Docker is present — a fresh VPS may not have it; the telemetry + proxy steps
+            // 3) Ensure Docker is present — a fresh VPS may not have it; the telemetry + proxy steps
             // below all run `docker compose`. Install via the official convenience script if missing.
+            step = OnboardingStep.Docker;
             progress.Report("⑤ Docker sicherstellen…");
             await Sh(serverId, "command -v docker >/dev/null 2>&1 || (curl -fsSL https://get.docker.com | sudo sh)", TimeSpan.FromMinutes(5), ct);
             await ShTry(serverId, "sudo systemctl enable --now docker", TimeSpan.FromSeconds(30), ct);
+            completed.Add(step);
 
             // 4) Deploy node_exporter (mesh-only) on the new host ---------------------------------
+            step = OnboardingStep.NodeExporter;
             progress.Report("⑥ node-exporter deployen…");
-            await WriteFile(serverId, "/opt/telemetry/docker-compose.yml", NodeExporterCompose(tsIp), ct);
+            await WriteFile(serverId, "/opt/telemetry/docker-compose.yml", OnboardingCommands.NodeExporterCompose(tsIp), ct);
             await Sh(serverId, "cd /opt/telemetry && sudo docker compose up -d", TimeSpan.FromMinutes(2), ct);
+            completed.Add(step);
 
             // 5) Issue the per-host server cert from step-ca (on local) ---------------------------
+            step = OnboardingStep.Certificate;
             progress.Report("⑥ Server-Zertifikat ausstellen (step-ca)…");
-            var caPwFile = "/home/step/secrets/password";
-            await Sh("local", $"docker exec {StepCaContainer} step certificate create {slug}-dockerproxy " +
-                $"/home/step/certs/{slug}-server.crt /home/step/secrets/{slug}-server.key " +
-                $"--ca /home/step/certs/intermediate_ca.crt --ca-key /home/step/secrets/intermediate_ca_key " +
-                $"--ca-password-file {caPwFile} --san {tsIp} --san {slug} --not-after 8760h --no-password --insecure --bundle --force",
-                TimeSpan.FromSeconds(60), ct);
+            await Sh("local", OnboardingCommands.CertCreate(StepCaContainer, slug, tsIp), TimeSpan.FromSeconds(60), ct);
 
             var serverCrtB64 = (await Sh("local", $"base64 -w0 /opt/step-ca/certs/{slug}-server.crt", TimeSpan.FromSeconds(20), ct)).Output.Trim();
             var serverKeyB64 = (await Sh("local", $"base64 -w0 /opt/step-ca/secrets/{slug}-server.key", TimeSpan.FromSeconds(20), ct)).Output.Trim();
             // CA bundle = root + intermediate (ghostunnel must complete the chain for the leaf-only .NET client)
             var caBundleB64 = (await Sh("local", "cat /opt/step-ca/certs/root_ca.crt /opt/step-ca/certs/intermediate_ca.crt | base64 -w0", TimeSpan.FromSeconds(20), ct)).Output.Trim();
+            completed.Add(step);
 
             // 6) Deploy socket-proxy + ghostunnel (mTLS) on the new host -------------------------
+            step = OnboardingStep.MtlsProxy;
             progress.Report("⑦ socket-proxy + ghostunnel (mTLS) deployen…");
             await Sh(serverId, "sudo mkdir -p /opt/dockerproxy/certs", TimeSpan.FromSeconds(20), ct);
             await WriteFileB64(serverId, "/opt/dockerproxy/certs/server.crt", serverCrtB64, ct);
             await WriteFileB64(serverId, "/opt/dockerproxy/certs/server.key", serverKeyB64, ct);
             await WriteFileB64(serverId, "/opt/dockerproxy/certs/ca.crt", caBundleB64, ct);
             await Sh(serverId, "sudo chmod 600 /opt/dockerproxy/certs/server.key", TimeSpan.FromSeconds(20), ct);
-            await WriteFile(serverId, "/opt/dockerproxy/docker-compose.yml", DockerProxyCompose(tsIp), ct);
+            await WriteFile(serverId, "/opt/dockerproxy/docker-compose.yml", OnboardingCommands.DockerProxyCompose(tsIp), ct);
             await Sh(serverId, "cd /opt/dockerproxy && sudo docker compose up -d", TimeSpan.FromMinutes(2), ct);
+            completed.Add(step);
 
             // 7) Wire into the VictoriaMetrics scrape config (on local) + reload -----------------
+            step = OnboardingStep.ScrapeConfig;
             progress.Report("⑧ In Scrape-Config eintragen…");
-            await AddScrapeTarget(serverId, tsIp, ct);
+            await Sh("local", OnboardingCommands.AddScrapeTargetCommand(ScrapeFileOnHost, serverId, tsIp), TimeSpan.FromSeconds(20), ct);
             await ShTry("local", $"cd {VmComposeDirOnHost} && docker compose restart victoriametrics", TimeSpan.FromSeconds(30), ct);
+            completed.Add(step);
 
             // 8) Switch the server to TCP + mTLS + Prometheus ------------------------------------
+            step = OnboardingStep.Switchover;
             progress.Report("⑨ Server auf TCP+mTLS umstellen…");
             var vmEndpoint = await ResolveVmEndpoint(ct);
             server.ConnectionType = ConnectionType.TCP;
@@ -163,16 +206,19 @@ public class OnboardingService : IOnboardingService
             server.MetricsSource = MetricsSourceKind.Prometheus;
             server.MetricsEndpoint = vmEndpoint;
             await _serverConfig.UpdateServerAsync(server);
+            completed.Add(step);
 
             // 9) Verify over mTLS -----------------------------------------------------------------
+            step = OnboardingStep.Verify;
             progress.Report("⑩ Verifizieren (mTLS)…");
             await Task.Delay(TimeSpan.FromSeconds(3), ct);
             var info = await _docker.GetServerSystemInfoAsync(serverId);
             if (!info.IsReachable)
             {
                 progress.Report($"⚠️ Onboarding fertig, aber mTLS-Verbindung noch nicht erreichbar: {info.Error}");
-                return false;
+                return Fail(progress, completed, step, info.Error ?? "mTLS-Verbindung nicht erreichbar.");
             }
+            completed.Add(step);
 
             // Onboarding succeeded over mTLS → drop the one-time bootstrap credentials so nothing
             // standing remains: clear the in-memory password and delete the SSH key from disk.
@@ -180,19 +226,26 @@ public class OnboardingService : IOnboardingService
             await _serverConfig.DeleteSshKeyAsync(serverId);
 
             progress.Report($"🎉 Fertig! {server.Name} ist im Mesh, läuft über mTLS ({info.ContainersRunning}/{info.ContainersTotal} Container, {info.OperatingSystem}). SSH-Bootstrap-Key + Passwort wurden entfernt — SSH wird nicht mehr benötigt.");
-            return true;
+            return OnboardingResult.Ok(completed);
         }
         catch (OperationCanceledException)
         {
-            progress.Report("⏹️ Abgebrochen.");
-            return false;
+            progress.Report("⏹️ Abgebrochen. Erneutes Starten setzt am unterbrochenen Schritt wieder auf (alle Schritte sind idempotent).");
+            return OnboardingResult.Fail(completed, step, "Abgebrochen.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Onboarding failed for {ServerId}", serverId);
-            progress.Report($"❌ Fehler: {ex.Message}");
-            return false;
+            _logger.LogError(ex, "Onboarding failed for {ServerId} at step {Step}", serverId, step);
+            return Fail(progress, completed, step, ex.Message);
         }
+    }
+
+    /// <summary>Reports the per-step hint + technical detail and builds the failure result.</summary>
+    private static OnboardingResult Fail(IProgress<string> progress, List<OnboardingStep> completed, OnboardingStep step, string detail)
+    {
+        progress.Report($"❌ {OnboardingResult.Hint(step)}");
+        progress.Report("↻ Erneutes Starten des Onboardings ist gefahrlos — abgeschlossene Schritte werden erkannt und übersprungen.");
+        return OnboardingResult.Fail(completed, step, $"{OnboardingResult.Hint(step)} (Details: {Trunc(detail)})");
     }
 
     // ---- helpers -------------------------------------------------------------------------------
@@ -216,10 +269,7 @@ public class OnboardingService : IOnboardingService
     }
 
     private async Task WriteFileB64(string serverId, string path, string b64, CancellationToken ct)
-    {
-        var dir = path[..path.LastIndexOf('/')];
-        await Sh(serverId, $"sudo mkdir -p {dir} && echo {b64} | base64 -d | sudo tee {path} >/dev/null", TimeSpan.FromSeconds(30), ct);
-    }
+        => await Sh(serverId, OnboardingCommands.WriteFileB64(path, b64), TimeSpan.FromSeconds(30), ct);
 
     private static async Task<T?> PollAsync<T>(Func<Task<T?>> probe, int attempts, TimeSpan delay, CancellationToken ct) where T : class
     {
@@ -230,31 +280,6 @@ public class OnboardingService : IOnboardingService
             await Task.Delay(delay, ct);
         }
         return null;
-    }
-
-    // Regenerate-safe append: add this host's node target to the scrape config if absent.
-    private async Task AddScrapeTarget(string serverId, string tsIp, CancellationToken ct)
-    {
-        var py =
-            "import sys\n" +
-            $"f='{ScrapeFileOnHost}'\n" +
-            "import re\n" +
-            "s=open(f).read()\n" +
-            $"ip='{tsIp}'; sid='{serverId}'\n" +
-            "if ip in s:\n    print('already present'); sys.exit(0)\n" +
-            "lines=s.rstrip().split(chr(10))\n" +
-            "out=[]\n" +
-            "ins=False\n" +
-            "for ln in lines:\n" +
-            "    out.append(ln)\n" +
-            "    if not ins and ln.strip()=='static_configs:':\n" +
-            "        out.append(\"      - targets: ['%s:9100']\" % ip)\n" +
-            "        out.append(\"        labels: { server: '%s' }\" % sid)\n" +
-            "        ins=True\n" +
-            "open(f,'w').write(chr(10).join(out)+chr(10))\n" +
-            "print('added' if ins else 'no static_configs anchor found')\n";
-        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(py));
-        await Sh("local", $"echo {b64} | base64 -d | python3 -", TimeSpan.FromSeconds(20), ct);
     }
 
     private async Task<string> ResolveVmEndpoint(CancellationToken ct)
@@ -270,71 +295,6 @@ public class OnboardingService : IOnboardingService
         return "http://127.0.0.1:8428";
     }
 
-    private static string Slug(string name)
-    {
-        var s = Regex.Replace(name.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
-        return string.IsNullOrEmpty(s) ? "server" : s;
-    }
-
     private static string Trunc(string? s, int max = 400)
         => string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
-
-    private static string NodeExporterCompose(string tsIp) =>
-$@"services:
-  node-exporter:
-    image: quay.io/prometheus/node-exporter:v1.8.2
-    container_name: node-exporter
-    restart: unless-stopped
-    network_mode: host
-    pid: host
-    command:
-      - '--path.rootfs=/host'
-      - '--web.listen-address={tsIp}:9100'
-    volumes:
-      - '/:/host:ro,rslave'
-";
-
-    private static string DockerProxyCompose(string tsIp) =>
-$@"services:
-  socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
-    container_name: socket-proxy
-    restart: unless-stopped
-    environment:
-      CONTAINERS: 1
-      IMAGES: 1
-      NETWORKS: 1
-      VOLUMES: 1
-      INFO: 1
-      VERSION: 1
-      POST: 1
-      EXEC: 0
-      SWARM: 0
-      SECRETS: 0
-      CONFIGS: 0
-      PLUGINS: 0
-      SYSTEM: 0
-      AUTH: 0
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-  ghostunnel:
-    image: ghostunnel/ghostunnel:v1.8.2
-    container_name: ghostunnel
-    restart: unless-stopped
-    command:
-      - server
-      - --listen=0.0.0.0:2376
-      - --target=socket-proxy:2375
-      - --unsafe-target
-      - --cert=/certs/server.crt
-      - --key=/certs/server.key
-      - --cacert=/certs/ca.crt
-      - --allow-cn=serverwatch-client
-    volumes:
-      - /opt/dockerproxy/certs:/certs:ro
-    ports:
-      - '{tsIp}:2376:2376'
-    depends_on:
-      - socket-proxy
-";
 }

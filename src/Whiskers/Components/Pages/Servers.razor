@@ -7,6 +7,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.Onboarding.IOnboardingService Onboarding
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject NavigationManager Nav
 
 <PageTitle>Server - Whiskers</PageTitle>
 
@@ -231,8 +232,20 @@
                     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
                 }
             </MudPaper>
+            @if (!_onboardBusy && _onboardResult is { Success: false })
+            {
+                <MudAlert Severity="Severity.Warning" Class="mt-3">
+                    <strong>Fehlgeschlagen bei Schritt „@_onboardResult.FailedStep":</strong> @_onboardResult.Error
+                    <br />Alle Schritte sind idempotent — „Erneut versuchen" setzt am fehlgeschlagenen Schritt wieder auf.
+                </MudAlert>
+            }
         </DialogContent>
         <DialogActions>
+            @if (!_onboardBusy && _onboardResult is { Success: false } && _onboardingServer != null)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Replay"
+                           OnClick="@(() => StartOnboarding(_onboardingServer, skipPreflight: true))">Erneut versuchen</MudButton>
+            }
             <MudButton OnClick="@(() => { if (!_onboardBusy) _onboarding = false; })" Disabled="_onboardBusy">
                 @(_onboardBusy ? "Läuft…" : "Schließen")
             </MudButton>
@@ -258,6 +271,7 @@
     private bool _onboardBusy;
     private List<string> _onboardLog = new();
     private Whiskers.Models.ServerConfig? _onboardingServer;
+    private Whiskers.Services.Onboarding.OnboardingResult? _onboardResult;
 
     private AppRole _role = AppRole.Viewer;
 
@@ -275,6 +289,20 @@
     {
         _role = await CurrentUser.GetRoleAsync();
         _servers = ServerConfigService.GetServers();
+
+        // Deep link from the dashboard empty state (W3): ?add=onboard preselects the SSH bootstrap
+        // path (one-click onboarding), ?add=classic the plain Docker-API path.
+        var query = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
+        var add = query.Get("add");
+        if (add is "onboard" or "classic" && _role >= AppRole.Admin)
+        {
+            ShowAddDialog();
+            if (add == "onboard")
+            {
+                _form.ConnectionType = Whiskers.Models.ConnectionType.SSH;
+                _useSshPassword = true;
+            }
+        }
     }
 
     private void ShowAddDialog()
@@ -380,6 +408,9 @@
     private async Task SaveAndOnboard()
     {
         if (!Require(AppRole.Admin)) return;
+        // Ask the Tailscale question BEFORE saving/closing anything — cancelling leaves the form open
+        // so the user can simply hit "Speichern" for the classic (no-mesh) path instead.
+        if (!await ConfirmTailscalePreflight()) return;
         _saving = true;
         _connectError = null;
         StateHasChanged();
@@ -387,7 +418,7 @@
         {
             var saved = await PersistServerAsync();
             _showDialog = false;
-            await StartOnboarding(saved);
+            await StartOnboarding(saved, skipPreflight: true);
         }
         finally
         {
@@ -465,11 +496,27 @@
         }
     }
 
-    private async Task StartOnboarding(Whiskers.Models.ServerConfig server)
+    /// <summary>W3: the Tailscale account requirement used to surface mid-flow (::TS_LOGIN:: marker) —
+    /// now asked UP FRONT so nobody starts the onboarding without knowing what's coming.</summary>
+    private async Task<bool> ConfirmTailscalePreflight()
+    {
+        var choice = await DialogService.ShowMessageBoxAsync(
+            "Tailscale-Konto erforderlich",
+            (MarkupString)("Das One-Click-Onboarding verbindet den Server über ein <strong>Tailscale-Mesh</strong> " +
+            "(danach SSH-frei via mTLS). Dafür brauchen Sie ein — kostenloses — Tailscale-Konto; der Login-Link " +
+            "erscheint während des Onboardings.<br/><br/>Kein Tailscale gewünscht? Dann den Server einfach mit " +
+            "„Speichern“ klassisch per Docker-API (TCP/TLS) oder SSH verbinden — ohne Mesh."),
+            yesText: "Weiter mit Tailscale", cancelText: "Abbrechen");
+        return choice == true;
+    }
+
+    private async Task StartOnboarding(Whiskers.Models.ServerConfig server, bool skipPreflight = false)
     {
         if (!Require(AppRole.Admin)) return;
+        if (!skipPreflight && !await ConfirmTailscalePreflight()) return;
         _onboardingServer = server;
         _onboardLog = new();
+        _onboardResult = null;
         _onboarding = true;
         _onboardBusy = true;
         StateHasChanged();
@@ -482,7 +529,7 @@
 
         try
         {
-            await Onboarding.OnboardServerAsync(server.Id, progress, CancellationToken.None);
+            _onboardResult = await Onboarding.OnboardServerAsync(server.Id, progress, CancellationToken.None);
         }
         catch (Exception ex)
         {

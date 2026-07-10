@@ -165,6 +165,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, WhitelistService>();
         builder.Services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
         builder.Services.AddSingleton<Whiskers.Services.Setup.ISetupStateService, Whiskers.Services.Setup.SetupStateService>();
+        // W3.4: static production-readiness checklist (Settings panel). Read-only checks.
+        builder.Services.AddSingleton<Whiskers.Services.Setup.IProductionReadinessService, Whiskers.Services.Setup.ProductionReadinessService>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
 

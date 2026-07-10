@@ -10,7 +10,9 @@ See [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) > *Onboarding a new se
 
 | File | Purpose |
 |---|---|
-| `IOnboardingService.cs` / `OnboardingService.cs` | Orchestrates onboarding into the Tailscale + mTLS-proxy + telemetry stack, end to end, reporting progress (incl. surfacing the Tailscale login link in the app). |
+| `IOnboardingService.cs` / `OnboardingService.cs` | Orchestrates onboarding into the Tailscale + mTLS-proxy + telemetry stack, end to end, reporting progress (incl. surfacing the Tailscale login link in the app). Returns a step-tracked `OnboardingResult`. |
+| `OnboardingResult.cs` | The `OnboardingStep` enum + result record (completed steps, failed step, actionable German hint per step). Every step is idempotent → a re-run after failure resumes safely (W3). |
+| `OnboardingCommands.cs` | Pure, unit-tested command/config builders (`OnboardingCommandsTests`): user input only reaches the shell through the strict `Slug` allow-list or base64; the tailnet IP is validated with `IPAddress.TryParse` before use. |
 
 ## Related
 

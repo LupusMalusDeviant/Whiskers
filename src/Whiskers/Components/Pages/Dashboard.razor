@@ -75,6 +75,57 @@
     </MudItem>
 </MudGrid>
 
+@* W3 empty state: only the local Docker host is connected → guide the user to their first
+   remote server, with the mesh onboarding as the recommended path and the classic
+   Docker-API/SSH connection as the no-Tailscale alternative. *@
+@if (_showFirstServerCard)
+{
+    <MudPaper Class="pa-6 mb-4 glass-card">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.RocketLaunch" Color="Color.Primary" Size="Size.Large" />
+            <div>
+                <MudText Typo="Typo.h6">Fügen Sie Ihren ersten Server hinzu</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                    Der lokale Docker-Host ist verbunden ✓ — verbinden Sie jetzt Ihre Flotte.
+                </MudText>
+            </div>
+        </MudStack>
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4 glass-card" Style="height: 100%;">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Hub" Color="Color.Primary" />
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:600;">One-Click-Onboarding</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Empfohlen</MudChip>
+                    </MudStack>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Eine einmalige SSH-Bootstrap-Verbindung installiert Tailscale-Mesh, Telemetrie und
+                        den mTLS-Docker-Proxy — danach wird der SSH-Zugang gelöscht. Control-, Daten- und
+                        Telemetrie-Plane laufen getrennt übers Mesh. Voraussetzung: kostenloses Tailscale-Konto.
+                    </MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Hub"
+                               Href="servers?add=onboard">Server onboarden</MudButton>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4 glass-card" Style="height: 100%;">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Cable" Color="Color.Secondary" />
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Nur Docker-API / SSH verbinden</MudText>
+                    </MudStack>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Klassische Verbindung ohne Mesh: Docker Remote API (TCP, optional TLS) oder ein
+                        SSH-Tunnel. Für Nutzer, die kein Tailscale einsetzen möchten — jederzeit später
+                        aufs Mesh umstellbar.
+                    </MudText>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Cable"
+                               Href="servers?add=classic">Server verbinden</MudButton>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
+
 @* Grouped Container Tables *@
 @foreach (var serverGroup in _grouped)
 {
@@ -353,6 +404,8 @@
     private readonly ApexCharts.ApexChartOptions<MetricPoint> _cpuChartOptions = CreateChartOptions("#2196F3");
     private readonly ApexCharts.ApexChartOptions<MetricPoint> _memChartOptions = CreateChartOptions("#9C27B0");
     private bool _loading = true;
+    // W3 empty state: true while no remote server is configured (only "local"), admin only.
+    private bool _showFirstServerCard;
     private Timer? _refreshTimer;
     private int _refreshing; // reentrancy guard for the periodic refresh (MIT-34 / OPT-9)
     private int _refreshCount;
@@ -373,6 +426,11 @@
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+
+        // W3: show the "first server" guide while the fleet is just the local Docker host.
+        // Only admins can add servers, so don't tease viewers with buttons they can't use.
+        _showFirstServerCard = _role >= AppRole.Admin &&
+            !ServerConfigService.GetServers().Any(s => s.ConnectionType != Whiskers.Models.ConnectionType.Local);
 
         // Phase 1: Load container list fast (no stats yet)
         await LoadContainerList();

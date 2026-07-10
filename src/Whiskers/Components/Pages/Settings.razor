@@ -56,6 +56,11 @@
 else
 {
 <MudExpansionPanels MultiExpansion="true">
+    @* W3.4: static production-readiness checklist. CORE, read-only, first panel on purpose. *@
+    <MudExpansionPanel Text="Produktionsreif?" Icon="@Icons.Material.Filled.Checklist">
+        <ProductionReadinessPanel />
+    </MudExpansionPanel>
+
     @* F3: Whiskers self-backup & restore. CORE (not module-gated) — always available to admins. *@
     <MudExpansionPanel Text="Backup & Restore" Icon="@Icons.Material.Filled.SettingsBackupRestore">
         <SelfBackupPanel />
