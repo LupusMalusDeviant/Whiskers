@@ -1,0 +1,12 @@
+@page "/hello-world"
+@attribute [Authorize]
+
+<PageTitle>Hello World - Whiskers</PageTitle>
+
+@* Example module page — a thin route wrapper (the standard DI-safe pattern). ModuleGuard renders the
+   interactive HelloWorldView only when the hello-world module is enabled (Features:hello-world:Enabled=true);
+   otherwise it shows a clean "module disabled" notice. Because the view — which injects IHelloWorldGreeter —
+   is only instantiated when enabled, a disabled module never triggers a missing-service DI error. *@
+<ModuleGuard ModuleId="hello-world">
+    <HelloWorldView />
+</ModuleGuard>

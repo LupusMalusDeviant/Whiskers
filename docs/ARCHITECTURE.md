@@ -123,3 +123,46 @@ server fully mesh + mTLS, SSH-free, with no standing credential.
   config template, plus a sample Tailscale ACL. All mesh-bound; bind addresses are templated.
 - Certificates and per-host runtime config live **on the hosts** and in the controller's gitignored
   `data/` directory, never in this repository.
+
+## Module system (RoadToSAP Phase 1)
+
+Beyond the network architecture above, the application itself is a lean **Core** plus **modules** that
+contribute features and can be switched on or off individually — the "SAP" idea: a small kernel that other
+features dock onto instead of growing into. Modules are in-assembly with enforced discipline (no dynamic
+plugin loading for 1.0); the assembly split and external plugins are Phase 2/3.
+
+**The contract.** Each module implements [`IWhiskersModule`](../src/Whiskers/Modules/IWhiskersModule.cs):
+`Id`, `DisplayName`, `EnabledByDefault`, `DependsOn`, `ConfigureServices(services, config)`, `NavItems`,
+`McpToolTypes`, `InitializeAsync`. Modules consume Core interfaces, never the reverse.
+
+**Discovery is explicit, not reflection.** [`ModuleCatalog`](../src/Whiskers/Modules/ModuleCatalog.cs) holds one
+static list of modules; `DiscoverEnabled(config)` filters it by `Features:{id}:Enabled` (overriding
+`EnabledByDefault`) and fails fast on an unmet `DependsOn`. The explicit list keeps the module set greppable,
+code-reviewable and trim/AOT-friendly. `Program.cs` discovers modules early, calls each `ConfigureServices`,
+registers MCP tools via `modules.SelectMany(m => m.McpToolTypes)`, and builds the nav registry from
+`modules.SelectMany(m => m.NavItems)`.
+
+**What "disabled" means, on four levels.** With `Features:{id}:Enabled=false` (restart-only — no hot toggle):
+1. **Services** — the module's `ConfigureServices` isn't called, so its services (and hosted services) aren't
+   registered and don't run.
+2. **Nav** — `NavMenu.razor` renders from `IModuleRegistry.NavItems`, so a disabled module contributes no
+   sidebar entry.
+3. **Routes** — a module's pages are thin wrappers: `<ModuleGuard ModuleId="…"><…View/></ModuleGuard>`. The
+   interactive child view (which injects the module's services) is only instantiated when enabled, so a
+   disabled route shows a clean "module disabled" notice instead of a DI exception.
+4. **MCP** — the tool host iterates `modules.SelectMany(m => m.McpToolTypes)`, so a disabled module's tools are
+   registered neither for external callers nor for the in-process agent.
+
+**Soft dependencies use a no-op Core contract, never `DependsOn`.** When Core (or another module) still needs a
+service a module owns, Core registers a **no-op default** for that interface *before* the module loop; the
+module's real implementation is registered inside the loop and wins by last-registration. With the module off,
+consumers resolve the no-op and degrade gracefully (e.g. `NoopNotificationService`, `NoopImageUpdateStore`).
+Mutating no-ops **fail** rather than fake success (e.g. `NoopVolumeBackupService.BackupVolumeAsync` throws
+instead of pretending a backup ran). A mixed MCP tool class that also holds core operations
+(`ContainerTools`, `ServerTools`) **stays in Core**; its module-owned dependencies get no-op defaults so those
+tool methods answer cleanly when the module is off.
+
+**Where to look.** The contract + framework live in [`src/Whiskers/Modules/`](../src/Whiskers/Modules/); each
+extracted module has its own folder + README there and a one-page reference under
+[`docs/modules/`](modules/). [`Modules/HelloWorld`](../src/Whiskers/Modules/HelloWorld/) is a deliberately
+minimal, disabled-by-default example that documents the whole pattern — copy it to start a new module.

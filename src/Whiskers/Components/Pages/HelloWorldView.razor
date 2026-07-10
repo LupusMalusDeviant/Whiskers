@@ -1,0 +1,22 @@
+@inject Whiskers.Modules.HelloWorld.IHelloWorldGreeter Greeter
+
+@* The interactive part of the example page. Rendered by HelloWorld.razor only when the module is enabled
+   (via ModuleGuard), so the IHelloWorldGreeter injection is never reached when the module is off. *@
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon"><MudIcon Icon="@Icons.Material.Filled.WavingHand" Size="Size.Large" /></div>
+        <div>
+            <MudText Typo="Typo.h5">Hello World</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">The minimal example module (RoadToSAP §6 DoD)</MudText>
+        </div>
+    </MudStack>
+</div>
+
+<MudAlert Severity="Severity.Success" Class="mb-4">@Greeter.Greet()</MudAlert>
+
+<MudText Typo="Typo.body2">
+    This page and its <code>IHelloWorldGreeter</code> service come from <code>Modules/HelloWorld</code> — the
+    minimal, disabled-by-default example that documents the module contract. Enable it with
+    <code>Features:hello-world:Enabled=true</code> (restart required), or copy the folder to start a new module.
+</MudText>

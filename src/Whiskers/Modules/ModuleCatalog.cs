@@ -23,7 +23,9 @@ public static class ModuleCatalog
         new Cve.CveModule(),
         new CloudControl.CloudControlModule(),
         new ImageUpdate.ImageUpdateModule(),
-        // Real modules are appended here as features are extracted (Terminal was the first pilot).
+        // Real modules are appended above as features are extracted (Terminal was the first pilot).
+        // The minimal example module (disabled by default) — living documentation for the module contract.
+        new HelloWorld.HelloWorldModule(),
     };
 
     /// <summary>Returns the enabled modules. <c>Features:{Id}:Enabled</c> overrides
