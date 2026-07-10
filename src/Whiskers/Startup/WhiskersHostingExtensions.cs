@@ -164,6 +164,7 @@ public static class WhiskersHostingExtensions
         // Auth whitelist + roles
         builder.Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, WhitelistService>();
         builder.Services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
+        builder.Services.AddSingleton<Whiskers.Services.Setup.ISetupStateService, Whiskers.Services.Setup.SetupStateService>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
 
@@ -228,6 +229,7 @@ public static class WhiskersHostingExtensions
         // replacing the previously hand-wired InitializeAsync calls. Order values live on the services.
         builder.Services.AddInitializable<Whiskers.Services.Auth.IWhitelistService>();              // 10
         builder.Services.AddInitializable<Whiskers.Services.Auth.IRoleService>();                   // 20
+        builder.Services.AddInitializable<Whiskers.Services.Setup.ISetupStateService>();            // 25 (after roles)
         builder.Services.AddInitializable<Whiskers.Services.Notifications.IContainerNotificationPrefsService>(); // 30
         builder.Services.AddInitializable<Whiskers.Services.Vault.IVaultService>();                 // 40
         builder.Services.AddInitializable<Whiskers.Services.ServerConfig.IServerConfigService>();   // 50

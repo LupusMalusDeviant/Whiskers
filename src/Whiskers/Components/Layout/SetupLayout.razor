@@ -1,0 +1,27 @@
+@inherits LayoutComponentBase
+
+@* Minimal first-run layout: MudBlazor providers + centered branded card, but NO NavMenu/AppBar/Drawer and
+   no AuthorizeView — the setup wizard runs for an anonymous, pre-admin user. *@
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center" Style="min-height: 92vh;">
+            <MudPaper Elevation="4" Class="pa-6 mx-auto my-6" Style="width: 100%; max-width: 600px;">
+                <div class="d-flex flex-column align-center mb-4">
+                    <img src="brand.png?v=4" alt="Whiskers" width="72" height="72" class="mb-2"
+                         style="border-radius:14px; filter: drop-shadow(0 0 7px var(--sw-accent-primary-glow));" />
+                    <MudText Typo="Typo.h5" Class="sw-gradient-text" Style="font-weight:700; letter-spacing:-0.02em;">Whiskers</MudText>
+                </div>
+                @Body
+            </MudPaper>
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private readonly MudTheme _theme = AppThemes.Get(AppThemes.DefaultKey).ToMudTheme();
+}

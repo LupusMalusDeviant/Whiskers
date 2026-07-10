@@ -1,0 +1,159 @@
+@page "/setup"
+@layout Whiskers.Components.Layout.SetupLayout
+@using System.Security.Cryptography
+@using Whiskers.Services.Setup
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject ISetupStateService SetupState
+@inject Whiskers.Services.Vault.IVaultService Vault
+@inject Whiskers.Configuration.DataPathOptions DataPaths
+@inject IJSRuntime JS
+@inject IStringLocalizer<SharedResource> L
+
+<MudText Typo="Typo.overline" Color="Color.Secondary">@L["Setup_Step", _step + 1, 5]</MudText>
+<MudProgressLinear Value="@((_step + 1) * 20)" Color="Color.Primary" Rounded="true" Class="mb-4" />
+
+@* Step 0 — Welcome + language *@
+@if (_step == 0)
+{
+    <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Welcome_Title"]</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4">@L["Setup_Welcome_Body"]</MudText>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Href="set-culture?culture=en&redirect=/setup">English</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Href="set-culture?culture=de&redirect=/setup">Deutsch</MudButton>
+    </div>
+}
+@* Step 1 — Admin account *@
+else if (_step == 1)
+{
+    <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Admin_Title"]</MudText>
+    <MudSwitch @bind-Value="_isLocal" Color="Color.Primary" Class="mb-2">@L["Setup_Admin_UseLocal"]</MudSwitch>
+    <MudTextField @bind-Value="_email" Label="@L["Login_Field_Email"]" InputType="InputType.Email" Immediate="true" Class="mb-2" />
+    @if (_isLocal)
+    {
+        <MudTextField @bind-Value="_password" Label="@L["Login_Field_Password"]" InputType="InputType.Password" Immediate="true"
+                      HelperText="@L["Setup_Admin_PwHint"]" Class="mb-2" />
+        <MudTextField @bind-Value="_passwordConfirm" Label="@L["Setup_Admin_PwConfirm"]" InputType="InputType.Password" Immediate="true" />
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Class="mt-2">@L["Setup_Admin_FederatedHint"]</MudText>
+    }
+    @if (_error != null) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
+}
+@* Step 2 — Security basics (MCP key + VAULT_KEY) *@
+else if (_step == 2)
+{
+    <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Security_Title"]</MudText>
+    @if (_mcpKey != null)
+    {
+        <MudText Typo="Typo.subtitle2">@L["Setup_Security_McpKey"]</MudText>
+        <MudTextField T="string" Value="_mcpKey" ReadOnly="true" Adornment="Adornment.End"
+                      AdornmentIcon="@Icons.Material.Filled.ContentCopy" OnAdornmentClick="@(() => Copy(_mcpKey!))" Class="mb-1" />
+        <MudText Typo="Typo.caption" Class="mb-4 d-block">@L["Setup_Security_McpKeyHint"]</MudText>
+    }
+    @if (_vaultEnabled)
+    {
+        <MudAlert Severity="Severity.Success" Dense="true">@L["Setup_Security_VaultOn"]</MudAlert>
+    }
+    else
+    {
+        <MudText Typo="Typo.subtitle2">@L["Setup_Security_VaultKey"]</MudText>
+        <MudTextField T="string" Value="_generatedVaultKey" ReadOnly="true" Adornment="Adornment.End"
+                      AdornmentIcon="@Icons.Material.Filled.ContentCopy" OnAdornmentClick="@(() => Copy(_generatedVaultKey!))" Class="mb-1" />
+        <MudText Typo="Typo.caption" Class="d-block">@L["Setup_Security_VaultKeyHint"]</MudText>
+    }
+}
+@* Step 3 — First server *@
+else if (_step == 3)
+{
+    <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Server_Title"]</MudText>
+    <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">@L["Setup_Server_LocalConnected"]</MudAlert>
+    <MudText Typo="Typo.body2">@L["Setup_Server_Body"]</MudText>
+}
+@* Step 4 — Done *@
+else
+{
+    <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Done_Title"]</MudText>
+    <MudText Typo="Typo.body2" Class="mb-3">@L["Setup_Done_Body"]</MudText>
+    @if (_error != null) { <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert> }
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="_busy" OnClick="CompleteAsync">
+        @L["Setup_Done_Complete"]
+    </MudButton>
+}
+
+<div class="d-flex justify-space-between mt-6">
+    <MudButton Variant="Variant.Text" Disabled="@(_step == 0 || _busy)" OnClick="Back">@L["Setup_Back"]</MudButton>
+    @if (_step < 4)
+    {
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!CanNext)" OnClick="Next">@L["Setup_Next"]</MudButton>
+    }
+</div>
+
+@code {
+    private int _step;
+    private bool _isLocal = true;
+    private string _email = "";
+    private string _password = "";
+    private string _passwordConfirm = "";
+    private string? _mcpKey;
+    private bool _vaultEnabled;
+    private string? _generatedVaultKey;
+    private bool _busy;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        // Auth bypass / already-configured: the wizard has no purpose — go to the app.
+        if (Config.GetValue<bool>("Auth:Disabled") || SetupState.IsSetupComplete)
+        {
+            Nav.NavigateTo("/", forceLoad: false);
+            return;
+        }
+
+        _vaultEnabled = Vault.IsEnabled;
+        if (!_vaultEnabled)
+            _generatedVaultKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+        // One-time MCP admin key surfaced by McpApiKeyStore (C6); deleted on completion.
+        try { if (File.Exists(DataPaths.InitialMcpKeyFile)) _mcpKey = File.ReadAllText(DataPaths.InitialMcpKeyFile).Trim(); }
+        catch { /* best-effort — the key stays valid in api-keys.json regardless */ }
+    }
+
+    private bool CanNext => _step switch
+    {
+        1 => !string.IsNullOrWhiteSpace(_email)
+             && (!_isLocal || (_password.Length >= 12 && _password == _passwordConfirm)),
+        _ => true
+    };
+
+    private void Next() { if (_step < 4 && CanNext) _step++; }
+    private void Back() { if (_step > 0) _step--; }
+
+    private async Task Copy(string value)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); } catch { }
+    }
+
+    private async Task CompleteAsync()
+    {
+        _busy = true; _error = null;
+        var result = await SetupState.CompleteSetupAsync(new SetupAdminRequest
+        {
+            IsLocal = _isLocal,
+            Email = _email.Trim(),
+            Password = _isLocal ? _password : null
+        });
+        _busy = false;
+
+        if (result.Status == SetupCompletionStatus.Failed)
+        {
+            _error = string.Join(" ", result.Errors);
+            _step = 1;   // back to the admin step to fix it
+            return;
+        }
+        // Success (or someone just won the race): drop the one-time MCP key file, then sign in via /login-local.
+        try { if (File.Exists(DataPaths.InitialMcpKeyFile)) File.Delete(DataPaths.InitialMcpKeyFile); } catch { }
+        Nav.NavigateTo("login", forceLoad: true);
+    }
+}

@@ -68,6 +68,37 @@ public static class WhiskersPipelineExtensions
 
         app.UseStaticFiles();
         app.UseAntiforgery();
+
+        // W1 first-run setup redirect (ADDITIVE — does NOT touch the auth chain below). Placed BEFORE
+        // UseAuthentication so the decision is auth-independent, and registered only when auth is real
+        // (Auth:Disabled is the LAN escape hatch — no wizard). Until an admin exists, every top-level HTML
+        // navigation is funneled to /setup; infra endpoints + sub-resources (non-HTML Accept) pass through.
+        // Once complete, /setup is a dead route (→ /). 302 (not 301 — a 301 would be cached past setup).
+        if (!authDisabled)
+        {
+            app.Use(async (ctx, next) =>
+            {
+                var setup = ctx.RequestServices.GetRequiredService<Whiskers.Services.Setup.ISetupStateService>();
+                var path = ctx.Request.Path;
+                if (setup.IsSetupComplete)
+                {
+                    if (path.StartsWithSegments("/setup"))
+                    {
+                        ctx.Response.Redirect(configuredPathBase + "/");
+                        return;
+                    }
+                }
+                else if (!path.StartsWithSegments("/setup")
+                         && !SetupRedirectPaths.IsExempt(path)
+                         && SetupRedirectPaths.IsHtmlNavigation(ctx.Request))
+                {
+                    ctx.Response.Redirect(configuredPathBase + "/setup");
+                    return;
+                }
+                await next();
+            });
+        }
+
         app.UseAuthentication();
 
         // Auth bypass for trusted LAN deployments — inject a synthetic authenticated

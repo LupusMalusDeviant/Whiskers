@@ -86,6 +86,72 @@
   <data name="Login_Error_Invalid" xml:space="preserve">
     <value>Invalid email or password.</value>
   </data>
+  <data name="Setup_Step" xml:space="preserve">
+    <value>Step {0} of {1}</value>
+  </data>
+  <data name="Setup_Welcome_Title" xml:space="preserve">
+    <value>Welcome to Whiskers</value>
+  </data>
+  <data name="Setup_Welcome_Body" xml:space="preserve">
+    <value>Let's set up your instance. This takes about a minute.</value>
+  </data>
+  <data name="Setup_Admin_Title" xml:space="preserve">
+    <value>Create your admin account</value>
+  </data>
+  <data name="Setup_Admin_UseLocal" xml:space="preserve">
+    <value>Use a local account (email + password)</value>
+  </data>
+  <data name="Setup_Admin_PwHint" xml:space="preserve">
+    <value>At least 12 characters.</value>
+  </data>
+  <data name="Setup_Admin_PwConfirm" xml:space="preserve">
+    <value>Confirm password</value>
+  </data>
+  <data name="Setup_Admin_FederatedHint" xml:space="preserve">
+    <value>This email will be granted admin access. Sign in with Google or OIDC after setup.</value>
+  </data>
+  <data name="Setup_Security_Title" xml:space="preserve">
+    <value>Security basics</value>
+  </data>
+  <data name="Setup_Security_McpKey" xml:space="preserve">
+    <value>Initial MCP API key</value>
+  </data>
+  <data name="Setup_Security_McpKeyHint" xml:space="preserve">
+    <value>Copy it now — it won't be shown again. Manage keys later in Settings → MCP.</value>
+  </data>
+  <data name="Setup_Security_VaultOn" xml:space="preserve">
+    <value>Secrets vault is active (AES-256-GCM).</value>
+  </data>
+  <data name="Setup_Security_VaultKey" xml:space="preserve">
+    <value>Secrets vault key</value>
+  </data>
+  <data name="Setup_Security_VaultKeyHint" xml:space="preserve">
+    <value>Optional but recommended. Set this value as the VAULT_KEY environment variable and restart to encrypt stored secrets at rest. It is intentionally not saved to disk (keeping the key off the data volume).</value>
+  </data>
+  <data name="Setup_Server_Title" xml:space="preserve">
+    <value>Your first server</value>
+  </data>
+  <data name="Setup_Server_LocalConnected" xml:space="preserve">
+    <value>Local Docker host connected.</value>
+  </data>
+  <data name="Setup_Server_Body" xml:space="preserve">
+    <value>You can add remote servers from the Servers page after signing in.</value>
+  </data>
+  <data name="Setup_Done_Title" xml:space="preserve">
+    <value>All set!</value>
+  </data>
+  <data name="Setup_Done_Body" xml:space="preserve">
+    <value>Finish to create your admin account and sign in.</value>
+  </data>
+  <data name="Setup_Done_Complete" xml:space="preserve">
+    <value>Complete and sign in</value>
+  </data>
+  <data name="Setup_Back" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="Setup_Next" xml:space="preserve">
+    <value>Next</value>
+  </data>
   <data name="Language_Name" xml:space="preserve">
     <value>Language</value>
   </data>

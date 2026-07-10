@@ -86,6 +86,72 @@
   <data name="Login_Error_Invalid" xml:space="preserve">
     <value>Ungültige E-Mail oder Passwort.</value>
   </data>
+  <data name="Setup_Step" xml:space="preserve">
+    <value>Schritt {0} von {1}</value>
+  </data>
+  <data name="Setup_Welcome_Title" xml:space="preserve">
+    <value>Willkommen bei Whiskers</value>
+  </data>
+  <data name="Setup_Welcome_Body" xml:space="preserve">
+    <value>Lass uns deine Instanz einrichten. Das dauert etwa eine Minute.</value>
+  </data>
+  <data name="Setup_Admin_Title" xml:space="preserve">
+    <value>Admin-Konto anlegen</value>
+  </data>
+  <data name="Setup_Admin_UseLocal" xml:space="preserve">
+    <value>Lokales Konto verwenden (E-Mail + Passwort)</value>
+  </data>
+  <data name="Setup_Admin_PwHint" xml:space="preserve">
+    <value>Mindestens 12 Zeichen.</value>
+  </data>
+  <data name="Setup_Admin_PwConfirm" xml:space="preserve">
+    <value>Passwort bestätigen</value>
+  </data>
+  <data name="Setup_Admin_FederatedHint" xml:space="preserve">
+    <value>Diese E-Mail erhält Admin-Zugriff. Melde dich nach der Einrichtung mit Google oder OIDC an.</value>
+  </data>
+  <data name="Setup_Security_Title" xml:space="preserve">
+    <value>Sicherheits-Grundlagen</value>
+  </data>
+  <data name="Setup_Security_McpKey" xml:space="preserve">
+    <value>Initialer MCP-API-Key</value>
+  </data>
+  <data name="Setup_Security_McpKeyHint" xml:space="preserve">
+    <value>Jetzt kopieren — er wird nicht erneut angezeigt. Keys später unter Einstellungen → MCP verwalten.</value>
+  </data>
+  <data name="Setup_Security_VaultOn" xml:space="preserve">
+    <value>Secrets-Vault ist aktiv (AES-256-GCM).</value>
+  </data>
+  <data name="Setup_Security_VaultKey" xml:space="preserve">
+    <value>Secrets-Vault-Key</value>
+  </data>
+  <data name="Setup_Security_VaultKeyHint" xml:space="preserve">
+    <value>Optional, aber empfohlen. Setze diesen Wert als Umgebungsvariable VAULT_KEY und starte neu, um gespeicherte Secrets verschlüsselt abzulegen. Er wird bewusst NICHT auf die Festplatte geschrieben (Key bleibt vom Daten-Volume getrennt).</value>
+  </data>
+  <data name="Setup_Server_Title" xml:space="preserve">
+    <value>Dein erster Server</value>
+  </data>
+  <data name="Setup_Server_LocalConnected" xml:space="preserve">
+    <value>Lokaler Docker-Host verbunden.</value>
+  </data>
+  <data name="Setup_Server_Body" xml:space="preserve">
+    <value>Remote-Server kannst du nach der Anmeldung auf der Server-Seite hinzufügen.</value>
+  </data>
+  <data name="Setup_Done_Title" xml:space="preserve">
+    <value>Fertig!</value>
+  </data>
+  <data name="Setup_Done_Body" xml:space="preserve">
+    <value>Abschließen, um dein Admin-Konto anzulegen und dich anzumelden.</value>
+  </data>
+  <data name="Setup_Done_Complete" xml:space="preserve">
+    <value>Abschließen und anmelden</value>
+  </data>
+  <data name="Setup_Back" xml:space="preserve">
+    <value>Zurück</value>
+  </data>
+  <data name="Setup_Next" xml:space="preserve">
+    <value>Weiter</value>
+  </data>
   <data name="Language_Name" xml:space="preserve">
     <value>Sprache</value>
   </data>

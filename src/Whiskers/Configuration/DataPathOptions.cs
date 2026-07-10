@@ -71,6 +71,9 @@ public sealed class DataPathOptions
     public string VaultJson => P("vault.json");
     public string RolesJson => P("roles.json");
     public string WhitelistJson => P("whitelist.json");
+    // W1 setup wizard: first-run completion mirror flag + the one-time MCP key surface file (shared with McpApiKeyStore).
+    public string SetupCompleteFlag => P("setup-complete");
+    public string InitialMcpKeyFile => P("initial-mcp-key.txt");
     public string NotificationPrefsJson => P("notification-prefs.json");
     public string GuardrailsJson => P("guardrails.json");
     public string CveFindingsJson => P("cve-findings.json");
