@@ -99,6 +99,36 @@ public static class WhiskersPipelineExtensions
             });
         }
 
+        // F3 maintenance gate (ADDITIVE — does NOT touch the auth chain). While a restore is staged and the
+        // process is about to restart, return 503 for top-level HTML navigations so the admin sees a clear
+        // "restarting" page instead of errors against half-swapped state; infra endpoints + sub-resources pass
+        // through. Runs in BOTH auth modes (a restore can happen under Auth:Disabled too). Same seam as the
+        // setup redirect: after UseAntiforgery, before UseAuthentication.
+        app.Use(async (ctx, next) =>
+        {
+            var maintenance = ctx.RequestServices.GetRequiredService<Whiskers.Services.Maintenance.IMaintenanceStateService>();
+            if (maintenance.IsMaintenance
+                && !MaintenancePaths.IsExempt(ctx.Request.Path)
+                && SetupRedirectPaths.IsHtmlNavigation(ctx.Request))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                ctx.Response.Headers.RetryAfter = "30";
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                var reason = System.Net.WebUtility.HtmlEncode(maintenance.Reason ?? "Wartungsmodus");
+                await ctx.Response.WriteAsync(
+                    "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">" +
+                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                    "<meta http-equiv=\"refresh\" content=\"15\"><title>Whiskers — Wartung</title></head>" +
+                    "<body style=\"font-family:system-ui,sans-serif;background:#111;color:#eee;display:flex;" +
+                    "align-items:center;justify-content:center;height:100vh;margin:0;text-align:center\">" +
+                    "<div><h1 style=\"font-weight:600\">🐾 Whiskers wird gewartet</h1>" +
+                    $"<p style=\"color:#aaa\">{reason}</p>" +
+                    "<p style=\"color:#777;font-size:.9em\">Diese Seite lädt automatisch neu…</p></div></body></html>");
+                return;
+            }
+            await next();
+        });
+
         app.UseAuthentication();
 
         // Auth bypass for trusted LAN deployments — inject a synthetic authenticated
@@ -238,6 +268,27 @@ public static class WhiskersPipelineExtensions
                 // Also allow authenticated web users
                 return context.User.Identity?.IsAuthenticated == true;
             }));
+
+        // F3 self-backup download. Streams a self-backup archive to an ADMIN web user (or the trusted-LAN
+        // AuthDisabled principal). The archive is a secret-bearing artifact — even when VAULT_KEY-encrypted it
+        // is restricted. The id is validated (SafeName) and resolved strictly within backups/self by the
+        // service, so this endpoint cannot be steered outside the backups directory.
+        app.MapGet("/backups/self/{id}/download", (string id, HttpContext ctx) =>
+        {
+            var backups = ctx.RequestServices.GetRequiredService<Whiskers.Services.Backup.IBackupService>();
+            var path = backups.ResolveArchivePath(id);
+            if (path is null) return Results.NotFound();
+            return Results.File(path, "application/octet-stream", Path.GetFileName(path), enableRangeProcessing: true);
+        }).RequireAuthorization(policy => policy.RequireAssertion(context =>
+        {
+            var httpContext = context.Resource as HttpContext;
+            if (httpContext is null) return false;
+            if (httpContext.User.Identity?.AuthenticationType == Whiskers.Services.Auth.AuthConstants.AuthDisabledScheme)
+                return true;   // trusted-LAN bypass = admin, consistent with the rest of the app
+            var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
+            var roles = httpContext.RequestServices.GetService<Whiskers.Services.Auth.IRoleService>();
+            return roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin;
+        }));
 
         // Webhook API endpoint (no auth — uses HMAC signature validation)
         app.MapPost("/api/webhooks/{webhookId}", async (string webhookId, HttpContext ctx) =>

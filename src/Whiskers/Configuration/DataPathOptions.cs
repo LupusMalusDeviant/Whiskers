@@ -86,6 +86,17 @@ public sealed class DataPathOptions
     public string ChatDir => P("chat");
     public string AgentChatDir => P("agent-chat");
 
+    // --- F3 self-backup / restore ---
+    // Self-backup archives + their plaintext manifest sidecars. Nested UNDER backups/ so the snapshot's
+    // "exclude backups/" rule already keeps prior self-backups out of a new snapshot (no recursion).
+    public string SelfBackupsDir => P("backups/self");
+    // Restore extraction target: the already-decrypted, validated backup contents wait here until the
+    // process restarts and the boot handler swaps them over the live files.
+    public string RestoreStagingDir => P(".restore-staging");
+    // Commit marker written last (atomic) once staging is fully populated. Its presence at boot — and only
+    // its presence — triggers RestoreBootHandler to perform the swap. Absent staging without it is ignored.
+    public string RestorePendingMarker => P(".restore-pending");
+
     // --- Mesh-VPN state (VpnSettings defaults derive from these) ---
     public string TailscaleStateDir => P("tailscale");
     public string NetbirdConfigPath => P("netbird/config.json");

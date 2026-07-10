@@ -186,7 +186,10 @@ public static class WhiskersHostingExtensions
         // checks carry the "ready" tag; /healthz stays dependency-free.
         builder.Services.AddHealthChecks()
             .AddCheck<DbReadyCheck>("db", tags: new[] { "ready" })
-            .AddCheck<ServerConfigReadyCheck>("serverconfig", tags: new[] { "ready" });
+            .AddCheck<ServerConfigReadyCheck>("serverconfig", tags: new[] { "ready" })
+            // F3: drain readiness while a restore is staged and the app is about to restart. "ready" tag only,
+            // so /healthz (the container liveness probe) is unaffected.
+            .AddCheck<MaintenanceReadyCheck>("maintenance", tags: new[] { "ready" });
         builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
         builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
         builder.Services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore, Whiskers.Services.Persistence.AppSettingsStore>();
@@ -224,6 +227,12 @@ public static class WhiskersHostingExtensions
 
         // MCP/agent observability (Agent History)
         builder.Services.AddSingleton<Whiskers.Services.Observability.IMcpCallLogStore, Whiskers.Services.Observability.McpCallLogStore>();
+
+        // F3 self-backup/restore + maintenance mode. Both are Core (always present): the scheduler's
+        // SelfBackup task and the Settings "Backup & Restore" panel depend on IBackupService directly, and the
+        // maintenance flag gates requests during a restore. No module no-op — these never turn off.
+        builder.Services.AddSingleton<Whiskers.Services.Maintenance.IMaintenanceStateService, Whiskers.Services.Maintenance.MaintenanceStateService>();
+        builder.Services.AddSingleton<Whiskers.Services.Backup.IBackupService, Whiskers.Services.Backup.BackupService>();
 
         // Startup initializers — the loop after Build() runs each IInitializable's async warm-up in Order,
         // replacing the previously hand-wired InitializeAsync calls. Order values live on the services.

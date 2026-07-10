@@ -6,7 +6,10 @@ public enum ScheduledTaskType
     DbBackup,
     VolumeBackup,
     CustomCommand,
-    Cleanup
+    Cleanup,
+    // F3: schedule a Whiskers self-backup of /app/data. MUST stay last — TaskType is persisted as an INT
+    // (see DatabaseInitializer schema), so inserting a member mid-list would renumber existing rows.
+    SelfBackup
 }
 
 public class ScheduledTaskEntity

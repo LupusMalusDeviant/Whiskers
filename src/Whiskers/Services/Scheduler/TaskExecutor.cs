@@ -13,6 +13,7 @@ public class TaskExecutor : ITaskExecutor
     private readonly IDockerService _docker;
     private readonly IDatabaseService _dbService;
     private readonly IVolumeBackupService _backupService;
+    private readonly IBackupService _selfBackupService;
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<TaskExecutor> _logger;
 
@@ -20,6 +21,7 @@ public class TaskExecutor : ITaskExecutor
         IDockerService docker,
         IDatabaseService dbService,
         IVolumeBackupService backupService,
+        IBackupService selfBackupService,
         IHostCommandExecutor executor,
         ILogger<TaskExecutor> logger,
         DataPathOptions? dataPaths = null)
@@ -27,6 +29,7 @@ public class TaskExecutor : ITaskExecutor
         _docker = docker;
         _dbService = dbService;
         _backupService = backupService;
+        _selfBackupService = selfBackupService;
         _executor = executor;
         _logger = logger;
         _hostBackupDir = (dataPaths ?? DataPathOptions.Default).BackupsDir;
@@ -43,6 +46,7 @@ public class TaskExecutor : ITaskExecutor
                 ScheduledTaskType.ContainerRestart => await ExecuteContainerRestart(task),
                 ScheduledTaskType.DbBackup => await ExecuteDbBackup(task),
                 ScheduledTaskType.VolumeBackup => await ExecuteVolumeBackup(task),
+                ScheduledTaskType.SelfBackup => await ExecuteSelfBackup(task),
                 ScheduledTaskType.CustomCommand => await ExecuteCustomCommand(task),
                 ScheduledTaskType.Cleanup => await ExecuteCleanup(task),
                 _ => (false, $"Unknown task type: {task.TaskType}")
@@ -107,6 +111,17 @@ public class TaskExecutor : ITaskExecutor
         return (true, $"Volume backup: {backup.FileName} ({backup.SizeBytes / 1024}KB)");
     }
 
+    private async Task<(bool, string)> ExecuteSelfBackup(ScheduledTaskEntity task)
+    {
+        // Whiskers self-backup of /app/data (F3). Backs up the app itself, so ServerId/TargetId are ignored.
+        var info = await _selfBackupService.CreateBackupAsync($"scheduled-{task.Name}");
+
+        var config = ParseConfig(task.Config);
+        await ApplyRetention(task, config);
+
+        return (true, $"Whiskers self-backup: {info.FileName} ({info.SizeBytes / 1024}KB, encrypted={info.Encrypted})");
+    }
+
     private async Task<(bool, string)> ExecuteCustomCommand(ScheduledTaskEntity task)
     {
         var config = ParseConfig(task.Config);
@@ -145,6 +160,11 @@ public class TaskExecutor : ITaskExecutor
                 var toDelete = backups.OrderByDescending(b => b.CreatedAt).Skip(maxBackups);
                 foreach (var b in toDelete)
                     await _backupService.DeleteBackupAsync(b.BackupId);
+            }
+            else if (task.TaskType == ScheduledTaskType.SelfBackup)
+            {
+                // Self-backups are tracked by the self-backup service (files + sidecars); keep the newest N.
+                await _selfBackupService.PruneAsync(maxBackups);
             }
             else if (task.TaskType == ScheduledTaskType.DbBackup && !string.IsNullOrWhiteSpace(dbName))
             {

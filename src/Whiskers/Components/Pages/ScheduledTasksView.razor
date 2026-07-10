@@ -181,6 +181,7 @@ else
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.ContainerRestart">Container-Neustart</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.DbBackup">Datenbank-Backup</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.VolumeBackup">Volume-Backup</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.SelfBackup">Whiskers Selbst-Backup</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.CustomCommand">Befehl ausführen</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.Cleanup">Docker Cleanup</MudSelectItem>
             </MudSelect>
@@ -215,7 +216,7 @@ else
                 <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 0 1 * *")">Monatlich</MudButton>
             </MudStack>
 
-            @if (_formType is ScheduledTaskType.DbBackup or ScheduledTaskType.VolumeBackup)
+            @if (_formType is ScheduledTaskType.DbBackup or ScheduledTaskType.VolumeBackup or ScheduledTaskType.SelfBackup)
             {
                 <MudNumericField T="int" @bind-Value="_formMaxBackups" Label="Max. Backups behalten (0 = unbegrenzt)"
                                  Variant="Variant.Outlined" Min="0" Max="100" />
@@ -361,6 +362,7 @@ else
         ScheduledTaskType.ContainerRestart => Color.Primary,
         ScheduledTaskType.DbBackup => Color.Warning,
         ScheduledTaskType.VolumeBackup => Color.Info,
+        ScheduledTaskType.SelfBackup => Color.Success,
         ScheduledTaskType.CustomCommand => Color.Tertiary,
         ScheduledTaskType.Cleanup => Color.Default,
         _ => Color.Default
@@ -371,6 +373,7 @@ else
         ScheduledTaskType.ContainerRestart => "Neustart",
         ScheduledTaskType.DbBackup => "DB-Backup",
         ScheduledTaskType.VolumeBackup => "Volume-Backup",
+        ScheduledTaskType.SelfBackup => "Selbst-Backup",
         ScheduledTaskType.CustomCommand => "Befehl",
         ScheduledTaskType.Cleanup => "Cleanup",
         _ => type.ToString()

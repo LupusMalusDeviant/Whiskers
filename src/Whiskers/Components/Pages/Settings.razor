@@ -56,6 +56,11 @@
 else
 {
 <MudExpansionPanels MultiExpansion="true">
+    @* F3: Whiskers self-backup & restore. CORE (not module-gated) — always available to admins. *@
+    <MudExpansionPanel Text="Backup & Restore" Icon="@Icons.Material.Filled.SettingsBackupRestore">
+        <SelfBackupPanel />
+    </MudExpansionPanel>
+
     @* RoadToSAP Phase 1: hide the channel + composite settings when the Notifications module is off. The
        /notifications feed (bell + page) stays available — it's Core (the in-app store), not this module. *@
     @if (ModuleRegistry.IsEnabled("notifications"))
