@@ -72,7 +72,19 @@
     <comment>{0} = der konfigurierte OIDC-Anbietername.</comment>
   </data>
   <data name="Login_NoProvider" xml:space="preserve">
-    <value>Kein Login-Anbieter konfiguriert. Bitte Google oder OIDC in der Konfiguration aktivieren.</value>
+    <value>Keine Anmeldemethode verfügbar. Konfiguriere einen Anbieter oder aktiviere die lokale Anmeldung.</value>
+  </data>
+  <data name="Login_Button_Local" xml:space="preserve">
+    <value>Anmelden</value>
+  </data>
+  <data name="Login_Field_Email" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="Login_Field_Password" xml:space="preserve">
+    <value>Passwort</value>
+  </data>
+  <data name="Login_Error_Invalid" xml:space="preserve">
+    <value>Ungültige E-Mail oder Passwort.</value>
   </data>
   <data name="Language_Name" xml:space="preserve">
     <value>Sprache</value>

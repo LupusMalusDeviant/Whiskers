@@ -2,7 +2,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Localization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Whiskers.Configuration;
@@ -138,6 +140,42 @@ public static class WhiskersPipelineExtensions
                 RedirectUri = configuredPathBase + "/"
             });
         });
+
+        // Local username/password login (F1). Only when auth is real. Validates against the Identity user
+        // store, applies the SAME whitelist gate as Google/OIDC, then issues the EXISTING cookie carrying a
+        // ClaimTypes.Email claim so the role/whitelist system resolves the user identically to a federated one.
+        // [FromForm] marks the endpoint antiforgery-required; the existing UseAntiforgery() validates the token.
+        if (!authDisabled)
+        {
+            app.MapPost("/login-local", async (
+                HttpContext ctx,
+                [Microsoft.AspNetCore.Mvc.FromForm] string email,
+                [Microsoft.AspNetCore.Mvc.FromForm] string password,
+                UserManager<AppUser> users,
+                Whiskers.Services.Auth.IWhitelistService whitelist) =>
+            {
+                var user = await users.FindByEmailAsync(email ?? "");
+                // Generic failure for both "no such user" and "wrong password" — no account enumeration.
+                if (user is null || !await users.CheckPasswordAsync(user, password ?? ""))
+                    return Results.Redirect(configuredPathBase + "/login?error=invalid");
+
+                if (!whitelist.IsEmailAllowed(user.Email))
+                    return Results.Redirect(configuredPathBase + "/login?error=unauthorized");
+
+                // Build the principal MANUALLY so it carries ClaimTypes.Email — the default claims factory does
+                // not, and every role consumer keys on the email claim. authenticationType is non-empty (so
+                // IsAuthenticated is true) and deliberately NOT "AuthDisabled"/"AgentSynthetic".
+                var identity = new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.Email, user.Email!),
+                    new Claim(ClaimTypes.Name, user.Email!),
+                    new Claim(ClaimTypes.NameIdentifier, user.Id),
+                }, authenticationType: "LocalPassword");
+                await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                    new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = true });
+                return Results.Redirect(configuredPathBase + "/");
+            });
+        }
 
         app.MapGet("/logout", async (HttpContext ctx) =>
         {
@@ -284,6 +322,23 @@ public static class WhiskersPipelineExtensions
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             var dbLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInitializer");
             await Whiskers.Services.Persistence.DatabaseInitializer.InitializeAsync(db, dbLogger);
+        }
+
+        // Local-auth (F1): migrate the Identity schema in its OWN __IdentityMigrationsHistory table (kept off
+        // the metrics legacy-baseline path), then seed the unattended admin if configured. Brand-new tables →
+        // a straight MigrateAsync (Npgsql retry handles transient connects). Skip the seed when auth is
+        // bypassed (Auth:Disabled has no login).
+        using (var scope = app.Services.CreateScope())
+        {
+            var idDb = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+            await idDb.Database.MigrateAsync();
+
+            if (!app.Configuration.GetValue<bool>("Auth:Disabled"))
+            {
+                var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+                var seedLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("LocalAdminSeeder");
+                await Whiskers.Services.Auth.LocalAdminSeeder.SeedAsync(users, app.Configuration, seedLogger);
+            }
         }
     }
 }

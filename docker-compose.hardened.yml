@@ -89,6 +89,8 @@ services:
       - VAULT_KEY=${VAULT_KEY:-}
       # Admin bootstrap: seeded as Admin on first run + flips the whitelist fail-closed. See .env.example.
       - WHISKERS_ADMIN_EMAIL=${WHISKERS_ADMIN_EMAIL:-}
+      # Local login (F1): path to a mounted secret file with the admin password → unattended local admin.
+      - WHISKERS_ADMIN_PASSWORD_FILE=${WHISKERS_ADMIN_PASSWORD_FILE:-}
       # Point the built-in "local" server at the proxy (Settings → Servers, or servers.json):
       #   SocketPath = http://127.0.0.1:2375 . Or manage only remote (mTLS) hosts and ignore local.
       - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}

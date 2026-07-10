@@ -10,6 +10,9 @@
     <!-- Base EF Core only: DbContext, entities and the UTC value converter. The concrete providers
          (Sqlite/Npgsql) and the migration assemblies are referenced by the Whiskers app, not here. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <!-- Local-auth (F1): the IdentityUserContext + AppUser live here so both migration assemblies (which
+         reference only this project) can scaffold the Identity schema. Users only — roles stay in roles.json. -->
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.9" />
   </ItemGroup>
 
 </Project>

@@ -44,6 +44,14 @@ public static class DatabaseRegistration
                 builder.Services.AddDbContext<MetricsDbContext>(
                     o => o.UseSqlite(sqliteCs, sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite")),
                     ServiceLifetime.Transient);
+                // Local-auth Identity context (F1): SAME database, its OWN __IdentityMigrationsHistory so it
+                // never touches the metrics legacy-baseline path. Scoped (default) — UserManager/store are Scoped.
+                builder.Services.AddDbContext<WhiskersIdentityDbContext>(
+                    o => o.UseSqlite(sqliteCs, sql =>
+                    {
+                        sql.MigrationsAssembly("Whiskers.Migrations.Sqlite");
+                        sql.MigrationsHistoryTable("__IdentityMigrationsHistory");
+                    }));
                 break;
 
             case "postgres":
@@ -58,6 +66,14 @@ public static class DatabaseRegistration
                         npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
                     }),
                     ServiceLifetime.Transient);
+                // Local-auth Identity context (F1): SAME database, its OWN __IdentityMigrationsHistory. Scoped.
+                builder.Services.AddDbContext<WhiskersIdentityDbContext>(
+                    o => o.UseNpgsql(connectionString, npg =>
+                    {
+                        npg.EnableRetryOnFailure(3);
+                        npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
+                        npg.MigrationsHistoryTable("__IdentityMigrationsHistory");
+                    }));
                 break;
 
             default:

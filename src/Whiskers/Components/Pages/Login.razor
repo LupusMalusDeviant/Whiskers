@@ -17,7 +17,12 @@
             @if (!string.IsNullOrEmpty(_error))
             {
                 <MudAlert Severity="Severity.Error" Class="mb-4 mud-width-full">
-                    @(_error == "unauthorized" ? L["Login_Error_Unauthorized"].Value : _error)
+                    @(_error switch
+                    {
+                        "unauthorized" => L["Login_Error_Unauthorized"].Value,
+                        "invalid" => L["Login_Error_Invalid"].Value,
+                        _ => _error
+                    })
                 </MudAlert>
             }
 
@@ -37,7 +42,27 @@
                     @L["Login_Button_Oidc", _oidcName]
                 </MudButton>
             }
-            @if (!_googleEnabled && !_oidcEnabled)
+            @if (_localEnabled)
+            {
+                @* Plain server-rendered form: a native POST to /login-local (which sets the cookie). Uses raw
+                   <input name=…> — interactive MudBlazor inputs are NOT serialized into a form submission.
+                   <AntiforgeryToken/> renders the hidden token the existing UseAntiforgery() middleware checks. *@
+                <form method="post" action="login-local"
+                      class="d-flex flex-column mud-width-full @((_googleEnabled || _oidcEnabled) ? "mt-4" : "")" style="gap: 12px;">
+                    <AntiforgeryToken />
+                    <input type="email" name="email" autocomplete="username" required
+                           placeholder="@L["Login_Field_Email"]" aria-label="@L["Login_Field_Email"]"
+                           style="padding: 12px; border-radius: 8px; border: 1px solid var(--mud-palette-lines-inputs); background: var(--mud-palette-background-grey); color: var(--mud-palette-text-primary);" />
+                    <input type="password" name="password" autocomplete="current-password" required
+                           placeholder="@L["Login_Field_Password"]" aria-label="@L["Login_Field_Password"]"
+                           style="padding: 12px; border-radius: 8px; border: 1px solid var(--mud-palette-lines-inputs); background: var(--mud-palette-background-grey); color: var(--mud-palette-text-primary);" />
+                    <button type="submit"
+                            style="padding: 11px; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; background: var(--mud-palette-primary); color: var(--mud-palette-primary-text);">
+                        @L["Login_Button_Local"]
+                    </button>
+                </form>
+            }
+            @if (!_googleEnabled && !_oidcEnabled && !_localEnabled)
             {
                 <MudAlert Severity="Severity.Warning" Class="mud-width-full">
                     @L["Login_NoProvider"]
@@ -53,6 +78,7 @@
 
     private bool _googleEnabled;
     private bool _oidcEnabled;
+    private bool _localEnabled;
     private string _oidcName = "SSO";
 
     protected override void OnInitialized()
@@ -68,5 +94,8 @@
         _googleEnabled = !string.IsNullOrWhiteSpace(Config["GoogleAuth:ClientId"]);
         _oidcEnabled = Config.GetValue<bool>("Oidc:Enabled") && !string.IsNullOrWhiteSpace(Config["Oidc:Authority"]);
         _oidcName = string.IsNullOrWhiteSpace(Config["Oidc:DisplayName"]) ? "SSO" : Config["Oidc:DisplayName"]!;
+        // Local username/password login (F1) — on by default so the "no provider" dead-end disappears; a
+        // deployment that wants federated-only can set Auth:LocalLogin:Enabled=false.
+        _localEnabled = Config.GetValue("Auth:LocalLogin:Enabled", true);
     }
 }

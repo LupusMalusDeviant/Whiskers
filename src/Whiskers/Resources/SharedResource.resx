@@ -72,7 +72,19 @@
     <comment>{0} = the configured OIDC provider display name.</comment>
   </data>
   <data name="Login_NoProvider" xml:space="preserve">
-    <value>No login provider configured. Please enable Google or OIDC in the configuration.</value>
+    <value>No login method is available. Configure a provider or enable local login.</value>
+  </data>
+  <data name="Login_Button_Local" xml:space="preserve">
+    <value>Sign in</value>
+  </data>
+  <data name="Login_Field_Email" xml:space="preserve">
+    <value>Email</value>
+  </data>
+  <data name="Login_Field_Password" xml:space="preserve">
+    <value>Password</value>
+  </data>
+  <data name="Login_Error_Invalid" xml:space="preserve">
+    <value>Invalid email or password.</value>
   </data>
   <data name="Language_Name" xml:space="preserve">
     <value>Language</value>

@@ -155,6 +155,19 @@ public static class WhiskersAuthenticationExtensions
             }
         }
 
+        // Local username/password login (F1) — ADDITIVE. AddIdentityCore registers UserManager<AppUser> + the
+        // EF user store + password hashing ONLY; it does NOT add an authentication/cookie scheme and does NOT
+        // override the default scheme, so the cookie session + Google/OIDC wiring above remain the sole auth
+        // setup. NEVER AddIdentity/AddDefaultIdentity here (those register competing cookie schemes). No
+        // AddRoles → a UserOnlyStore, no RoleManager, no parallel role system (roles stay in roles.json).
+        builder.Services.AddIdentityCore<Whiskers.Services.Persistence.AppUser>(options =>
+        {
+            options.Password.RequiredLength = 12;
+            options.User.RequireUniqueEmail = true;
+            options.Lockout.MaxFailedAccessAttempts = 5;
+        })
+        .AddEntityFrameworkStores<Whiskers.Services.Persistence.WhiskersIdentityDbContext>();
+
         builder.Services.AddAuthorization();
         builder.Services.AddCascadingAuthenticationState();
     }
