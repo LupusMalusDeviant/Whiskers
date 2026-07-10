@@ -87,6 +87,8 @@ services:
       - TZ=${TZ:-Europe/Berlin}
       # Secrets-vault passphrase (empty = vault disabled). See .env.example.
       - VAULT_KEY=${VAULT_KEY:-}
+      # Admin bootstrap: seeded as Admin on first run + flips the whitelist fail-closed. See .env.example.
+      - WHISKERS_ADMIN_EMAIL=${WHISKERS_ADMIN_EMAIL:-}
       # Point the built-in "local" server at the proxy (Settings → Servers, or servers.json):
       #   SocketPath = http://127.0.0.1:2375 . Or manage only remote (mTLS) hosts and ignore local.
       - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}

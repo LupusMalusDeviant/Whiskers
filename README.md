@@ -194,6 +194,7 @@ Whiskers is configured entirely through environment variables (`.env`). The most
 | Group | Keys | Notes |
 |---|---|---|
 | Authentication | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ADMIN_EMAIL`, `AUTH_DISABLED` | Set `AUTH_DISABLED=true` for trusted LAN-only deployments where Google rejects private redirect URIs |
+| Admin bootstrap | `WHISKERS_ADMIN_EMAIL` | Seeded as an **Admin** on first run (provider-neutral; `GOOGLE_ADMIN_EMAIL` does the same for Google) so a fresh instance is never admin-less. Also flips the email whitelist **fail-closed** once any role exists: an authenticated user who is neither whitelisted nor role-assigned is rejected instead of admitted. Existing installs (with a `roles.json`) are untouched. |
 | Secrets vault | `VAULT_KEY` | Passphrase that encrypts stored secrets at rest (AES-256-GCM). Empty = vault disabled. Keep it stable — losing it makes stored secrets undecryptable |
 | OIDC (optional) | `OIDC_ENABLED`, `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, ... | Generic OpenID Connect (Authentik, Keycloak, Authelia, Zitadel, ...) for real 2FA/passkeys from your IdP |
 | Notifications | `MATTERMOST_WEBHOOK_URL`, `MATTERMOST_ENABLED` | Matrix is configured in the UI |

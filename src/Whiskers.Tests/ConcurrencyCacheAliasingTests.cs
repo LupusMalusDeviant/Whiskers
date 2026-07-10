@@ -16,12 +16,14 @@ public class ConcurrencyCacheAliasingTests
     private static string TempStore()
         => Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N") + ".json");
 
+    private static IConfiguration EmptyConfig() => new ConfigurationBuilder().Build();
+
     // ---------------------------------------------------------------- MIT-1: RoleService
 
     [Fact]
     public async Task RoleService_SetRole_then_mutate_input_does_not_change_persisted_state()
     {
-        var svc = new RoleService(NullLogger<RoleService>.Instance, TempStore());
+        var svc = new RoleService(EmptyConfig(), NullLogger<RoleService>.Instance, TempStore());
         var data = new UserRoleData { Roles = { new UserRoleEntry { Email = "a@x", Role = AppRole.Admin } } };
         await svc.SaveRoleDataAsync(data);
 
@@ -36,7 +38,7 @@ public class ConcurrencyCacheAliasingTests
     [Fact]
     public async Task RoleService_concurrent_GetRole_and_SetRole_never_throws()
     {
-        var svc = new RoleService(NullLogger<RoleService>.Instance, TempStore());
+        var svc = new RoleService(EmptyConfig(), NullLogger<RoleService>.Instance, TempStore());
         var tasks = new List<Task>();
         for (var i = 0; i < 50; i++)
         {
@@ -57,7 +59,7 @@ public class ConcurrencyCacheAliasingTests
         // (SetData runs only after a successful save).
         var dir = Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
-        var svc = new RoleService(NullLogger<RoleService>.Instance, dir);
+        var svc = new RoleService(EmptyConfig(), NullLogger<RoleService>.Instance, dir);
 
         await Assert.ThrowsAnyAsync<Exception>(() =>
             svc.SaveRoleDataAsync(new UserRoleData { Roles = { new UserRoleEntry { Email = "a@x", Role = AppRole.Admin } } }));

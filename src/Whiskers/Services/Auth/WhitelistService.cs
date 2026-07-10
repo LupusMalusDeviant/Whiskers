@@ -9,14 +9,16 @@ public class WhitelistService : IWhitelistService, IInitializable
 {
     private readonly JsonFileStore<WhitelistData> _store;
     private readonly IConfiguration _configuration;
+    private readonly IRoleService _roles;
     private readonly ILogger<WhitelistService> _logger;
     private WhitelistData _cached = new();
     private readonly ReaderWriterLockSlim _lock = new();
 
-    public WhitelistService(IConfiguration configuration, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null)
+    public WhitelistService(IConfiguration configuration, IRoleService roleService, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null)
     {
         _store = new JsonFileStore<WhitelistData>((dataPaths ?? DataPathOptions.Default).WhitelistJson);
         _configuration = configuration;
+        _roles = roleService;
         _logger = logger;
     }
 
@@ -54,22 +56,31 @@ public class WhitelistService : IWhitelistService, IInitializable
         if (string.IsNullOrEmpty(email))
             return false;
 
+        bool enabled, inList;
+        int count;
         _lock.EnterReadLock();
         try
         {
-            // Not enabled = whitelist off, allow everyone. Enabled but empty = deny all (an admin who
-            // cleared the last entry must not silently open the instance to every Google account).
-            if (!_cached.Enabled)
-                return true;
-            if (_cached.Emails.Count == 0)
-                return false;
-
-            return _cached.Emails.Contains(email, StringComparer.OrdinalIgnoreCase);
+            enabled = _cached.Enabled;
+            count = _cached.Emails.Count;
+            inList = enabled && _cached.Emails.Contains(email, StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
             _lock.ExitReadLock();
         }
+
+        // Enabled = enforce the list. Enabled-but-empty = deny all (an admin who cleared the last entry must
+        // not silently open the instance to every Google account).
+        if (enabled)
+            return count > 0 && inList;
+
+        // Whitelist disabled (never configured). C5: previously an unconditional fail-open ("allow everyone").
+        // Now fail-open ONLY while the instance is otherwise unconfigured (no role entries) — preserving the
+        // legacy behaviour for existing deployments that rely on it. As soon as ANY role exists (e.g. the C5
+        // admin bootstrap seeded one), a disabled whitelist is fail-CLOSED: only users with an explicit role
+        // are admitted, so a fresh instance with a configured admin no longer lets every Google/OIDC account in.
+        return !_roles.HasAnyRoles() || _roles.HasExplicitRole(email);
     }
 
     public WhitelistData GetWhitelist()

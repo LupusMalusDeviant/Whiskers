@@ -2,20 +2,21 @@
 
 Authorization primitives used across the app: who the current user is, what role they hold, and whether their email is allowed in.
 
-Authentication itself (Google OAuth / OIDC) is wired in [`Program.cs`](../../Program.cs); this folder is the **authorization** layer that sits on top.
+Authentication itself (Google OAuth / OIDC) is wired in [`../../Startup/WhiskersAuthenticationExtensions.cs`](../../Startup/WhiskersAuthenticationExtensions.cs); this folder is the **authorization** layer that sits on top.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `ICurrentUserService.cs` / `CurrentUserService.cs` | Resolves the current authenticated user (email, role) from the request context. |
-| `IRoleService.cs` / `RoleService.cs` | Maps users to roles (e.g. Admin/User) and resolves a role's permission level. |
-| `IWhitelistService.cs` / `WhitelistService.cs` | The email whitelist, who may sign in; managed in the UI, applied without restart. |
+| `IRoleService.cs` / `RoleService.cs` | Maps users to roles (Viewer/Operator/Admin). On first run seeds the configured admin email (`WHISKERS_ADMIN_EMAIL` / first `GOOGLE_ADMIN_EMAIL`) as Admin so a fresh instance is never admin-less (C5). |
+| `IWhitelistService.cs` / `WhitelistService.cs` | The email whitelist, who may sign in; managed in the UI, applied without restart. Consults `IRoleService` for the fail-closed switch. |
 | `AuthConstants.cs` | Well-known auth scheme names + claim types in one place: `AuthDisabledScheme` (trusted-LAN → Admin), `AgentSyntheticScheme` + `McpLevelClaim` (in-process agent execution, enforced at the caller's level — never Admin). |
 
 ## Behaviour notes
 
-- **Whitelist semantics:** disabled ⇒ everyone allowed; enabled **and non-empty** ⇒ only listed emails; enabled **and empty** ⇒ deny all (fail-closed). The Settings UI refuses to save an enabled+empty whitelist so an admin can't lock themselves out. `SaveWhitelistAsync` deep-copies the incoming data so the enforcement snapshot never aliases a caller-owned list.
+- **Whitelist semantics (C5):** enabled **and non-empty** ⇒ only listed emails; enabled **and empty** ⇒ deny all. Disabled (never configured) ⇒ **fail-open only while the instance is unconfigured** (`IRoleService.HasAnyRoles()` is false); as soon as *any* role exists, a disabled whitelist is **fail-closed** — only users with an explicit role entry are admitted. So the admin bootstrap alone makes a fresh instance fail-closed without the operator touching the whitelist. The Settings UI refuses to save an enabled+empty whitelist so an admin can't lock themselves out. `SaveWhitelistAsync` deep-copies the incoming data so the enforcement snapshot never aliases a caller-owned list.
+- **Admin bootstrap (C5):** `RoleService.InitializeAsync` seeds an Admin role from `WHISKERS_ADMIN_EMAIL` (provider-neutral) + the first `GoogleAuth:AllowedEmails` entry — **first run only** (missing `roles.json`); an existing file is loaded and never overwritten. Fixes the chicken-and-egg where the admin email seeded the whitelist but not the Admin role, leaving the Admin-gated Settings unreachable.
 - **Role updates are snapshot-isolated:** `RoleService` clones role data before caching/persisting and snapshots under its write-lock before serializing — an unsaved UI edit never mutates the live enforcement list, and a concurrent write can't corrupt serialization (same discipline as the whitelist).
 - **Synthetic agent identity:** agent tool execution runs under `AgentSyntheticScheme` carrying the caller's real MCP level in `McpLevelClaim`; tool-internal `McpPermissionCheck` enforces that level rather than granting Admin. This is deliberately **not** the `AuthDisabled` admin scheme.
 

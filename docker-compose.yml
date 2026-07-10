@@ -31,6 +31,8 @@ services:
       - TZ=${TZ:-Europe/Berlin}
       # Secrets-vault passphrase (empty = vault disabled). See .env.example — set a long random value.
       - VAULT_KEY=${VAULT_KEY:-}
+      # Admin bootstrap: seeded as Admin on first run + flips the whitelist fail-closed. See .env.example.
+      - WHISKERS_ADMIN_EMAIL=${WHISKERS_ADMIN_EMAIL:-}
       - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}
       - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-}
       - GoogleAuth__AllowedEmails__0=${GOOGLE_ADMIN_EMAIL:-}

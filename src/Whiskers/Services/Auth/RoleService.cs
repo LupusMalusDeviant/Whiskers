@@ -8,13 +8,15 @@ namespace Whiskers.Services.Auth;
 public class RoleService : IRoleService, IInitializable
 {
     private readonly JsonFileStore<UserRoleData> _store;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<RoleService> _logger;
     private UserRoleData _data = new();
     private readonly ReaderWriterLockSlim _lock = new();
 
-    public RoleService(ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
+    public RoleService(IConfiguration configuration, ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
         _store = new JsonFileStore<UserRoleData>(storePath ?? (dataPaths ?? DataPathOptions.Default).RolesJson);
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -30,9 +32,38 @@ public class RoleService : IRoleService, IInitializable
         }
         else
         {
-            SetData(new UserRoleData());
-            _logger.LogInformation("No roles configured, all users get default role: Viewer");
+            // C5 admin bootstrap: a fresh instance (no roles.json yet) must never end up admin-less — else
+            // nobody can open the Admin-gated Settings and no one can ever be promoted. Seed the configured
+            // admin email(s) as Admin so whoever set WHISKERS_ADMIN_EMAIL / GOOGLE_ADMIN_EMAIL can manage the
+            // instance. Only ever on first run; an existing roles.json is loaded above and NEVER overwritten.
+            var data = new UserRoleData();
+            foreach (var adminEmail in ResolveBootstrapAdminEmails())
+                data.Roles.Add(new UserRoleEntry { Email = adminEmail, Role = AppRole.Admin });
+
+            if (data.Roles.Count > 0)
+            {
+                await _store.SaveAsync(data);
+                SetData(data);
+                _logger.LogInformation("Bootstrapped {Count} admin role(s) from configuration (no roles.json existed)", data.Roles.Count);
+            }
+            else
+            {
+                SetData(data);
+                _logger.LogInformation("No roles configured, all users get default role: Viewer");
+            }
         }
+    }
+
+    // Admin emails to seed on first run: the provider-neutral WHISKERS_ADMIN_EMAIL plus the first
+    // GoogleAuth:AllowedEmails entry (= the documented GOOGLE_ADMIN_EMAIL). De-duped, case-insensitive.
+    private IEnumerable<string> ResolveBootstrapAdminEmails()
+    {
+        var emails = new List<string>();
+        var whiskersAdmin = _configuration["WHISKERS_ADMIN_EMAIL"];
+        if (!string.IsNullOrWhiteSpace(whiskersAdmin)) emails.Add(whiskersAdmin.Trim());
+        var googleAdmin = _configuration.GetSection("GoogleAuth:AllowedEmails").Get<List<string>>()?.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(googleAdmin)) emails.Add(googleAdmin.Trim());
+        return emails.Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Get the role for a user email. Returns DefaultRole if not explicitly assigned.</summary>
@@ -54,6 +85,21 @@ public class RoleService : IRoleService, IInitializable
     {
         var userRole = GetRole(email);
         return (int)userRole >= (int)requiredRole;
+    }
+
+    public bool HasAnyRoles()
+    {
+        _lock.EnterReadLock();
+        try { return _data.Roles.Count > 0; }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    public bool HasExplicitRole(string? email)
+    {
+        if (string.IsNullOrEmpty(email)) return false;
+        _lock.EnterReadLock();
+        try { return _data.Roles.Any(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase)); }
+        finally { _lock.ExitReadLock(); }
     }
 
     public UserRoleData GetRoleData()
