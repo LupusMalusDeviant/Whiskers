@@ -15,6 +15,15 @@ It resolves a Whiskers server's configured provider + per-server API key, finds 
 - **Weak-resolution warning:** the VM is matched by public IP; when that fails and only a name-match succeeds (common, since `SshHost` is often a mesh address ≠ the cloud public IP), the result carries a `Note` that power/reset responses surface with ⚠️ — so a destructive op on the wrong VM is visible.
 - **Hostinger has no hard reset:** `cloud_hard_reset` on a Hostinger VM triggers a graceful RESTART and says so explicitly (may be ineffective on a hung system); Hetzner does a real power-cycle.
 
+## Wiring
+
+This service, its two provider clients ([`../Hetzner/`](../Hetzner/), [`../Hostinger/`](../Hostinger/)) and the
+`CloudTools` + `HetznerTools` MCP classes are the opt-in **CloudControl module**
+([`../../Modules/CloudControl/`](../../Modules/CloudControl/), toggle `Features:cloud-control:Enabled`). It's a
+clean extraction — nothing in Core consumes them, so there are no no-op defaults; the `/cloud` page uses the
+`ModuleGuard` wrapper pattern. The §3.6 C10 `ICloudProvider` seam (pluggable providers behind a common
+contract) is deferred to a separate refactor.
+
 ## Related
 
 - Provider clients: [`../Hetzner/`](../Hetzner/), [`../Hostinger/`](../Hostinger/)

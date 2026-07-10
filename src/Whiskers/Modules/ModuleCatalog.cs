@@ -21,6 +21,7 @@ public static class ModuleCatalog
         new HostManagement.HostManagementModule(),
         new Deployment.DeploymentModule(),
         new Cve.CveModule(),
+        new CloudControl.CloudControlModule(),
         // Real modules are appended here as features are extracted (Terminal was the first pilot).
     };
 

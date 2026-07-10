@@ -184,20 +184,8 @@ builder.Services.AddSingleton<Whiskers.Services.Notifications.IContainerNotifica
 // Secret vault
 builder.Services.AddSingleton<Whiskers.Services.Vault.IVaultService, Whiskers.Services.Vault.VaultService>();
 
-// Cloud provider integrations (per-server credentials, provider-agnostic dispatch)
-// Rotating primary handler (PooledConnectionLifetime) so these long-lived cloud clients re-resolve
-// DNS periodically instead of pinning a stale IP.
-builder.Services.AddHttpClient<IHetznerService, HetznerApiService>()
-    .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
-    {
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-    });
-builder.Services.AddHttpClient<IHostingerService, HostingerApiService>()
-    .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
-    {
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-    });
-builder.Services.AddSingleton<Whiskers.Services.Cloud.ICloudControlService, Whiskers.Services.Cloud.CloudControlService>();
+// Cloud provider integrations (Hetzner/Hostinger + ICloudControlService) moved to Modules/CloudControl
+// (RoadToSAP Phase 1 §3.6). Clean extraction — no Core consumer, so no no-op defaults are needed.
 
 // Host command execution + server management. IHostCommandExecutor stays in Core (shared by many services).
 // The firewall/nginx/systemd/ssl services moved to Modules/HostManagement; Core keeps their Noop* defaults

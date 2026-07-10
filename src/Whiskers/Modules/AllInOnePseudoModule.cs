@@ -33,10 +33,10 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
     // as each feature is extracted; disabling that module then removes its tools everywhere.
     public IReadOnlyList<Type> McpToolTypes { get; } = new[]
     {
-        typeof(ContainerTools), typeof(ServerTools), typeof(MonitoringTools), typeof(CloudTools),
-        typeof(HetznerTools), typeof(NetworkTools), typeof(DatabaseTools),
+        typeof(ContainerTools), typeof(ServerTools), typeof(MonitoringTools),
+        typeof(NetworkTools), typeof(DatabaseTools),
         typeof(AgentTools),
-        // SchedulerTools → Modules/Scheduler, LogTools → Modules/LogMonitor, CveTools → Modules/Cve (RoadToSAP Phase 1).
+        // Scheduler/Log/Cve tools → their modules; Cloud+Hetzner tools → Modules/CloudControl (RoadToSAP Phase 1).
     };
 
     // Roles are permissive (Viewer): today's nav shows every link to everyone and gates on the page
@@ -58,7 +58,7 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
 
         // Infrastruktur
         new NavItem("servers",     "Server",             Icons.Material.Filled.Storage,      "Infrastruktur",    AppRole.Viewer, 210),
-        new NavItem("cloud",       "Cloud",              Icons.Material.Filled.CloudQueue,   "Infrastruktur",    AppRole.Viewer, 220),
+        // "cloud" extracted to Modules/CloudControl (RoadToSAP Phase 1).
         new NavItem("networks",    "Netzwerke",          Icons.Material.Filled.Hub,          "Infrastruktur",    AppRole.Viewer, 230),
         // "backups" extracted to Modules/VolumeBackups (RoadToSAP Phase 1).
 
