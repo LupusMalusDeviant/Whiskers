@@ -40,8 +40,9 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
   (`/deploy` + `/apps` — 3 Core no-ops because the mixed `ContainerTools` stays Core) and ✅ **Cve** (§3.5 —
   dedicated `CveTools` moves with it; no-ops for the Core Dashboard/ContainerDetail/Settings consumers; the C8
   service-locator removal is deferred), and ✅ **CloudControl** (§3.6 — clean extraction, no no-ops; C10
-  `ICloudProvider` seam deferred) are done. **Remaining §3 modules (in order):** ImageUpdate/AutoUpdate (§3.7),
-  Agent+AiChat (§3.8, +the `AgentToolRegistry`→`ModuleRegistry` change). Each module PR moves its registrations here verbatim, wraps its
+  `ICloudProvider` seam deferred), and ✅ **ImageUpdate/AutoUpdate** (§3.7 — one module for both; no-op store
+  for the Core Dashboard + `ContainerTools` consumers; C12 rollback deferred) are done. **Last §3 module:**
+  Agent+AiChat (§3.8, +the `AgentToolRegistry`→`ModuleRegistry` change). Then the §6 DoD items. Each module PR moves its registrations here verbatim, wraps its
   pages in `ModuleGuard` / gates its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false`
   boots cleanly. What remains in the transitional `AllInOnePseudoModule` is the
   lean Core surface (dashboard, health, CVE, graph, diff, notifications feed, audit log, compose editor,

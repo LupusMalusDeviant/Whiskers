@@ -180,6 +180,9 @@ else
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMetricAlert" Class="mt-2">Speichern</MudButton>
     </MudExpansionPanel>
 
+    @* RoadToSAP Phase 1: hide the Image-Updates settings when the ImageUpdate module is disabled. *@
+    @if (ModuleRegistry.IsEnabled("image-updates"))
+    {
     @* Image / Auto-Update *@
     <MudExpansionPanel Text="Image-Updates" Icon="@Icons.Material.Filled.SystemUpdate">
         <MudGrid>
@@ -189,6 +192,7 @@ else
         </MudGrid>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveImageUpdate" Class="mt-2">Speichern</MudButton>
     </MudExpansionPanel>
+    }
 
     @* Terminal *@
     @* RoadToSAP Phase 1: hide the CVE-Monitor settings when the Cve module is disabled. *@

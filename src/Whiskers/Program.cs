@@ -104,6 +104,10 @@ builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchService,
 builder.Services.AddSingleton<Whiskers.Services.Cve.ICveFindingsStore, Whiskers.Services.Cve.NoopCveFindingsStore>();
 builder.Services.AddSingleton<Whiskers.Services.Cve.ICveMonitorService, Whiskers.Services.Cve.NoopCveMonitorService>();
 builder.Services.AddSingleton<Whiskers.Services.Cve.ICveAgeStore, Whiskers.Services.Cve.NoopCveAgeStore>();
+// And for image updates: ContainerTools (mixed: core container ops + check_updates/update_container) and the
+// Dashboard page consume IImageUpdateStore, so it needs a default when the ImageUpdate module is off. The
+// module registers the real store in the loop below and wins. (RoadToSAP §2.1)
+builder.Services.AddSingleton<Whiskers.Services.ImageUpdate.IImageUpdateStore, Whiskers.Services.ImageUpdate.NoopImageUpdateStore>();
 
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
@@ -152,22 +156,8 @@ builder.Services.AddSingleton<Whiskers.Services.Help.IHelpContentService, Whiske
 // Deployment (IDeploymentService) moved to Modules/Deployment (RoadToSAP Phase 1). Core keeps a
 // NoopDeploymentService default (registered above) for ContainerTools + the /deploy page when it's off.
 
-// Image update checking
-builder.Services.Configure<ImageUpdateSettings>(builder.Configuration.GetSection("ImageUpdate"));
-// Registry client: a typed HttpClient with a rotating primary handler so a long-lived resolution
-// doesn't pin a stale DNS answer. IRegistryClient stays the singleton (shared digest cache); the
-// concrete type is no longer *also* registered as a singleton — that pinned a captive HttpClient.
-builder.Services.AddHttpClient<RegistryClient>()
-    // Explicit timeout (was unset → 100s default): bounds a hung registry so an in-flight image-update
-    // check can't stall the ImageUpdateChecker's shutdown far beyond this.
-    .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15))
-    .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
-    {
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-    });
-builder.Services.AddSingleton<Whiskers.Services.ImageUpdate.IImageUpdateStore, ImageUpdateStore>();
-builder.Services.AddSingleton<Whiskers.Services.ImageUpdate.IRegistryClient>(sp => sp.GetRequiredService<RegistryClient>());
-builder.Services.AddHostedService<ImageUpdateChecker>();
+// Image-update checking + auto-update moved to Modules/ImageUpdate (RoadToSAP Phase 1 §3.7). Core keeps a
+// NoopImageUpdateStore default (registered above) for ContainerTools + the Dashboard page when it's off.
 
 // CVE monitoring (Trivy + apt) moved to Modules/Cve (RoadToSAP Phase 1 §3.5). Core keeps Noop CVE defaults
 // (registered above) for the Dashboard/ContainerDetail/Settings pages when the module is off.
@@ -240,8 +230,7 @@ builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Servi
 builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnService, Whiskers.Services.Vpn.VpnService>();
 builder.Services.AddHostedService<Whiskers.Services.Vpn.VpnBootstrapHostedService>();
 
-// Auto-update (opt-in only)
-builder.Services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.AutoUpdate.AutoUpdateService, Whiskers.Services.AutoUpdate.IAutoUpdateService>();
+// Auto-update (opt-in) moved to Modules/ImageUpdate (RoadToSAP Phase 1 §3.7).
 
 // Webhooks (IWebhookService) moved to Modules/Webhooks (RoadToSAP Phase 1). Core keeps a NoopWebhookService
 // default (registered above) for the inbound /api/webhooks endpoint when the module is off.
