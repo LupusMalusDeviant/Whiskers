@@ -22,6 +22,7 @@ public static class NotificationFormatter
         "agent_action" => ("AI-Agent", "Info"),
         "agent_approval" => ("Freigabe erforderlich", "Warning"),
         "auto_update_failed" => ("Auto-Update fehlgeschlagen", "Error"),
+        "webhook_disabled" => ("Webhook deaktiviert", "Warning"),
         _ when e.EventType.StartsWith("log_alert", StringComparison.Ordinal) => ("Log-Alert / Fehler im Log", "Warning"),
         _ => (e.EventType, "Info"),
     };
@@ -42,6 +43,7 @@ public static class NotificationFormatter
     public static string? LinkFor(NotificationEvent e)
     {
         if (e.EventType == "agent_approval") return "approvals";
+        if (e.EventType == "webhook_disabled") return "webhooks";
         if (e.EventType.StartsWith("agent_action", StringComparison.Ordinal)) return "agent-history";
         if (e.EventType == "cve_finding") return "cves";
         if (e.EventType.StartsWith("log_alert", StringComparison.Ordinal)) return "logs";

@@ -422,5 +422,12 @@ public static class WhiskersPipelineExtensions
                 await Whiskers.Services.Auth.LocalAdminSeeder.SeedAsync(users, app.Configuration, seedLogger);
             }
         }
+
+        // Module warm-ups (IWhiskersModule.InitializeAsync). Declared since RoadToSAP Phase 0 but never
+        // invoked until F11 needed it — wired here, AFTER the database migration, so a module's init can
+        // safely touch its tables (first consumer: the Webhooks module's secret-mandatory upgrade path).
+        // DiscoverEnabled is deterministic, so this list matches the one used for ConfigureServices.
+        foreach (var module in Whiskers.Modules.ModuleCatalog.DiscoverEnabled(app.Configuration))
+            await module.InitializeAsync(app.Services, CancellationToken.None);
     }
 }

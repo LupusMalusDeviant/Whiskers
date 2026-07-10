@@ -34,11 +34,41 @@ public class WebhookService : IWebhookService
 
     public async Task<WebhookEntity> CreateWebhookAsync(WebhookEntity webhook)
     {
+        // Secrets are mandatory (HOCH-12 part 2): without one the trigger URL alone would be enough
+        // to fire host actions. Generate server-side so no caller can create a secret-less webhook.
+        if (string.IsNullOrWhiteSpace(webhook.Secret))
+            webhook.Secret = GenerateSecret();
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         db.Webhooks.Add(webhook);
         await db.SaveChangesAsync();
         return webhook;
+    }
+
+    public async Task<string> RegenerateSecretAsync(string webhookId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
+            ?? throw new InvalidOperationException("Webhook not found");
+        webhook.Secret = GenerateSecret();
+        await db.SaveChangesAsync();
+        return webhook.Secret;
+    }
+
+    public async Task SetEnabledAsync(string webhookId, bool enabled)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
+            ?? throw new InvalidOperationException("Webhook not found");
+        // A legacy webhook without a secret must not come back to life unauthenticated —
+        // force a secret regeneration first.
+        if (enabled && string.IsNullOrEmpty(webhook.Secret))
+            throw new InvalidOperationException("Webhook has no secret — regenerate its secret before enabling it.");
+        webhook.Enabled = enabled;
+        await db.SaveChangesAsync();
     }
 
     public async Task DeleteWebhookAsync(string webhookId)
@@ -63,20 +93,23 @@ public class WebhookService : IWebhookService
         if (webhook == null) return (false, "Webhook not found");
         if (!webhook.Enabled) return (false, "Webhook is disabled");
 
-        // Validate HMAC. If the webhook has a secret configured, a valid signature is REQUIRED —
-        // otherwise anyone who learns the (unauthenticated) webhook URL could trigger it without
-        // knowing the shared secret. Compare in constant time to avoid signature-timing leaks.
-        if (!string.IsNullOrEmpty(webhook.Secret))
-        {
-            if (string.IsNullOrEmpty(signature) || string.IsNullOrEmpty(body))
-                return (false, "Signature required");
+        // Secrets are mandatory (HOCH-12 part 2). A webhook without one (legacy row) is rejected
+        // fail-closed instead of accepted unauthenticated — the boot migration disables such rows,
+        // but this guard also covers a row edited behind the app's back.
+        if (string.IsNullOrEmpty(webhook.Secret))
+            return (false, "Webhook has no secret configured — regenerate its secret in the UI.");
 
-            var expected = Encoding.UTF8.GetBytes($"sha256={ComputeHmac(webhook.Secret, body)}");
-            var provided = Encoding.UTF8.GetBytes(signature.Trim());
-            if (expected.Length != provided.Length ||
-                !CryptographicOperations.FixedTimeEquals(expected, provided))
-                return (false, "Invalid signature");
-        }
+        // Validate HMAC: a valid signature over the raw body is REQUIRED — otherwise anyone who
+        // learns the (unauthenticated) webhook URL could trigger it without knowing the shared
+        // secret. Compare in constant time to avoid signature-timing leaks.
+        if (string.IsNullOrEmpty(signature) || string.IsNullOrEmpty(body))
+            return (false, "Signature required");
+
+        var expected = Encoding.UTF8.GetBytes($"sha256={ComputeHmac(webhook.Secret, body)}");
+        var provided = Encoding.UTF8.GetBytes(signature.Trim());
+        if (expected.Length != provided.Length ||
+            !CryptographicOperations.FixedTimeEquals(expected, provided))
+            return (false, "Invalid signature");
 
         _logger.LogInformation("Webhook triggered: {Name} ({Action} on {Target})", webhook.Name, webhook.Action, webhook.TargetId);
 
@@ -150,6 +183,28 @@ public class WebhookService : IWebhookService
             TimeSpan.FromMinutes(5));
         return (result.Success, result.Success ? result.Output : result.Error);
     }
+
+    /// <summary>Signs a synthetic test payload with the stored secret and runs it through the exact
+    /// same path as an external CI caller — proves URL, secret and HMAC wiring end-to-end.</summary>
+    public async Task<(bool Success, string Output)> TriggerSignedTestAsync(string webhookId)
+    {
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId);
+            if (webhook == null) return (false, "Webhook not found");
+            if (string.IsNullOrEmpty(webhook.Secret))
+                return (false, "Webhook has no secret configured — regenerate its secret first.");
+
+            var body = $"{{\"test\":true,\"webhookId\":\"{webhook.WebhookId}\",\"timestamp\":\"{DateTime.UtcNow:O}\"}}";
+            var signature = $"sha256={ComputeHmac(webhook.Secret, body)}";
+            return await TriggerAsync(webhookId, signature, body, "ui-test");
+        }
+    }
+
+    /// <summary>256-bit cryptographically random HMAC secret, lowercase hex (64 chars).</summary>
+    internal static string GenerateSecret() =>
+        Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
 
     private static string ComputeHmac(string secret, string payload)
     {

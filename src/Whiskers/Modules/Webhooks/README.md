@@ -6,7 +6,9 @@ triggers (restart / rebuild / compose-deploy). The sixth feature extracted from 
 
 - `WebhooksModule.cs` — `Id = "webhooks"`, enabled by default. `ConfigureServices` (moved **verbatim** from
   `Program.cs`) registers `IWebhookService` → `WebhookService`. Nav: the `webhooks` entry ("Webhooks", group
-  *Automatisierung*).
+  *Automatisierung*). `InitializeAsync` (runs after the DB migration, see `RunWhiskersStartupAsync`) is the
+  F11 upgrade path: legacy webhooks without a secret are **disabled** (never deleted) and the admin gets a
+  one-time `webhook_disabled` notification — secrets are mandatory now.
 
 **Toggle:** `Features:webhooks:Enabled` (`Features__webhooks__Enabled=false`), restart-only. When off, the
 `webhooks` nav entry disappears and `/webhooks` shows a "module disabled" notice.

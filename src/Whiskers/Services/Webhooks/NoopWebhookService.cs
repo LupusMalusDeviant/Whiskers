@@ -23,7 +23,16 @@ public sealed class NoopWebhookService : IWebhookService
 
     public Task DeleteWebhookAsync(string webhookId) => Task.CompletedTask;
 
+    public Task<string> RegenerateSecretAsync(string webhookId)
+        => throw new InvalidOperationException(Disabled);
+
+    public Task SetEnabledAsync(string webhookId, bool enabled)
+        => throw new InvalidOperationException(Disabled);
+
     public Task<(bool Success, string Output)> TriggerAsync(
         string webhookId, string? signature = null, string? body = null, string? sourceIp = null)
+        => Task.FromResult((false, "Webhooks are disabled."));
+
+    public Task<(bool Success, string Output)> TriggerSignedTestAsync(string webhookId)
         => Task.FromResult((false, "Webhooks are disabled."));
 }

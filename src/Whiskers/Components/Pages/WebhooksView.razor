@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IJSRuntime JS
 
 @* The interactive webhooks UI. Rendered by Webhooks.razor only when the Webhooks module is enabled (via
    ModuleGuard), so a disabled module never reaches the IWebhookService injection. *@
@@ -40,6 +41,7 @@ else
     <MudTable Items="@_webhooks" Dense="true" Hover="true" Striped="true" Elevation="0">
         <HeaderContent>
             <MudTh>Name</MudTh>
+            <MudTh>Status</MudTh>
             <MudTh>URL</MudTh>
             <MudTh>Aktion</MudTh>
             <MudTh>Ziel</MudTh>
@@ -48,6 +50,23 @@ else
         </HeaderContent>
         <RowTemplate>
             <MudTd><strong>@context.Name</strong></MudTd>
+            <MudTd>
+                @if (string.IsNullOrEmpty(context.Secret))
+                {
+                    <MudTooltip Text="Legacy-Webhook ohne Secret — deaktiviert. Secret neu generieren, dann wieder aktivieren.">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined"
+                                 Icon="@Icons.Material.Filled.Warning">Kein Secret</MudChip>
+                    </MudTooltip>
+                }
+                else if (context.Enabled)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Aktiv</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Deaktiviert</MudChip>
+                }
+            </MudTd>
             <MudTd>
                 <code style="font-size: 0.75rem; word-break: break-all;">
                     @($"{Nav.BaseUri}api/webhooks/{context.WebhookId}")
@@ -58,9 +77,15 @@ else
             <MudTd>@context.TriggerCount×</MudTd>
             <MudTd>
                 <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
-                               OnClick="@(() => TestWebhook(context))" title="Testen" />
+                               OnClick="@(() => TestWebhook(context))" title="Signierten Test senden" />
                 @if (_role >= AppRole.Admin)
                 {
+                    <MudIconButton Icon="@Icons.Material.Filled.Autorenew" Color="Color.Warning" Size="Size.Small"
+                                   OnClick="@(() => RegenerateSecret(context))" title="Secret neu generieren (einmalige Anzeige)" />
+                    <MudIconButton Icon="@(context.Enabled ? Icons.Material.Filled.PauseCircle : Icons.Material.Filled.PlayCircle)"
+                                   Color="@(context.Enabled ? Color.Default : Color.Success)" Size="Size.Small"
+                                   OnClick="@(() => ToggleEnabled(context))"
+                                   title="@(context.Enabled ? "Deaktivieren" : "Aktivieren")" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                    OnClick="@(() => DeleteWebhook(context))" title="Löschen" />
                 }
@@ -68,6 +93,31 @@ else
         </RowTemplate>
     </MudTable>
 }
+
+@* One-time secret display (create + regenerate). The secret is shown exactly once and never again. *@
+<MudDialog Visible="_showSecretDialog" VisibleChanged="@(v => { _showSecretDialog = v; if (!v) _shownSecret = null; })"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false })">
+    <TitleContent>Webhook-Secret — einmalige Anzeige</TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+            Dieses Secret wird nur JETZT angezeigt und kann später nicht mehr abgerufen werden.
+            Im CI-System (z. B. GitHub-Webhook-Secret) hinterlegen — Payload wird als
+            <code>X-Hub-Signature-256</code> (HMAC-SHA256) signiert erwartet.
+        </MudAlert>
+        <MudTextField Value="@_shownSecretUrl" Label="Webhook-URL" Variant="Variant.Outlined" ReadOnly="true"
+                      Class="mb-3" Style="font-family: 'JetBrains Mono', monospace;"
+                      Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.ContentCopy"
+                      OnAdornmentClick="@(() => CopyToClipboard(_shownSecretUrl))" />
+        <MudTextField Value="@_shownSecret" Label="Secret" Variant="Variant.Outlined" ReadOnly="true"
+                      Style="font-family: 'JetBrains Mono', monospace;"
+                      Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.ContentCopy"
+                      OnAdornmentClick="@(() => CopyToClipboard(_shownSecret))" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="@(() => { _showSecretDialog = false; _shownSecret = null; })">Secret gesichert — schließen</MudButton>
+    </DialogActions>
+</MudDialog>
 
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>Webhook erstellen</TitleContent>
@@ -110,6 +160,9 @@ else
     private List<Whiskers.Models.WebhookEntity> _webhooks = new();
     private List<Whiskers.Models.ContainerInfo> _containers = new();
     private bool _showDialog;
+    private bool _showSecretDialog;
+    private string? _shownSecret;
+    private string _shownSecretUrl = "";
     private string _formName = "";
     private string _formAction = "restart";
     private string _formTarget = "";
@@ -168,8 +221,9 @@ else
                 TargetId = _formTarget,
                 ServerId = _formServerId
             });
-            Snackbar.Add($"Webhook '{_formName}' erstellt. URL: /api/webhooks/{wh.WebhookId}", Severity.Success);
             _showDialog = false;
+            // One-time display: the secret is only ever available right here.
+            ShowSecretOnce(wh.WebhookId, wh.Secret);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }
         catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
@@ -180,10 +234,54 @@ else
         // Triggering runs restart/rebuild/deploy on the host — gate it behind Operator so a Viewer
         // cannot fire host actions from the UI.
         if (!Require(AppRole.Operator)) return;
-        Snackbar.Add($"Webhook '{wh.Name}' wird getestet...", Severity.Info);
-        var (success, output) = await WebhookService.TriggerAsync(wh.WebhookId);
+        Snackbar.Add($"Webhook '{wh.Name}' wird getestet (signierter Request)...", Severity.Info);
+        // Signed end-to-end test: same HMAC validation path as an external CI caller.
+        var (success, output) = await WebhookService.TriggerSignedTestAsync(wh.WebhookId);
         Snackbar.Add(success ? $"OK: {output}" : $"Fehler: {output}", success ? Severity.Success : Severity.Error);
         _webhooks = await WebhookService.GetWebhooksAsync();
+    }
+
+    private async Task RegenerateSecret(Whiskers.Models.WebhookEntity wh)
+    {
+        if (!Require(AppRole.Admin)) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Secret neu generieren",
+            $"Secret für '{wh.Name}' neu generieren? Das alte Secret wird sofort ungültig — CI-Systeme müssen aktualisiert werden.",
+            yesText: "Neu generieren", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+        try
+        {
+            var secret = await WebhookService.RegenerateSecretAsync(wh.WebhookId);
+            ShowSecretOnce(wh.WebhookId, secret);
+            _webhooks = await WebhookService.GetWebhooksAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task ToggleEnabled(Whiskers.Models.WebhookEntity wh)
+    {
+        if (!Require(AppRole.Admin)) return;
+        try
+        {
+            await WebhookService.SetEnabledAsync(wh.WebhookId, !wh.Enabled);
+            Snackbar.Add(wh.Enabled ? "Webhook deaktiviert." : "Webhook aktiviert.", Severity.Success);
+            _webhooks = await WebhookService.GetWebhooksAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+    }
+
+    private void ShowSecretOnce(string webhookId, string secret)
+    {
+        _shownSecret = secret;
+        _shownSecretUrl = $"{Nav.BaseUri}api/webhooks/{webhookId}";
+        _showSecretDialog = true;
+    }
+
+    private async Task CopyToClipboard(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        await JS.InvokeVoidAsync("swClipboard.copy", text);
+        Snackbar.Add("In die Zwischenablage kopiert.", Severity.Success);
     }
 
     private async Task DeleteWebhook(Whiskers.Models.WebhookEntity wh)

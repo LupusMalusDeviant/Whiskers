@@ -10,7 +10,7 @@ pipeline (discovery → services → MCP tools → navigation) is wired, and fea
 
 | File | Purpose |
 |---|---|
-| `IWhiskersModule.cs` | The module contract: `Id`, `DisplayName`, `EnabledByDefault`, `DependsOn`, `ConfigureServices`, `NavItems`, `McpToolTypes`, `InitializeAsync`. Modules consume Core interfaces, never the reverse. |
+| `IWhiskersModule.cs` | The module contract: `Id`, `DisplayName`, `EnabledByDefault`, `DependsOn`, `ConfigureServices`, `NavItems`, `McpToolTypes`, `InitializeAsync`. Modules consume Core interfaces, never the reverse. `InitializeAsync` runs at startup **after** the DB migration (`RunWhiskersStartupAsync`), enabled modules only — first consumer: the Webhooks module's F11 secret-mandatory upgrade. |
 | `ModuleCatalog.cs` | The single **explicit** list of modules (no assembly scanning) + `DiscoverEnabled(config)`: filters by `Features:{id}:Enabled` (overrides `EnabledByDefault`) and fails fast on an unmet `DependsOn`. |
 | `AllInOnePseudoModule.cs` | Transitional "everything not yet a real module" bucket — carries the not-yet-extracted nav entries + MCP tool classes with a **no-op** `ConfigureServices` (registrations stay inline in `Program.cs`). Shrinks with each module PR (Scheduler took the `tasks` nav + `SchedulerTools`); retired once empty. Kept in sync with [`../Components/Layout/NavMenu.razor`](../Components/Layout/NavMenu.razor). |
 | `NavItem.cs` | A navigation entry a module contributes (`Href`, `LocKey`, `Icon`, `Group`, `MinRole`, `Order`). |

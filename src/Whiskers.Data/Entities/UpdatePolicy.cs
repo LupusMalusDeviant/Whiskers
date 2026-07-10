@@ -51,7 +51,9 @@ public class WebhookEntity
     public long Id { get; set; }
     public string WebhookId { get; set; } = Guid.NewGuid().ToString("N")[..16];
     public string Name { get; set; } = "";
-    public string Secret { get; set; } = Guid.NewGuid().ToString("N");  // HMAC secret
+    // HMAC secret — mandatory (HOCH-12 part 2). Left empty here on purpose: WebhookService is the
+    // single generator (256-bit) and rejects triggers for secret-less rows fail-closed.
+    public string Secret { get; set; } = "";
     public string TargetType { get; set; } = "container"; // container, compose
     public string TargetId { get; set; } = "";         // Container name or compose project dir
     public string Action { get; set; } = "restart";    // restart, rebuild, deploy
