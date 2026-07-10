@@ -73,6 +73,44 @@ public class ImageUpdateModuleTests
         Assert.Null(noop.Get("some-container"));
     }
 
+    // --- C12 rollback no-op gate: since C12 the Dashboard consumes IAutoUpdateService too (rollback button +
+    // capturing a snapshot before a manual update), so it needs a Core NoopAutoUpdateService default that
+    // resolves when the module is off and is overridden by the real hosted service when on. ------------------
+
+    [Fact]
+    public void Disabled_module_keeps_the_noop_auto_update_service()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IAutoUpdateService, NoopAutoUpdateService>();
+        using var sp = services.BuildServiceProvider();
+        Assert.IsType<NoopAutoUpdateService>(sp.GetRequiredService<IAutoUpdateService>());
+    }
+
+    [Fact]
+    public void Enabled_module_overrides_the_noop_auto_update_service_by_last_registration()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IAutoUpdateService, NoopAutoUpdateService>();
+        new ImageUpdateModule().ConfigureServices(services, Config());
+        // The module forwards IAutoUpdateService to the shared hosted AutoUpdateService via a factory, so the
+        // last registration is factory-based (no ImplementationType) — i.e. it is NOT the no-op type default.
+        var last = services.Last(d => d.ServiceType == typeof(IAutoUpdateService));
+        Assert.Null(last.ImplementationType);
+        Assert.NotNull(last.ImplementationFactory);
+    }
+
+    [Fact]
+    public async Task Noop_auto_update_service_has_nothing_and_refuses_rollback()
+    {
+        var noop = new NoopAutoUpdateService();
+        Assert.Empty(await noop.GetRollbacksAsync());
+        Assert.Empty(await noop.GetPoliciesAsync());
+        Assert.Empty(await noop.GetHistoryAsync());
+        // With the module off there is no snapshot to roll back to — the call is defensively refused (and the
+        // UI never offers it, since GetRollbacksAsync is empty).
+        await Assert.ThrowsAsync<InvalidOperationException>(() => noop.RollbackAsync(1));
+    }
+
     // --- Enable/disable gate -----------------------------------------------------------------------------
 
     [Fact]

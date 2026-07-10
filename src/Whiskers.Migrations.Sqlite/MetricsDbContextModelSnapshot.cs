@@ -417,6 +417,41 @@ namespace Whiskers.Migrations
                     b.ToTable("UpdatePolicies");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.UpdateRollbackEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CapturedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfigJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContainerId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContainerName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OldImageRef")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServerId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContainerId", "ServerId");
+
+                    b.ToTable("UpdateRollbacks");
+                });
+
             modelBuilder.Entity("Whiskers.Models.VolumeBackupEntity", b =>
                 {
                     b.Property<long>("Id")

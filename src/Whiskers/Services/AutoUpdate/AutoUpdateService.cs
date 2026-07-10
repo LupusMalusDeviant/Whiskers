@@ -121,6 +121,12 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
 
             try
             {
+                // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
+                // drops the old container, so a failed update can be rolled back from the UI (and the snapshot
+                // survives even a crash mid-update). Best-effort — a snapshot failure must never abort the update.
+                try { await CaptureSnapshotAsync(container); }
+                catch (Exception cex) { _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
+
                 var progress = new Progress<string>(msg => _logger.LogDebug("Update {Container}: {Msg}", container.Name, msg));
                 var newId = await _docker.RecreateContainerAsync(container.Id, container.ServerId == "local" ? null : container.ServerId, progress);
 
@@ -216,5 +222,83 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
         if (!string.IsNullOrEmpty(containerId))
             query = query.Where(h => h.ContainerId == containerId);
         return await query.OrderByDescending(h => h.StartedAt).Take(limit).ToListAsync();
+    }
+
+    // === C12 manual rollback ===
+
+    // Capture + persist a container's pre-update snapshot (old image id + full config). Called right before an
+    // update from BOTH the auto-updater above and the manual Dashboard update path, so either can be rolled
+    // back. Own scope + immediate save so the snapshot is durable before the recreate touches the container.
+    public async Task CaptureSnapshotAsync(ContainerInfo container)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var (oldImageId, cfg) = await _docker.CaptureRollbackSnapshotAsync(
+            container.Id, container.ServerId == "local" ? null : container.ServerId);
+        await UpsertRollbackAsync(db, container, oldImageId, cfg, CancellationToken.None);
+        await db.SaveChangesAsync();
+    }
+
+    // Upsert the pre-update snapshot keyed by (container NAME, server): the name is stable across updates (the
+    // container ID changes on each recreate), so exactly one snapshot is kept per container — the latest good
+    // pre-update state. Saved by the caller together with the update-history row.
+    private static async Task UpsertRollbackAsync(MetricsDbContext db, ContainerInfo container, string oldImageId, string configJson, CancellationToken ct)
+    {
+        var existing = await db.UpdateRollbacks.FirstOrDefaultAsync(
+            r => r.ContainerName == container.Name && r.ServerId == container.ServerId, ct);
+        if (existing != null)
+        {
+            existing.ContainerId = container.Id;
+            existing.OldImageRef = oldImageId;
+            existing.ConfigJson = configJson;
+            existing.CapturedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            db.UpdateRollbacks.Add(new UpdateRollbackEntity
+            {
+                ContainerId = container.Id,
+                ContainerName = container.Name,
+                ServerId = container.ServerId,
+                OldImageRef = oldImageId,
+                ConfigJson = configJson,
+                CapturedAt = DateTime.UtcNow
+            });
+        }
+    }
+
+    public async Task<List<UpdateRollbackEntity>> GetRollbacksAsync()
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        return await db.UpdateRollbacks.OrderByDescending(r => r.CapturedAt).ToListAsync();
+    }
+
+    public async Task<string> RollbackAsync(long rollbackId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+
+        var snap = await db.UpdateRollbacks.FirstOrDefaultAsync(r => r.Id == rollbackId)
+                   ?? throw new InvalidOperationException("Kein Rollback-Snapshot gefunden.");
+
+        var progress = new Progress<string>(msg => _logger.LogDebug("Rollback {Container}: {Msg}", snap.ContainerName, msg));
+        await _docker.RollbackContainerAsync(
+            snap.ContainerName, snap.OldImageRef, snap.ConfigJson,
+            snap.ServerId == "local" ? null : snap.ServerId, progress);
+
+        // Mark the latest update-history row for this container as rolled back.
+        var hist = await db.UpdateHistory
+            .Where(h => h.ContainerName == snap.ContainerName && h.ServerId == snap.ServerId)
+            .OrderByDescending(h => h.StartedAt).FirstOrDefaultAsync();
+        if (hist != null) hist.RolledBack = true;
+
+        // The snapshot is consumed — the container now runs the OLD image again, so there is nothing newer to
+        // roll back to until the next update captures a fresh snapshot.
+        db.UpdateRollbacks.Remove(snap);
+        await db.SaveChangesAsync();
+
+        _logger.LogInformation("Manual rollback of {Container} to the previous image completed", snap.ContainerName);
+        return $"{snap.ContainerName} wurde auf das vorherige Image zurückgesetzt.";
     }
 }

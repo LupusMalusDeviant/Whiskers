@@ -73,6 +73,7 @@ public class MetricsDbContext : DbContext
     public DbSet<LogAlertRuleEntity> LogAlertRules => Set<LogAlertRuleEntity>();
     public DbSet<UpdatePolicyEntity> UpdatePolicies => Set<UpdatePolicyEntity>();
     public DbSet<UpdateHistoryEntity> UpdateHistory => Set<UpdateHistoryEntity>();
+    public DbSet<UpdateRollbackEntity> UpdateRollbacks => Set<UpdateRollbackEntity>();
     public DbSet<WebhookEntity> Webhooks => Set<WebhookEntity>();
     public DbSet<WebhookLogEntity> WebhookLogs => Set<WebhookLogEntity>();
     public DbSet<CveFirstSeenEntity> CveFirstSeen => Set<CveFirstSeenEntity>();
@@ -157,6 +158,15 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => x.Timestamp);
             e.HasIndex(x => new { x.Severity, x.Timestamp });
             e.HasIndex(x => x.Read);
+        });
+
+        modelBuilder.Entity<UpdateRollbackEntity>(e =>
+        {
+            // Access index for looking a container's snapshot up by id + server. The service keeps exactly one
+            // row per (ContainerName, ServerId) — the name is the stable key, since the container id changes on
+            // every update/recreate — but that upsert runs at most once per check interval, so a plain scan is
+            // fine and this index just speeds id-scoped reads.
+            e.HasIndex(x => new { x.ContainerId, x.ServerId });
         });
     }
 }

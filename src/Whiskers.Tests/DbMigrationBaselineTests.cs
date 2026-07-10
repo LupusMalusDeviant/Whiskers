@@ -91,6 +91,7 @@ public sealed class DbMigrationBaselineTests : IDisposable
         Assert.Equal(0, await db2.LogAlertRules.CountAsync());
         Assert.Equal(0, await db2.UpdatePolicies.CountAsync());
         Assert.Equal(0, await db2.UpdateHistory.CountAsync());
+        Assert.Equal(0, await db2.UpdateRollbacks.CountAsync());
         Assert.Equal(0, await db2.Webhooks.CountAsync());
         Assert.Equal(0, await db2.WebhookLogs.CountAsync());
         Assert.Equal(0, await db2.CveFirstSeen.CountAsync());
@@ -132,8 +133,11 @@ public sealed class DbMigrationBaselineTests : IDisposable
 
         await using var check = Ctx(path);
         Assert.Equal(1, await check.ContainerMetrics.CountAsync()); // rows unchanged
-        var applied = await check.Database.GetAppliedMigrationsAsync();
-        Assert.Single(applied); // InitialCreate recorded exactly once
+        var applied = (await check.Database.GetAppliedMigrationsAsync()).ToList();
+        // Idempotent baseline: InitialCreate is recorded EXACTLY ONCE across both startups (never re-baselined).
+        // Asserted on the InitialCreate marker itself, not the total count, so this stays valid as later
+        // additive migrations (e.g. AddUpdateRollback) join the applied set.
+        Assert.Equal(1, applied.Count(m => m.EndsWith("InitialCreate")));
     }
 
     [Fact]

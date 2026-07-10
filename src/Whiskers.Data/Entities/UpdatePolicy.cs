@@ -31,6 +31,21 @@ public class UpdateHistoryEntity
     public string? Error { get; set; }
 }
 
+/// <summary>The pre-update snapshot needed to roll a container back after a bad update (changeme C12): the OLD
+/// image reference (its image ID — the tag now points at the NEW image after the pull) plus the container's
+/// full pre-update inspect config serialized as JSON. One row per (container, server), overwritten on each
+/// update; a "Rollback" UI action recreates the container from this.</summary>
+public class UpdateRollbackEntity
+{
+    public long Id { get; set; }
+    public string ContainerId { get; set; } = "";
+    public string ContainerName { get; set; } = "";
+    public string? ServerId { get; set; }
+    public string OldImageRef { get; set; } = "";   // image ID to recreate FROM (not the tag, which moved to the new image)
+    public string ConfigJson { get; set; } = "";    // pre-update ContainerInspect snapshot (config + hostConfig + networks)
+    public DateTime CapturedAt { get; set; }
+}
+
 public class WebhookEntity
 {
     public long Id { get; set; }

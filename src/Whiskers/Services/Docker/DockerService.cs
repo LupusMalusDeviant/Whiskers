@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Caching.Memory;
@@ -834,6 +835,137 @@ public class DockerService : IDockerService
         progress?.Report($"Container updated successfully (new ID: {newId[..12]})");
         _logger.LogInformation("Container {Name} recreated: {OldId} → {NewId}", name, containerId[..12], newId[..12]);
 
+        return newId;
+    }
+
+    // ─────────────────────────── C12 update-rollback ───────────────────────────
+
+    // Serializable snapshot of the pre-update container, enough to recreate it from the OLD image.
+    private sealed class ContainerRollbackSnapshot
+    {
+        public string Name { get; set; } = "";
+        public Config? Config { get; set; }
+        public HostConfig? HostConfig { get; set; }
+        public IDictionary<string, EndpointSettings>? Networks { get; set; }
+    }
+
+    private static readonly JsonSerializerOptions RollbackJsonOptions =
+        new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+
+    // The snapshot is round-tripped through System.Text.Json. Docker.DotNet's models carry Newtonsoft
+    // attributes, so STJ serializes by C# property name — symmetric here, since we deserialize the same way and
+    // only hand the rebuilt object back to Docker.DotNet, which re-serializes it with the correct wire names.
+    private static string SerializeRollbackSnapshot(ContainerRollbackSnapshot snapshot)
+        => JsonSerializer.Serialize(snapshot, RollbackJsonOptions);
+
+    private static ContainerRollbackSnapshot DeserializeRollbackSnapshot(string json)
+        => JsonSerializer.Deserialize<ContainerRollbackSnapshot>(json, RollbackJsonOptions)
+           ?? throw new InvalidOperationException("Rollback-Snapshot konnte nicht gelesen werden.");
+
+    public async Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null)
+    {
+        var client = await GetClient(serverId);
+        var inspect = await client.Containers.InspectContainerAsync(containerId);
+        var snapshot = new ContainerRollbackSnapshot
+        {
+            Name = inspect.Name.TrimStart('/'),
+            Config = inspect.Config,
+            HostConfig = inspect.HostConfig,
+            Networks = inspect.NetworkSettings?.Networks
+        };
+        // inspect.Image is the concrete image ID (sha256:…) currently in use. After the update the tag moves to
+        // the new image, but this ID still exists locally (until pruned), so a rollback can recreate from it.
+        return (inspect.Image, SerializeRollbackSnapshot(snapshot));
+    }
+
+    public async Task<string> RollbackContainerAsync(string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null)
+    {
+        var client = await GetClient(serverId);
+        var snap = DeserializeRollbackSnapshot(configJson);
+
+        // 1. Find the CURRENT container by name — its id changed on the (failed) update.
+        progress?.Report("Locating current container...");
+        var existing = (await client.Containers.ListContainersAsync(new ContainersListParameters { All = true }))
+            .FirstOrDefault(c => c.Names.Any(n => n.TrimStart('/') == containerName));
+        var currentId = existing?.ID;
+
+        // 2. Rename the current one out of the way (don't destroy it until the rollback container is up), same
+        //    fail-safe as RecreateContainerAsync — a failed rollback must never leave the container gone.
+        var stashName = $"{containerName}-rollbackfail-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        if (currentId != null)
+        {
+            progress?.Report("Stopping current container...");
+            try { await client.Containers.StopContainerAsync(currentId, new ContainerStopParameters { WaitBeforeKillSeconds = 10 }); }
+            catch { }
+            await client.Containers.RenameContainerAsync(currentId,
+                new ContainerRenameParameters { NewName = stashName }, CancellationToken.None);
+        }
+
+        // 3. Create the rollback container from the OLD image + saved config (attach first network on create,
+        //    connect the rest after — mirrors RecreateContainerAsync for old-engine compatibility).
+        var allNetworks = snap.Networks?.ToDictionary(kv => kv.Key, kv => kv.Value) ?? new();
+        var firstNetwork = allNetworks.Take(1).ToDictionary(kv => kv.Key, kv => kv.Value);
+        var createParams = new CreateContainerParameters
+        {
+            Image = imageId,          // roll back to the OLD image by ID
+            Name = containerName,
+            Env = snap.Config?.Env,
+            Cmd = snap.Config?.Cmd,
+            Entrypoint = snap.Config?.Entrypoint,
+            ExposedPorts = snap.Config?.ExposedPorts,
+            Labels = snap.Config?.Labels,
+            WorkingDir = snap.Config?.WorkingDir,
+            HostConfig = snap.HostConfig,
+            NetworkingConfig = new NetworkingConfig { EndpointsConfig = firstNetwork }
+        };
+
+        string newId;
+        try
+        {
+            progress?.Report("Creating rollback container...");
+            var response = await client.Containers.CreateContainerAsync(createParams);
+            newId = response.ID;
+
+            foreach (var (netName, endpoint) in allNetworks.Skip(1))
+            {
+                await client.Networks.ConnectNetworkAsync(netName,
+                    new NetworkConnectParameters { Container = newId, EndpointConfig = endpoint });
+            }
+
+            progress?.Report("Starting rollback container...");
+            await client.Containers.StartContainerAsync(newId, new ContainerStartParameters());
+        }
+        catch (Exception ex)
+        {
+            // Rollback of the rollback: restore the stashed container so we never lose it.
+            _logger.LogError(ex, "Rollback recreate of {Name} failed — restoring the stashed container", containerName);
+            progress?.Report("Rollback failed — restoring previous container...");
+            if (currentId != null)
+            {
+                try
+                {
+                    await client.Containers.RenameContainerAsync(currentId,
+                        new ContainerRenameParameters { NewName = containerName }, CancellationToken.None);
+                    await client.Containers.StartContainerAsync(currentId, new ContainerStartParameters());
+                }
+                catch (Exception rex)
+                {
+                    _logger.LogError(rex, "Restoring stashed container {Name} failed; it remains as {Stash}", containerName, stashName);
+                }
+            }
+            throw;
+        }
+
+        // 4. Success — remove the stashed (failed-update) container.
+        if (currentId != null)
+        {
+            progress?.Report("Removing failed-update container...");
+            try { await client.Containers.RemoveContainerAsync(currentId, new ContainerRemoveParameters { Force = true }); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Rollback of {Name} is up, but removing the stashed container failed", containerName); }
+        }
+
+        progress?.Report($"Rollback complete (new ID: {newId[..12]})");
+        _logger.LogInformation("Container {Name} rolled back to image {Image}", containerName, imageId.Length > 19 ? imageId[..19] : imageId);
         return newId;
     }
 

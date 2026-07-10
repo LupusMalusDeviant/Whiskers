@@ -6,6 +6,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject NavigationManager Nav
 @inject Whiskers.Services.ImageUpdate.IImageUpdateStore ImageUpdateStore
+@inject Whiskers.Services.AutoUpdate.IAutoUpdateService AutoUpdate
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject IMetricsQueryService MetricsQuery
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
@@ -298,6 +299,11 @@
                                 <MudIconButton Icon="@Icons.Material.Filled.SystemUpdateAlt" Size="Size.Small" Color="Color.Warning"
                                                title="Image aktualisieren" OnClick="@(() => UpdateContainer(context))" />
                             }
+                            @if (HasRollback(context))
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.SettingsBackupRestore" Size="Size.Small" Color="Color.Secondary"
+                                               title="Update zurückrollen" OnClick="@(() => RollbackContainer(context))" />
+                            }
                         }
                     }
                     else
@@ -306,6 +312,11 @@
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
                                            title="Starten" OnClick="@(() => StartContainer(context))" />
+                            @if (HasRollback(context))
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.SettingsBackupRestore" Size="Size.Small" Color="Color.Secondary"
+                                               title="Update zurückrollen" OnClick="@(() => RollbackContainer(context))" />
+                            }
                         }
                         @if (_role >= AppRole.Admin)
                         {
@@ -330,6 +341,9 @@
 
 @code {
     private List<ContainerInfo> _containers = new();
+    // C12: pre-update rollback snapshots keyed by "{ServerId}|{ContainerName}" (the container id changes on
+    // update, so the name is the stable key). Populated each refresh; drives the per-row rollback button.
+    private Dictionary<string, Whiskers.Models.UpdateRollbackEntity> _rollbacks = new();
     private List<ServerGroupViewModel> _grouped = new();
     private Dictionary<string, ServerSystemInfo> _serverInfos = new();
     private HashSet<string> _expandedServers = new();
@@ -432,6 +446,18 @@
         {
             var containers = await DockerService.ListAllContainersAsync();
             _containers = containers.ToList();
+
+            // C12: load pre-update rollback snapshots for the per-row rollback button. Empty when the
+            // ImageUpdate module is off (the no-op service returns none). Indexer-assign so a stray duplicate
+            // key can never throw — the service already keeps one snapshot per (name, server).
+            try
+            {
+                var rbs = await AutoUpdate.GetRollbacksAsync();
+                var map = new Dictionary<string, Whiskers.Models.UpdateRollbackEntity>();
+                foreach (var r in rbs) map[$"{r.ServerId}|{r.ContainerName}"] = r;
+                _rollbacks = map;
+            }
+            catch (Exception rex) { _logger?.LogWarning(rex, "Loading rollback snapshots failed"); }
 
             // Stats in parallel (cached results return instantly)
             await Task.WhenAll(_containers
@@ -594,6 +620,10 @@
         {
             Snackbar.Add($"{container.Name} wird aktualisiert...", Severity.Info);
             var progress = new Progress<string>(msg => Snackbar.Add(msg, Severity.Info));
+            // C12: snapshot the current image + config BEFORE recreating, so this update can be rolled back.
+            // Best-effort — a snapshot failure must not block the update itself.
+            try { await AutoUpdate.CaptureSnapshotAsync(container); }
+            catch (Exception cex) { _logger?.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
             await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
             ImageUpdateStore.Remove(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, serverId: container.ServerId);
@@ -604,6 +634,37 @@
         {
             await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
             Snackbar.Add($"Fehler beim Aktualisieren von {container.Name}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // C12: a rollback snapshot exists for this container (captured on its last update).
+    private bool HasRollback(ContainerInfo c) => _rollbacks.ContainsKey($"{c.ServerId}|{c.Name}");
+
+    private async Task RollbackContainer(ContainerInfo container)
+    {
+        if (!Require(AppRole.Operator)) return;
+        if (!_rollbacks.TryGetValue($"{container.ServerId}|{container.Name}", out var snap)) return;
+
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Update zurückrollen?",
+            $"{container.Name} wird auf das vorherige Image zurückgesetzt (Snapshot vom {snap.CapturedAt.ToLocalTime():g}). " +
+            "Der Container wird dazu neu erstellt.",
+            yesText: "Zurückrollen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+
+        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+        try
+        {
+            Snackbar.Add($"{container.Name} wird zurückgerollt...", Severity.Info);
+            var msg = await AutoUpdate.RollbackAsync(snap.Id);
+            await AuditLog.LogAsync(actor, "web", "container.rollback", "container", container.Id, container.Name, serverId: container.ServerId);
+            Snackbar.Add(msg, Severity.Success);
+            await RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            await AuditLog.LogAsync(actor, "web", "container.rollback", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
+            Snackbar.Add($"Fehler beim Zurückrollen von {container.Name}: {ex.Message}", Severity.Error);
         }
     }
 

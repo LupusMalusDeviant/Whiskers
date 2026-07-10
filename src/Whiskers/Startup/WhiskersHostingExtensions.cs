@@ -90,6 +90,10 @@ public static class WhiskersHostingExtensions
         // Dashboard page consume IImageUpdateStore, so it needs a default when the ImageUpdate module is off. The
         // module registers the real store in the loop below and wins. (RoadToSAP §2.1)
         builder.Services.AddSingleton<Whiskers.Services.ImageUpdate.IImageUpdateStore, Whiskers.Services.ImageUpdate.NoopImageUpdateStore>();
+        // Since C12 the Dashboard also consumes IAutoUpdateService (the manual-rollback button + capturing a snapshot
+        // before a manual update), so it likewise needs a default when the ImageUpdate module is off. The module
+        // registers the real hosted AutoUpdateService in the loop below and wins. (RoadToSAP §2.1 / changeme C12)
+        builder.Services.AddSingleton<Whiskers.Services.AutoUpdate.IAutoUpdateService, Whiskers.Services.AutoUpdate.NoopAutoUpdateService>();
         // And for AI triggers: the notification composite (Modules/Notifications) lazily resolves IAiTriggerDispatcher
         // on every event (to avoid a DI cycle), so it needs a default when the Agent module is off. The Agent module
         // registers the real dispatcher in the loop below and wins. (RoadToSAP §2.1 / §3.8)

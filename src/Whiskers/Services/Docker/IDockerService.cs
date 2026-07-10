@@ -22,6 +22,11 @@ public interface IDockerService
     Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null);
     Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null);
 
+    // C12 update-rollback: capture the pre-update snapshot (old image ID + full container config as JSON) so a
+    // failed update can be undone; RollbackContainerAsync recreates the container from that snapshot's old image.
+    Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null);
+    Task<string> RollbackContainerAsync(string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null);
+
     // Networks
     Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null);
     Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null);
