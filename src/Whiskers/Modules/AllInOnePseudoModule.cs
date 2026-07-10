@@ -35,8 +35,8 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
     {
         typeof(ContainerTools), typeof(ServerTools), typeof(MonitoringTools), typeof(CloudTools),
         typeof(HetznerTools), typeof(NetworkTools), typeof(DatabaseTools),
-        typeof(CveTools), typeof(AgentTools),
-        // SchedulerTools → Modules/Scheduler, LogTools → Modules/LogMonitor (RoadToSAP Phase 1).
+        typeof(AgentTools),
+        // SchedulerTools → Modules/Scheduler, LogTools → Modules/LogMonitor, CveTools → Modules/Cve (RoadToSAP Phase 1).
     };
 
     // Roles are permissive (Viewer): today's nav shows every link to everyone and gates on the page
@@ -47,8 +47,7 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         // Übersicht
         new NavItem("",            "Dashboard",          Icons.Material.Filled.Dashboard,    "Übersicht",        AppRole.Viewer, 10),
         new NavItem("health",      "Statusberichte",     Icons.Material.Filled.MonitorHeart, "Übersicht",        AppRole.Viewer, 20),
-        new NavItem("cves",        "CVE-Monitor",        Icons.Material.Filled.Security,     "Übersicht",        AppRole.Viewer, 30),
-        // "logs" extracted to Modules/LogMonitor (RoadToSAP Phase 1).
+        // "cves" → Modules/Cve, "logs" → Modules/LogMonitor (RoadToSAP Phase 1).
         new NavItem("graph",       "Topologie",          Icons.Material.Filled.Hub,          "Übersicht",        AppRole.Viewer, 50),
         new NavItem("diff",        "Vergleichen",        Icons.Material.Filled.Compare,      "Übersicht",        AppRole.Viewer, 60),
         new NavItem("notifications", "Benachrichtigungen", Icons.Material.Filled.Notifications, "Übersicht",     AppRole.Viewer, 70),

@@ -20,6 +20,7 @@ public static class ModuleCatalog
         new Webhooks.WebhooksModule(),
         new HostManagement.HostManagementModule(),
         new Deployment.DeploymentModule(),
+        new Cve.CveModule(),
         // Real modules are appended here as features are extracted (Terminal was the first pilot).
     };
 

@@ -98,6 +98,12 @@ builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, Whiskers
 builder.Services.AddScoped<Whiskers.Services.Deployment.IDeploymentService, Whiskers.Services.Deployment.NoopDeploymentService>();
 builder.Services.AddSingleton<Whiskers.Services.Templates.ITemplateService, Whiskers.Services.Templates.NoopTemplateService>();
 builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchService, Whiskers.Services.ImageSearch.NoopImageSearchService>();
+// And for CVE: the findings store + monitor are consumed by Core pages (Dashboard, ContainerDetail, Settings),
+// so they need defaults when the Cve module is off; the age-store no-op keeps the inline-gated /cves page's
+// injection safe. The module registers the real services in the loop below and wins. (RoadToSAP §2.1)
+builder.Services.AddSingleton<Whiskers.Services.Cve.ICveFindingsStore, Whiskers.Services.Cve.NoopCveFindingsStore>();
+builder.Services.AddSingleton<Whiskers.Services.Cve.ICveMonitorService, Whiskers.Services.Cve.NoopCveMonitorService>();
+builder.Services.AddSingleton<Whiskers.Services.Cve.ICveAgeStore, Whiskers.Services.Cve.NoopCveAgeStore>();
 
 // Module pipeline (RoadToSAP Phase 1). Discover enabled modules early (Features:<id>:Enabled overrides each
 // module's default) so their services, MCP tools and navigation all come from one list; the MCP-tool and
@@ -163,14 +169,8 @@ builder.Services.AddSingleton<Whiskers.Services.ImageUpdate.IImageUpdateStore, I
 builder.Services.AddSingleton<Whiskers.Services.ImageUpdate.IRegistryClient>(sp => sp.GetRequiredService<RegistryClient>());
 builder.Services.AddHostedService<ImageUpdateChecker>();
 
-// CVE monitoring (containers via Trivy + OS via apt)
-builder.Services.Configure<CveMonitorSettings>(builder.Configuration.GetSection(CveMonitorSettings.SectionName));
-builder.Services.AddSingleton<Whiskers.Services.Cve.ICveFindingsStore, CveFindingsStore>();
-builder.Services.AddSingleton<Whiskers.Services.Cve.ICveAgeStore, Whiskers.Services.Cve.CveAgeStore>();
-builder.Services.AddSingleton<Whiskers.Services.Cve.IOsCveScanner, OsCveScanner>();
-builder.Services.AddSingleton<Whiskers.Services.Cve.ITrivyScanner, TrivyScanner>();
-// Registered as Singleton AND HostedService — same instance — so UI can trigger manual scans.
-builder.Services.AddSingletonWithInterfaceAndHostedService<CveMonitorService, Whiskers.Services.Cve.ICveMonitorService>();
+// CVE monitoring (Trivy + apt) moved to Modules/Cve (RoadToSAP Phase 1 §3.5). Core keeps Noop CVE defaults
+// (registered above) for the Dashboard/ContainerDetail/Settings pages when the module is off.
 
 // Auth whitelist + roles
 builder.Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, WhitelistService>();

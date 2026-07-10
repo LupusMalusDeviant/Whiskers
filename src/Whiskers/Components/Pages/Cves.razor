@@ -14,6 +14,10 @@
 
 <PageTitle>CVE-Monitor — Whiskers</PageTitle>
 
+@* RoadToSAP Phase 1: gated by the Cve module; when off, ModuleGuard shows a "disabled" notice. The
+   ICveFindingsStore / ICveMonitorService / ICveAgeStore injections resolve the Core no-op defaults either way. *@
+<ModuleGuard ModuleId="cve">
+
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
         <MudIcon Icon="@Icons.Material.Filled.Security" Size="Size.Large" />
@@ -240,6 +244,8 @@
         </PagerContent>
     </MudTable>
 </MudContainer>
+
+</ModuleGuard>
 
 @code {
     private List<Whiskers.Models.ServerConfig> _servers = new();

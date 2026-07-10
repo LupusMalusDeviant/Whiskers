@@ -191,6 +191,9 @@ else
     </MudExpansionPanel>
 
     @* Terminal *@
+    @* RoadToSAP Phase 1: hide the CVE-Monitor settings when the Cve module is disabled. *@
+    @if (ModuleRegistry.IsEnabled("cve"))
+    {
     @* CVE-Monitor *@
     <MudExpansionPanel Text="CVE-Monitor" Icon="@Icons.Material.Filled.Security">
         @{
@@ -249,6 +252,7 @@ else
             </MudItem>
         </MudGrid>
     </MudExpansionPanel>
+    }
 
     @* RoadToSAP Phase 1: hide the Terminal settings when the Terminal module is disabled. *@
     @if (ModuleRegistry.IsEnabled("terminal"))

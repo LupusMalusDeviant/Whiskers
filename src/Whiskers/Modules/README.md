@@ -37,10 +37,13 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
   task executor), and ✅ **Webhooks** (no-op for a Core `Program.cs` endpoint that can't move) are done — each
   has its own README + `docs/modules/<id>.md`. ✅ **HostManagement** (Nginx/Systemd/Firewall/SslCerts as one
   module — needs 4 Core no-ops because the mixed `ServerTools` MCP class stays Core) and ✅ **Deployment**
-  (`/deploy` + `/apps`, the final extraction — 3 Core no-ops because the mixed `ContainerTools` stays Core) are
-  done. **All planned Phase-1 feature modules are now extracted.** Each module PR moved its registrations here
-  verbatim, wrapped its pages in `ModuleGuard` / gated its `Settings.razor` section when off, and proved
-  `Features:<id>:Enabled=false` boots cleanly. What remains in the transitional `AllInOnePseudoModule` is the
+  (`/deploy` + `/apps` — 3 Core no-ops because the mixed `ContainerTools` stays Core) and ✅ **Cve** (§3.5 —
+  dedicated `CveTools` moves with it; no-ops for the Core Dashboard/ContainerDetail/Settings consumers; the C8
+  service-locator removal is deferred) are done. **Remaining §3 modules (in order):** CloudControl (§3.6, +the
+  C10 `ICloudProvider` seam), ImageUpdate/AutoUpdate (§3.7), Agent+AiChat (§3.8, +the
+  `AgentToolRegistry`→`ModuleRegistry` change). Each module PR moves its registrations here verbatim, wraps its
+  pages in `ModuleGuard` / gates its `Settings.razor` section when off, and proves `Features:<id>:Enabled=false`
+  boots cleanly. What remains in the transitional `AllInOnePseudoModule` is the
   lean Core surface (dashboard, health, CVE, graph, diff, notifications feed, audit log, compose editor,
   servers/cloud/networks, agent/guardrails/approvals/ai-triggers, settings, help) plus the mixed MCP tool
   classes (`ContainerTools`, `ServerTools`) — these are Core, not pending extraction.

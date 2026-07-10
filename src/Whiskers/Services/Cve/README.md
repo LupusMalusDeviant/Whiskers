@@ -15,6 +15,15 @@ Findings are **de-duplicated per CVE-ID** for display (one CVE > all real affect
 | `ITrivyScanner.cs` / `TrivyScanner.cs` | Scans a container image for known CVEs using [Trivy](https://github.com/aquasecurity/trivy); captures the image OS and the CVE published date. |
 | `ICveFindingsStore.cs` / `CveFindingsStore.cs` | In-memory store of the latest CVE scan results per server/container, with summary helpers and `BuildGroups`, which **de-duplicates** every finding into one `CveGroup` per CVE-ID listing all real affected (server, container/OS, package) instances behind it. |
 | `ICveAgeStore.cs` / `CveAgeStore.cs` | Persists (SQLite, `CveFirstSeen` table) when each vulnerability instance was first detected, so the "open for N days" age survives restarts. Recorded after each scan cycle; read when grouping. |
+| `NoopCveServices.cs` | Core no-op defaults (`NoopCveFindingsStore` / `NoopCveMonitorService` / `NoopCveAgeStore`) for when the **Cve module** is off — the findings store + monitor are read by the Core Dashboard/ContainerDetail/Settings pages, which then show no CVE data. Real services win by last-registration when on (RoadToSAP Phase 1). |
+
+## Wiring
+
+This is the opt-in **Cve module** ([`../../Modules/Cve/`](../../Modules/Cve/), toggle `Features:cve:Enabled`):
+its `ConfigureServices` registers the stores, scanners and hosted monitor, and it owns the `cves` nav entry and
+the dedicated `CveTools`. Because the Core Dashboard/ContainerDetail/Settings pages consume `ICveFindingsStore`
+(and Settings consumes `ICveMonitorService`), Core keeps the `NoopCveServices` defaults above for when the
+module is off. (The C8 service-locator removal in `CveMonitorService` is a deferred, separate follow-up.)
 
 ## Related
 
