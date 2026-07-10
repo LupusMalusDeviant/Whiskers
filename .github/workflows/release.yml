@@ -1,0 +1,140 @@
+# Release pipeline (outOfTheBox W2): on a `v*` tag, build the multi-arch image, gate it through a Trivy
+# scan BEFORE anything is published (the tool that scans CVEs must not ship Criticals), push to GHCR, then
+# cut a GitHub Release with the compose files, install.sh, checksums and an SBOM attached.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to build (e.g. v0.12.0). Manual runs do not push :latest."
+        required: true
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # push to GHCR
+
+env:
+  # GHCR requires a lowercase image path; the org is LupusMalusDeviant.
+  IMAGE: ghcr.io/lupusmalusdeviant/whiskers
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Resolve the version once. A pushed tag uses itself; a manual run uses the input. `latest` only moves
+      # on a real tag push (never on a manual/dispatch build, so testing can't clobber the stable tag).
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ github.event.inputs.tag }}"; PUSH_LATEST=false
+          else
+            RAW="${GITHUB_REF_NAME}"; PUSH_LATEST=true
+          fi
+          VER="${RAW#v}"                                  # strip leading v
+          MINOR="$(printf '%s' "$VER" | cut -d. -f1-2)"   # X.Y
+          echo "raw=$RAW"        >> "$GITHUB_OUTPUT"
+          echo "ver=$VER"        >> "$GITHUB_OUTPUT"
+          echo "minor=$MINOR"    >> "$GITHUB_OUTPUT"
+          echo "push_latest=$PUSH_LATEST" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 1) Build a single-arch (amd64) image locally and hold it — do NOT push yet.
+      - name: Build amd64 image (for the scan gate)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:scan-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 2) GATE: scan the built image; fail the whole run on any CRITICAL so nothing gets published.
+      - name: Trivy scan (gate — fail on CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:scan-${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL
+          vuln-type: os,library
+
+      # 3) Only now (scan passed) build the multi-arch image and push it with the release tags.
+      - name: Build + push multi-arch image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.ver.outputs.ver }}
+            ${{ env.IMAGE }}:${{ steps.ver.outputs.minor }}
+            ${{ steps.ver.outputs.push_latest == 'true' && format('{0}:latest', env.IMAGE) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      # 4) A standalone SBOM artifact (syft) for the release assets, in addition to the attestation above.
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}:${{ steps.ver.outputs.ver }}
+          format: spdx-json
+          output-file: whiskers-${{ steps.ver.outputs.ver }}.sbom.spdx.json
+
+      # 5) Assemble the release assets: a version-pinned image-based compose, the hardened compose, the
+      #    installer, and checksums over all of them.
+      - name: Assemble release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Ship the standard-profile compose as an IMAGE-based, version-pinned file: take the repo's
+          # (build-based, dev-oriented) docker-compose.yml and swap `build: .` for the published image so a
+          # user who just downloads it can `docker compose up -d` without the source tree.
+          sed -E "s#^( *)build: \.#\1image: ${IMAGE}:${{ steps.ver.outputs.ver }}#" \
+            docker-compose.yml > dist/docker-compose.yml
+          grep -q "image: ${IMAGE}:${{ steps.ver.outputs.ver }}" dist/docker-compose.yml \
+            || { echo "ERROR: compose image-pin substitution failed"; exit 1; }
+          # Same image-pin for the hardened profile (its `build: .` → the published image).
+          sed -E "s#^( *)build: \.#\1image: ${IMAGE}:${{ steps.ver.outputs.ver }}#" \
+            docker-compose.hardened.yml > dist/docker-compose.hardened.yml
+          cp deploy/install.sh dist/install.sh
+          cp whiskers-${{ steps.ver.outputs.ver }}.sbom.spdx.json dist/
+          ( cd dist && sha256sum * > checksums.txt )
+          echo "assets:"; ls -l dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'push'
+        with:
+          name: Whiskers ${{ steps.ver.outputs.raw }}
+          tag_name: ${{ steps.ver.outputs.raw }}
+          generate_release_notes: true
+          files: |
+            dist/docker-compose.yml
+            dist/docker-compose.hardened.yml
+            dist/install.sh
+            dist/checksums.txt
+            dist/whiskers-${{ steps.ver.outputs.ver }}.sbom.spdx.json

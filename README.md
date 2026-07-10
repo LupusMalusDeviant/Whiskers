@@ -118,19 +118,31 @@ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Quick start
 
-### Docker (recommended)
+> Prebuilt multi-arch images (amd64 / arm64) are published to **`ghcr.io/lupusmalusdeviant/whiskers`** from **v0.12.0**. Before that release, use the *From source* path below.
+
+### Quick — one command
 
 ```bash
-git clone https://github.com/LupusMalusDeviant/Whiskers.git
-cd Whiskers
-cp .env.example .env
-# edit .env and fill in values
-docker compose up -d
+# Installer: pulls the image, writes a small compose file in ./whiskers/, waits until healthy, prints the URL.
+curl -fsSL https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/deploy/install.sh | bash
+
+# ...or a bare docker run:
+docker run -d --name whiskers -p 127.0.0.1:5100:8080 \
+  -v whiskers-data:/app/data -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/lupusmalusdeviant/whiskers:latest
 ```
 
-All configuration is set through `.env` (see [.env.example](.env.example)). `.env` is gitignored, secrets never land in the repository.
+Open `http://127.0.0.1:5100`. The installer accepts `--port`, `--bind`, `--data`, `--yes` (`install.sh --help`); re-running it updates in place (`pull` + `up`).
 
-The app listens on `127.0.0.1:5100` by default (configurable via `HOST_BIND` / `HOST_PORT`).
+### Standard — Docker Compose
+
+Download `docker-compose.yml` from the [latest release](https://github.com/LupusMalusDeviant/Whiskers/releases) (already pinned to the image), then `docker compose up -d`. Optional settings go in a `.env` beside it — **everything is optional**, Whiskers runs with none (see [.env.example](.env.example)).
+
+The app listens on `127.0.0.1:5100` by default (`HOST_BIND` / `HOST_PORT`) and never binds publicly unless you change the bind.
+
+### First sign-in
+
+Until the setup wizard ships (roadmap *outOfTheBox W1*), the first sign-in needs an identity provider: configure **Google** or **generic OIDC** (see [Configuration](#configuration)) — or, for a localhost-only trial, set `AUTH_DISABLED=true` (never on a public bind).
 
 ### Behind an Nginx reverse proxy
 
@@ -163,6 +175,16 @@ When serving under a subpath, set `PATH_BASE=/serverwatch` in `.env`.
 
 See **[docs/container-hardening.md](docs/container-hardening.md)** for the full matrix and trade-offs.
 
+### From source (development)
+
+```bash
+git clone https://github.com/LupusMalusDeviant/Whiskers.git
+cd Whiskers
+docker compose up -d          # builds the image locally
+```
+
+Copy [.env.example](.env.example) to `.env` to override any defaults. `.env` is gitignored — secrets never land in the repository.
+
 ---
 
 ## Configuration
@@ -172,6 +194,7 @@ Whiskers is configured entirely through environment variables (`.env`). The most
 | Group | Keys | Notes |
 |---|---|---|
 | Authentication | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ADMIN_EMAIL`, `AUTH_DISABLED` | Set `AUTH_DISABLED=true` for trusted LAN-only deployments where Google rejects private redirect URIs |
+| Secrets vault | `VAULT_KEY` | Passphrase that encrypts stored secrets at rest (AES-256-GCM). Empty = vault disabled. Keep it stable — losing it makes stored secrets undecryptable |
 | OIDC (optional) | `OIDC_ENABLED`, `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, ... | Generic OpenID Connect (Authentik, Keycloak, Authelia, Zitadel, ...) for real 2FA/passkeys from your IdP |
 | Notifications | `MATTERMOST_WEBHOOK_URL`, `MATTERMOST_ENABLED` | Matrix is configured in the UI |
 | Routing | `PATH_BASE` | Path prefix when reverse-proxied under a subpath |
