@@ -52,9 +52,11 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
   lean Core surface (dashboard, health, graph, diff, notifications feed, audit log, compose editor,
   servers/networks, agent-history, settings, help) plus the mixed MCP tool
   classes (`ContainerTools`, `ServerTools`) — these are Core, not pending extraction.
-- **§6 DoD (in progress):** a `docs/modules/` index ✅ + an `ARCHITECTURE.md` "Module System" chapter ✅ + an
-  all-on/all-off/only-core matrix test ✅ + a `Modules/HelloWorld` example ✅; still open — `Program.cs` <150
-  lines and a full-app boot-matrix test (both follow the agent extraction).
+- **§6 DoD (nearly complete):** a `docs/modules/` index ✅ + an `ARCHITECTURE.md` "Module System" chapter ✅ +
+  a DI-level all-on/all-off/only-core matrix test ✅ + a full-app `WebApplicationFactory` boot-matrix test ✅
+  (`BootMatrixTests`, boots the real app under ValidateOnBuild in each configuration and pings `/healthz`) +
+  a `Modules/HelloWorld` example ✅; **still open — only `Program.cs` <150 lines** (needs the auth/OIDC/endpoint
+  setup extracted into extension methods — a separate cleanup PR, not a module move).
 - **F2 (i18n):** each `NavItem.LocKey` (a German label today) becomes a real `IStringLocalizer` key.
 
 See RoadToSAP §2–3 for the full design and phasing.

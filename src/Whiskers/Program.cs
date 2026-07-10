@@ -704,3 +704,8 @@ app.Run();
 
 // Normal boot returns 0 on shutdown; the --migrate-to-postgres branch above returns its own exit code.
 return 0;
+
+// Exposed so the test project's WebApplicationFactory<Program> can boot the app in-process for the module
+// boot-matrix test (RoadToSAP §6 DoD). With top-level statements the generated Program class is otherwise
+// internal; this partial declaration makes it public without changing any runtime behaviour.
+public partial class Program { }
