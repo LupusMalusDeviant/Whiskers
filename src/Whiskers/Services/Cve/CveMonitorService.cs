@@ -20,21 +20,47 @@ namespace Whiskers.Services.Cve;
 /// </summary>
 public class CveMonitorService : BackgroundService, ICveMonitorService
 {
-    private readonly IServiceProvider _services;
     private readonly ICveFindingsStore _store;
     private readonly IOptionsMonitor<CveMonitorSettings> _settings;
     private readonly ILogger<CveMonitorService> _logger;
 
+    // C8: the scan-cycle collaborators are injected directly instead of being pulled from a per-cycle
+    // IServiceProvider scope (service-locator antipattern). All of them are singletons — verified: none is
+    // registered AddScoped — so this BackgroundService can hold them, and ValidateScopes proves it at boot.
+    // The CveAgeStore opens its own DbContext scope internally, so no outer scope is needed here.
+    private readonly IServerConfigService _serverConfig;
+    private readonly IDockerService _docker;
+    private readonly IOsCveScanner _osScanner;
+    private readonly ITrivyScanner _trivyScanner;
+    private readonly INotificationService _notification;
+    private readonly ICveAgeStore _ageStore;
+    private readonly IHubContext<ContainerHub> _hub;
+    private readonly Whiskers.Services.Metrics.IMetricsSource _metricsSource;
+
     public CveMonitorService(
-        IServiceProvider services,
         ICveFindingsStore store,
         IOptionsMonitor<CveMonitorSettings> settings,
-        ILogger<CveMonitorService> logger)
+        ILogger<CveMonitorService> logger,
+        IServerConfigService serverConfig,
+        IDockerService docker,
+        IOsCveScanner osScanner,
+        ITrivyScanner trivyScanner,
+        INotificationService notification,
+        ICveAgeStore ageStore,
+        IHubContext<ContainerHub> hub,
+        Whiskers.Services.Metrics.IMetricsSource metricsSource)
     {
-        _services = services;
         _store = store;
         _settings = settings;
         _logger = logger;
+        _serverConfig = serverConfig;
+        _docker = docker;
+        _osScanner = osScanner;
+        _trivyScanner = trivyScanner;
+        _notification = notification;
+        _ageStore = ageStore;
+        _hub = hub;
+        _metricsSource = metricsSource;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -101,23 +127,13 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
         var settings = _settings.CurrentValue;
         try
         {
-            using var scope = _services.CreateScope();
-            var sp = scope.ServiceProvider;
-            var serverConfig = sp.GetRequiredService<IServerConfigService>();
-            var docker = sp.GetRequiredService<IDockerService>();
-            var osScanner = sp.GetRequiredService<IOsCveScanner>();
-            var trivyScanner = sp.GetRequiredService<ITrivyScanner>();
-            var notification = sp.GetRequiredService<INotificationService>();
-            var ageStore = sp.GetRequiredService<ICveAgeStore>();
-            var hub = sp.GetRequiredService<IHubContext<ContainerHub>>();
-            var serverNames = serverConfig.GetServers().ToDictionary(s => s.Id, s => s.Name);
+            var serverNames = _serverConfig.GetServers().ToDictionary(s => s.Id, s => s.Name);
 
             // Real host OS per server (so OS findings carry the actual OS they apply to).
             var osByServer = new Dictionary<string, string>();
             try
             {
-                var metricsSource = sp.GetRequiredService<Whiskers.Services.Metrics.IMetricsSource>();
-                foreach (var (sid, info) in await metricsSource.GetAllServerSystemInfoAsync())
+                foreach (var (sid, info) in await _metricsSource.GetAllServerSystemInfoAsync())
                 {
                     var os = string.Join(' ', new[] { info.OperatingSystem, info.OsVersion }
                         .Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
@@ -126,7 +142,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
             }
             catch (Exception ex) { _logger.LogDebug(ex, "Could not resolve server OS info for CVE context"); }
 
-            var servers = serverConfig.GetEnabledServers();
+            var servers = _serverConfig.GetEnabledServers();
             var threshold = ParseSeverity(settings.NotifySeverity);
 
             // Aggregate "new since last scan" per scan target, used for notifications.
@@ -141,7 +157,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                     try
                     {
                         var prev = _store.Get(server.Id, null);
-                        var osResult = await osScanner.ScanAsync(server.Id, ct);
+                        var osResult = await _osScanner.ScanAsync(server.Id, ct);
                         if (osByServer.TryGetValue(server.Id, out var hostOs))
                             foreach (var f in osResult.Findings)
                                 f.OsContext ??= hostOs;
@@ -172,7 +188,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                     List<ContainerInfo> containers;
                     try
                     {
-                        containers = (await docker.ListAllContainersAsync(all: false))
+                        containers = (await _docker.ListAllContainersAsync(all: false))
                             .Where(c => c.ServerId == server.Id)
                             .ToList();
                     }
@@ -189,7 +205,7 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                         try
                         {
                             var prev = _store.Get(server.Id, c.Id);
-                            var result = await trivyScanner.ScanContainerImageAsync(
+                            var result = await _trivyScanner.ScanContainerImageAsync(
                                 server.Id, c.Id, c.Name, c.Image, ct);
                             // Keep previous results on scan failure (see OS branch above) to avoid a false
                             // "clean" state and a re-notification storm on the next successful scan.
@@ -231,9 +247,9 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                     .SelectMany(r => r.Findings)
                     .Select(f => (f.IdentityKey, f.CveId))
                     .ToList();
-                await ageStore.RecordSeenAsync(current, ct);
+                await _ageStore.RecordSeenAsync(current, ct);
                 var liveKeys = current.Select(x => x.IdentityKey).ToHashSet();
-                await ageStore.PruneStaleAsync(liveKeys, DateTime.UtcNow.AddDays(-30), ct);
+                await _ageStore.PruneStaleAsync(liveKeys, DateTime.UtcNow.AddDays(-30), ct);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "Recording/pruning CVE first-seen failed"); }
 
@@ -247,12 +263,12 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
                 {
                     var relevant = news.Where(f => f.Severity >= threshold).ToList();
                     if (relevant.Count == 0) continue;
-                    await TrySendAggregateNotificationAsync(notification, target, relevant, serverNames);
+                    await TrySendAggregateNotificationAsync(_notification, target, relevant, serverNames);
                 }
             }
 
             // SignalR broadcast for the UI (Phase 2 will hook this).
-            try { await hub.Clients.All.SendAsync("CveFindingsChanged", ct); }
+            try { await _hub.Clients.All.SendAsync("CveFindingsChanged", ct); }
             catch (Exception ex) { _logger.LogDebug(ex, "SignalR broadcast failed"); }
 
             _logger.LogInformation(
