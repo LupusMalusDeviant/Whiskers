@@ -1,8 +1,17 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+# Copy every csproj first so `dotnet restore` layer-caches. Whiskers references Whiskers.Data and the two
+# per-provider migration assemblies (ADR-0004), and both migration projects reference Whiskers.Data — all four
+# must be present or restore/publish can't resolve the moved entities (e.g. McpToolCallEntity, WebhookEntity).
 COPY src/Whiskers/Whiskers.csproj ./Whiskers/
+COPY src/Whiskers.Data/Whiskers.Data.csproj ./Whiskers.Data/
+COPY src/Whiskers.Migrations.Sqlite/Whiskers.Migrations.Sqlite.csproj ./Whiskers.Migrations.Sqlite/
+COPY src/Whiskers.Migrations.Postgres/Whiskers.Migrations.Postgres.csproj ./Whiskers.Migrations.Postgres/
 RUN dotnet restore ./Whiskers/Whiskers.csproj
 COPY src/Whiskers/ ./Whiskers/
+COPY src/Whiskers.Data/ ./Whiskers.Data/
+COPY src/Whiskers.Migrations.Sqlite/ ./Whiskers.Migrations.Sqlite/
+COPY src/Whiskers.Migrations.Postgres/ ./Whiskers.Migrations.Postgres/
 WORKDIR /src/Whiskers
 RUN dotnet publish -c Release -o /app/publish
 
