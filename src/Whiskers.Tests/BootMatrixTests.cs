@@ -14,6 +14,7 @@ namespace Whiskers.Tests;
 /// Core, and the opt-in example module on) without a DI regression. Docker/DB unavailability is irrelevant —
 /// <c>/healthz</c> carries no dependency checks; a real boot/DI break instead surfaces as an exception when the
 /// host starts.</summary>
+[Collection("WebAppBoot")] // serialized: the boot needs the process-wide WHISKERS_DATA_DIR env var below
 public class BootMatrixTests
 {
     private static async Task AssertBootsAsync(params (string Key, string Value)[] featureSettings)
@@ -21,9 +22,14 @@ public class BootMatrixTests
         var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-boot-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dataDir);
 
+        // WHISKERS_DATA_DIR is read EAGERLY in Program.cs (DataPathOptions.FromConfiguration), before the
+        // factory's in-memory config is layered in — it must be a real env var (see SetupWizardBootTests).
+        // An in-memory-only value made the boot silently use the /app/data default, which CI runners can't write.
+        var prev = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
+        Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
+
         var config = new List<KeyValuePair<string, string?>>
         {
-            new("WHISKERS_DATA_DIR", dataDir), // config-resolved (DataPathOptions.FromConfiguration) — no process env
             new("Auth:Disabled", "true"),
         };
         foreach (var (key, value) in featureSettings)
@@ -45,6 +51,7 @@ public class BootMatrixTests
         }
         finally
         {
+            Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", prev);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort temp cleanup */ }
         }
     }

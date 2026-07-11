@@ -18,6 +18,7 @@ namespace Whiskers.Tests;
 /// coexists with MetricsDbContext on one DB via a separate history table, the admin seeder), a DI-shape guard
 /// (UserManager but no RoleManager), and an end-to-end WebApplicationFactory boot proving a seeded local admin
 /// can sign in through /login-local (incl. the antiforgery token under global interactive render).</summary>
+[Collection("WebAppBoot")] // serialized: the end-to-end boot below needs the process-wide WHISKERS_DATA_DIR env var
 public sealed class LocalAuthIdentityTests : IDisposable
 {
     private readonly List<string> _files = new();
@@ -175,9 +176,13 @@ public sealed class LocalAuthIdentityTests : IDisposable
         var pwFile = Path.Combine(dataDir, "admin-pw.txt");
         await File.WriteAllTextAsync(pwFile, "CorrectHorse12!!");
 
+        // WHISKERS_DATA_DIR is read EAGERLY in Program.cs (DataPathOptions.FromConfiguration), before the
+        // factory's in-memory config is layered in — it must be a real env var (see SetupWizardBootTests).
+        var prev = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
+        Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
+
         var config = new List<KeyValuePair<string, string?>>
         {
-            new("WHISKERS_DATA_DIR", dataDir),
             new("Auth:Disabled", "false"),
             new("WHISKERS_ADMIN_EMAIL", "admin@local.test"),
             new("WHISKERS_ADMIN_PASSWORD_FILE", pwFile),
@@ -216,6 +221,7 @@ public sealed class LocalAuthIdentityTests : IDisposable
         }
         finally
         {
+            Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", prev);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort */ }
         }
     }
