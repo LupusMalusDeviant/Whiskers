@@ -1,0 +1,47 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please search existing issues first.
+        **Never paste secrets** (API keys, kubeconfigs, VAULT_KEY, SSH keys) into an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+      placeholder: Steps to reproduce, expected vs. actual behavior.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Whiskers version
+      placeholder: e.g. 0.12.0 (Settings → footer, or the image tag)
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment profile
+      options:
+        - Quick (docker run / install.sh)
+        - Standard (docker compose)
+        - Hardened (docker-compose.hardened.yml)
+        - Kubernetes (Helm)
+        - From source (development)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: "`docker logs whiskers` around the failure (secrets are redacted in-app, but double-check before pasting)."
+      render: text
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Host OS/arch, Docker/Kubernetes version, browser (for UI bugs), auth mode (local/Google/OIDC/disabled)"

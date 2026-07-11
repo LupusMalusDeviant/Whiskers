@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an idea or improvement
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the roadmap section of the README and existing issues first —
+        some gaps (e.g. git-based deploys, registry management UI) are known and planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case, not only the solution — it helps us fit it into the architecture (modules, MCP-first, security posture).
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      placeholder: How would you expect it to work? UI, MCP tool, both?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
