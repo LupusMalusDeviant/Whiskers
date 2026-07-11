@@ -24,7 +24,10 @@ public class DockerService : IDockerService
         IDockerConnectionManager connectionManager,
         IServerConfigService serverConfigService,
         IPrometheusMetricsSource prometheusMetrics,
-        ILogger<DockerService> logger)
+        ILogger<DockerService> logger,
+        // F8: optional last param (test seams unchanged) — registry credentials for authenticated
+        // pulls of UI-managed private registries.
+        Whiskers.Services.Registries.IRegistryConfigService? registryConfig = null)
     {
         // One shared cache across the collaborators (stats, host-shell sweep/image markers, host
         // resource usage) — same single MemoryCache instance the pre-split class used; the key
@@ -32,7 +35,7 @@ public class DockerService : IDockerService
         var statsCache = new MemoryCache(new MemoryCacheOptions());
 
         _containers = new ContainerOperations(connectionManager, serverConfigService, logger, statsCache);
-        _images = new ImageOperations(connectionManager, logger);
+        _images = new ImageOperations(connectionManager, logger, registryConfig);
         _lifecycle = new ContainerLifecycleOperations(connectionManager, _images, logger);
         _networks = new NetworkOperations(connectionManager, serverConfigService);
         _hostShell = new HostShellOperations(connectionManager, statsCache);

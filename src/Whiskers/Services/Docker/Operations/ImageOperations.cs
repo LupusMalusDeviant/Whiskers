@@ -10,13 +10,16 @@ internal sealed class ImageOperations
 {
     private readonly IDockerConnectionManager _connectionManager;
     private readonly ILogger<DockerService> _logger;
+    private readonly Whiskers.Services.Registries.IRegistryConfigService? _registries;
 
     public ImageOperations(
         IDockerConnectionManager connectionManager,
-        ILogger<DockerService> logger)
+        ILogger<DockerService> logger,
+        Whiskers.Services.Registries.IRegistryConfigService? registries = null)
     {
         _connectionManager = connectionManager;
         _logger = logger;
+        _registries = registries;
     }
 
     private async Task<DockerClient> GetClient(string? serverId)
@@ -27,9 +30,18 @@ internal sealed class ImageOperations
         var client = await GetClient(serverId);
         var (repo, tag) = ParseImageReference(imageName);
 
+        // F8: authenticated pulls for UI-managed private registries — the image's registry host is
+        // matched against the configured registries; no match = anonymous pull (unchanged behavior).
+        AuthConfig? auth = null;
+        if (_registries?.GetCredentialForImage(imageName) is { } cred)
+        {
+            auth = new AuthConfig { Username = cred.Username, Password = cred.Password, ServerAddress = cred.ServerAddress };
+            _logger.LogDebug("Pulling {Image} with credentials for {Registry}", imageName, cred.ServerAddress);
+        }
+
         await client.Images.CreateImageAsync(
             new ImagesCreateParameters { FromImage = repo, Tag = tag },
-            null,
+            auth,
             new Progress<JSONMessage>(msg =>
             {
                 progress?.Report(msg.Status ?? "");

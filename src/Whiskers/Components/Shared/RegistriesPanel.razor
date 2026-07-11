@@ -1,0 +1,120 @@
+@inject Whiskers.Services.Registries.IRegistryConfigService Registries
+@inject Whiskers.Services.Vault.IVaultService Vault
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+
+@* F8: registries managed in the UI — credentials go to the vault and are used for authenticated
+   image pulls (deploys, updates, app store) when an image reference matches the registry host. *@
+
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+    Private Registries für authentifizierte Pulls: Das Credential wird verschlüsselt im Vault gespeichert und
+    automatisch verwendet, wenn ein Image-Name zum Registry-Host passt (z. B. <code>ghcr.io/…</code>).
+</MudText>
+
+@if (!Vault.IsEnabled)
+{
+    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+        Ohne <code>VAULT_KEY</code> können keine Registry-Credentials gespeichert werden.
+    </MudAlert>
+}
+
+<MudTable Items="@_registries" Dense="true" Elevation="0" Class="mb-3">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Host</MudTh>
+        <MudTh>Benutzer</MudTh>
+        <MudTh>Credential</MudTh>
+        <MudTh />
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd><code>@context.Host</code></MudTd>
+        <MudTd>@context.Username</MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     Color="@(context.HasCredential ? Color.Success : Color.Default)">
+                @(context.HasCredential ? "im Vault" : "keins")
+            </MudChip>
+        </MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => ShowDialog(context))" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Delete(context))" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-2" Typo="Typo.body2">Keine Registries konfiguriert.</MudText></NoRecordsContent>
+</MudTable>
+
+<MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           OnClick="@(() => ShowDialog(null))">Registry hinzufügen</MudButton>
+
+<MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>@(_editing == null ? "Registry hinzufügen" : "Registry bearbeiten")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_form.Name" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_form.Host" Label="Host" Variant="Variant.Outlined" Class="mb-3"
+                      Placeholder="ghcr.io / harbor.example.com:5000 / docker.io"
+                      HelperText="So wie er in Image-Referenzen vorkommt." />
+        <MudTextField @bind-Value="_form.Username" Label="Benutzername" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_formCredential" Label="Passwort / Token" Variant="Variant.Outlined"
+                      InputType="InputType.Password"
+                      HelperText="@(_editing?.HasCredential == true ? "Leer lassen, um das gespeicherte Credential zu behalten." : "Wird verschlüsselt im Vault gespeichert.")" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save"
+                   Disabled="@(string.IsNullOrWhiteSpace(_form.Name) || string.IsNullOrWhiteSpace(_form.Host))">Speichern</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<Whiskers.Models.RegistryConfig> _registries = new();
+    private bool _showDialog;
+    private Whiskers.Models.RegistryConfig? _editing;
+    private Whiskers.Models.RegistryConfig _form = new();
+    private string _formCredential = "";
+
+    protected override async Task OnInitializedAsync() => _registries = await Registries.GetRegistriesAsync();
+
+    private void ShowDialog(Whiskers.Models.RegistryConfig? reg)
+    {
+        _editing = reg;
+        _form = reg is null ? new() : new()
+        {
+            Id = reg.Id, Name = reg.Name, Host = reg.Host, Username = reg.Username,
+            HasCredential = reg.HasCredential, CreatedAt = reg.CreatedAt,
+        };
+        _formCredential = "";
+        _showDialog = true;
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            var cred = string.IsNullOrWhiteSpace(_formCredential) ? null : _formCredential;
+            await Registries.SaveRegistryAsync(_form, cred);
+            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
+                _editing == null ? "registry.create" : "registry.update", "registry", _form.Id, _form.Name);
+            Snackbar.Add($"Registry '{_form.Name}' gespeichert.", Severity.Success);
+            _showDialog = false;
+            _registries = await Registries.GetRegistriesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task Delete(Whiskers.Models.RegistryConfig reg)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Registry löschen", $"Registry '{reg.Name}' und ihr Vault-Credential löschen?",
+            yesText: "Löschen", cancelText: "Abbrechen");
+        if (confirmed != true) return;
+        await Registries.DeleteRegistryAsync(reg.Id);
+        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
+            "registry.delete", "registry", reg.Id, reg.Name);
+        Snackbar.Add("Gelöscht.", Severity.Success);
+        _registries = await Registries.GetRegistriesAsync();
+    }
+}

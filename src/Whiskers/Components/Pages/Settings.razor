@@ -66,6 +66,11 @@ else
         <SelfBackupPanel />
     </MudExpansionPanel>
 
+    @* F8: UI-managed registries (credentials in the vault, used for authenticated pulls). CORE. *@
+    <MudExpansionPanel Text="Registries" Icon="@Icons.Material.Filled.Widgets">
+        <RegistriesPanel />
+    </MudExpansionPanel>
+
     @* RoadToSAP Phase 1: hide the channel + composite settings when the Notifications module is off. The
        /notifications feed (bell + page) stays available — it's Core (the in-app store), not this module. *@
     @if (ModuleRegistry.IsEnabled("notifications"))

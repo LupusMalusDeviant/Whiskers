@@ -172,6 +172,8 @@ public static class WhiskersHostingExtensions
         // Kubernetes clusters). Consumers migrate onto it incrementally.
         builder.Services.AddSingleton<Whiskers.Services.Workloads.IWorkloadProviderFactory, Whiskers.Services.Workloads.WorkloadProviderFactory>();
         builder.Services.AddSingleton<Whiskers.Services.Workloads.Kubernetes.IKubernetesClientCache, Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache>();
+        // F8: UI-managed registries (credentials in the vault) for authenticated image pulls.
+        builder.Services.AddSingleton<Whiskers.Services.Registries.IRegistryConfigService, Whiskers.Services.Registries.RegistryConfigService>();
         // W3.4: static production-readiness checklist (Settings panel). Read-only checks.
         builder.Services.AddSingleton<Whiskers.Services.Setup.IProductionReadinessService, Whiskers.Services.Setup.ProductionReadinessService>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
