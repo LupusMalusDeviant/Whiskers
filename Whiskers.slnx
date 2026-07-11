@@ -4,5 +4,6 @@
     <Project Path="src/Whiskers.Migrations.Sqlite/Whiskers.Migrations.Sqlite.csproj" />
     <Project Path="src/Whiskers.Migrations.Postgres/Whiskers.Migrations.Postgres.csproj" />
     <Project Path="src/Whiskers/Whiskers.csproj" />
+    <Project Path="src/Whiskers.Tests/Whiskers.Tests.csproj" />
   </Folder>
 </Solution>

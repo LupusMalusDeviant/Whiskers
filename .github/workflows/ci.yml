@@ -31,7 +31,12 @@ jobs:
         run: dotnet build Whiskers.slnx --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release --logger "console;verbosity=minimal"
+        # The grep guards against a silently-empty run: with the test project missing from
+        # Whiskers.slnx, `dotnet test --no-build` once exited 0 without executing any test.
+        run: |
+          set -euo pipefail
+          dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release --logger "console;verbosity=minimal" | tee test.log
+          grep -Eiq "(Passed:|succeeded:)\s*[1-9]" test.log
 
       # DI boot gate (project rule): build+tests miss DI-graph regressions — boot the app in
       # Development (ValidateOnBuild/ValidateScopes) against a fresh data dir until /healthz answers.
