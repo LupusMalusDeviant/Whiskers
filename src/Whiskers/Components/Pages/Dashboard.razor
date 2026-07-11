@@ -11,6 +11,7 @@
 @inject IMetricsQueryService MetricsQuery
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject Whiskers.Services.Workloads.IWorkloadProviderFactory WorkloadFactory
 @implements IDisposable
 
 <PageTitle>Dashboard - Whiskers</PageTitle>
@@ -138,7 +139,12 @@
             <span class="sw-pulse-dot sw-green" style="@(GetServerReachable(serverGroup.ServerId) ? "" : "background: var(--sw-accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.5);")"></span>
             <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
             <MudText Typo="Typo.h6" Style="font-weight: 600;">@serverGroup.ServerName</MudText>
-            @if (_serverInfos.TryGetValue(serverGroup.ServerId, out var sInfoHeader) && sInfoHeader.IsReachable)
+            @if (_k8sServerIds.Contains(serverGroup.ServerId))
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined"
+                         Icon="@Icons.Material.Filled.Hub" Class="ml-2">Kubernetes</MudChip>
+            }
+            else if (_serverInfos.TryGetValue(serverGroup.ServerId, out var sInfoHeader) && sInfoHeader.IsReachable)
             {
                 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="ml-2">
                     @sInfoHeader.OperatingSystem — @sInfoHeader.CpuCount Kerne — @FormatBytes(sInfoHeader.MemoryTotalBytes) RAM
@@ -163,19 +169,24 @@
             }
         </div>
         <MudSpacer />
-        @if (ServerConfigService.SupportsTerminal(serverGroup.ServerId))
+        @* Host-management pages (terminal/firewall/nginx/systemd/ssl) are Docker/SSH-host features —
+           a Kubernetes cluster has no host shell here. *@
+        @if (!_k8sServerIds.Contains(serverGroup.ServerId))
         {
-            <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
-                           Href="@($"server-terminal/{serverGroup.ServerId}")" title="Terminal" />
+            @if (ServerConfigService.SupportsTerminal(serverGroup.ServerId))
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
+                               Href="@($"server-terminal/{serverGroup.ServerId}")" title="Terminal" />
+            }
+            <MudIconButton Icon="@Icons.Material.Filled.Security" Size="Size.Small" Color="Color.Warning"
+                           Href="@($"firewall/{serverGroup.ServerId}")" title="Firewall / Ports" />
+            <MudIconButton Icon="@Icons.Material.Filled.Web" Size="Size.Small" Color="Color.Info"
+                           Href="@($"nginx/{serverGroup.ServerId}")" title="Nginx-Seiten" />
+            <MudIconButton Icon="@Icons.Material.Filled.MiscellaneousServices" Size="Size.Small" Color="Color.Default"
+                           Href="@($"services/{serverGroup.ServerId}")" title="Systemdienste" />
+            <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Success"
+                           Href="@($"ssl/{serverGroup.ServerId}")" title="SSL-Zertifikate" />
         }
-        <MudIconButton Icon="@Icons.Material.Filled.Security" Size="Size.Small" Color="Color.Warning"
-                       Href="@($"firewall/{serverGroup.ServerId}")" title="Firewall / Ports" />
-        <MudIconButton Icon="@Icons.Material.Filled.Web" Size="Size.Small" Color="Color.Info"
-                       Href="@($"nginx/{serverGroup.ServerId}")" title="Nginx-Seiten" />
-        <MudIconButton Icon="@Icons.Material.Filled.MiscellaneousServices" Size="Size.Small" Color="Color.Default"
-                       Href="@($"services/{serverGroup.ServerId}")" title="Systemdienste" />
-        <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Success"
-                       Href="@($"ssl/{serverGroup.ServerId}")" title="SSL-Zertifikate" />
     </div>
 
     @if (_expandedServers.Contains(serverGroup.ServerId) && _serverInfos.TryGetValue(serverGroup.ServerId, out var sInfo) && sInfo.IsReachable)
@@ -297,7 +308,15 @@
             <RowTemplate>
                 <MudTd>
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                        <MudLink Href="@($"container/{context.ServerId}/{context.Id}")">@context.Name</MudLink>
+                        @if (_k8sServerIds.Contains(context.ServerId))
+                        {
+                            @* ContainerDetail is Docker-only — pods have no detail page yet (Track B.3). *@
+                            <MudText Typo="Typo.body2" Style="font-weight: 500;">@context.Name</MudText>
+                        }
+                        else
+                        {
+                            <MudLink Href="@($"container/{context.ServerId}/{context.Id}")">@context.Name</MudLink>
+                        }
                         @if (HasUpdate(context))
                         {
                             <MudTooltip Text="@GetUpdateTooltip(context)">
@@ -342,9 +361,11 @@
                         @if (_role >= AppRole.Operator)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                           title="Stoppen" OnClick="@(() => StopContainer(context))" />
+                                           title="@(_k8sServerIds.Contains(context.ServerId) ? "Stoppen (skaliert den Controller auf 0)" : "Stoppen")"
+                                           OnClick="@(() => StopContainer(context))" />
                             <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                           title="Neustarten" OnClick="@(() => RestartContainer(context))" />
+                                           title="@(_k8sServerIds.Contains(context.ServerId) ? "Neustarten (Rollout-Restart)" : "Neustarten")"
+                                           OnClick="@(() => RestartContainer(context))" />
                             @if (HasUpdate(context))
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.SystemUpdateAlt" Size="Size.Small" Color="Color.Warning"
@@ -369,7 +390,7 @@
                                                title="Update zurückrollen" OnClick="@(() => RollbackContainer(context))" />
                             }
                         }
-                        @if (_role >= AppRole.Admin)
+                        @if (_role >= AppRole.Admin && !_k8sServerIds.Contains(context.ServerId))
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                            title="Entfernen" OnClick="@(() => RemoveContainer(context))" />
@@ -406,6 +427,9 @@
     private bool _loading = true;
     // W3 empty state: true while no remote server is configured (only "local"), admin only.
     private bool _showFirstServerCard;
+    // Track B.2: enabled Kubernetes servers — their rows come from the workload seam, get honest
+    // scale/rollout action labels and no Docker-only buttons (detail page, remove, update).
+    private HashSet<string> _k8sServerIds = new();
     private Timer? _refreshTimer;
     private int _refreshing; // reentrancy guard for the periodic refresh (MIT-34 / OPT-9)
     private int _refreshCount;
@@ -472,7 +496,9 @@
         try
         {
             var containers = await DockerService.ListAllContainersAsync();
-            _containers = containers.ToList();
+            var merged = containers.ToList();
+            merged.AddRange(await LoadKubernetesWorkloadsAsync());
+            _containers = merged;
             RebuildGrouping();
         }
         catch (Exception ex)
@@ -481,9 +507,35 @@
         }
     }
 
+    /// <summary>Track B.2: pods from every enabled Kubernetes server, via the workload seam. A
+    /// failing cluster is skipped (logged) — it must never blank the Docker part of the dashboard.</summary>
+    private async Task<List<ContainerInfo>> LoadKubernetesWorkloadsAsync()
+    {
+        var k8sServers = ServerConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
+            .ToList();
+        _k8sServerIds = k8sServers.Select(s => s.Id).ToHashSet();
+
+        var result = new List<ContainerInfo>();
+        foreach (var server in k8sServers)
+        {
+            try
+            {
+                result.AddRange(await WorkloadFactory.GetForServer(server.Id).ListWorkloadsAsync());
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Listing Kubernetes workloads for {ServerName} failed", server.Name);
+            }
+        }
+        return result;
+    }
+
     private async Task LoadStats()
     {
-        var running = _containers.Where(c => c.State == "running").ToList();
+        // K8s pods have no Docker stats endpoint (SupportsStats=false until metrics-server lands).
+        var running = _containers
+            .Where(c => c.State == "running" && !_k8sServerIds.Contains(c.ServerId)).ToList();
         // Fetch stats in parallel batches of 10 to avoid overwhelming the daemon
         const int batchSize = 10;
         for (int i = 0; i < running.Count; i += batchSize)
@@ -503,7 +555,9 @@
         try
         {
             var containers = await DockerService.ListAllContainersAsync();
-            _containers = containers.ToList();
+            var merged = containers.ToList();
+            merged.AddRange(await LoadKubernetesWorkloadsAsync());
+            _containers = merged;
 
             // C12: load pre-update rollback snapshots for the per-row rollback button. Empty when the
             // ImageUpdate module is off (the no-op service returns none). Indexer-assign so a stray duplicate
@@ -517,9 +571,9 @@
             }
             catch (Exception rex) { _logger?.LogWarning(rex, "Loading rollback snapshots failed"); }
 
-            // Stats in parallel (cached results return instantly)
+            // Stats in parallel (cached results return instantly). K8s pods: no Docker stats.
             await Task.WhenAll(_containers
-                .Where(c => c.State == "running")
+                .Where(c => c.State == "running" && !_k8sServerIds.Contains(c.ServerId))
                 .Select(async c =>
                 {
                     c.LatestStats = await DockerService.GetContainerStatsAsync(c.Id, c.ServerId);
@@ -587,7 +641,11 @@
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            await DockerService.StartContainerAsync(container.Id, container.ServerId);
+            // K8s rows route through the workload seam (start = scale the controller back up).
+            if (_k8sServerIds.Contains(container.ServerId))
+                await WorkloadFactory.GetForServer(container.ServerId).StartAsync(container.Id);
+            else
+                await DockerService.StartContainerAsync(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.start", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} gestartet", Severity.Success);
             await RefreshAll();
@@ -605,7 +663,11 @@
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            await DockerService.StopContainerAsync(container.Id, container.ServerId);
+            // K8s rows route through the workload seam (stop = scale the controller to 0).
+            if (_k8sServerIds.Contains(container.ServerId))
+                await WorkloadFactory.GetForServer(container.ServerId).StopAsync(container.Id);
+            else
+                await DockerService.StopContainerAsync(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.stop", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} gestoppt", Severity.Success);
             await RefreshAll();
@@ -623,7 +685,11 @@
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            await DockerService.RestartContainerAsync(container.Id, container.ServerId);
+            // K8s rows route through the workload seam (restart = rollout-restart of the controller).
+            if (_k8sServerIds.Contains(container.ServerId))
+                await WorkloadFactory.GetForServer(container.ServerId).RestartAsync(container.Id);
+            else
+                await DockerService.RestartContainerAsync(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.restart", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add($"{container.Name} neugestartet", Severity.Success);
             await RefreshAll();

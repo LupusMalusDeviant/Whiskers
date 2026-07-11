@@ -44,6 +44,13 @@ public class DockerConnectionManager : IDockerConnectionManager
         if (server == null)
             throw new InvalidOperationException($"Server '{serverId ?? "default"}' not found");
 
+        // A Kubernetes cluster is not a Docker host — any Docker-path caller reaching this is a
+        // routing bug (workloads go through Services/Workloads). Fail loud instead of trying to
+        // build a Docker transport out of kube fields.
+        if (server.ConnectionType == ConnectionType.Kubernetes)
+            throw new InvalidOperationException(
+                $"Server '{server.Name}' is a Kubernetes cluster — handled by the workload seam, not the Docker connection manager.");
+
         // Fast path: a cached client whose underlying transport is still alive.
         if (TryGetLiveClient(server, out var live))
             return live!;

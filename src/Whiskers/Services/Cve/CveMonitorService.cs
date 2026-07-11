@@ -142,7 +142,10 @@ public class CveMonitorService : BackgroundService, ICveMonitorService
             }
             catch (Exception ex) { _logger.LogDebug(ex, "Could not resolve server OS info for CVE context"); }
 
-            var servers = _serverConfig.GetEnabledServers();
+            // Kubernetes clusters have no host shell / Docker API for the scanners — K8s image
+            // scanning is a later Track B step (kubernetesImplement §B.3, explicitly not v1).
+            var servers = _serverConfig.GetEnabledServers()
+                .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes).ToList();
             var threshold = ParseSeverity(settings.NotifySeverity);
 
             // Aggregate "new since last scan" per scan target, used for notifications.

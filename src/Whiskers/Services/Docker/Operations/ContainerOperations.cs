@@ -97,7 +97,10 @@ internal sealed class ContainerOperations
 
     public async Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true)
     {
-        var servers = _serverConfigService.GetEnabledServers();
+        // Kubernetes servers are not Docker hosts — their workloads come from the workload seam
+        // (Services/Workloads), not from this Docker-only aggregation.
+        var servers = _serverConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType != ConnectionType.Kubernetes).ToList();
         // Bound each server with a short timeout so ONE unreachable host can't blank the whole
         // dashboard: a slow/dead server is skipped after 8s (returns empty) while the reachable ones
         // render immediately. Unreachability itself is surfaced separately via GetServerSystemInfoAsync.

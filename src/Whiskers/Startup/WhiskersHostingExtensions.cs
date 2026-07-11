@@ -165,9 +165,10 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, WhitelistService>();
         builder.Services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
         builder.Services.AddSingleton<Whiskers.Services.Setup.ISetupStateService, Whiskers.Services.Setup.SetupStateService>();
-        // Track B.1: backend-neutral workload seam. Dispatches per server (today always Docker; the
-        // Kubernetes provider joins in Track B.2). Consumers migrate onto it incrementally.
+        // Track B.1/B.2: backend-neutral workload seam. Dispatches per server (Docker hosts vs.
+        // Kubernetes clusters). Consumers migrate onto it incrementally.
         builder.Services.AddSingleton<Whiskers.Services.Workloads.IWorkloadProviderFactory, Whiskers.Services.Workloads.WorkloadProviderFactory>();
+        builder.Services.AddSingleton<Whiskers.Services.Workloads.Kubernetes.IKubernetesClientCache, Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache>();
         // W3.4: static production-readiness checklist (Settings panel). Read-only checks.
         builder.Services.AddSingleton<Whiskers.Services.Setup.IProductionReadinessService, Whiskers.Services.Setup.ProductionReadinessService>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)

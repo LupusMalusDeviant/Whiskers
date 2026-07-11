@@ -13,6 +13,7 @@
     <PackageReference Include="Blazor-ApexCharts" Version="6.1.0" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="Docker.DotNet.X509" Version="3.125.15" />
+    <PackageReference Include="KubernetesClient" Version="19.0.2" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.9" />

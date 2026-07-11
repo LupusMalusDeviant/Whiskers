@@ -1,0 +1,51 @@
+# Minimal RBAC for connecting a Kubernetes cluster to Whiskers (kubernetesImplement Track B).
+#
+# Prefer this ServiceAccount over pasting an admin kubeconfig: it grants exactly what the
+# Kubernetes workload provider uses — read pods + logs, scale/rollout-restart controllers,
+# delete bare pods — and nothing else (no secrets, no exec, no cluster admin).
+#
+# Apply, then mint a kubeconfig for the ServiceAccount (see deploy/k8s/README.md).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: whiskers-agent
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: whiskers-agent
+rules:
+  # List/inspect pods and read their logs (dashboard + logs view).
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  # Stop for a bare pod = delete it (controller-owned pods are scaled instead).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  # Start/stop = scale to 1/0; restart = rollout-restart via a pod-template annotation patch.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "patch"]
+  # Owner resolution for pod grouping happens name-based (no ReplicaSet reads needed), but
+  # allowing reads keeps `kubectl describe`-style debugging with this account possible.
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: whiskers-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: whiskers-agent
+subjects:
+  - kind: ServiceAccount
+    name: whiskers-agent
+    namespace: kube-system

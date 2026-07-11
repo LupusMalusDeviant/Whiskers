@@ -4,7 +4,11 @@ public enum ConnectionType
 {
     Local,
     TCP,
-    SSH
+    SSH,
+    // Track B.2: a Kubernetes cluster (pods via the workload seam instead of a Docker host).
+    // MUST stay last — ConnectionType is persisted as an INT in servers.json, so inserting a
+    // member mid-list would silently retype existing servers.
+    Kubernetes
 }
 
 public enum CloudProvider
@@ -70,6 +74,12 @@ public class ServerConfig
     public MetricsSourceKind MetricsSource { get; set; } = MetricsSourceKind.Docker;
     public string? MetricsEndpoint { get; set; }
 
+    // Kubernetes (Track B.2). The kubeconfig itself is stored ENCRYPTED IN THE VAULT under
+    // "kubeconfig:{Id}" (never in this file, never on disk); these are only the selectors.
+    // KubeContext null = the kubeconfig's current-context; KubeNamespaces empty = all visible.
+    public string? KubeContext { get; set; }
+    public List<string> KubeNamespaces { get; set; } = new();
+
     // Cloud provider control (out-of-band power/snapshot via provider API).
     // The API key is per-server: Hetzner tokens are per-project and Hostinger keys per-account,
     // so each server carries the credential for whatever account/project it lives in.
@@ -79,10 +89,16 @@ public class ServerConfig
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; } = true;
 
-    // Shallow copy for the edit-form dialog. All members are value types or strings, so MemberwiseClone
-    // is safe — and using it (instead of a hand-listed `new ServerConfig { ... }`) guarantees that
-    // newly-added fields can never be silently dropped when a server is edited and saved.
-    public ServerConfig Clone() => (ServerConfig)MemberwiseClone();
+    // Copy for the edit-form dialog. MemberwiseClone (instead of a hand-listed `new ServerConfig
+    // { ... }`) guarantees that newly-added fields can never be silently dropped when a server is
+    // edited and saved; the only reference-typed member (KubeNamespaces) is deep-copied so the
+    // dialog can't mutate the live config through the shared list.
+    public ServerConfig Clone()
+    {
+        var copy = (ServerConfig)MemberwiseClone();
+        copy.KubeNamespaces = new List<string>(KubeNamespaces);
+        return copy;
+    }
 }
 
 public class ServerConfigData

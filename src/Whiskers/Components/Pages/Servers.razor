@@ -8,6 +8,9 @@
 @inject Whiskers.Services.Onboarding.IOnboardingService Onboarding
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject NavigationManager Nav
+@inject Whiskers.Services.Workloads.IWorkloadProviderFactory WorkloadFactory
+@inject Whiskers.Services.Workloads.Kubernetes.IKubernetesClientCache KubeClients
+@inject Whiskers.Services.Vault.IVaultService Vault
 
 <PageTitle>Server - Whiskers</PageTitle>
 
@@ -112,6 +115,7 @@
             <MudSelect @bind-Value="_form.ConnectionType" Label="Verbindungstyp" Variant="Variant.Outlined" Class="mb-3">
                 <MudSelectItem Value="Whiskers.Models.ConnectionType.TCP">TCP (Docker Remote API)</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ConnectionType.SSH">SSH Tunnel</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ConnectionType.Kubernetes">Kubernetes-Cluster (kubeconfig)</MudSelectItem>
             </MudSelect>
 
             @if (_form.ConnectionType == Whiskers.Models.ConnectionType.TCP)
@@ -126,6 +130,28 @@
                         Web-Terminal verbindet sich keyless über das Tailnet (Mesh-Identität, kein SSH-Key) als root auf dem Host aus dem Feld oben. Voraussetzung: <code>tailscale set --ssh</code> auf dem Host.
                     </MudText>
                 }
+            }
+            else if (_form.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
+            {
+                @if (!Vault.IsEnabled)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                        Kubernetes-Cluster benötigen den Secret-Vault: das kubeconfig wird verschlüsselt im Vault
+                        gespeichert (nie als Datei). Bitte <code>VAULT_KEY</code> setzen und neu starten.
+                    </MudAlert>
+                }
+                <MudTextField @bind-Value="_kubeconfigYaml" Label="kubeconfig (YAML)" Variant="Variant.Outlined"
+                              Lines="8" Class="mb-2" Style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;"
+                              Placeholder="apiVersion: v1&#10;kind: Config&#10;clusters: …"
+                              HelperText="@(_editingServer != null ? "Leer lassen, um das gespeicherte kubeconfig zu behalten." : "Wird verschlüsselt im Vault abgelegt — nie auf der Platte.")" />
+                <MudTextField @bind-Value="_form.KubeContext" Label="Context (optional)" Variant="Variant.Outlined" Class="mb-3"
+                              HelperText="Leer = current-context des kubeconfig." />
+                <MudTextField @bind-Value="_kubeNamespacesCsv" Label="Namespaces (optional, kommagetrennt)" Variant="Variant.Outlined" Class="mb-2"
+                              HelperText="Leer = alle sichtbaren Namespaces. Beispiel: default, apps, monitoring" />
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                    Empfehlung: einen minimalen ServiceAccount statt des Admin-kubeconfig verwenden —
+                    Manifest + Anleitung unter <code>deploy/k8s/whiskers-agent-rbac.yaml</code>.
+                </MudAlert>
             }
             else if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH)
             {
@@ -160,7 +186,7 @@
                 </MudAlert>
             }
 
-            @if (_form.ConnectionType != Whiskers.Models.ConnectionType.Local)
+            @if (_form.ConnectionType is Whiskers.Models.ConnectionType.TCP or Whiskers.Models.ConnectionType.SSH)
             {
                 <MudDivider Class="my-3" />
                 <MudText Typo="Typo.subtitle2" Class="mb-2">Cloud-Provider (Power/Snapshot via API, out-of-band)</MudText>
@@ -264,6 +290,10 @@
     private byte[]? _sshKeyData;
     private string _cloudApiKey = "";
     private bool _hasCloudKey;
+    // Kubernetes (Track B.2): kubeconfig is pasted here and stored in the VAULT, never persisted
+    // in the form/servers.json; namespaces are edited as a comma-separated string.
+    private string _kubeconfigYaml = "";
+    private string _kubeNamespacesCsv = "";
     private HashSet<string> _testing = new();
     private Dictionary<string, TestResult> _testResults = new();
 
@@ -313,6 +343,8 @@
         _sshKeyData = null;
         _cloudApiKey = "";
         _hasCloudKey = false;
+        _kubeconfigYaml = "";
+        _kubeNamespacesCsv = "";
         _connectError = null;
         _useSshPassword = false;
         _showDialog = true;
@@ -326,6 +358,8 @@
         _sshKeyData = null;
         _cloudApiKey = "";                                  // never prefill the secret
         _hasCloudKey = !string.IsNullOrWhiteSpace(server.CloudApiKey);
+        _kubeconfigYaml = "";                               // never prefill the secret (vault-only)
+        _kubeNamespacesCsv = string.Join(", ", server.KubeNamespaces);
         _connectError = null;
         _useSshPassword = false;
         _showDialog = true;
@@ -335,6 +369,26 @@
     // keeps the transient SshPassword (used for onboarding) that is never written to disk.
     private async Task<Whiskers.Models.ServerConfig> PersistServerAsync()
     {
+        // Kubernetes cluster (Track B.2): the kubeconfig goes into the VAULT (encrypted, never on
+        // disk); servers.json only carries the selectors. Vault is a hard requirement here.
+        if (_form.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
+        {
+            if (!Vault.IsEnabled)
+                throw new InvalidOperationException("Kubernetes-Cluster benötigen den Vault — VAULT_KEY setzen und neu starten.");
+            if (_editingServer == null && string.IsNullOrWhiteSpace(_kubeconfigYaml))
+                throw new InvalidOperationException("Bitte ein kubeconfig einfügen.");
+
+            _form.KubeNamespaces = _kubeNamespacesCsv
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            if (!string.IsNullOrWhiteSpace(_kubeconfigYaml))
+            {
+                await Vault.SetSecretAsync(
+                    Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(_editingServer?.Id ?? _form.Id),
+                    _kubeconfigYaml.Trim());
+            }
+        }
+
         // Resolve the cloud API key: blank field = keep the existing one; clearing the provider clears the key.
         if (_form.CloudProvider == Whiskers.Models.CloudProvider.None)
             _form.CloudApiKey = null;
@@ -358,6 +412,7 @@
 
             await ServerConfigService.UpdateServerAsync(_form);
             ConnectionManager.InvalidateClient(_form.Id);
+            KubeClients.Invalidate(_form.Id); // rebuild on next use if kubeconfig/context changed
             await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
         }
         else
@@ -382,7 +437,17 @@
         StateHasChanged();
         try
         {
-            var saved = await PersistServerAsync();
+            Whiskers.Models.ServerConfig saved;
+            try
+            {
+                saved = await PersistServerAsync();
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Validation failures (e.g. Kubernetes without vault/kubeconfig) — surface, keep dialog open.
+                Snackbar.Add(ex.Message, Severity.Error);
+                return;
+            }
             // Build + probe the connection before closing, so a broken server isn't saved silently
             // (which would otherwise drag the dashboard with timeouts later).
             var (ok, info) = await TryConnectAsync(saved.Id, TimeSpan.FromSeconds(12));
@@ -432,6 +497,16 @@
     {
         try
         {
+            // Kubernetes clusters are probed through the workload seam (list pods ≈ GET /version
+            // + list) — the Docker connection manager is Docker-only.
+            var cfg = ServerConfigService.GetServer(serverId);
+            if (cfg?.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
+            {
+                using var kcts = new System.Threading.CancellationTokenSource(timeout);
+                var pods = await WorkloadFactory.GetForServer(serverId).ListWorkloadsAsync(all: true, kcts.Token);
+                return (true, $"{pods.Count} Pods");
+            }
+
             ConnectionManager.InvalidateClient(serverId);
             var client = await ConnectionManager.GetClientAsync(serverId);
             using var cts = new System.Threading.CancellationTokenSource(timeout);
@@ -462,6 +537,10 @@
         {
             ConnectionManager.InvalidateClient(server.Id);
             await ServerConfigService.RemoveServerAsync(server.Id);
+            // A Kubernetes server leaves its kubeconfig in the vault — clean that up too.
+            if (server.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes && Vault.IsEnabled)
+                await Vault.DeleteSecretAsync(
+                    Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(server.Id));
             _servers = ServerConfigService.GetServers();
             await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, serverId: server.Id);
             Snackbar.Add($"{server.Name} entfernt", Severity.Success);
@@ -481,6 +560,13 @@
 
         try
         {
+            if (server.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
+            {
+                var pods = await WorkloadFactory.GetForServer(server.Id).ListWorkloadsAsync(all: true);
+                _testResults[server.Id] = new TestResult { Success = true, ContainerCount = pods.Count };
+                return;
+            }
+
             var client = await ConnectionManager.GetClientAsync(server.Id);
             var containers = await client.Containers.ListContainersAsync(
                 new Docker.DotNet.Models.ContainersListParameters { All = true });

@@ -139,7 +139,9 @@ internal sealed class SystemInfoOperations
 
     public async Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync()
     {
-        var servers = _serverConfigService.GetEnabledServers();
+        // Kubernetes servers are handled by the workload seam, not the Docker system-info probe.
+        var servers = _serverConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType != ConnectionType.Kubernetes).ToList();
         // Bound each server's reachability probe so one dead host (whose retrying executor can take up
         // to ~60s) can't stall the whole dashboard load — it's marked unreachable after 8s instead.
         var perServerTimeout = TimeSpan.FromSeconds(8);

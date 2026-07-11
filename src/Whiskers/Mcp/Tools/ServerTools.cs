@@ -31,7 +31,9 @@ public class ServerTools
         {
             var info = infos.GetValueOrDefault(server.Id);
             sb.AppendLine($"- {server.Name} (ID: {server.Id}, Type: {server.ConnectionType})");
-            if (info?.IsReachable == true)
+            if (server.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
+                sb.AppendLine("  Kubernetes cluster — pods are shown on the dashboard (workload provider); MCP tool coverage follows in Track B.3.");
+            else if (info?.IsReachable == true)
                 sb.AppendLine($"  OS: {info.OperatingSystem}, CPU: {info.CpuCount} cores ({info.CpuUsagePercent:F1}%), RAM: {info.MemoryUsedBytes / 1073741824.0:F1}/{info.MemoryTotalBytes / 1073741824.0:F1} GB, Docker: {info.DockerVersion}, Containers: {info.ContainersRunning}/{info.ContainersTotal}");
             else
                 sb.AppendLine($"  Status: Unreachable - {info?.Error ?? "unknown"}");

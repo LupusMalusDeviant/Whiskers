@@ -37,7 +37,10 @@ public class MetricsSourceDispatcher : IMetricsSource
 
     public async Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync()
     {
-        var servers = _serverConfig.GetEnabledServers();
+        // Kubernetes clusters have neither a Docker API nor a node_exporter host mapping here —
+        // skip them instead of producing a warning per collection cycle.
+        var servers = _serverConfig.GetEnabledServers()
+            .Where(s => s.ConnectionType != ConnectionType.Kubernetes).ToList();
         var tasks = servers.Select(async s =>
         {
             try
