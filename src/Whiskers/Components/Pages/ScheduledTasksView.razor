@@ -4,6 +4,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
    enabled (via ModuleGuard), so a disabled module never reaches the ISchedulerService injection. *@
@@ -309,6 +310,8 @@ else
                 ServerId = _formServerId,
                 Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null
             });
+            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
+                "task.create", "scheduled-task", _formName, _formName, serverId: _formServerId);
             Snackbar.Add($"Task '{_formName}' erstellt.", Severity.Success);
             _showDialog = false;
             await LoadData();
@@ -324,6 +327,8 @@ else
         if (!Require(AppRole.Operator)) return;
         Snackbar.Add($"Task '{task.Name}' wird ausgeführt...", Severity.Info);
         var (success, output) = await Scheduler.RunNowAsync(task.TaskId);
+        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
+            "task.run-now", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId, success: success);
         Snackbar.Add(success ? $"Erfolgreich: {output}" : $"Fehler: {output}",
             success ? Severity.Success : Severity.Error);
         await LoadData();
@@ -334,6 +339,8 @@ else
         if (!Require(AppRole.Admin)) return;
         task.Enabled = enabled;
         await Scheduler.UpdateTaskAsync(task);
+        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
+            enabled ? "task.enable" : "task.disable", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
         await LoadData();
     }
 
@@ -348,6 +355,8 @@ else
         try
         {
             await Scheduler.DeleteTaskAsync(task.TaskId);
+            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
+                "task.delete", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
             Snackbar.Add($"Task '{task.Name}' gelöscht.", Severity.Success);
             await LoadData();
         }
