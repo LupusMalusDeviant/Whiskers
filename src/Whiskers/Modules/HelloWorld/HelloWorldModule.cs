@@ -29,7 +29,7 @@ public sealed class HelloWorldModule : IWhiskersModule
     /// <summary>One sidebar entry, merged into the nav registry and shown only while the module is enabled.</summary>
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("hello-world", "Hello World", Icons.Material.Filled.WavingHand, "Übersicht", AppRole.Viewer, 5),
+        new NavItem("hello-world", "Nav_HelloWorld", Icons.Material.Filled.WavingHand, "Übersicht", AppRole.Viewer, 5),
     };
 
     /// <summary>No MCP tools in this example. A real module lists its <c>[McpServerToolType]</c> classes here;

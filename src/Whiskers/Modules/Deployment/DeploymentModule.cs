@@ -29,8 +29,8 @@ public sealed class DeploymentModule : IWhiskersModule
     // "deploy" + "apps" (moved verbatim from AllInOnePseudoModule). "compose" stays in Core.
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("deploy", "Bereitstellen", Icons.Material.Filled.RocketLaunch, "Deployment", AppRole.Viewer, 110),
-        new NavItem("apps",   "App Store",     Icons.Material.Filled.Apps,         "Deployment", AppRole.Viewer, 130),
+        new NavItem("deploy", "Nav_Deploy", Icons.Material.Filled.RocketLaunch, "Deployment", AppRole.Viewer, 110),
+        new NavItem("apps",   "Nav_AppStore",     Icons.Material.Filled.Apps,         "Deployment", AppRole.Viewer, 130),
     };
 
     public IReadOnlyList<Type> McpToolTypes => Array.Empty<Type>();

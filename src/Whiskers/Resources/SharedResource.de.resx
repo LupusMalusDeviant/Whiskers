@@ -164,4 +164,94 @@
   <data name="Theme_Mode_System" xml:space="preserve">
     <value>System</value>
   </data>
+  <data name="Nav_Dashboard" xml:space="preserve">
+    <value>Dashboard</value>
+  </data>
+  <data name="Nav_HealthReports" xml:space="preserve">
+    <value>Statusberichte</value>
+  </data>
+  <data name="Nav_CveMonitor" xml:space="preserve">
+    <value>CVE-Monitor</value>
+  </data>
+  <data name="Nav_LogSearch" xml:space="preserve">
+    <value>Log-Suche</value>
+  </data>
+  <data name="Nav_Topology" xml:space="preserve">
+    <value>Topologie</value>
+  </data>
+  <data name="Nav_Compare" xml:space="preserve">
+    <value>Vergleichen</value>
+  </data>
+  <data name="Nav_Notifications" xml:space="preserve">
+    <value>Benachrichtigungen</value>
+  </data>
+  <data name="Nav_AuditLog" xml:space="preserve">
+    <value>Audit-Protokoll</value>
+  </data>
+  <data name="Nav_Deploy" xml:space="preserve">
+    <value>Bereitstellen</value>
+  </data>
+  <data name="Nav_ComposeEditor" xml:space="preserve">
+    <value>Compose Editor</value>
+  </data>
+  <data name="Nav_AppStore" xml:space="preserve">
+    <value>App Store</value>
+  </data>
+  <data name="Nav_Servers" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Nav_Cloud" xml:space="preserve">
+    <value>Cloud</value>
+  </data>
+  <data name="Nav_Networks" xml:space="preserve">
+    <value>Netzwerke</value>
+  </data>
+  <data name="Nav_Backups" xml:space="preserve">
+    <value>Backups</value>
+  </data>
+  <data name="Nav_ScheduledTasks" xml:space="preserve">
+    <value>Geplante Tasks</value>
+  </data>
+  <data name="Nav_Webhooks" xml:space="preserve">
+    <value>Webhooks</value>
+  </data>
+  <data name="Nav_AgentHistory" xml:space="preserve">
+    <value>Agent-History</value>
+  </data>
+  <data name="Nav_Agent" xml:space="preserve">
+    <value>Agent</value>
+  </data>
+  <data name="Nav_Guardrails" xml:space="preserve">
+    <value>Guardrails</value>
+  </data>
+  <data name="Nav_Approvals" xml:space="preserve">
+    <value>Freigaben</value>
+  </data>
+  <data name="Nav_AiTriggers" xml:space="preserve">
+    <value>AI-Trigger</value>
+  </data>
+  <data name="Nav_Settings" xml:space="preserve">
+    <value>Einstellungen</value>
+  </data>
+  <data name="Nav_Help" xml:space="preserve">
+    <value>Hilfe</value>
+  </data>
+  <data name="Nav_HelloWorld" xml:space="preserve">
+    <value>Hello World</value>
+  </data>
+  <data name="NavGroup_Overview" xml:space="preserve">
+    <value>Übersicht</value>
+  </data>
+  <data name="NavGroup_Deployment" xml:space="preserve">
+    <value>Deployment</value>
+  </data>
+  <data name="NavGroup_Infrastructure" xml:space="preserve">
+    <value>Infrastruktur</value>
+  </data>
+  <data name="NavGroup_Automation" xml:space="preserve">
+    <value>Automatisierung</value>
+  </data>
+  <data name="Layout_Logout" xml:space="preserve">
+    <value>Abmelden</value>
+  </data>
 </root>

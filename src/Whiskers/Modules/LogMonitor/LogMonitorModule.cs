@@ -28,7 +28,7 @@ public sealed class LogMonitorModule : IWhiskersModule
     // The "logs" sidebar entry (moved verbatim from AllInOnePseudoModule); shown only while enabled.
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("logs", "Log-Suche", Icons.Material.Filled.Search, "Übersicht", AppRole.Viewer, 40),
+        new NavItem("logs", "Nav_LogSearch", Icons.Material.Filled.Search, "Übersicht", AppRole.Viewer, 40),
     };
 
     public IReadOnlyList<Type> McpToolTypes { get; } = new[] { typeof(LogTools) };

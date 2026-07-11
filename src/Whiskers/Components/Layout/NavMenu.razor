@@ -1,4 +1,5 @@
 @inject Whiskers.Modules.IModuleRegistry ModuleRegistry
+@inject IStringLocalizer<SharedResource> L
 
 <div class="sw-sidebar-logo">
     <img src="brand.png?v=4" alt="Whiskers" class="sw-sidebar-logo-img" />
@@ -13,12 +14,12 @@
 <MudNavMenu>
     @foreach (var group in _groups)
     {
-        <MudNavGroup Title="@group.Name" Icon="@GroupIcon(group.Name)" Expanded="false">
+        <MudNavGroup Title="@GroupTitle(group.Name)" Icon="@GroupIcon(group.Name)" Expanded="false">
             @foreach (var item in group.Items)
             {
                 <MudNavLink Href="@item.Href" Icon="@item.Icon"
                             Match="@(string.IsNullOrEmpty(item.Href) ? NavLinkMatch.All : NavLinkMatch.Prefix)">
-                    @item.LocKey
+                    @L[item.LocKey]
                 </MudNavLink>
             }
         </MudNavGroup>
@@ -27,7 +28,7 @@
     @foreach (var item in _topLevel)
     {
         <MudNavLink Href="@item.Href" Icon="@item.Icon">
-            @item.LocKey
+            @L[item.LocKey]
         </MudNavLink>
     }
 </MudNavMenu>
@@ -54,4 +55,17 @@
 
     private static string GroupIcon(string group) =>
         GroupIcons.TryGetValue(group, out var icon) ? icon : Icons.Material.Filled.Folder;
+
+    // F2 i18n: group NAMES stay German-internal grouping ids on NavItem (module contract stability);
+    // only the display goes through the localizer. Unknown groups fall back to their raw name.
+    private static readonly Dictionary<string, string> GroupKeys = new()
+    {
+        ["Übersicht"] = "NavGroup_Overview",
+        ["Deployment"] = "NavGroup_Deployment",
+        ["Infrastruktur"] = "NavGroup_Infrastructure",
+        ["Automatisierung"] = "NavGroup_Automation",
+    };
+
+    private string GroupTitle(string group) =>
+        GroupKeys.TryGetValue(group, out var key) ? L[key].Value : group;
 }

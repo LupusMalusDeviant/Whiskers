@@ -28,7 +28,7 @@ public sealed class SchedulerModule : IWhiskersModule
     // The "tasks" sidebar entry (moved verbatim from AllInOnePseudoModule); shown only while enabled.
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("tasks", "Geplante Tasks", Icons.Material.Filled.Schedule, "Automatisierung", AppRole.Viewer, 310),
+        new NavItem("tasks", "Nav_ScheduledTasks", Icons.Material.Filled.Schedule, "Automatisierung", AppRole.Viewer, 310),
     };
 
     public IReadOnlyList<Type> McpToolTypes { get; } = new[] { typeof(SchedulerTools) };

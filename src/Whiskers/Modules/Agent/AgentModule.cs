@@ -34,10 +34,10 @@ public sealed class AgentModule : IWhiskersModule
     // "agent-history" stays in Core — it is MCP-call observability, not the acting agent.
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("agent",       "Agent",      Icons.Material.Filled.SmartToy,  "Automatisierung", AppRole.Viewer, 340),
-        new NavItem("guardrails",  "Guardrails", Icons.Material.Filled.Shield,    "Automatisierung", AppRole.Viewer, 350),
-        new NavItem("approvals",   "Freigaben",  Icons.Material.Filled.Approval,  "Automatisierung", AppRole.Viewer, 360),
-        new NavItem("ai-triggers", "AI-Trigger", Icons.Material.Filled.Bolt,      "Automatisierung", AppRole.Viewer, 370),
+        new NavItem("agent",       "Nav_Agent",      Icons.Material.Filled.SmartToy,  "Automatisierung", AppRole.Viewer, 340),
+        new NavItem("guardrails",  "Nav_Guardrails", Icons.Material.Filled.Shield,    "Automatisierung", AppRole.Viewer, 350),
+        new NavItem("approvals",   "Nav_Approvals",  Icons.Material.Filled.Approval,  "Automatisierung", AppRole.Viewer, 360),
+        new NavItem("ai-triggers", "Nav_AiTriggers", Icons.Material.Filled.Bolt,      "Automatisierung", AppRole.Viewer, 370),
     };
 
     public IReadOnlyList<Type> McpToolTypes { get; } = new[] { typeof(AgentTools) };

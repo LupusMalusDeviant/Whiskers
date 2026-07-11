@@ -29,7 +29,7 @@ public sealed class WebhooksModule : IWhiskersModule
     // The "webhooks" sidebar entry (moved verbatim from AllInOnePseudoModule); shown only while enabled.
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("webhooks", "Webhooks", Icons.Material.Filled.Webhook, "Automatisierung", AppRole.Viewer, 320),
+        new NavItem("webhooks", "Nav_Webhooks", Icons.Material.Filled.Webhook, "Automatisierung", AppRole.Viewer, 320),
     };
 
     public IReadOnlyList<Type> McpToolTypes => Array.Empty<Type>();

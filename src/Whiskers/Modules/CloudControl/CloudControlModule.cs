@@ -32,7 +32,7 @@ public sealed class CloudControlModule : IWhiskersModule
 
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("cloud", "Cloud", Icons.Material.Filled.CloudQueue, "Infrastruktur", AppRole.Viewer, 220),
+        new NavItem("cloud", "Nav_Cloud", Icons.Material.Filled.CloudQueue, "Infrastruktur", AppRole.Viewer, 220),
     };
 
     public IReadOnlyList<Type> McpToolTypes { get; } = new[] { typeof(CloudTools), typeof(HetznerTools) };

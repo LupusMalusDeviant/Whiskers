@@ -27,7 +27,7 @@ public sealed class CveModule : IWhiskersModule
 
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("cves", "CVE-Monitor", Icons.Material.Filled.Security, "Übersicht", AppRole.Viewer, 30),
+        new NavItem("cves", "Nav_CveMonitor", Icons.Material.Filled.Security, "Übersicht", AppRole.Viewer, 30),
     };
 
     public IReadOnlyList<Type> McpToolTypes { get; } = new[] { typeof(CveTools) };

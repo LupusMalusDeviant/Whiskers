@@ -8,8 +8,8 @@ namespace Whiskers.Modules;
 /// <see cref="IModuleRegistry"/> in Phase 1.
 /// </summary>
 /// <param name="Href">Route the link points at (relative, e.g. <c>"servers"</c>; empty = dashboard).</param>
-/// <param name="LocKey">Display text. Holds the current German label until F2 (i18n) swaps in a real
-/// <c>IStringLocalizer</c> key.</param>
+/// <param name="LocKey">SharedResource localization key for the display text (F2 i18n) — e.g.
+/// <c>Nav_Servers</c>; rendered via <c>IStringLocalizer</c> in NavMenu.razor.</param>
 /// <param name="Icon">MudBlazor icon constant (e.g. <c>Icons.Material.Filled.Storage</c>).</param>
 /// <param name="Group">Sidebar group heading the item sits under; empty = a top-level link.</param>
 /// <param name="MinRole">Lowest role that may see the entry.</param>

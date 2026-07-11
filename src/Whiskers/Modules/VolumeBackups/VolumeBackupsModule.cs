@@ -24,7 +24,7 @@ public sealed class VolumeBackupsModule : IWhiskersModule
     // The "backups" sidebar entry (moved verbatim from AllInOnePseudoModule); shown only while enabled.
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("backups", "Backups", Icons.Material.Filled.Backup, "Infrastruktur", AppRole.Viewer, 240),
+        new NavItem("backups", "Nav_Backups", Icons.Material.Filled.Backup, "Infrastruktur", AppRole.Viewer, 240),
     };
 
     public IReadOnlyList<Type> McpToolTypes => Array.Empty<Type>();
