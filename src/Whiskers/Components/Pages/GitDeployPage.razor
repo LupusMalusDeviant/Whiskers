@@ -1,0 +1,8 @@
+@page "/git-deploy"
+@attribute [Authorize]
+
+@* Thin route wrapper (DI-safe module guard pattern): the interactive logic that injects
+   IGitDeployService lives in the child view, so a disabled module never reaches the injection. *@
+<ModuleGuard ModuleId="gitdeploy">
+    <GitDeployView />
+</ModuleGuard>

@@ -254,4 +254,7 @@
   <data name="Layout_Logout" xml:space="preserve">
     <value>Abmelden</value>
   </data>
+  <data name="Nav_GitDeploy" xml:space="preserve">
+    <value>Git Deploy</value>
+  </data>
 </root>

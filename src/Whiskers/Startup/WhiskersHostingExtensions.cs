@@ -65,6 +65,9 @@ public static class WhiskersHostingExtensions
         // per request, so it needs a default when the Webhooks module is off. The module registers the real service in
         // the loop below and wins; with it off, a trigger answers 400 instead of 500. (RoadToSAP §2.1)
         builder.Services.AddSingleton<Whiskers.Services.Webhooks.IWebhookService, Whiskers.Services.Webhooks.NoopWebhookService>();
+        // Same pattern for git deploys (F5): the Webhooks module dispatches the "git-deploy" action
+        // through this Core contract; the GitDeploy module's real service wins by last-registration.
+        builder.Services.AddSingleton<Whiskers.Services.GitDeploy.IGitDeployService, Whiskers.Services.GitDeploy.NoopGitDeployService>();
         // And for host management: ServerTools (an MCP class mixing core server ops with firewall/nginx/systemd/ssl
         // ops) can't be split under the byte-gleich rule, so it stays in Core and injects these four services per
         // call. Their no-op defaults keep that working when the HostManagement module is off; the module registers the

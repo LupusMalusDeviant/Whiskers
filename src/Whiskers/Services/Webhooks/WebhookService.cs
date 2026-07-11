@@ -123,6 +123,9 @@ public class WebhookService : IWebhookService
                 "restart" => await RestartContainer(webhook),
                 "rebuild" => await RebuildContainer(webhook),
                 "deploy" => await DeployCompose(webhook),
+                // F5: push-triggered git redeploy. TargetId = GitDeployApp id; resolved via the Core
+                // contract so a disabled GitDeploy module answers gracefully (no-op default).
+                "git-deploy" => await GitDeploy(webhook),
                 _ => (false, $"Unknown action: {webhook.Action}")
             };
         }
@@ -167,6 +170,13 @@ public class WebhookService : IWebhookService
 
         var newId = await _docker.RecreateContainerAsync(container.Id, webhook.ServerId);
         return (true, $"Container {container.Name} rebuilt (new ID: {newId[..12]}).");
+    }
+
+    private async Task<(bool, string)> GitDeploy(WebhookEntity webhook)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var gitDeploy = scope.ServiceProvider.GetRequiredService<Whiskers.Services.GitDeploy.IGitDeployService>();
+        return await gitDeploy.DeployAsync(webhook.TargetId);
     }
 
     private async Task<(bool, string)> DeployCompose(WebhookEntity webhook)

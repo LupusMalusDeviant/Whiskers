@@ -1,4 +1,5 @@
 @inject Whiskers.Services.Webhooks.IWebhookService WebhookService
+@inject Whiskers.Services.GitDeploy.IGitDeployService GitDeploy
 @inject IDockerService DockerService
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject NavigationManager Nav
@@ -134,8 +135,24 @@ else
                 <MudSelectItem Value="@("restart")">Container neustarten</MudSelectItem>
                 <MudSelectItem Value="@("rebuild")">Container neu bauen (Pull + Recreate)</MudSelectItem>
                 <MudSelectItem Value="@("deploy")">Compose Deploy (Pull + Up)</MudSelectItem>
+                <MudSelectItem Value="@("git-deploy")">Git Deploy (Fetch + Build + Up)</MudSelectItem>
             </MudSelect>
-            @if (_formAction is "restart" or "rebuild")
+            @if (_formAction == "git-deploy")
+            {
+                <MudSelect T="string" @bind-Value="_formTarget" Label="Git-Deploy-App" Variant="Variant.Outlined" Class="mb-3">
+                    @foreach (var app in _gitApps)
+                    {
+                        <MudSelectItem Value="@app.Id">@app.Name (@app.Branch)</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (!_gitApps.Any())
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                        Keine Git-Deploy-Apps vorhanden — zuerst unter <MudLink Href="git-deploy">Git Deploy</MudLink> anlegen.
+                    </MudAlert>
+                }
+            }
+            else if (_formAction is "restart" or "rebuild")
             {
                 <MudSelect T="string" @bind-Value="_formTarget" Label="Container" Variant="Variant.Outlined" Class="mb-3">
                     @foreach (var c in _containers)
@@ -188,11 +205,14 @@ else
         _webhooks = await WebhookService.GetWebhooksAsync();
     }
 
+    private List<Whiskers.Models.GitDeployApp> _gitApps = new();
+
     private async Task ShowCreateDialog()
     {
         _formName = ""; _formAction = "restart"; _formTarget = "";
         _formServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
         await LoadContainersForServer();
+        _gitApps = await GitDeploy.GetAppsAsync();   // empty when the GitDeploy module is off (no-op)
         _showDialog = true;
     }
 
