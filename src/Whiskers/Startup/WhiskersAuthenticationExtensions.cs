@@ -168,7 +168,19 @@ public static class WhiskersAuthenticationExtensions
         })
         .AddEntityFrameworkStores<Whiskers.Services.Persistence.WhiskersIdentityDbContext>();
 
-        builder.Services.AddAuthorization();
+        // KRIT-3 step 2 (fail-closed by default; user approval 2026-07-11): every endpoint WITHOUT
+        // explicit authorization metadata now requires an authenticated user. Anonymous surfaces are
+        // explicit opt-outs: /healthz+/readyz, /set-culture, the login endpoints, /logout,
+        // /api/webhooks (HMAC-authenticated), /metrics (scrape-token-gated), static assets, and the
+        // Razor-components/circuit endpoints (page-level auth stays with AuthorizeRouteView +
+        // the default [Authorize] in _Imports.razor; Login/Setup/Error opt out via [AllowAnonymous]).
+        // /mcp keeps its own explicit RequireAuthorization policy (bearer-key principal).
+        // Auth:Disabled mode is unaffected: the synthetic-principal middleware authenticates every
+        // request before authorization runs.
+        builder.Services.AddAuthorizationBuilder()
+            .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build());
         builder.Services.AddCascadingAuthenticationState();
     }
 }

@@ -106,7 +106,8 @@ public class SshTunnelManager : ISshTunnelManager
     /// <summary>Builds and starts one ssh port-forward process. Options chosen so a broken tunnel dies
     /// fast and cleanly: ExitOnForwardFailure (exit immediately if the local forward can't bind),
     /// ServerAlive* keepalives (terminate a half-dead link after ~45s), BatchMode (never block on a
-    /// prompt). StrictHostKeyChecking stays as-is (HOCH-11 / ADR-0002).</summary>
+    /// prompt). Host keys are verified TOFU-style via <see cref="Services.Server.SshHostKeyPolicy"/>
+    /// (HOCH-11 fixed per user approval 2026-07-11; see ADR-0002).</summary>
     private static Process StartSshProcess(Models.ServerConfig server, string? keyPath, int localPort)
     {
         var args = new List<string>();
@@ -115,13 +116,13 @@ public class SshTunnelManager : ISshTunnelManager
             args.Add("-i");
             args.Add(keyPath);
         }
+        args.AddRange(Services.Server.SshHostKeyPolicy.Options());
         args.AddRange(new[]
         {
             "-N",
             "-L", $"{localPort}:/var/run/docker.sock",
             $"{server.SshUser}@{server.SshHost}",
             "-p", server.SshPort.ToString(),
-            "-o", "StrictHostKeyChecking=no",
             "-o", "BatchMode=yes",
             "-o", "ExitOnForwardFailure=yes",
             "-o", "ServerAliveInterval=15",

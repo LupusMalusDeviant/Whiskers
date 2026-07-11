@@ -29,3 +29,7 @@
 @using Whiskers.Services.Server
 @using Whiskers.Services.AuditLog
 @using Whiskers.Services.Database
+
+@* KRIT-3 step 2: default-deny — every routable page requires an authenticated user unless it
+   explicitly opts out with [AllowAnonymous] (Login, Setup, Error). Enforced by AuthorizeRouteView. *@
+@attribute [Authorize]

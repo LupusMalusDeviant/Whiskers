@@ -32,7 +32,7 @@ public interface IAuditLogService
 
         // Check for MCP API key
         var authHeader = httpContext.Request.Headers.Authorization.FirstOrDefault();
-        if (authHeader != null && authHeader.StartsWith("Bearer ") && permissionService != null)
+        if (authHeader != null && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && permissionService != null) // NIED-1
         {
             var key = authHeader["Bearer ".Length..];
             var keyConfig = permissionService.ValidateKey(key);

@@ -23,7 +23,8 @@ public class McpBearerAuthMiddleware
         if (context.Request.Path.StartsWithSegments("/mcp"))
         {
             var authHeader = context.Request.Headers.Authorization.FirstOrDefault();
-            if (authHeader != null && authHeader.StartsWith("Bearer "))
+            // NIED-1: RFC 7235 auth schemes are case-insensitive — accept "bearer"/"BEARER" too.
+            if (authHeader != null && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
             {
                 var key = authHeader["Bearer ".Length..];
                 var permService = context.RequestServices.GetService<IMcpPermissionService>();

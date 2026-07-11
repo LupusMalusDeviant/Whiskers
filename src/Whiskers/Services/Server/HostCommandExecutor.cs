@@ -110,9 +110,9 @@ public class HostCommandExecutor : IHostCommandExecutor
 
         try { Directory.CreateDirectory(ControlDir); } catch { /* best effort; ssh falls back to no mux */ }
 
-        var args = new List<string>
+        // TOFU host-key verification (HOCH-11 / ADR-0002) — shared policy with tunnel + terminal.
+        var args = new List<string>(SshHostKeyPolicy.Options())
         {
-            "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=10",
             // Connection multiplexing: the first call opens a master, subsequent calls within
             // ControlPersist reuse it. %C is a safe hash of host/port/user, so no escaping concerns.

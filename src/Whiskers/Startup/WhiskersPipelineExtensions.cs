@@ -192,7 +192,7 @@ public static class WhiskersPipelineExtensions
             {
                 RedirectUri = configuredPathBase + "/"
             });
-        });
+        }).AllowAnonymous();
 
         app.MapGet("/login-oidc", async (HttpContext ctx) =>
         {
@@ -200,7 +200,7 @@ public static class WhiskersPipelineExtensions
             {
                 RedirectUri = configuredPathBase + "/"
             });
-        });
+        }).AllowAnonymous();
 
         // Local username/password login (F1). Only when auth is real. Validates against the Identity user
         // store, applies the SAME whitelist gate as Google/OIDC, then issues the EXISTING cookie carrying a
@@ -235,14 +235,14 @@ public static class WhiskersPipelineExtensions
                 await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
                     new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = true });
                 return Results.Redirect(configuredPathBase + "/");
-            });
+            }).AllowAnonymous();
         }
 
         app.MapGet("/logout", async (HttpContext ctx) =>
         {
             await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             ctx.Response.Redirect(configuredPathBase + "/login");
-        });
+        }).AllowAnonymous();
 
         // SignalR hubs
         app.MapHub<ContainerHub>("/hubs/containers");
@@ -257,7 +257,7 @@ public static class WhiskersPipelineExtensions
                 var httpContext = context.Resource as HttpContext;
                 var permService = httpContext?.RequestServices.GetService<Whiskers.Services.Mcp.IMcpPermissionService>();
                 var authHeader = httpContext?.Request.Headers.Authorization.FirstOrDefault();
-                if (authHeader != null && authHeader.StartsWith("Bearer "))
+                if (authHeader != null && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) // NIED-1: scheme is case-insensitive
                 {
                     var key = authHeader["Bearer ".Length..];
                     // Validate via new permission service (or legacy store for backwards compat)
@@ -300,7 +300,7 @@ public static class WhiskersPipelineExtensions
 
             var (success, output) = await webhookService.TriggerAsync(webhookId, signature, body, sourceIp);
             return success ? Results.Ok(new { status = "ok", output }) : Results.BadRequest(new { status = "error", output });
-        });
+        }).AllowAnonymous();
 
         // Prometheus metrics endpoint. Gated by a static scrape token (Metrics:ScrapeToken) because the
         // payload is the full multi-server container inventory. With no token configured the endpoint stays
@@ -379,11 +379,28 @@ public static class WhiskersPipelineExtensions
 
             ctx.Response.ContentType = "text/plain; version=0.0.4; charset=utf-8";
             await ctx.Response.WriteAsync(sb.ToString());
-        });
+        }).AllowAnonymous(); // gated by the scrape token inside, not by user auth
 
-        app.MapStaticAssets();
+        // KRIT-3 step 2: static assets stay anonymous (the login page needs its CSS/JS). The
+        // component PAGE endpoints are NOT blanket-exempted — each page carries [Authorize] by
+        // default (_Imports.razor) and the anonymous pages (Login/Setup/Error) opt out per
+        // attribute, so the fallback policy + endpoint metadata enforce page auth at the HTTP
+        // level too. Only the Blazor FRAMEWORK endpoints (/_blazor circuit, initializers,
+        // disconnect) get a targeted anonymous opt-out — without it the fallback policy 302s the
+        // circuit and the anonymous pages (Login, Setup wizard) lose interactivity; the circuit
+        // itself carries no content, page auth still gates everything rendered through it.
+        app.MapStaticAssets().AllowAnonymous();
         app.MapRazorComponents<Whiskers.Components.App>()
-            .AddInteractiveServerRenderMode();
+            .AddInteractiveServerRenderMode()
+            .Add(endpointBuilder =>
+            {
+                if (endpointBuilder is RouteEndpointBuilder reb
+                    && reb.RoutePattern.RawText is { } raw
+                    && raw.StartsWith("/_blazor", StringComparison.OrdinalIgnoreCase))
+                {
+                    endpointBuilder.Metadata.Add(new Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute());
+                }
+            });
     }
 
     /// <summary>Startup warm-up run after Build(): each IInitializable in ascending Order, then the metrics

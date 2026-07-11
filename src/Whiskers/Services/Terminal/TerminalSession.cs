@@ -65,10 +65,11 @@ public class TerminalSession : IAsyncDisposable
         var args = new List<string>
         {
             "-tt",
-            "-o", "StrictHostKeyChecking=no",
             "-o", "ServerAliveInterval=30",
             "-p", port.ToString(),
         };
+        // TOFU host-key verification (HOCH-11 / ADR-0002) — shared policy with tunnel + executor.
+        args.AddRange(Whiskers.Services.Server.SshHostKeyPolicy.Options());
         if (!string.IsNullOrEmpty(keyPath))
         {
             args.Add("-i");
