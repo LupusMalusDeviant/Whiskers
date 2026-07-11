@@ -70,7 +70,7 @@ jobs:
 
       # 2) GATE: scan the built image; fail the whole run on any CRITICAL so nothing gets published.
       - name: Trivy scan (gate — fail on CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:scan-${{ github.sha }}
           format: table
