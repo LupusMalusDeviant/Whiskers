@@ -1,0 +1,82 @@
+# Chart CI (kubernetesImplement Track A.3): lint + render-invariant checks on every chart change.
+# The kind-based install smoke is manual-only (workflow_dispatch) until the first published image
+# exists — a `helm install` against a not-yet-released ghcr tag would always fail.
+name: chart-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/helm/**"]
+  pull_request:
+    paths: ["deploy/helm/**"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  lint-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: helm lint
+        run: helm lint deploy/helm/whiskers
+
+      # Golden-invariant checks: render default + full-variant values and assert the properties
+      # the chart must never lose (single replica/Recreate, non-root, probes, V4 env, secrets wiring).
+      - name: helm template invariants
+        run: |
+          set -euo pipefail
+          helm template test deploy/helm/whiskers > default.yaml
+          grep -q "type: Recreate" default.yaml
+          grep -q "replicas: 1" default.yaml
+          grep -q "runAsNonRoot: true" default.yaml
+          grep -q "runAsUser: 10001" default.yaml
+          grep -q "readOnlyRootFilesystem: true" default.yaml
+          grep -q "path: /readyz" default.yaml
+          grep -q "path: /healthz" default.yaml
+          grep -q "WHISKERS_DISABLE_LOCAL_DOCKER" default.yaml
+          ! grep -q "docker.sock" default.yaml
+
+          helm template test deploy/helm/whiskers \
+            --set database.provider=postgres \
+            --set database.connectionString="Host=pg;Database=whiskers" \
+            --set vault.key=testkey \
+            --set ingress.enabled=true \
+            --set "ingress.hosts[0].host=w.example.com" \
+            --set "ingress.hosts[0].paths[0].path=/" \
+            --set tailscaleSidecar.enabled=true \
+            --set tailscaleSidecar.authKeySecret=ts-auth \
+            --set localDocker.enabled=true \
+            --set "trustedProxyCidrs[0]=10.42.0.0/16" > full.yaml
+          grep -q "WHISKERS_DB_PROVIDER" full.yaml
+          grep -q "kind: Ingress" full.yaml
+          grep -q "TS_USERSPACE" full.yaml
+          grep -q "ForwardedHeaders__TrustedNetworks__0" full.yaml
+          grep -q "docker.sock" full.yaml
+          ! grep -q "WHISKERS_DISABLE_LOCAL_DOCKER" full.yaml
+          echo "all render invariants hold"
+
+  # Manual smoke: spin up a kind cluster, helm install, wait for /readyz. Requires a published
+  # image (first v* release) — run via the Actions UI after tagging.
+  kind-smoke:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+
+      - name: Install chart and wait for readiness
+        run: |
+          set -euo pipefail
+          helm install whiskers deploy/helm/whiskers \
+            --set vault.key=ci-smoke-test-key \
+            --wait --timeout 5m
+          kubectl get pods -o wide
+          kubectl port-forward svc/whiskers 8080:8080 &
+          sleep 5
+          curl -fsS http://127.0.0.1:8080/readyz
+          curl -fsS -o /dev/null -w "login page: %{http_code}\n" http://127.0.0.1:8080/

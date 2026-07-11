@@ -37,7 +37,7 @@ public class ServerConfigService : IServerConfigService, IInitializable
             _cached = await _store.LoadAsync();
             _logger.LogInformation("Loaded {Count} server configs", _cached.Servers.Count);
         }
-        else
+        else if (ShouldCreateDefaultLocalServer())
         {
             // Create default local server
             _cached = new ServerConfigData
@@ -58,8 +58,35 @@ public class ServerConfigService : IServerConfigService, IInitializable
             await _store.SaveAsync(_cached);
             _logger.LogInformation("Created default local server config");
         }
+        else
+        {
+            // No local Docker (e.g. Whiskers running on Kubernetes, Track A/V4): start with an
+            // empty fleet — the dashboard shows the first-server guide instead.
+            _cached = new ServerConfigData();
+            await _store.SaveAsync(_cached);
+            _logger.LogInformation("No local Docker socket — starting without a default local server");
+        }
 
         IsInitialized = true;
+    }
+
+    /// <summary>V4 (kubernetesImplement Track A): whether a fresh install should seed the default
+    /// "local" Docker server. On Kubernetes there is no meaningful local Docker host — the socket
+    /// isn't mounted — so a first boot without one starts with an empty fleet instead of a
+    /// permanently-unreachable entry. <c>WHISKERS_DISABLE_LOCAL_DOCKER=true</c> forces it off.</summary>
+    private bool ShouldCreateDefaultLocalServer()
+    {
+        if (string.Equals(Environment.GetEnvironmentVariable("WHISKERS_DISABLE_LOCAL_DOCKER"), "true",
+                StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var socketPath = _dockerSettings.Value.SocketPath ?? "";
+        if (socketPath.StartsWith("unix://", StringComparison.OrdinalIgnoreCase))
+            return File.Exists(socketPath["unix://".Length..]);
+
+        // npipe:// (Windows dev) or tcp:// values: keep the historical behaviour — create the
+        // entry; reachability is probed at runtime anyway.
+        return true;
     }
 
     public List<Models.ServerConfig> GetServers()

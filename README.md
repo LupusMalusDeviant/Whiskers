@@ -175,6 +175,22 @@ When serving under a subpath, set `PATH_BASE=/serverwatch` in `.env`.
 
 See **[docs/container-hardening.md](docs/container-hardening.md)** for the full matrix and trade-offs.
 
+### Kubernetes (Helm)
+
+Run Whiskers **on** a cluster as the control plane for your remote Docker fleet (and Kubernetes
+clusters — pods appear next to containers on the dashboard):
+
+```bash
+helm install whiskers oci://ghcr.io/lupusmalusdeviant/charts/whiskers \
+  --set vault.key="$(openssl rand -hex 32)"
+kubectl port-forward svc/whiskers 8080:8080   # → http://localhost:8080 (setup wizard)
+```
+
+Single-replica by design (Blazor Server + stateful loops), non-root, read-only rootfs, PVC-backed
+data. All values, ingress/WebSocket notes and the Postgres variant:
+**[deploy/helm/whiskers/README.md](deploy/helm/whiskers/README.md)**. To *manage* a cluster from
+Whiskers instead, see **[deploy/k8s/README.md](deploy/k8s/README.md)**.
+
 ### From source (development)
 
 ```bash

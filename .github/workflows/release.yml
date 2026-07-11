@@ -138,3 +138,34 @@ jobs:
             dist/install.sh
             dist/checksums.txt
             dist/whiskers-${{ steps.ver.outputs.ver }}.sbom.spdx.json
+
+  # Helm chart as an OCI artifact (kubernetesImplement Track A.3): version + appVersion are stamped
+  # from the tag, then pushed to ghcr.io/lupusmalusdeviant/charts/whiskers. Runs AFTER the image
+  # release so the chart's default tag always points at an image that exists.
+  helm:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ github.event.inputs.tag }}"
+          else
+            RAW="${GITHUB_REF_NAME}"
+          fi
+          echo "ver=${RAW#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR (helm)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Lint, package and push the chart
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.ver }}"
+          helm lint deploy/helm/whiskers
+          helm package deploy/helm/whiskers --version "$VER" --app-version "$VER" -d dist-chart
+          helm push "dist-chart/whiskers-$VER.tgz" oci://ghcr.io/lupusmalusdeviant/charts

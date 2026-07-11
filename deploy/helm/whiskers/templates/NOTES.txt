@@ -1,0 +1,22 @@
+Whiskers ist installiert.
+
+1. Auf den Pod warten:
+   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "whiskers.fullname" . }}
+
+2. UI öffnen (ohne Ingress):
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "whiskers.fullname" . }} 8080:{{ .Values.service.port }}
+   → http://localhost:8080  (Erststart: Setup-Wizard legt den Admin an)
+
+{{- if not (or .Values.vault.existingSecret .Values.vault.key) }}
+
+HINWEIS: Kein VAULT_KEY gesetzt — der Secret-Vault (kubeconfig-basierte Kubernetes-Server,
+verschlüsselte Backups) ist deaktiviert. values: vault.existingSecret / vault.key.
+{{- end }}
+{{- if .Values.localDocker.enabled }}
+
+WARNUNG: localDocker.enabled=true mountet den Docker-Socket des Nodes — root-äquivalenter
+Zugriff auf den Node und Node-Pinning. Nur für Sonderfälle.
+{{- end }}
+
+Remote-Docker-Hosts verbindet Whiskers über SSH-Bootstrap-Onboarding oder TCP+mTLS;
+Kubernetes-Cluster über ein kubeconfig (siehe deploy/k8s/README.md im Repo).

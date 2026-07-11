@@ -1,0 +1,12 @@
+apiVersion: v2
+name: whiskers
+description: Whiskers — self-hosted Docker fleet control plane with MCP/AI agent, CVE scanning and zero-SSH operation. Single-replica by design (Blazor Server + stateful background loops).
+type: application
+icon: https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/src/Whiskers/wwwroot/brand.png
+home: https://github.com/LupusMalusDeviant/Whiskers
+sources:
+  - https://github.com/LupusMalusDeviant/Whiskers
+# version = chart version, appVersion = image tag. The release pipeline stamps both from the
+# git tag (v* → X.Y.Z); the values here are the fallbacks for local `helm install` from source.
+version: 0.11.0
+appVersion: "0.11.0"

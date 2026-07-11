@@ -1,0 +1,179 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "whiskers.fullname" . }}
+  labels:
+    {{- include "whiskers.labels" . | nindent 4 }}
+spec:
+  # Single replica by design for 1.0 (Blazor Server circuits, stateful background loops, SQLite/
+  # JSON stores on one PVC). Recreate prevents two writers during a rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "whiskers.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "whiskers.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "whiskers.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # PVC ownership — without this a fresh volume is root-owned and unwritable for uid 10001.
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: whiskers
+          image: {{ include "whiskers.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: WHISKERS_DATA_DIR
+              value: /app/data
+            {{- if not .Values.localDocker.enabled }}
+            # V4: no Docker socket in the pod — start without the default "local" server.
+            - name: WHISKERS_DISABLE_LOCAL_DOCKER
+              value: "true"
+            {{- end }}
+            {{- if eq .Values.database.provider "postgres" }}
+            - name: WHISKERS_DB_PROVIDER
+              value: postgres
+            - name: WHISKERS_DB_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | default (printf "%s-db" (include "whiskers.fullname" .)) }}
+                  key: connectionString
+            {{- end }}
+            {{- if or .Values.vault.existingSecret .Values.vault.key }}
+            - name: VAULT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vault.existingSecret | default (printf "%s-vault" (include "whiskers.fullname" .)) }}
+                  key: vaultKey
+            {{- end }}
+            {{- if and .Values.auth.adminEmail .Values.auth.adminPasswordSecret }}
+            - name: WHISKERS_ADMIN_EMAIL
+              value: {{ .Values.auth.adminEmail | quote }}
+            - name: WHISKERS_ADMIN_PASSWORD_FILE
+              value: /run/secrets/whiskers-admin/adminPassword
+            {{- end }}
+            {{- range $i, $cidr := .Values.trustedProxyCidrs }}
+            - name: ForwardedHeaders__TrustedNetworks__{{ $i }}
+              value: {{ $cidr | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            # readOnlyRootFilesystem needs a writable /tmp (same trick as the hardened compose).
+            - name: tmp
+              mountPath: /tmp
+            {{- if and .Values.auth.adminEmail .Values.auth.adminPasswordSecret }}
+            - name: admin-password
+              mountPath: /run/secrets/whiskers-admin
+              readOnly: true
+            {{- end }}
+            {{- if .Values.localDocker.enabled }}
+            # WARNING: root-equivalent control over this node's Docker + pins the pod to the node.
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            {{- end }}
+          # Probes: startupProbe covers the first migration (up to ~60s); liveness is deliberately
+          # lazy (period 30s, threshold 5) so a busy Blazor app is not probed to death.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.tailscaleSidecar.enabled }}
+        # Userspace networking: no /dev/net/tun, no NET_ADMIN — good enough for OUTBOUND
+        # connections from Whiskers to the mesh-connected fleet.
+        - name: tailscale
+          image: {{ .Values.tailscaleSidecar.image }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: TS_USERSPACE
+              value: "true"
+            - name: TS_HOSTNAME
+              value: {{ .Values.tailscaleSidecar.hostname | quote }}
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "tailscaleSidecar.authKeySecret is required when the sidecar is enabled" .Values.tailscaleSidecar.authKeySecret }}
+                  key: authKey
+            - name: TS_STATE_DIR
+              value: /var/lib/tailscale
+          volumeMounts:
+            - name: tailscale-state
+              mountPath: /var/lib/tailscale
+        {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "whiskers.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- if and .Values.auth.adminEmail .Values.auth.adminPasswordSecret }}
+        - name: admin-password
+          secret:
+            secretName: {{ .Values.auth.adminPasswordSecret }}
+        {{- end }}
+        {{- if .Values.localDocker.enabled }}
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        {{- end }}
+        {{- if .Values.tailscaleSidecar.enabled }}
+        - name: tailscale-state
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

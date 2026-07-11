@@ -1,0 +1,101 @@
+# Whiskers Helm values (kubernetesImplement Track A).
+#
+# Architecture decisions baked in (do not "fix"):
+# - replicas: 1 + strategy Recreate — Blazor Server circuits, background loops and the SQLite/
+#   JSON-store data dir make multi-replica wrong for 1.0. HA is a post-1.0 topic.
+# - No Docker socket by default: on K8s, Whiskers is the control plane for REMOTE Docker hosts
+#   (SSH bootstrap / TCP+mTLS / mesh) and Kubernetes clusters. localDocker.enabled=true is the
+#   explicit, warned-about exception.
+
+image:
+  repository: ghcr.io/lupusmalusdeviant/whiskers
+  # "" = use the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# The /app/data volume: SQLite DB, JSON stores, keys, certs. Survives pod restarts.
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClass: ""
+  # Use an existing PVC instead of creating one.
+  existingClaim: ""
+
+database:
+  # sqlite (zero-config, on the PVC) | postgres (external; recommended for bigger fleets).
+  provider: sqlite
+  # Secret with key "connectionString" for postgres. Preferred over inline connectionString.
+  existingSecret: ""
+  # Inline connection string (postgres only) — the chart puts it into a Secret for you.
+  # Prefer existingSecret in anything beyond a lab.
+  connectionString: ""
+
+vault:
+  # Secret with key "vaultKey" holding the VAULT_KEY passphrase. Strongly recommended: without
+  # it the secret vault (and kubeconfig-based Kubernetes servers, encrypted backups) is disabled.
+  existingSecret: ""
+  # Inline passphrase — the chart puts it into a Secret for you. Prefer existingSecret.
+  key: ""
+
+# First-run: the setup wizard creates the admin account in the browser. For unattended installs
+# set both (password comes from a Secret with key "adminPassword").
+auth:
+  adminEmail: ""
+  adminPasswordSecret: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  # SignalR/WebSockets: ingress-nginx needs proxy-read-timeout/proxy-send-timeout raised or the
+  # Blazor circuit drops every 60s — see the chart README. Traefik needs nothing.
+  annotations: {}
+  hosts: []
+  #  - host: whiskers.example.com
+  #    paths:
+  #      - path: /
+  #        pathType: Prefix
+  tls: []
+
+# Optional Tailscale sidecar (userspace networking — no NET_ADMIN/devices needed) so Whiskers can
+# reach a mesh-connected fleet. Secret must hold key "authKey" (a tailscale auth key).
+tailscaleSidecar:
+  enabled: false
+  image: tailscale/tailscale:latest
+  authKeySecret: ""
+  hostname: whiskers
+
+# Mount the node's Docker socket into the pod. Almost never what you want on Kubernetes — it ties
+# the pod to one node AND grants root-equivalent control over that node's Docker. Off by default.
+localDocker:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 384Mi
+  limits:
+    memory: 1Gi
+
+# Extra environment variables (name/value pairs), e.g. OIDC settings.
+extraEnv: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Forwarded headers: Whiskers trusts RFC1918 + loopback + Tailscale CGNAT by default, which covers
+# typical pod CIDRs. Clusters with pod CIDRs outside RFC1918 must list them here (CIDR strings).
+trustedProxyCidrs: []
