@@ -1,6 +1,6 @@
 # 0002 — SSH-Host-Key-Verifizierung: Umstellung auf `accept-new` zurückgestellt
 
-- **Status:** Offen / zurückgestellt — braucht ausdrückliche Freigabe (2026-07-07)
+- **Status:** UMGESETZT (2026-07-11, ausdrückliche User-Freigabe erteilt) — `accept-new` + eigenes `known_hosts` unter dem Data-Dir auf allen 3 Pfaden, zentral in `Services/Server/SshHostKeyPolicy`. Host-Keys der Bestandsflotte wurden vor dem Rollout per `ssh-keyscan` geseedet. Nach einem beabsichtigten Server-Rebuild: die Host-Zeile aus `<data>/ssh-keys/known_hosts` entfernen, dann neu verbinden.
 - **Betrifft:** `src/Whiskers/Services/Docker/SshTunnelManager.cs`, `src/Whiskers/Services/Server/HostCommandExecutor.cs`, `src/Whiskers/Services/Terminal/TerminalSession.cs`
 - **Bezug:** Full-Repo-Review 2026-07-06, Finding HOCH-11
 
