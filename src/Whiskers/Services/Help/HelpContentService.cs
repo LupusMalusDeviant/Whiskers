@@ -31,9 +31,13 @@ public sealed class HelpContentService : IHelpContentService
                     gegenseitigem TLS (mTLS) angesprochen, sodass kein dauerhafter Privatschlüssel herumliegt,
                     den jemand stehlen könnte.
                     """),
-                new("Anmelden", """
-                    Whiskers nutzt **Single Sign-On** (z. B. Google OIDC). Nur freigegebene E-Mail-Adressen
-                    erhalten Zugang. Deine Rolle bestimmt, was du darfst:
+                new("Erster Start & Anmelden", """
+                    Beim **ersten Start** führt dich der **Setup-Wizard** im Browser durch die Einrichtung:
+                    Admin-Konto anlegen, Schlüssel einmalig sichern — ganz ohne Konfigurationsdatei.
+
+                    Danach meldest du dich wahlweise **lokal** (E-Mail + Passwort) oder per **Single Sign-On**
+                    (Google/OIDC) an. Nur freigegebene E-Mail-Adressen erhalten Zugang. Deine Rolle bestimmt,
+                    was du darfst:
 
                     - **Viewer**: alles ansehen, keine Änderungen.
                     - **Operator**: Container starten/stoppen/neustarten, Befehle ausführen.
@@ -195,8 +199,31 @@ public sealed class HelpContentService : IHelpContentService
                     """),
             }),
 
+        new("kubernetes", "Kubernetes (k3s)", "Lan",
+            "Cluster verbinden, Pods im Dashboard, Whiskers per Helm betreiben.",
+            new List<HelpSection>
+            {
+                new("Cluster verbinden", """
+                    Unter **Infrastruktur > Server > Hinzufügen** legst du einen Server vom Typ **Kubernetes**
+                    an und fügst die **kubeconfig** ein — sie wird **verschlüsselt im Vault** gespeichert,
+                    nie im Klartext auf der Platte. Ausgelegt auf **k3s**, funktioniert mit jedem
+                    erreichbaren Cluster.
+                    """),
+                new("Pods im Dashboard", """
+                    Pods erscheinen wie Container im **Dashboard**, gruppiert nach ihrem Besitzer
+                    (**Deployment/StatefulSet/DaemonSet**), mit Status und **Logs**. Als Aktionen stehen
+                    **Skalieren** und **Rollout-Neustart** bereit — bewusst ehrlich gehalten: Was Kubernetes
+                    selbst heilt, verspricht Whiskers nicht doppelt.
+                    """),
+                new("Whiskers auf Kubernetes", """
+                    Andersherum läuft Whiskers selbst per **Helm-Chart** auf deinem Cluster
+                    (`oci://ghcr.io/lupusmalusdeviant/charts/whiskers`) — Single-Replica by design, non-root,
+                    restricted PodSecurity, Daten auf einem PVC.
+                    """),
+            }),
+
         new("deployment", "Deployment", "RocketLaunch",
-            "Bereitstellen, Compose-Editor und App Store.",
+            "Bereitstellen, Compose-Editor, App Store, Git-Deploy, Registries und Updates.",
             new List<HelpSection>
             {
                 new("Container bereitstellen", """
@@ -208,6 +235,61 @@ public sealed class HelpContentService : IHelpContentService
                     - **Compose Editor**: `docker-compose.yml` direkt im Browser bearbeiten und deployen.
                     - **App Store**: kuratierte Vorlagen (Redis, Nginx, Ghost ...) als Startpunkt; Platzhalter
                       wie `{PROJECT}`/`{PORT}` werden beim Deploy ersetzt.
+                    """),
+                new("Git-Deployments", """
+                    Unter **Deployment > Git-Deploy** verbindest du ein Git-Repository mit einem Zielserver:
+                    Whiskers klont bzw. pullt das Repo dort und bringt es per **Docker Compose** hoch. Der
+                    Zugriffs-Token liegt **nur im Vault** und wird git ausschließlich flüchtig gereicht.
+                    Zusammen mit der Webhook-Aktion **git-deploy** wird daraus Push-to-Deploy direkt aus
+                    deiner CI.
+                    """),
+                new("Private Registries", """
+                    In **Einstellungen > Registries** hinterlegst du private Container-Registries (GHCR,
+                    Harbor ...); die Zugangsdaten liegen im **Vault**. Image-Pulls authentifizieren sich
+                    automatisch, sobald der Registry-Host der Image-Referenz passt.
+                    """),
+                new("Image-Updates & Rollback", """
+                    Whiskers erkennt neuere Image-Versionen und aktualisiert Container auf Wunsch
+                    **automatisch** (opt-in, auch als geplante Aufgabe) — oder du stößt das Update manuell an.
+                    Vor jedem Update wird die alte Container-Konfiguration samt Image-Stand als **Snapshot**
+                    festgehalten; über den **Rollback-Knopf** auf dem Dashboard kehrst du mit einem Klick zum
+                    letzten funktionierenden Stand zurück.
+                    """),
+            }),
+
+        new("zeitplaene-webhooks", "Geplante Aufgaben & Webhooks", "Schedule",
+            "Wiederkehrende Aktionen planen und Aktionen von außen anstoßen.",
+            new List<HelpSection>
+            {
+                new("Geplante Aufgaben", """
+                    Unter **Automatisierung > Geplante Aufgaben** planst du wiederkehrende Aktionen per
+                    **Cron-Ausdruck**: Container-Neustarts, Image-Updates, Selbst-Backups, Aufräum-Jobs und
+                    mehr. Jeder Lauf landet im Audit-Protokoll.
+                    """),
+                new("Eingehende Webhooks", """
+                    **Webhooks** stoßen Aktionen von außen an, z. B. ein Redeploy oder Git-Deploy aus der CI.
+                    Jeder Webhook hat ein **Pflicht-Secret**; Aufrufe müssen über den Raw-Body per
+                    **HMAC-Signatur** (`X-Hub-Signature-256`) signiert sein — kompatibel mit GitHub, GitLab
+                    und Gitea. Das Secret wird genau **einmal** angezeigt.
+                    """),
+            }),
+
+        new("backup", "Backup & Wiederherstellung", "Archive",
+            "Whiskers' eigene Daten sichern und crash-sicher zurückspielen.",
+            new List<HelpSection>
+            {
+                new("Selbst-Backup", """
+                    Unter **Einstellungen > Backup** sichert Whiskers sein **eigenes Datenverzeichnis**
+                    (Server-Liste, Vault, Metriken, Schlüssel) als tar.gz — auf Wunsch **verschlüsselt**
+                    (AES-256-GCM, abgeleitet vom `VAULT_KEY`). Auch als **geplante Aufgabe** mit
+                    Aufbewahrungsregel. Davon getrennt gibt es weiterhin **Volume-Backups** für die Daten
+                    deiner Container.
+                    """),
+                new("Wiederherstellen", """
+                    Ein Backup spielst du per Upload zurück: Whiskers **validiert** es, legt automatisch ein
+                    **Pre-Restore-Backup** an, wechselt in den **Wartungsmodus** und tauscht die Daten
+                    **crash-sicher beim Neustart**. Verschlüsselte Backups brauchen zum Entschlüsseln
+                    denselben `VAULT_KEY`.
                     """),
             }),
 
@@ -378,16 +460,21 @@ public sealed class HelpContentService : IHelpContentService
                     """),
             }),
 
-        new("themes", "Themes & Branding", "Palette",
-            "Das Aussehen umstellen.",
+        new("themes", "Themes, Sprache & Branding", "Palette",
+            "Aussehen und Sprache umstellen.",
             new List<HelpSection>
             {
-                new("Theme wechseln", """
-                    Über das **Paletten-Icon** oben rechts wechselst du das Farbschema (Ember, Aurora, Ocean,
+                new("Theme & Modus wechseln", """
+                    Über das **Paletten-Icon** oben rechts wählst du den Modus — **Hell**, **Dunkel** oder
+                    **System** (folgt deinem Betriebssystem live) — und das Farbschema (Ember, Aurora, Ocean,
                     Nebula, Rose). Die Wahl wird im Browser gespeichert. Das **Logo** in der Sidebar färbt sich
                     passend zum aktiven Theme.
                     """,
                     Shot("Theme-Auswahl im Paletten-Menü")),
+                new("Sprache", """
+                    Im selben Menü stellst du die **Sprache** um (Deutsch/Englisch). Ohne eigene Wahl folgt
+                    Whiskers der Browser-Sprache; Englisch ist der Standard.
+                    """),
             }),
     };
 
