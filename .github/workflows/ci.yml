@@ -1,0 +1,53 @@
+# CI: build + full test suite on every push/PR against main. This is the gate that makes
+# Dependabot PRs safely mergeable — without it nothing validated dependency bumps.
+# ubuntu-latest ships Docker, so the Testcontainers-based PostgresSmokeTests run for real here
+# (they are skipped-by-failure on dev boxes without Docker Desktop).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore Whiskers.slnx
+
+      - name: Build
+        run: dotnet build Whiskers.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release --logger "console;verbosity=minimal"
+
+      # DI boot gate (project rule): build+tests miss DI-graph regressions — boot the app in
+      # Development (ValidateOnBuild/ValidateScopes) against a fresh data dir until /healthz answers.
+      - name: DI boot gate
+        run: |
+          set -euo pipefail
+          export WHISKERS_DATA_DIR="$(mktemp -d)"
+          export Auth__Disabled=true
+          export ASPNETCORE_ENVIRONMENT=Development
+          dotnet run --project src/Whiskers/Whiskers.csproj --no-build --configuration Release --urls http://127.0.0.1:5199 &
+          APP_PID=$!
+          for i in $(seq 1 45); do
+            sleep 2
+            if curl -fsS http://127.0.0.1:5199/healthz >/dev/null 2>&1; then
+              echo "healthy"; kill $APP_PID; exit 0
+            fi
+            if ! kill -0 $APP_PID 2>/dev/null; then echo "app exited early"; exit 1; fi
+          done
+          echo "healthz never became ready"; kill $APP_PID; exit 1

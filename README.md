@@ -8,15 +8,15 @@
 
 Whiskers gives you a live, web-based control plane for a fleet of Docker hosts, containers, images, networks, databases, firewalls, Nginx, systemd, SSL, metrics and logs, and exposes the same capabilities to AI agents (such as Claude Code) through an authenticated MCP endpoint with per-key Read/Write/Admin permissions.
 
-Its headline design goal is **SSH-key-free operation**: hosts are managed over a private WireGuard mesh with mutual-TLS Docker access, so there is no standing private key for an attacker to steal. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
+Its headline design goal is **SSH-key-free operation**: hosts are managed over a private WireGuard-based mesh (Tailscale or NetBird) with mutual-TLS Docker access, so there is no standing private key for an attacker to steal. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
-[![Version](https://img.shields.io/badge/version-0.11.0-orange.svg)](#)
+[![Release](https://img.shields.io/github/v/release/LupusMalusDeviant/Whiskers?color=orange)](https://github.com/LupusMalusDeviant/Whiskers/releases)
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4.svg)](https://learn.microsoft.com/aspnet/core/blazor/)
 
-> ⚠️ **Beta (`0.11.0`).** Whiskers is under active development and not yet API-stable.
+> ⚠️ **Beta.** Whiskers is under active development and not yet API-stable.
 > Run it on a trusted network, review the [security policy](SECURITY.md), and expect breaking
 > changes before `1.0`.
 
@@ -58,9 +58,13 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - Integrated web terminal (host and container)
 - **Connection test on save**: adding/editing a server probes the connection before closing, so a broken host isn't saved silently
 - **Resilient dashboard**: an unreachable host is marked *nicht erreichbar* instead of blanking the whole view (each server is time-boxed)
+- **Kubernetes clusters alongside Docker hosts**: add a k3s/Kubernetes cluster via kubeconfig (stored encrypted in the vault) — pods appear next to containers with owner grouping, logs and honest scale/rollout actions; Whiskers itself runs on Kubernetes via the [Helm chart](deploy/helm/whiskers/)
+- **Git deploy**: repo URL in → cloned, built and composed **on the target server**; push-triggered redeploys via HMAC-signed webhooks (tokens live in the vault, served via `GIT_ASKPASS` — never in a process list)
+- **Registry management in the UI**: private-registry credentials in the vault, used automatically for authenticated pulls
+- **Light & dark mode** (system-aware) and an English/German UI (navigation + chrome localized; page-level translation ongoing)
 
 ### Security: mesh + mTLS (SSH-key-free)
-- Management over a private WireGuard mesh, no management ports exposed publicly
+- Management over a private WireGuard-based mesh (Tailscale/NetBird), no management ports exposed publicly
 - **Pluggable mesh VPN** (Tailscale or NetBird): the VPN bring-up is decoupled from the app image behind a provider seam — run it in-app, on the host, or in a sidecar
 - Docker control over **mutual TLS** (ghostunnel + a verb-whitelisting socket-proxy) instead of SSH tunnels
 - Host shell commands without SSH over the same mTLS channel (a one-shot privileged `nsenter` container)
@@ -68,6 +72,8 @@ Its headline design goal is **SSH-key-free operation**: hosts are managed over a
 - Own PKI (step-ca) for client/server certificates
 - Telemetry via `node_exporter` > VictoriaMetrics (Prometheus-compatible)
 - **One-click onboarding** of new servers (from the add/edit dialog): bootstraps over a single SSH connection authenticated by an **SSH key _or_ a root password**, installs Docker if missing, brings up Tailscale (login link surfaced in the app), deploys telemetry + the mTLS proxy, switches the host to SSH-free mTLS, and **auto-deletes the bootstrap credentials** afterwards
+- **SSH host-key verification** (trust-on-first-use): every ssh path pins host keys in a persistent `known_hosts`; a changed key fails hard instead of silently talking to a man-in-the-middle
+- **Mandatory HMAC webhook secrets** (`X-Hub-Signature-256`-compatible — GitHub/Gitea/GitLab signing works natively) and **fail-closed authorization**: every endpoint requires authentication unless it explicitly opts out
 
 Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
@@ -108,8 +114,8 @@ Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | Backend | C# / .NET 10 / ASP.NET Core |
 | Frontend | Blazor Server + [MudBlazor](https://mudblazor.com/) |
 | Docker API | [Docker.DotNet](https://github.com/dotnet/Docker.DotNet) |
-| Database | SQLite (Entity Framework Core) + JSON file stores |
-| Auth | Google OAuth 2.0 or generic OIDC + roles & email whitelist |
+| Database | SQLite (zero-config default) or PostgreSQL (Entity Framework Core) + JSON file stores |
+| Auth | Local accounts (ASP.NET Identity), Google OAuth 2.0 or generic OIDC + roles & email whitelist |
 | Real-time | SignalR |
 | MCP | [ModelContextProtocol.AspNetCore](https://github.com/modelcontextprotocol) |
 | Metrics | VictoriaMetrics (Prometheus-compatible) |
@@ -366,7 +372,8 @@ Beta is feature-rich but not finished. Planned / not-yet-implemented:
 
 **Fleet & deployment**
 - Server groups / tags; richer Compose templates.
-- Lightweight Kubernetes (**k3s**) support, discover and operate k3s clusters alongside Docker hosts.
+- Kubernetes track B.3: pod **exec terminal**, MCP tools for pods, metrics-server stats (managing
+  k3s clusters + running on Kubernetes via Helm **shipped in 0.12**).
 
 **Agent governance** (building on the shipped Agent-History, Freigaben/Human-in-the-Loop and rich
 chat widgets)
@@ -376,7 +383,6 @@ chat widgets)
 - A fuller **rich-widget / MCP-Apps** catalog beyond the curated chart + status card.
 
 **Hardening & resilience**
-- Finish the zero-SSH-key migration tooling (Tailscale + step-ca + ghostunnel/socket-proxy).
 - **Break-glass / disaster recovery**: short-lived SSH certificates issued via step-ca as an
   auditable emergency-access path when the normal control plane is unavailable.
 - **Distroless/chiseled "remote" image** for the hardened profile (a locked-down container profile
