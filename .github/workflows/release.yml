@@ -59,7 +59,7 @@ jobs:
 
       # 1) Build a single-arch (amd64) image locally and hold it — do NOT push yet.
       - name: Build amd64 image (for the scan gate)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -82,7 +82,7 @@ jobs:
       # 3) Only now (scan passed) build the multi-arch image and push it with the release tags.
       - name: Build + push multi-arch image
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
