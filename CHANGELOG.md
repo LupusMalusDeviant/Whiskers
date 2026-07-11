@@ -4,6 +4,36 @@ All notable changes to Whiskers are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer
 (0.x = pre-1.0, minor bumps may contain breaking changes — noted explicitly).
 
+## [0.12.1] — 2026-07-11
+
+Security hardening plus the features that landed right after the 0.12.0 tag was cut.
+The three security items below were previously listed under 0.12.0, but the published
+0.12.0 artifacts were built before they landed — they ship starting with this release.
+
+### Security
+- **SSH host keys are now verified** (trust-on-first-use, pinned in
+  `<data>/ssh-keys/known_hosts`). *Behavior change:* an intentionally rebuilt server needs
+  its line removed from that file before reconnecting.
+- **Fail-closed authorization**: every endpoint/page requires authentication unless it
+  explicitly opts out (login, setup wizard, health probes, HMAC webhooks, token-gated
+  metrics). The SignalR hub is no longer reachable anonymously.
+- MCP bearer scheme is parsed case-insensitively (RFC 7235).
+
+### Added
+- **Git-based deployments** (`gitdeploy` module) — clone/pull a repository on a target
+  server and bring it up with Docker Compose; deploy tokens are vault-only (surfaced to git
+  via a 0600 `GIT_ASKPASS` file), and the new `git-deploy` webhook action enables
+  push-to-deploy from CI.
+- **Container registries (v1)** — manage private registries in Settings with vault-stored
+  credentials; image pulls authenticate automatically by registry-host match.
+- **Localized navigation & app chrome** (English/German) — all nav items and groups.
+- Audit log now also covers scheduler and webhook management actions in the UI.
+- CI on every push/PR (build, full test suite, DI boot gate); first bUnit component tests.
+
+### Changed
+- Dependency refresh: MudBlazor 9.7, YamlDotNet 18, Npgsql EF provider 10.0.3,
+  MCP SDK 1.4.1, NCrontab 3.4; release pipeline moved to docker/* actions v4/v7.
+
 ## [0.12.0] — 2026-07-11
 
 First **published** release: the container image (`ghcr.io/lupusmalusdeviant/whiskers`)
@@ -36,17 +66,10 @@ scanned by the release pipeline from this version on.
 - **Webhook secrets are mandatory** (HMAC `X-Hub-Signature-256` over the raw body).
   *Breaking:* pre-existing webhooks without a secret are disabled at boot (not deleted) —
   regenerate their secret in the UI and update the CI caller, then re-enable.
-- **SSH host keys are now verified** (trust-on-first-use, pinned in
-  `<data>/ssh-keys/known_hosts`). *Behavior change:* an intentionally rebuilt server needs
-  its line removed from that file before reconnecting.
-- **Fail-closed authorization**: every endpoint/page requires authentication unless it
-  explicitly opts out (login, setup wizard, health probes, HMAC webhooks, token-gated
-  metrics). The SignalR hub is no longer reachable anonymously.
 - Fresh installs no longer seed the "local" Docker server when no Docker socket is present
   (Kubernetes deployments start with an empty fleet).
 
 ### Fixed
-- MCP bearer scheme is parsed case-insensitively (RFC 7235).
 - The webhook UI test button now sends a genuinely signed request.
 - `DockerService` split into focused internals (no behavior change); numerous smaller fixes.
 
