@@ -15,6 +15,7 @@
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 @using Whiskers.Models.Cve
 @implements IAsyncDisposable
 
@@ -27,7 +28,7 @@
         <MudStack Row="true" AlignItems="AlignItems.Center" Class="pa-4" Spacing="2">
             <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="GoBack" />
             <MudAlert Severity="Severity.Warning">
-                Container <code>@(ContainerId.Length > 12 ? ContainerId[..12] : ContainerId)</code> wurde auf keinem Server gefunden — er wurde möglicherweise entfernt oder neu erstellt (Image-Update vergibt eine neue ID).
+                Container <code>@(ContainerId.Length > 12 ? ContainerId[..12] : ContainerId)</code> @L["ContainerDetail_Alert_NotFound"]
             </MudAlert>
         </MudStack>
     }
@@ -56,9 +57,9 @@ else
             @if (_role >= AppRole.Operator)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Stop" OnClick="Stop">Stoppen</MudButton>
+                           StartIcon="@Icons.Material.Filled.Stop" OnClick="Stop">@L["ContainerDetail_Button_Stop"]</MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="Restart">Neustarten</MudButton>
+                           StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="Restart">@L["ContainerDetail_Button_Restart"]</MudButton>
             }
         }
         else
@@ -66,12 +67,12 @@ else
             @if (_role >= AppRole.Operator)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start">Starten</MudButton>
+                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start">@L["ContainerDetail_Button_Start"]</MudButton>
             }
             @if (_role >= AppRole.Admin)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Delete" OnClick="Remove">Entfernen</MudButton>
+                           StartIcon="@Icons.Material.Filled.Delete" OnClick="Remove">@L["ContainerDetail_Button_Remove"]</MudButton>
             }
         }
     </MudStack>
@@ -79,14 +80,14 @@ else
 
     <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
         @* Overview Tab *@
-        <MudTabPanel Text="Übersicht" Icon="@Icons.Material.Filled.Info">
+        <MudTabPanel Text="@L["ContainerDetail_Tab_Overview"]" Icon="@Icons.Material.Filled.Info">
             <MudSimpleTable Striped="true" Dense="true">
                 <tbody>
                     <tr><td><strong>ID</strong></td><td style="font-family: monospace;">@_container.Id</td></tr>
                     <tr><td><strong>Name</strong></td><td>@_container.Name</td></tr>
                     <tr><td><strong>Image</strong></td><td>@_container.Image</td></tr>
                     <tr><td><strong>Status</strong></td><td>@_container.Status</td></tr>
-                    <tr><td><strong>Erstellt</strong></td><td>@_container.Created.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td></tr>
+                    <tr><td><strong>@L["ContainerDetail_Overview_Created"]</strong></td><td>@_container.Created.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td></tr>
                     <tr>
                         <td><strong>Ports</strong></td>
                         <td>@(string.Join(", ", _container.Ports.Select(p => p.ToString())))</td>
@@ -94,7 +95,7 @@ else
                     @if (_container.Labels.Any())
                     {
                         <tr>
-                            <td><strong>Labels (Bezeichner)</strong></td>
+                            <td><strong>@L["ContainerDetail_Overview_Labels"]</strong></td>
                             <td>
                                 @foreach (var (k, v) in _container.Labels.Take(10))
                                 {
@@ -108,52 +109,52 @@ else
         </MudTabPanel>
 
         @* Stats Tab *@
-        <MudTabPanel Text="Statistiken" Icon="@Icons.Material.Filled.BarChart">
+        <MudTabPanel Text="@L["ContainerDetail_Tab_Stats"]" Icon="@Icons.Material.Filled.BarChart">
             @if (_stats != null)
             {
                 <MudGrid>
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-4" Elevation="1">
-                            <MudText Typo="Typo.subtitle1">CPU-Auslastung</MudText>
+                            <MudText Typo="Typo.subtitle1">@L["ContainerDetail_Stats_CpuUsage"]</MudText>
                             <MudText Typo="Typo.h3" Color="Color.Primary">@_stats.CpuPercent.ToString("F2")%</MudText>
                             <ResourceGauge Value="@_stats.CpuPercent" />
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-4" Elevation="1">
-                            <MudText Typo="Typo.subtitle1">Speicherauslastung</MudText>
+                            <MudText Typo="Typo.subtitle1">@L["ContainerDetail_Stats_MemoryUsage"]</MudText>
                             <MudText Typo="Typo.h3" Color="Color.Secondary">
                                 @FormatBytes(_stats.MemoryUsageBytes)
                             </MudText>
-                            <MudText Typo="Typo.body2">von @FormatBytes(_stats.MemoryLimitBytes) (@_stats.MemoryPercent.ToString("F1")%)</MudText>
+                            <MudText Typo="Typo.body2">@L["ContainerDetail_Stats_MemoryOfLimit", FormatBytes(_stats.MemoryLimitBytes), _stats.MemoryPercent.ToString("F1")]</MudText>
                             <ResourceGauge Value="@_stats.MemoryPercent" />
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-4" Elevation="1">
-                            <MudText Typo="Typo.subtitle1">Netzwerk-I/O</MudText>
+                            <MudText Typo="Typo.subtitle1">@L["ContainerDetail_Stats_NetworkIo"]</MudText>
                             <MudText>RX: @FormatBytes(_stats.NetworkRxBytes)</MudText>
                             <MudText>TX: @FormatBytes(_stats.NetworkTxBytes)</MudText>
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-4" Elevation="1">
-                            <MudText Typo="Typo.subtitle1">Datenträger-I/O</MudText>
-                            <MudText>Lesen: @FormatBytes(_stats.BlockReadBytes)</MudText>
-                            <MudText>Schreiben: @FormatBytes(_stats.BlockWriteBytes)</MudText>
+                            <MudText Typo="Typo.subtitle1">@L["ContainerDetail_Stats_DiskIo"]</MudText>
+                            <MudText>@L["ContainerDetail_Stats_Read", FormatBytes(_stats.BlockReadBytes)]</MudText>
+                            <MudText>@L["ContainerDetail_Stats_Write", FormatBytes(_stats.BlockWriteBytes)]</MudText>
                         </MudPaper>
                     </MudItem>
                 </MudGrid>
 
                 @* Historical Charts *@
                 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-4 mb-2" Spacing="2">
-                    <MudText Typo="Typo.subtitle1">Verlauf</MudText>
+                    <MudText Typo="Typo.subtitle1">@L["ContainerDetail_Stats_History"]</MudText>
                     <MudSelect T="string" Value="_chartPeriod" Variant="Variant.Outlined" Margin="Margin.Dense"
-                               Style="max-width: 120px;" Label="Zeitraum" ValueChanged="@((string v) => { _chartPeriod = v; _ = LoadChartData(); })">
-                        <MudSelectItem Value="@("1h")">1 Stunde</MudSelectItem>
-                        <MudSelectItem Value="@("6h")">6 Stunden</MudSelectItem>
-                        <MudSelectItem Value="@("24h")">24 Stunden</MudSelectItem>
-                        <MudSelectItem Value="@("7d")">7 Tage</MudSelectItem>
+                               Style="max-width: 120px;" Label="@L["ContainerDetail_Stats_Period"]" ValueChanged="@((string v) => { _chartPeriod = v; _ = LoadChartData(); })">
+                        <MudSelectItem Value="@("1h")">@L["ContainerDetail_Stats_Period1h"]</MudSelectItem>
+                        <MudSelectItem Value="@("6h")">@L["ContainerDetail_Stats_Period6h"]</MudSelectItem>
+                        <MudSelectItem Value="@("24h")">@L["ContainerDetail_Stats_Period24h"]</MudSelectItem>
+                        <MudSelectItem Value="@("7d")">@L["ContainerDetail_Stats_Period7d"]</MudSelectItem>
                     </MudSelect>
                 </MudStack>
 
@@ -162,7 +163,7 @@ else
                     <MudGrid>
                         <MudItem xs="12" md="6">
                             <MudPaper Class="pa-4" Elevation="1">
-                                <MudText Typo="Typo.subtitle2" Class="mb-2">CPU-Verlauf</MudText>
+                                <MudText Typo="Typo.subtitle2" Class="mb-2">@L["ContainerDetail_Stats_CpuHistory"]</MudText>
                                 <ApexCharts.ApexChart TItem="MetricPoint" Height="250"
                                            Options="@_cpuChartOptions">
                                     <ApexCharts.ApexPointSeries TItem="MetricPoint"
@@ -176,7 +177,7 @@ else
                         </MudItem>
                         <MudItem xs="12" md="6">
                             <MudPaper Class="pa-4" Elevation="1">
-                                <MudText Typo="Typo.subtitle2" Class="mb-2">Speicher-Verlauf</MudText>
+                                <MudText Typo="Typo.subtitle2" Class="mb-2">@L["ContainerDetail_Stats_MemoryHistory"]</MudText>
                                 <ApexCharts.ApexChart TItem="MetricPoint" Height="250"
                                            Options="@_memChartOptions">
                                     <ApexCharts.ApexPointSeries TItem="MetricPoint"
@@ -184,7 +185,7 @@ else
                                                      SeriesType="ApexCharts.SeriesType.Area"
                                                      XValue="@(p => p.Timestamp)"
                                                      YValue="@(p => (decimal)p.Value)"
-                                                     Name="Speicher %" />
+                                                     Name="@L["ContainerDetail_Stats_MemorySeries"]" />
                                 </ApexCharts.ApexChart>
                             </MudPaper>
                         </MudItem>
@@ -192,29 +193,29 @@ else
                 }
                 else
                 {
-                    <MudText Color="Color.Secondary" Class="mt-2">Noch keine historischen Daten vorhanden.</MudText>
+                    <MudText Color="Color.Secondary" Class="mt-2">@L["ContainerDetail_Stats_NoHistory"]</MudText>
                 }
             }
             else
             {
-                <MudText Color="Color.Secondary">Statistiken sind nur für laufende Container verfügbar.</MudText>
+                <MudText Color="Color.Secondary">@L["ContainerDetail_Stats_OnlyRunning"]</MudText>
             }
         </MudTabPanel>
 
         @* Logs Tab *@
-        <MudTabPanel Text="Logs" Icon="@Icons.Material.Filled.Article">
+        <MudTabPanel Text="@L["ContainerDetail_Tab_Logs"]" Icon="@Icons.Material.Filled.Article">
             <LogViewer ContainerId="@ContainerId" ServerId="@_resolvedServerId" Height="calc(100vh - 320px)" />
         </MudTabPanel>
 
         @* Health Tab *@
-        <MudTabPanel Text="Zustand" Icon="@Icons.Material.Filled.MonitorHeart">
+        <MudTabPanel Text="@L["ContainerDetail_Tab_Health"]" Icon="@Icons.Material.Filled.MonitorHeart">
             @{ var records = HealthStore.GetHistory(ContainerId); }
             <MudTable Items="@records" Dense="true" Hover="true" Striped="true">
                 <HeaderContent>
-                    <MudTh>Zeitstempel</MudTh>
-                    <MudTh>Status</MudTh>
-                    <MudTh>Zustand</MudTh>
-                    <MudTh>Exit-Code</MudTh>
+                    <MudTh>@L["ContainerDetail_Health_ColTimestamp"]</MudTh>
+                    <MudTh>@L["ContainerDetail_Health_ColStatus"]</MudTh>
+                    <MudTh>@L["ContainerDetail_Health_ColHealth"]</MudTh>
+                    <MudTh>@L["ContainerDetail_Health_ColExitCode"]</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd Style="font-family: monospace;">@context.Timestamp.ToLocalTime().ToString("HH:mm:ss")</MudTd>
@@ -223,23 +224,23 @@ else
                     <MudTd>@(context.ExitCode?.ToString() ?? "-")</MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
-                    <MudText Class="pa-4">Noch keine Zustandsdaten für diesen Container vorhanden.</MudText>
+                    <MudText Class="pa-4">@L["ContainerDetail_Health_NoData"]</MudText>
                 </NoRecordsContent>
             </MudTable>
         </MudTabPanel>
 
         @* Terminal Tab - inline *@
-        <MudTabPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
+        <MudTabPanel Text="@L["ContainerDetail_Tab_Terminal"]" Icon="@Icons.Material.Filled.Terminal">
             @if (!ServerConfigService.SupportsTerminal(_resolvedServerId))
             {
                 <MudAlert Severity="Severity.Info">
-                    Das Container-Terminal ist auf mTLS-Servern nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Stream weiter).
-                    Nutze die Container-Logs oder <code>execute_command</code> für einzelne Befehle.
+                    @L["ContainerDetail_Terminal_MtlsUnavailable"]
+                    @L["ContainerDetail_Terminal_MtlsHintPrefix"] <code>execute_command</code> @L["ContainerDetail_Terminal_MtlsHintSuffix"]
                 </MudAlert>
             }
             else if (_container.State != "running")
             {
-                <MudAlert Severity="Severity.Warning">Terminal ist nur für laufende Container verfügbar.</MudAlert>
+                <MudAlert Severity="Severity.Warning">@L["ContainerDetail_Terminal_OnlyRunning"]</MudAlert>
             }
             else if (!string.IsNullOrEmpty(_termError))
             {
@@ -254,7 +255,7 @@ else
         @* Environment Variables Tab — Operator+ only, so a Viewer can't read env (MIT-37) *@
         @if (_role >= AppRole.Operator)
         {
-        <MudTabPanel Text="Umgebungsvariablen" Icon="@Icons.Material.Filled.Code">
+        <MudTabPanel Text="@L["ContainerDetail_Tab_EnvVars"]" Icon="@Icons.Material.Filled.Code">
             @if (!_envLoaded)
             {
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
@@ -262,23 +263,23 @@ else
             else
             {
                 @* Read-only: Running container env vars (values always masked) *@
-                <MudText Typo="Typo.subtitle1" Class="mb-2">Laufende Container-Variablen</MudText>
+                <MudText Typo="Typo.subtitle1" Class="mb-2">@L["ContainerDetail_Env_RunningVars"]</MudText>
                 <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-                    Sensible Werte (Keys, Secrets, Passwörter) sind aus Sicherheitsgründen maskiert.
+                    @L["ContainerDetail_Env_MaskedInfo"]
                 </MudAlert>
                 <MudTextField Value="@_envSearch" ValueChanged="@((string v) => _envSearch = v)"
-                              Label="Suchen..." Variant="Variant.Outlined" Adornment="Adornment.Start"
+                              Label="@L["ContainerDetail_Env_Search"]" Variant="Variant.Outlined" Adornment="Adornment.Start"
                               AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true"
                               Class="mb-3" Style="max-width: 400px;" />
                 <MudTable Items="@FilteredContainerEnv" Dense="true" Hover="true" Striped="true"
                           FixedHeader="true" Height="300px" Class="mb-6">
                     <HeaderContent>
-                        <MudTh><MudTableSortLabel SortBy="new Func<KeyValuePair<string,string>, object>(x => x.Key)">Variable</MudTableSortLabel></MudTh>
-                        <MudTh>Wert</MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<KeyValuePair<string,string>, object>(x => x.Key)">@L["ContainerDetail_Env_ColVariable"]</MudTableSortLabel></MudTh>
+                        <MudTh>@L["ContainerDetail_Env_ColValue"]</MudTh>
                     </HeaderContent>
                     <RowTemplate>
-                        <MudTd DataLabel="Variable"><code>@context.Key</code></MudTd>
-                        <MudTd DataLabel="Wert">
+                        <MudTd DataLabel="@L["ContainerDetail_Env_ColVariable"]"><code>@context.Key</code></MudTd>
+                        <MudTd DataLabel="@L["ContainerDetail_Env_ColValue"]">
                             @if (Whiskers.Utils.EnvMasking.ShouldMask(context.Key, context.Value))
                             {
                                 <code style="color: #888;">••••••••</code>
@@ -296,9 +297,9 @@ else
                 @if (_composeWorkingDir != null)
                 {
                     <MudDivider Class="my-4" />
-                    <MudText Typo="Typo.subtitle1" Class="mb-2">.env-Datei</MudText>
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">@L["ContainerDetail_Env_DotEnvFile"]</MudText>
                     <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-                        Änderungen an der .env-Datei erfordern einen Container-Neustart (kurze Downtime).
+                        @L["ContainerDetail_Env_DotEnvWarning"]
                         <br /><code>@_composeWorkingDir/.env</code>
                     </MudAlert>
 
@@ -320,28 +321,28 @@ else
                                 @* Sensitive key: always masked, edit to overwrite *@
                                 @if (entry.IsNew || entry.IsEditing)
                                 {
-                                    <MudTextField @bind-Value="entry.Value" Label="@(entry.IsNew ? "Wert" : "Neuer Wert")"
+                                    <MudTextField @bind-Value="entry.Value" Label="@(entry.IsNew ? L["ContainerDetail_Env_FieldValue"].Value : L["ContainerDetail_Env_FieldNewValue"].Value)"
                                                   Variant="Variant.Outlined"
                                                   Style="font-family: monospace;"
                                                   InputType="@(entry.ShowValue ? InputType.Text : InputType.Password)"
                                                   Adornment="Adornment.End"
                                                   AdornmentIcon="@(entry.ShowValue ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                                                   OnAdornmentClick="@(() => entry.ShowValue = !entry.ShowValue)"
-                                                  Placeholder="@(entry.IsEditing ? "Neuen Wert eingeben..." : "")" />
+                                                  Placeholder="@(entry.IsEditing ? L["ContainerDetail_Env_EnterNewValue"].Value : "")" />
                                     @if (entry.IsEditing && !entry.IsNew)
                                     {
                                         <MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Warning" Size="Size.Small"
                                                        OnClick="@(() => { entry.IsEditing = false; entry.Value = ""; })"
-                                                       title="Änderung verwerfen" />
+                                                       title="@L["ContainerDetail_Env_DiscardChange"]" />
                                     }
                                 }
                                 else
                                 {
-                                    <MudTextField Value="@("••••••••")" Label="Wert (gespeichert)" Variant="Variant.Outlined"
+                                    <MudTextField Value="@("••••••••")" Label="@L["ContainerDetail_Env_FieldValueStored"]" Variant="Variant.Outlined"
                                                   Style="font-family: monospace; color: #888;" ReadOnly="true" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" Size="Size.Small"
                                                    OnClick="@(() => { entry.IsEditing = true; entry.Value = ""; })"
-                                                   title="Wert ändern" />
+                                                   title="@L["ContainerDetail_Env_EditValue"]" />
                                 }
                             }
                             else
@@ -349,30 +350,30 @@ else
                                 @* Non-sensitive key: normal editable field, show value *@
                                 @if (entry.IsNew)
                                 {
-                                    <MudTextField @bind-Value="entry.Value" Label="Wert" Variant="Variant.Outlined"
+                                    <MudTextField @bind-Value="entry.Value" Label="@L["ContainerDetail_Env_FieldValue"]" Variant="Variant.Outlined"
                                                   Style="font-family: monospace;" />
                                 }
                                 else
                                 {
                                     <MudTextField Value="@entry.OriginalValue"
                                                   ValueChanged="@((string v) => { entry.Value = v; entry.IsEditing = true; entry.OriginalValue = v; })"
-                                                  Label="Wert" Variant="Variant.Outlined"
+                                                  Label="@L["ContainerDetail_Env_FieldValue"]" Variant="Variant.Outlined"
                                                   Style="font-family: monospace;" />
                                 }
                             }
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                           OnClick="@(() => _dotEnvEntries.RemoveAt(idx))" title="Variable entfernen" />
+                                           OnClick="@(() => _dotEnvEntries.RemoveAt(idx))" title="@L["ContainerDetail_Env_RemoveVariable"]" />
                         </MudStack>
                     }
 
                     <MudStack Row="true" Class="mt-3" Spacing="2">
                         <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
-                                   OnClick="@(() => _dotEnvEntries.Add(new EnvEntry { IsNew = true, IsSensitive = false }))">Variable hinzufügen</MudButton>
+                                   OnClick="@(() => _dotEnvEntries.Add(new EnvEntry { IsNew = true, IsSensitive = false }))">@L["ContainerDetail_Env_AddVariable"]</MudButton>
                         <MudSpacer />
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_envSaving"
                                    StartIcon="@Icons.Material.Filled.Save" OnClick="SaveEnvAndRestart">
                             @if (_envSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                            Speichern & Neu starten
+                            @L["ContainerDetail_Env_SaveAndRestart"]
                         </MudButton>
                     </MudStack>
                 }
@@ -380,7 +381,7 @@ else
                 {
                     <MudDivider Class="my-4" />
                     <MudAlert Severity="Severity.Info" Dense="true">
-                        Kein Docker-Compose-Projekt erkannt – .env-Datei kann nicht bearbeitet werden.
+                        @L["ContainerDetail_Env_NoCompose"]
                     </MudAlert>
                 }
             }
@@ -390,7 +391,7 @@ else
         @* Database Tab - only visible for database containers *@
         @if (_container.IsDatabase)
         {
-            <MudTabPanel Text="Datenbank" Icon="@Icons.Material.Filled.Storage">
+            <MudTabPanel Text="@L["ContainerDetail_Tab_Database"]" Icon="@Icons.Material.Filled.Storage">
                 @if (!_dbLoaded)
                 {
                     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
@@ -412,7 +413,7 @@ else
                         @if (_dbDatabases.Any())
                         {
                             <MudSelect T="string" Value="@_dbSelectedDatabase" ValueChanged="OnDatabaseChanged"
-                                       Label="Datenbank" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;">
+                                       Label="@L["ContainerDetail_Db_SelectDatabase"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;">
                                 @foreach (var db in _dbDatabases)
                                 {
                                     <MudSelectItem Value="@db">@db</MudSelectItem>
@@ -433,25 +434,25 @@ else
                                 {
                                     <MudIcon Icon="@Icons.Material.Filled.Backup" Color="Color.Warning" Size="Size.Large" />
                                 }
-                                <div class="sw-stat-label">DB-Backup</div>
+                                <div class="sw-stat-label">@L["ContainerDetail_Db_Backup"]</div>
                             </div>
                         </MudItem>
                         <MudItem xs="6" sm="3">
                             <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowMigrationPanel">
                                 <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" Size="Size.Large" />
-                                <div class="sw-stat-label">Migrationen</div>
+                                <div class="sw-stat-label">@L["ContainerDetail_Db_Migrations"]</div>
                             </div>
                         </MudItem>
                         <MudItem xs="6" sm="3">
                             <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowSeedPanel">
                                 <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" Size="Size.Large" />
-                                <div class="sw-stat-label">Seed / Import</div>
+                                <div class="sw-stat-label">@L["ContainerDetail_Db_SeedImport"]</div>
                             </div>
                         </MudItem>
                         <MudItem xs="6" sm="3">
                             <div class="sw-stat-card" style="text-align: center;">
                                 <div class="sw-stat-value" style="color: var(--sw-accent-blue);">@_dbTables.Count</div>
-                                <div class="sw-stat-label">Tabellen</div>
+                                <div class="sw-stat-label">@L["ContainerDetail_Db_Tables"]</div>
                             </div>
                         </MudItem>
                     </MudGrid>
@@ -465,7 +466,7 @@ else
 
                         @* Row 1+2: Action + Table *@
                         <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
-                            <MudSelect T="string" @bind-Value="_qbAction" Label="Aktion" Variant="Variant.Outlined"
+                            <MudSelect T="string" @bind-Value="_qbAction" Label="@L["ContainerDetail_Db_QbAction"]" Variant="Variant.Outlined"
                                        Dense="true" Style="max-width: 160px;">
                                 <MudSelectItem Value="@("SELECT")">SELECT</MudSelectItem>
                                 <MudSelectItem Value="@("COUNT")">COUNT</MudSelectItem>
@@ -474,7 +475,7 @@ else
                                 <MudSelectItem Value="@("DELETE")">DELETE</MudSelectItem>
                             </MudSelect>
                             <MudSelect T="string" Value="@_qbTable" ValueChanged="OnQbTableChanged"
-                                       Label="Tabelle" Variant="Variant.Outlined" Dense="true" Style="min-width: 200px;">
+                                       Label="@L["ContainerDetail_Db_QbTable"]" Variant="Variant.Outlined" Dense="true" Style="min-width: 200px;">
                                 @foreach (var t in _dbTables)
                                 {
                                     <MudSelectItem Value="@t.Name">@t.Name (@t.RowCount)</MudSelectItem>
@@ -491,11 +492,11 @@ else
                         @if (_qbAction == "SELECT" && _qbTableColumns.Any())
                         {
                             <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
-                                <MudTextField @bind-Value="_qbColumnsText" Label="Spalten (kommagetrennt, leer = alle)"
+                                <MudTextField @bind-Value="_qbColumnsText" Label="@L["ContainerDetail_Db_QbColumns"]"
                                               Variant="Variant.Outlined" Style="min-width: 220px; font-family: 'JetBrains Mono', monospace;"
                                               Placeholder="@(string.Join(", ", _qbTableColumns.Take(3)) + ", ...")" />
                                 <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
-                                              Placeholder="z.B. id = 1" Style="flex: 1; font-family: 'JetBrains Mono', monospace;" />
+                                              Placeholder="@L["ContainerDetail_Db_QbWhereExampleId"]" Style="flex: 1; font-family: 'JetBrains Mono', monospace;" />
                                 <MudSelect T="string" @bind-Value="_qbOrderBy" Label="ORDER BY" Variant="Variant.Outlined"
                                            Dense="true" Clearable="true" Style="min-width: 160px;">
                                     @foreach (var col in _qbTableColumns)
@@ -514,12 +515,12 @@ else
                         else if (_qbAction == "COUNT")
                         {
                             <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
-                                          Placeholder="z.B. status = 'active'" Class="mb-3"
+                                          Placeholder="@L["ContainerDetail_Db_QbWhereExampleStatus"]" Class="mb-3"
                                           Style="font-family: 'JetBrains Mono', monospace;" />
                         }
                         else if (_qbAction == "INSERT" && _qbTableColumns.Any())
                         {
-                            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">Werte für neue Zeile:</MudText>
+                            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">@L["ContainerDetail_Db_QbInsertValues"]</MudText>
                             <MudGrid Class="mb-3">
                                 @for (var i = 0; i < _qbSetFields.Count; i++)
                                 {
@@ -535,7 +536,7 @@ else
                         }
                         else if (_qbAction == "UPDATE" && _qbTableColumns.Any())
                         {
-                            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">SET-Werte (leer = unverändert):</MudText>
+                            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">@L["ContainerDetail_Db_QbSetValues"]</MudText>
                             <MudGrid Class="mb-2">
                                 @for (var i = 0; i < _qbSetFields.Count; i++)
                                 {
@@ -548,20 +549,20 @@ else
                                     </MudItem>
                                 }
                             </MudGrid>
-                            <MudTextField @bind-Value="_qbWhere" Label="WHERE (Pflicht!)" Variant="Variant.Outlined"
-                                          Placeholder="z.B. id = 42" Class="mb-3"
+                            <MudTextField @bind-Value="_qbWhere" Label="@L["ContainerDetail_Db_QbWhereRequired"]" Variant="Variant.Outlined"
+                                          Placeholder="@L["ContainerDetail_Db_QbWhereExampleId42"]" Class="mb-3"
                                           Style="font-family: 'JetBrains Mono', monospace;" />
                             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-                                UPDATE ohne WHERE ändert ALLE Zeilen! WHERE ist Pflicht.
+                                @L["ContainerDetail_Db_QbUpdateWarning"]
                             </MudAlert>
                         }
                         else if (_qbAction == "DELETE")
                         {
-                            <MudTextField @bind-Value="_qbWhere" Label="WHERE (Pflicht!)" Variant="Variant.Outlined"
-                                          Placeholder="z.B. id = 42" Class="mb-3"
+                            <MudTextField @bind-Value="_qbWhere" Label="@L["ContainerDetail_Db_QbWhereRequired"]" Variant="Variant.Outlined"
+                                          Placeholder="@L["ContainerDetail_Db_QbWhereExampleId42"]" Class="mb-3"
                                           Style="font-family: 'JetBrains Mono', monospace;" />
                             <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
-                                DELETE ohne WHERE löscht ALLE Zeilen! WHERE ist Pflicht.
+                                @L["ContainerDetail_Db_QbDeleteWarning"]
                             </MudAlert>
                         }
 
@@ -579,13 +580,13 @@ else
                                        StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="ExecuteBuilderQuery"
                                        Disabled="@(string.IsNullOrEmpty(_qbTable) || _dbExecuting || ((_qbAction is "DELETE" or "UPDATE") && string.IsNullOrWhiteSpace(_qbWhere)))">
                                 @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-                                Ausführen
+                                @L["ContainerDetail_Db_Execute"]
                             </MudButton>
                             <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                        StartIcon="@Icons.Material.Filled.Edit"
                                        OnClick="CopyBuilderToEditor"
                                        Disabled="@(string.IsNullOrEmpty(generatedSql))">
-                                Im Editor öffnen
+                                @L["ContainerDetail_Db_OpenInEditor"]
                             </MudButton>
                         </MudStack>
                     </MudPaper>
@@ -596,7 +597,7 @@ else
                         <MudPaper Class="pa-4 mb-4" Elevation="0">
                             <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
                                 <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" />
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Migrationen</MudText>
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@L["ContainerDetail_Db_Migrations"]</MudText>
                                 <MudSpacer />
                                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                                                OnClick="@(() => _showMigration = false)" />
@@ -606,7 +607,7 @@ else
                                            StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunMigration"
                                            Disabled="@_dbMigrating">
                                     @if (_dbMigrating) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-                                    Migration ausführen
+                                    @L["ContainerDetail_Db_RunMigration"]
                                 </MudButton>
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                            StartIcon="@Icons.Material.Filled.Undo" OnClick="RollbackMigration"
@@ -617,7 +618,7 @@ else
                             <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small" HtmlTag="label"
                                            for="migration-upload" StartIcon="@Icons.Material.Filled.Upload">
-                                    @(_migrationFileName ?? "SQL-Datei hochladen")
+                                    @(_migrationFileName ?? L["ContainerDetail_Db_UploadSqlFile"].Value)
                                 </MudButton>
                                 <InputFile id="migration-upload" OnChange="OnMigrationFileSelected" style="display:none;"
                                            accept=".sql,.dump" />
@@ -625,7 +626,7 @@ else
                                 {
                                     <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
                                                OnClick="ExecuteMigrationFile" Disabled="@_dbMigrating"
-                                               StartIcon="@Icons.Material.Filled.PlayArrow">Datei ausführen</MudButton>
+                                               StartIcon="@Icons.Material.Filled.PlayArrow">@L["ContainerDetail_Db_ExecuteFile"]</MudButton>
                                 }
                             </MudStack>
                             @if (!string.IsNullOrEmpty(_migrationOutput))
@@ -643,7 +644,7 @@ else
                         <MudPaper Class="pa-4 mb-4" Elevation="0">
                             <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
                                 <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" />
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Seed / Import</MudText>
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@L["ContainerDetail_Db_SeedImport"]</MudText>
                                 <MudSpacer />
                                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                                                OnClick="@(() => _showSeed = false)" />
@@ -652,7 +653,7 @@ else
                                 <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
                                     <MudButton Variant="Variant.Outlined" HtmlTag="label" for="seed-upload"
                                                StartIcon="@Icons.Material.Filled.Upload">
-                                        @(_seedFileName ?? "SQL / CSV / JSON hochladen")
+                                        @(_seedFileName ?? L["ContainerDetail_Db_UploadSeedFile"].Value)
                                     </MudButton>
                                     <InputFile id="seed-upload" OnChange="OnSeedFileSelected" style="display:none;"
                                                accept=".sql,.json,.dump,.gz" />
@@ -663,7 +664,7 @@ else
                                                    OnClick="ExecuteSeedFile" Disabled="@_dbSeeding"
                                                    StartIcon="@Icons.Material.Filled.PlayArrow">
                                             @if (_dbSeeding) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-                                            Importieren
+                                            @L["ContainerDetail_Db_Import"]
                                         </MudButton>
                                     }
                                 </MudStack>
@@ -680,7 +681,7 @@ else
                     @* Tabellen-Browser — Klickbar *@
                     @if (_dbTables.Any())
                     {
-                        <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600;">Tabellen</MudText>
+                        <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600;">@L["ContainerDetail_Db_Tables"]</MudText>
                         <MudGrid Class="mb-4">
                             @foreach (var table in _dbTables)
                             {
@@ -698,7 +699,7 @@ else
                                             </MudStack>
                                             <MudStack Row="true" Spacing="2">
                                                 <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
-                                                    @table.RowCount Zeilen
+                                                    @L["ContainerDetail_Db_RowCount", table.RowCount]
                                                 </MudText>
                                                 @if (!string.IsNullOrEmpty(table.Size) && table.Size != "0")
                                                 {
@@ -727,7 +728,7 @@ else
                                 <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
                                            StartIcon="@Icons.Material.Filled.Visibility"
                                            OnClick="@(() => QuickQuery($"SELECT * FROM {_dbSelectedTable} LIMIT 50"))">
-                                    Vorschau (50)
+                                    @L["ContainerDetail_Db_Preview50"]
                                 </MudButton>
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                            StartIcon="@Icons.Material.Filled.Tag"
@@ -737,7 +738,7 @@ else
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                            StartIcon="@Icons.Material.Filled.Download"
                                            OnClick="@(() => QuickQuery($"SELECT * FROM {_dbSelectedTable}"))">
-                                    Alle + CSV
+                                    @L["ContainerDetail_Db_AllCsv"]
                                 </MudButton>
                             </MudStack>
 
@@ -746,8 +747,8 @@ else
                             {
                                 <MudTable Items="@_dbColumns" Dense="true" Hover="true" Striped="true" Elevation="0">
                                     <HeaderContent>
-                                        <MudTh>Spalte</MudTh>
-                                        <MudTh>Typ</MudTh>
+                                        <MudTh>@L["ContainerDetail_Db_ColColumn"]</MudTh>
+                                        <MudTh>@L["ContainerDetail_Db_ColType"]</MudTh>
                                         <MudTh>Nullable</MudTh>
                                         <MudTh>Default</MudTh>
                                         <MudTh Style="width: 50px;"></MudTh>
@@ -786,9 +787,9 @@ else
 
                     @* Query Editor — Collapsible *@
                     <MudExpansionPanels Class="mb-4">
-                        <MudExpansionPanel Text="Query-Editor" Icon="@Icons.Material.Filled.Code"
+                        <MudExpansionPanel Text="@L["ContainerDetail_Db_QueryEditor"]" Icon="@Icons.Material.Filled.Code"
                                            Expanded="@(_dbResult != null || !string.IsNullOrEmpty(_dbQuery))">
-                            <MudTextField @bind-Value="_dbQuery" Label="SQL / Befehl" Variant="Variant.Outlined"
+                            <MudTextField @bind-Value="_dbQuery" Label="@L["ContainerDetail_Db_SqlCommand"]" Variant="Variant.Outlined"
                                           Lines="4" Class="mb-2 sw-query-editor"
                                           Placeholder="@(_container.DatabaseType == Whiskers.Models.DatabaseType.Redis ? "GET key" : "SELECT * FROM ... LIMIT 10")" />
                             <MudStack Row="true" Spacing="2">
@@ -796,13 +797,13 @@ else
                                            StartIcon="@Icons.Material.Filled.PlayArrow"
                                            Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting)">
                                     @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                                    Ausführen
+                                    @L["ContainerDetail_Db_Execute"]
                                 </MudButton>
                                 @if (_dbResult is { Success: true, Columns.Count: > 0 })
                                 {
                                     <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                                StartIcon="@Icons.Material.Filled.Download"
-                                               OnClick="DownloadCsv">CSV herunterladen</MudButton>
+                                               OnClick="DownloadCsv">@L["ContainerDetail_Db_DownloadCsv"]</MudButton>
                                 }
                             </MudStack>
                         </MudExpansionPanel>
@@ -819,7 +820,7 @@ else
                         {
                             <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="2">
                                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
-                                    @_dbResult.RowCount Zeilen
+                                    @L["ContainerDetail_Db_RowCount", _dbResult.RowCount]
                                 </MudChip>
                                 <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted);">
                                     @(_dbResult.DurationMs.ToString("F0"))ms
@@ -848,7 +849,7 @@ else
                         else
                         {
                             <MudAlert Severity="Severity.Success" Dense="true">
-                                Query ausgeführt (@(_dbResult.DurationMs.ToString("F0"))ms, @_dbResult.RowCount Zeilen betroffen)
+                                @L["ContainerDetail_Db_QueryExecuted", _dbResult.DurationMs.ToString("F0"), _dbResult.RowCount]
                             </MudAlert>
                         }
                     }
@@ -856,28 +857,28 @@ else
             </MudTabPanel>
         }
 
-        <MudTabPanel Text="CVEs" Icon="@Icons.Material.Filled.Security">
+        <MudTabPanel Text="@L["ContainerDetail_Tab_Cves"]" Icon="@Icons.Material.Filled.Security">
             @{
                 var cveResult = CveStore.Get(ServerId, ContainerId);
             }
             @if (cveResult == null)
             {
                 <MudAlert Severity="MudBlazor.Severity.Info">
-                    Noch kein CVE-Scan für diesen Container — der CVE-Monitor muss aktiviert sein und mindestens einmal gelaufen sein.
+                    @L["ContainerDetail_Cve_NoScan"]
                 </MudAlert>
             }
             else if (!string.IsNullOrEmpty(cveResult.Error))
             {
-                <MudAlert Severity="MudBlazor.Severity.Warning">Scan-Fehler: @cveResult.Error</MudAlert>
+                <MudAlert Severity="MudBlazor.Severity.Warning">@L["ContainerDetail_Cve_ScanError", cveResult.Error]</MudAlert>
             }
             else if (cveResult.Findings.Count == 0)
             {
-                <MudAlert Severity="MudBlazor.Severity.Success">Keine CVE-Findings im Image.</MudAlert>
+                <MudAlert Severity="MudBlazor.Severity.Success">@L["ContainerDetail_Cve_NoFindings"]</MudAlert>
             }
             else
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="2">
-                    <MudText Typo="Typo.body2">@cveResult.Findings.Count Findings</MudText>
+                    <MudText Typo="Typo.body2">@L["ContainerDetail_Cve_FindingsCount", cveResult.Findings.Count]</MudText>
                     <MudText Typo="Typo.body2" Style="color:#888;">
                         Scan: @cveResult.ScannedAt.ToString("yyyy-MM-dd HH:mm 'UTC'")
                     </MudText>
@@ -886,9 +887,9 @@ else
                     <HeaderContent>
                         <MudTh>Severity</MudTh>
                         <MudTh>CVE-ID</MudTh>
-                        <MudTh>Paket</MudTh>
-                        <MudTh>Installiert → Fix</MudTh>
-                        <MudTh>Titel</MudTh>
+                        <MudTh>@L["ContainerDetail_Cve_ColPackage"]</MudTh>
+                        <MudTh>@L["ContainerDetail_Cve_ColInstalledFix"]</MudTh>
+                        <MudTh>@L["ContainerDetail_Cve_ColTitle"]</MudTh>
                     </HeaderContent>
                     <RowTemplate>
                         <MudTd>
@@ -1025,7 +1026,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["ContainerDetail_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -1083,7 +1084,7 @@ else
     private async Task InitTerminal()
     {
         if (!ServerConfigService.SupportsTerminal(_resolvedServerId)) return;
-        if (_role < AppRole.Operator) { _termError = "Keine Berechtigung — Operator erforderlich."; return; }
+        if (_role < AppRole.Operator) { _termError = L["ContainerDetail_Terminal_NoPermission"].Value; return; }
         try
         {
             _dotNetRef = DotNetObjectReference.Create(this);
@@ -1098,7 +1099,7 @@ else
         }
         catch (Exception ex)
         {
-            _termError = $"Fehler beim Initialisieren des Terminals: {ex.Message}";
+            _termError = L["ContainerDetail_Terminal_InitError", ex.Message].Value;
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -1194,7 +1195,7 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add("Gestartet", Severity.Success); }
+        try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1204,7 +1205,7 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add("Gestoppt", Severity.Success); }
+        try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1214,7 +1215,7 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add("Neugestartet", Severity.Success); }
+        try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1223,9 +1224,9 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Container entfernen",
-            $"Container '{_container?.Name ?? ContainerId}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.",
-            yesText: "Entfernen", cancelText: "Abbrechen");
+            L["ContainerDetail_Dialog_RemoveTitle"].Value,
+            L["ContainerDetail_Dialog_RemoveMessage", _container?.Name ?? ContainerId].Value,
+            yesText: L["ContainerDetail_Button_Remove"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
@@ -1233,7 +1234,7 @@ else
         {
             await DockerService.RemoveContainerAsync(ContainerId, force: true, serverId: _resolvedServerId);
             await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, serverId: _resolvedServerId);
-            Snackbar.Add("Entfernt", Severity.Success);
+            Snackbar.Add(L["ContainerDetail_Snackbar_Removed"].Value, Severity.Success);
             Nav.NavigateTo("/");
         }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
@@ -1367,13 +1368,13 @@ else
                 }
                 else
                 {
-                    _dotEnvError = "Keine .env-Datei gefunden. Sie können eine neue erstellen.";
+                    _dotEnvError = L["ContainerDetail_Env_NoDotEnvFound"].Value;
                 }
             }
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler beim Laden der Umgebungsvariablen: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["ContainerDetail_Env_LoadError", ex.Message].Value, Severity.Error);
         }
         finally
         {
@@ -1386,9 +1387,9 @@ else
         if (!Require(AppRole.Admin)) return;
         if (_composeWorkingDir == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Umgebungsvariablen speichern",
-            "Die .env-Datei wird überschrieben und der Container neu gestartet. Fortfahren?",
-            yesText: "Speichern & Neustart", cancelText: "Abbrechen");
+            L["ContainerDetail_Dialog_SaveEnvTitle"].Value,
+            L["ContainerDetail_Dialog_SaveEnvMessage"].Value,
+            yesText: L["ContainerDetail_Dialog_SaveEnvYes"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
         _envSaving = true;
 
@@ -1412,7 +1413,7 @@ else
 
             if (!writeResult.Success)
             {
-                Snackbar.Add($"Fehler beim Schreiben: {writeResult.Error}", Severity.Error);
+                Snackbar.Add(L["ContainerDetail_Env_WriteError", writeResult.Error].Value, Severity.Error);
                 return;
             }
 
@@ -1426,7 +1427,7 @@ else
             if (restartResult.Success)
             {
                 await AuditLog.LogAsync(actor, "web", "env.save", "env", ContainerId, name, serverId: _resolvedServerId);
-                Snackbar.Add("Umgebungsvariablen gespeichert und Container neu gestartet.", Severity.Success);
+                Snackbar.Add(L["ContainerDetail_Env_SaveSuccess"].Value, Severity.Success);
                 // Reload env vars and container state
                 _envLoaded = false;
                 await LoadContainer();
@@ -1435,12 +1436,12 @@ else
             else
             {
                 await AuditLog.LogAsync(actor, "web", "env.save", "env", ContainerId, name, details: "Neustart fehlgeschlagen", serverId: _resolvedServerId, success: false);
-                Snackbar.Add($"Fehler beim Neustart: {restartResult.Output}\n{restartResult.Error}", Severity.Error);
+                Snackbar.Add(L["ContainerDetail_Env_RestartError", restartResult.Output, restartResult.Error].Value, Severity.Error);
             }
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["ContainerDetail_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
         finally
         {
@@ -1500,7 +1501,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler beim Laden der Datenbank-Info: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["ContainerDetail_Db_LoadError", ex.Message].Value, Severity.Error);
         }
         finally
         {
@@ -1631,9 +1632,9 @@ else
         if (!Require(AppRole.Admin)) return;
         if (_container == null || _dbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Migration ausführen",
-            "Datenbank-Migrationen ausführen? Dies verändert das Datenbankschema.",
-            yesText: "Ausführen", cancelText: "Abbrechen");
+            L["ContainerDetail_Db_RunMigration"].Value,
+            L["ContainerDetail_Dialog_RunMigrationMessage"].Value,
+            yesText: L["ContainerDetail_Db_Execute"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
         _dbMigrating = true; _migrationOutput = null;
         try
@@ -1647,7 +1648,7 @@ else
             else
             {
                 // Fallback: plain SQL via psql/mysql
-                _migrationOutput = "Kein Framework erkannt. Nutze die SQL-Datei Upload-Funktion.";
+                _migrationOutput = L["ContainerDetail_Db_NoFrameworkUpload"].Value;
                 _migrationSuccess = false;
             }
         }
@@ -1660,15 +1661,15 @@ else
         if (!Require(AppRole.Admin)) return;
         if (_container == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Migration zurückrollen",
-            "Letzte Migration zurückrollen? Dies kann zu Datenverlust führen.",
-            yesText: "Rollback", cancelText: "Abbrechen");
+            L["ContainerDetail_Dialog_RollbackTitle"].Value,
+            L["ContainerDetail_Dialog_RollbackMessage"].Value,
+            yesText: "Rollback", cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
         _dbMigrating = true; _migrationOutput = null;
         try
         {
             var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
-            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? "Kein Framework erkannt." : result.StdOut;
+            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
         catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
@@ -1683,7 +1684,7 @@ else
         try
         {
             var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
-            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? "Kein Framework erkannt." : result.StdOut;
+            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
         catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
@@ -1703,9 +1704,9 @@ else
         if (!Require(AppRole.Admin)) return;
         if (_migrationFileData == null || _container == null || _dbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "SQL-Datei ausführen",
-            $"Datei '{_migrationFileName}' gegen die Datenbank ausführen? Dies verändert Daten/Schema.",
-            yesText: "Ausführen", cancelText: "Abbrechen");
+            L["ContainerDetail_Dialog_ExecuteSqlFileTitle"].Value,
+            L["ContainerDetail_Dialog_ExecuteSqlFileMessage", _migrationFileName ?? ""].Value,
+            yesText: L["ContainerDetail_Db_Execute"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
         _dbMigrating = true; _migrationOutput = null;
         try
@@ -1716,10 +1717,10 @@ else
             {
                 DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} 2>&1",
                 DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
-                _ => "echo 'Nicht unterstützt'"
+                _ => "echo 'Not supported'"
             };
             var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
-            _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? "Erfolgreich ausgeführt." : result.StdOut;
+            _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0;
             if (_migrationSuccess) await LoadDatabaseInfo();
         }
@@ -1740,9 +1741,9 @@ else
         if (!Require(AppRole.Admin)) return;
         if (_seedFileData == null || _container == null || _dbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Daten importieren",
-            $"Datei '{_seedFileName}' in die Datenbank importieren?",
-            yesText: "Importieren", cancelText: "Abbrechen");
+            L["ContainerDetail_Dialog_ImportDataTitle"].Value,
+            L["ContainerDetail_Dialog_ImportDataMessage", _seedFileName ?? ""].Value,
+            yesText: L["ContainerDetail_Db_Import"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
         _dbSeeding = true; _seedOutput = null;
         try
@@ -1753,13 +1754,13 @@ else
             var cmd = (_container.DatabaseType, ext) switch
             {
                 (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} 2>&1",
-                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV-Import: Bitte Tabellennamen im Query-Editor angeben'",
+                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV import: please specify the table name in the query editor'",
                 (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
                 (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
-                _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... Dateiformat {ext} wird für {_container.DatabaseType} unterstützt via SQL-Pipe'"
+                _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
             };
             var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
-            _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? "Erfolgreich importiert." : result.StdOut;
+            _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
             _seedSuccess = result.ExitCode == 0;
             if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }
         }
@@ -1807,13 +1808,13 @@ else
                 ContainerId, db, _container.DatabaseType, _dbCreds, _resolvedServerId);
 
             if (success)
-                Snackbar.Add($"Backup erstellt: {filePath} ({size / 1024}KB)", Severity.Success);
+                Snackbar.Add(L["ContainerDetail_Db_BackupSuccess", filePath, size / 1024].Value, Severity.Success);
             else
-                Snackbar.Add($"Backup fehlgeschlagen: {error}", Severity.Error);
+                Snackbar.Add(L["ContainerDetail_Db_BackupError", error].Value, Severity.Error);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["ContainerDetail_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
         finally
         {

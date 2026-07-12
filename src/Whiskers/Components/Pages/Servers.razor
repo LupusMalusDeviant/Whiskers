@@ -11,8 +11,9 @@
 @inject Whiskers.Services.Workloads.IWorkloadProviderFactory WorkloadFactory
 @inject Whiskers.Services.Workloads.Kubernetes.IKubernetesClientCache KubeClients
 @inject Whiskers.Services.Vault.IVaultService Vault
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Server - Whiskers</PageTitle>
+<PageTitle>@L["Servers_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -20,32 +21,32 @@
             <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Serververwaltung</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Server hinzufügen, konfigurieren und verwalten</MudText>
+            <MudText Typo="Typo.h5">@L["Servers_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Servers_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
         @if (_role >= AppRole.Admin)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="ShowAddDialog">Server hinzufügen</MudButton>
+                       OnClick="ShowAddDialog">@L["Servers_Button_Add"]</MudButton>
         }
     </MudStack>
 </div>
 
 <MudTable Items="@_servers" Dense="true" Hover="true" Striped="true" Elevation="2">
     <HeaderContent>
-        <MudTh>Name</MudTh>
-        <MudTh>Host</MudTh>
-        <MudTh>Typ</MudTh>
-        <MudTh>Status</MudTh>
-        <MudTh>Aktionen</MudTh>
+        <MudTh>@L["Servers_Table_Name"]</MudTh>
+        <MudTh>@L["Servers_Table_Host"]</MudTh>
+        <MudTh>@L["Servers_Table_Type"]</MudTh>
+        <MudTh>@L["Servers_Table_Status"]</MudTh>
+        <MudTh>@L["Servers_Table_Actions"]</MudTh>
     </HeaderContent>
     <RowTemplate>
         <MudTd>
             @context.Name
             @if (context.IsDefault)
             {
-                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" Class="ml-2">Standard</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" Class="ml-2">@L["Servers_Chip_Default"]</MudChip>
             }
         </MudTd>
         <MudTd Style="font-family: monospace;">
@@ -74,13 +75,13 @@
                 @if (result.Success)
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">
-                        @result.ContainerCount Container
+                        @L["Servers_Chip_ContainerCount", result.ContainerCount]
                     </MudChip>
                 }
                 else
                 {
                     <MudTooltip Text="@result.Error">
-                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">Fehler</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">@L["Servers_Chip_Error"]</MudChip>
                     </MudTooltip>
                 }
             }
@@ -91,43 +92,43 @@
         </MudTd>
         <MudTd>
             <MudIconButton Icon="@Icons.Material.Filled.NetworkCheck" Size="Size.Small" Color="Color.Primary"
-                           OnClick="@(() => TestConnection(context))" title="Verbindung testen" />
+                           OnClick="@(() => TestConnection(context))" title="@L["Servers_Action_TestConnection"]" />
             @if (context.ConnectionType == Whiskers.Models.ConnectionType.SSH && _role >= AppRole.Admin)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Hub" Size="Size.Small" Color="Color.Tertiary"
-                               OnClick="@(() => StartOnboarding(context))" title="Ins Mesh onboarden (Tailscale + mTLS, SSH-frei)" />
+                               OnClick="@(() => StartOnboarding(context))" title="@L["Servers_Action_Onboard"]" />
             }
             @if (!context.IsDefault && _role >= AppRole.Admin)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Default"
-                               OnClick="@(() => EditServer(context))" title="Bearbeiten" />
+                               OnClick="@(() => EditServer(context))" title="@L["Servers_Action_Edit"]" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                               OnClick="@(() => DeleteServer(context))" title="Löschen" />
+                               OnClick="@(() => DeleteServer(context))" title="@L["Servers_Action_Delete"]" />
             }
         </MudTd>
     </RowTemplate>
 </MudTable>
 
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
-        <TitleContent>@(_editingServer == null ? "Server hinzufügen" : "Server bearbeiten")</TitleContent>
+        <TitleContent>@(_editingServer == null ? L["Servers_Dialog_TitleAdd"].Value : L["Servers_Dialog_TitleEdit"].Value)</TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="_form.Name" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
-            <MudSelect @bind-Value="_form.ConnectionType" Label="Verbindungstyp" Variant="Variant.Outlined" Class="mb-3">
-                <MudSelectItem Value="Whiskers.Models.ConnectionType.TCP">TCP (Docker Remote API)</MudSelectItem>
-                <MudSelectItem Value="Whiskers.Models.ConnectionType.SSH">SSH Tunnel</MudSelectItem>
-                <MudSelectItem Value="Whiskers.Models.ConnectionType.Kubernetes">Kubernetes-Cluster (kubeconfig)</MudSelectItem>
+            <MudTextField @bind-Value="_form.Name" Label="@L["Servers_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect @bind-Value="_form.ConnectionType" Label="@L["Servers_Field_ConnectionType"]" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="Whiskers.Models.ConnectionType.TCP">@L["Servers_ConnType_Tcp"]</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ConnectionType.SSH">@L["Servers_ConnType_Ssh"]</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ConnectionType.Kubernetes">@L["Servers_ConnType_Kubernetes"]</MudSelectItem>
             </MudSelect>
 
             @if (_form.ConnectionType == Whiskers.Models.ConnectionType.TCP)
             {
-                <MudTextField @bind-Value="_form.TcpHost" Label="Host (Domain / IPv4 / IPv6)" Variant="Variant.Outlined" Class="mb-3" />
-                <MudNumericField @bind-Value="_form.TcpPort" Label="Port" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
-                <MudSwitch @bind-Value="_form.TcpUseTls" Label="TLS verwenden" Color="Color.Primary" />
-                <MudSwitch @bind-Value="_form.TailscaleSsh" Label="Tailscale SSH (keyless Web-Terminal)" Color="Color.Primary" />
+                <MudTextField @bind-Value="_form.TcpHost" Label="@L["Servers_Field_Host"]" Variant="Variant.Outlined" Class="mb-3" />
+                <MudNumericField @bind-Value="_form.TcpPort" Label="@L["Servers_Field_Port"]" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
+                <MudSwitch @bind-Value="_form.TcpUseTls" Label="@L["Servers_Field_UseTls"]" Color="Color.Primary" />
+                <MudSwitch @bind-Value="_form.TailscaleSsh" Label="@L["Servers_Field_TailscaleSsh"]" Color="Color.Primary" />
                 @if (_form.TailscaleSsh)
                 {
                     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">
-                        Web-Terminal verbindet sich keyless über das Tailnet (Mesh-Identität, kein SSH-Key) als root auf dem Host aus dem Feld oben. Voraussetzung: <code>tailscale set --ssh</code> auf dem Host.
+                        @L["Servers_TailscaleSsh_Hint"] <code>tailscale set --ssh</code> @L["Servers_TailscaleSsh_HintSuffix"]
                     </MudText>
                 }
             }
@@ -136,36 +137,34 @@
                 @if (!Vault.IsEnabled)
                 {
                     <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-                        Kubernetes-Cluster benötigen den Secret-Vault: das kubeconfig wird verschlüsselt im Vault
-                        gespeichert (nie als Datei). Bitte <code>VAULT_KEY</code> setzen und neu starten.
+                        @L["Servers_KubeVaultWarning_Prefix"] <code>VAULT_KEY</code> @L["Servers_KubeVaultWarning_Suffix"]
                     </MudAlert>
                 }
-                <MudTextField @bind-Value="_kubeconfigYaml" Label="kubeconfig (YAML)" Variant="Variant.Outlined"
+                <MudTextField @bind-Value="_kubeconfigYaml" Label="@L["Servers_Field_Kubeconfig"]" Variant="Variant.Outlined"
                               Lines="8" Class="mb-2" Style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;"
                               Placeholder="apiVersion: v1&#10;kind: Config&#10;clusters: …"
-                              HelperText="@(_editingServer != null ? "Leer lassen, um das gespeicherte kubeconfig zu behalten." : "Wird verschlüsselt im Vault abgelegt — nie auf der Platte.")" />
-                <MudTextField @bind-Value="_form.KubeContext" Label="Context (optional)" Variant="Variant.Outlined" Class="mb-3"
-                              HelperText="Leer = current-context des kubeconfig." />
-                <MudTextField @bind-Value="_kubeNamespacesCsv" Label="Namespaces (optional, kommagetrennt)" Variant="Variant.Outlined" Class="mb-2"
-                              HelperText="Leer = alle sichtbaren Namespaces. Beispiel: default, apps, monitoring" />
+                              HelperText="@(_editingServer != null ? L["Servers_Kubeconfig_HelperKeep"].Value : L["Servers_Kubeconfig_HelperVault"].Value)" />
+                <MudTextField @bind-Value="_form.KubeContext" Label="@L["Servers_Field_KubeContext"]" Variant="Variant.Outlined" Class="mb-3"
+                              HelperText="@L["Servers_Field_KubeContext_Helper"]" />
+                <MudTextField @bind-Value="_kubeNamespacesCsv" Label="@L["Servers_Field_KubeNamespaces"]" Variant="Variant.Outlined" Class="mb-2"
+                              HelperText="@L["Servers_Field_KubeNamespaces_Helper"]" />
                 <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
-                    Empfehlung: einen minimalen ServiceAccount statt des Admin-kubeconfig verwenden —
-                    Manifest + Anleitung unter <code>deploy/k8s/whiskers-agent-rbac.yaml</code>.
+                    @L["Servers_KubeRbacHint"] <code>deploy/k8s/whiskers-agent-rbac.yaml</code>.
                 </MudAlert>
             }
             else if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH)
             {
-                <MudTextField @bind-Value="_form.SshHost" Label="Host (Domain / IPv4 / IPv6)" Variant="Variant.Outlined" Class="mb-3" />
-                <MudNumericField @bind-Value="_form.SshPort" Label="SSH-Port" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
-                <MudTextField @bind-Value="_form.SshUser" Label="SSH-Benutzer" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField @bind-Value="_form.SshHost" Label="@L["Servers_Field_Host"]" Variant="Variant.Outlined" Class="mb-3" />
+                <MudNumericField @bind-Value="_form.SshPort" Label="@L["Servers_Field_SshPort"]" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
+                <MudTextField @bind-Value="_form.SshUser" Label="@L["Servers_Field_SshUser"]" Variant="Variant.Outlined" Class="mb-3" />
 
                 <MudSwitch @bind-Value="_useSshPassword" Color="Color.Primary" Class="mb-1"
-                           Label="Mit Root-/Passwort statt SSH-Key (nur fürs Erst-Onboarding)" />
+                           Label="@L["Servers_Field_UseSshPassword"]" />
                 @if (_useSshPassword)
                 {
-                    <MudTextField @bind-Value="_form.SshPassword" Label="Root-/SSH-Passwort" Variant="Variant.Outlined"
+                    <MudTextField @bind-Value="_form.SshPassword" Label="@L["Servers_Field_SshPassword"]" Variant="Variant.Outlined"
                                   InputType="InputType.Password" Class="mb-2"
-                                  HelperText="Wird nur einmalig fürs Onboarding genutzt, nie gespeichert und nach Erfolg verworfen." />
+                                  HelperText="@L["Servers_Field_SshPassword_Helper"]" />
                 }
                 else
                 {
@@ -173,68 +172,66 @@
                         <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                                    StartIcon="@Icons.Material.Filled.Key"
                                    HtmlTag="label" for="ssh-key-upload">
-                            @(_sshKeyFileName ?? "SSH-Schlüssel hochladen")
+                            @(_sshKeyFileName ?? L["Servers_Button_UploadSshKey"].Value)
                         </MudButton>
                         <InputFile id="ssh-key-upload" OnChange="OnSshKeyFileChanged" style="display:none;" />
                     </MudStack>
                 }
 
                 <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
-                    <strong>Onboarding (SSH-frei werden):</strong> „Speichern &amp; Onboarden" installiert Tailscale +
-                    mTLS-Proxy über <em>eine</em> SSH-Bootstrap-Verbindung und stellt den Host danach auf TCP+mTLS um.
-                    Key bzw. Passwort werden nach Erfolg automatisch entfernt.
+                    @((MarkupString)L["Servers_OnboardInfo"].Value)
                 </MudAlert>
             }
 
             @if (_form.ConnectionType is Whiskers.Models.ConnectionType.TCP or Whiskers.Models.ConnectionType.SSH)
             {
                 <MudDivider Class="my-3" />
-                <MudText Typo="Typo.subtitle2" Class="mb-2">Cloud-Provider (Power/Snapshot via API, out-of-band)</MudText>
-                <MudSelect @bind-Value="_form.CloudProvider" Label="Provider" Variant="Variant.Outlined" Class="mb-3">
-                    <MudSelectItem Value="Whiskers.Models.CloudProvider.None">Keiner</MudSelectItem>
+                <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Servers_Cloud_SectionTitle"]</MudText>
+                <MudSelect @bind-Value="_form.CloudProvider" Label="@L["Servers_Field_CloudProvider"]" Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="Whiskers.Models.CloudProvider.None">@L["Servers_Cloud_ProviderNone"]</MudSelectItem>
                     <MudSelectItem Value="Whiskers.Models.CloudProvider.Hetzner">Hetzner Cloud</MudSelectItem>
                     <MudSelectItem Value="Whiskers.Models.CloudProvider.Hostinger">Hostinger VPS</MudSelectItem>
                 </MudSelect>
                 @if (_form.CloudProvider != Whiskers.Models.CloudProvider.None)
                 {
-                    <MudTextField @bind-Value="_cloudApiKey" Label="API-Key" Variant="Variant.Outlined"
+                    <MudTextField @bind-Value="_cloudApiKey" Label="@L["Servers_Field_CloudApiKey"]" Variant="Variant.Outlined"
                                   InputType="InputType.Password" Class="mb-1"
-                                  HelperText="@(_hasCloudKey ? "Ein Key ist gespeichert — leer lassen, um ihn beizubehalten." : "API-Token des Providers (Hetzner: Projekt-Token; Hostinger: API-Token). Matching erfolgt über die Server-IP.")" />
+                                  HelperText="@(_hasCloudKey ? L["Servers_CloudKey_HelperKeep"].Value : L["Servers_CloudKey_HelperNew"].Value)" />
                 }
             }
 
             @if (!string.IsNullOrEmpty(_connectError))
             {
                 <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
-                    Gespeichert, aber die Verbindung ließ sich nicht aufbauen: @_connectError
-                    <br />Host/Port/TLS prüfen — der Server bleibt gespeichert; korrigiere und speichere erneut.
+                    @L["Servers_ConnectError_Prefix"] @_connectError
+                    <br />@L["Servers_ConnectError_Hint"]
                 </MudAlert>
             }
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="@(() => _showDialog = false)" Disabled="_saving">Abbrechen</MudButton>
+            <MudButton OnClick="@(() => _showDialog = false)" Disabled="_saving">@L["Servers_Button_Cancel"]</MudButton>
             @if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="SaveAndOnboard"
                            Disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name))"
                            StartIcon="@Icons.Material.Filled.Hub">
-                    Speichern &amp; Onboarden
+                    @L["Servers_Button_SaveAndOnboard"]
                 </MudButton>
             }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveServer"
                        Disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name))">
                 @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                @(_saving ? "Verbinde…" : "Speichern")
+                @(_saving ? L["Servers_Button_Connecting"].Value : L["Servers_Button_Save"].Value)
             </MudButton>
         </DialogActions>
     </MudDialog>
 
 <MudDialog Visible="_onboarding" VisibleChanged="@(v => { if (!_onboardBusy) _onboarding = v; })"
                Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
-        <TitleContent>Onboarding: @_onboardingServer?.Name</TitleContent>
+        <TitleContent>@L["Servers_Onboard_DialogTitle", _onboardingServer?.Name ?? ""]</TitleContent>
         <DialogContent>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
-                Installiert Tailscale, deployt Telemetrie + mTLS-Proxy und stellt den Server SSH-frei (mTLS).
+                @L["Servers_Onboard_Description"]
             </MudText>
             <MudPaper Class="pa-3" Outlined="true" Style="max-height:55vh; overflow-y:auto; font-size:0.88rem;">
                 @foreach (var line in _onboardLog)
@@ -243,9 +240,9 @@
                     {
                         var url = line.Substring(Whiskers.Services.Onboarding.OnboardingService.LinkMarker.Length);
                         <MudAlert Severity="Severity.Info" Class="my-2">
-                            <MudText Typo="Typo.body2" Class="mb-2">Tailscale-Login — im Browser öffnen und den Node bestätigen:</MudText>
+                            <MudText Typo="Typo.body2" Class="mb-2">@L["Servers_Onboard_TailscaleLoginHint"]</MudText>
                             <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="@url" Target="_blank"
-                                       StartIcon="@Icons.Material.Filled.OpenInNew">Tailscale-Login öffnen</MudButton>
+                                       StartIcon="@Icons.Material.Filled.OpenInNew">@L["Servers_Onboard_OpenTailscaleLogin"]</MudButton>
                         </MudAlert>
                     }
                     else
@@ -261,8 +258,8 @@
             @if (!_onboardBusy && _onboardResult is { Success: false })
             {
                 <MudAlert Severity="Severity.Warning" Class="mt-3">
-                    <strong>Fehlgeschlagen bei Schritt „@_onboardResult.FailedStep":</strong> @_onboardResult.Error
-                    <br />Alle Schritte sind idempotent — „Erneut versuchen" setzt am fehlgeschlagenen Schritt wieder auf.
+                    <strong>@L["Servers_Onboard_FailedAtStep", _onboardResult.FailedStep?.ToString() ?? ""]</strong> @_onboardResult.Error
+                    <br />@L["Servers_Onboard_IdempotentHint"]
                 </MudAlert>
             }
         </DialogContent>
@@ -270,10 +267,10 @@
             @if (!_onboardBusy && _onboardResult is { Success: false } && _onboardingServer != null)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Replay"
-                           OnClick="@(() => StartOnboarding(_onboardingServer, skipPreflight: true))">Erneut versuchen</MudButton>
+                           OnClick="@(() => StartOnboarding(_onboardingServer, skipPreflight: true))">@L["Servers_Button_Retry"]</MudButton>
             }
             <MudButton OnClick="@(() => { if (!_onboardBusy) _onboarding = false; })" Disabled="_onboardBusy">
-                @(_onboardBusy ? "Läuft…" : "Schließen")
+                @(_onboardBusy ? L["Servers_Button_Running"].Value : L["Servers_Button_Close"].Value)
             </MudButton>
         </DialogActions>
     </MudDialog>
@@ -309,7 +306,7 @@
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["Servers_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -374,9 +371,9 @@
         if (_form.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
         {
             if (!Vault.IsEnabled)
-                throw new InvalidOperationException("Kubernetes-Cluster benötigen den Vault — VAULT_KEY setzen und neu starten.");
+                throw new InvalidOperationException(L["Servers_Error_KubeNeedsVault"].Value);
             if (_editingServer == null && string.IsNullOrWhiteSpace(_kubeconfigYaml))
-                throw new InvalidOperationException("Bitte ein kubeconfig einfügen.");
+                throw new InvalidOperationException(L["Servers_Error_KubeconfigMissing"].Value);
 
             _form.KubeNamespaces = _kubeNamespacesCsv
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -453,13 +450,13 @@
             var (ok, info) = await TryConnectAsync(saved.Id, TimeSpan.FromSeconds(12));
             if (ok)
             {
-                Snackbar.Add($"{_form.Name} gespeichert — verbunden ({info}).", Severity.Success);
+                Snackbar.Add(L["Servers_Snackbar_SavedConnected", _form.Name, info].Value, Severity.Success);
                 _showDialog = false;
             }
             else
             {
                 _connectError = info;
-                Snackbar.Add($"{_form.Name} gespeichert, aber Verbindung fehlgeschlagen.", Severity.Warning);
+                Snackbar.Add(L["Servers_Snackbar_SavedConnectFailed", _form.Name].Value, Severity.Warning);
             }
         }
         finally
@@ -504,7 +501,7 @@
             {
                 using var kcts = new System.Threading.CancellationTokenSource(timeout);
                 var pods = await WorkloadFactory.GetForServer(serverId).ListWorkloadsAsync(all: true, kcts.Token);
-                return (true, $"{pods.Count} Pods");
+                return (true, L["Servers_Status_Pods", pods.Count].Value);
             }
 
             ConnectionManager.InvalidateClient(serverId);
@@ -512,11 +509,11 @@
             using var cts = new System.Threading.CancellationTokenSource(timeout);
             var containers = await client.Containers.ListContainersAsync(
                 new Docker.DotNet.Models.ContainersListParameters { All = true }, cts.Token);
-            return (true, $"{containers.Count} Container");
+            return (true, L["Servers_Status_Containers", containers.Count].Value);
         }
         catch (OperationCanceledException)
         {
-            return (false, $"Zeitüberschreitung nach {timeout.TotalSeconds:0}s — Host/Port/Firewall prüfen.");
+            return (false, L["Servers_Status_Timeout", timeout.TotalSeconds].Value);
         }
         catch (Exception ex)
         {
@@ -528,9 +525,9 @@
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Server entfernen",
-            $"Server '{server.Name}' wirklich entfernen? Die Verbindung und hinterlegte Zugangsdaten gehen verloren.",
-            yesText: "Entfernen", cancelText: "Abbrechen");
+            L["Servers_Dialog_DeleteTitle"].Value,
+            L["Servers_Dialog_DeleteMessage", server.Name].Value,
+            yesText: L["Servers_Button_Delete"].Value, cancelText: L["Servers_Button_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
@@ -543,7 +540,7 @@
                     Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(server.Id));
             _servers = ServerConfigService.GetServers();
             await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, serverId: server.Id);
-            Snackbar.Add($"{server.Name} entfernt", Severity.Success);
+            Snackbar.Add(L["Servers_Snackbar_Removed", server.Name].Value, Severity.Success);
         }
         catch (Exception ex)
         {
@@ -587,12 +584,9 @@
     private async Task<bool> ConfirmTailscalePreflight()
     {
         var choice = await DialogService.ShowMessageBoxAsync(
-            "Tailscale-Konto erforderlich",
-            (MarkupString)("Das One-Click-Onboarding verbindet den Server über ein <strong>Tailscale-Mesh</strong> " +
-            "(danach SSH-frei via mTLS). Dafür brauchen Sie ein — kostenloses — Tailscale-Konto; der Login-Link " +
-            "erscheint während des Onboardings.<br/><br/>Kein Tailscale gewünscht? Dann den Server einfach mit " +
-            "„Speichern“ klassisch per Docker-API (TCP/TLS) oder SSH verbinden — ohne Mesh."),
-            yesText: "Weiter mit Tailscale", cancelText: "Abbrechen");
+            L["Servers_Dialog_TailscaleTitle"].Value,
+            (MarkupString)L["Servers_Dialog_TailscaleMessage"].Value,
+            yesText: L["Servers_Button_ContinueTailscale"].Value, cancelText: L["Servers_Button_Cancel"].Value);
         return choice == true;
     }
 

@@ -1,8 +1,9 @@
 @page "/agent-history"
 @attribute [Authorize]
 @inject Whiskers.Services.Observability.IMcpCallLogStore CallLog
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Agent-History - Whiskers</PageTitle>
+<PageTitle>@L["AgentHistory_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -10,34 +11,34 @@
             <MudIcon Icon="@Icons.Material.Filled.Policy" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Agent-History</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Jeder Agent-/MCP-Tool-Aufruf — Akteur, Parameter, Verdict, Ergebnis</MudText>
+            <MudText Typo="Typo.h5">@L["AgentHistory_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["AgentHistory_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
 
 <MudStack Row="true" Class="mb-4" Spacing="2" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
     <MudTextField T="string" Value="@_actorFilter" ValueChanged="OnActorChanged" DebounceInterval="400"
-                  Label="Akteur" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;"
+                  Label="@L["AgentHistory_Filter_Actor"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;"
                   Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Person" Clearable="true" />
     <MudTextField T="string" Value="@_toolFilter" ValueChanged="OnToolChanged" DebounceInterval="400"
-                  Label="Tool" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;"
+                  Label="@L["AgentHistory_Filter_Tool"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;"
                   Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Build" Clearable="true" />
     <MudSelect T="string" Value="@_period" ValueChanged="OnPeriodChanged"
-               Label="Zeitraum" Variant="Variant.Outlined" Dense="true" Style="max-width: 160px;">
-        <MudSelectItem Value="@("1h")">Letzte Stunde</MudSelectItem>
-        <MudSelectItem Value="@("24h")">Letzte 24 h</MudSelectItem>
-        <MudSelectItem Value="@("7d")">Letzte 7 Tage</MudSelectItem>
-        <MudSelectItem Value="@("30d")">Letzte 30 Tage</MudSelectItem>
-        <MudSelectItem Value="@("all")">Alles</MudSelectItem>
+               Label="@L["AgentHistory_Filter_Period"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 160px;">
+        <MudSelectItem Value="@("1h")">@L["AgentHistory_Period_LastHour"]</MudSelectItem>
+        <MudSelectItem Value="@("24h")">@L["AgentHistory_Period_Last24h"]</MudSelectItem>
+        <MudSelectItem Value="@("7d")">@L["AgentHistory_Period_Last7Days"]</MudSelectItem>
+        <MudSelectItem Value="@("30d")">@L["AgentHistory_Period_Last30Days"]</MudSelectItem>
+        <MudSelectItem Value="@("all")">@L["AgentHistory_Period_All"]</MudSelectItem>
     </MudSelect>
     <MudSwitch T="bool" Value="@_writesOnly" ValueChanged="OnWritesOnlyChanged"
-               Color="Color.Warning" Label="Nur Schreibzugriffe" />
+               Color="Color.Warning" Label="@L["AgentHistory_Filter_WritesOnly"]" />
     <MudSwitch T="bool" Value="@_deniesOnly" ValueChanged="OnDeniesOnlyChanged"
-               Color="Color.Error" Label="Nur Verweigerte" />
+               Color="Color.Error" Label="@L["AgentHistory_Filter_DeniesOnly"]" />
     <MudSpacer />
     <MudText Typo="Typo.body2" Class="align-self-center" Style="color: #888;">
-        @_totalCount Einträge
+        @L["AgentHistory_TotalCount", _totalCount]
     </MudText>
 </MudStack>
 
@@ -45,38 +46,38 @@
           FixedHeader="true" Height="calc(100vh - 300px)" OnRowClick="OnRowClick"
           T="Whiskers.Models.McpToolCallEntity">
     <HeaderContent>
-        <MudTh Style="width: 150px;">Zeitpunkt</MudTh>
-        <MudTh Style="width: 190px;">Akteur</MudTh>
-        <MudTh>Tool</MudTh>
-        <MudTh Style="width: 90px;">Level</MudTh>
-        <MudTh Style="width: 100px;">Verdict</MudTh>
-        <MudTh Style="width: 80px;" Align="Align.Right">Dauer</MudTh>
-        <MudTh Style="width: 70px;">Status</MudTh>
+        <MudTh Style="width: 150px;">@L["AgentHistory_Column_Timestamp"]</MudTh>
+        <MudTh Style="width: 190px;">@L["AgentHistory_Column_Actor"]</MudTh>
+        <MudTh>@L["AgentHistory_Column_Tool"]</MudTh>
+        <MudTh Style="width: 90px;">@L["AgentHistory_Column_Level"]</MudTh>
+        <MudTh Style="width: 100px;">@L["AgentHistory_Column_Verdict"]</MudTh>
+        <MudTh Style="width: 80px;" Align="Align.Right">@L["AgentHistory_Column_Duration"]</MudTh>
+        <MudTh Style="width: 70px;">@L["AgentHistory_Column_Status"]</MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Zeitpunkt">
+        <MudTd DataLabel="@L["AgentHistory_Column_Timestamp"]">
             <MudText Typo="Typo.body2" Style="font-family: monospace;">
                 @context.Timestamp.ToLocalTime().ToString("dd.MM.yy HH:mm:ss")
             </MudText>
         </MudTd>
-        <MudTd DataLabel="Akteur">
+        <MudTd DataLabel="@L["AgentHistory_Column_Actor"]">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@ActorColor(context.ActorType)">
                 @context.Actor
             </MudChip>
         </MudTd>
-        <MudTd DataLabel="Tool"><code>@context.ToolName</code></MudTd>
-        <MudTd DataLabel="Level">
+        <MudTd DataLabel="@L["AgentHistory_Column_Tool"]"><code>@context.ToolName</code></MudTd>
+        <MudTd DataLabel="@L["AgentHistory_Column_Level"]">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@LevelColor(context.Level)">
                 @context.Level
             </MudChip>
         </MudTd>
-        <MudTd DataLabel="Verdict">
+        <MudTd DataLabel="@L["AgentHistory_Column_Verdict"]">
             <MudChip T="string" Size="Size.Small" Color="@VerdictColor(context.Verdict)">
                 @context.Verdict
             </MudChip>
         </MudTd>
-        <MudTd DataLabel="Dauer" Style="text-align: right; font-family: monospace;">@context.DurationMs ms</MudTd>
-        <MudTd DataLabel="Status">
+        <MudTd DataLabel="@L["AgentHistory_Column_Duration"]" Style="text-align: right; font-family: monospace;">@context.DurationMs ms</MudTd>
+        <MudTd DataLabel="@L["AgentHistory_Column_Status"]">
             @if (context.Success)
             {
                 <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />

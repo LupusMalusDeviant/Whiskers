@@ -2,8 +2,9 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Container-Vergleich - Whiskers</PageTitle>
+<PageTitle>@L["ContainerDiff_Title"] - Whiskers</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -11,8 +12,8 @@
             <MudIcon Icon="@Icons.Material.Filled.Compare" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Container-Vergleich</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Konfiguration und Umgebung zweier Container vergleichen</MudText>
+            <MudText Typo="Typo.h5">@L["ContainerDiff_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ContainerDiff_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
@@ -37,7 +38,7 @@
 {
     <MudTable Items="@_diffRows" Dense="true" Hover="true" Striped="true" Elevation="0" FixedHeader="true" Height="calc(100vh - 280px)">
         <HeaderContent>
-            <MudTh Style="width: 180px;">Eigenschaft</MudTh>
+            <MudTh Style="width: 180px;">@L["ContainerDiff_ColProperty"]</MudTh>
             <MudTh>@_left.Name</MudTh>
             <MudTh>@_right.Name</MudTh>
             <MudTh Style="width: 80px;"></MudTh>
@@ -60,13 +61,13 @@
     </MudTable>
 
     <MudStack Row="true" Class="mt-3" Spacing="2">
-        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@_diffRows.Count(r => r.IsDifferent) Unterschiede</MudChip>
-        <MudChip T="string" Size="Size.Small" Color="Color.Success">@_diffRows.Count(r => !r.IsDifferent) Gleich</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@L["ContainerDiff_DiffCount", _diffRows.Count(r => r.IsDifferent)]</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Success">@L["ContainerDiff_SameCount", _diffRows.Count(r => !r.IsDifferent)]</MudChip>
     </MudStack>
 }
 else if (_left != null || _right != null)
 {
-    <MudAlert Severity="Severity.Info">Wähle zwei Container aus um sie zu vergleichen.</MudAlert>
+    <MudAlert Severity="Severity.Info">@L["ContainerDiff_SelectTwo"]</MudAlert>
 }
 
 @code {
@@ -107,14 +108,16 @@ else if (_left != null || _right != null)
         _diffRows.Clear();
         if (_left == null || _right == null) return Task.CompletedTask;
 
+        var notSet = L["ContainerDiff_NotSet"].Value;
+
         // Basic properties
         AddRow("Image", _left.Image, _right.Image);
         AddRow("State", _left.State, _right.State);
         AddRow("Health", _left.HealthStatus, _right.HealthStatus);
-        AddRow("Projekt", _left.ComposeProject, _right.ComposeProject);
+        AddRow(L["ContainerDiff_PropProject"].Value, _left.ComposeProject, _right.ComposeProject);
         AddRow("Server", _left.ServerName, _right.ServerName);
         AddRow("Ports", string.Join(", ", _left.Ports.Select(p => p.ToString())), string.Join(", ", _right.Ports.Select(p => p.ToString())));
-        AddRow("DB-Typ", _left.DatabaseType.ToString(), _right.DatabaseType.ToString());
+        AddRow(L["ContainerDiff_PropDbType"].Value, _left.DatabaseType.ToString(), _right.DatabaseType.ToString());
 
         // Env vars diff
         if (_leftEnv != null && _rightEnv != null)
@@ -126,8 +129,8 @@ else if (_left != null || _right != null)
                 if (key is "PATH" or "HOME" or "HOSTNAME") continue;
                 if (key.StartsWith("PHP") || key.StartsWith("GOSU") || key.StartsWith("GPG")) continue;
 
-                var leftVal = _leftEnv.FirstOrDefault(e => e.Key == key).Value ?? "(nicht gesetzt)";
-                var rightVal = _rightEnv.FirstOrDefault(e => e.Key == key).Value ?? "(nicht gesetzt)";
+                var leftVal = _leftEnv.FirstOrDefault(e => e.Key == key).Value ?? notSet;
+                var rightVal = _rightEnv.FirstOrDefault(e => e.Key == key).Value ?? notSet;
 
                 // Mask sensitive values — sensitive key OR a value carrying inline credentials (e.g. DATABASE_URL).
                 var isSensitive = Whiskers.Utils.EnvMasking.ShouldMask(key, leftVal)
@@ -135,8 +138,8 @@ else if (_left != null || _right != null)
                 if (isSensitive)
                 {
                     var same = leftVal == rightVal;
-                    leftVal = leftVal == "(nicht gesetzt)" ? leftVal : "••••••••";
-                    rightVal = rightVal == "(nicht gesetzt)" ? rightVal : "••••••••";
+                    leftVal = leftVal == notSet ? leftVal : "••••••••";
+                    rightVal = rightVal == notSet ? rightVal : "••••••••";
                     AddRow($"ENV: {key}", leftVal, rightVal, !same);
                 }
                 else
@@ -152,8 +155,8 @@ else if (_left != null || _right != null)
             .OrderBy(k => k);
         foreach (var key in allLabels)
         {
-            var leftVal = _left.Labels.GetValueOrDefault(key, "(nicht gesetzt)");
-            var rightVal = _right.Labels.GetValueOrDefault(key, "(nicht gesetzt)");
+            var leftVal = _left.Labels.GetValueOrDefault(key, notSet);
+            var rightVal = _right.Labels.GetValueOrDefault(key, notSet);
             AddRow($"Label: {key}", leftVal, rightVal);
         }
 

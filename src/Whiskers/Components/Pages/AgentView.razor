@@ -24,6 +24,7 @@
 @inject IChatWidgetParser WidgetParser
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>Agent</PageTitle>
 
@@ -35,17 +36,17 @@
         @if (_lines.Count > 0)
         {
             <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.DeleteSweep"
-                       Variant="Variant.Text" OnClick="ClearChat">Verlauf leeren</MudButton>
+                       Variant="Variant.Text" OnClick="ClearChat">@L["AgentView_Button_ClearChat"]</MudButton>
         }
     </div>
     <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
-        Handelnder Assistent — führt Aktionen nur innerhalb der Guardrails und nie über deine eigenen Rechte hinaus aus.
+        @L["AgentView_Header_Subtitle"]
     </MudText>
 
     @if (!Settings.CurrentValue.Enabled)
     {
         <MudAlert Severity="Severity.Info" Class="mb-4">
-            Der Agent ist nicht aktiviert. Setze <code>Agent:Enabled=true</code>, einen Provider und einen API-Key in der Konfiguration.
+            @L["AgentView_Alert_NotEnabled"] <code>Agent:Enabled=true</code>@L["AgentView_Alert_NotEnabledSuffix"]
         </MudAlert>
     }
 
@@ -56,7 +57,7 @@
                     @if (_lines.Count == 0)
                     {
                         <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-8" Style="color: rgba(255,255,255,0.3);">
-                            Sag dem Agenten, was er tun soll — z.B. „liste alle unhealthy Container".
+                            @L["AgentView_Chat_EmptyState"]
                         </MudText>
                     }
                     @foreach (var line in _lines)
@@ -97,19 +98,19 @@
                     {
                         <MudPaper Class="pa-3" Outlined="true" Style="border-color: var(--mud-palette-warning);">
                             <MudText Typo="Typo.body2" Class="mb-2">
-                                <b>Bestätigung nötig:</b> @_pendingConfirm.Name — @_pendingReason
+                                <b>@L["AgentView_Confirm_Label"]</b> @_pendingConfirm.Name — @_pendingReason
                             </MudText>
                             <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled"
-                                       OnClick="@(() => Resolve(true))" Class="mr-2">Freigeben</MudButton>
+                                       OnClick="@(() => Resolve(true))" Class="mr-2">@L["AgentView_Confirm_Approve"]</MudButton>
                             <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
-                                       OnClick="@(() => Resolve(false))">Ablehnen</MudButton>
+                                       OnClick="@(() => Resolve(false))">@L["AgentView_Confirm_Deny"]</MudButton>
                         </MudPaper>
                     }
                     @if (_running && _pendingConfirm is null)
                     {
                         <div style="display:flex; align-items:center; gap:8px; color: rgba(255,255,255,0.4);">
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" />
-                            <span>Arbeitet…</span>
+                            <span>@L["AgentView_Chat_Working"]</span>
                         </div>
                     }
                 </div>
@@ -128,13 +129,13 @@
                 <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
                     <MudFileUpload @ref="_fileUpload" T="IBrowserFile" FilesChanged="OnFileSelected" Class="d-none"
                                    Accept=".txt,.log,.json,.yml,.yaml,.md,.csv,.conf,.ini,.env,.sh,.cs,.xml,.html,.py,.js,.ts,.sql,Dockerfile" />
-                    <MudIconButton Icon="@Icons.Material.Filled.AttachFile" title="Textdatei anhängen"
+                    <MudIconButton Icon="@Icons.Material.Filled.AttachFile" title="@L["AgentView_Attach_Tooltip"]"
                                    OnClick="OpenFilePicker" Disabled="@_running" />
-                    <MudTextField @bind-Value="_input" Placeholder="Auftrag… (Enter sendet)" Variant="Variant.Outlined"
+                    <MudTextField @bind-Value="_input" Placeholder="@L["AgentView_Input_Placeholder"]" Variant="Variant.Outlined"
                                   Margin="Margin.Dense" Immediate="true" Disabled="@_running"
                                   OnKeyDown="OnKeyDown" Class="flex-1" />
                     <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Send"
-                               Disabled="@(_running || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0))">Senden</MudButton>
+                               Disabled="@(_running || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0))">@L["AgentView_Button_Send"]</MudButton>
                 </div>
             </MudPaper>
         </MudItem>
@@ -143,9 +144,9 @@
         {
             <MudItem xs="12" md="5">
                 <MudPaper Class="pa-4" Style="height: calc(100vh - 210px); min-height: 460px; overflow-y:auto;">
-                    <MudText Typo="Typo.subtitle1" Class="mb-2">LLM-Provider</MudText>
-                    <MudSwitch @bind-Value="_llmEnabled" Color="Color.Primary" Label="Agent aktiviert" />
-                    <MudSelect T="string" Value="_llmProvider" ValueChanged="OnProviderChanged" Label="Provider" Margin="Margin.Dense"
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">@L["AgentView_Provider_SectionTitle"]</MudText>
+                    <MudSwitch @bind-Value="_llmEnabled" Color="Color.Primary" Label="@L["AgentView_Provider_EnabledLabel"]" />
+                    <MudSelect T="string" Value="_llmProvider" ValueChanged="OnProviderChanged" Label="@L["AgentView_Provider_ProviderLabel"]" Margin="Margin.Dense"
                                Variant="Variant.Outlined" Class="mt-2">
                         <MudSelectItem Value="@("openai")">openai</MudSelectItem>
                         <MudSelectItem Value="@("openrouter")">openrouter</MudSelectItem>
@@ -154,21 +155,21 @@
                         <MudSelectItem Value="@("anthropic")">anthropic</MudSelectItem>
                         <MudSelectItem Value="@("claude-code")">claude-code</MudSelectItem>
                     </MudSelect>
-                    <MudTextField @bind-Value="_llmEndpoint" Label="Endpoint (optional)" Margin="Margin.Dense"
+                    <MudTextField @bind-Value="_llmEndpoint" Label="@L["AgentView_Provider_EndpointLabel"]" Margin="Margin.Dense"
                                   Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync" />
-                    <MudTextField @bind-Value="_llmKey" Label="API-Key" InputType="InputType.Password" Margin="Margin.Dense"
+                    <MudTextField @bind-Value="_llmKey" Label="@L["AgentView_Provider_ApiKeyLabel"]" InputType="InputType.Password" Margin="Margin.Dense"
                                   Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync"
                                   Immediate="true" DebounceInterval="700" OnDebounceIntervalElapsed="OnKeyDebounced" />
 
                     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;" class="mt-2">
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.NetworkCheck"
                                    OnClick="ForceTestAsync" Disabled="@(_modelTesting || _llmProvider == "claude-code")">
-                            Verbindung testen
+                            @L["AgentView_Provider_TestConnection"]
                         </MudButton>
                         @if (_modelTesting)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" />
-                            <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">Teste…</MudText>
+                            <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">@L["AgentView_Provider_Testing"]</MudText>
                         }
                         else if (_modelStatus == "ok")
                         {
@@ -182,50 +183,49 @@
                         }
                     </div>
 
-                    <MudAutocomplete T="string" @bind-Value="_llmModel" Label="Modell" Margin="Margin.Dense"
+                    <MudAutocomplete T="string" @bind-Value="_llmModel" Label="@L["AgentView_Provider_ModelLabel"]" Margin="Margin.Dense"
                                      Variant="Variant.Outlined" Class="mt-2" SearchFunc="SearchModels"
                                      CoerceValue="true" CoerceText="false" ResetValueOnEmptyText="false" MaxItems="300"
                                      AdornmentIcon="@Icons.Material.Filled.ExpandMore" Clearable="true"
-                                     HelperText="@(_availableModels.Count > 0 ? $"{_availableModels.Count} Modelle verfügbar — tippen zum Filtern" : "Frei eingeben, oder API-Key testen für Vorschläge")" />
+                                     HelperText="@(_availableModels.Count > 0 ? L["AgentView_Provider_ModelHelperAvailable", _availableModels.Count].Value : L["AgentView_Provider_ModelHelperEmpty"].Value)" />
 
-                    <MudNumericField @bind-Value="_llmIterations" Label="Max. Tool-Iterationen" Min="1" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudNumericField @bind-Value="_llmIterations" Label="@L["AgentView_Provider_MaxIterationsLabel"]" Min="1" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-2" />
 
                     <MudExpansionPanels Elevation="0" Class="mt-2" Style="background:transparent;">
                         <MudExpansionPanel Style="background:transparent;">
                             <TitleContent>
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" />
-                                    <MudText Typo="Typo.body2">System-Prompt</MudText>
+                                    <MudText Typo="Typo.body2">@L["AgentView_SystemPrompt_Title"]</MudText>
                                     @if (_systemPrompt.Trim() != DefaultSystemPrompt.Trim())
                                     {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text">angepasst</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text">@L["AgentView_SystemPrompt_ModifiedChip"]</MudChip>
                                     }
                                 </div>
                             </TitleContent>
                             <ChildContent>
                                 <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.5);">
-                                    Anweisung an das LLM. Leer = Standard. Ändert NICHT die Guardrails — die greifen
-                                    code-erzwungen am Tool-Boundary, egal was hier steht.
+                                    @L["AgentView_SystemPrompt_Hint"]
                                 </MudText>
                                 <MudTextField @bind-Value="_systemPrompt" Lines="12" Variant="Variant.Outlined"
                                               Margin="Margin.Dense" Style="font-size:0.82rem;" />
                                 <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Restore"
-                                           OnClick="ResetSystemPrompt" Class="mt-1">Auf Standard zurücksetzen</MudButton>
+                                           OnClick="ResetSystemPrompt" Class="mt-1">@L["AgentView_SystemPrompt_ResetButton"]</MudButton>
                             </ChildContent>
                         </MudExpansionPanel>
                     </MudExpansionPanels>
 
                     <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveLlm" Class="mt-3" FullWidth="true">
-                        Provider speichern
+                        @L["AgentView_Provider_SaveButton"]
                     </MudButton>
                     <MudText Typo="Typo.caption" Class="mt-1" Style="color: rgba(255,255,255,0.4);">
-                        Wird ohne Neustart übernommen (reloadOnChange).
+                        @L["AgentView_Provider_ReloadHint"]
                     </MudText>
 
                     <MudDivider Class="my-4" />
                     <MudButton Href="guardrails" Variant="Variant.Outlined" Color="Color.Primary"
                                StartIcon="@Icons.Material.Filled.Shield" FullWidth="true">
-                        Guardrails verwalten
+                        @L["AgentView_Guardrails_Button"]
                     </MudButton>
                 </MudPaper>
             </MudItem>
@@ -326,7 +326,7 @@
         const long max = 512 * 1024;
         if (file.Size > max)
         {
-            Snackbar.Add($"{file.Name} ist zu groß (max. 512 KB Text).", Severity.Warning);
+            Snackbar.Add(L["AgentView_Snackbar_FileTooLarge", file.Name].Value, Severity.Warning);
             return;
         }
         try
@@ -337,7 +337,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Datei konnte nicht gelesen werden: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["AgentView_Snackbar_FileReadError", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -403,7 +403,7 @@
         }
         catch (Exception ex)
         {
-            _lines.Add(new Line("error", $"Fehler: {ex.Message}"));
+            _lines.Add(new Line("error", L["AgentView_Chat_Error", ex.Message].Value));
         }
         finally
         {
@@ -474,7 +474,7 @@
 
     private async Task SaveLlm()
     {
-        if (!_isAdmin) { Snackbar.Add("Nur Admins dürfen die Agent-Einstellungen ändern.", Severity.Error); return; }
+        if (!_isAdmin) { Snackbar.Add(L["AgentView_Snackbar_AdminOnly"].Value, Severity.Error); return; }
         await SettingsStore.SaveAsync(new AgentSettings
         {
             Enabled = _llmEnabled,
@@ -486,7 +486,7 @@
             // Store empty when unchanged from default, so it keeps tracking the built-in prompt.
             SystemPrompt = _systemPrompt.Trim() == DefaultSystemPrompt.Trim() ? "" : _systemPrompt,
         }, await BuildPrincipalAsync());
-        Snackbar.Add("Provider gespeichert.", Severity.Success);
+        Snackbar.Add(L["AgentView_Snackbar_ProviderSaved"].Value, Severity.Success);
     }
 
     private void ResetSystemPrompt() => _systemPrompt = DefaultSystemPrompt;
@@ -559,7 +559,7 @@
             if (!_availableModels.Contains(_llmModel, StringComparer.OrdinalIgnoreCase))
                 _llmModel = PickPreferredModel(_availableModels);
             _modelStatus = "ok";
-            _modelStatusMsg = $"{_availableModels.Count} Modelle";
+            _modelStatusMsg = L["AgentView_ModelStatus_ModelCount", _availableModels.Count].Value;
             _lastTestedSignature = Signature();
             return;
         }
@@ -589,15 +589,15 @@
                 _llmModel = PickPreferredModel(_availableModels);
             _modelStatus = "ok";
             _modelStatusMsg = _availableModels.Count > 0
-                ? $"{_availableModels.Count} Modelle gefunden"
-                : "Key gültig, keine Modelle gelistet";
+                ? L["AgentView_ModelStatus_ModelsFound", _availableModels.Count].Value
+                : L["AgentView_ModelStatus_KeyValidNoModels"].Value;
             _lastTestedSignature = Signature();
         }
         catch (Exception)
         {
             _availableModels.Clear();
             _modelStatus = "fail";
-            _modelStatusMsg = "Verbindung fehlgeschlagen — Key/Endpoint prüfen";
+            _modelStatusMsg = L["AgentView_ModelStatus_ConnectionFailed"].Value;
         }
         finally
         {

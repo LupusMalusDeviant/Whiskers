@@ -8,6 +8,7 @@
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>App Store - Whiskers</PageTitle>
 
@@ -22,19 +23,19 @@
         </div>
         <div>
             <MudText Typo="Typo.h5">App Store</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">@TemplateService.GetTemplates().Count Apps verfügbar</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["AppStore_Header_Subtitle", TemplateService.GetTemplates().Count]</MudText>
         </div>
         <MudSpacer />
         @if (_mode == ViewMode.Registry)
         {
-            <MudTextField @bind-Value="_search" Placeholder="Image suchen (z.B. nginx, ghcr.io/owner/app)..." Variant="Variant.Outlined"
+            <MudTextField @bind-Value="_search" Placeholder="@L["AppStore_Placeholder_RegistrySearch"]" Variant="Variant.Outlined"
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
                           OnAdornmentClick="SearchRegistry" OnKeyDown="OnRegistrySearchKey"
                           Immediate="true" Style="max-width: 360px;" />
         }
         else
         {
-            <MudTextField @bind-Value="_search" Placeholder="Suchen..." Variant="Variant.Outlined"
+            <MudTextField @bind-Value="_search" Placeholder="@L["AppStore_Placeholder_Search"]" Variant="Variant.Outlined"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                           Immediate="true" Style="max-width: 280px;" />
         }
@@ -45,10 +46,10 @@
 <MudStack Row="true" Spacing="1" Class="mb-4">
     <MudButton Variant="@(_mode == ViewMode.Apps ? Variant.Filled : Variant.Outlined)"
                Color="Color.Primary" StartIcon="@Icons.Material.Filled.Apps"
-               OnClick="@(() => _mode = ViewMode.Apps)">App-Katalog</MudButton>
+               OnClick="@(() => _mode = ViewMode.Apps)">@L["AppStore_Button_AppCatalog"]</MudButton>
     <MudButton Variant="@(_mode == ViewMode.Registry ? Variant.Filled : Variant.Outlined)"
                Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
-               OnClick="@(() => _mode = ViewMode.Registry)">Registry-Suche</MudButton>
+               OnClick="@(() => _mode = ViewMode.Registry)">@L["AppStore_Button_RegistrySearch"]</MudButton>
 </MudStack>
 
 @if (_mode == ViewMode.Apps)
@@ -57,7 +58,7 @@
 <MudStack Row="true" Spacing="1" Class="mb-4" Style="flex-wrap: wrap;">
     <MudChip T="string" Size="Size.Small" OnClick="@(() => _categoryFilter = null)"
              Color="@(_categoryFilter == null ? Color.Primary : Color.Default)"
-             Variant="@(_categoryFilter == null ? Variant.Filled : Variant.Outlined)">Alle</MudChip>
+             Variant="@(_categoryFilter == null ? Variant.Filled : Variant.Outlined)">@L["AppStore_Chip_All"]</MudChip>
     @foreach (var cat in TemplateService.GetCategories())
     {
         var c = cat;
@@ -72,7 +73,7 @@
 @if (_installedApps.Any() && string.IsNullOrWhiteSpace(_search) && _categoryFilter == null)
 {
     <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600; color: var(--sw-accent-primary);">
-        Installiert (@_installedApps.Count)
+        @L["AppStore_Heading_Installed", _installedApps.Count]
     </MudText>
     <MudGrid Class="mb-4">
         @foreach (var app in _installedApps)
@@ -85,7 +86,7 @@
                             <MudText Typo="Typo.body1" Style="font-weight: 600;">@app.Project</MudText>
                         </MudStack>
                         <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
-                            @app.ContainerCount Container · @app.ServerName
+                            @L["AppStore_Label_ContainerSummary", app.ContainerCount, app.ServerName]
                         </MudText>
                         @foreach (var c in app.Containers.Take(3))
                         {
@@ -95,7 +96,7 @@
                         }
                         @if (app.Containers.Count > 3)
                         {
-                            <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">+@(app.Containers.Count - 3) weitere</MudText>
+                            <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">@L["AppStore_Label_MoreContainers", app.Containers.Count - 3]</MudText>
                         }
                     </MudStack>
                 </MudPaper>
@@ -133,7 +134,7 @@
 
 @if (!FilteredTemplates.Any())
 {
-    <MudAlert Severity="Severity.Info" Class="mt-4">Keine Apps gefunden für "@_search".</MudAlert>
+    <MudAlert Severity="Severity.Info" Class="mt-4">@L["AppStore_Empty_NoApps", _search]</MudAlert>
 }
 }
 
@@ -144,14 +145,14 @@
     <MudStack Row="true" Spacing="1" Class="mb-2" Style="flex-wrap: wrap;">
         <MudChip T="string" Size="Size.Small" OnClick="@(() => SelectRegistry(null))"
                  Color="@(_selectedRegistryId == null ? Color.Primary : Color.Default)"
-                 Variant="@(_selectedRegistryId == null ? Variant.Filled : Variant.Outlined)">Alle Marketplaces</MudChip>
+                 Variant="@(_selectedRegistryId == null ? Variant.Filled : Variant.Outlined)">@L["AppStore_Chip_AllMarketplaces"]</MudChip>
         @foreach (var reg in _registries)
         {
             var r = reg;
             <MudChip T="string" Size="Size.Small" OnClick="@(() => SelectRegistry(r.Id))"
                      Color="@(_selectedRegistryId == r.Id ? Color.Primary : Color.Default)"
                      Variant="@(_selectedRegistryId == r.Id ? Variant.Filled : Variant.Outlined)">
-                @r.Name@(r.SupportsSearch ? "" : " (exakte Referenz)")
+                @r.Name@(r.SupportsSearch ? "" : $" ({L["AppStore_Chip_ExactReference"].Value})")
             </MudChip>
         }
     </MudStack>
@@ -159,7 +160,7 @@
     @if (_selectedRegistryId != null && _registries.FirstOrDefault(r => r.Id == _selectedRegistryId) is { SupportsSearch: false })
     {
         <MudText Typo="Typo.caption" Class="mb-3" Style="color: var(--sw-text-muted);">
-            Dieser Marketplace bietet keine Volltextsuche — gib die exakte Referenz ein (z.B. <code>ghcr.io/owner/app</code> oder <code>owner/app</code>).
+            @L["AppStore_Hint_NoFullTextSearch"] <code>ghcr.io/owner/app</code> @L["AppStore_Hint_Or"] <code>owner/app</code>).
         </MudText>
     }
 
@@ -208,11 +209,11 @@
     }
     else if (_searchPerformed)
     {
-        <MudAlert Severity="Severity.Info" Class="mt-4">Keine Images gefunden für "@_search".</MudAlert>
+        <MudAlert Severity="Severity.Info" Class="mt-4">@L["AppStore_Empty_NoImages", _search]</MudAlert>
     }
     else
     {
-        <MudAlert Severity="Severity.Normal" Class="mt-4">Suchbegriff eingeben und Enter drücken, um Container-Images über die Marketplaces zu finden.</MudAlert>
+        <MudAlert Severity="Severity.Normal" Class="mt-4">@L["AppStore_Empty_SearchPrompt"]</MudAlert>
     }
 }
 
@@ -221,15 +222,15 @@
     <TitleContent>
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
             <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" />
-            <span>@_selectedImage?.Name deployen</span>
+            <span>@L["AppStore_Dialog_DeployTitle", _selectedImage?.Name ?? ""]</span>
         </MudStack>
     </TitleContent>
     <DialogContent>
         <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Class="mb-3">@_selectedImage?.RegistryName</MudChip>
 
-        <MudTextField @bind-Value="_deployProjectName" Label="Projektname" Variant="Variant.Outlined" Class="mb-3" Placeholder="my-app" />
+        <MudTextField @bind-Value="_deployProjectName" Label="@L["AppStore_Label_ProjectName"]" Variant="Variant.Outlined" Class="mb-3" Placeholder="my-app" />
 
-        <MudSelect T="string" @bind-Value="_deployServerId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+        <MudSelect T="string" @bind-Value="_deployServerId" Label="@L["AppStore_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
             @foreach (var srv in _servers)
             {
                 <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
@@ -254,9 +255,9 @@
             <MudTextField @bind-Value="_deployTag" Label="Tag" Variant="Variant.Outlined" Class="mb-3" Placeholder="latest" />
         }
 
-        <MudTextField @bind-Value="_deployPorts" Label="Ports (optional)" Variant="Variant.Outlined" Class="mb-1"
+        <MudTextField @bind-Value="_deployPorts" Label="@L["AppStore_Label_Ports"]" Variant="Variant.Outlined" Class="mb-1"
                       Placeholder="8080:80, 8443:443" Style="font-family: 'JetBrains Mono', monospace;" />
-        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">Format host:container, mehrere mit Komma getrennt.</MudText>
+        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">@L["AppStore_Hint_PortFormat"]</MudText>
 
         <MudText Typo="Typo.caption" Class="mt-3" Style="display: block; color: var(--sw-text-muted);">
             Image: <code>@($"{_selectedImage?.PullReference}:{(string.IsNullOrWhiteSpace(_deployTag) ? "latest" : _deployTag)}")</code>
@@ -268,12 +269,12 @@
         }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="@(() => _showRegistryDialog = false)" Disabled="@_deploying">Abbrechen</MudButton>
+        <MudButton OnClick="@(() => _showRegistryDialog = false)" Disabled="@_deploying">@L["AppStore_Button_Cancel"]</MudButton>
         @if (_role >= AppRole.Operator)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployRegistryImage"
                        Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName))">
-                Deployen auf @(_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local")
+                @L["AppStore_Button_DeployTo", _servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"]
             </MudButton>
         }
     </DialogActions>
@@ -284,15 +285,15 @@
         <TitleContent>
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@GetIcon(_selectedTemplate!.Icon)" Color="Color.Primary" />
-                <span>@_selectedTemplate.Name deployen</span>
+                <span>@L["AppStore_Dialog_DeployTitle", _selectedTemplate.Name]</span>
             </MudStack>
         </TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="_deployProjectName" Label="Projektname" Variant="Variant.Outlined" Class="mb-3"
+            <MudTextField @bind-Value="_deployProjectName" Label="@L["AppStore_Label_ProjectName"]" Variant="Variant.Outlined" Class="mb-3"
                           Placeholder="my-app" />
 
             @* Server Selection *@
-            <MudSelect T="string" @bind-Value="_deployServerId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelect T="string" @bind-Value="_deployServerId" Label="@L["AppStore_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
                 @foreach (var srv in _servers)
                 {
                     <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
@@ -316,7 +317,7 @@
             @if (_portConflicts.Any())
             {
                 <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
-                    Port-Konflikte erkannt! Bitte andere Ports wählen.
+                    @L["AppStore_Alert_PortConflicts"]
                 </MudAlert>
             }
 
@@ -326,12 +327,12 @@
             }
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="@(() => _showDialog = false)" Disabled="@_deploying">Abbrechen</MudButton>
+            <MudButton OnClick="@(() => _showDialog = false)" Disabled="@_deploying">@L["AppStore_Button_Cancel"]</MudButton>
             @if (_role >= AppRole.Operator)
             {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployTemplate"
                            Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName) || _portConflicts.Any())">
-                    Deployen auf @(_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local")
+                    @L["AppStore_Button_DeployTo", _servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"]
                 </MudButton>
             }
         </DialogActions>
@@ -373,7 +374,7 @@
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["AppStore_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -409,7 +410,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Installierte Apps konnten nicht geladen werden: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["AppStore_Snackbar_LoadInstalledFailed", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -472,7 +473,7 @@
             if (!key.Contains("PORT", StringComparison.OrdinalIgnoreCase)) continue;
             if (int.TryParse(value, out var port) && _usedPorts.Contains(port))
             {
-                _portConflicts[key] = $"Port {port} ist bereits belegt!";
+                _portConflicts[key] = L["AppStore_Error_PortInUse", port].Value;
             }
         }
     }
@@ -483,7 +484,7 @@
         if (_selectedTemplate == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
         {
-            Snackbar.Add("Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.", Severity.Error);
+            Snackbar.Add(L["AppStore_Snackbar_InvalidProjectName"].Value, Severity.Error);
             return;
         }
 
@@ -492,14 +493,14 @@
         {
             if (string.IsNullOrWhiteSpace(_deployVars.GetValueOrDefault(req)))
             {
-                Snackbar.Add($"Pflichtfeld: {req}", Severity.Warning);
+                Snackbar.Add(L["AppStore_Snackbar_RequiredField", req].Value, Severity.Warning);
                 return;
             }
         }
 
         if (_portConflicts.Any())
         {
-            Snackbar.Add("Port-Konflikte beheben!", Severity.Warning);
+            Snackbar.Add(L["AppStore_Snackbar_FixPortConflicts"].Value, Severity.Warning);
             return;
         }
 
@@ -523,15 +524,15 @@
             await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, _selectedTemplate.Name, details: $"Template: {_selectedTemplate.Id}", serverId: _deployServerId, success: result.Success);
             if (result.Success)
             {
-                Snackbar.Add($"'{_selectedTemplate.Name}' erfolgreich deployed auf {_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"}!", Severity.Success);
+                Snackbar.Add(L["AppStore_Snackbar_TemplateDeployed", _selectedTemplate.Name, _servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"].Value, Severity.Success);
                 _showDialog = false;
             }
             else
             {
-                Snackbar.Add($"Fehler: {result.Output}\n{result.Error}", Severity.Error);
+                Snackbar.Add(L["AppStore_Snackbar_DeployError", result.Output, result.Error].Value, Severity.Error);
             }
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["AppStore_Snackbar_Error", ex.Message].Value, Severity.Error); }
         finally { _deploying = false; }
     }
 
@@ -558,7 +559,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Suche fehlgeschlagen: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["AppStore_Snackbar_SearchFailed", ex.Message].Value, Severity.Error);
             _searchResults = new();
         }
         finally { _searching = false; }
@@ -596,7 +597,7 @@
         if (_selectedImage == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
         {
-            Snackbar.Add("Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.", Severity.Error);
+            Snackbar.Add(L["AppStore_Snackbar_InvalidProjectName"].Value, Severity.Error);
             return;
         }
 
@@ -634,15 +635,15 @@
 
             if (result.Success)
             {
-                Snackbar.Add($"'{imageRef}' deployed auf {_servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"}!", Severity.Success);
+                Snackbar.Add(L["AppStore_Snackbar_ImageDeployed", imageRef, _servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"].Value, Severity.Success);
                 _showRegistryDialog = false;
             }
             else
             {
-                Snackbar.Add($"Fehler: {result.Output}\n{result.Error}", Severity.Error);
+                Snackbar.Add(L["AppStore_Snackbar_DeployError", result.Output, result.Error].Value, Severity.Error);
             }
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["AppStore_Snackbar_Error", ex.Message].Value, Severity.Error); }
         finally { _deploying = false; }
     }
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Whiskers.Models.Help;
 
 namespace Whiskers.Services.Help;
@@ -5,11 +6,14 @@ namespace Whiskers.Services.Help;
 /// <summary>
 /// The complete in-app user handbook. Content lives here as Markdown prose plus a handful of
 /// hand-drawn, theme-aware SVG diagrams; UI-heavy chapters carry screenshot placeholders that can
-/// be swapped for real captures later. Pure static content, no external state.
+/// be swapped for real captures later. Pure static content, no external state. This class holds
+/// the German chapters; the English set (the default for every non-German culture) lives in
+/// <see cref="HelpContentEn"/> and must be kept structurally identical chapter-for-chapter.
 /// </summary>
 public sealed class HelpContentService : IHelpContentService
 {
-    public IReadOnlyList<HelpChapter> GetChapters() => Chapters;
+    public IReadOnlyList<HelpChapter> GetChapters() =>
+        CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de" ? Chapters : HelpContentEn.Chapters;
 
     private static HelpFigure Shot(string caption) => new(HelpFigureKind.Screenshot, caption);
     private static HelpFigure Img(string caption, string path) => new(HelpFigureKind.Image, caption, Image: path);

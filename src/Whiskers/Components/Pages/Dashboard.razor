@@ -12,6 +12,7 @@
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject Whiskers.Services.Workloads.IWorkloadProviderFactory WorkloadFactory
+@inject IStringLocalizer<SharedResource> L
 @implements IDisposable
 
 <PageTitle>Dashboard - Whiskers</PageTitle>
@@ -22,8 +23,8 @@
             <MudIcon Icon="@Icons.Material.Filled.Dashboard" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Container-Übersicht</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Echtzeit-Status aller Server und Container</MudText>
+            <MudText Typo="Typo.h5">@L["Dashboard_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Dashboard_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
@@ -36,7 +37,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.Dns" Class="sw-stat-icon mr-3" />
                 <div>
                     <div class="sw-stat-value">@_containers.Count</div>
-                    <div class="sw-stat-label">Gesamt</div>
+                    <div class="sw-stat-label">@L["Dashboard_Stat_Total"]</div>
                 </div>
             </MudStack>
         </div>
@@ -47,7 +48,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.PlayCircle" Class="sw-stat-icon mr-3" />
                 <div>
                     <div class="sw-stat-value">@_containers.Count(c => c.State == "running")</div>
-                    <div class="sw-stat-label">Laufend</div>
+                    <div class="sw-stat-label">@L["Dashboard_Stat_Running"]</div>
                 </div>
             </MudStack>
         </div>
@@ -58,7 +59,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.StopCircle" Class="sw-stat-icon mr-3" />
                 <div>
                     <div class="sw-stat-value">@_containers.Count(c => c.State == "exited")</div>
-                    <div class="sw-stat-label">Gestoppt</div>
+                    <div class="sw-stat-label">@L["Dashboard_Stat_Stopped"]</div>
                 </div>
             </MudStack>
         </div>
@@ -69,7 +70,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.Warning" Class="sw-stat-icon mr-3" />
                 <div>
                     <div class="sw-stat-value">@_containers.Count(c => c.HealthStatus == "unhealthy")</div>
-                    <div class="sw-stat-label">Fehlerhaft</div>
+                    <div class="sw-stat-label">@L["Dashboard_Stat_Unhealthy"]</div>
                 </div>
             </MudStack>
         </div>
@@ -85,9 +86,9 @@
         <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
             <MudIcon Icon="@Icons.Material.Filled.RocketLaunch" Color="Color.Primary" Size="Size.Large" />
             <div>
-                <MudText Typo="Typo.h6">Fügen Sie Ihren ersten Server hinzu</MudText>
+                <MudText Typo="Typo.h6">@L["Dashboard_FirstServer_Title"]</MudText>
                 <MudText Typo="Typo.body2" Color="Color.Secondary">
-                    Der lokale Docker-Host ist verbunden ✓ — verbinden Sie jetzt Ihre Flotte.
+                    @L["Dashboard_FirstServer_Subtitle"]
                 </MudText>
             </div>
         </MudStack>
@@ -96,31 +97,27 @@
                 <MudPaper Class="pa-4 glass-card" Style="height: 100%;">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
                         <MudIcon Icon="@Icons.Material.Filled.Hub" Color="Color.Primary" />
-                        <MudText Typo="Typo.subtitle1" Style="font-weight:600;">One-Click-Onboarding</MudText>
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Empfohlen</MudChip>
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:600;">@L["Dashboard_FirstServer_OnboardTitle"]</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@L["Dashboard_FirstServer_RecommendedChip"]</MudChip>
                     </MudStack>
                     <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-                        Eine einmalige SSH-Bootstrap-Verbindung installiert Tailscale-Mesh, Telemetrie und
-                        den mTLS-Docker-Proxy — danach wird der SSH-Zugang gelöscht. Control-, Daten- und
-                        Telemetrie-Plane laufen getrennt übers Mesh. Voraussetzung: kostenloses Tailscale-Konto.
+                        @L["Dashboard_FirstServer_OnboardText"]
                     </MudText>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Hub"
-                               Href="servers?add=onboard">Server onboarden</MudButton>
+                               Href="servers?add=onboard">@L["Dashboard_FirstServer_OnboardButton"]</MudButton>
                 </MudPaper>
             </MudItem>
             <MudItem xs="12" md="6">
                 <MudPaper Class="pa-4 glass-card" Style="height: 100%;">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
                         <MudIcon Icon="@Icons.Material.Filled.Cable" Color="Color.Secondary" />
-                        <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Nur Docker-API / SSH verbinden</MudText>
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:600;">@L["Dashboard_FirstServer_ClassicTitle"]</MudText>
                     </MudStack>
                     <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-                        Klassische Verbindung ohne Mesh: Docker Remote API (TCP, optional TLS) oder ein
-                        SSH-Tunnel. Für Nutzer, die kein Tailscale einsetzen möchten — jederzeit später
-                        aufs Mesh umstellbar.
+                        @L["Dashboard_FirstServer_ClassicText"]
                     </MudText>
                     <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Cable"
-                               Href="servers?add=classic">Server verbinden</MudButton>
+                               Href="servers?add=classic">@L["Dashboard_FirstServer_ClassicButton"]</MudButton>
                 </MudPaper>
             </MudItem>
         </MudGrid>
@@ -134,7 +131,7 @@
         <MudIconButton Icon="@(_expandedServers.Contains(serverGroup.ServerId) ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
                        Size="Size.Small" OnClick="@(() => ToggleServerExpand(serverGroup.ServerId))" />
         <div style="display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1 1 auto; min-width: 0;"
-             title="Container ein-/ausklappen"
+             title="@L["Dashboard_Tooltip_ToggleServer"]"
              @onclick="@(() => ToggleServerExpand(serverGroup.ServerId))">
             <span class="sw-pulse-dot sw-green" style="@(GetServerReachable(serverGroup.ServerId) ? "" : "background: var(--sw-accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.5);")"></span>
             <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
@@ -147,12 +144,12 @@
             else if (_serverInfos.TryGetValue(serverGroup.ServerId, out var sInfoHeader) && sInfoHeader.IsReachable)
             {
                 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="ml-2">
-                    @sInfoHeader.OperatingSystem — @sInfoHeader.CpuCount Kerne — @FormatBytes(sInfoHeader.MemoryTotalBytes) RAM
+                    @L["Dashboard_ServerHeader_Info", sInfoHeader.OperatingSystem, sInfoHeader.CpuCount, FormatBytes(sInfoHeader.MemoryTotalBytes)]
                 </MudText>
                 var cveSum = CveStore.SummarizeServer(serverGroup.ServerId);
                 if (cveSum.CriticalCount + cveSum.HighCount > 0)
                 {
-                    <MudTooltip Text="@($"{cveSum.CriticalCount} Critical, {cveSum.HighCount} High, {cveSum.MediumCount} Medium, {cveSum.LowCount} Low — klick zu /cves")">
+                    <MudTooltip Text="@L["Dashboard_Cve_Tooltip", cveSum.CriticalCount, cveSum.HighCount, cveSum.MediumCount, cveSum.LowCount]">
                         <MudLink Href="cves" Underline="Underline.None" @onclick:stopPropagation="true">
                             <MudChip T="string" Size="Size.Small"
                                      Color="@(cveSum.CriticalCount > 0 ? Color.Error : Color.Warning)"
@@ -165,7 +162,7 @@
             }
             else
             {
-                <MudText Typo="Typo.body2" Color="Color.Error" Class="ml-2">nicht erreichbar</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Error" Class="ml-2">@L["Dashboard_Server_Unreachable"]</MudText>
             }
         </div>
         <MudSpacer />
@@ -176,16 +173,16 @@
             @if (ServerConfigService.SupportsTerminal(serverGroup.ServerId))
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Primary"
-                               Href="@($"server-terminal/{serverGroup.ServerId}")" title="Terminal" />
+                               Href="@($"server-terminal/{serverGroup.ServerId}")" title="@L["Dashboard_Tooltip_Terminal"]" />
             }
             <MudIconButton Icon="@Icons.Material.Filled.Security" Size="Size.Small" Color="Color.Warning"
-                           Href="@($"firewall/{serverGroup.ServerId}")" title="Firewall / Ports" />
+                           Href="@($"firewall/{serverGroup.ServerId}")" title="@L["Dashboard_Tooltip_Firewall"]" />
             <MudIconButton Icon="@Icons.Material.Filled.Web" Size="Size.Small" Color="Color.Info"
-                           Href="@($"nginx/{serverGroup.ServerId}")" title="Nginx-Seiten" />
+                           Href="@($"nginx/{serverGroup.ServerId}")" title="@L["Dashboard_Tooltip_Nginx"]" />
             <MudIconButton Icon="@Icons.Material.Filled.MiscellaneousServices" Size="Size.Small" Color="Color.Default"
-                           Href="@($"services/{serverGroup.ServerId}")" title="Systemdienste" />
+                           Href="@($"services/{serverGroup.ServerId}")" title="@L["Dashboard_Tooltip_Services"]" />
             <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Success"
-                           Href="@($"ssl/{serverGroup.ServerId}")" title="SSL-Zertifikate" />
+                           Href="@($"ssl/{serverGroup.ServerId}")" title="@L["Dashboard_Tooltip_Ssl"]" />
         }
     </div>
 
@@ -208,21 +205,21 @@
                         <MudText Typo="Typo.caption" Color="Color.Secondary">Host</MudText>
                         <MudText Typo="Typo.body2" Style="font-family: monospace;">@sInfo.IpAddress</MudText>
                         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">Container</MudText>
-                        <MudText Typo="Typo.body2">@sInfo.ContainersRunning laufend / @sInfo.ContainersTotal gesamt</MudText>
+                        <MudText Typo="Typo.body2">@L["Dashboard_ServerInfo_ContainersValue", sInfo.ContainersRunning, sInfo.ContainersTotal]</MudText>
                         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">Images</MudText>
                         <MudText Typo="Typo.body2">@sInfo.ImagesCount</MudText>
                     </MudStack>
                 </MudItem>
                 <MudItem xs="12" md="3">
                     <MudStack Spacing="1">
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">CPU (@sInfo.CpuCount Kerne)</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Dashboard_ServerInfo_CpuLabel", sInfo.CpuCount]</MudText>
                         <ResourceGauge Value="@sInfo.CpuUsagePercent" />
-                        <MudText Typo="Typo.body2">@sInfo.CpuUsagePercent.ToString("F1")% genutzt</MudText>
+                        <MudText Typo="Typo.body2">@L["Dashboard_ServerInfo_CpuUsed", sInfo.CpuUsagePercent.ToString("F1")]</MudText>
                     </MudStack>
                 </MudItem>
                 <MudItem xs="12" md="3">
                     <MudStack Spacing="1">
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">Speicher</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Dashboard_ServerInfo_MemoryLabel"]</MudText>
                         <ResourceGauge Value="@sInfo.MemoryUsedPercent" />
                         <MudText Typo="Typo.body2">@FormatBytes(sInfo.MemoryUsedBytes) / @FormatBytes(sInfo.MemoryTotalBytes)</MudText>
                     </MudStack>
@@ -232,15 +229,15 @@
             @* Auslastungsverlauf *@
             <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-4 mb-2" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Color="Color.Primary" />
-                <MudText Typo="Typo.subtitle2">Auslastungsverlauf</MudText>
+                <MudText Typo="Typo.subtitle2">@L["Dashboard_Chart_UsageHistoryTitle"]</MudText>
                 <MudSpacer />
                 <MudSelect T="string" Value="_chartPeriod" Variant="Variant.Outlined" Margin="Margin.Dense"
-                           Style="max-width: 130px;" Label="Zeitraum"
+                           Style="max-width: 130px;" Label="@L["Dashboard_Chart_PeriodLabel"]"
                            ValueChanged="@((string v) => { _chartPeriod = v; _ = ReloadAllServerHistory(); })">
-                    <MudSelectItem Value="@("1h")">1 Stunde</MudSelectItem>
-                    <MudSelectItem Value="@("6h")">6 Stunden</MudSelectItem>
-                    <MudSelectItem Value="@("24h")">24 Stunden</MudSelectItem>
-                    <MudSelectItem Value="@("7d")">7 Tage</MudSelectItem>
+                    <MudSelectItem Value="@("1h")">@L["Dashboard_Chart_Period1h"]</MudSelectItem>
+                    <MudSelectItem Value="@("6h")">@L["Dashboard_Chart_Period6h"]</MudSelectItem>
+                    <MudSelectItem Value="@("24h")">@L["Dashboard_Chart_Period24h"]</MudSelectItem>
+                    <MudSelectItem Value="@("7d")">@L["Dashboard_Chart_Period7d"]</MudSelectItem>
                 </MudSelect>
             </MudStack>
 
@@ -253,7 +250,7 @@
                 <MudGrid Spacing="2">
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-3" Elevation="1">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">CPU-Verlauf</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">@L["Dashboard_Chart_CpuHistory"]</MudText>
                             <ApexCharts.ApexChart TItem="MetricPoint" Height="180" Options="@_cpuChartOptions">
                                 <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="cpuHist"
                                                  SeriesType="ApexCharts.SeriesType.Area"
@@ -265,13 +262,13 @@
                     </MudItem>
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-3" Elevation="1">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">Speicher-Verlauf</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">@L["Dashboard_Chart_MemoryHistory"]</MudText>
                             <ApexCharts.ApexChart TItem="MetricPoint" Height="180" Options="@_memChartOptions">
                                 <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="memHist"
                                                  SeriesType="ApexCharts.SeriesType.Area"
                                                  XValue="@(p => p.Timestamp)"
                                                  YValue="@(p => (decimal)p.Value)"
-                                                 Name="Speicher %" />
+                                                 Name="@L["Dashboard_Chart_MemorySeries"]" />
                             </ApexCharts.ApexChart>
                         </MudPaper>
                     </MudItem>
@@ -279,7 +276,7 @@
             }
             else
             {
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Noch keine historischen Daten vorhanden.</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Dashboard_Chart_NoHistory"]</MudText>
             }
         </div>
     }
@@ -299,11 +296,11 @@
                 <MudTh>Name</MudTh>
                 <MudTh>Image</MudTh>
                 <MudTh>Status</MudTh>
-                <MudTh>Zustand</MudTh>
+                <MudTh>@L["Dashboard_Table_Health"]</MudTh>
                 <MudTh Style="width: 150px;">CPU</MudTh>
-                <MudTh Style="width: 150px;">Speicher</MudTh>
-                <MudTh>Statustext</MudTh>
-                <MudTh>Aktionen</MudTh>
+                <MudTh Style="width: 150px;">@L["Dashboard_Table_Memory"]</MudTh>
+                <MudTh>@L["Dashboard_Table_StatusText"]</MudTh>
+                <MudTh>@L["Dashboard_Table_Actions"]</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd>
@@ -361,20 +358,20 @@
                         @if (_role >= AppRole.Operator)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                           title="@(_k8sServerIds.Contains(context.ServerId) ? "Stoppen (skaliert den Controller auf 0)" : "Stoppen")"
+                                           title="@(_k8sServerIds.Contains(context.ServerId) ? L["Dashboard_Action_StopK8s"].Value : L["Dashboard_Action_Stop"].Value)"
                                            OnClick="@(() => StopContainer(context))" />
                             <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                           title="@(_k8sServerIds.Contains(context.ServerId) ? "Neustarten (Rollout-Restart)" : "Neustarten")"
+                                           title="@(_k8sServerIds.Contains(context.ServerId) ? L["Dashboard_Action_RestartK8s"].Value : L["Dashboard_Action_Restart"].Value)"
                                            OnClick="@(() => RestartContainer(context))" />
                             @if (HasUpdate(context))
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.SystemUpdateAlt" Size="Size.Small" Color="Color.Warning"
-                                               title="Image aktualisieren" OnClick="@(() => UpdateContainer(context))" />
+                                               title="@L["Dashboard_Action_UpdateImage"]" OnClick="@(() => UpdateContainer(context))" />
                             }
                             @if (HasRollback(context))
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.SettingsBackupRestore" Size="Size.Small" Color="Color.Secondary"
-                                               title="Update zurückrollen" OnClick="@(() => RollbackContainer(context))" />
+                                               title="@L["Dashboard_Action_Rollback"]" OnClick="@(() => RollbackContainer(context))" />
                             }
                         }
                     }
@@ -383,23 +380,23 @@
                         @if (_role >= AppRole.Operator)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                           title="Starten" OnClick="@(() => StartContainer(context))" />
+                                           title="@L["Dashboard_Action_Start"]" OnClick="@(() => StartContainer(context))" />
                             @if (HasRollback(context))
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.SettingsBackupRestore" Size="Size.Small" Color="Color.Secondary"
-                                               title="Update zurückrollen" OnClick="@(() => RollbackContainer(context))" />
+                                               title="@L["Dashboard_Action_Rollback"]" OnClick="@(() => RollbackContainer(context))" />
                             }
                         }
                         @if (_role >= AppRole.Admin && !_k8sServerIds.Contains(context.ServerId))
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                           title="Entfernen" OnClick="@(() => RemoveContainer(context))" />
+                                           title="@L["Dashboard_Action_Remove"]" OnClick="@(() => RemoveContainer(context))" />
                         }
                     }
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>
-                <MudText Class="pa-4">Keine Container in diesem Projekt gefunden.</MudText>
+                <MudText Class="pa-4">@L["Dashboard_Table_NoContainers"]</MudText>
             </NoRecordsContent>
         </MudTable>
         }
@@ -408,7 +405,7 @@
 
 @if (!_loading && !_containers.Any())
 {
-    <MudText Class="pa-4">Keine Container gefunden. Bitte sicherstellen, dass Docker läuft und der Socket erreichbar ist.</MudText>
+    <MudText Class="pa-4">@L["Dashboard_Empty_NoContainers"]</MudText>
 }
 
 @code {
@@ -441,7 +438,7 @@
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["Dashboard_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -503,7 +500,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler beim Laden der Container: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Dashboard_Snackbar_LoadError", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -647,13 +644,13 @@
             else
                 await DockerService.StartContainerAsync(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.start", "container", container.Id, container.Name, serverId: container.ServerId);
-            Snackbar.Add($"{container.Name} gestartet", Severity.Success);
+            Snackbar.Add(L["Dashboard_Snackbar_Started", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "container.start", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
-            Snackbar.Add($"Fehler beim Starten von {container.Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Dashboard_Snackbar_StartError", container.Name, ex.Message].Value, Severity.Error);
         }
     }
 
@@ -669,13 +666,13 @@
             else
                 await DockerService.StopContainerAsync(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.stop", "container", container.Id, container.Name, serverId: container.ServerId);
-            Snackbar.Add($"{container.Name} gestoppt", Severity.Success);
+            Snackbar.Add(L["Dashboard_Snackbar_Stopped", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "container.stop", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
-            Snackbar.Add($"Fehler beim Stoppen von {container.Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Dashboard_Snackbar_StopError", container.Name, ex.Message].Value, Severity.Error);
         }
     }
 
@@ -691,13 +688,13 @@
             else
                 await DockerService.RestartContainerAsync(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.restart", "container", container.Id, container.Name, serverId: container.ServerId);
-            Snackbar.Add($"{container.Name} neugestartet", Severity.Success);
+            Snackbar.Add(L["Dashboard_Snackbar_Restarted", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "container.restart", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
-            Snackbar.Add($"Fehler beim Neustarten von {container.Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Dashboard_Snackbar_RestartError", container.Name, ex.Message].Value, Severity.Error);
         }
     }
 
@@ -705,22 +702,22 @@
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Container entfernen",
-            $"Container '{container.Name}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.",
-            yesText: "Entfernen", cancelText: "Abbrechen");
+            L["Dashboard_Dialog_RemoveTitle"].Value,
+            L["Dashboard_Dialog_RemoveMessage", container.Name].Value,
+            yesText: L["Dashboard_Dialog_RemoveYes"].Value, cancelText: L["Dashboard_Dialog_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await DockerService.RemoveContainerAsync(container.Id, force: true, serverId: container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.remove", "container", container.Id, container.Name, serverId: container.ServerId);
-            Snackbar.Add($"{container.Name} entfernt", Severity.Success);
+            Snackbar.Add(L["Dashboard_Snackbar_Removed", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "container.remove", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
-            Snackbar.Add($"Fehler beim Entfernen von {container.Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Dashboard_Snackbar_RemoveError", container.Name, ex.Message].Value, Severity.Error);
         }
     }
 
@@ -733,7 +730,7 @@
         if (info == null) return "";
         var local = info.LocalDigest.Length > 19 ? info.LocalDigest[..19] : info.LocalDigest;
         var remote = info.RemoteDigest.Length > 19 ? info.RemoteDigest[..19] : info.RemoteDigest;
-        return $"Update verfügbar: {info.Image} — Lokal: {local}… → Remote: {remote}…";
+        return L["Dashboard_Tooltip_UpdateAvailable", info.Image, local, remote].Value;
     }
 
     private async Task UpdateContainer(ContainerInfo container)
@@ -742,7 +739,7 @@
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            Snackbar.Add($"{container.Name} wird aktualisiert...", Severity.Info);
+            Snackbar.Add(L["Dashboard_Snackbar_Updating", container.Name].Value, Severity.Info);
             var progress = new Progress<string>(msg => Snackbar.Add(msg, Severity.Info));
             // C12: snapshot the current image + config BEFORE recreating, so this update can be rolled back.
             // Best-effort — a snapshot failure must not block the update itself.
@@ -751,13 +748,13 @@
             await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
             ImageUpdateStore.Remove(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, serverId: container.ServerId);
-            Snackbar.Add($"{container.Name} erfolgreich aktualisiert!", Severity.Success);
+            Snackbar.Add(L["Dashboard_Snackbar_Updated", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
-            Snackbar.Add($"Fehler beim Aktualisieren von {container.Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Dashboard_Snackbar_UpdateError", container.Name, ex.Message].Value, Severity.Error);
         }
     }
 
@@ -770,16 +767,15 @@
         if (!_rollbacks.TryGetValue($"{container.ServerId}|{container.Name}", out var snap)) return;
 
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Update zurückrollen?",
-            $"{container.Name} wird auf das vorherige Image zurückgesetzt (Snapshot vom {snap.CapturedAt.ToLocalTime():g}). " +
-            "Der Container wird dazu neu erstellt.",
-            yesText: "Zurückrollen", cancelText: "Abbrechen");
+            L["Dashboard_Dialog_RollbackTitle"].Value,
+            L["Dashboard_Dialog_RollbackMessage", container.Name, snap.CapturedAt.ToLocalTime().ToString("g")].Value,
+            yesText: L["Dashboard_Dialog_RollbackYes"].Value, cancelText: L["Dashboard_Dialog_Cancel"].Value);
         if (confirmed != true) return;
 
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            Snackbar.Add($"{container.Name} wird zurückgerollt...", Severity.Info);
+            Snackbar.Add(L["Dashboard_Snackbar_RollingBack", container.Name].Value, Severity.Info);
             var msg = await AutoUpdate.RollbackAsync(snap.Id);
             await AuditLog.LogAsync(actor, "web", "container.rollback", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(msg, Severity.Success);
@@ -788,7 +784,7 @@
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "container.rollback", "container", container.Id, container.Name, details: ex.Message, serverId: container.ServerId, success: false);
-            Snackbar.Add($"Fehler beim Zurückrollen von {container.Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Dashboard_Snackbar_RollbackError", container.Name, ex.Message].Value, Severity.Error);
         }
     }
 

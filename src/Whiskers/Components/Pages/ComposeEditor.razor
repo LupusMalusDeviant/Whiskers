@@ -6,6 +6,7 @@
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>Compose Editor - Whiskers</PageTitle>
 
@@ -16,10 +17,10 @@
         </div>
         <div>
             <MudText Typo="Typo.h5">Compose Editor</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Docker Compose-Dateien bearbeiten und deployen</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ComposeEditor_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddService">Service hinzufügen</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddService">@L["ComposeEditor_Button_AddService"]</MudButton>
     </MudStack>
 </div>
 
@@ -28,7 +29,7 @@
     <MudItem xs="12" md="5">
         @if (!_services.Any())
         {
-            <MudAlert Severity="Severity.Info">Füge Services hinzu um eine Compose-Datei zu erstellen.</MudAlert>
+            <MudAlert Severity="Severity.Info">@L["ComposeEditor_Empty_NoServices"]</MudAlert>
         }
         @foreach (var svc in _services)
         {
@@ -40,8 +41,8 @@
                     <MudIcon Icon="@Icons.Material.Filled.Widgets" Size="Size.Small"
                              Style="@($"color: {(_selectedService == s ? "var(--sw-accent-blue)" : "var(--sw-text-muted)") };")" />
                     <MudStack Spacing="0">
-                        <MudText Typo="Typo.body2" Style="font-weight: 600;">@(string.IsNullOrEmpty(s.Name) ? "(unbenannt)" : s.Name)</MudText>
-                        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">@(string.IsNullOrEmpty(s.Image) ? "kein Image" : s.Image)</MudText>
+                        <MudText Typo="Typo.body2" Style="font-weight: 600;">@(string.IsNullOrEmpty(s.Name) ? L["ComposeEditor_Label_Unnamed"].Value : s.Name)</MudText>
+                        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">@(string.IsNullOrEmpty(s.Image) ? L["ComposeEditor_Label_NoImage"].Value : s.Image)</MudText>
                     </MudStack>
                     <MudSpacer />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
@@ -58,26 +59,26 @@
             var svc = _selectedService;
             <MudPaper Class="pa-4" Elevation="0">
                 <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight: 600;">
-                    Service: @(string.IsNullOrEmpty(svc.Name) ? "(neu)" : svc.Name)
+                    Service: @(string.IsNullOrEmpty(svc.Name) ? L["ComposeEditor_Label_New"].Value : svc.Name)
                 </MudText>
                 <MudGrid>
                     <MudItem xs="6">
-                        <MudTextField @bind-Value="svc.Name" Label="Service-Name" Variant="Variant.Outlined" />
+                        <MudTextField @bind-Value="svc.Name" Label="@L["ComposeEditor_Label_ServiceName"]" Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="6">
                         <MudTextField @bind-Value="svc.Image" Label="Image" Variant="Variant.Outlined"
                                       Placeholder="nginx:latest" Style="font-family: monospace;" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="svc.Ports" Label="Ports (kommagetrennt)" Variant="Variant.Outlined"
+                        <MudTextField @bind-Value="svc.Ports" Label="@L["ComposeEditor_Label_Ports"]" Variant="Variant.Outlined"
                                       Placeholder="8080:80, 8443:443" Style="font-family: monospace;" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="svc.EnvVars" Label="Umgebungsvariablen (KEY=VALUE, kommagetrennt)" Variant="Variant.Outlined"
+                        <MudTextField @bind-Value="svc.EnvVars" Label="@L["ComposeEditor_Label_EnvVars"]" Variant="Variant.Outlined"
                                       Placeholder="DB_HOST=db, DB_PORT=5432" Style="font-family: monospace;" Lines="2" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="svc.Volumes" Label="Volumes (kommagetrennt)" Variant="Variant.Outlined"
+                        <MudTextField @bind-Value="svc.Volumes" Label="@L["ComposeEditor_Label_Volumes"]" Variant="Variant.Outlined"
                                       Placeholder="data:/app/data, ./config:/etc/config" Style="font-family: monospace;" />
                     </MudItem>
                     <MudItem xs="6">
@@ -89,11 +90,11 @@
                         </MudSelect>
                     </MudItem>
                     <MudItem xs="6">
-                        <MudTextField @bind-Value="svc.DependsOn" Label="Depends On (kommagetrennt)" Variant="Variant.Outlined"
+                        <MudTextField @bind-Value="svc.DependsOn" Label="@L["ComposeEditor_Label_DependsOn"]" Variant="Variant.Outlined"
                                       Placeholder="db, redis" />
                     </MudItem>
                     <MudItem xs="6">
-                        <MudTextField @bind-Value="svc.Network" Label="Netzwerk" Variant="Variant.Outlined"
+                        <MudTextField @bind-Value="svc.Network" Label="@L["ComposeEditor_Label_Network"]" Variant="Variant.Outlined"
                                       Placeholder="app-network" />
                     </MudItem>
                 </MudGrid>
@@ -101,7 +102,7 @@
         }
         else
         {
-            <MudAlert Severity="Severity.Info">Wähle einen Service links aus oder erstelle einen neuen.</MudAlert>
+            <MudAlert Severity="Severity.Info">@L["ComposeEditor_Empty_NoSelection"]</MudAlert>
         }
     </MudItem>
 </MudGrid>
@@ -111,23 +112,23 @@
 {
     <MudDivider Class="my-4" />
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
-        <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Generierte docker-compose.yml</MudText>
+        <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@L["ComposeEditor_Heading_GeneratedYaml"]</MudText>
         <MudSpacer />
-        <MudSelect T="string" @bind-Value="_serverId" Label="Ziel-Server" Variant="Variant.Outlined"
+        <MudSelect T="string" @bind-Value="_serverId" Label="@L["ComposeEditor_Label_TargetServer"]" Variant="Variant.Outlined"
                    Style="max-width: 200px;">
             @foreach (var srv in _servers)
             {
                 <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
             }
         </MudSelect>
-        <MudTextField @bind-Value="_projectName" Label="Projektname" Variant="Variant.Outlined"
+        <MudTextField @bind-Value="_projectName" Label="@L["ComposeEditor_Label_ProjectName"]" Variant="Variant.Outlined"
                       Style="max-width: 200px;" Placeholder="my-app" />
         @if (_role >= AppRole.Operator)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch"
                        OnClick="Deploy" Disabled="@(_deploying || string.IsNullOrWhiteSpace(_projectName))">
                 @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-                Deployen
+                @L["ComposeEditor_Button_Deploy"]
             </MudButton>
         }
     </MudStack>
@@ -149,7 +150,7 @@
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["ComposeEditor_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -240,7 +241,7 @@
         if (string.IsNullOrWhiteSpace(_projectName)) return;
         if (_projectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_projectName, @"^[a-zA-Z0-9._-]+$"))
         {
-            Snackbar.Add("Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.", Severity.Error);
+            Snackbar.Add(L["ComposeEditor_Snackbar_InvalidProjectName"].Value, Severity.Error);
             return;
         }
         _deploying = true;
@@ -257,11 +258,11 @@
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _projectName, _projectName, serverId: _serverId, success: result.Success);
             if (result.Success)
-                Snackbar.Add($"Deployment '{_projectName}' erfolgreich!\n{result.Output}", Severity.Success);
+                Snackbar.Add(L["ComposeEditor_Snackbar_DeploySuccess", _projectName, result.Output].Value, Severity.Success);
             else
-                Snackbar.Add($"Fehler: {result.Output}\n{result.Error}", Severity.Error);
+                Snackbar.Add(L["ComposeEditor_Snackbar_DeployError", result.Output, result.Error].Value, Severity.Error);
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["ComposeEditor_Snackbar_Error", ex.Message].Value, Severity.Error); }
         finally { _deploying = false; }
     }
 

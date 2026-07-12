@@ -4,6 +4,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IStringLocalizer<SharedResource> L
 
 @* The interactive cloud-control UI. Rendered by Cloud.razor only when the CloudControl module is enabled
    (via ModuleGuard), so a disabled module never reaches the ICloudControlService injection. *@
@@ -14,28 +15,28 @@
             <MudIcon Icon="@Icons.Material.Filled.CloudQueue" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Cloud-Steuerung</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Out-of-band Power & Snapshots über Hetzner / Hostinger — Provider pro Server unter „Server" hinterlegen</MudText>
+            <MudText Typo="Typo.h5">@L["CloudView_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["CloudView_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
 
 <MudStack Row="true" Class="mb-4" Spacing="2">
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAll" Disabled="@_loading">
-        Aktualisieren
+        @L["CloudView_Button_Refresh"]
     </MudButton>
 </MudStack>
 
 <MudTable Items="@_servers" Dense="true" Hover="true" Striped="true" Loading="@_loading"
           LoadingProgressColor="Color.Primary" Elevation="2">
     <HeaderContent>
-        <MudTh>Server</MudTh>
-        <MudTh>Provider</MudTh>
-        <MudTh>Status</MudTh>
-        <MudTh>Typ</MudTh>
-        <MudTh>IPv4</MudTh>
-        <MudTh>Traffic</MudTh>
-        <MudTh>Aktionen</MudTh>
+        <MudTh>@L["CloudView_Table_Server"]</MudTh>
+        <MudTh>@L["CloudView_Table_Provider"]</MudTh>
+        <MudTh>@L["CloudView_Table_Status"]</MudTh>
+        <MudTh>@L["CloudView_Table_Type"]</MudTh>
+        <MudTh>@L["CloudView_Table_Ipv4"]</MudTh>
+        <MudTh>@L["CloudView_Table_Traffic"]</MudTh>
+        <MudTh>@L["CloudView_Table_Actions"]</MudTh>
     </HeaderContent>
     <RowTemplate>
         <MudTd>
@@ -64,24 +65,24 @@
                 @if (context.Status == "running")
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                   title="Neustarten" OnClick="@(() => Act(context, "reboot"))" Disabled="@_busy" />
+                                   title="@L["CloudView_Action_Reboot"]" OnClick="@(() => Act(context, "reboot"))" Disabled="@_busy" />
                     <MudIconButton Icon="@Icons.Material.Filled.PowerSettingsNew" Size="Size.Small" Color="Color.Warning"
-                                   title="Herunterfahren" OnClick="@(() => Act(context, "shutdown"))" Disabled="@_busy" />
+                                   title="@L["CloudView_Action_Shutdown"]" OnClick="@(() => Act(context, "shutdown"))" Disabled="@_busy" />
                     <MudIconButton Icon="@Icons.Material.Filled.FlashOn" Size="Size.Small" Color="Color.Error"
-                                   title="Hard-Reset (erzwungener Neustart)" OnClick="@(() => Act(context, "reset"))" Disabled="@_busy" />
+                                   title="@L["CloudView_Action_HardReset"]" OnClick="@(() => Act(context, "reset"))" Disabled="@_busy" />
                 }
                 else
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                   title="Einschalten" OnClick="@(() => Act(context, "poweron"))" Disabled="@_busy" />
+                                   title="@L["CloudView_Action_PowerOn"]" OnClick="@(() => Act(context, "poweron"))" Disabled="@_busy" />
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.PhotoCamera" Size="Size.Small" Color="Color.Primary"
-                               title="Snapshot erstellen" OnClick="@(() => Act(context, "snapshot"))" Disabled="@_busy" />
+                               title="@L["CloudView_Action_Snapshot"]" OnClick="@(() => Act(context, "snapshot"))" Disabled="@_busy" />
             }
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
-        <MudText Class="pa-4">Kein Server mit konfiguriertem Cloud-Provider. Provider + API-Key pro Server unter <MudLink Href="servers">Server</MudLink> hinterlegen.</MudText>
+        <MudText Class="pa-4">@L["CloudView_Empty_Prefix"] <MudLink Href="servers">@L["CloudView_Empty_Link"]</MudLink> @L["CloudView_Empty_Suffix"]</MudText>
     </NoRecordsContent>
 </MudTable>
 
@@ -95,7 +96,7 @@
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["CloudView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -111,7 +112,7 @@
     {
         _loading = true;
         try { _servers = await CloudControl.ListAllAsync(); }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["CloudView_Snackbar_LoadError", ex.Message].Value, Severity.Error); }
         finally { _loading = false; }
     }
 
@@ -122,15 +123,15 @@
         // Confirm out-of-band power actions that interrupt the running server.
         var confirmPrompt = action switch
         {
-            "reboot" => $"Server '{s.WhiskersName}' neustarten? Laufende Dienste werden unterbrochen.",
-            "shutdown" => $"Server '{s.WhiskersName}' herunterfahren? Der Server ist danach offline.",
-            "reset" => $"Hard-Reset für '{s.WhiskersName}'? Erzwungener Neustart ohne sauberes Herunterfahren — Datenverlust möglich.",
+            "reboot" => L["CloudView_Confirm_Reboot", s.WhiskersName].Value,
+            "shutdown" => L["CloudView_Confirm_Shutdown", s.WhiskersName].Value,
+            "reset" => L["CloudView_Confirm_HardReset", s.WhiskersName].Value,
             _ => null
         };
         if (confirmPrompt != null)
         {
             var confirmed = await DialogService.ShowMessageBoxAsync(
-                "Aktion bestätigen", confirmPrompt, yesText: "Ausführen", cancelText: "Abbrechen");
+                L["CloudView_Confirm_Title"].Value, confirmPrompt, yesText: L["CloudView_Button_Execute"].Value, cancelText: L["CloudView_Button_Cancel"].Value);
             if (confirmed != true) return;
         }
 
@@ -144,12 +145,12 @@
                 "reboot" => await CloudControl.RebootAsync(s.WhiskersId),
                 "reset" => await CloudControl.HardResetAsync(s.WhiskersId),
                 "snapshot" => await CloudControl.CreateSnapshotAsync(s.WhiskersId, $"{s.Name} {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC"),
-                _ => "Unbekannte Aktion"
+                _ => L["CloudView_Snackbar_UnknownAction"].Value
             };
             Snackbar.Add(msg, Severity.Success);
             await LoadAll();
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler ({action}) bei {s.WhiskersName}: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["CloudView_Snackbar_ActionError", action, s.WhiskersName, ex.Message].Value, Severity.Error); }
         finally { _busy = false; }
     }
 

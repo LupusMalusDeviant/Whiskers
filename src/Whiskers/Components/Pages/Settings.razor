@@ -32,8 +32,9 @@
 @inject IOptionsMonitor<Whiskers.Configuration.WebhookNotificationSettings> WebhookOptions
 @inject Whiskers.Services.Persistence.IAppSettingsStore AppSettings
 @inject IConfiguration Configuration
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Einstellungen - Whiskers</PageTitle>
+<PageTitle>@L["Settings_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -41,8 +42,8 @@
             <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Einstellungen</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Benachrichtigungen, Sicherheit und Integrationen</MudText>
+            <MudText Typo="Typo.h5">@L["Settings_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Settings_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
@@ -50,14 +51,14 @@
 @if (_role < AppRole.Admin)
 {
     <MudAlert Severity="Severity.Error" Class="mt-4">
-        Kein Zugriff — diese Seite erfordert Administratorrechte. Deine Rolle: @_role.
+        @L["Settings_Alert_NoAccess", _role]
     </MudAlert>
 }
 else
 {
 <MudExpansionPanels MultiExpansion="true">
     @* W3.4: static production-readiness checklist. CORE, read-only, first panel on purpose. *@
-    <MudExpansionPanel Text="Produktionsreif?" Icon="@Icons.Material.Filled.Checklist">
+    <MudExpansionPanel Text="@L["Settings_Panel_ProductionReady"]" Icon="@Icons.Material.Filled.Checklist">
         <ProductionReadinessPanel />
     </MudExpansionPanel>
 
@@ -76,48 +77,48 @@ else
     @if (ModuleRegistry.IsEnabled("notifications"))
     {
     @* Notifications (Mattermost + Matrix) *@
-    <MudExpansionPanel Text="Benachrichtigungen" Icon="@Icons.Material.Filled.Notifications" Expanded="true">
+    <MudExpansionPanel Text="@L["Settings_Panel_Notifications"]" Icon="@Icons.Material.Filled.Notifications" Expanded="true">
         <MudText Typo="Typo.subtitle2" Class="mb-2">Mattermost</MudText>
         <MudGrid>
-            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mmEnabled" Color="Color.Primary" Label="Aktiviert" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_mmWebhook" Label="Webhook-URL" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmChannel" Label="Kanal" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmBot" Label="Bot-Benutzername" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mmThrottle" Label="Throttle (Min)" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mmEnabled" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_mmWebhook" Label="@L["Settings_Label_WebhookUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmChannel" Label="@L["Settings_Label_Channel"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmBot" Label="@L["Settings_Label_BotUsername"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mmThrottle" Label="@L["Settings_Label_ThrottleMinutes"]" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="TestMattermost" StartIcon="@Icons.Material.Filled.Send"
-                   Disabled="@(!_mmEnabled)" Class="mt-1">Testbenachrichtigung</MudButton>
+                   Disabled="@(!_mmEnabled)" Class="mt-1">@L["Settings_Button_TestNotification"]</MudButton>
 
         <MudDivider Class="my-3" />
         <MudText Typo="Typo.subtitle2" Class="mb-2">Matrix</MudText>
         <MudGrid>
-            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mxEnabled" Color="Color.Primary" Label="Aktiviert" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_mxHomeserver" Label="Homeserver-URL" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mxRoom" Label="Raum-ID" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="!abc123:matrix.org" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mxEnabled" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_mxHomeserver" Label="@L["Settings_Label_HomeserverUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mxRoom" Label="@L["Settings_Label_RoomId"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="!abc123:matrix.org" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="_mxToken" Label="Access Token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mxThrottle" Label="Throttle (Min)" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mxThrottle" Label="@L["Settings_Label_ThrottleMinutes"]" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="TestMatrix" StartIcon="@Icons.Material.Filled.Send"
-                   Disabled="@(!_mxEnabled)" Class="mt-1">Testbenachrichtigung</MudButton>
+                   Disabled="@(!_mxEnabled)" Class="mt-1">@L["Settings_Button_TestNotification"]</MudButton>
 
         <MudDivider Class="my-3" />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveNotifications">Benachrichtigungen speichern</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveNotifications">@L["Settings_Button_SaveNotifications"]</MudButton>
     </MudExpansionPanel>
 
     @* Additional notification channels (Telegram / ntfy / Discord / Email / Webhook) *@
-    <MudExpansionPanel Text="Weitere Benachrichtigungskanäle" Icon="@Icons.Material.Filled.Campaign">
+    <MudExpansionPanel Text="@L["Settings_Panel_MoreChannels"]" Icon="@Icons.Material.Filled.Campaign">
         <MudText Typo="Typo.subtitle2" Class="mb-1">Telegram</MudText>
         <MudGrid>
-            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_tgEnabled" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgToken" Label="Bot-Token" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgChat" Label="Chat-ID" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_tgEnabled" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgToken" Label="@L["Settings_Label_BotToken"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgChat" Label="@L["Settings_Label_ChatId"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
         <MudText Typo="Typo.subtitle2" Class="mb-1">ntfy</MudText>
         <MudGrid>
-            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_ntfyEnabled" /></MudItem>
-            <MudItem xs="12" md="5"><MudTextField @bind-Value="_ntfyServer" Label="Server-URL" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="https://ntfy.sh" /></MudItem>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_ntfyEnabled" /></MudItem>
+            <MudItem xs="12" md="5"><MudTextField @bind-Value="_ntfyServer" Label="@L["Settings_Label_ServerUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="https://ntfy.sh" /></MudItem>
             <MudItem xs="12" md="4"><MudTextField @bind-Value="_ntfyTopic" Label="Topic" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="3"><MudTextField @bind-Value="_ntfyToken" Label="Token (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
         </MudGrid>
@@ -125,87 +126,87 @@ else
         <MudDivider Class="my-3" />
         <MudText Typo="Typo.subtitle2" Class="mb-1">Discord</MudText>
         <MudGrid>
-            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_dcEnabled" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_dcWebhook" Label="Webhook-URL" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_dcEnabled" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_dcWebhook" Label="@L["Settings_Label_WebhookUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
         <MudText Typo="Typo.subtitle2" Class="mb-1">Slack</MudText>
         <MudGrid>
-            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_slEnabled" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_slWebhook" Label="Webhook-URL" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_slEnabled" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_slWebhook" Label="@L["Settings_Label_WebhookUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
         <MudText Typo="Typo.subtitle2" Class="mb-1">Email (SMTP)</MudText>
         <MudGrid>
-            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_mailEnabled" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailHost" Label="SMTP-Host" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_mailEnabled" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailHost" Label="@L["Settings_Label_SmtpHost"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="6" md="3"><MudNumericField @bind-Value="_mailPort" Label="Port" Min="1" Max="65535" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="6" md="3" Class="d-flex align-center"><MudSwitch T="bool" Color="Color.Primary" Label="SSL/TLS" @bind-Value="_mailSsl" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailUser" Label="Benutzer" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailPass" Label="Passwort" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailFrom" Label="Absender (From)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailTo" Label="Empfänger (kommagetrennt)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailUser" Label="@L["Settings_Label_Username"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailPass" Label="@L["Settings_Label_Password"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailFrom" Label="@L["Settings_Label_MailFrom"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailTo" Label="@L["Settings_Label_MailTo"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
-        <MudText Typo="Typo.subtitle2" Class="mb-1">Generischer Webhook</MudText>
+        <MudText Typo="Typo.subtitle2" Class="mb-1">@L["Settings_Heading_GenericWebhook"]</MudText>
         <MudGrid>
-            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_whEnabled" /></MudItem>
+            <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_whEnabled" /></MudItem>
             <MudItem xs="12"><MudTextField @bind-Value="_whUrl" Label="URL (POST JSON)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
         <MudStack Row="true" Spacing="2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveChannels">Kanäle speichern</MudButton>
-            <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send" OnClick="TestChannels">Testbenachrichtigung senden</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveChannels">@L["Settings_Button_SaveChannels"]</MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send" OnClick="TestChannels">@L["Settings_Button_SendTestNotification"]</MudButton>
         </MudStack>
     </MudExpansionPanel>
     }
 
     @* Health Monitoring *@
-    <MudExpansionPanel Text="Zustandsüberwachung" Icon="@Icons.Material.Filled.MonitorHeart">
+    <MudExpansionPanel Text="@L["Settings_Panel_HealthMonitoring"]" Icon="@Icons.Material.Filled.MonitorHeart">
         <MudGrid>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hInterval" Label="Prüfintervall (Sekunden)" Min="5" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hRetention" Label="Verlaufsaufbewahrung (Stunden)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopThreshold" Label="Neustart-Schleifenschwellwert" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopWindow" Label="Neustart-Schleifenfenster (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hInterval" Label="@L["Settings_Label_CheckIntervalSeconds"]" Min="5" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hRetention" Label="@L["Settings_Label_HistoryRetentionHours"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopThreshold" Label="@L["Settings_Label_RestartLoopThreshold"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopWindow" Label="@L["Settings_Label_RestartLoopWindow"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveHealth" Class="mt-2">Speichern</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveHealth" Class="mt-2">@L["Settings_Button_Save"]</MudButton>
     </MudExpansionPanel>
 
     @* Metric alerts *@
-    <MudExpansionPanel Text="Metrik-Alerts (für AI-Trigger)" Icon="@Icons.Material.Filled.Insights">
+    <MudExpansionPanel Text="@L["Settings_Panel_MetricAlerts"]" Icon="@Icons.Material.Filled.Insights">
         <MudGrid>
-            <MudItem xs="12"><MudSwitch @bind-Value="_maEnabled" Color="Color.Primary" Label="Metrik-Alerts aktiv (emittiert high_cpu / high_memory / high_disk / metric_anomaly)" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCpu" Label="CPU-Schwelle (%)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maMem" Label="RAM-Schwelle (%)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maDisk" Label="Festplatten-Schwelle (%, Host)" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maSustained" Label="Anhaltend (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCooldown" Label="Cooldown (Minuten)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12"><MudSwitch @bind-Value="_maEnabled" Color="Color.Primary" Label="@L["Settings_Label_MetricAlertsEnabled"]" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCpu" Label="@L["Settings_Label_CpuThreshold"]" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maMem" Label="@L["Settings_Label_MemoryThreshold"]" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maDisk" Label="@L["Settings_Label_DiskThreshold"]" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maSustained" Label="@L["Settings_Label_SustainedMinutes"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCooldown" Label="@L["Settings_Label_CooldownMinutes"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
         <MudDivider Class="my-2" />
         <MudGrid>
-            <MudItem xs="12"><MudSwitch @bind-Value="_maAnom" Color="Color.Secondary" Label="Ausreißererkennung (Anomalie) aktiv" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomWindow" Label="Baseline-Fenster (Samples)" Min="5" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomSigma" Label="Sigma (Ausreißer-Schwelle)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomFloor" Label="Mindestwert (%) für Anomalie" Min="0" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
+            <MudItem xs="12"><MudSwitch @bind-Value="_maAnom" Color="Color.Secondary" Label="@L["Settings_Label_AnomalyEnabled"]" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomWindow" Label="@L["Settings_Label_AnomalyWindow"]" Min="5" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomSigma" Label="@L["Settings_Label_AnomalySigma"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomFloor" Label="@L["Settings_Label_AnomalyFloor"]" Min="0" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
         </MudGrid>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMetricAlert" Class="mt-2">Speichern</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMetricAlert" Class="mt-2">@L["Settings_Button_Save"]</MudButton>
     </MudExpansionPanel>
 
     @* RoadToSAP Phase 1: hide the Image-Updates settings when the ImageUpdate module is disabled. *@
     @if (ModuleRegistry.IsEnabled("image-updates"))
     {
     @* Image / Auto-Update *@
-    <MudExpansionPanel Text="Image-Updates" Icon="@Icons.Material.Filled.SystemUpdate">
+    <MudExpansionPanel Text="@L["Settings_Panel_ImageUpdates"]" Icon="@Icons.Material.Filled.SystemUpdate">
         <MudGrid>
-            <MudItem xs="12"><MudSwitch @bind-Value="_iuEnabled" Color="Color.Primary" Label="Image-Update-Prüfung aktiv" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_iuInterval" Label="Prüfintervall (Stunden)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudSwitch @bind-Value="_iuNotify" Color="Color.Primary" Label="Bei verfügbarem Update benachrichtigen" /></MudItem>
+            <MudItem xs="12"><MudSwitch @bind-Value="_iuEnabled" Color="Color.Primary" Label="@L["Settings_Label_ImageUpdateEnabled"]" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_iuInterval" Label="@L["Settings_Label_CheckIntervalHours"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudSwitch @bind-Value="_iuNotify" Color="Color.Primary" Label="@L["Settings_Label_NotifyOnUpdate"]" /></MudItem>
         </MudGrid>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveImageUpdate" Class="mt-2">Speichern</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveImageUpdate" Class="mt-2">@L["Settings_Button_Save"]</MudButton>
     </MudExpansionPanel>
     }
 
@@ -214,7 +215,7 @@ else
     @if (ModuleRegistry.IsEnabled("cve"))
     {
     @* CVE-Monitor *@
-    <MudExpansionPanel Text="CVE-Monitor" Icon="@Icons.Material.Filled.Security">
+    <MudExpansionPanel Text="@L["Settings_Panel_CveMonitor"]" Icon="@Icons.Material.Filled.Security">
         @{
             var cveCfg = CveSettings.CurrentValue;
         }
@@ -224,50 +225,50 @@ else
                     <MudChip T="string" Size="Size.Small"
                              Color="@(cveCfg.Enabled ? Color.Success : Color.Default)"
                              Variant="Variant.Outlined">
-                        @(cveCfg.Enabled ? "Aktiv" : "Deaktiviert")
+                        @(cveCfg.Enabled ? L["Settings_Chip_Active"] : L["Settings_Chip_Disabled"])
                     </MudChip>
                     @if (CveStore.IsScanning)
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Info">
-                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> Scan läuft
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> @L["Settings_Chip_ScanRunning"]
                         </MudChip>
                     }
                     @if (CveStore.LastScanAt is { } lsa)
                     {
                         <MudText Typo="Typo.body2" Style="color:#888;">
-                            Letzter Scan: @lsa.ToString("yyyy-MM-dd HH:mm 'UTC'")
+                            @L["Settings_Text_LastScan", lsa.ToString("yyyy-MM-dd HH:mm 'UTC'")]
                         </MudText>
                     }
                     <MudSpacer />
                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                                Href="cves" StartIcon="@Icons.Material.Filled.OpenInNew">
-                        Zu /cves
+                        @L["Settings_Button_GoToCves"]
                     </MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                                StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerCveScan"
                                Disabled="@(CveStore.IsScanning || !cveCfg.Enabled)">
-                        Jetzt scannen
+                        @L["Settings_Button_ScanNow"]
                     </MudButton>
                 </MudStack>
             </MudItem>
-            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveEnabled" Color="Color.Primary" Label="Aktiviert" /></MudItem>
-            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanContainers" Color="Color.Primary" Label="Container scannen" /></MudItem>
-            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanOs" Color="Color.Primary" Label="Host-OS scannen" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveInterval" Label="Prüfintervall (Stunden)" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveMaxScans" Label="Max. parallele Scans" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_cveTrivy" Label="Trivy-Image" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveEnabled" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanContainers" Color="Color.Primary" Label="@L["Settings_Label_ScanContainers"]" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanOs" Color="Color.Primary" Label="@L["Settings_Label_ScanHostOs"]" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveInterval" Label="@L["Settings_Label_CheckIntervalHours"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveMaxScans" Label="@L["Settings_Label_MaxParallelScans"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_cveTrivy" Label="@L["Settings_Label_TrivyImage"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6">
-                <MudSelect T="string" @bind-Value="_cveSeverity" Label="Ab Schweregrad benachrichtigen" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelect T="string" @bind-Value="_cveSeverity" Label="@L["Settings_Label_NotifySeverity"]" Variant="Variant.Outlined" Margin="Margin.Dense">
                     <MudSelectItem Value="@("Critical")">Critical</MudSelectItem>
                     <MudSelectItem Value="@("High")">High</MudSelectItem>
                     <MudSelectItem Value="@("Medium")">Medium</MudSelectItem>
                     <MudSelectItem Value="@("Low")">Low</MudSelectItem>
                 </MudSelect>
             </MudItem>
-            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveNotify" Color="Color.Primary" Label="Bei Fund benachrichtigen" /></MudItem>
-            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveOsIds" Color="Color.Primary" Label="OS-CVE-IDs auflösen" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveNotify" Color="Color.Primary" Label="@L["Settings_Label_NotifyOnFinding"]" /></MudItem>
+            <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveOsIds" Color="Color.Primary" Label="@L["Settings_Label_ResolveOsCveIds"]" /></MudItem>
             <MudItem xs="12">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveCve">Speichern</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveCve">@L["Settings_Button_Save"]</MudButton>
             </MudItem>
         </MudGrid>
     </MudExpansionPanel>
@@ -279,90 +280,89 @@ else
     <MudExpansionPanel Text="Terminal" Icon="@Icons.Material.Filled.Terminal">
         <MudGrid>
             <MudItem xs="12">
-                <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_termEnabled" />
+                <MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_termEnabled" />
             </MudItem>
             <MudItem xs="12" md="3">
-                <MudTextField @bind-Value="_termShell" Label="Standard-Shell" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_termShell" Label="@L["Settings_Label_DefaultShell"]" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
             <MudItem xs="12" md="3">
-                <MudNumericField @bind-Value="_termMaxSessions" Label="Max. Sitzungen" Min="1" Max="50" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudNumericField @bind-Value="_termMaxSessions" Label="@L["Settings_Label_MaxSessions"]" Min="1" Max="50" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
             <MudItem xs="12" md="3">
-                <MudNumericField @bind-Value="_termIdle" Label="Leerlauf-Timeout (Minuten)" Min="1" Max="1440" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudNumericField @bind-Value="_termIdle" Label="@L["Settings_Label_IdleTimeout"]" Min="1" Max="1440" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveTerminal"
-                   StartIcon="@Icons.Material.Filled.Save" Class="mt-3">Terminal speichern</MudButton>
+                   StartIcon="@Icons.Material.Filled.Save" Class="mt-3">@L["Settings_Button_SaveTerminal"]</MudButton>
     </MudExpansionPanel>
     }
 
     @* AI advisor chat — belongs to the Agent module (RoadToSAP Phase 1 §3.8); hidden when it's disabled. *@
     @if (ModuleRegistry.IsEnabled("agent"))
     {
-    <MudExpansionPanel Text="AI-Chat (Berater)" Icon="@Icons.Material.Filled.Chat">
+    <MudExpansionPanel Text="@L["Settings_Panel_AiChat"]" Icon="@Icons.Material.Filled.Chat">
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-            Schreibgeschützter Berater-Chat (keine Aktionen). Der API-Key wird im Klartext unter /app/data gespeichert — wie bei servers.json.
+            @L["Settings_Alert_AiChatInfo"]
         </MudAlert>
         <MudGrid>
             <MudItem xs="12">
-                <MudSwitch T="bool" Color="Color.Primary" Label="Aktiviert" @bind-Value="_aiEnabled" />
+                <MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_aiEnabled" />
             </MudItem>
             <MudItem xs="12" md="4">
                 <MudSelect T="string" @bind-Value="_aiProvider" Label="Provider" Variant="Variant.Outlined" Margin="Margin.Dense">
-                    <MudSelectItem Value="@("openai")">OpenAI / kompatibel</MudSelectItem>
+                    <MudSelectItem Value="@("openai")">@L["Settings_Option_OpenAiCompatible"]</MudSelectItem>
                     <MudSelectItem Value="@("anthropic")">Anthropic</MudSelectItem>
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" md="4">
-                <MudTextField @bind-Value="_aiModel" Label="Modell" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="z.B. gpt-4o-mini" />
+                <MudTextField @bind-Value="_aiModel" Label="@L["Settings_Label_Model"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="@L["Settings_Placeholder_ModelExample"]" />
             </MudItem>
             <MudItem xs="12" md="4">
-                <MudTextField @bind-Value="_aiApiUrl" Label="API-URL (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Provider-Default wenn leer" />
+                <MudTextField @bind-Value="_aiApiUrl" Label="@L["Settings_Label_ApiUrlOptional"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="@L["Settings_Placeholder_ApiUrlDefault"]" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_aiApiKey" Label="API-Key" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" />
+                <MudTextField @bind-Value="_aiApiKey" Label="@L["Settings_Label_ApiKey"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" />
             </MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveAiChat"
-                   StartIcon="@Icons.Material.Filled.Save" Class="mt-3">AI-Chat speichern</MudButton>
+                   StartIcon="@Icons.Material.Filled.Save" Class="mt-3">@L["Settings_Button_SaveAiChat"]</MudButton>
     </MudExpansionPanel>
     }
 
     @* Restart-only / environment settings — read-only (set via .env, applied on restart) *@
-    <MudExpansionPanel Text="Umgebung (Neustart erforderlich)" Icon="@Icons.Material.Filled.Dns">
+    <MudExpansionPanel Text="@L["Settings_Panel_Environment"]" Icon="@Icons.Material.Filled.Dns">
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-            Diese Werte kommen aus Umgebungsvariablen (<code>.env</code>) und werden erst nach einem Neustart wirksam — hier nur zur Ansicht.
-            Das Host-Binding (<code>HOST_BIND</code>/<code>HOST_PORT</code>) liegt auf Compose-Ebene und ist im Container nicht sichtbar.
+            @((MarkupString)L["Settings_Alert_EnvInfo"].Value)
         </MudAlert>
         <MudSimpleTable Dense="true" Hover="true" Striped="true">
             <tbody>
-                <tr><td>Login deaktiviert (AUTH_DISABLED)</td><td>@(Configuration["Auth:Disabled"] ?? "false")</td></tr>
-                <tr><td>Google OAuth</td><td>@(string.IsNullOrWhiteSpace(Configuration["GoogleAuth:ClientId"]) ? "nicht konfiguriert" : "konfiguriert")</td></tr>
-                <tr><td>OIDC aktiviert</td><td>@(Configuration["Oidc:Enabled"] ?? "false")</td></tr>
+                <tr><td>@L["Settings_Env_LoginDisabled"]</td><td>@(Configuration["Auth:Disabled"] ?? "false")</td></tr>
+                <tr><td>Google OAuth</td><td>@(string.IsNullOrWhiteSpace(Configuration["GoogleAuth:ClientId"]) ? L["Settings_Env_NotConfigured"] : L["Settings_Env_Configured"])</td></tr>
+                <tr><td>@L["Settings_Env_OidcEnabled"]</td><td>@(Configuration["Oidc:Enabled"] ?? "false")</td></tr>
                 <tr><td>OIDC Authority</td><td>@(string.IsNullOrWhiteSpace(Configuration["Oidc:Authority"]) ? "—" : Configuration["Oidc:Authority"])</td></tr>
-                <tr><td>OIDC Anzeigename</td><td>@(string.IsNullOrWhiteSpace(Configuration["Oidc:DisplayName"]) ? "—" : Configuration["Oidc:DisplayName"])</td></tr>
+                <tr><td>@L["Settings_Env_OidcDisplayName"]</td><td>@(string.IsNullOrWhiteSpace(Configuration["Oidc:DisplayName"]) ? "—" : Configuration["Oidc:DisplayName"])</td></tr>
                 <tr><td>PathBase</td><td>@(string.IsNullOrWhiteSpace(Configuration["PathBase"]) ? "(root)" : Configuration["PathBase"])</td></tr>
-                <tr><td>VPN-Provider</td><td>@(string.IsNullOrWhiteSpace(Configuration["Vpn:Provider"]) ? "none" : Configuration["Vpn:Provider"])</td></tr>
+                <tr><td>@L["Settings_Env_VpnProvider"]</td><td>@(string.IsNullOrWhiteSpace(Configuration["Vpn:Provider"]) ? "none" : Configuration["Vpn:Provider"])</td></tr>
             </tbody>
         </MudSimpleTable>
     </MudExpansionPanel>
 
     @* MCP Permissions *@
-    <MudExpansionPanel Text="MCP-Rechte" Icon="@Icons.Material.Filled.VpnKey"
+    <MudExpansionPanel Text="@L["Settings_Panel_McpPermissions"]" Icon="@Icons.Material.Filled.VpnKey"
                        Expanded="false">
-        <MudText Typo="Typo.subtitle1" Class="mb-3">API-Schlüssel</MudText>
+        <MudText Typo="Typo.subtitle1" Class="mb-3">@L["Settings_Heading_ApiKeys"]</MudText>
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-            Jeder API-Schlüssel hat eine Berechtigungsstufe: <b>Lesen</b> (nur Abfragen), <b>Schreiben</b> (Container/Server verwalten) oder <b>Admin</b> (alle Befehle inkl. Shell).
+            @((MarkupString)L["Settings_Alert_ApiKeyLevels"].Value)
         </MudAlert>
 
         <MudTable Items="@_mcpApiKeys" Dense="true" Hover="true" Class="mb-4">
             <HeaderContent>
                 <MudTh>Name</MudTh>
-                <MudTh>Schlüssel</MudTh>
-                <MudTh>Stufe</MudTh>
-                <MudTh>Aktiv</MudTh>
-                <MudTh>Erstellt</MudTh>
-                <MudTh>Aktionen</MudTh>
+                <MudTh>@L["Settings_Th_Key"]</MudTh>
+                <MudTh>@L["Settings_Th_Level"]</MudTh>
+                <MudTh>@L["Settings_Th_Active"]</MudTh>
+                <MudTh>@L["Settings_Th_Created"]</MudTh>
+                <MudTh>@L["Settings_Th_Actions"]</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd>@context.Name</MudTd>
@@ -395,21 +395,21 @@ else
 
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-6">
             <MudTextField @bind-Value="_newKeyName" Label="Name" Variant="Variant.Outlined"
-                          Margin="Margin.Dense" Style="max-width: 200px;" Placeholder="z.B. Claude Code" />
-            <MudSelect @bind-Value="_newKeyLevel" Label="Stufe" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Style="max-width: 200px;" Placeholder="@L["Settings_Placeholder_KeyName"]" />
+            <MudSelect @bind-Value="_newKeyLevel" Label="@L["Settings_Label_Level"]" Variant="Variant.Outlined"
                        Margin="Margin.Dense" Style="max-width: 150px;">
-                <MudSelectItem Value="@("read")">Lesen</MudSelectItem>
-                <MudSelectItem Value="@("write")">Schreiben</MudSelectItem>
-                <MudSelectItem Value="@("admin")">Admin</MudSelectItem>
+                <MudSelectItem Value="@("read")">@L["Settings_Level_Read"]</MudSelectItem>
+                <MudSelectItem Value="@("write")">@L["Settings_Level_Write"]</MudSelectItem>
+                <MudSelectItem Value="@("admin")">@L["Settings_Level_Admin"]</MudSelectItem>
             </MudSelect>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                        OnClick="AddApiKey" StartIcon="@Icons.Material.Filled.Add"
-                       Disabled="@string.IsNullOrWhiteSpace(_newKeyName)">Schlüssel erstellen</MudButton>
+                       Disabled="@string.IsNullOrWhiteSpace(_newKeyName)">@L["Settings_Button_CreateKey"]</MudButton>
         </MudStack>
 
         <MudDivider Class="mb-4" />
 
-        <MudText Typo="Typo.subtitle1" Class="mb-3">Tool-Berechtigungen</MudText>
+        <MudText Typo="Typo.subtitle1" Class="mb-3">@L["Settings_Heading_ToolPermissions"]</MudText>
 
         @foreach (var category in _mcpTools.GroupBy(t => t.Value.Category).OrderBy(g => g.Key))
         {
@@ -417,8 +417,8 @@ else
             <MudTable Items="@category.ToList()" Dense="true" Hover="true" Class="mb-2">
                 <HeaderContent>
                     <MudTh>Tool</MudTh>
-                    <MudTh>Min. Stufe</MudTh>
-                    <MudTh>Aktiviert</MudTh>
+                    <MudTh>@L["Settings_Th_MinLevel"]</MudTh>
+                    <MudTh>@L["Settings_Th_Enabled"]</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd>
@@ -438,7 +438,7 @@ else
 
         <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveMcpPermissions"
                    StartIcon="@Icons.Material.Filled.Save" Class="mt-4" Disabled="@_savingMcp">
-            @(_savingMcp ? "Wird gespeichert..." : "MCP-Rechte speichern")
+            @(_savingMcp ? L["Settings_Button_Saving"] : L["Settings_Button_SaveMcpPermissions"])
         </MudButton>
     </MudExpansionPanel>
 
@@ -446,20 +446,20 @@ else
     @* Cloud-Provider (Hetzner/Hostinger) credentials are configured per server under "Server". *@
 
     @* User Roles *@
-    <MudExpansionPanel Text="Benutzerrollen" Icon="@Icons.Material.Filled.AdminPanelSettings">
+    <MudExpansionPanel Text="@L["Settings_Panel_UserRoles"]" Icon="@Icons.Material.Filled.AdminPanelSettings">
         <MudGrid>
             <MudItem xs="12">
                 <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-                    <strong>Viewer:</strong> Nur lesen |
-                    <strong>Operator:</strong> Container starten/stoppen, Queries |
-                    <strong>Admin:</strong> Alles (Settings, Server, Rollen, Löschen)
+                    <strong>Viewer:</strong> @L["Settings_Role_ViewerDesc"] |
+                    <strong>Operator:</strong> @L["Settings_Role_OperatorDesc"] |
+                    <strong>Admin:</strong> @L["Settings_Role_AdminDesc"]
                 </MudAlert>
             </MudItem>
             <MudItem xs="12">
                 <MudTable Items="@_roleEntries" Dense="true" Hover="true" Striped="true" Elevation="0">
                     <HeaderContent>
-                        <MudTh>E-Mail</MudTh>
-                        <MudTh>Rolle</MudTh>
+                        <MudTh>@L["Settings_Th_Email"]</MudTh>
+                        <MudTh>@L["Settings_Th_Role"]</MudTh>
                         <MudTh Style="width: 60px;"></MudTh>
                     </HeaderContent>
                     <RowTemplate>
@@ -482,14 +482,14 @@ else
             </MudItem>
             <MudItem xs="12">
                 <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
-                    <MudTextField @bind-Value="_newRoleEmail" Label="E-Mail" Variant="Variant.Outlined" Style="max-width: 300px;" />
-                    <MudSelect T="Whiskers.Models.AppRole" @bind-Value="_newRoleRole" Label="Rolle" Variant="Variant.Outlined" Dense="true" Style="max-width: 140px;">
+                    <MudTextField @bind-Value="_newRoleEmail" Label="@L["Settings_Label_Email"]" Variant="Variant.Outlined" Style="max-width: 300px;" />
+                    <MudSelect T="Whiskers.Models.AppRole" @bind-Value="_newRoleRole" Label="@L["Settings_Label_Role"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 140px;">
                         <MudSelectItem Value="Whiskers.Models.AppRole.Viewer">Viewer</MudSelectItem>
                         <MudSelectItem Value="Whiskers.Models.AppRole.Operator">Operator</MudSelectItem>
                         <MudSelectItem Value="Whiskers.Models.AppRole.Admin">Admin</MudSelectItem>
                     </MudSelect>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="AddRole"
-                               Disabled="@string.IsNullOrWhiteSpace(_newRoleEmail)">Hinzufügen</MudButton>
+                               Disabled="@string.IsNullOrWhiteSpace(_newRoleEmail)">@L["Settings_Button_Add"]</MudButton>
                 </MudStack>
             </MudItem>
         </MudGrid>
@@ -502,7 +502,7 @@ else
             {
                 <MudItem xs="12">
                     <MudAlert Severity="Severity.Warning" Dense="true">
-                        Vault ist deaktiviert. Setze die Umgebungsvariable <code>VAULT_KEY</code> um Secrets verschlüsselt zu speichern.
+                        @((MarkupString)L["Settings_Alert_VaultDisabled"].Value)
                     </MudAlert>
                 </MudItem>
             }
@@ -510,7 +510,7 @@ else
             {
                 <MudItem xs="12">
                     <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
-                        Vault aktiv — @_vaultEntries.Count Secrets gespeichert (AES-256 verschlüsselt)
+                        @L["Settings_Alert_VaultActive", _vaultEntries.Count]
                     </MudAlert>
                 </MudItem>
                 <MudItem xs="12">
@@ -518,7 +518,7 @@ else
                         <HeaderContent>
                             <MudTh>Key</MudTh>
                             <MudTh>Container</MudTh>
-                            <MudTh>Erstellt</MudTh>
+                            <MudTh>@L["Settings_Th_Created"]</MudTh>
                             <MudTh>Rotation</MudTh>
                             <MudTh Style="width: 60px;"></MudTh>
                         </HeaderContent>
@@ -529,7 +529,7 @@ else
                             <MudTd>
                                 @if (context.RotateAfterDays.HasValue)
                                 {
-                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@context.RotateAfterDays Tage</MudChip>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@L["Settings_Chip_RotationDays", context.RotateAfterDays]</MudChip>
                                 }
                             </MudTd>
                             <MudTd>
@@ -545,7 +545,7 @@ else
                         <MudTextField @bind-Value="_newVaultValue" Label="Value" Variant="Variant.Outlined"
                                       InputType="InputType.Password" Style="flex: 1;" />
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="AddVaultSecret"
-                                   Disabled="@(string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue))">Speichern</MudButton>
+                                   Disabled="@(string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue))">@L["Settings_Button_Save"]</MudButton>
                     </MudStack>
                 </MudItem>
             }
@@ -553,28 +553,28 @@ else
     </MudExpansionPanel>
 
     @* Auth *@
-    <MudExpansionPanel Text="Authentifizierung" Icon="@Icons.Material.Filled.Security">
+    <MudExpansionPanel Text="@L["Settings_Panel_Authentication"]" Icon="@Icons.Material.Filled.Security">
         <MudGrid>
             <MudItem xs="12">
                 <MudText Typo="Typo.subtitle1">Google OAuth</MudText>
                 <MudText Typo="Typo.body2" Color="Color.Secondary">
-                    Client-ID: @(string.IsNullOrWhiteSpace(AuthOptions.CurrentValue.ClientId) ? "(nicht konfiguriert)" : "***konfiguriert***")
+                    @L["Settings_Text_ClientId"] @(string.IsNullOrWhiteSpace(AuthOptions.CurrentValue.ClientId) ? L["Settings_Text_ClientIdNotConfigured"] : L["Settings_Text_ClientIdConfigured"])
                 </MudText>
             </MudItem>
             <MudItem xs="12">
                 <MudSwitch T="bool" @bind-Value="_whitelistEnabled" Color="Color.Primary"
-                           Label="E-Mail-Whitelist aktiviert" />
+                           Label="@L["Settings_Label_WhitelistEnabled"]" />
             </MudItem>
             @if (_whitelistEnabled && _whitelistEmails.Count == 0)
             {
                 <MudItem xs="12">
                     <MudAlert Severity="Severity.Warning">
-                        Whitelist ist aktiviert aber leer — niemand kann sich anmelden!
+                        @L["Settings_Alert_WhitelistEmpty"]
                     </MudAlert>
                 </MudItem>
             }
             <MudItem xs="12">
-                <MudText Typo="Typo.subtitle2" Class="mb-2">Erlaubte E-Mail-Adressen</MudText>
+                <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Settings_Heading_AllowedEmails"]</MudText>
                 <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1">
                     @foreach (var email in _whitelistEmails)
                     {
@@ -585,19 +585,19 @@ else
             </MudItem>
             <MudItem xs="12">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                    <MudTextField @bind-Value="_newEmail" Label="E-Mail hinzufügen" Variant="Variant.Outlined"
+                    <MudTextField @bind-Value="_newEmail" Label="@L["Settings_Label_AddEmail"]" Variant="Variant.Outlined"
                                   Margin="Margin.Dense" Style="max-width: 350px;"
-                                  Placeholder="benutzer@beispiel.de"
+                                  Placeholder="@L["Settings_Placeholder_Email"]"
                                   OnKeyUp="@(async (e) => { if (e.Key == "Enter") await AddEmail(); })" />
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                                OnClick="AddEmail" StartIcon="@Icons.Material.Filled.Add"
-                               Disabled="@string.IsNullOrWhiteSpace(_newEmail)">Hinzufügen</MudButton>
+                               Disabled="@string.IsNullOrWhiteSpace(_newEmail)">@L["Settings_Button_Add"]</MudButton>
                 </MudStack>
             </MudItem>
             <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveWhitelist"
                            StartIcon="@Icons.Material.Filled.Save" Disabled="@_savingWhitelist">
-                    @(_savingWhitelist ? "Wird gespeichert..." : "Whitelist speichern")
+                    @(_savingWhitelist ? L["Settings_Button_Saving"] : L["Settings_Button_SaveWhitelist"])
                 </MudButton>
             </MudItem>
         </MudGrid>
@@ -717,7 +717,7 @@ else
             AccessToken = _mxToken ?? "", ThrottleMinutes = _mxThrottle,
         });
         await Audit("notifications");
-        Snackbar.Add("Benachrichtigungen gespeichert (gelten sofort).", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_NotificationsSaved"].Value, Severity.Success);
     }
 
     private async Task SaveHealth()
@@ -728,7 +728,7 @@ else
             RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
         });
         await Audit("healthmonitor");
-        Snackbar.Add("Zustandsüberwachung gespeichert.", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_HealthSaved"].Value, Severity.Success);
     }
 
     private async Task SaveMetricAlert()
@@ -740,7 +740,7 @@ else
             AnomalyEnabled = _maAnom, AnomalyWindow = _maAnomWindow, AnomalySigma = _maAnomSigma, AnomalyFloorPercent = _maAnomFloor,
         });
         await Audit("metricalert");
-        Snackbar.Add("Metrik-Alerts gespeichert.", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_MetricAlertsSaved"].Value, Severity.Success);
     }
 
     private async Task SaveCve()
@@ -754,7 +754,7 @@ else
             OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
         });
         await Audit("cvemonitor");
-        Snackbar.Add("CVE-Monitor gespeichert.", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_CveSaved"].Value, Severity.Success);
     }
 
     private async Task SaveImageUpdate()
@@ -764,7 +764,7 @@ else
             Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
         });
         await Audit("imageupdate");
-        Snackbar.Add("Image-Updates gespeichert.", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_ImageUpdatesSaved"].Value, Severity.Success);
     }
 
     private async Task SaveTerminal()
@@ -777,7 +777,7 @@ else
             IdleTimeoutMinutes = _termIdle,
         });
         await Audit("terminal");
-        Snackbar.Add("Terminal gespeichert (neue Sitzungen gelten sofort).", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_TerminalSaved"].Value, Severity.Success);
     }
 
     private async Task SaveAiChat()
@@ -791,7 +791,7 @@ else
             ApiKey = _aiApiKey ?? "",
         });
         await Audit("aichat");
-        Snackbar.Add("AI-Chat gespeichert (gilt sofort).", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_AiChatSaved"].Value, Severity.Success);
     }
 
     private async Task SaveChannels()
@@ -825,7 +825,7 @@ else
             Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
         });
         await Audit("notification-channels");
-        Snackbar.Add("Kanäle gespeichert (gelten sofort).", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_ChannelsSaved"].Value, Severity.Success);
     }
 
     private async Task TestChannels()
@@ -833,9 +833,9 @@ else
         try
         {
             await NotificationService.SendTestAsync();
-            Snackbar.Add("Testbenachrichtigung an alle konfigurierten Kanäle gesendet (vorher speichern!).", Severity.Success);
+            Snackbar.Add(L["Settings_Snackbar_TestSent"].Value, Severity.Success);
         }
-        catch (Exception ex) { Snackbar.Add($"Test teilweise fehlgeschlagen: {ex.Message}", Severity.Warning); }
+        catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", ex.Message].Value, Severity.Warning); }
     }
 
     private async Task Audit(string section)
@@ -859,7 +859,7 @@ else
         // Copy to the clipboard via JS — never echo the key value in a toast.
         try { await JS.InvokeVoidAsync("swClipboard.copy", key); }
         catch { /* clipboard unavailable */ }
-        Snackbar.Add("Schlüssel in die Zwischenablage kopiert.", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_KeyCopied"].Value, Severity.Success);
     }
 
     private Color GetLevelColor(string level) => level switch
@@ -872,15 +872,15 @@ else
 
     private string GetLevelLabel(string level) => level switch
     {
-        "read" => "Lesen",
-        "write" => "Schreiben",
-        "admin" => "Admin",
+        "read" => L["Settings_Level_Read"].Value,
+        "write" => L["Settings_Level_Write"].Value,
+        "admin" => L["Settings_Level_Admin"].Value,
         _ => level
     };
 
     private async Task AddApiKey()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         var newKey = await McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel);
         // Reload from service to avoid duplicates from reference sharing
@@ -888,7 +888,7 @@ else
         _mcpApiKeys = mcpData.ApiKeys;
         _revealedKeys.Add(newKey.Id); // Show the new key immediately
         _newKeyName = "";
-        Snackbar.Add($"API-Schlüssel '{newKey.Name}' erstellt. Bitte kopieren und sicher aufbewahren!", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_ApiKeyCreated", newKey.Name].Value, Severity.Success);
     }
 
     private async Task RemoveApiKey(string id)
@@ -897,7 +897,7 @@ else
         // Reload from service to stay in sync
         var mcpData = McpPermissionService.GetPermissionData();
         _mcpApiKeys = mcpData.ApiKeys;
-        Snackbar.Add("API-Schlüssel gelöscht.", Severity.Info);
+        Snackbar.Add(L["Settings_Snackbar_ApiKeyDeleted"].Value, Severity.Info);
     }
 
     private async Task SaveMcpPermissions()
@@ -912,11 +912,11 @@ else
             });
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "config.save", "config", "mcp-permissions", "MCP-Rechte");
-            Snackbar.Add("MCP-Rechte gespeichert. Änderungen gelten sofort.", Severity.Success);
+            Snackbar.Add(L["Settings_Snackbar_McpSaved"].Value, Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler beim Speichern: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_SaveError", ex.Message].Value, Severity.Error);
         }
         finally
         {
@@ -943,12 +943,12 @@ else
 
     private async Task SaveWhitelist()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         // An enabled whitelist with zero entries denies everyone (fail-closed) — refuse to save that state
         // so an admin can't accidentally lock the whole instance (including themselves) out.
         if (_whitelistEnabled && _whitelistEmails.Count == 0)
         {
-            Snackbar.Add("Eine aktivierte Whitelist ohne Einträge würde alle aussperren. Bitte mindestens eine E-Mail hinzufügen oder die Whitelist deaktivieren.", Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_WhitelistEmptyError"].Value, Severity.Error);
             return;
         }
         _savingWhitelist = true;
@@ -961,11 +961,11 @@ else
             });
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "config.save", "config", "whitelist", "E-Mail-Whitelist");
-            Snackbar.Add("Whitelist gespeichert. Änderungen gelten ab der nächsten Anmeldung.", Severity.Success);
+            Snackbar.Add(L["Settings_Snackbar_WhitelistSaved"].Value, Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler beim Speichern: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_SaveError", ex.Message].Value, Severity.Error);
         }
         finally
         {
@@ -978,11 +978,11 @@ else
         try
         {
             await NotificationService.SendTestAsync();
-            Snackbar.Add("Mattermost-Testbenachrichtigung gesendet!", Severity.Success);
+            Snackbar.Add(L["Settings_Snackbar_MattermostTestSent"].Value, Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -993,17 +993,17 @@ else
         var matrix = ServiceProvider.GetService<Whiskers.Services.Notifications.IMatrixNotificationService>();
         if (matrix is null)
         {
-            Snackbar.Add("Benachrichtigungsmodul ist deaktiviert.", Severity.Warning);
+            Snackbar.Add(L["Settings_Snackbar_NotificationsModuleDisabled"].Value, Severity.Warning);
             return;
         }
         try
         {
             await matrix.SendTestAsync();
-            Snackbar.Add("Matrix-Testbenachrichtigung gesendet!", Severity.Success);
+            Snackbar.Add(L["Settings_Snackbar_MatrixTestSent"].Value, Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -1019,11 +1019,11 @@ else
 
     private async Task SaveRoles()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         await RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData { Roles = _roleEntries });
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         await AuditLog.LogAsync(actor, "web", "config.save", "config", "roles", "Benutzerrollen");
-        Snackbar.Add("Rollen gespeichert.", Severity.Success);
+        Snackbar.Add(L["Settings_Snackbar_RolesSaved"].Value, Severity.Success);
     }
 
     // === Vault ===
@@ -1035,7 +1035,7 @@ else
 
     private async Task DeleteVaultSecret(string key)
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         await VaultService.DeleteSecretAsync(key);
         await AuditVault("vault.delete", key);
         LoadVault();
@@ -1043,20 +1043,20 @@ else
 
     private async Task AddVaultSecret()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add("Keine Berechtigung.", Severity.Error); return; }
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue)) return;
         var key = _newVaultKey.Trim();
         try
         {
             await VaultService.SetSecretAsync(key, _newVaultValue);
             await AuditVault("vault.set", key);
-            Snackbar.Add($"Secret '{key}' gespeichert.", Severity.Success);
+            Snackbar.Add(L["Settings_Snackbar_SecretSaved", key].Value, Severity.Success);
             _newVaultKey = ""; _newVaultValue = "";
             LoadVault();
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -1076,7 +1076,7 @@ else
     private Task TriggerCveScan()
     {
         if (CveStore.IsScanning) return Task.CompletedTask;
-        Snackbar.Add("CVE-Scan gestartet — kann beim ersten Lauf mehrere Minuten dauern (Trivy-DB-Download).", MudBlazor.Severity.Info);
+        Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info);
         _ = Task.Run(async () =>
         {
             try { await CveMonitor.RunOneCycleAsync(); }

@@ -2,8 +2,9 @@
 @attribute [Authorize]
 @inject IHealthStore HealthStore
 @inject IDockerService DockerService
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Statusberichte - Whiskers</PageTitle>
+<PageTitle>@L["HealthReports_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -11,8 +12,8 @@
             <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Statusberichte</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Health-Checks und Verfügbarkeitshistorie</MudText>
+            <MudText Typo="Typo.h5">@L["HealthReports_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["HealthReports_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
@@ -21,7 +22,7 @@
     <MudItem xs="12" md="4">
         <MudSelect T="string" @bind-Value="_selectedContainerId" Label="Container" Variant="Variant.Outlined"
                    Dense="true" Class="mb-4">
-            <MudSelectItem T="string" Value="@("all")">Alle Container</MudSelectItem>
+            <MudSelectItem T="string" Value="@("all")">@L["HealthReports_Filter_AllContainers"]</MudSelectItem>
             @foreach (var c in _containers)
             {
                 <MudSelectItem T="string" Value="@c.Id">@c.Name</MudSelectItem>
@@ -29,28 +30,28 @@
         </MudSelect>
     </MudItem>
     <MudItem xs="12" md="4">
-        <MudSelect T="int" @bind-Value="_hoursWindow" Label="Zeitfenster" Variant="Variant.Outlined" Dense="true">
-            <MudSelectItem T="int" Value="1">Letzte Stunde</MudSelectItem>
-            <MudSelectItem T="int" Value="6">Letzte 6 Stunden</MudSelectItem>
-            <MudSelectItem T="int" Value="12">Letzte 12 Stunden</MudSelectItem>
-            <MudSelectItem T="int" Value="24">Letzte 24 Stunden</MudSelectItem>
+        <MudSelect T="int" @bind-Value="_hoursWindow" Label="@L["HealthReports_Filter_TimeWindowLabel"]" Variant="Variant.Outlined" Dense="true">
+            <MudSelectItem T="int" Value="1">@L["HealthReports_Filter_LastHour"]</MudSelectItem>
+            <MudSelectItem T="int" Value="6">@L["HealthReports_Filter_Last6Hours"]</MudSelectItem>
+            <MudSelectItem T="int" Value="12">@L["HealthReports_Filter_Last12Hours"]</MudSelectItem>
+            <MudSelectItem T="int" Value="24">@L["HealthReports_Filter_Last24Hours"]</MudSelectItem>
         </MudSelect>
     </MudItem>
     <MudItem xs="12" md="4">
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadRecords"
                    StartIcon="@Icons.Material.Filled.Refresh" Class="mt-1">
-            Aktualisieren
+            @L["HealthReports_Button_Refresh"]
         </MudButton>
     </MudItem>
 </MudGrid>
 
 <MudTable Items="@_records" Dense="true" Hover="true" Striped="true" Elevation="2" Class="mt-4">
     <HeaderContent>
-        <MudTh>Zeitstempel</MudTh>
+        <MudTh>@L["HealthReports_Table_Timestamp"]</MudTh>
         <MudTh>Container</MudTh>
         <MudTh>Status</MudTh>
-        <MudTh>Zustand</MudTh>
-        <MudTh>Exit-Code</MudTh>
+        <MudTh>@L["HealthReports_Table_Health"]</MudTh>
+        <MudTh>@L["HealthReports_Table_ExitCode"]</MudTh>
         <MudTh>OOM</MudTh>
     </HeaderContent>
     <RowTemplate>
@@ -77,7 +78,7 @@
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
-        <MudText Class="pa-4">Noch keine Zustandsdaten vorhanden. Der Monitor sammelt alle 30 Sekunden Daten.</MudText>
+        <MudText Class="pa-4">@L["HealthReports_Table_NoRecords"]</MudText>
     </NoRecordsContent>
 </MudTable>
 

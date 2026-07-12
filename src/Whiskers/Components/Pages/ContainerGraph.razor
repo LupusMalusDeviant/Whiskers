@@ -2,9 +2,10 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject IJSRuntime JS
+@inject IStringLocalizer<SharedResource> L
 @implements IAsyncDisposable
 
-<PageTitle>Topologie - Whiskers</PageTitle>
+<PageTitle>@L["ContainerGraph_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -12,8 +13,8 @@
             <MudIcon Icon="@Icons.Material.Filled.Hub" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Container-Topologie</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Netzwerk- und Abhängigkeitsgraph</MudText>
+            <MudText Typo="Typo.h5">@L["ContainerGraph_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ContainerGraph_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
         <MudStack Row="true" Spacing="1">
@@ -21,7 +22,7 @@
             <MudChip T="string" Size="Size.Small" Style="background: rgba(248, 113, 113, 0.15); color: #f87171;">Stopped</MudChip>
             <MudChip T="string" Size="Size.Small" Style="background: rgba(96, 165, 250, 0.15); color: #60a5fa;">Database</MudChip>
     </MudStack>
-        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadGraph">Aktualisieren</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadGraph">@L["ContainerGraph_Button_Refresh"]</MudButton>
     </MudStack>
 </div>
 
@@ -58,7 +59,7 @@
                 {
                     id = c.Id,
                     label = c.Name,
-                    tooltip = $"{c.Name}\n{c.Image}\n{c.State} ({c.HealthStatus})\nProjekt: {c.ComposeProject}",
+                    tooltip = L["ContainerGraph_Node_Tooltip", c.Name, c.Image, c.State, c.HealthStatus, c.ComposeProject].Value,
                     group = c.ComposeProject,
                     state = c.State,
                     isDatabase = c.IsDatabase

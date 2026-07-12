@@ -6,8 +6,9 @@
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Bereitstellen - Whiskers</PageTitle>
+<PageTitle>@L["Deploy_PageTitle"]</PageTitle>
 
 @* RoadToSAP Phase 1: gated by the Deployment module; when off, ModuleGuard shows a "disabled" notice.
    The IDeploymentService injection resolves the Core no-op default either way. *@
@@ -19,14 +20,14 @@
             <MudIcon Icon="@Icons.Material.Filled.RocketLaunch" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Container bereitstellen</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Neue Container und Stacks erstellen und deployen</MudText>
+            <MudText Typo="Typo.h5">@L["Deploy_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Deploy_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
 
 @* Server Selection (applies to both tabs) *@
-<MudSelect T="string" @bind-Value="_serverId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-4" Style="max-width: 320px;">
+<MudSelect T="string" @bind-Value="_serverId" Label="@L["Deploy_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-4" Style="max-width: 320px;">
     @foreach (var srv in _servers)
     {
         <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
@@ -35,40 +36,40 @@
 
 <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
     @* Tab 1: Form Deploy *@
-    <MudTabPanel Text="Formular" Icon="@Icons.Material.Filled.EditNote">
+    <MudTabPanel Text="@L["Deploy_Tab_Form"]" Icon="@Icons.Material.Filled.EditNote">
         <MudGrid>
             <MudItem xs="12" md="6">
-                <MudTextField @bind-Value="_formRequest.Image" Label="Image-Name" Variant="Variant.Outlined"
+                <MudTextField @bind-Value="_formRequest.Image" Label="@L["Deploy_Label_ImageName"]" Variant="Variant.Outlined"
                               Placeholder="nginx:latest" Required="true" />
             </MudItem>
             <MudItem xs="12" md="6">
-                <MudTextField @bind-Value="_formRequest.ContainerName" Label="Container-Name"
+                <MudTextField @bind-Value="_formRequest.ContainerName" Label="@L["Deploy_Label_ContainerName"]"
                               Variant="Variant.Outlined" Placeholder="my-container" />
             </MudItem>
 
             @* Port Mappings *@
             <MudItem xs="12">
-                <MudText Typo="Typo.subtitle1" Class="mb-2">Port-Zuordnungen</MudText>
+                <MudText Typo="Typo.subtitle1" Class="mb-2">@L["Deploy_Section_PortMappings"]</MudText>
                 @for (var i = 0; i < _ports.Count; i++)
                 {
                     var idx = i;
                     <MudStack Row="true" Class="mb-2">
-                        <MudTextField @bind-Value="_ports[idx].Host" Label="Host-Port" Variant="Variant.Outlined"
+                        <MudTextField @bind-Value="_ports[idx].Host" Label="@L["Deploy_Label_HostPort"]" Variant="Variant.Outlined"
                                       Style="max-width: 150px;" />
                         <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="align-self-center" />
-                        <MudTextField @bind-Value="_ports[idx].Container" Label="Container-Port" Variant="Variant.Outlined"
+                        <MudTextField @bind-Value="_ports[idx].Container" Label="@L["Deploy_Label_ContainerPort"]" Variant="Variant.Outlined"
                                       Style="max-width: 150px;" />
                         <MudIconButton Icon="@Icons.Material.Filled.Remove" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => _ports.RemoveAt(idx))" Class="align-self-center" />
                     </MudStack>
                 }
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
-                           OnClick="@(() => _ports.Add(new PortEntry()))">Port hinzufügen</MudButton>
+                           OnClick="@(() => _ports.Add(new PortEntry()))">@L["Deploy_Button_AddPort"]</MudButton>
             </MudItem>
 
             @* Volumes *@
             <MudItem xs="12">
-                <MudText Typo="Typo.subtitle1" Class="mb-2">Volumes (Datenträger)</MudText>
+                <MudText Typo="Typo.subtitle1" Class="mb-2">@L["Deploy_Section_Volumes"]</MudText>
                 @for (var i = 0; i < _volumes.Count; i++)
                 {
                     var idx = i;
@@ -80,12 +81,12 @@
                     </MudStack>
                 }
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
-                           OnClick="@(() => _volumes.Add(""))">Volume hinzufügen</MudButton>
+                           OnClick="@(() => _volumes.Add(""))">@L["Deploy_Button_AddVolume"]</MudButton>
             </MudItem>
 
             @* Environment Variables *@
             <MudItem xs="12">
-                <MudText Typo="Typo.subtitle1" Class="mb-2">Umgebungsvariablen</MudText>
+                <MudText Typo="Typo.subtitle1" Class="mb-2">@L["Deploy_Section_EnvVars"]</MudText>
                 @for (var i = 0; i < _envVars.Count; i++)
                 {
                     var idx = i;
@@ -98,21 +99,21 @@
                     </MudStack>
                 }
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
-                           OnClick="@(() => _envVars.Add(new EnvEntry()))">Variable hinzufügen</MudButton>
+                           OnClick="@(() => _envVars.Add(new EnvEntry()))">@L["Deploy_Button_AddEnvVar"]</MudButton>
             </MudItem>
 
             @* Options *@
             <MudItem xs="12" md="6">
-                <MudSelect T="string" @bind-Value="_formRequest.RestartPolicy" Label="Neustart-Richtlinie"
+                <MudSelect T="string" @bind-Value="_formRequest.RestartPolicy" Label="@L["Deploy_Label_RestartPolicy"]"
                            Variant="Variant.Outlined">
-                    <MudSelectItem T="string" Value="@("unless-stopped")">Außer wenn gestoppt</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("always")">Immer</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("on-failure")">Bei Fehler</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("no")">Nein</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("unless-stopped")">@L["Deploy_RestartPolicy_UnlessStopped"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("always")">@L["Deploy_RestartPolicy_Always"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("on-failure")">@L["Deploy_RestartPolicy_OnFailure"]</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("no")">@L["Deploy_RestartPolicy_No"]</MudSelectItem>
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" md="6">
-                <MudTextField @bind-Value="_formRequest.NetworkName" Label="Netzwerk (optional)"
+                <MudTextField @bind-Value="_formRequest.NetworkName" Label="@L["Deploy_Label_Network"]"
                               Variant="Variant.Outlined" Placeholder="bridge" />
             </MudItem>
 
@@ -122,7 +123,7 @@
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployFromForm"
                                Disabled="_deploying" StartIcon="@Icons.Material.Filled.RocketLaunch">
                         @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                        Bereitstellen
+                        @L["Deploy_Button_Deploy"]
                     </MudButton>
                 }
             </MudItem>
@@ -137,13 +138,13 @@
     @* Tab 2: Compose Deploy *@
     <MudTabPanel Text="Compose" Icon="@Icons.Material.Filled.Description">
         <MudTextField @bind-Value="_composeYaml" Label="docker-compose.yml" Variant="Variant.Outlined"
-                      Lines="15" Placeholder="docker-compose.yml Inhalt hier einfügen..."
+                      Lines="15" Placeholder="@L["Deploy_Placeholder_ComposeContent"]"
                       Style="font-family: 'Cascadia Code', monospace; font-size: 13px;" />
 
         <MudStack Row="true" Class="mt-4">
             <MudButton Variant="Variant.Outlined" OnClick="ValidateCompose"
                        StartIcon="@Icons.Material.Filled.CheckCircle">
-                Validieren
+                @L["Deploy_Button_Validate"]
             </MudButton>
             @if (_role >= AppRole.Operator)
             {
@@ -151,7 +152,7 @@
                            Disabled="@(_deploying || string.IsNullOrWhiteSpace(_composeYaml))"
                            StartIcon="@Icons.Material.Filled.RocketLaunch">
                     @if (_deploying) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                    Alle bereitstellen
+                    @L["Deploy_Button_DeployAll"]
                 </MudButton>
             }
         </MudStack>
@@ -162,14 +163,14 @@
                 @if (_validationResult.IsValid)
                 {
                     <MudAlert Severity="Severity.Success">
-                        Gültig! @_validationResult.Services.Count Dienst(e) gefunden:
+                        @L["Deploy_Validation_Valid", _validationResult.Services.Count]
                         @string.Join(", ", _validationResult.Services.Select(s => s.ContainerName ?? s.Image))
                     </MudAlert>
                 }
                 else
                 {
                     <MudAlert Severity="Severity.Error">
-                        Validierungsfehler:
+                        @L["Deploy_Validation_ErrorsTitle"]
                         <ul>
                             @foreach (var err in _validationResult.Errors)
                             {
@@ -207,7 +208,7 @@
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["Deploy_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -225,7 +226,7 @@
         if (!Require(AppRole.Operator)) return;
         if (string.IsNullOrWhiteSpace(_formRequest.Image))
         {
-            Snackbar.Add("Image-Name ist erforderlich", Severity.Warning);
+            Snackbar.Add(L["Deploy_Snackbar_ImageRequired"].Value, Severity.Warning);
             return;
         }
 
@@ -250,16 +251,16 @@
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;
             await AuditLog.LogAsync(actor, "web", "deploy.app", "container", id, appName, details: $"Image: {_formRequest.Image}", serverId: _serverId);
-            Snackbar.Add($"Container bereitgestellt: {id[..12]}", Severity.Success);
-            _deployProgress = $"Erfolgreich! Container-ID: {id[..12]}";
+            Snackbar.Add(L["Deploy_Snackbar_Deployed", id[..12]].Value, Severity.Success);
+            _deployProgress = L["Deploy_Progress_Success", id[..12]].Value;
         }
         catch (Exception ex)
         {
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;
             await AuditLog.LogAsync(actor, "web", "deploy.app", "container", appName, appName, details: $"Image: {_formRequest.Image}; {ex.Message}", serverId: _serverId, success: false);
-            Snackbar.Add($"Bereitstellung fehlgeschlagen: {ex.Message}", Severity.Error);
-            _deployProgress = $"Fehler: {ex.Message}";
+            Snackbar.Add(L["Deploy_Snackbar_DeployFailed", ex.Message].Value, Severity.Error);
+            _deployProgress = L["Deploy_Progress_Error", ex.Message].Value;
         }
         finally
         {
@@ -287,15 +288,15 @@
             var ids = await DeploymentService.DeployFromComposeAsync(_composeYaml, progress, _serverId);
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: $"{ids.Count} Container", serverId: _serverId);
-            Snackbar.Add($"{ids.Count} Container bereitgestellt", Severity.Success);
-            _deployProgress = $"Erfolgreich! {ids.Count} Container bereitgestellt";
+            Snackbar.Add(L["Deploy_Snackbar_ComposeDeployed", ids.Count].Value, Severity.Success);
+            _deployProgress = L["Deploy_Progress_ComposeSuccess", ids.Count].Value;
         }
         catch (Exception ex)
         {
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: ex.Message, serverId: _serverId, success: false);
-            Snackbar.Add($"Bereitstellung fehlgeschlagen: {ex.Message}", Severity.Error);
-            _deployProgress = $"Fehler: {ex.Message}";
+            Snackbar.Add(L["Deploy_Snackbar_DeployFailed", ex.Message].Value, Severity.Error);
+            _deployProgress = L["Deploy_Progress_Error", ex.Message].Value;
         }
         finally
         {

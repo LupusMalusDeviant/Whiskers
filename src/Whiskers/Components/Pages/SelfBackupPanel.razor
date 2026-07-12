@@ -6,51 +6,47 @@
 @inject Whiskers.Modules.IModuleRegistry ModuleRegistry
 @inject IConfiguration Configuration
 @inject Microsoft.AspNetCore.Components.NavigationManager NavManager
+@inject IStringLocalizer<SharedResource> L
 
 @* F3 self-backup & restore. Rendered inside the Core "Backup & Restore" panel in Settings (already Admin-gated).
    Backs up Whiskers' OWN /app/data: download, restore an on-box or uploaded archive, and (via the scheduler
    module) a scheduled backup. Restore is data-safety-sensitive — it replaces all state and restarts the app. *@
 
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-    Sichert Whiskers' eigenen Zustand unter <code>/app/data</code> (Datenbank, Konfiguration, Schlüssel) in ein
-    herunterladbares Archiv. Eine Wiederherstellung ersetzt alle Daten und startet Whiskers neu.
+    @((MarkupString)L["SelfBackupPanel_Text_Intro"].Value)
 </MudText>
 
 @if (_encrypted)
 {
     <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
-        Backups werden mit deinem <code>VAULT_KEY</code> verschlüsselt (AES-256-GCM). Zur Wiederherstellung wird
-        derselbe <code>VAULT_KEY</code> benötigt.
+        @((MarkupString)L["SelfBackupPanel_Alert_Encrypted"].Value)
     </MudAlert>
 }
 else
 {
     <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-        <code>VAULT_KEY</code> ist nicht gesetzt — Backups werden <b>unverschlüsselt</b> gespeichert und enthalten
-        Klartext-Secrets (ssh-keys, mtls, API-Schlüssel, DataProtection-Ring). Setze <code>VAULT_KEY</code> für
-        verschlüsselte Backups oder verwahre heruntergeladene Dateien sicher.
+        @((MarkupString)L["SelfBackupPanel_Alert_Unencrypted"].Value)
     </MudAlert>
 }
 
 @if (_provider == "postgres")
 {
     <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-        Diese Instanz nutzt PostgreSQL. Das Backup enthält Konfiguration und Secrets unter <code>/app/data</code>,
-        aber <b>nicht</b> die PostgreSQL-Datenbank selbst — sichere diese separat (z. B. mit <code>pg_dump</code>).
+        @((MarkupString)L["SelfBackupPanel_Alert_Postgres"].Value)
     </MudAlert>
 }
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Wrap="Wrap.Wrap">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Backup"
-               OnClick="CreateBackup" Disabled="@_busy">Backup jetzt erstellen</MudButton>
+               OnClick="CreateBackup" Disabled="@_busy">@L["SelfBackupPanel_Button_CreateBackup"]</MudButton>
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
-               OnClick="LoadBackups" Disabled="@_busy">Aktualisieren</MudButton>
+               OnClick="LoadBackups" Disabled="@_busy">@L["SelfBackupPanel_Button_Refresh"]</MudButton>
     <MudSpacer />
     @if (ModuleRegistry.IsEnabled("scheduler"))
     {
         <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Schedule" Href="/tasks"
-                   title="Wiederkehrende Selbst-Backups als geplante Aufgabe (Typ „Whiskers Selbst-Backup“) einrichten">
-            Automatische Backups planen
+                   title="@L["SelfBackupPanel_Tooltip_ScheduleBackups"]">
+            @L["SelfBackupPanel_Button_ScheduleBackups"]
         </MudButton>
     }
 </MudStack>
@@ -59,41 +55,41 @@ else
 
 @if (!_backups.Any())
 {
-    <MudAlert Severity="Severity.Info" Dense="true">Noch keine Selbst-Backups vorhanden.</MudAlert>
+    <MudAlert Severity="Severity.Info" Dense="true">@L["SelfBackupPanel_Alert_NoBackups"]</MudAlert>
 }
 else
 {
     <MudTable Items="@_backups" Dense="true" Hover="true" Striped="true" Elevation="0">
         <HeaderContent>
-            <MudTh>Erstellt</MudTh>
+            <MudTh>@L["SelfBackupPanel_Th_Created"]</MudTh>
             <MudTh>Label</MudTh>
-            <MudTh>Größe</MudTh>
+            <MudTh>@L["SelfBackupPanel_Th_Size"]</MudTh>
             <MudTh>DB</MudTh>
-            <MudTh>Verschl.</MudTh>
-            <MudTh>Aktionen</MudTh>
+            <MudTh>@L["SelfBackupPanel_Th_Encrypted"]</MudTh>
+            <MudTh>@L["SelfBackupPanel_Th_Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="Erstellt">@context.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")</MudTd>
+            <MudTd DataLabel="@L["SelfBackupPanel_Th_Created"]">@context.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")</MudTd>
             <MudTd DataLabel="Label">@(string.IsNullOrEmpty(context.Label) ? "-" : context.Label)</MudTd>
-            <MudTd DataLabel="Größe">@FormatBytes(context.SizeBytes)</MudTd>
+            <MudTd DataLabel="@L["SelfBackupPanel_Th_Size"]">@FormatBytes(context.SizeBytes)</MudTd>
             <MudTd DataLabel="DB">@context.Provider</MudTd>
-            <MudTd DataLabel="Verschl.">
+            <MudTd DataLabel="@L["SelfBackupPanel_Th_Encrypted"]">
                 @if (context.Encrypted)
                 {
-                    <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Success" Size="Size.Small" title="verschlüsselt" />
+                    <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Success" Size="Size.Small" title="@L["SelfBackupPanel_Tooltip_Encrypted"]" />
                 }
                 else
                 {
-                    <MudIcon Icon="@Icons.Material.Filled.LockOpen" Color="Color.Warning" Size="Size.Small" title="unverschlüsselt" />
+                    <MudIcon Icon="@Icons.Material.Filled.LockOpen" Color="Color.Warning" Size="Size.Small" title="@L["SelfBackupPanel_Tooltip_Unencrypted"]" />
                 }
             </MudTd>
-            <MudTd DataLabel="Aktionen">
-                <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" title="Herunterladen"
+            <MudTd DataLabel="@L["SelfBackupPanel_Th_Actions"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" title="@L["SelfBackupPanel_Tooltip_Download"]"
                                OnClick="@(() => Download(context))" />
                 <MudIconButton Icon="@Icons.Material.Filled.Restore" Color="Color.Primary" Size="Size.Small"
-                               title="Wiederherstellen" OnClick="@(() => RestoreExisting(context))" Disabled="@_busy" />
+                               title="@L["SelfBackupPanel_Tooltip_Restore"]" OnClick="@(() => RestoreExisting(context))" Disabled="@_busy" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                               title="Löschen" OnClick="@(() => DeleteBackup(context))" Disabled="@_busy" />
+                               title="@L["SelfBackupPanel_Tooltip_Delete"]" OnClick="@(() => DeleteBackup(context))" Disabled="@_busy" />
             </MudTd>
         </RowTemplate>
     </MudTable>
@@ -101,10 +97,9 @@ else
 
 <MudDivider Class="my-4" />
 
-<MudText Typo="Typo.subtitle2" Class="mb-1">Aus Datei wiederherstellen</MudText>
+<MudText Typo="Typo.subtitle2" Class="mb-1">@L["SelfBackupPanel_Heading_RestoreFromFile"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
-    Lade eine zuvor heruntergeladene Backup-Datei hoch. Whiskers erstellt zuerst automatisch ein Sicherungs-Backup
-    des aktuellen Zustands, ersetzt dann alle Daten und startet neu.
+    @L["SelfBackupPanel_Text_UploadInfo"]
 </MudText>
 <InputFile OnChange="OnFileSelected" accept=".gz,.enc" disabled="@_busy" />
 
@@ -127,7 +122,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -136,7 +131,7 @@ else
     private async Task LoadBackups()
     {
         try { _backups = (await BackupService.ListBackupsAsync()).ToList(); }
-        catch (Exception ex) { Snackbar.Add($"Fehler beim Laden: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["SelfBackupPanel_Snackbar_LoadError", ex.Message].Value, Severity.Error); }
     }
 
     private async Task CreateBackup()
@@ -148,13 +143,13 @@ else
         {
             var info = await BackupService.CreateBackupAsync("manual", CancellationToken.None);
             await AuditLog.LogAsync(actor, "web", "selfbackup.create", "whiskers", info.Id, info.FileName);
-            Snackbar.Add($"Backup erstellt: {FormatBytes(info.SizeBytes)}{(info.Encrypted ? " (verschlüsselt)" : "")}", Severity.Success);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupCreated", FormatBytes(info.SizeBytes) + (info.Encrypted ? L["SelfBackupPanel_Snackbar_EncryptedSuffix"].Value : "")].Value, Severity.Success);
             await LoadBackups();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "selfbackup.create", "whiskers", "", "", details: ex.Message, success: false);
-            Snackbar.Add($"Backup fehlgeschlagen: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupFailed", ex.Message].Value, Severity.Error);
         }
         finally { _busy = false; }
     }
@@ -171,22 +166,22 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Backup löschen",
-            $"Backup vom {info.CreatedAtUtc.ToLocalTime():dd.MM.yy HH:mm} wirklich löschen?",
-            yesText: "Löschen", cancelText: "Abbrechen");
+            L["SelfBackupPanel_Dialog_DeleteTitle"].Value,
+            L["SelfBackupPanel_Dialog_DeleteMessage", info.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value,
+            yesText: L["SelfBackupPanel_Dialog_DeleteYes"].Value, cancelText: L["SelfBackupPanel_Dialog_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await BackupService.DeleteBackupAsync(info.Id);
             await AuditLog.LogAsync(actor, "web", "selfbackup.delete", "whiskers", info.Id, info.FileName);
-            Snackbar.Add("Backup gelöscht.", Severity.Success);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupDeleted"].Value, Severity.Success);
             await LoadBackups();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "selfbackup.delete", "whiskers", info.Id, info.FileName, details: ex.Message, success: false);
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -194,8 +189,8 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var path = BackupService.ResolveArchivePath(info.Id);
-        if (path is null) { Snackbar.Add("Archiv nicht gefunden.", Severity.Error); return; }
-        await ConfirmAndRestore(path, $"Backup vom {info.CreatedAtUtc.ToLocalTime():dd.MM.yy HH:mm}");
+        if (path is null) { Snackbar.Add(L["SelfBackupPanel_Snackbar_ArchiveNotFound"].Value, Severity.Error); return; }
+        await ConfirmAndRestore(path, L["SelfBackupPanel_Text_BackupFrom", info.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value);
     }
 
     private async Task OnFileSelected(InputFileChangeEventArgs e)
@@ -211,11 +206,11 @@ else
             await using (var upload = file.OpenReadStream(maxAllowedSize: 2L * 1024 * 1024 * 1024))
                 staged = await BackupService.StageUploadAsync(upload, CancellationToken.None);
 
-            await ConfirmAndRestore(staged, $"hochgeladene Datei „{file.Name}“");
+            await ConfirmAndRestore(staged, L["SelfBackupPanel_Text_UploadedFile", file.Name].Value);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Upload/Wiederherstellung fehlgeschlagen: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_UploadRestoreFailed", ex.Message].Value, Severity.Error);
         }
         finally
         {
@@ -234,21 +229,19 @@ else
         var validation = await BackupService.ValidateArchiveAsync(archivePath);
         if (!validation.Ok)
         {
-            Snackbar.Add($"Wiederherstellung nicht möglich: {validation.Error}", Severity.Error);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_RestoreNotPossible", validation.Error].Value, Severity.Error);
             return;
         }
 
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Whiskers wiederherstellen",
-            $"{description} wiederherstellen?\n\nDies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), " +
-            "erstellt vorher automatisch ein Sicherungs-Backup und startet Whiskers neu. " +
-            "Alle Sitzungen werden abgemeldet. Läuft Whiskers ohne Docker/systemd, musst du den Prozess danach manuell neu starten.",
-            yesText: "Wiederherstellen & Neustart", cancelText: "Abbrechen");
+            L["SelfBackupPanel_Dialog_RestoreTitle"].Value,
+            L["SelfBackupPanel_Dialog_RestoreMessage", description].Value,
+            yesText: L["SelfBackupPanel_Dialog_RestoreYes"].Value, cancelText: L["SelfBackupPanel_Dialog_Cancel"].Value);
         if (confirmed != true) return;
 
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         await AuditLog.LogAsync(actor, "web", "selfbackup.restore", "whiskers", "", description);
-        Snackbar.Add("Wiederherstellung läuft — Whiskers startet gleich neu…", Severity.Info);
+        Snackbar.Add(L["SelfBackupPanel_Snackbar_RestoreRunning"].Value, Severity.Info);
         try
         {
             // This enters maintenance, stages the restore and stops the process — the circuit will drop here.
@@ -257,7 +250,7 @@ else
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "selfbackup.restore", "whiskers", "", description, details: ex.Message, success: false);
-            Snackbar.Add($"Wiederherstellung fehlgeschlagen: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["SelfBackupPanel_Snackbar_RestoreFailed", ex.Message].Value, Severity.Error);
         }
     }
 

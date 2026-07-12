@@ -257,4 +257,2110 @@
   <data name="Nav_GitDeploy" xml:space="preserve">
     <value>Git Deploy</value>
   </data>
+  <data name="AgentCallDetailDialog_Close_Button" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Actor" xml:space="preserve">
+    <value>Akteur</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Duration" xml:space="preserve">
+    <value>Dauer</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Level" xml:space="preserve">
+    <value>Level</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Timestamp" xml:space="preserve">
+    <value>Zeitpunkt</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Tool" xml:space="preserve">
+    <value>Tool</value>
+  </data>
+  <data name="AgentCallDetailDialog_Field_Verdict" xml:space="preserve">
+    <value>Verdict</value>
+  </data>
+  <data name="AgentCallDetailDialog_Params_Title" xml:space="preserve">
+    <value>Parameter (Secrets redacted)</value>
+  </data>
+  <data name="AgentCallDetailDialog_Result_Title" xml:space="preserve">
+    <value>Ergebnis</value>
+  </data>
+  <data name="AgentCallDetailDialog_Status_Failure" xml:space="preserve">
+    <value>Fehler</value>
+  </data>
+  <data name="AgentCallDetailDialog_Status_Success" xml:space="preserve">
+    <value>Erfolg</value>
+  </data>
+  <data name="AgentHistory_Column_Actor" xml:space="preserve">
+    <value>Akteur</value>
+  </data>
+  <data name="AgentHistory_Column_Duration" xml:space="preserve">
+    <value>Dauer</value>
+  </data>
+  <data name="AgentHistory_Column_Level" xml:space="preserve">
+    <value>Level</value>
+  </data>
+  <data name="AgentHistory_Column_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="AgentHistory_Column_Timestamp" xml:space="preserve">
+    <value>Zeitpunkt</value>
+  </data>
+  <data name="AgentHistory_Column_Tool" xml:space="preserve">
+    <value>Tool</value>
+  </data>
+  <data name="AgentHistory_Column_Verdict" xml:space="preserve">
+    <value>Verdict</value>
+  </data>
+  <data name="AgentHistory_Filter_Actor" xml:space="preserve">
+    <value>Akteur</value>
+  </data>
+  <data name="AgentHistory_Filter_DeniesOnly" xml:space="preserve">
+    <value>Nur Verweigerte</value>
+  </data>
+  <data name="AgentHistory_Filter_Period" xml:space="preserve">
+    <value>Zeitraum</value>
+  </data>
+  <data name="AgentHistory_Filter_Tool" xml:space="preserve">
+    <value>Tool</value>
+  </data>
+  <data name="AgentHistory_Filter_WritesOnly" xml:space="preserve">
+    <value>Nur Schreibzugriffe</value>
+  </data>
+  <data name="AgentHistory_Header_Subtitle" xml:space="preserve">
+    <value>Jeder Agent-/MCP-Tool-Aufruf — Akteur, Parameter, Verdict, Ergebnis</value>
+  </data>
+  <data name="AgentHistory_Header_Title" xml:space="preserve">
+    <value>Agent-History</value>
+  </data>
+  <data name="AgentHistory_PageTitle" xml:space="preserve">
+    <value>Agent-History - Whiskers</value>
+  </data>
+  <data name="AgentHistory_Period_All" xml:space="preserve">
+    <value>Alles</value>
+  </data>
+  <data name="AgentHistory_Period_Last24h" xml:space="preserve">
+    <value>Letzte 24 h</value>
+  </data>
+  <data name="AgentHistory_Period_Last30Days" xml:space="preserve">
+    <value>Letzte 30 Tage</value>
+  </data>
+  <data name="AgentHistory_Period_Last7Days" xml:space="preserve">
+    <value>Letzte 7 Tage</value>
+  </data>
+  <data name="AgentHistory_Period_LastHour" xml:space="preserve">
+    <value>Letzte Stunde</value>
+  </data>
+  <data name="AgentHistory_TotalCount" xml:space="preserve">
+    <value>{0} Einträge</value>
+  </data>
+  <data name="AgentView_Alert_NotEnabled" xml:space="preserve">
+    <value>Der Agent ist nicht aktiviert. Setze</value>
+  </data>
+  <data name="AgentView_Alert_NotEnabledSuffix" xml:space="preserve">
+    <value>, einen Provider und einen API-Key in der Konfiguration.</value>
+  </data>
+  <data name="AgentView_Attach_Tooltip" xml:space="preserve">
+    <value>Textdatei anhängen</value>
+  </data>
+  <data name="AgentView_Button_ClearChat" xml:space="preserve">
+    <value>Verlauf leeren</value>
+  </data>
+  <data name="AgentView_Button_Send" xml:space="preserve">
+    <value>Senden</value>
+  </data>
+  <data name="AgentView_Chat_EmptyState" xml:space="preserve">
+    <value>Sag dem Agenten, was er tun soll — z.B. „liste alle unhealthy Container".</value>
+  </data>
+  <data name="AgentView_Chat_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="AgentView_Chat_Working" xml:space="preserve">
+    <value>Arbeitet…</value>
+  </data>
+  <data name="AgentView_Confirm_Approve" xml:space="preserve">
+    <value>Freigeben</value>
+  </data>
+  <data name="AgentView_Confirm_Deny" xml:space="preserve">
+    <value>Ablehnen</value>
+  </data>
+  <data name="AgentView_Confirm_Label" xml:space="preserve">
+    <value>Bestätigung nötig:</value>
+  </data>
+  <data name="AgentView_Guardrails_Button" xml:space="preserve">
+    <value>Guardrails verwalten</value>
+  </data>
+  <data name="AgentView_Header_Subtitle" xml:space="preserve">
+    <value>Handelnder Assistent — führt Aktionen nur innerhalb der Guardrails und nie über deine eigenen Rechte hinaus aus.</value>
+  </data>
+  <data name="AgentView_Input_Placeholder" xml:space="preserve">
+    <value>Auftrag… (Enter sendet)</value>
+  </data>
+  <data name="AgentView_ModelStatus_ConnectionFailed" xml:space="preserve">
+    <value>Verbindung fehlgeschlagen — Key/Endpoint prüfen</value>
+  </data>
+  <data name="AgentView_ModelStatus_KeyValidNoModels" xml:space="preserve">
+    <value>Key gültig, keine Modelle gelistet</value>
+  </data>
+  <data name="AgentView_ModelStatus_ModelCount" xml:space="preserve">
+    <value>{0} Modelle</value>
+  </data>
+  <data name="AgentView_ModelStatus_ModelsFound" xml:space="preserve">
+    <value>{0} Modelle gefunden</value>
+  </data>
+  <data name="AgentView_Provider_ApiKeyLabel" xml:space="preserve">
+    <value>API-Key</value>
+  </data>
+  <data name="AgentView_Provider_EnabledLabel" xml:space="preserve">
+    <value>Agent aktiviert</value>
+  </data>
+  <data name="AgentView_Provider_EndpointLabel" xml:space="preserve">
+    <value>Endpoint (optional)</value>
+  </data>
+  <data name="AgentView_Provider_MaxIterationsLabel" xml:space="preserve">
+    <value>Max. Tool-Iterationen</value>
+  </data>
+  <data name="AgentView_Provider_ModelHelperAvailable" xml:space="preserve">
+    <value>{0} Modelle verfügbar — tippen zum Filtern</value>
+  </data>
+  <data name="AgentView_Provider_ModelHelperEmpty" xml:space="preserve">
+    <value>Frei eingeben, oder API-Key testen für Vorschläge</value>
+  </data>
+  <data name="AgentView_Provider_ModelLabel" xml:space="preserve">
+    <value>Modell</value>
+  </data>
+  <data name="AgentView_Provider_ProviderLabel" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="AgentView_Provider_ReloadHint" xml:space="preserve">
+    <value>Wird ohne Neustart übernommen (reloadOnChange).</value>
+  </data>
+  <data name="AgentView_Provider_SaveButton" xml:space="preserve">
+    <value>Provider speichern</value>
+  </data>
+  <data name="AgentView_Provider_SectionTitle" xml:space="preserve">
+    <value>LLM-Provider</value>
+  </data>
+  <data name="AgentView_Provider_TestConnection" xml:space="preserve">
+    <value>Verbindung testen</value>
+  </data>
+  <data name="AgentView_Provider_Testing" xml:space="preserve">
+    <value>Teste…</value>
+  </data>
+  <data name="AgentView_Snackbar_AdminOnly" xml:space="preserve">
+    <value>Nur Admins dürfen die Agent-Einstellungen ändern.</value>
+  </data>
+  <data name="AgentView_Snackbar_FileReadError" xml:space="preserve">
+    <value>Datei konnte nicht gelesen werden: {0}</value>
+  </data>
+  <data name="AgentView_Snackbar_FileTooLarge" xml:space="preserve">
+    <value>{0} ist zu groß (max. 512 KB Text).</value>
+  </data>
+  <data name="AgentView_Snackbar_ProviderSaved" xml:space="preserve">
+    <value>Provider gespeichert.</value>
+  </data>
+  <data name="AgentView_SystemPrompt_Hint" xml:space="preserve">
+    <value>Anweisung an das LLM. Leer = Standard. Ändert NICHT die Guardrails — die greifen code-erzwungen am Tool-Boundary, egal was hier steht.</value>
+  </data>
+  <data name="AgentView_SystemPrompt_ModifiedChip" xml:space="preserve">
+    <value>angepasst</value>
+  </data>
+  <data name="AgentView_SystemPrompt_ResetButton" xml:space="preserve">
+    <value>Auf Standard zurücksetzen</value>
+  </data>
+  <data name="AgentView_SystemPrompt_Title" xml:space="preserve">
+    <value>System-Prompt</value>
+  </data>
+  <data name="AppStore_Alert_PortConflicts" xml:space="preserve">
+    <value>Port-Konflikte erkannt! Bitte andere Ports wählen.</value>
+  </data>
+  <data name="AppStore_Button_AppCatalog" xml:space="preserve">
+    <value>App-Katalog</value>
+  </data>
+  <data name="AppStore_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="AppStore_Button_DeployTo" xml:space="preserve">
+    <value>Deployen auf {0}</value>
+  </data>
+  <data name="AppStore_Button_RegistrySearch" xml:space="preserve">
+    <value>Registry-Suche</value>
+  </data>
+  <data name="AppStore_Chip_All" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="AppStore_Chip_AllMarketplaces" xml:space="preserve">
+    <value>Alle Marketplaces</value>
+  </data>
+  <data name="AppStore_Chip_ExactReference" xml:space="preserve">
+    <value>exakte Referenz</value>
+  </data>
+  <data name="AppStore_Dialog_DeployTitle" xml:space="preserve">
+    <value>{0} deployen</value>
+  </data>
+  <data name="AppStore_Empty_NoApps" xml:space="preserve">
+    <value>Keine Apps gefunden für "{0}".</value>
+  </data>
+  <data name="AppStore_Empty_NoImages" xml:space="preserve">
+    <value>Keine Images gefunden für "{0}".</value>
+  </data>
+  <data name="AppStore_Empty_SearchPrompt" xml:space="preserve">
+    <value>Suchbegriff eingeben und Enter drücken, um Container-Images über die Marketplaces zu finden.</value>
+  </data>
+  <data name="AppStore_Error_PortInUse" xml:space="preserve">
+    <value>Port {0} ist bereits belegt!</value>
+  </data>
+  <data name="AppStore_Header_Subtitle" xml:space="preserve">
+    <value>{0} Apps verfügbar</value>
+  </data>
+  <data name="AppStore_Heading_Installed" xml:space="preserve">
+    <value>Installiert ({0})</value>
+  </data>
+  <data name="AppStore_Hint_NoFullTextSearch" xml:space="preserve">
+    <value>Dieser Marketplace bietet keine Volltextsuche — gib die exakte Referenz ein (z.B.</value>
+  </data>
+  <data name="AppStore_Hint_Or" xml:space="preserve">
+    <value>oder</value>
+  </data>
+  <data name="AppStore_Hint_PortFormat" xml:space="preserve">
+    <value>Format host:container, mehrere mit Komma getrennt.</value>
+  </data>
+  <data name="AppStore_Label_ContainerSummary" xml:space="preserve">
+    <value>{0} Container · {1}</value>
+  </data>
+  <data name="AppStore_Label_MoreContainers" xml:space="preserve">
+    <value>+{0} weitere</value>
+  </data>
+  <data name="AppStore_Label_Ports" xml:space="preserve">
+    <value>Ports (optional)</value>
+  </data>
+  <data name="AppStore_Label_ProjectName" xml:space="preserve">
+    <value>Projektname</value>
+  </data>
+  <data name="AppStore_Label_TargetServer" xml:space="preserve">
+    <value>Ziel-Server</value>
+  </data>
+  <data name="AppStore_Placeholder_RegistrySearch" xml:space="preserve">
+    <value>Image suchen (z.B. nginx, ghcr.io/owner/app)...</value>
+  </data>
+  <data name="AppStore_Placeholder_Search" xml:space="preserve">
+    <value>Suchen...</value>
+  </data>
+  <data name="AppStore_Snackbar_DeployError" xml:space="preserve">
+    <value>Fehler: {0}
+{1}</value>
+  </data>
+  <data name="AppStore_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="AppStore_Snackbar_FixPortConflicts" xml:space="preserve">
+    <value>Port-Konflikte beheben!</value>
+  </data>
+  <data name="AppStore_Snackbar_ImageDeployed" xml:space="preserve">
+    <value>'{0}' deployed auf {1}!</value>
+  </data>
+  <data name="AppStore_Snackbar_InvalidProjectName" xml:space="preserve">
+    <value>Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.</value>
+  </data>
+  <data name="AppStore_Snackbar_LoadInstalledFailed" xml:space="preserve">
+    <value>Installierte Apps konnten nicht geladen werden: {0}</value>
+  </data>
+  <data name="AppStore_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="AppStore_Snackbar_RequiredField" xml:space="preserve">
+    <value>Pflichtfeld: {0}</value>
+  </data>
+  <data name="AppStore_Snackbar_SearchFailed" xml:space="preserve">
+    <value>Suche fehlgeschlagen: {0}</value>
+  </data>
+  <data name="AppStore_Snackbar_TemplateDeployed" xml:space="preserve">
+    <value>'{0}' erfolgreich deployed auf {1}!</value>
+  </data>
+  <data name="CloudView_Action_HardReset" xml:space="preserve">
+    <value>Hard-Reset (erzwungener Neustart)</value>
+  </data>
+  <data name="CloudView_Action_PowerOn" xml:space="preserve">
+    <value>Einschalten</value>
+  </data>
+  <data name="CloudView_Action_Reboot" xml:space="preserve">
+    <value>Neustarten</value>
+  </data>
+  <data name="CloudView_Action_Shutdown" xml:space="preserve">
+    <value>Herunterfahren</value>
+  </data>
+  <data name="CloudView_Action_Snapshot" xml:space="preserve">
+    <value>Snapshot erstellen</value>
+  </data>
+  <data name="CloudView_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="CloudView_Button_Execute" xml:space="preserve">
+    <value>Ausführen</value>
+  </data>
+  <data name="CloudView_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="CloudView_Confirm_HardReset" xml:space="preserve">
+    <value>Hard-Reset für '{0}'? Erzwungener Neustart ohne sauberes Herunterfahren — Datenverlust möglich.</value>
+  </data>
+  <data name="CloudView_Confirm_Reboot" xml:space="preserve">
+    <value>Server '{0}' neustarten? Laufende Dienste werden unterbrochen.</value>
+  </data>
+  <data name="CloudView_Confirm_Shutdown" xml:space="preserve">
+    <value>Server '{0}' herunterfahren? Der Server ist danach offline.</value>
+  </data>
+  <data name="CloudView_Confirm_Title" xml:space="preserve">
+    <value>Aktion bestätigen</value>
+  </data>
+  <data name="CloudView_Empty_Link" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="CloudView_Empty_Prefix" xml:space="preserve">
+    <value>Kein Server mit konfiguriertem Cloud-Provider. Provider + API-Key pro Server unter</value>
+  </data>
+  <data name="CloudView_Empty_Suffix" xml:space="preserve">
+    <value>hinterlegen.</value>
+  </data>
+  <data name="CloudView_Header_Subtitle" xml:space="preserve">
+    <value>Out-of-band Power &amp; Snapshots über Hetzner / Hostinger — Provider pro Server unter „Server" hinterlegen</value>
+  </data>
+  <data name="CloudView_Header_Title" xml:space="preserve">
+    <value>Cloud-Steuerung</value>
+  </data>
+  <data name="CloudView_Snackbar_ActionError" xml:space="preserve">
+    <value>Fehler ({0}) bei {1}: {2}</value>
+  </data>
+  <data name="CloudView_Snackbar_LoadError" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="CloudView_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="CloudView_Snackbar_UnknownAction" xml:space="preserve">
+    <value>Unbekannte Aktion</value>
+  </data>
+  <data name="CloudView_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="CloudView_Table_Ipv4" xml:space="preserve">
+    <value>IPv4</value>
+  </data>
+  <data name="CloudView_Table_Provider" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="CloudView_Table_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="CloudView_Table_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="CloudView_Table_Traffic" xml:space="preserve">
+    <value>Traffic</value>
+  </data>
+  <data name="CloudView_Table_Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+  <data name="ComposeEditor_Button_AddService" xml:space="preserve">
+    <value>Service hinzufügen</value>
+  </data>
+  <data name="ComposeEditor_Button_Deploy" xml:space="preserve">
+    <value>Deployen</value>
+  </data>
+  <data name="ComposeEditor_Empty_NoSelection" xml:space="preserve">
+    <value>Wähle einen Service links aus oder erstelle einen neuen.</value>
+  </data>
+  <data name="ComposeEditor_Empty_NoServices" xml:space="preserve">
+    <value>Füge Services hinzu um eine Compose-Datei zu erstellen.</value>
+  </data>
+  <data name="ComposeEditor_Header_Subtitle" xml:space="preserve">
+    <value>Docker Compose-Dateien bearbeiten und deployen</value>
+  </data>
+  <data name="ComposeEditor_Heading_GeneratedYaml" xml:space="preserve">
+    <value>Generierte docker-compose.yml</value>
+  </data>
+  <data name="ComposeEditor_Label_DependsOn" xml:space="preserve">
+    <value>Depends On (kommagetrennt)</value>
+  </data>
+  <data name="ComposeEditor_Label_EnvVars" xml:space="preserve">
+    <value>Umgebungsvariablen (KEY=VALUE, kommagetrennt)</value>
+  </data>
+  <data name="ComposeEditor_Label_Network" xml:space="preserve">
+    <value>Netzwerk</value>
+  </data>
+  <data name="ComposeEditor_Label_New" xml:space="preserve">
+    <value>(neu)</value>
+  </data>
+  <data name="ComposeEditor_Label_NoImage" xml:space="preserve">
+    <value>kein Image</value>
+  </data>
+  <data name="ComposeEditor_Label_Ports" xml:space="preserve">
+    <value>Ports (kommagetrennt)</value>
+  </data>
+  <data name="ComposeEditor_Label_ProjectName" xml:space="preserve">
+    <value>Projektname</value>
+  </data>
+  <data name="ComposeEditor_Label_ServiceName" xml:space="preserve">
+    <value>Service-Name</value>
+  </data>
+  <data name="ComposeEditor_Label_TargetServer" xml:space="preserve">
+    <value>Ziel-Server</value>
+  </data>
+  <data name="ComposeEditor_Label_Unnamed" xml:space="preserve">
+    <value>(unbenannt)</value>
+  </data>
+  <data name="ComposeEditor_Label_Volumes" xml:space="preserve">
+    <value>Volumes (kommagetrennt)</value>
+  </data>
+  <data name="ComposeEditor_Snackbar_DeployError" xml:space="preserve">
+    <value>Fehler: {0}
+{1}</value>
+  </data>
+  <data name="ComposeEditor_Snackbar_DeploySuccess" xml:space="preserve">
+    <value>Deployment '{0}' erfolgreich!
+{1}</value>
+  </data>
+  <data name="ComposeEditor_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="ComposeEditor_Snackbar_InvalidProjectName" xml:space="preserve">
+    <value>Ungültiger Projektname. Nur Buchstaben, Zahlen, Punkte, Bindestriche und Unterstriche erlaubt.</value>
+  </data>
+  <data name="ComposeEditor_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="ContainerDetail_Alert_NotFound" xml:space="preserve">
+    <value>wurde auf keinem Server gefunden — er wurde möglicherweise entfernt oder neu erstellt (Image-Update vergibt eine neue ID).</value>
+  </data>
+  <data name="ContainerDetail_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="ContainerDetail_Button_Remove" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="ContainerDetail_Button_Restart" xml:space="preserve">
+    <value>Neustarten</value>
+  </data>
+  <data name="ContainerDetail_Button_Start" xml:space="preserve">
+    <value>Starten</value>
+  </data>
+  <data name="ContainerDetail_Button_Stop" xml:space="preserve">
+    <value>Stoppen</value>
+  </data>
+  <data name="ContainerDetail_Cve_ColInstalledFix" xml:space="preserve">
+    <value>Installiert → Fix</value>
+  </data>
+  <data name="ContainerDetail_Cve_ColPackage" xml:space="preserve">
+    <value>Paket</value>
+  </data>
+  <data name="ContainerDetail_Cve_ColTitle" xml:space="preserve">
+    <value>Titel</value>
+  </data>
+  <data name="ContainerDetail_Cve_FindingsCount" xml:space="preserve">
+    <value>{0} Findings</value>
+  </data>
+  <data name="ContainerDetail_Cve_NoFindings" xml:space="preserve">
+    <value>Keine CVE-Findings im Image.</value>
+  </data>
+  <data name="ContainerDetail_Cve_NoScan" xml:space="preserve">
+    <value>Noch kein CVE-Scan für diesen Container — der CVE-Monitor muss aktiviert sein und mindestens einmal gelaufen sein.</value>
+  </data>
+  <data name="ContainerDetail_Cve_ScanError" xml:space="preserve">
+    <value>Scan-Fehler: {0}</value>
+  </data>
+  <data name="ContainerDetail_Db_AllCsv" xml:space="preserve">
+    <value>Alle + CSV</value>
+  </data>
+  <data name="ContainerDetail_Db_Backup" xml:space="preserve">
+    <value>DB-Backup</value>
+  </data>
+  <data name="ContainerDetail_Db_BackupError" xml:space="preserve">
+    <value>Backup fehlgeschlagen: {0}</value>
+  </data>
+  <data name="ContainerDetail_Db_BackupSuccess" xml:space="preserve">
+    <value>Backup erstellt: {0} ({1}KB)</value>
+  </data>
+  <data name="ContainerDetail_Db_ColColumn" xml:space="preserve">
+    <value>Spalte</value>
+  </data>
+  <data name="ContainerDetail_Db_ColType" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+  <data name="ContainerDetail_Db_DownloadCsv" xml:space="preserve">
+    <value>CSV herunterladen</value>
+  </data>
+  <data name="ContainerDetail_Db_Execute" xml:space="preserve">
+    <value>Ausführen</value>
+  </data>
+  <data name="ContainerDetail_Db_ExecuteFile" xml:space="preserve">
+    <value>Datei ausführen</value>
+  </data>
+  <data name="ContainerDetail_Db_ExecutedSuccess" xml:space="preserve">
+    <value>Erfolgreich ausgeführt.</value>
+  </data>
+  <data name="ContainerDetail_Db_Import" xml:space="preserve">
+    <value>Importieren</value>
+  </data>
+  <data name="ContainerDetail_Db_ImportSuccess" xml:space="preserve">
+    <value>Erfolgreich importiert.</value>
+  </data>
+  <data name="ContainerDetail_Db_LoadError" xml:space="preserve">
+    <value>Fehler beim Laden der Datenbank-Info: {0}</value>
+  </data>
+  <data name="ContainerDetail_Db_Migrations" xml:space="preserve">
+    <value>Migrationen</value>
+  </data>
+  <data name="ContainerDetail_Db_NoFramework" xml:space="preserve">
+    <value>Kein Framework erkannt.</value>
+  </data>
+  <data name="ContainerDetail_Db_NoFrameworkUpload" xml:space="preserve">
+    <value>Kein Framework erkannt. Nutze die SQL-Datei Upload-Funktion.</value>
+  </data>
+  <data name="ContainerDetail_Db_OpenInEditor" xml:space="preserve">
+    <value>Im Editor öffnen</value>
+  </data>
+  <data name="ContainerDetail_Db_Preview50" xml:space="preserve">
+    <value>Vorschau (50)</value>
+  </data>
+  <data name="ContainerDetail_Db_QbAction" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="ContainerDetail_Db_QbColumns" xml:space="preserve">
+    <value>Spalten (kommagetrennt, leer = alle)</value>
+  </data>
+  <data name="ContainerDetail_Db_QbDeleteWarning" xml:space="preserve">
+    <value>DELETE ohne WHERE löscht ALLE Zeilen! WHERE ist Pflicht.</value>
+  </data>
+  <data name="ContainerDetail_Db_QbInsertValues" xml:space="preserve">
+    <value>Werte für neue Zeile:</value>
+  </data>
+  <data name="ContainerDetail_Db_QbSetValues" xml:space="preserve">
+    <value>SET-Werte (leer = unverändert):</value>
+  </data>
+  <data name="ContainerDetail_Db_QbTable" xml:space="preserve">
+    <value>Tabelle</value>
+  </data>
+  <data name="ContainerDetail_Db_QbUpdateWarning" xml:space="preserve">
+    <value>UPDATE ohne WHERE ändert ALLE Zeilen! WHERE ist Pflicht.</value>
+  </data>
+  <data name="ContainerDetail_Db_QbWhereExampleId" xml:space="preserve">
+    <value>z.B. id = 1</value>
+  </data>
+  <data name="ContainerDetail_Db_QbWhereExampleId42" xml:space="preserve">
+    <value>z.B. id = 42</value>
+  </data>
+  <data name="ContainerDetail_Db_QbWhereExampleStatus" xml:space="preserve">
+    <value>z.B. status = 'active'</value>
+  </data>
+  <data name="ContainerDetail_Db_QbWhereRequired" xml:space="preserve">
+    <value>WHERE (Pflicht!)</value>
+  </data>
+  <data name="ContainerDetail_Db_QueryEditor" xml:space="preserve">
+    <value>Query-Editor</value>
+  </data>
+  <data name="ContainerDetail_Db_QueryExecuted" xml:space="preserve">
+    <value>Query ausgeführt ({0}ms, {1} Zeilen betroffen)</value>
+  </data>
+  <data name="ContainerDetail_Db_RowCount" xml:space="preserve">
+    <value>{0} Zeilen</value>
+  </data>
+  <data name="ContainerDetail_Db_RunMigration" xml:space="preserve">
+    <value>Migration ausführen</value>
+  </data>
+  <data name="ContainerDetail_Db_SeedImport" xml:space="preserve">
+    <value>Seed / Import</value>
+  </data>
+  <data name="ContainerDetail_Db_SelectDatabase" xml:space="preserve">
+    <value>Datenbank</value>
+  </data>
+  <data name="ContainerDetail_Db_SqlCommand" xml:space="preserve">
+    <value>SQL / Befehl</value>
+  </data>
+  <data name="ContainerDetail_Db_Tables" xml:space="preserve">
+    <value>Tabellen</value>
+  </data>
+  <data name="ContainerDetail_Db_UploadSeedFile" xml:space="preserve">
+    <value>SQL / CSV / JSON hochladen</value>
+  </data>
+  <data name="ContainerDetail_Db_UploadSqlFile" xml:space="preserve">
+    <value>SQL-Datei hochladen</value>
+  </data>
+  <data name="ContainerDetail_Dialog_ExecuteSqlFileMessage" xml:space="preserve">
+    <value>Datei '{0}' gegen die Datenbank ausführen? Dies verändert Daten/Schema.</value>
+  </data>
+  <data name="ContainerDetail_Dialog_ExecuteSqlFileTitle" xml:space="preserve">
+    <value>SQL-Datei ausführen</value>
+  </data>
+  <data name="ContainerDetail_Dialog_ImportDataMessage" xml:space="preserve">
+    <value>Datei '{0}' in die Datenbank importieren?</value>
+  </data>
+  <data name="ContainerDetail_Dialog_ImportDataTitle" xml:space="preserve">
+    <value>Daten importieren</value>
+  </data>
+  <data name="ContainerDetail_Dialog_RemoveMessage" xml:space="preserve">
+    <value>Container '{0}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.</value>
+  </data>
+  <data name="ContainerDetail_Dialog_RemoveTitle" xml:space="preserve">
+    <value>Container entfernen</value>
+  </data>
+  <data name="ContainerDetail_Dialog_RollbackMessage" xml:space="preserve">
+    <value>Letzte Migration zurückrollen? Dies kann zu Datenverlust führen.</value>
+  </data>
+  <data name="ContainerDetail_Dialog_RollbackTitle" xml:space="preserve">
+    <value>Migration zurückrollen</value>
+  </data>
+  <data name="ContainerDetail_Dialog_RunMigrationMessage" xml:space="preserve">
+    <value>Datenbank-Migrationen ausführen? Dies verändert das Datenbankschema.</value>
+  </data>
+  <data name="ContainerDetail_Dialog_SaveEnvMessage" xml:space="preserve">
+    <value>Die .env-Datei wird überschrieben und der Container neu gestartet. Fortfahren?</value>
+  </data>
+  <data name="ContainerDetail_Dialog_SaveEnvTitle" xml:space="preserve">
+    <value>Umgebungsvariablen speichern</value>
+  </data>
+  <data name="ContainerDetail_Dialog_SaveEnvYes" xml:space="preserve">
+    <value>Speichern &amp; Neustart</value>
+  </data>
+  <data name="ContainerDetail_Env_AddVariable" xml:space="preserve">
+    <value>Variable hinzufügen</value>
+  </data>
+  <data name="ContainerDetail_Env_ColValue" xml:space="preserve">
+    <value>Wert</value>
+  </data>
+  <data name="ContainerDetail_Env_ColVariable" xml:space="preserve">
+    <value>Variable</value>
+  </data>
+  <data name="ContainerDetail_Env_DiscardChange" xml:space="preserve">
+    <value>Änderung verwerfen</value>
+  </data>
+  <data name="ContainerDetail_Env_DotEnvFile" xml:space="preserve">
+    <value>.env-Datei</value>
+  </data>
+  <data name="ContainerDetail_Env_DotEnvWarning" xml:space="preserve">
+    <value>Änderungen an der .env-Datei erfordern einen Container-Neustart (kurze Downtime).</value>
+  </data>
+  <data name="ContainerDetail_Env_EditValue" xml:space="preserve">
+    <value>Wert ändern</value>
+  </data>
+  <data name="ContainerDetail_Env_EnterNewValue" xml:space="preserve">
+    <value>Neuen Wert eingeben...</value>
+  </data>
+  <data name="ContainerDetail_Env_FieldNewValue" xml:space="preserve">
+    <value>Neuer Wert</value>
+  </data>
+  <data name="ContainerDetail_Env_FieldValue" xml:space="preserve">
+    <value>Wert</value>
+  </data>
+  <data name="ContainerDetail_Env_FieldValueStored" xml:space="preserve">
+    <value>Wert (gespeichert)</value>
+  </data>
+  <data name="ContainerDetail_Env_LoadError" xml:space="preserve">
+    <value>Fehler beim Laden der Umgebungsvariablen: {0}</value>
+  </data>
+  <data name="ContainerDetail_Env_MaskedInfo" xml:space="preserve">
+    <value>Sensible Werte (Keys, Secrets, Passwörter) sind aus Sicherheitsgründen maskiert.</value>
+  </data>
+  <data name="ContainerDetail_Env_NoCompose" xml:space="preserve">
+    <value>Kein Docker-Compose-Projekt erkannt – .env-Datei kann nicht bearbeitet werden.</value>
+  </data>
+  <data name="ContainerDetail_Env_NoDotEnvFound" xml:space="preserve">
+    <value>Keine .env-Datei gefunden. Sie können eine neue erstellen.</value>
+  </data>
+  <data name="ContainerDetail_Env_RemoveVariable" xml:space="preserve">
+    <value>Variable entfernen</value>
+  </data>
+  <data name="ContainerDetail_Env_RestartError" xml:space="preserve">
+    <value>Fehler beim Neustart: {0}
+{1}</value>
+  </data>
+  <data name="ContainerDetail_Env_RunningVars" xml:space="preserve">
+    <value>Laufende Container-Variablen</value>
+  </data>
+  <data name="ContainerDetail_Env_SaveAndRestart" xml:space="preserve">
+    <value>Speichern &amp; Neu starten</value>
+  </data>
+  <data name="ContainerDetail_Env_SaveSuccess" xml:space="preserve">
+    <value>Umgebungsvariablen gespeichert und Container neu gestartet.</value>
+  </data>
+  <data name="ContainerDetail_Env_Search" xml:space="preserve">
+    <value>Suchen...</value>
+  </data>
+  <data name="ContainerDetail_Env_WriteError" xml:space="preserve">
+    <value>Fehler beim Schreiben: {0}</value>
+  </data>
+  <data name="ContainerDetail_Health_ColExitCode" xml:space="preserve">
+    <value>Exit-Code</value>
+  </data>
+  <data name="ContainerDetail_Health_ColHealth" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="ContainerDetail_Health_ColStatus" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="ContainerDetail_Health_ColTimestamp" xml:space="preserve">
+    <value>Zeitstempel</value>
+  </data>
+  <data name="ContainerDetail_Health_NoData" xml:space="preserve">
+    <value>Noch keine Zustandsdaten für diesen Container vorhanden.</value>
+  </data>
+  <data name="ContainerDetail_Overview_Created" xml:space="preserve">
+    <value>Erstellt</value>
+  </data>
+  <data name="ContainerDetail_Overview_Labels" xml:space="preserve">
+    <value>Labels (Bezeichner)</value>
+  </data>
+  <data name="ContainerDetail_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="ContainerDetail_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="ContainerDetail_Snackbar_Removed" xml:space="preserve">
+    <value>Entfernt</value>
+  </data>
+  <data name="ContainerDetail_Snackbar_Restarted" xml:space="preserve">
+    <value>Neugestartet</value>
+  </data>
+  <data name="ContainerDetail_Snackbar_Started" xml:space="preserve">
+    <value>Gestartet</value>
+  </data>
+  <data name="ContainerDetail_Snackbar_Stopped" xml:space="preserve">
+    <value>Gestoppt</value>
+  </data>
+  <data name="ContainerDetail_Stats_CpuHistory" xml:space="preserve">
+    <value>CPU-Verlauf</value>
+  </data>
+  <data name="ContainerDetail_Stats_CpuUsage" xml:space="preserve">
+    <value>CPU-Auslastung</value>
+  </data>
+  <data name="ContainerDetail_Stats_DiskIo" xml:space="preserve">
+    <value>Datenträger-I/O</value>
+  </data>
+  <data name="ContainerDetail_Stats_History" xml:space="preserve">
+    <value>Verlauf</value>
+  </data>
+  <data name="ContainerDetail_Stats_MemoryHistory" xml:space="preserve">
+    <value>Speicher-Verlauf</value>
+  </data>
+  <data name="ContainerDetail_Stats_MemoryOfLimit" xml:space="preserve">
+    <value>von {0} ({1}%)</value>
+  </data>
+  <data name="ContainerDetail_Stats_MemorySeries" xml:space="preserve">
+    <value>Speicher %</value>
+  </data>
+  <data name="ContainerDetail_Stats_MemoryUsage" xml:space="preserve">
+    <value>Speicherauslastung</value>
+  </data>
+  <data name="ContainerDetail_Stats_NetworkIo" xml:space="preserve">
+    <value>Netzwerk-I/O</value>
+  </data>
+  <data name="ContainerDetail_Stats_NoHistory" xml:space="preserve">
+    <value>Noch keine historischen Daten vorhanden.</value>
+  </data>
+  <data name="ContainerDetail_Stats_OnlyRunning" xml:space="preserve">
+    <value>Statistiken sind nur für laufende Container verfügbar.</value>
+  </data>
+  <data name="ContainerDetail_Stats_Period" xml:space="preserve">
+    <value>Zeitraum</value>
+  </data>
+  <data name="ContainerDetail_Stats_Period1h" xml:space="preserve">
+    <value>1 Stunde</value>
+  </data>
+  <data name="ContainerDetail_Stats_Period24h" xml:space="preserve">
+    <value>24 Stunden</value>
+  </data>
+  <data name="ContainerDetail_Stats_Period6h" xml:space="preserve">
+    <value>6 Stunden</value>
+  </data>
+  <data name="ContainerDetail_Stats_Period7d" xml:space="preserve">
+    <value>7 Tage</value>
+  </data>
+  <data name="ContainerDetail_Stats_Read" xml:space="preserve">
+    <value>Lesen: {0}</value>
+  </data>
+  <data name="ContainerDetail_Stats_Write" xml:space="preserve">
+    <value>Schreiben: {0}</value>
+  </data>
+  <data name="ContainerDetail_Tab_Cves" xml:space="preserve">
+    <value>CVEs</value>
+  </data>
+  <data name="ContainerDetail_Tab_Database" xml:space="preserve">
+    <value>Datenbank</value>
+  </data>
+  <data name="ContainerDetail_Tab_EnvVars" xml:space="preserve">
+    <value>Umgebungsvariablen</value>
+  </data>
+  <data name="ContainerDetail_Tab_Health" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="ContainerDetail_Tab_Logs" xml:space="preserve">
+    <value>Logs</value>
+  </data>
+  <data name="ContainerDetail_Tab_Overview" xml:space="preserve">
+    <value>Übersicht</value>
+  </data>
+  <data name="ContainerDetail_Tab_Stats" xml:space="preserve">
+    <value>Statistiken</value>
+  </data>
+  <data name="ContainerDetail_Tab_Terminal" xml:space="preserve">
+    <value>Terminal</value>
+  </data>
+  <data name="ContainerDetail_Terminal_InitError" xml:space="preserve">
+    <value>Fehler beim Initialisieren des Terminals: {0}</value>
+  </data>
+  <data name="ContainerDetail_Terminal_MtlsHintPrefix" xml:space="preserve">
+    <value>Nutze die Container-Logs oder</value>
+  </data>
+  <data name="ContainerDetail_Terminal_MtlsHintSuffix" xml:space="preserve">
+    <value>für einzelne Befehle.</value>
+  </data>
+  <data name="ContainerDetail_Terminal_MtlsUnavailable" xml:space="preserve">
+    <value>Das Container-Terminal ist auf mTLS-Servern nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Stream weiter).</value>
+  </data>
+  <data name="ContainerDetail_Terminal_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — Operator erforderlich.</value>
+  </data>
+  <data name="ContainerDetail_Terminal_OnlyRunning" xml:space="preserve">
+    <value>Terminal ist nur für laufende Container verfügbar.</value>
+  </data>
+  <data name="ContainerDiff_ColProperty" xml:space="preserve">
+    <value>Eigenschaft</value>
+  </data>
+  <data name="ContainerDiff_DiffCount" xml:space="preserve">
+    <value>{0} Unterschiede</value>
+  </data>
+  <data name="ContainerDiff_NotSet" xml:space="preserve">
+    <value>(nicht gesetzt)</value>
+  </data>
+  <data name="ContainerDiff_PropDbType" xml:space="preserve">
+    <value>DB-Typ</value>
+  </data>
+  <data name="ContainerDiff_PropProject" xml:space="preserve">
+    <value>Projekt</value>
+  </data>
+  <data name="ContainerDiff_SameCount" xml:space="preserve">
+    <value>{0} Gleich</value>
+  </data>
+  <data name="ContainerDiff_SelectTwo" xml:space="preserve">
+    <value>Wähle zwei Container aus um sie zu vergleichen.</value>
+  </data>
+  <data name="ContainerDiff_Subtitle" xml:space="preserve">
+    <value>Konfiguration und Umgebung zweier Container vergleichen</value>
+  </data>
+  <data name="ContainerDiff_Title" xml:space="preserve">
+    <value>Container-Vergleich</value>
+  </data>
+  <data name="ContainerGraph_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="ContainerGraph_Header_Subtitle" xml:space="preserve">
+    <value>Netzwerk- und Abhängigkeitsgraph</value>
+  </data>
+  <data name="ContainerGraph_Header_Title" xml:space="preserve">
+    <value>Container-Topologie</value>
+  </data>
+  <data name="ContainerGraph_Node_Tooltip" xml:space="preserve">
+    <value>{0}
+{1}
+{2} ({3})
+Projekt: {4}</value>
+  </data>
+  <data name="ContainerGraph_PageTitle" xml:space="preserve">
+    <value>Topologie - Whiskers</value>
+  </data>
+  <data name="Dashboard_Action_Remove" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="Dashboard_Action_Restart" xml:space="preserve">
+    <value>Neustarten</value>
+  </data>
+  <data name="Dashboard_Action_RestartK8s" xml:space="preserve">
+    <value>Neustarten (Rollout-Restart)</value>
+  </data>
+  <data name="Dashboard_Action_Rollback" xml:space="preserve">
+    <value>Update zurückrollen</value>
+  </data>
+  <data name="Dashboard_Action_Start" xml:space="preserve">
+    <value>Starten</value>
+  </data>
+  <data name="Dashboard_Action_Stop" xml:space="preserve">
+    <value>Stoppen</value>
+  </data>
+  <data name="Dashboard_Action_StopK8s" xml:space="preserve">
+    <value>Stoppen (skaliert den Controller auf 0)</value>
+  </data>
+  <data name="Dashboard_Action_UpdateImage" xml:space="preserve">
+    <value>Image aktualisieren</value>
+  </data>
+  <data name="Dashboard_Chart_CpuHistory" xml:space="preserve">
+    <value>CPU-Verlauf</value>
+  </data>
+  <data name="Dashboard_Chart_MemoryHistory" xml:space="preserve">
+    <value>Speicher-Verlauf</value>
+  </data>
+  <data name="Dashboard_Chart_MemorySeries" xml:space="preserve">
+    <value>Speicher %</value>
+  </data>
+  <data name="Dashboard_Chart_NoHistory" xml:space="preserve">
+    <value>Noch keine historischen Daten vorhanden.</value>
+  </data>
+  <data name="Dashboard_Chart_Period1h" xml:space="preserve">
+    <value>1 Stunde</value>
+  </data>
+  <data name="Dashboard_Chart_Period24h" xml:space="preserve">
+    <value>24 Stunden</value>
+  </data>
+  <data name="Dashboard_Chart_Period6h" xml:space="preserve">
+    <value>6 Stunden</value>
+  </data>
+  <data name="Dashboard_Chart_Period7d" xml:space="preserve">
+    <value>7 Tage</value>
+  </data>
+  <data name="Dashboard_Chart_PeriodLabel" xml:space="preserve">
+    <value>Zeitraum</value>
+  </data>
+  <data name="Dashboard_Chart_UsageHistoryTitle" xml:space="preserve">
+    <value>Auslastungsverlauf</value>
+  </data>
+  <data name="Dashboard_Cve_Tooltip" xml:space="preserve">
+    <value>{0} Critical, {1} High, {2} Medium, {3} Low — klick zu /cves</value>
+  </data>
+  <data name="Dashboard_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="Dashboard_Dialog_RemoveMessage" xml:space="preserve">
+    <value>Container '{0}' wirklich entfernen? Diese Aktion kann nicht rückgängig gemacht werden.</value>
+  </data>
+  <data name="Dashboard_Dialog_RemoveTitle" xml:space="preserve">
+    <value>Container entfernen</value>
+  </data>
+  <data name="Dashboard_Dialog_RemoveYes" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="Dashboard_Dialog_RollbackMessage" xml:space="preserve">
+    <value>{0} wird auf das vorherige Image zurückgesetzt (Snapshot vom {1}). Der Container wird dazu neu erstellt.</value>
+  </data>
+  <data name="Dashboard_Dialog_RollbackTitle" xml:space="preserve">
+    <value>Update zurückrollen?</value>
+  </data>
+  <data name="Dashboard_Dialog_RollbackYes" xml:space="preserve">
+    <value>Zurückrollen</value>
+  </data>
+  <data name="Dashboard_Empty_NoContainers" xml:space="preserve">
+    <value>Keine Container gefunden. Bitte sicherstellen, dass Docker läuft und der Socket erreichbar ist.</value>
+  </data>
+  <data name="Dashboard_FirstServer_ClassicButton" xml:space="preserve">
+    <value>Server verbinden</value>
+  </data>
+  <data name="Dashboard_FirstServer_ClassicText" xml:space="preserve">
+    <value>Klassische Verbindung ohne Mesh: Docker Remote API (TCP, optional TLS) oder ein SSH-Tunnel. Für Nutzer, die kein Tailscale einsetzen möchten — jederzeit später aufs Mesh umstellbar.</value>
+  </data>
+  <data name="Dashboard_FirstServer_ClassicTitle" xml:space="preserve">
+    <value>Nur Docker-API / SSH verbinden</value>
+  </data>
+  <data name="Dashboard_FirstServer_OnboardButton" xml:space="preserve">
+    <value>Server onboarden</value>
+  </data>
+  <data name="Dashboard_FirstServer_OnboardText" xml:space="preserve">
+    <value>Eine einmalige SSH-Bootstrap-Verbindung installiert Tailscale-Mesh, Telemetrie und den mTLS-Docker-Proxy — danach wird der SSH-Zugang gelöscht. Control-, Daten- und Telemetrie-Plane laufen getrennt übers Mesh. Voraussetzung: kostenloses Tailscale-Konto.</value>
+  </data>
+  <data name="Dashboard_FirstServer_OnboardTitle" xml:space="preserve">
+    <value>One-Click-Onboarding</value>
+  </data>
+  <data name="Dashboard_FirstServer_RecommendedChip" xml:space="preserve">
+    <value>Empfohlen</value>
+  </data>
+  <data name="Dashboard_FirstServer_Subtitle" xml:space="preserve">
+    <value>Der lokale Docker-Host ist verbunden ✓ — verbinden Sie jetzt Ihre Flotte.</value>
+  </data>
+  <data name="Dashboard_FirstServer_Title" xml:space="preserve">
+    <value>Fügen Sie Ihren ersten Server hinzu</value>
+  </data>
+  <data name="Dashboard_Header_Subtitle" xml:space="preserve">
+    <value>Echtzeit-Status aller Server und Container</value>
+  </data>
+  <data name="Dashboard_Header_Title" xml:space="preserve">
+    <value>Container-Übersicht</value>
+  </data>
+  <data name="Dashboard_ServerHeader_Info" xml:space="preserve">
+    <value>{0} — {1} Kerne — {2} RAM</value>
+  </data>
+  <data name="Dashboard_ServerInfo_ContainersValue" xml:space="preserve">
+    <value>{0} laufend / {1} gesamt</value>
+  </data>
+  <data name="Dashboard_ServerInfo_CpuLabel" xml:space="preserve">
+    <value>CPU ({0} Kerne)</value>
+  </data>
+  <data name="Dashboard_ServerInfo_CpuUsed" xml:space="preserve">
+    <value>{0}% genutzt</value>
+  </data>
+  <data name="Dashboard_ServerInfo_MemoryLabel" xml:space="preserve">
+    <value>Speicher</value>
+  </data>
+  <data name="Dashboard_Server_Unreachable" xml:space="preserve">
+    <value>nicht erreichbar</value>
+  </data>
+  <data name="Dashboard_Snackbar_LoadError" xml:space="preserve">
+    <value>Fehler beim Laden der Container: {0}</value>
+  </data>
+  <data name="Dashboard_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="Dashboard_Snackbar_RemoveError" xml:space="preserve">
+    <value>Fehler beim Entfernen von {0}: {1}</value>
+  </data>
+  <data name="Dashboard_Snackbar_Removed" xml:space="preserve">
+    <value>{0} entfernt</value>
+  </data>
+  <data name="Dashboard_Snackbar_RestartError" xml:space="preserve">
+    <value>Fehler beim Neustarten von {0}: {1}</value>
+  </data>
+  <data name="Dashboard_Snackbar_Restarted" xml:space="preserve">
+    <value>{0} neugestartet</value>
+  </data>
+  <data name="Dashboard_Snackbar_RollbackError" xml:space="preserve">
+    <value>Fehler beim Zurückrollen von {0}: {1}</value>
+  </data>
+  <data name="Dashboard_Snackbar_RollingBack" xml:space="preserve">
+    <value>{0} wird zurückgerollt...</value>
+  </data>
+  <data name="Dashboard_Snackbar_StartError" xml:space="preserve">
+    <value>Fehler beim Starten von {0}: {1}</value>
+  </data>
+  <data name="Dashboard_Snackbar_Started" xml:space="preserve">
+    <value>{0} gestartet</value>
+  </data>
+  <data name="Dashboard_Snackbar_StopError" xml:space="preserve">
+    <value>Fehler beim Stoppen von {0}: {1}</value>
+  </data>
+  <data name="Dashboard_Snackbar_Stopped" xml:space="preserve">
+    <value>{0} gestoppt</value>
+  </data>
+  <data name="Dashboard_Snackbar_UpdateError" xml:space="preserve">
+    <value>Fehler beim Aktualisieren von {0}: {1}</value>
+  </data>
+  <data name="Dashboard_Snackbar_Updated" xml:space="preserve">
+    <value>{0} erfolgreich aktualisiert!</value>
+  </data>
+  <data name="Dashboard_Snackbar_Updating" xml:space="preserve">
+    <value>{0} wird aktualisiert...</value>
+  </data>
+  <data name="Dashboard_Stat_Running" xml:space="preserve">
+    <value>Laufend</value>
+  </data>
+  <data name="Dashboard_Stat_Stopped" xml:space="preserve">
+    <value>Gestoppt</value>
+  </data>
+  <data name="Dashboard_Stat_Total" xml:space="preserve">
+    <value>Gesamt</value>
+  </data>
+  <data name="Dashboard_Stat_Unhealthy" xml:space="preserve">
+    <value>Fehlerhaft</value>
+  </data>
+  <data name="Dashboard_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="Dashboard_Table_Health" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="Dashboard_Table_Memory" xml:space="preserve">
+    <value>Speicher</value>
+  </data>
+  <data name="Dashboard_Table_NoContainers" xml:space="preserve">
+    <value>Keine Container in diesem Projekt gefunden.</value>
+  </data>
+  <data name="Dashboard_Table_StatusText" xml:space="preserve">
+    <value>Statustext</value>
+  </data>
+  <data name="Dashboard_Tooltip_Firewall" xml:space="preserve">
+    <value>Firewall / Ports</value>
+  </data>
+  <data name="Dashboard_Tooltip_Nginx" xml:space="preserve">
+    <value>Nginx-Seiten</value>
+  </data>
+  <data name="Dashboard_Tooltip_Services" xml:space="preserve">
+    <value>Systemdienste</value>
+  </data>
+  <data name="Dashboard_Tooltip_Ssl" xml:space="preserve">
+    <value>SSL-Zertifikate</value>
+  </data>
+  <data name="Dashboard_Tooltip_Terminal" xml:space="preserve">
+    <value>Terminal</value>
+  </data>
+  <data name="Dashboard_Tooltip_ToggleServer" xml:space="preserve">
+    <value>Container ein-/ausklappen</value>
+  </data>
+  <data name="Dashboard_Tooltip_UpdateAvailable" xml:space="preserve">
+    <value>Update verfügbar: {0} — Lokal: {1}… → Remote: {2}…</value>
+  </data>
+  <data name="Deploy_Button_AddEnvVar" xml:space="preserve">
+    <value>Variable hinzufügen</value>
+  </data>
+  <data name="Deploy_Button_AddPort" xml:space="preserve">
+    <value>Port hinzufügen</value>
+  </data>
+  <data name="Deploy_Button_AddVolume" xml:space="preserve">
+    <value>Volume hinzufügen</value>
+  </data>
+  <data name="Deploy_Button_Deploy" xml:space="preserve">
+    <value>Bereitstellen</value>
+  </data>
+  <data name="Deploy_Button_DeployAll" xml:space="preserve">
+    <value>Alle bereitstellen</value>
+  </data>
+  <data name="Deploy_Button_Validate" xml:space="preserve">
+    <value>Validieren</value>
+  </data>
+  <data name="Deploy_Header_Subtitle" xml:space="preserve">
+    <value>Neue Container und Stacks erstellen und deployen</value>
+  </data>
+  <data name="Deploy_Header_Title" xml:space="preserve">
+    <value>Container bereitstellen</value>
+  </data>
+  <data name="Deploy_Label_ContainerName" xml:space="preserve">
+    <value>Container-Name</value>
+  </data>
+  <data name="Deploy_Label_ContainerPort" xml:space="preserve">
+    <value>Container-Port</value>
+  </data>
+  <data name="Deploy_Label_HostPort" xml:space="preserve">
+    <value>Host-Port</value>
+  </data>
+  <data name="Deploy_Label_ImageName" xml:space="preserve">
+    <value>Image-Name</value>
+  </data>
+  <data name="Deploy_Label_Network" xml:space="preserve">
+    <value>Netzwerk (optional)</value>
+  </data>
+  <data name="Deploy_Label_RestartPolicy" xml:space="preserve">
+    <value>Neustart-Richtlinie</value>
+  </data>
+  <data name="Deploy_Label_TargetServer" xml:space="preserve">
+    <value>Ziel-Server</value>
+  </data>
+  <data name="Deploy_PageTitle" xml:space="preserve">
+    <value>Bereitstellen - Whiskers</value>
+  </data>
+  <data name="Deploy_Placeholder_ComposeContent" xml:space="preserve">
+    <value>docker-compose.yml Inhalt hier einfügen...</value>
+  </data>
+  <data name="Deploy_Progress_ComposeSuccess" xml:space="preserve">
+    <value>Erfolgreich! {0} Container bereitgestellt</value>
+  </data>
+  <data name="Deploy_Progress_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="Deploy_Progress_Success" xml:space="preserve">
+    <value>Erfolgreich! Container-ID: {0}</value>
+  </data>
+  <data name="Deploy_RestartPolicy_Always" xml:space="preserve">
+    <value>Immer</value>
+  </data>
+  <data name="Deploy_RestartPolicy_No" xml:space="preserve">
+    <value>Nein</value>
+  </data>
+  <data name="Deploy_RestartPolicy_OnFailure" xml:space="preserve">
+    <value>Bei Fehler</value>
+  </data>
+  <data name="Deploy_RestartPolicy_UnlessStopped" xml:space="preserve">
+    <value>Außer wenn gestoppt</value>
+  </data>
+  <data name="Deploy_Section_EnvVars" xml:space="preserve">
+    <value>Umgebungsvariablen</value>
+  </data>
+  <data name="Deploy_Section_PortMappings" xml:space="preserve">
+    <value>Port-Zuordnungen</value>
+  </data>
+  <data name="Deploy_Section_Volumes" xml:space="preserve">
+    <value>Volumes (Datenträger)</value>
+  </data>
+  <data name="Deploy_Snackbar_ComposeDeployed" xml:space="preserve">
+    <value>{0} Container bereitgestellt</value>
+  </data>
+  <data name="Deploy_Snackbar_DeployFailed" xml:space="preserve">
+    <value>Bereitstellung fehlgeschlagen: {0}</value>
+  </data>
+  <data name="Deploy_Snackbar_Deployed" xml:space="preserve">
+    <value>Container bereitgestellt: {0}</value>
+  </data>
+  <data name="Deploy_Snackbar_ImageRequired" xml:space="preserve">
+    <value>Image-Name ist erforderlich</value>
+  </data>
+  <data name="Deploy_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="Deploy_Tab_Form" xml:space="preserve">
+    <value>Formular</value>
+  </data>
+  <data name="Deploy_Validation_ErrorsTitle" xml:space="preserve">
+    <value>Validierungsfehler:</value>
+  </data>
+  <data name="Deploy_Validation_Valid" xml:space="preserve">
+    <value>Gültig! {0} Dienst(e) gefunden:</value>
+  </data>
+  <data name="HealthReports_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="HealthReports_Filter_AllContainers" xml:space="preserve">
+    <value>Alle Container</value>
+  </data>
+  <data name="HealthReports_Filter_Last12Hours" xml:space="preserve">
+    <value>Letzte 12 Stunden</value>
+  </data>
+  <data name="HealthReports_Filter_Last24Hours" xml:space="preserve">
+    <value>Letzte 24 Stunden</value>
+  </data>
+  <data name="HealthReports_Filter_Last6Hours" xml:space="preserve">
+    <value>Letzte 6 Stunden</value>
+  </data>
+  <data name="HealthReports_Filter_LastHour" xml:space="preserve">
+    <value>Letzte Stunde</value>
+  </data>
+  <data name="HealthReports_Filter_TimeWindowLabel" xml:space="preserve">
+    <value>Zeitfenster</value>
+  </data>
+  <data name="HealthReports_Header_Subtitle" xml:space="preserve">
+    <value>Health-Checks und Verfügbarkeitshistorie</value>
+  </data>
+  <data name="HealthReports_Header_Title" xml:space="preserve">
+    <value>Statusberichte</value>
+  </data>
+  <data name="HealthReports_PageTitle" xml:space="preserve">
+    <value>Statusberichte - Whiskers</value>
+  </data>
+  <data name="HealthReports_Table_ExitCode" xml:space="preserve">
+    <value>Exit-Code</value>
+  </data>
+  <data name="HealthReports_Table_Health" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="HealthReports_Table_NoRecords" xml:space="preserve">
+    <value>Noch keine Zustandsdaten vorhanden. Der Monitor sammelt alle 30 Sekunden Daten.</value>
+  </data>
+  <data name="HealthReports_Table_Timestamp" xml:space="preserve">
+    <value>Zeitstempel</value>
+  </data>
+  <data name="SelfBackupPanel_Alert_Encrypted" xml:space="preserve">
+    <value>Backups werden mit deinem &lt;code&gt;VAULT_KEY&lt;/code&gt; verschlüsselt (AES-256-GCM). Zur Wiederherstellung wird derselbe &lt;code&gt;VAULT_KEY&lt;/code&gt; benötigt.</value>
+  </data>
+  <data name="SelfBackupPanel_Alert_NoBackups" xml:space="preserve">
+    <value>Noch keine Selbst-Backups vorhanden.</value>
+  </data>
+  <data name="SelfBackupPanel_Alert_Postgres" xml:space="preserve">
+    <value>Diese Instanz nutzt PostgreSQL. Das Backup enthält Konfiguration und Secrets unter &lt;code&gt;/app/data&lt;/code&gt;, aber &lt;b&gt;nicht&lt;/b&gt; die PostgreSQL-Datenbank selbst — sichere diese separat (z. B. mit &lt;code&gt;pg_dump&lt;/code&gt;).</value>
+  </data>
+  <data name="SelfBackupPanel_Alert_Unencrypted" xml:space="preserve">
+    <value>&lt;code&gt;VAULT_KEY&lt;/code&gt; ist nicht gesetzt — Backups werden &lt;b&gt;unverschlüsselt&lt;/b&gt; gespeichert und enthalten Klartext-Secrets (ssh-keys, mtls, API-Schlüssel, DataProtection-Ring). Setze &lt;code&gt;VAULT_KEY&lt;/code&gt; für verschlüsselte Backups oder verwahre heruntergeladene Dateien sicher.</value>
+  </data>
+  <data name="SelfBackupPanel_Button_CreateBackup" xml:space="preserve">
+    <value>Backup jetzt erstellen</value>
+  </data>
+  <data name="SelfBackupPanel_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="SelfBackupPanel_Button_ScheduleBackups" xml:space="preserve">
+    <value>Automatische Backups planen</value>
+  </data>
+  <data name="SelfBackupPanel_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="SelfBackupPanel_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Backup vom {0} wirklich löschen?</value>
+  </data>
+  <data name="SelfBackupPanel_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Backup löschen</value>
+  </data>
+  <data name="SelfBackupPanel_Dialog_DeleteYes" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="SelfBackupPanel_Dialog_RestoreMessage" xml:space="preserve">
+    <value>{0} wiederherstellen?
+
+Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstellt vorher automatisch ein Sicherungs-Backup und startet Whiskers neu. Alle Sitzungen werden abgemeldet. Läuft Whiskers ohne Docker/systemd, musst du den Prozess danach manuell neu starten.</value>
+  </data>
+  <data name="SelfBackupPanel_Dialog_RestoreTitle" xml:space="preserve">
+    <value>Whiskers wiederherstellen</value>
+  </data>
+  <data name="SelfBackupPanel_Dialog_RestoreYes" xml:space="preserve">
+    <value>Wiederherstellen &amp; Neustart</value>
+  </data>
+  <data name="SelfBackupPanel_Heading_RestoreFromFile" xml:space="preserve">
+    <value>Aus Datei wiederherstellen</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_ArchiveNotFound" xml:space="preserve">
+    <value>Archiv nicht gefunden.</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_BackupCreated" xml:space="preserve">
+    <value>Backup erstellt: {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_BackupDeleted" xml:space="preserve">
+    <value>Backup gelöscht.</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_BackupFailed" xml:space="preserve">
+    <value>Backup fehlgeschlagen: {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_EncryptedSuffix" xml:space="preserve">
+    <value> (verschlüsselt)</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_LoadError" xml:space="preserve">
+    <value>Fehler beim Laden: {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_RestoreFailed" xml:space="preserve">
+    <value>Wiederherstellung fehlgeschlagen: {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_RestoreNotPossible" xml:space="preserve">
+    <value>Wiederherstellung nicht möglich: {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_RestoreRunning" xml:space="preserve">
+    <value>Wiederherstellung läuft — Whiskers startet gleich neu…</value>
+  </data>
+  <data name="SelfBackupPanel_Snackbar_UploadRestoreFailed" xml:space="preserve">
+    <value>Upload/Wiederherstellung fehlgeschlagen: {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Text_BackupFrom" xml:space="preserve">
+    <value>Backup vom {0}</value>
+  </data>
+  <data name="SelfBackupPanel_Text_Intro" xml:space="preserve">
+    <value>Sichert Whiskers' eigenen Zustand unter &lt;code&gt;/app/data&lt;/code&gt; (Datenbank, Konfiguration, Schlüssel) in ein herunterladbares Archiv. Eine Wiederherstellung ersetzt alle Daten und startet Whiskers neu.</value>
+  </data>
+  <data name="SelfBackupPanel_Text_UploadInfo" xml:space="preserve">
+    <value>Lade eine zuvor heruntergeladene Backup-Datei hoch. Whiskers erstellt zuerst automatisch ein Sicherungs-Backup des aktuellen Zustands, ersetzt dann alle Daten und startet neu.</value>
+  </data>
+  <data name="SelfBackupPanel_Text_UploadedFile" xml:space="preserve">
+    <value>hochgeladene Datei „{0}“</value>
+  </data>
+  <data name="SelfBackupPanel_Th_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="SelfBackupPanel_Th_Created" xml:space="preserve">
+    <value>Erstellt</value>
+  </data>
+  <data name="SelfBackupPanel_Th_Encrypted" xml:space="preserve">
+    <value>Verschl.</value>
+  </data>
+  <data name="SelfBackupPanel_Th_Size" xml:space="preserve">
+    <value>Größe</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_Download" xml:space="preserve">
+    <value>Herunterladen</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_Encrypted" xml:space="preserve">
+    <value>verschlüsselt</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_Restore" xml:space="preserve">
+    <value>Wiederherstellen</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_ScheduleBackups" xml:space="preserve">
+    <value>Wiederkehrende Selbst-Backups als geplante Aufgabe (Typ „Whiskers Selbst-Backup“) einrichten</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_Unencrypted" xml:space="preserve">
+    <value>unverschlüsselt</value>
+  </data>
+  <data name="Servers_Action_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="Servers_Action_Edit" xml:space="preserve">
+    <value>Bearbeiten</value>
+  </data>
+  <data name="Servers_Action_Onboard" xml:space="preserve">
+    <value>Ins Mesh onboarden (Tailscale + mTLS, SSH-frei)</value>
+  </data>
+  <data name="Servers_Action_TestConnection" xml:space="preserve">
+    <value>Verbindung testen</value>
+  </data>
+  <data name="Servers_Button_Add" xml:space="preserve">
+    <value>Server hinzufügen</value>
+  </data>
+  <data name="Servers_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="Servers_Button_Close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="Servers_Button_Connecting" xml:space="preserve">
+    <value>Verbinde…</value>
+  </data>
+  <data name="Servers_Button_ContinueTailscale" xml:space="preserve">
+    <value>Weiter mit Tailscale</value>
+  </data>
+  <data name="Servers_Button_Delete" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="Servers_Button_Retry" xml:space="preserve">
+    <value>Erneut versuchen</value>
+  </data>
+  <data name="Servers_Button_Running" xml:space="preserve">
+    <value>Läuft…</value>
+  </data>
+  <data name="Servers_Button_Save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="Servers_Button_SaveAndOnboard" xml:space="preserve">
+    <value>Speichern &amp; Onboarden</value>
+  </data>
+  <data name="Servers_Button_UploadSshKey" xml:space="preserve">
+    <value>SSH-Schlüssel hochladen</value>
+  </data>
+  <data name="Servers_Chip_ContainerCount" xml:space="preserve">
+    <value>{0} Container</value>
+  </data>
+  <data name="Servers_Chip_Default" xml:space="preserve">
+    <value>Standard</value>
+  </data>
+  <data name="Servers_Chip_Error" xml:space="preserve">
+    <value>Fehler</value>
+  </data>
+  <data name="Servers_CloudKey_HelperKeep" xml:space="preserve">
+    <value>Ein Key ist gespeichert — leer lassen, um ihn beizubehalten.</value>
+  </data>
+  <data name="Servers_CloudKey_HelperNew" xml:space="preserve">
+    <value>API-Token des Providers (Hetzner: Projekt-Token; Hostinger: API-Token). Matching erfolgt über die Server-IP.</value>
+  </data>
+  <data name="Servers_Cloud_ProviderNone" xml:space="preserve">
+    <value>Keiner</value>
+  </data>
+  <data name="Servers_Cloud_SectionTitle" xml:space="preserve">
+    <value>Cloud-Provider (Power/Snapshot via API, out-of-band)</value>
+  </data>
+  <data name="Servers_ConnType_Kubernetes" xml:space="preserve">
+    <value>Kubernetes-Cluster (kubeconfig)</value>
+  </data>
+  <data name="Servers_ConnType_Ssh" xml:space="preserve">
+    <value>SSH Tunnel</value>
+  </data>
+  <data name="Servers_ConnType_Tcp" xml:space="preserve">
+    <value>TCP (Docker Remote API)</value>
+  </data>
+  <data name="Servers_ConnectError_Hint" xml:space="preserve">
+    <value>Host/Port/TLS prüfen — der Server bleibt gespeichert; korrigiere und speichere erneut.</value>
+  </data>
+  <data name="Servers_ConnectError_Prefix" xml:space="preserve">
+    <value>Gespeichert, aber die Verbindung ließ sich nicht aufbauen:</value>
+  </data>
+  <data name="Servers_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Server '{0}' wirklich entfernen? Die Verbindung und hinterlegte Zugangsdaten gehen verloren.</value>
+  </data>
+  <data name="Servers_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Server entfernen</value>
+  </data>
+  <data name="Servers_Dialog_TailscaleMessage" xml:space="preserve">
+    <value>Das One-Click-Onboarding verbindet den Server über ein &lt;strong&gt;Tailscale-Mesh&lt;/strong&gt; (danach SSH-frei via mTLS). Dafür brauchen Sie ein — kostenloses — Tailscale-Konto; der Login-Link erscheint während des Onboardings.&lt;br/&gt;&lt;br/&gt;Kein Tailscale gewünscht? Dann den Server einfach mit „Speichern“ klassisch per Docker-API (TCP/TLS) oder SSH verbinden — ohne Mesh.</value>
+  </data>
+  <data name="Servers_Dialog_TailscaleTitle" xml:space="preserve">
+    <value>Tailscale-Konto erforderlich</value>
+  </data>
+  <data name="Servers_Dialog_TitleAdd" xml:space="preserve">
+    <value>Server hinzufügen</value>
+  </data>
+  <data name="Servers_Dialog_TitleEdit" xml:space="preserve">
+    <value>Server bearbeiten</value>
+  </data>
+  <data name="Servers_Field_CloudApiKey" xml:space="preserve">
+    <value>API-Key</value>
+  </data>
+  <data name="Servers_Field_CloudProvider" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="Servers_Field_ConnectionType" xml:space="preserve">
+    <value>Verbindungstyp</value>
+  </data>
+  <data name="Servers_Field_Host" xml:space="preserve">
+    <value>Host (Domain / IPv4 / IPv6)</value>
+  </data>
+  <data name="Servers_Field_KubeContext" xml:space="preserve">
+    <value>Context (optional)</value>
+  </data>
+  <data name="Servers_Field_KubeContext_Helper" xml:space="preserve">
+    <value>Leer = current-context des kubeconfig.</value>
+  </data>
+  <data name="Servers_Field_KubeNamespaces" xml:space="preserve">
+    <value>Namespaces (optional, kommagetrennt)</value>
+  </data>
+  <data name="Servers_Field_KubeNamespaces_Helper" xml:space="preserve">
+    <value>Leer = alle sichtbaren Namespaces. Beispiel: default, apps, monitoring</value>
+  </data>
+  <data name="Servers_Field_Kubeconfig" xml:space="preserve">
+    <value>kubeconfig (YAML)</value>
+  </data>
+  <data name="Servers_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Servers_Field_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="Servers_Field_SshPassword" xml:space="preserve">
+    <value>Root-/SSH-Passwort</value>
+  </data>
+  <data name="Servers_Field_SshPassword_Helper" xml:space="preserve">
+    <value>Wird nur einmalig fürs Onboarding genutzt, nie gespeichert und nach Erfolg verworfen.</value>
+  </data>
+  <data name="Servers_Field_SshPort" xml:space="preserve">
+    <value>SSH-Port</value>
+  </data>
+  <data name="Servers_Field_SshUser" xml:space="preserve">
+    <value>SSH-Benutzer</value>
+  </data>
+  <data name="Servers_Field_TailscaleSsh" xml:space="preserve">
+    <value>Tailscale SSH (keyless Web-Terminal)</value>
+  </data>
+  <data name="Servers_Field_UseSshPassword" xml:space="preserve">
+    <value>Mit Root-/Passwort statt SSH-Key (nur fürs Erst-Onboarding)</value>
+  </data>
+  <data name="Servers_Field_UseTls" xml:space="preserve">
+    <value>TLS verwenden</value>
+  </data>
+  <data name="Servers_Header_Subtitle" xml:space="preserve">
+    <value>Server hinzufügen, konfigurieren und verwalten</value>
+  </data>
+  <data name="Servers_Header_Title" xml:space="preserve">
+    <value>Serververwaltung</value>
+  </data>
+  <data name="Servers_KubeRbacHint" xml:space="preserve">
+    <value>Empfehlung: einen minimalen ServiceAccount statt des Admin-kubeconfig verwenden — Manifest + Anleitung unter</value>
+  </data>
+  <data name="Servers_KubeVaultWarning_Prefix" xml:space="preserve">
+    <value>Kubernetes-Cluster benötigen den Secret-Vault: das kubeconfig wird verschlüsselt im Vault gespeichert (nie als Datei). Bitte</value>
+  </data>
+  <data name="Servers_KubeVaultWarning_Suffix" xml:space="preserve">
+    <value>setzen und neu starten.</value>
+  </data>
+  <data name="Servers_Kubeconfig_HelperKeep" xml:space="preserve">
+    <value>Leer lassen, um das gespeicherte kubeconfig zu behalten.</value>
+  </data>
+  <data name="Servers_Kubeconfig_HelperVault" xml:space="preserve">
+    <value>Wird verschlüsselt im Vault abgelegt — nie auf der Platte.</value>
+  </data>
+  <data name="Servers_OnboardInfo" xml:space="preserve">
+    <value>&lt;strong&gt;Onboarding (SSH-frei werden):&lt;/strong&gt; „Speichern &amp;amp; Onboarden“ installiert Tailscale + mTLS-Proxy über &lt;em&gt;eine&lt;/em&gt; SSH-Bootstrap-Verbindung und stellt den Host danach auf TCP+mTLS um. Key bzw. Passwort werden nach Erfolg automatisch entfernt.</value>
+  </data>
+  <data name="Servers_Onboard_Description" xml:space="preserve">
+    <value>Installiert Tailscale, deployt Telemetrie + mTLS-Proxy und stellt den Server SSH-frei (mTLS).</value>
+  </data>
+  <data name="Servers_Onboard_DialogTitle" xml:space="preserve">
+    <value>Onboarding: {0}</value>
+  </data>
+  <data name="Servers_Onboard_FailedAtStep" xml:space="preserve">
+    <value>Fehlgeschlagen bei Schritt „{0}":</value>
+  </data>
+  <data name="Servers_Onboard_IdempotentHint" xml:space="preserve">
+    <value>Alle Schritte sind idempotent — „Erneut versuchen" setzt am fehlgeschlagenen Schritt wieder auf.</value>
+  </data>
+  <data name="Servers_Onboard_OpenTailscaleLogin" xml:space="preserve">
+    <value>Tailscale-Login öffnen</value>
+  </data>
+  <data name="Servers_Onboard_TailscaleLoginHint" xml:space="preserve">
+    <value>Tailscale-Login — im Browser öffnen und den Node bestätigen:</value>
+  </data>
+  <data name="Servers_PageTitle" xml:space="preserve">
+    <value>Server - Whiskers</value>
+  </data>
+  <data name="Servers_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="Servers_Snackbar_Removed" xml:space="preserve">
+    <value>{0} entfernt</value>
+  </data>
+  <data name="Servers_Snackbar_SavedConnectFailed" xml:space="preserve">
+    <value>{0} gespeichert, aber Verbindung fehlgeschlagen.</value>
+  </data>
+  <data name="Servers_Snackbar_SavedConnected" xml:space="preserve">
+    <value>{0} gespeichert — verbunden ({1}).</value>
+  </data>
+  <data name="Servers_Status_Containers" xml:space="preserve">
+    <value>{0} Container</value>
+  </data>
+  <data name="Servers_Status_Pods" xml:space="preserve">
+    <value>{0} Pods</value>
+  </data>
+  <data name="Servers_Status_Timeout" xml:space="preserve">
+    <value>Zeitüberschreitung nach {0:0}s — Host/Port/Firewall prüfen.</value>
+  </data>
+  <data name="Servers_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="Servers_Table_Host" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="Servers_Table_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Servers_Table_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="Servers_Table_Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+  <data name="Servers_TailscaleSsh_Hint" xml:space="preserve">
+    <value>Web-Terminal verbindet sich keyless über das Tailnet (Mesh-Identität, kein SSH-Key) als root auf dem Host aus dem Feld oben. Voraussetzung:</value>
+  </data>
+  <data name="Servers_TailscaleSsh_HintSuffix" xml:space="preserve">
+    <value>auf dem Host.</value>
+  </data>
+  <data name="Settings_Alert_AiChatInfo" xml:space="preserve">
+    <value>Schreibgeschützter Berater-Chat (keine Aktionen). Der API-Key wird im Klartext unter /app/data gespeichert — wie bei servers.json.</value>
+  </data>
+  <data name="Settings_Alert_ApiKeyLevels" xml:space="preserve">
+    <value>Jeder API-Schlüssel hat eine Berechtigungsstufe: &lt;b&gt;Lesen&lt;/b&gt; (nur Abfragen), &lt;b&gt;Schreiben&lt;/b&gt; (Container/Server verwalten) oder &lt;b&gt;Admin&lt;/b&gt; (alle Befehle inkl. Shell).</value>
+  </data>
+  <data name="Settings_Alert_EnvInfo" xml:space="preserve">
+    <value>Diese Werte kommen aus Umgebungsvariablen (&lt;code&gt;.env&lt;/code&gt;) und werden erst nach einem Neustart wirksam — hier nur zur Ansicht. Das Host-Binding (&lt;code&gt;HOST_BIND&lt;/code&gt;/&lt;code&gt;HOST_PORT&lt;/code&gt;) liegt auf Compose-Ebene und ist im Container nicht sichtbar.</value>
+  </data>
+  <data name="Settings_Alert_NoAccess" xml:space="preserve">
+    <value>Kein Zugriff — diese Seite erfordert Administratorrechte. Deine Rolle: {0}.</value>
+  </data>
+  <data name="Settings_Alert_VaultActive" xml:space="preserve">
+    <value>Vault aktiv — {0} Secrets gespeichert (AES-256 verschlüsselt)</value>
+  </data>
+  <data name="Settings_Alert_VaultDisabled" xml:space="preserve">
+    <value>Vault ist deaktiviert. Setze die Umgebungsvariable &lt;code&gt;VAULT_KEY&lt;/code&gt; um Secrets verschlüsselt zu speichern.</value>
+  </data>
+  <data name="Settings_Alert_WhitelistEmpty" xml:space="preserve">
+    <value>Whitelist ist aktiviert aber leer — niemand kann sich anmelden!</value>
+  </data>
+  <data name="Settings_Button_Add" xml:space="preserve">
+    <value>Hinzufügen</value>
+  </data>
+  <data name="Settings_Button_CreateKey" xml:space="preserve">
+    <value>Schlüssel erstellen</value>
+  </data>
+  <data name="Settings_Button_GoToCves" xml:space="preserve">
+    <value>Zu /cves</value>
+  </data>
+  <data name="Settings_Button_Save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="Settings_Button_SaveAiChat" xml:space="preserve">
+    <value>AI-Chat speichern</value>
+  </data>
+  <data name="Settings_Button_SaveChannels" xml:space="preserve">
+    <value>Kanäle speichern</value>
+  </data>
+  <data name="Settings_Button_SaveMcpPermissions" xml:space="preserve">
+    <value>MCP-Rechte speichern</value>
+  </data>
+  <data name="Settings_Button_SaveNotifications" xml:space="preserve">
+    <value>Benachrichtigungen speichern</value>
+  </data>
+  <data name="Settings_Button_SaveTerminal" xml:space="preserve">
+    <value>Terminal speichern</value>
+  </data>
+  <data name="Settings_Button_SaveWhitelist" xml:space="preserve">
+    <value>Whitelist speichern</value>
+  </data>
+  <data name="Settings_Button_Saving" xml:space="preserve">
+    <value>Wird gespeichert...</value>
+  </data>
+  <data name="Settings_Button_ScanNow" xml:space="preserve">
+    <value>Jetzt scannen</value>
+  </data>
+  <data name="Settings_Button_SendTestNotification" xml:space="preserve">
+    <value>Testbenachrichtigung senden</value>
+  </data>
+  <data name="Settings_Button_TestNotification" xml:space="preserve">
+    <value>Testbenachrichtigung</value>
+  </data>
+  <data name="Settings_Chip_Active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="Settings_Chip_Disabled" xml:space="preserve">
+    <value>Deaktiviert</value>
+  </data>
+  <data name="Settings_Chip_RotationDays" xml:space="preserve">
+    <value>{0} Tage</value>
+  </data>
+  <data name="Settings_Chip_ScanRunning" xml:space="preserve">
+    <value>Scan läuft</value>
+  </data>
+  <data name="Settings_Env_Configured" xml:space="preserve">
+    <value>konfiguriert</value>
+  </data>
+  <data name="Settings_Env_LoginDisabled" xml:space="preserve">
+    <value>Login deaktiviert (AUTH_DISABLED)</value>
+  </data>
+  <data name="Settings_Env_NotConfigured" xml:space="preserve">
+    <value>nicht konfiguriert</value>
+  </data>
+  <data name="Settings_Env_OidcDisplayName" xml:space="preserve">
+    <value>OIDC Anzeigename</value>
+  </data>
+  <data name="Settings_Env_OidcEnabled" xml:space="preserve">
+    <value>OIDC aktiviert</value>
+  </data>
+  <data name="Settings_Env_VpnProvider" xml:space="preserve">
+    <value>VPN-Provider</value>
+  </data>
+  <data name="Settings_Header_Subtitle" xml:space="preserve">
+    <value>Benachrichtigungen, Sicherheit und Integrationen</value>
+  </data>
+  <data name="Settings_Header_Title" xml:space="preserve">
+    <value>Einstellungen</value>
+  </data>
+  <data name="Settings_Heading_AllowedEmails" xml:space="preserve">
+    <value>Erlaubte E-Mail-Adressen</value>
+  </data>
+  <data name="Settings_Heading_ApiKeys" xml:space="preserve">
+    <value>API-Schlüssel</value>
+  </data>
+  <data name="Settings_Heading_GenericWebhook" xml:space="preserve">
+    <value>Generischer Webhook</value>
+  </data>
+  <data name="Settings_Heading_ToolPermissions" xml:space="preserve">
+    <value>Tool-Berechtigungen</value>
+  </data>
+  <data name="Settings_Label_AddEmail" xml:space="preserve">
+    <value>E-Mail hinzufügen</value>
+  </data>
+  <data name="Settings_Label_AnomalyEnabled" xml:space="preserve">
+    <value>Ausreißererkennung (Anomalie) aktiv</value>
+  </data>
+  <data name="Settings_Label_AnomalyFloor" xml:space="preserve">
+    <value>Mindestwert (%) für Anomalie</value>
+  </data>
+  <data name="Settings_Label_AnomalySigma" xml:space="preserve">
+    <value>Sigma (Ausreißer-Schwelle)</value>
+  </data>
+  <data name="Settings_Label_AnomalyWindow" xml:space="preserve">
+    <value>Baseline-Fenster (Samples)</value>
+  </data>
+  <data name="Settings_Label_ApiKey" xml:space="preserve">
+    <value>API-Key</value>
+  </data>
+  <data name="Settings_Label_ApiUrlOptional" xml:space="preserve">
+    <value>API-URL (optional)</value>
+  </data>
+  <data name="Settings_Label_BotToken" xml:space="preserve">
+    <value>Bot-Token</value>
+  </data>
+  <data name="Settings_Label_BotUsername" xml:space="preserve">
+    <value>Bot-Benutzername</value>
+  </data>
+  <data name="Settings_Label_Channel" xml:space="preserve">
+    <value>Kanal</value>
+  </data>
+  <data name="Settings_Label_ChatId" xml:space="preserve">
+    <value>Chat-ID</value>
+  </data>
+  <data name="Settings_Label_CheckIntervalHours" xml:space="preserve">
+    <value>Prüfintervall (Stunden)</value>
+  </data>
+  <data name="Settings_Label_CheckIntervalSeconds" xml:space="preserve">
+    <value>Prüfintervall (Sekunden)</value>
+  </data>
+  <data name="Settings_Label_CooldownMinutes" xml:space="preserve">
+    <value>Cooldown (Minuten)</value>
+  </data>
+  <data name="Settings_Label_CpuThreshold" xml:space="preserve">
+    <value>CPU-Schwelle (%)</value>
+  </data>
+  <data name="Settings_Label_DefaultShell" xml:space="preserve">
+    <value>Standard-Shell</value>
+  </data>
+  <data name="Settings_Label_DiskThreshold" xml:space="preserve">
+    <value>Festplatten-Schwelle (%, Host)</value>
+  </data>
+  <data name="Settings_Label_Email" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="Settings_Label_Enabled" xml:space="preserve">
+    <value>Aktiviert</value>
+  </data>
+  <data name="Settings_Label_HistoryRetentionHours" xml:space="preserve">
+    <value>Verlaufsaufbewahrung (Stunden)</value>
+  </data>
+  <data name="Settings_Label_HomeserverUrl" xml:space="preserve">
+    <value>Homeserver-URL</value>
+  </data>
+  <data name="Settings_Label_IdleTimeout" xml:space="preserve">
+    <value>Leerlauf-Timeout (Minuten)</value>
+  </data>
+  <data name="Settings_Label_ImageUpdateEnabled" xml:space="preserve">
+    <value>Image-Update-Prüfung aktiv</value>
+  </data>
+  <data name="Settings_Label_Level" xml:space="preserve">
+    <value>Stufe</value>
+  </data>
+  <data name="Settings_Label_MailFrom" xml:space="preserve">
+    <value>Absender (From)</value>
+  </data>
+  <data name="Settings_Label_MailTo" xml:space="preserve">
+    <value>Empfänger (kommagetrennt)</value>
+  </data>
+  <data name="Settings_Label_MaxParallelScans" xml:space="preserve">
+    <value>Max. parallele Scans</value>
+  </data>
+  <data name="Settings_Label_MaxSessions" xml:space="preserve">
+    <value>Max. Sitzungen</value>
+  </data>
+  <data name="Settings_Label_MemoryThreshold" xml:space="preserve">
+    <value>RAM-Schwelle (%)</value>
+  </data>
+  <data name="Settings_Label_MetricAlertsEnabled" xml:space="preserve">
+    <value>Metrik-Alerts aktiv (emittiert high_cpu / high_memory / high_disk / metric_anomaly)</value>
+  </data>
+  <data name="Settings_Label_Model" xml:space="preserve">
+    <value>Modell</value>
+  </data>
+  <data name="Settings_Label_NotifyOnFinding" xml:space="preserve">
+    <value>Bei Fund benachrichtigen</value>
+  </data>
+  <data name="Settings_Label_NotifyOnUpdate" xml:space="preserve">
+    <value>Bei verfügbarem Update benachrichtigen</value>
+  </data>
+  <data name="Settings_Label_NotifySeverity" xml:space="preserve">
+    <value>Ab Schweregrad benachrichtigen</value>
+  </data>
+  <data name="Settings_Label_Password" xml:space="preserve">
+    <value>Passwort</value>
+  </data>
+  <data name="Settings_Label_ResolveOsCveIds" xml:space="preserve">
+    <value>OS-CVE-IDs auflösen</value>
+  </data>
+  <data name="Settings_Label_RestartLoopThreshold" xml:space="preserve">
+    <value>Neustart-Schleifenschwellwert</value>
+  </data>
+  <data name="Settings_Label_RestartLoopWindow" xml:space="preserve">
+    <value>Neustart-Schleifenfenster (Minuten)</value>
+  </data>
+  <data name="Settings_Label_Role" xml:space="preserve">
+    <value>Rolle</value>
+  </data>
+  <data name="Settings_Label_RoomId" xml:space="preserve">
+    <value>Raum-ID</value>
+  </data>
+  <data name="Settings_Label_ScanContainers" xml:space="preserve">
+    <value>Container scannen</value>
+  </data>
+  <data name="Settings_Label_ScanHostOs" xml:space="preserve">
+    <value>Host-OS scannen</value>
+  </data>
+  <data name="Settings_Label_ServerUrl" xml:space="preserve">
+    <value>Server-URL</value>
+  </data>
+  <data name="Settings_Label_SmtpHost" xml:space="preserve">
+    <value>SMTP-Host</value>
+  </data>
+  <data name="Settings_Label_SustainedMinutes" xml:space="preserve">
+    <value>Anhaltend (Minuten)</value>
+  </data>
+  <data name="Settings_Label_ThrottleMinutes" xml:space="preserve">
+    <value>Throttle (Min)</value>
+  </data>
+  <data name="Settings_Label_TrivyImage" xml:space="preserve">
+    <value>Trivy-Image</value>
+  </data>
+  <data name="Settings_Label_Username" xml:space="preserve">
+    <value>Benutzer</value>
+  </data>
+  <data name="Settings_Label_WebhookUrl" xml:space="preserve">
+    <value>Webhook-URL</value>
+  </data>
+  <data name="Settings_Label_WhitelistEnabled" xml:space="preserve">
+    <value>E-Mail-Whitelist aktiviert</value>
+  </data>
+  <data name="Settings_Level_Admin" xml:space="preserve">
+    <value>Admin</value>
+  </data>
+  <data name="Settings_Level_Read" xml:space="preserve">
+    <value>Lesen</value>
+  </data>
+  <data name="Settings_Level_Write" xml:space="preserve">
+    <value>Schreiben</value>
+  </data>
+  <data name="Settings_Option_OpenAiCompatible" xml:space="preserve">
+    <value>OpenAI / kompatibel</value>
+  </data>
+  <data name="Settings_PageTitle" xml:space="preserve">
+    <value>Einstellungen - Whiskers</value>
+  </data>
+  <data name="Settings_Panel_AiChat" xml:space="preserve">
+    <value>AI-Chat (Berater)</value>
+  </data>
+  <data name="Settings_Panel_Authentication" xml:space="preserve">
+    <value>Authentifizierung</value>
+  </data>
+  <data name="Settings_Panel_CveMonitor" xml:space="preserve">
+    <value>CVE-Monitor</value>
+  </data>
+  <data name="Settings_Panel_Environment" xml:space="preserve">
+    <value>Umgebung (Neustart erforderlich)</value>
+  </data>
+  <data name="Settings_Panel_HealthMonitoring" xml:space="preserve">
+    <value>Zustandsüberwachung</value>
+  </data>
+  <data name="Settings_Panel_ImageUpdates" xml:space="preserve">
+    <value>Image-Updates</value>
+  </data>
+  <data name="Settings_Panel_McpPermissions" xml:space="preserve">
+    <value>MCP-Rechte</value>
+  </data>
+  <data name="Settings_Panel_MetricAlerts" xml:space="preserve">
+    <value>Metrik-Alerts (für AI-Trigger)</value>
+  </data>
+  <data name="Settings_Panel_MoreChannels" xml:space="preserve">
+    <value>Weitere Benachrichtigungskanäle</value>
+  </data>
+  <data name="Settings_Panel_Notifications" xml:space="preserve">
+    <value>Benachrichtigungen</value>
+  </data>
+  <data name="Settings_Panel_ProductionReady" xml:space="preserve">
+    <value>Produktionsreif?</value>
+  </data>
+  <data name="Settings_Panel_UserRoles" xml:space="preserve">
+    <value>Benutzerrollen</value>
+  </data>
+  <data name="Settings_Placeholder_ApiUrlDefault" xml:space="preserve">
+    <value>Provider-Default wenn leer</value>
+  </data>
+  <data name="Settings_Placeholder_Email" xml:space="preserve">
+    <value>benutzer@beispiel.de</value>
+  </data>
+  <data name="Settings_Placeholder_KeyName" xml:space="preserve">
+    <value>z.B. Claude Code</value>
+  </data>
+  <data name="Settings_Placeholder_ModelExample" xml:space="preserve">
+    <value>z.B. gpt-4o-mini</value>
+  </data>
+  <data name="Settings_Role_AdminDesc" xml:space="preserve">
+    <value>Alles (Settings, Server, Rollen, Löschen)</value>
+  </data>
+  <data name="Settings_Role_OperatorDesc" xml:space="preserve">
+    <value>Container starten/stoppen, Queries</value>
+  </data>
+  <data name="Settings_Role_ViewerDesc" xml:space="preserve">
+    <value>Nur lesen</value>
+  </data>
+  <data name="Settings_Snackbar_AiChatSaved" xml:space="preserve">
+    <value>AI-Chat gespeichert (gilt sofort).</value>
+  </data>
+  <data name="Settings_Snackbar_ApiKeyCreated" xml:space="preserve">
+    <value>API-Schlüssel '{0}' erstellt. Bitte kopieren und sicher aufbewahren!</value>
+  </data>
+  <data name="Settings_Snackbar_ApiKeyDeleted" xml:space="preserve">
+    <value>API-Schlüssel gelöscht.</value>
+  </data>
+  <data name="Settings_Snackbar_ChannelsSaved" xml:space="preserve">
+    <value>Kanäle gespeichert (gelten sofort).</value>
+  </data>
+  <data name="Settings_Snackbar_CveSaved" xml:space="preserve">
+    <value>CVE-Monitor gespeichert.</value>
+  </data>
+  <data name="Settings_Snackbar_CveScanStarted" xml:space="preserve">
+    <value>CVE-Scan gestartet — kann beim ersten Lauf mehrere Minuten dauern (Trivy-DB-Download).</value>
+  </data>
+  <data name="Settings_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="Settings_Snackbar_HealthSaved" xml:space="preserve">
+    <value>Zustandsüberwachung gespeichert.</value>
+  </data>
+  <data name="Settings_Snackbar_ImageUpdatesSaved" xml:space="preserve">
+    <value>Image-Updates gespeichert.</value>
+  </data>
+  <data name="Settings_Snackbar_KeyCopied" xml:space="preserve">
+    <value>Schlüssel in die Zwischenablage kopiert.</value>
+  </data>
+  <data name="Settings_Snackbar_MatrixTestSent" xml:space="preserve">
+    <value>Matrix-Testbenachrichtigung gesendet!</value>
+  </data>
+  <data name="Settings_Snackbar_MattermostTestSent" xml:space="preserve">
+    <value>Mattermost-Testbenachrichtigung gesendet!</value>
+  </data>
+  <data name="Settings_Snackbar_McpSaved" xml:space="preserve">
+    <value>MCP-Rechte gespeichert. Änderungen gelten sofort.</value>
+  </data>
+  <data name="Settings_Snackbar_MetricAlertsSaved" xml:space="preserve">
+    <value>Metrik-Alerts gespeichert.</value>
+  </data>
+  <data name="Settings_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung.</value>
+  </data>
+  <data name="Settings_Snackbar_NotificationsModuleDisabled" xml:space="preserve">
+    <value>Benachrichtigungsmodul ist deaktiviert.</value>
+  </data>
+  <data name="Settings_Snackbar_NotificationsSaved" xml:space="preserve">
+    <value>Benachrichtigungen gespeichert (gelten sofort).</value>
+  </data>
+  <data name="Settings_Snackbar_RolesSaved" xml:space="preserve">
+    <value>Rollen gespeichert.</value>
+  </data>
+  <data name="Settings_Snackbar_SaveError" xml:space="preserve">
+    <value>Fehler beim Speichern: {0}</value>
+  </data>
+  <data name="Settings_Snackbar_SecretSaved" xml:space="preserve">
+    <value>Secret '{0}' gespeichert.</value>
+  </data>
+  <data name="Settings_Snackbar_TerminalSaved" xml:space="preserve">
+    <value>Terminal gespeichert (neue Sitzungen gelten sofort).</value>
+  </data>
+  <data name="Settings_Snackbar_TestPartialFail" xml:space="preserve">
+    <value>Test teilweise fehlgeschlagen: {0}</value>
+  </data>
+  <data name="Settings_Snackbar_TestSent" xml:space="preserve">
+    <value>Testbenachrichtigung an alle konfigurierten Kanäle gesendet (vorher speichern!).</value>
+  </data>
+  <data name="Settings_Snackbar_WhitelistEmptyError" xml:space="preserve">
+    <value>Eine aktivierte Whitelist ohne Einträge würde alle aussperren. Bitte mindestens eine E-Mail hinzufügen oder die Whitelist deaktivieren.</value>
+  </data>
+  <data name="Settings_Snackbar_WhitelistSaved" xml:space="preserve">
+    <value>Whitelist gespeichert. Änderungen gelten ab der nächsten Anmeldung.</value>
+  </data>
+  <data name="Settings_Text_ClientId" xml:space="preserve">
+    <value>Client-ID:</value>
+  </data>
+  <data name="Settings_Text_ClientIdConfigured" xml:space="preserve">
+    <value>***konfiguriert***</value>
+  </data>
+  <data name="Settings_Text_ClientIdNotConfigured" xml:space="preserve">
+    <value>(nicht konfiguriert)</value>
+  </data>
+  <data name="Settings_Text_LastScan" xml:space="preserve">
+    <value>Letzter Scan: {0}</value>
+  </data>
+  <data name="Settings_Th_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="Settings_Th_Active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="Settings_Th_Created" xml:space="preserve">
+    <value>Erstellt</value>
+  </data>
+  <data name="Settings_Th_Email" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="Settings_Th_Enabled" xml:space="preserve">
+    <value>Aktiviert</value>
+  </data>
+  <data name="Settings_Th_Key" xml:space="preserve">
+    <value>Schlüssel</value>
+  </data>
+  <data name="Settings_Th_Level" xml:space="preserve">
+    <value>Stufe</value>
+  </data>
+  <data name="Settings_Th_MinLevel" xml:space="preserve">
+    <value>Min. Stufe</value>
+  </data>
+  <data name="Settings_Th_Role" xml:space="preserve">
+    <value>Rolle</value>
+  </data>
+  <data name="Servers_Error_KubeNeedsVault" xml:space="preserve">
+    <value>Kubernetes-Cluster benötigen den Vault — VAULT_KEY setzen und neu starten.</value>
+  </data>
+  <data name="Servers_Error_KubeconfigMissing" xml:space="preserve">
+    <value>Bitte ein kubeconfig einfügen.</value>
+  </data>
 </root>
