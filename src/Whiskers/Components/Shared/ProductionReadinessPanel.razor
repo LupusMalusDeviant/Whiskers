@@ -1,5 +1,6 @@
 @inject Whiskers.Services.Setup.IProductionReadinessService Readiness
 @inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
 
 @* W3.4: static "production ready?" checklist. Read-only, informational — each failed item says
    what to do and links to the place to fix it. *@
@@ -11,7 +12,7 @@
 else
 {
     <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-        @_okCount von @_checks.Count Punkten erfüllt — für einen abgesicherten Dauerbetrieb.
+        @L["ProductionReadinessPanel_Summary", _okCount, _checks.Count]
     </MudText>
     <MudList T="string" Dense="true">
         @foreach (var check in _checks)

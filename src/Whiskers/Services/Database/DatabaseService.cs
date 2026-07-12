@@ -186,7 +186,7 @@ public class DatabaseService : IDatabaseService
         };
 
         if (cmd.Length == 0)
-            return (false, "", 0, $"Backup wird für {dbType} nicht unterstützt.");
+            return (false, "", 0, $"Backup is not supported for {dbType}.");
 
         var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromMinutes(5));
 
@@ -209,7 +209,7 @@ public class DatabaseService : IDatabaseService
         await ExecInContainer(containerId, new[] { "rm", "-f", containerFile }, serverId);
 
         if (!cp.Success)
-            return (false, "", 0, $"Dump erstellt, aber Kopieren auf den Host schlug fehl: {cp.Output} {cp.Error}".Trim());
+            return (false, "", 0, $"Dump created, but copying it to the host failed: {cp.Output} {cp.Error}".Trim());
 
         var sizeResult = await _hostExec.ExecuteAsync(sid, $"stat -c %s {ShellUtils.Quote(hostPath)}", TimeSpan.FromSeconds(5));
         long.TryParse(sizeResult.Output.Trim(), out var size);
@@ -262,7 +262,7 @@ public class DatabaseService : IDatabaseService
         if (dbType == DatabaseType.Redis || dbType == DatabaseType.MongoDB)
         {
             // Plain text output — single column
-            result.Columns.Add("Ergebnis");
+            result.Columns.Add("Result");
             foreach (var line in lines)
                 result.Rows.Add(new List<string> { line });
             result.RowCount = result.Rows.Count;

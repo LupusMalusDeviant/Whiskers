@@ -6,8 +6,9 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Netzwerke - Whiskers</PageTitle>
+<PageTitle>@L["Networks_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -15,16 +16,16 @@
             <MudIcon Icon="@Icons.Material.Filled.Hub" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Docker-Netzwerke</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Netzwerke erstellen und Container verbinden</MudText>
+            <MudText Typo="Typo.h5">@L["Networks_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Networks_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
         @if (_role >= AppRole.Admin)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="ShowCreateDialog">Netzwerk erstellen</MudButton>
+                       OnClick="ShowCreateDialog">@L["Networks_Button_Create"]</MudButton>
         }
-        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadNetworks">Aktualisieren</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadNetworks">@L["Networks_Button_Refresh"]</MudButton>
     </MudStack>
 </div>
 
@@ -39,12 +40,12 @@ else
         <MudText Typo="Typo.subtitle1" Class="mb-2 mt-4">@group.Key</MudText>
         <MudTable Items="@group.ToList()" Dense="true" Hover="true" Striped="true" Elevation="2" Class="mb-4">
             <HeaderContent>
-                <MudTh>Name</MudTh>
-                <MudTh>Treiber</MudTh>
-                <MudTh>Scope</MudTh>
-                <MudTh>Subnet</MudTh>
-                <MudTh>Container</MudTh>
-                <MudTh>Aktionen</MudTh>
+                <MudTh>@L["Networks_Table_Name"]</MudTh>
+                <MudTh>@L["Networks_Table_Driver"]</MudTh>
+                <MudTh>@L["Networks_Table_Scope"]</MudTh>
+                <MudTh>@L["Networks_Table_Subnet"]</MudTh>
+                <MudTh>@L["Networks_Table_Containers"]</MudTh>
+                <MudTh>@L["Networks_Table_Actions"]</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd><code>@context.Name</code></MudTd>
@@ -55,7 +56,7 @@ else
                     </MudChip>
                     @if (context.Internal)
                     {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">intern</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">@L["Networks_Chip_Internal"]</MudChip>
                     }
                 </MudTd>
                 <MudTd>@context.Scope</MudTd>
@@ -84,7 +85,7 @@ else
                     @if (!IsSystemNetwork(context.Name) && _role >= AppRole.Admin)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                       OnClick="@(() => DeleteNetwork(context))" title="Löschen" />
+                                       OnClick="@(() => DeleteNetwork(context))" title="@L["Networks_Action_Delete"]" />
                     }
                 </MudTd>
             </RowTemplate>
@@ -93,25 +94,25 @@ else
 }
 
 <MudDialog Visible="_showCreateDialog" VisibleChanged="@(v => _showCreateDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
-        <TitleContent>Netzwerk erstellen</TitleContent>
+        <TitleContent>@L["Networks_Dialog_CreateTitle"]</TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="_newNetworkName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
-            <MudSelect T="string" @bind-Value="_newNetworkServerId" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+            <MudTextField @bind-Value="_newNetworkName" Label="@L["Networks_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect T="string" @bind-Value="_newNetworkServerId" Label="@L["Networks_Field_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
                 @foreach (var srv in _servers)
                 {
                     <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
                 }
             </MudSelect>
-            <MudSelect @bind-Value="_newNetworkDriver" Label="Treiber" Variant="Variant.Outlined">
+            <MudSelect @bind-Value="_newNetworkDriver" Label="@L["Networks_Field_Driver"]" Variant="Variant.Outlined">
                 <MudSelectItem Value="@("bridge")">bridge</MudSelectItem>
                 <MudSelectItem Value="@("overlay")">overlay</MudSelectItem>
                 <MudSelectItem Value="@("macvlan")">macvlan</MudSelectItem>
             </MudSelect>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="@(() => _showCreateDialog = false)">Abbrechen</MudButton>
+            <MudButton OnClick="@(() => _showCreateDialog = false)">@L["Networks_Button_Cancel"]</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateNetwork"
-                       Disabled="@string.IsNullOrWhiteSpace(_newNetworkName)">Erstellen</MudButton>
+                       Disabled="@string.IsNullOrWhiteSpace(_newNetworkName)">@L["Networks_Button_CreateConfirm"]</MudButton>
         </DialogActions>
     </MudDialog>
 
@@ -129,7 +130,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["Networks_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -151,7 +152,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Networks_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
         _loading = false;
     }
@@ -173,14 +174,14 @@ else
         {
             var id = await DockerService.CreateNetworkAsync(_newNetworkName, _newNetworkDriver, sid);
             await AuditLog.LogAsync(actor, "web", "network.create", "network", id, _newNetworkName, details: $"Driver: {_newNetworkDriver}", serverId: sid);
-            Snackbar.Add($"Netzwerk '{_newNetworkName}' erstellt.", Severity.Success);
+            Snackbar.Add(L["Networks_Snackbar_Created", _newNetworkName].Value, Severity.Success);
             _showCreateDialog = false;
             await LoadNetworks();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "network.create", "network", _newNetworkName, _newNetworkName, details: ex.Message, serverId: sid, success: false);
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Networks_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -188,9 +189,9 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Netzwerk löschen",
-            $"Netzwerk '{network.Name}' wirklich löschen? Verbundene Container verlieren diese Netzwerkverbindung.",
-            yesText: "Löschen", cancelText: "Abbrechen");
+            L["Networks_Dialog_DeleteTitle"].Value,
+            L["Networks_Dialog_DeleteMessage", network.Name].Value,
+            yesText: L["Networks_Dialog_DeleteYes"].Value, cancelText: L["Networks_Button_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var sid = network.ServerId == "local" ? null : network.ServerId;
@@ -198,13 +199,13 @@ else
         {
             await DockerService.RemoveNetworkAsync(network.Id, sid);
             await AuditLog.LogAsync(actor, "web", "network.remove", "network", network.Id, network.Name, serverId: sid);
-            Snackbar.Add($"Netzwerk '{network.Name}' gelöscht.", Severity.Success);
+            Snackbar.Add(L["Networks_Snackbar_Deleted", network.Name].Value, Severity.Success);
             await LoadNetworks();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "network.remove", "network", network.Id, network.Name, details: ex.Message, serverId: sid, success: false);
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Networks_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 

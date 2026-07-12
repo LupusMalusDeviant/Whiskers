@@ -55,6 +55,6 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
     {
         if (editor.PermissionLevel != McpPermissionLevels.Admin)
             throw new UnauthorizedAccessException(
-                $"Agent-Einstellungen dürfen nur von Admins geändert werden ({editor.DisplayName} ist '{editor.PermissionLevel}').");
+                $"Agent settings may only be changed by admins ({editor.DisplayName} is '{editor.PermissionLevel}').");
     }
 }

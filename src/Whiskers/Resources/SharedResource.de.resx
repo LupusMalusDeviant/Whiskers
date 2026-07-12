@@ -2363,4 +2363,2020 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Error_KubeconfigMissing" xml:space="preserve">
     <value>Bitte ein kubeconfig einfügen.</value>
   </data>
+  <data name="AddFirewallRuleDialog_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Button_Submit" xml:space="preserve">
+    <value>Regel hinzufügen</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Label_Action" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Label_From" xml:space="preserve">
+    <value>Von (optional)</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Label_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Label_Protocol" xml:space="preserve">
+    <value>Protokoll</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Option_Allow" xml:space="preserve">
+    <value>Erlauben</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Option_Both" xml:space="preserve">
+    <value>Beide</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Option_Deny" xml:space="preserve">
+    <value>Verweigern</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Placeholder_Port" xml:space="preserve">
+    <value>80 oder 8000:9000</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="AddFirewallRuleDialog_Snackbar_RuleAdded" xml:space="preserve">
+    <value>Regel hinzugefügt</value>
+  </data>
+  <data name="AiChat_Approval_Required" xml:space="preserve">
+    <value>Freigabe nötig:</value>
+  </data>
+  <data name="AiChat_Button_Approve" xml:space="preserve">
+    <value>Genehmigen</value>
+  </data>
+  <data name="AiChat_Button_ClearChat" xml:space="preserve">
+    <value>Chat leeren</value>
+  </data>
+  <data name="AiChat_Button_Reject" xml:space="preserve">
+    <value>Ablehnen</value>
+  </data>
+  <data name="AiChat_Empty_Advisor" xml:space="preserve">
+    <value>Frag mich etwas zu deinen Containern, Servern oder Datenbanken.</value>
+  </data>
+  <data name="AiChat_Empty_Agent" xml:space="preserve">
+    <value>Ich sehe, was auf deiner Seite ist — sag mir, was ich tun soll.</value>
+  </data>
+  <data name="AiChat_Error_Generic" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="AiChat_Fab_Tooltip" xml:space="preserve">
+    <value>Whiskers-Agent</value>
+  </data>
+  <data name="AiChat_Header_Acting" xml:space="preserve">
+    <value>handelnd</value>
+  </data>
+  <data name="AiChat_Header_AgentTitle" xml:space="preserve">
+    <value>Whiskers-Agent</value>
+  </data>
+  <data name="AiChat_Header_AssistantTitle" xml:space="preserve">
+    <value>Whiskers Assistent</value>
+  </data>
+  <data name="AiChat_Header_KnowsPage" xml:space="preserve">
+    <value>kennt diese Seite</value>
+  </data>
+  <data name="AiChat_Header_ReadOnlyAdvisor" xml:space="preserve">
+    <value>Nur-Lese-Berater</value>
+  </data>
+  <data name="AiChat_Input_AdvisorPlaceholder" xml:space="preserve">
+    <value>Nachricht… (Enter sendet)</value>
+  </data>
+  <data name="AiChat_Input_AgentPlaceholder" xml:space="preserve">
+    <value>Auftrag… (Enter sendet, Shift+Enter = neue Zeile)</value>
+  </data>
+  <data name="AiChat_Input_IncludeScreenshot" xml:space="preserve">
+    <value>Screenshot mitschicken (Vision)</value>
+  </data>
+  <data name="AiChat_Status_Thinking" xml:space="preserve">
+    <value>Denkt nach…</value>
+  </data>
+  <data name="AiChat_Status_Working" xml:space="preserve">
+    <value>Arbeitet…</value>
+  </data>
+  <data name="AiTriggersView_AdminOnly_Warning" xml:space="preserve">
+    <value>Nur Admins können AI-Trigger verwalten.</value>
+  </data>
+  <data name="AiTriggersView_Cooldown_Label" xml:space="preserve">
+    <value>Cooldown (Sekunden, pro Container)</value>
+  </data>
+  <data name="AiTriggersView_DeleteTrigger_Tooltip" xml:space="preserve">
+    <value>Trigger löschen</value>
+  </data>
+  <data name="AiTriggersView_Empty" xml:space="preserve">
+    <value>Noch keine Trigger. „Neuer Trigger" anlegen.</value>
+  </data>
+  <data name="AiTriggersView_EventsCount" xml:space="preserve">
+    <value>{0} Ereignis(se)</value>
+  </data>
+  <data name="AiTriggersView_Events_Label" xml:space="preserve">
+    <value>Ereignisse</value>
+  </data>
+  <data name="AiTriggersView_Intro" xml:space="preserve">
+    <value>Ereignisse, die den Agenten &lt;b&gt;autonom&lt;/b&gt; auslösen. Pro Trigger: Ereignistyp(en), optionaler Namensfilter, ein eigener Auftrag/Workflow und das Guardrail-Preset, das den Lauf begrenzt. Bestätigungen werden im autonomen Lauf bis zum Preset-Level automatisch freigegeben. Nur Admins.</value>
+  </data>
+  <data name="AiTriggersView_LogRuleCreated_Snackbar" xml:space="preserve">
+    <value>Log-Alert-Regel 'Fehler/Errors' angelegt — feuert bei Fehlern in Container-Logs.</value>
+  </data>
+  <data name="AiTriggersView_LogRuleFailed_Snackbar" xml:space="preserve">
+    <value>Log-Regel konnte nicht angelegt werden: {0}</value>
+  </data>
+  <data name="AiTriggersView_NameFilter_Label" xml:space="preserve">
+    <value>Namensfilter (Glob, optional)</value>
+  </data>
+  <data name="AiTriggersView_NameFilter_Placeholder" xml:space="preserve">
+    <value>z.B. prod-*  oder  nginx</value>
+  </data>
+  <data name="AiTriggersView_Name_Label" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="AiTriggersView_NewTrigger_Button" xml:space="preserve">
+    <value>Neuer Trigger</value>
+  </data>
+  <data name="AiTriggersView_Preset_Label" xml:space="preserve">
+    <value>Guardrail-Preset</value>
+  </data>
+  <data name="AiTriggersView_Prompt_Label" xml:space="preserve">
+    <value>Auftrag / Workflow für den Agenten</value>
+  </data>
+  <data name="AiTriggersView_Prompt_Placeholder" xml:space="preserve">
+    <value>z.B. „Prüfe die Logs des betroffenen Containers, identifiziere die Ursache und starte ihn neu, falls es ein transienter Fehler ist. Fasse die Ursache zusammen.</value>
+  </data>
+  <data name="AiTriggersView_Save_Button" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="AiTriggersView_Saved_Snackbar" xml:space="preserve">
+    <value>{0} Trigger gespeichert.</value>
+  </data>
+  <data name="AiTriggersView_TemplateAdded_Snackbar" xml:space="preserve">
+    <value>Vorlage '{0}' hinzugefügt — nicht vergessen zu speichern.</value>
+  </data>
+  <data name="AiTriggersView_Template_Anomaly_Button" xml:space="preserve">
+    <value>Anomalie</value>
+  </data>
+  <data name="AiTriggersView_Template_Anomaly_Name" xml:space="preserve">
+    <value>Metrik-Anomalie</value>
+  </data>
+  <data name="AiTriggersView_Template_Cve_Button" xml:space="preserve">
+    <value>Neue CVE</value>
+  </data>
+  <data name="AiTriggersView_Template_Cve_Name" xml:space="preserve">
+    <value>Neue CVE → Bericht</value>
+  </data>
+  <data name="AiTriggersView_Template_ErrorLogs_Button" xml:space="preserve">
+    <value>Fehler-Logs → Agent</value>
+  </data>
+  <data name="AiTriggersView_Template_ErrorLogs_Name" xml:space="preserve">
+    <value>Fehler-Logs → Agent</value>
+  </data>
+  <data name="AiTriggersView_Template_HighCpu_Button" xml:space="preserve">
+    <value>Hohe CPU</value>
+  </data>
+  <data name="AiTriggersView_Template_HighCpu_Name" xml:space="preserve">
+    <value>Hohe CPU untersuchen</value>
+  </data>
+  <data name="AiTriggersView_Template_HighMem_Button" xml:space="preserve">
+    <value>Hohe RAM</value>
+  </data>
+  <data name="AiTriggersView_Template_HighMem_Name" xml:space="preserve">
+    <value>Hohe RAM untersuchen</value>
+  </data>
+  <data name="AiTriggersView_Template_Unhealthy_Button" xml:space="preserve">
+    <value>Unhealthy/Crash-Loop</value>
+  </data>
+  <data name="AiTriggersView_Template_Unhealthy_Name" xml:space="preserve">
+    <value>Unhealthy → analysieren/neustarten</value>
+  </data>
+  <data name="AiTriggersView_Templates_Caption" xml:space="preserve">
+    <value>Schnell-Vorlagen (fügen einen vorausgefüllten Trigger hinzu — danach „Speichern"):</value>
+  </data>
+  <data name="AiTriggersView_Title" xml:space="preserve">
+    <value>AI-Trigger</value>
+  </data>
+  <data name="ApprovalsView_Approve_Button" xml:space="preserve">
+    <value>Genehmigen</value>
+  </data>
+  <data name="ApprovalsView_Empty_Hint" xml:space="preserve">
+    <value>Sobald ein Agent eine bestätigungspflichtige Aktion ausführen möchte, erscheint sie hier.</value>
+  </data>
+  <data name="ApprovalsView_Empty_Title" xml:space="preserve">
+    <value>Keine offenen Freigaben.</value>
+  </data>
+  <data name="ApprovalsView_ExpiresAt_Tooltip" xml:space="preserve">
+    <value>Läuft ab {0}</value>
+  </data>
+  <data name="ApprovalsView_NoPermission_Snackbar" xml:space="preserve">
+    <value>Keine Berechtigung, diese Aktion zu genehmigen — deine Rolle ist niedriger als die angeforderte Berechtigungsstufe.</value>
+  </data>
+  <data name="ApprovalsView_PageTitle" xml:space="preserve">
+    <value>Freigaben - Whiskers</value>
+  </data>
+  <data name="ApprovalsView_Params_Title" xml:space="preserve">
+    <value>Parameter (Secrets redacted)</value>
+  </data>
+  <data name="ApprovalsView_Recent_Title" xml:space="preserve">
+    <value>Kürzlich entschieden</value>
+  </data>
+  <data name="ApprovalsView_Reject_Button" xml:space="preserve">
+    <value>Ablehnen</value>
+  </data>
+  <data name="ApprovalsView_Status_Approved" xml:space="preserve">
+    <value>Genehmigt</value>
+  </data>
+  <data name="ApprovalsView_Status_Cancelled" xml:space="preserve">
+    <value>Abgebrochen</value>
+  </data>
+  <data name="ApprovalsView_Status_Expired" xml:space="preserve">
+    <value>Abgelaufen</value>
+  </data>
+  <data name="ApprovalsView_Status_Rejected" xml:space="preserve">
+    <value>Abgelehnt</value>
+  </data>
+  <data name="ApprovalsView_Subtitle" xml:space="preserve">
+    <value>Aktionen, für die der Agent deine Bestätigung braucht</value>
+  </data>
+  <data name="ApprovalsView_Th_Actor" xml:space="preserve">
+    <value>Akteur</value>
+  </data>
+  <data name="ApprovalsView_Th_By" xml:space="preserve">
+    <value>Von</value>
+  </data>
+  <data name="ApprovalsView_Th_Decision" xml:space="preserve">
+    <value>Entscheidung</value>
+  </data>
+  <data name="ApprovalsView_Th_Time" xml:space="preserve">
+    <value>Zeit</value>
+  </data>
+  <data name="ApprovalsView_Th_Tool" xml:space="preserve">
+    <value>Tool</value>
+  </data>
+  <data name="ApprovalsView_Title" xml:space="preserve">
+    <value>Freigaben</value>
+  </data>
+  <data name="ApprovalsView_WantsToRun" xml:space="preserve">
+    <value>möchte &lt;code&gt;{0}&lt;/code&gt; ausführen</value>
+  </data>
+  <data name="AuditLog_Action_BackupCreate" xml:space="preserve">
+    <value>Backup erstellt</value>
+  </data>
+  <data name="AuditLog_Action_BackupDelete" xml:space="preserve">
+    <value>Backup gelöscht</value>
+  </data>
+  <data name="AuditLog_Action_BackupRestore" xml:space="preserve">
+    <value>Backup wiederhergestellt</value>
+  </data>
+  <data name="AuditLog_Action_CommandExecute" xml:space="preserve">
+    <value>Befehl ausgeführt</value>
+  </data>
+  <data name="AuditLog_Action_ConfigSave" xml:space="preserve">
+    <value>Konfiguration gespeichert</value>
+  </data>
+  <data name="AuditLog_Action_ContainerRemove" xml:space="preserve">
+    <value>Container entfernt</value>
+  </data>
+  <data name="AuditLog_Action_ContainerRestart" xml:space="preserve">
+    <value>Container neugestartet</value>
+  </data>
+  <data name="AuditLog_Action_ContainerStart" xml:space="preserve">
+    <value>Container gestartet</value>
+  </data>
+  <data name="AuditLog_Action_ContainerStop" xml:space="preserve">
+    <value>Container gestoppt</value>
+  </data>
+  <data name="AuditLog_Action_ContainerUpdate" xml:space="preserve">
+    <value>Container aktualisiert</value>
+  </data>
+  <data name="AuditLog_Action_DeployApp" xml:space="preserve">
+    <value>App deployed</value>
+  </data>
+  <data name="AuditLog_Action_DeployCompose" xml:space="preserve">
+    <value>Compose deployed</value>
+  </data>
+  <data name="AuditLog_Action_EnvSave" xml:space="preserve">
+    <value>Env-Vars gespeichert</value>
+  </data>
+  <data name="AuditLog_Action_FirewallAdd" xml:space="preserve">
+    <value>Firewall-Regel hinzugefügt</value>
+  </data>
+  <data name="AuditLog_Action_FirewallRemove" xml:space="preserve">
+    <value>Firewall-Regel entfernt</value>
+  </data>
+  <data name="AuditLog_Action_NetworkCreate" xml:space="preserve">
+    <value>Netzwerk erstellt</value>
+  </data>
+  <data name="AuditLog_Action_NetworkRemove" xml:space="preserve">
+    <value>Netzwerk entfernt</value>
+  </data>
+  <data name="AuditLog_Action_NginxUpdate" xml:space="preserve">
+    <value>Nginx aktualisiert</value>
+  </data>
+  <data name="AuditLog_Action_ServerAdd" xml:space="preserve">
+    <value>Server hinzugefügt</value>
+  </data>
+  <data name="AuditLog_Action_ServerRemove" xml:space="preserve">
+    <value>Server entfernt</value>
+  </data>
+  <data name="AuditLog_Action_ServerUpdate" xml:space="preserve">
+    <value>Server bearbeitet</value>
+  </data>
+  <data name="AuditLog_Action_SslRenew" xml:space="preserve">
+    <value>SSL erneuert</value>
+  </data>
+  <data name="AuditLog_Action_SystemdManage" xml:space="preserve">
+    <value>Systemd-Service verwaltet</value>
+  </data>
+  <data name="AuditLog_EntryCount" xml:space="preserve">
+    <value>{0} Einträge</value>
+  </data>
+  <data name="AuditLog_Filter_ActionLabel" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="AuditLog_Filter_Backups" xml:space="preserve">
+    <value>Backups</value>
+  </data>
+  <data name="AuditLog_Filter_Config" xml:space="preserve">
+    <value>Konfiguration</value>
+  </data>
+  <data name="AuditLog_Filter_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="AuditLog_Filter_Deploy" xml:space="preserve">
+    <value>Deployment</value>
+  </data>
+  <data name="AuditLog_Filter_Env" xml:space="preserve">
+    <value>Umgebungsvariablen</value>
+  </data>
+  <data name="AuditLog_Filter_Firewall" xml:space="preserve">
+    <value>Firewall</value>
+  </data>
+  <data name="AuditLog_Filter_Network" xml:space="preserve">
+    <value>Netzwerk</value>
+  </data>
+  <data name="AuditLog_Filter_Networks" xml:space="preserve">
+    <value>Netzwerke</value>
+  </data>
+  <data name="AuditLog_Filter_Nginx" xml:space="preserve">
+    <value>Nginx</value>
+  </data>
+  <data name="AuditLog_Filter_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="AuditLog_Filter_TargetTypeLabel" xml:space="preserve">
+    <value>Zieltyp</value>
+  </data>
+  <data name="AuditLog_Filter_Volume" xml:space="preserve">
+    <value>Volume</value>
+  </data>
+  <data name="AuditLog_Header_Subtitle" xml:space="preserve">
+    <value>Alle Aktionen und Änderungen nachverfolgen</value>
+  </data>
+  <data name="AuditLog_Header_Title" xml:space="preserve">
+    <value>Audit-Protokoll</value>
+  </data>
+  <data name="AuditLog_PageTitle" xml:space="preserve">
+    <value>Audit-Protokoll - Whiskers</value>
+  </data>
+  <data name="AuditLog_Table_Action" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="AuditLog_Table_Actor" xml:space="preserve">
+    <value>Akteur</value>
+  </data>
+  <data name="AuditLog_Table_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="AuditLog_Table_Target" xml:space="preserve">
+    <value>Ziel</value>
+  </data>
+  <data name="AuditLog_Table_Timestamp" xml:space="preserve">
+    <value>Zeitpunkt</value>
+  </data>
+  <data name="ChatWidget_Chart_NoData" xml:space="preserve">
+    <value>Keine Metrikdaten für die letzte Stunde.</value>
+  </data>
+  <data name="ChatWidget_Chart_Subtitle" xml:space="preserve">
+    <value>letzte Stunde</value>
+  </data>
+  <data name="ChatWidget_Series_Cpu" xml:space="preserve">
+    <value>CPU %</value>
+  </data>
+  <data name="ChatWidget_Series_Memory" xml:space="preserve">
+    <value>Speicher %</value>
+  </data>
+  <data name="ChatWidget_State_Paused" xml:space="preserve">
+    <value>pausiert</value>
+  </data>
+  <data name="ChatWidget_State_Restarting" xml:space="preserve">
+    <value>Neustart</value>
+  </data>
+  <data name="ChatWidget_State_Running" xml:space="preserve">
+    <value>läuft</value>
+  </data>
+  <data name="ChatWidget_State_Stopped" xml:space="preserve">
+    <value>gestoppt</value>
+  </data>
+  <data name="ChatWidget_Status_ContainerNotFound" xml:space="preserve">
+    <value>Container nicht gefunden</value>
+  </data>
+  <data name="ChatWidget_Status_Error" xml:space="preserve">
+    <value>Fehler</value>
+  </data>
+  <data name="ChatWidget_Status_NoData" xml:space="preserve">
+    <value>keine Daten</value>
+  </data>
+  <data name="ChatWidget_Status_Reachable" xml:space="preserve">
+    <value>erreichbar</value>
+  </data>
+  <data name="ChatWidget_Status_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="ChatWidget_Status_Unknown" xml:space="preserve">
+    <value>unbekannt</value>
+  </data>
+  <data name="ChatWidget_Title_Cpu" xml:space="preserve">
+    <value>CPU · {0}</value>
+  </data>
+  <data name="ChatWidget_Title_Memory" xml:space="preserve">
+    <value>Speicher · {0}</value>
+  </data>
+  <data name="Cves_Age_Days" xml:space="preserve">
+    <value>{0} Tage</value>
+  </data>
+  <data name="Cves_Age_Months" xml:space="preserve">
+    <value>{0} Mon.</value>
+  </data>
+  <data name="Cves_Age_OneDay" xml:space="preserve">
+    <value>1 Tag</value>
+  </data>
+  <data name="Cves_Age_Today" xml:space="preserve">
+    <value>heute</value>
+  </data>
+  <data name="Cves_Age_YearsMonths" xml:space="preserve">
+    <value>{0} J. {1} Mon.</value>
+  </data>
+  <data name="Cves_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="Cves_Button_ScanNow" xml:space="preserve">
+    <value>Jetzt scannen</value>
+  </data>
+  <data name="Cves_Card_NoFindings" xml:space="preserve">
+    <value>Keine Findings</value>
+  </data>
+  <data name="Cves_Chip_Fixable" xml:space="preserve">
+    <value>fixbar</value>
+  </data>
+  <data name="Cves_Chip_MonitorDisabled" xml:space="preserve">
+    <value>Monitor deaktiviert (Enabled=false)</value>
+  </data>
+  <data name="Cves_Chip_NoFix" xml:space="preserve">
+    <value>kein Fix</value>
+  </data>
+  <data name="Cves_Chip_Scanning" xml:space="preserve">
+    <value>Scan läuft …</value>
+  </data>
+  <data name="Cves_Expanded_InstalledFix" xml:space="preserve">
+    <value>Installiert → Fix</value>
+  </data>
+  <data name="Cves_Expanded_NoFix" xml:space="preserve">
+    <value>(kein Fix)</value>
+  </data>
+  <data name="Cves_Expanded_Os" xml:space="preserve">
+    <value>OS</value>
+  </data>
+  <data name="Cves_Expanded_Package" xml:space="preserve">
+    <value>Paket</value>
+  </data>
+  <data name="Cves_Expanded_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Cves_Expanded_Target" xml:space="preserve">
+    <value>Ziel</value>
+  </data>
+  <data name="Cves_Expanded_Title" xml:space="preserve">
+    <value>Betroffene Instanzen ({0})</value>
+  </data>
+  <data name="Cves_Expanded_Verified" xml:space="preserve">
+    <value>Verifiziert</value>
+  </data>
+  <data name="Cves_Filter_All" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="Cves_Filter_MinSeverityLabel" xml:space="preserve">
+    <value>Min. Severity</value>
+  </data>
+  <data name="Cves_Filter_OnlyFixable" xml:space="preserve">
+    <value>Nur fixbar</value>
+  </data>
+  <data name="Cves_Filter_SearchLabel" xml:space="preserve">
+    <value>Suche (CVE-ID, Paket, Container, Titel)</value>
+  </data>
+  <data name="Cves_Filter_ServerLabel" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Cves_Filter_SourceBoth" xml:space="preserve">
+    <value>Beide</value>
+  </data>
+  <data name="Cves_Filter_SourceLabel" xml:space="preserve">
+    <value>Quelle</value>
+  </data>
+  <data name="Cves_Header_Title" xml:space="preserve">
+    <value>CVE-Monitor</value>
+  </data>
+  <data name="Cves_Label_ServerCount" xml:space="preserve">
+    <value>{0} Srv</value>
+  </data>
+  <data name="Cves_LastScan" xml:space="preserve">
+    <value>Letzter Scan: {0}</value>
+  </data>
+  <data name="Cves_NoRecords" xml:space="preserve">
+    <value>Keine CVEs (oder Filter passt nichts).</value>
+  </data>
+  <data name="Cves_NoScanYet" xml:space="preserve">
+    <value>Noch kein Scan abgeschlossen</value>
+  </data>
+  <data name="Cves_PageTitle" xml:space="preserve">
+    <value>CVE-Monitor — Whiskers</value>
+  </data>
+  <data name="Cves_Published_Label" xml:space="preserve">
+    <value>CVE veröffentlicht: {0}</value>
+  </data>
+  <data name="Cves_Published_Unknown" xml:space="preserve">
+    <value>Veröffentlichung unbekannt</value>
+  </data>
+  <data name="Cves_Snackbar_ScanStarted" xml:space="preserve">
+    <value>CVE-Scan gestartet — kann beim ersten Lauf mehrere Minuten dauern (Trivy-DB-Download).</value>
+  </data>
+  <data name="Cves_Summary" xml:space="preserve">
+    <value>{0} eindeutige CVEs (von {1} gesamt) — eine Zeile pro CVE, aufklappen für betroffene Container/Server.</value>
+  </data>
+  <data name="Cves_Table_Affected" xml:space="preserve">
+    <value>Betroffen</value>
+  </data>
+  <data name="Cves_Table_CveId" xml:space="preserve">
+    <value>CVE-ID</value>
+  </data>
+  <data name="Cves_Table_Fix" xml:space="preserve">
+    <value>Fix</value>
+  </data>
+  <data name="Cves_Table_OpenSince" xml:space="preserve">
+    <value>Offen seit</value>
+  </data>
+  <data name="Cves_Table_Severity" xml:space="preserve">
+    <value>Severity</value>
+  </data>
+  <data name="Cves_Table_Title" xml:space="preserve">
+    <value>Titel</value>
+  </data>
+  <data name="Cves_Tooltip_Instances" xml:space="preserve">
+    <value>{0} Instanz(en) auf {1} Server</value>
+  </data>
+  <data name="Cves_Tooltip_PendingNoId" xml:space="preserve">
+    <value>Pending Update ohne CVE-ID</value>
+  </data>
+  <data name="Cves_Tooltip_Unverified" xml:space="preserve">
+    <value>Pending Security-Update ohne aufgelöste CVE-ID (niedrigere Konfidenz)</value>
+  </data>
+  <data name="Cves_Tooltip_Verified" xml:space="preserve">
+    <value>Installierte Paketversion gematcht</value>
+  </data>
+  <data name="Error_DevMode_Heading" xml:space="preserve">
+    <value>Entwicklungsmodus</value>
+  </data>
+  <data name="Error_DevMode_Info" xml:space="preserve">
+    <value>Der Wechsel zur &lt;strong&gt;Entwicklungs&lt;/strong&gt;umgebung zeigt detailliertere Informationen über den aufgetretenen Fehler an.</value>
+  </data>
+  <data name="Error_DevMode_Warning" xml:space="preserve">
+    <value>&lt;strong&gt;Die Entwicklungsumgebung sollte für bereitgestellte Anwendungen nicht aktiviert werden.&lt;/strong&gt; Sie kann dazu führen, dass sensible Informationen aus Ausnahmen an Endbenutzer angezeigt werden. Für lokales Debugging aktivieren Sie die &lt;strong&gt;Entwicklungs&lt;/strong&gt;umgebung, indem Sie die Umgebungsvariable &lt;strong&gt;ASPNETCORE_ENVIRONMENT&lt;/strong&gt; auf &lt;strong&gt;Development&lt;/strong&gt; setzen und die App neu starten.</value>
+  </data>
+  <data name="Error_PageTitle" xml:space="preserve">
+    <value>Fehler</value>
+  </data>
+  <data name="Error_RequestId_Label" xml:space="preserve">
+    <value>Anfragen-ID:</value>
+  </data>
+  <data name="Error_Subtitle" xml:space="preserve">
+    <value>Bei der Verarbeitung Ihrer Anfrage ist ein Fehler aufgetreten.</value>
+  </data>
+  <data name="Error_Title" xml:space="preserve">
+    <value>Fehler.</value>
+  </data>
+  <data name="Firewall_Button_AddRule" xml:space="preserve">
+    <value>Regel hinzufügen</value>
+  </data>
+  <data name="Firewall_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="Firewall_Dialog_AddRuleTitle" xml:space="preserve">
+    <value>Firewall-Regel hinzufügen</value>
+  </data>
+  <data name="Firewall_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="Firewall_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Firewall-Regel #{0} entfernen?</value>
+  </data>
+  <data name="Firewall_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Regel löschen</value>
+  </data>
+  <data name="Firewall_Dialog_DeleteYes" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="Firewall_Dialog_DisableMessage" xml:space="preserve">
+    <value>Firewall wirklich deaktivieren? Alle Ports werden für eingehende Verbindungen geöffnet und der Server ist ungeschützt.</value>
+  </data>
+  <data name="Firewall_Dialog_DisableTitle" xml:space="preserve">
+    <value>Firewall deaktivieren</value>
+  </data>
+  <data name="Firewall_Dialog_DisableYes" xml:space="preserve">
+    <value>Deaktivieren</value>
+  </data>
+  <data name="Firewall_Empty_NoRules" xml:space="preserve">
+    <value>Keine Firewall-Regeln konfiguriert.</value>
+  </data>
+  <data name="Firewall_Header_Action" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="Firewall_Header_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="Firewall_Header_Direction" xml:space="preserve">
+    <value>Richtung</value>
+  </data>
+  <data name="Firewall_Header_From" xml:space="preserve">
+    <value>Von</value>
+  </data>
+  <data name="Firewall_Header_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="Firewall_Snackbar_Disabled" xml:space="preserve">
+    <value>Firewall deaktiviert</value>
+  </data>
+  <data name="Firewall_Snackbar_Enabled" xml:space="preserve">
+    <value>Firewall aktiviert</value>
+  </data>
+  <data name="Firewall_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="Firewall_Snackbar_LoadError" xml:space="preserve">
+    <value>Fehler beim Laden der Firewall-Regeln: {0}</value>
+  </data>
+  <data name="Firewall_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="Firewall_Snackbar_RuleRemoved" xml:space="preserve">
+    <value>Regel entfernt</value>
+  </data>
+  <data name="Firewall_Status_Active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="Firewall_Status_Inactive" xml:space="preserve">
+    <value>Inaktiv</value>
+  </data>
+  <data name="Firewall_Table_Title" xml:space="preserve">
+    <value>Regeln</value>
+  </data>
+  <data name="GitDeployView_Alert_Intro" xml:space="preserve">
+    <value>Das Repository wird auf dem &lt;strong&gt;Zielserver&lt;/strong&gt; geklont und mit seiner Compose-Datei gebaut und gestartet. Push-getriggerte Redeploys: einen Webhook mit Aktion „git-deploy“ anlegen (HMAC-signiert).</value>
+  </data>
+  <data name="GitDeployView_Alert_NoVault" xml:space="preserve">
+    <value>Ohne &lt;code&gt;VAULT_KEY&lt;/code&gt; sind nur öffentliche Repos möglich (kein Token-Speicher).</value>
+  </data>
+  <data name="GitDeployView_Button_AddApp" xml:space="preserve">
+    <value>App hinzufügen</value>
+  </data>
+  <data name="GitDeployView_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="GitDeployView_Button_Close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="GitDeployView_Button_Running" xml:space="preserve">
+    <value>Läuft…</value>
+  </data>
+  <data name="GitDeployView_Button_Save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="GitDeployView_DeployDialog_Title" xml:space="preserve">
+    <value>Deploy: {0}</value>
+  </data>
+  <data name="GitDeployView_Dialog_AddTitle" xml:space="preserve">
+    <value>Git-Deploy-App hinzufügen</value>
+  </data>
+  <data name="GitDeployView_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="GitDeployView_Dialog_DeleteConfirm" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="GitDeployView_Dialog_DeleteMessage" xml:space="preserve">
+    <value>'{0}' wirklich löschen? Der Deploy-Arbeitsordner auf dem Zielserver wird entfernt; laufende Container bleiben bestehen.</value>
+  </data>
+  <data name="GitDeployView_Dialog_DeleteTitle" xml:space="preserve">
+    <value>App löschen</value>
+  </data>
+  <data name="GitDeployView_Dialog_EditTitle" xml:space="preserve">
+    <value>App bearbeiten</value>
+  </data>
+  <data name="GitDeployView_Empty_NoApps" xml:space="preserve">
+    <value>Noch keine Git-Deploy-Apps konfiguriert.</value>
+  </data>
+  <data name="GitDeployView_Field_AccessToken" xml:space="preserve">
+    <value>Access-Token (optional, für private Repos)</value>
+  </data>
+  <data name="GitDeployView_Field_Branch" xml:space="preserve">
+    <value>Branch</value>
+  </data>
+  <data name="GitDeployView_Field_ComposePath" xml:space="preserve">
+    <value>Compose-Datei (relativ zum Repo)</value>
+  </data>
+  <data name="GitDeployView_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="GitDeployView_Field_RepoUrl" xml:space="preserve">
+    <value>Repository-URL (https)</value>
+  </data>
+  <data name="GitDeployView_Field_TargetServer" xml:space="preserve">
+    <value>Zielserver</value>
+  </data>
+  <data name="GitDeployView_Header_Subtitle" xml:space="preserve">
+    <value>Repo-URL rein → auf dem Zielserver bauen &amp; deployen</value>
+  </data>
+  <data name="GitDeployView_Header_Title" xml:space="preserve">
+    <value>Git Deploy</value>
+  </data>
+  <data name="GitDeployView_HelperText_TokenKeep" xml:space="preserve">
+    <value>Ein Token ist im Vault hinterlegt — leer lassen, um es zu behalten.</value>
+  </data>
+  <data name="GitDeployView_HelperText_TokenNew" xml:space="preserve">
+    <value>Wird verschlüsselt im Vault gespeichert und via GIT_ASKPASS genutzt (nie in Logs/Prozessliste).</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Deleted" xml:space="preserve">
+    <value>Gelöscht.</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="GitDeployView_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Saved" xml:space="preserve">
+    <value>'{0}' gespeichert.</value>
+  </data>
+  <data name="GitDeployView_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="GitDeployView_Table_Branch" xml:space="preserve">
+    <value>Branch</value>
+  </data>
+  <data name="GitDeployView_Table_LastDeploy" xml:space="preserve">
+    <value>Letzter Deploy</value>
+  </data>
+  <data name="GitDeployView_Table_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="GitDeployView_Table_Repository" xml:space="preserve">
+    <value>Repository</value>
+  </data>
+  <data name="GitDeployView_Table_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="GitDeployView_Text_Never" xml:space="preserve">
+    <value>nie</value>
+  </data>
+  <data name="GitDeployView_Tooltip_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="GitDeployView_Tooltip_DeployNow" xml:space="preserve">
+    <value>Jetzt deployen</value>
+  </data>
+  <data name="GitDeployView_Tooltip_Edit" xml:space="preserve">
+    <value>Bearbeiten</value>
+  </data>
+  <data name="GitDeployView_Tooltip_PrivateRepo" xml:space="preserve">
+    <value>Privates Repo — Token im Vault</value>
+  </data>
+  <data name="GuardrailsView_ActiveChip" xml:space="preserve">
+    <value>aktiv</value>
+  </data>
+  <data name="GuardrailsView_AdminOnly_Warning" xml:space="preserve">
+    <value>Nur Admins können die Guardrails ändern.</value>
+  </data>
+  <data name="GuardrailsView_Autonomy_Title" xml:space="preserve">
+    <value>Autonomie &amp; Bestätigung</value>
+  </data>
+  <data name="GuardrailsView_Back_Tooltip" xml:space="preserve">
+    <value>Zurück zum Agent</value>
+  </data>
+  <data name="GuardrailsView_Category_Other" xml:space="preserve">
+    <value>Andere</value>
+  </data>
+  <data name="GuardrailsView_CopySuffix" xml:space="preserve">
+    <value>{0} Kopie</value>
+  </data>
+  <data name="GuardrailsView_DeletePreset_Button" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="GuardrailsView_DuplicatePreset_Button" xml:space="preserve">
+    <value>Duplizieren</value>
+  </data>
+  <data name="GuardrailsView_Forbidden_Helper" xml:space="preserve">
+    <value>Regex gegen destruktive Shell-/SQL-Argumente.</value>
+  </data>
+  <data name="GuardrailsView_Forbidden_Label" xml:space="preserve">
+    <value>Verbotene Argument-Muster (Regex, Komma)</value>
+  </data>
+  <data name="GuardrailsView_FreeText_Title" xml:space="preserve">
+    <value>Ressourcen &amp; Muster (Freitext)</value>
+  </data>
+  <data name="GuardrailsView_Intro" xml:space="preserve">
+    <value>Code-erzwungene, unumgängliche Sicherheits-Policy. Wird am Tool-Boundary durchgesetzt (nicht im Prompt). Lege mehrere Presets an und schalte das aktive um — der Agent benutzt immer das aktive Preset. Nur Admins.</value>
+  </data>
+  <data name="GuardrailsView_KillSwitch_Caption" xml:space="preserve">
+    <value>Blockiert sofort alles oberhalb von „read" — egal welche andere Einstellung.</value>
+  </data>
+  <data name="GuardrailsView_KillSwitch_Title" xml:space="preserve">
+    <value>Read-Only-Modus (Kill-Switch)</value>
+  </data>
+  <data name="GuardrailsView_Level_Admin" xml:space="preserve">
+    <value>admin — alles</value>
+  </data>
+  <data name="GuardrailsView_Level_Read" xml:space="preserve">
+    <value>read — nur lesen</value>
+  </data>
+  <data name="GuardrailsView_Level_Write" xml:space="preserve">
+    <value>write — auch ändern</value>
+  </data>
+  <data name="GuardrailsView_MakeActive_Button" xml:space="preserve">
+    <value>Als aktiv setzen</value>
+  </data>
+  <data name="GuardrailsView_MaxActions_Label" xml:space="preserve">
+    <value>Max. Aktionen pro Session</value>
+  </data>
+  <data name="GuardrailsView_MaxLevel_Helper" xml:space="preserve">
+    <value>Höchstes Level OHNE Bestätigung.</value>
+  </data>
+  <data name="GuardrailsView_MaxLevel_Label" xml:space="preserve">
+    <value>Autonomes Maximal-Level</value>
+  </data>
+  <data name="GuardrailsView_NewPresetDefaultName" xml:space="preserve">
+    <value>Neues Preset</value>
+  </data>
+  <data name="GuardrailsView_NewPreset_Button" xml:space="preserve">
+    <value>Neu</value>
+  </data>
+  <data name="GuardrailsView_PresetName_Label" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="GuardrailsView_PresetSelect_Label" xml:space="preserve">
+    <value>Preset bearbeiten</value>
+  </data>
+  <data name="GuardrailsView_Preset_ActiveSuffix" xml:space="preserve">
+    <value>— aktiv</value>
+  </data>
+  <data name="GuardrailsView_Protected_Helper" xml:space="preserve">
+    <value>Container/Server/DB, die der Agent nie anfassen darf — z.B. serverwatch*</value>
+  </data>
+  <data name="GuardrailsView_Protected_Label" xml:space="preserve">
+    <value>Geschützte Ressourcen (Glob, Komma)</value>
+  </data>
+  <data name="GuardrailsView_RequireConfirm_Label" xml:space="preserve">
+    <value>Writes erfordern Bestätigung</value>
+  </data>
+  <data name="GuardrailsView_SaveAll_Button" xml:space="preserve">
+    <value>Alle Presets speichern</value>
+  </data>
+  <data name="GuardrailsView_Saved_Snackbar" xml:space="preserve">
+    <value>Guardrails gespeichert. Aktiv: {0}.</value>
+  </data>
+  <data name="GuardrailsView_SelectAll_Button" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="GuardrailsView_SelectNone_Button" xml:space="preserve">
+    <value>Keine</value>
+  </data>
+  <data name="GuardrailsView_ToolHint" xml:space="preserve">
+    <value>Häkchen = der Agent darf dieses Tool (im Rahmen von Level/Bestätigung) nutzen.</value>
+  </data>
+  <data name="GuardrailsView_ToolHint_AllowMode" xml:space="preserve">
+    <value>Whitelist: nichts ist erlaubt außer den Angeklickten.</value>
+  </data>
+  <data name="GuardrailsView_ToolHint_DenyMode" xml:space="preserve">
+    <value>Deny: alles ist erlaubt außer den Abgewählten.</value>
+  </data>
+  <data name="GuardrailsView_ToolMode_Allow" xml:space="preserve">
+    <value>Whitelist — nur angeklickte erlaubt</value>
+  </data>
+  <data name="GuardrailsView_ToolMode_Deny" xml:space="preserve">
+    <value>Deny — alles erlaubt außer abgewählte</value>
+  </data>
+  <data name="GuardrailsView_ToolMode_Label" xml:space="preserve">
+    <value>Modus</value>
+  </data>
+  <data name="GuardrailsView_Tools_Title" xml:space="preserve">
+    <value>Tools — was geht, was nicht</value>
+  </data>
+  <data name="Help_Figure_ScreenshotPlaceholder" xml:space="preserve">
+    <value>Screenshot-Platzhalter</value>
+  </data>
+  <data name="Help_PageTitle" xml:space="preserve">
+    <value>Hilfe — Whiskers</value>
+  </data>
+  <data name="Help_Search_Placeholder" xml:space="preserve">
+    <value>In der Hilfe suchen…</value>
+  </data>
+  <data name="Help_Subtitle" xml:space="preserve">
+    <value>So benutzt du Whiskers — Kapitel links wählen oder oben suchen.</value>
+  </data>
+  <data name="Help_Title" xml:space="preserve">
+    <value>Hilfe &amp; Benutzerhandbuch</value>
+  </data>
+  <data name="Help_Toc_NoResults" xml:space="preserve">
+    <value>Keine Treffer für „{0}".</value>
+  </data>
+  <data name="LogSearchView_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="LogSearchView_Dialog_ContainerLabel" xml:space="preserve">
+    <value>Container (leer = alle)</value>
+  </data>
+  <data name="LogSearchView_Dialog_CooldownLabel" xml:space="preserve">
+    <value>Cooldown (Minuten)</value>
+  </data>
+  <data name="LogSearchView_Dialog_Create" xml:space="preserve">
+    <value>Erstellen</value>
+  </data>
+  <data name="LogSearchView_Dialog_NameLabel" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="LogSearchView_Dialog_PatternLabel" xml:space="preserve">
+    <value>Pattern</value>
+  </data>
+  <data name="LogSearchView_Dialog_RegexLabel" xml:space="preserve">
+    <value>Regex-Pattern</value>
+  </data>
+  <data name="LogSearchView_Dialog_SeverityLabel" xml:space="preserve">
+    <value>Severity</value>
+  </data>
+  <data name="LogSearchView_Dialog_Title" xml:space="preserve">
+    <value>Alert-Regel erstellen</value>
+  </data>
+  <data name="LogSearchView_Header_Subtitle" xml:space="preserve">
+    <value>Container-Logs durchsuchen und Warnungen einrichten</value>
+  </data>
+  <data name="LogSearchView_Header_Title" xml:space="preserve">
+    <value>Log-Suche &amp; Alerts</value>
+  </data>
+  <data name="LogSearchView_Results_Count" xml:space="preserve">
+    <value>{0} Treffer</value>
+  </data>
+  <data name="LogSearchView_Results_CountLimit" xml:space="preserve">
+    <value>{0} Treffer (Limit erreicht)</value>
+  </data>
+  <data name="LogSearchView_RulesTable_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="LogSearchView_RulesTable_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="LogSearchView_RulesTable_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="LogSearchView_RulesTable_Pattern" xml:space="preserve">
+    <value>Pattern</value>
+  </data>
+  <data name="LogSearchView_RulesTable_Severity" xml:space="preserve">
+    <value>Severity</value>
+  </data>
+  <data name="LogSearchView_RulesTable_Triggered" xml:space="preserve">
+    <value>Ausgelöst</value>
+  </data>
+  <data name="LogSearchView_Rules_AllContainers" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="LogSearchView_Rules_CreateButton" xml:space="preserve">
+    <value>Regel erstellen</value>
+  </data>
+  <data name="LogSearchView_Rules_DeleteTooltip" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="LogSearchView_Rules_Empty" xml:space="preserve">
+    <value>Keine Alert-Regeln. Erstelle eine Regel um bei bestimmten Log-Patterns benachrichtigt zu werden.</value>
+  </data>
+  <data name="LogSearchView_Rules_Heading" xml:space="preserve">
+    <value>Alert-Regeln</value>
+  </data>
+  <data name="LogSearchView_Search_Button" xml:space="preserve">
+    <value>Suchen</value>
+  </data>
+  <data name="LogSearchView_Search_ContainerLabel" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="LogSearchView_Search_PatternLabel" xml:space="preserve">
+    <value>Suchbegriff / Regex</value>
+  </data>
+  <data name="LogSearchView_Search_RegexLabel" xml:space="preserve">
+    <value>Regex</value>
+  </data>
+  <data name="LogSearchView_Severity_Critical" xml:space="preserve">
+    <value>Critical</value>
+  </data>
+  <data name="LogSearchView_Severity_Error" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="LogSearchView_Severity_Info" xml:space="preserve">
+    <value>Info</value>
+  </data>
+  <data name="LogSearchView_Severity_Warning" xml:space="preserve">
+    <value>Warning</value>
+  </data>
+  <data name="LogSearchView_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="LogSearchView_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="LogSearchView_Snackbar_RuleCreated" xml:space="preserve">
+    <value>Regel '{0}' erstellt.</value>
+  </data>
+  <data name="LogSearchView_Snackbar_RuleDeleted" xml:space="preserve">
+    <value>Regel gelöscht.</value>
+  </data>
+  <data name="LogSearchView_Snackbar_SearchError" xml:space="preserve">
+    <value>Suchfehler: {0}</value>
+  </data>
+  <data name="LogSearchView_Table_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="LogSearchView_Table_LogLine" xml:space="preserve">
+    <value>Log-Zeile</value>
+  </data>
+  <data name="ModuleGuard_Alert_Disabled" xml:space="preserve">
+    <value>Dieses Modul ist deaktiviert. Aktiviere es über &lt;code&gt;Features:{0}:Enabled=true&lt;/code&gt; und starte Whiskers neu.</value>
+  </data>
+  <data name="Networks_Action_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="Networks_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="Networks_Button_Create" xml:space="preserve">
+    <value>Netzwerk erstellen</value>
+  </data>
+  <data name="Networks_Button_CreateConfirm" xml:space="preserve">
+    <value>Erstellen</value>
+  </data>
+  <data name="Networks_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="Networks_Chip_Internal" xml:space="preserve">
+    <value>intern</value>
+  </data>
+  <data name="Networks_Dialog_CreateTitle" xml:space="preserve">
+    <value>Netzwerk erstellen</value>
+  </data>
+  <data name="Networks_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Netzwerk '{0}' wirklich löschen? Verbundene Container verlieren diese Netzwerkverbindung.</value>
+  </data>
+  <data name="Networks_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Netzwerk löschen</value>
+  </data>
+  <data name="Networks_Dialog_DeleteYes" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="Networks_Field_Driver" xml:space="preserve">
+    <value>Treiber</value>
+  </data>
+  <data name="Networks_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Networks_Field_TargetServer" xml:space="preserve">
+    <value>Ziel-Server</value>
+  </data>
+  <data name="Networks_Header_Subtitle" xml:space="preserve">
+    <value>Netzwerke erstellen und Container verbinden</value>
+  </data>
+  <data name="Networks_Header_Title" xml:space="preserve">
+    <value>Docker-Netzwerke</value>
+  </data>
+  <data name="Networks_PageTitle" xml:space="preserve">
+    <value>Netzwerke - Whiskers</value>
+  </data>
+  <data name="Networks_Snackbar_Created" xml:space="preserve">
+    <value>Netzwerk '{0}' erstellt.</value>
+  </data>
+  <data name="Networks_Snackbar_Deleted" xml:space="preserve">
+    <value>Netzwerk '{0}' gelöscht.</value>
+  </data>
+  <data name="Networks_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="Networks_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="Networks_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="Networks_Table_Containers" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="Networks_Table_Driver" xml:space="preserve">
+    <value>Treiber</value>
+  </data>
+  <data name="Networks_Table_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Networks_Table_Scope" xml:space="preserve">
+    <value>Scope</value>
+  </data>
+  <data name="Networks_Table_Subnet" xml:space="preserve">
+    <value>Subnet</value>
+  </data>
+  <data name="NginxManager_Button_Disable" xml:space="preserve">
+    <value>Deaktivieren</value>
+  </data>
+  <data name="NginxManager_Button_Enable" xml:space="preserve">
+    <value>Aktivieren</value>
+  </data>
+  <data name="NginxManager_Button_Reload" xml:space="preserve">
+    <value>Neu laden</value>
+  </data>
+  <data name="NginxManager_Button_SaveReload" xml:space="preserve">
+    <value>Speichern &amp; Neu laden</value>
+  </data>
+  <data name="NginxManager_Button_TestConfig" xml:space="preserve">
+    <value>Konfiguration testen</value>
+  </data>
+  <data name="NginxManager_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="NginxManager_Dialog_SaveMessage" xml:space="preserve">
+    <value>Konfiguration für '{0}' speichern und Nginx neu laden? Fehlerhafte Konfiguration kann die ausgelieferten Seiten stören.</value>
+  </data>
+  <data name="NginxManager_Dialog_SaveTitle" xml:space="preserve">
+    <value>Konfiguration speichern</value>
+  </data>
+  <data name="NginxManager_Header_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="NginxManager_Header_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="NginxManager_Header_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="NginxManager_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="NginxManager_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="NginxManager_Snackbar_ReloadFailed" xml:space="preserve">
+    <value>Neu laden fehlgeschlagen: {0}</value>
+  </data>
+  <data name="NginxManager_Snackbar_Reloaded" xml:space="preserve">
+    <value>Nginx neu geladen</value>
+  </data>
+  <data name="NginxManager_Snackbar_SavedReloaded" xml:space="preserve">
+    <value>Konfiguration gespeichert und Nginx neu geladen</value>
+  </data>
+  <data name="NginxManager_Snackbar_SiteDisabled" xml:space="preserve">
+    <value>Seite {0} deaktiviert</value>
+  </data>
+  <data name="NginxManager_Snackbar_SiteEnabled" xml:space="preserve">
+    <value>Seite {0} aktiviert</value>
+  </data>
+  <data name="NginxManager_Snackbar_TestFailed" xml:space="preserve">
+    <value>Konfigurationstest fehlgeschlagen: {0}</value>
+  </data>
+  <data name="NginxManager_Snackbar_TestSuccess" xml:space="preserve">
+    <value>Konfigurationstest erfolgreich!</value>
+  </data>
+  <data name="NginxManager_Status_Available" xml:space="preserve">
+    <value>verfügbar</value>
+  </data>
+  <data name="NginxManager_Status_Enabled" xml:space="preserve">
+    <value>aktiviert</value>
+  </data>
+  <data name="NginxManager_Title" xml:space="preserve">
+    <value>Nginx-Seiten</value>
+  </data>
+  <data name="NotificationsLog_Button_ClearAll" xml:space="preserve">
+    <value>Alle löschen</value>
+  </data>
+  <data name="NotificationsLog_Button_MarkAllRead" xml:space="preserve">
+    <value>Als gelesen</value>
+  </data>
+  <data name="NotificationsLog_Button_Open" xml:space="preserve">
+    <value>Öffnen</value>
+  </data>
+  <data name="NotificationsLog_EntryCount" xml:space="preserve">
+    <value>{0} Einträge</value>
+  </data>
+  <data name="NotificationsLog_Filter_SeverityLabel" xml:space="preserve">
+    <value>Schweregrad</value>
+  </data>
+  <data name="NotificationsLog_Filter_TypeLabel" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+  <data name="NotificationsLog_Header_Subtitle" xml:space="preserve">
+    <value>Verlauf aller Ereignisse (überlebt Neustarts)</value>
+  </data>
+  <data name="NotificationsLog_Header_Title" xml:space="preserve">
+    <value>Benachrichtigungen</value>
+  </data>
+  <data name="NotificationsLog_PageTitle" xml:space="preserve">
+    <value>Benachrichtigungen - Whiskers</value>
+  </data>
+  <data name="NotificationsLog_Severity_Error" xml:space="preserve">
+    <value>Fehler</value>
+  </data>
+  <data name="NotificationsLog_Severity_Info" xml:space="preserve">
+    <value>Info</value>
+  </data>
+  <data name="NotificationsLog_Severity_Success" xml:space="preserve">
+    <value>Erfolg</value>
+  </data>
+  <data name="NotificationsLog_Severity_Warning" xml:space="preserve">
+    <value>Warnung</value>
+  </data>
+  <data name="NotificationsLog_Snackbar_Cleared" xml:space="preserve">
+    <value>Verlauf geleert.</value>
+  </data>
+  <data name="NotificationsLog_Snackbar_MarkedRead" xml:space="preserve">
+    <value>Als gelesen markiert.</value>
+  </data>
+  <data name="NotificationsLog_Table_Details" xml:space="preserve">
+    <value>Details</value>
+  </data>
+  <data name="NotificationsLog_Table_Severity" xml:space="preserve">
+    <value>Grad</value>
+  </data>
+  <data name="NotificationsLog_Table_Timestamp" xml:space="preserve">
+    <value>Zeitpunkt</value>
+  </data>
+  <data name="NotificationsLog_Table_Title" xml:space="preserve">
+    <value>Titel</value>
+  </data>
+  <data name="NotificationsLog_Type_AgentAction" xml:space="preserve">
+    <value>AI-Agent</value>
+  </data>
+  <data name="NotificationsLog_Type_AgentApproval" xml:space="preserve">
+    <value>Freigabe erforderlich</value>
+  </data>
+  <data name="NotificationsLog_Type_AutoUpdateFailed" xml:space="preserve">
+    <value>Auto-Update fehlgeschlagen</value>
+  </data>
+  <data name="NotificationsLog_Type_CveFinding" xml:space="preserve">
+    <value>CVE</value>
+  </data>
+  <data name="NotificationsLog_Type_HighCpu" xml:space="preserve">
+    <value>Hohe CPU-Last</value>
+  </data>
+  <data name="NotificationsLog_Type_HighMemory" xml:space="preserve">
+    <value>Hohe RAM-Last</value>
+  </data>
+  <data name="NotificationsLog_Type_ImageUpdate" xml:space="preserve">
+    <value>Image-Update</value>
+  </data>
+  <data name="NotificationsLog_Type_MetricAnomaly" xml:space="preserve">
+    <value>Metrik-Ausreißer</value>
+  </data>
+  <data name="NotificationsLog_Type_OomKilled" xml:space="preserve">
+    <value>OOM-gekillt</value>
+  </data>
+  <data name="NotificationsLog_Type_RestartLoop" xml:space="preserve">
+    <value>Restart-Loop</value>
+  </data>
+  <data name="NotificationsLog_Type_Stopped" xml:space="preserve">
+    <value>Container gestoppt</value>
+  </data>
+  <data name="NotificationsLog_Type_Unhealthy" xml:space="preserve">
+    <value>Container unhealthy</value>
+  </data>
+  <data name="ProductionReadinessPanel_Summary" xml:space="preserve">
+    <value>{0} von {1} Punkten erfüllt — für einen abgesicherten Dauerbetrieb.</value>
+  </data>
+  <data name="ReconnectModal_Button_Resume" xml:space="preserve">
+    <value>Fortsetzen</value>
+  </data>
+  <data name="ReconnectModal_Button_Retry" xml:space="preserve">
+    <value>Wiederholen</value>
+  </data>
+  <data name="ReconnectModal_Text_Failed" xml:space="preserve">
+    <value>Verbindung fehlgeschlagen.&lt;br /&gt;Bitte erneut versuchen oder die Seite neu laden.</value>
+  </data>
+  <data name="ReconnectModal_Text_Paused" xml:space="preserve">
+    <value>Die Sitzung wurde vom Server pausiert.</value>
+  </data>
+  <data name="ReconnectModal_Text_Reconnecting" xml:space="preserve">
+    <value>Verbindung zum Server wird wiederhergestellt...</value>
+  </data>
+  <data name="ReconnectModal_Text_ResumeFailed" xml:space="preserve">
+    <value>Sitzung konnte nicht fortgesetzt werden.&lt;br /&gt;Bitte erneut versuchen oder die Seite neu laden.</value>
+  </data>
+  <data name="ReconnectModal_Text_RetryPrefix" xml:space="preserve">
+    <value>Verbindung fehlgeschlagen... erneuter Versuch in</value>
+  </data>
+  <data name="ReconnectModal_Text_RetrySuffix" xml:space="preserve">
+    <value>Sekunden.</value>
+  </data>
+  <data name="RegistriesPanel_Button_Add" xml:space="preserve">
+    <value>Registry hinzufügen</value>
+  </data>
+  <data name="RegistriesPanel_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="RegistriesPanel_Button_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="RegistriesPanel_Button_Save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="RegistriesPanel_Chip_InVault" xml:space="preserve">
+    <value>im Vault</value>
+  </data>
+  <data name="RegistriesPanel_Chip_None" xml:space="preserve">
+    <value>keins</value>
+  </data>
+  <data name="RegistriesPanel_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Registry '{0}' und ihr Vault-Credential löschen?</value>
+  </data>
+  <data name="RegistriesPanel_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Registry löschen</value>
+  </data>
+  <data name="RegistriesPanel_Dialog_TitleAdd" xml:space="preserve">
+    <value>Registry hinzufügen</value>
+  </data>
+  <data name="RegistriesPanel_Dialog_TitleEdit" xml:space="preserve">
+    <value>Registry bearbeiten</value>
+  </data>
+  <data name="RegistriesPanel_Field_Credential" xml:space="preserve">
+    <value>Passwort / Token</value>
+  </data>
+  <data name="RegistriesPanel_Field_CredentialKeepHelper" xml:space="preserve">
+    <value>Leer lassen, um das gespeicherte Credential zu behalten.</value>
+  </data>
+  <data name="RegistriesPanel_Field_CredentialStoreHelper" xml:space="preserve">
+    <value>Wird verschlüsselt im Vault gespeichert.</value>
+  </data>
+  <data name="RegistriesPanel_Field_Host" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="RegistriesPanel_Field_HostHelper" xml:space="preserve">
+    <value>So wie er in Image-Referenzen vorkommt.</value>
+  </data>
+  <data name="RegistriesPanel_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="RegistriesPanel_Field_Username" xml:space="preserve">
+    <value>Benutzername</value>
+  </data>
+  <data name="RegistriesPanel_Intro" xml:space="preserve">
+    <value>Private Registries für authentifizierte Pulls: Das Credential wird verschlüsselt im Vault gespeichert und automatisch verwendet, wenn ein Image-Name zum Registry-Host passt (z. B. &lt;code&gt;ghcr.io/…&lt;/code&gt;).</value>
+  </data>
+  <data name="RegistriesPanel_Snackbar_Deleted" xml:space="preserve">
+    <value>Gelöscht.</value>
+  </data>
+  <data name="RegistriesPanel_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="RegistriesPanel_Snackbar_Saved" xml:space="preserve">
+    <value>Registry '{0}' gespeichert.</value>
+  </data>
+  <data name="RegistriesPanel_Table_Credential" xml:space="preserve">
+    <value>Credential</value>
+  </data>
+  <data name="RegistriesPanel_Table_Empty" xml:space="preserve">
+    <value>Keine Registries konfiguriert.</value>
+  </data>
+  <data name="RegistriesPanel_Table_Host" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="RegistriesPanel_Table_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="RegistriesPanel_Table_User" xml:space="preserve">
+    <value>Benutzer</value>
+  </data>
+  <data name="RegistriesPanel_Warning_NoVault" xml:space="preserve">
+    <value>Ohne &lt;code&gt;VAULT_KEY&lt;/code&gt; können keine Registry-Credentials gespeichert werden.</value>
+  </data>
+  <data name="ScheduledTasksView_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="ScheduledTasksView_Button_Create" xml:space="preserve">
+    <value>Erstellen</value>
+  </data>
+  <data name="ScheduledTasksView_Button_CreateTask" xml:space="preserve">
+    <value>Task erstellen</value>
+  </data>
+  <data name="ScheduledTasksView_Chip_NeverRun" xml:space="preserve">
+    <value>Noch nie</value>
+  </data>
+  <data name="ScheduledTasksView_CronPreset_Daily" xml:space="preserve">
+    <value>Täglich 02:00</value>
+  </data>
+  <data name="ScheduledTasksView_CronPreset_Every6h" xml:space="preserve">
+    <value>Alle 6h</value>
+  </data>
+  <data name="ScheduledTasksView_CronPreset_Monthly" xml:space="preserve">
+    <value>Monatlich</value>
+  </data>
+  <data name="ScheduledTasksView_CronPreset_Sunday" xml:space="preserve">
+    <value>Sonntag 03:00</value>
+  </data>
+  <data name="ScheduledTasksView_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="ScheduledTasksView_Dialog_CreateTitle" xml:space="preserve">
+    <value>Task erstellen</value>
+  </data>
+  <data name="ScheduledTasksView_Dialog_DeleteConfirm" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="ScheduledTasksView_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Geplanten Task '{0}' wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.</value>
+  </data>
+  <data name="ScheduledTasksView_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Task löschen</value>
+  </data>
+  <data name="ScheduledTasksView_Empty_NoTasks" xml:space="preserve">
+    <value>Noch keine geplanten Tasks. Erstelle einen neuen Task!</value>
+  </data>
+  <data name="ScheduledTasksView_Field_Command" xml:space="preserve">
+    <value>Befehl</value>
+  </data>
+  <data name="ScheduledTasksView_Field_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="ScheduledTasksView_Field_CronHelperText" xml:space="preserve">
+    <value>Format: Min Std Tag Monat Wochentag (z.B. 0 2 * * * = täglich 02:00). Zeiten sind UTC.</value>
+  </data>
+  <data name="ScheduledTasksView_Field_CronSchedule" xml:space="preserve">
+    <value>Cron-Zeitplan</value>
+  </data>
+  <data name="ScheduledTasksView_Field_MaxBackups" xml:space="preserve">
+    <value>Max. Backups behalten (0 = unbegrenzt)</value>
+  </data>
+  <data name="ScheduledTasksView_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="ScheduledTasksView_Field_TargetServer" xml:space="preserve">
+    <value>Ziel-Server</value>
+  </data>
+  <data name="ScheduledTasksView_Field_Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+  <data name="ScheduledTasksView_Field_VolumeName" xml:space="preserve">
+    <value>Volume-Name</value>
+  </data>
+  <data name="ScheduledTasksView_Header_Subtitle" xml:space="preserve">
+    <value>Automatische Container-Aktionen planen und verwalten</value>
+  </data>
+  <data name="ScheduledTasksView_Header_Title" xml:space="preserve">
+    <value>Geplante Tasks</value>
+  </data>
+  <data name="ScheduledTasksView_History_Duration" xml:space="preserve">
+    <value>Dauer</value>
+  </data>
+  <data name="ScheduledTasksView_History_Result" xml:space="preserve">
+    <value>Ergebnis</value>
+  </data>
+  <data name="ScheduledTasksView_History_Started" xml:space="preserve">
+    <value>Gestartet</value>
+  </data>
+  <data name="ScheduledTasksView_History_Task" xml:space="preserve">
+    <value>Task</value>
+  </data>
+  <data name="ScheduledTasksView_History_Title" xml:space="preserve">
+    <value>Letzte Ausführungen</value>
+  </data>
+  <data name="ScheduledTasksView_History_Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_RunSuccess" xml:space="preserve">
+    <value>Erfolgreich: {0}</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_TaskCreated" xml:space="preserve">
+    <value>Task '{0}' erstellt.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_TaskDeleted" xml:space="preserve">
+    <value>Task '{0}' gelöscht.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_TaskRunning" xml:space="preserve">
+    <value>Task '{0}' wird ausgeführt...</value>
+  </data>
+  <data name="ScheduledTasksView_Stat_Active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="ScheduledTasksView_Stat_Failed" xml:space="preserve">
+    <value>Fehlgeschlagen</value>
+  </data>
+  <data name="ScheduledTasksView_Stat_LastRunOk" xml:space="preserve">
+    <value>Letzter Lauf OK</value>
+  </data>
+  <data name="ScheduledTasksView_Stat_Total" xml:space="preserve">
+    <value>Gesamt</value>
+  </data>
+  <data name="ScheduledTasksView_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="ScheduledTasksView_Table_LastRun" xml:space="preserve">
+    <value>Letzter Lauf</value>
+  </data>
+  <data name="ScheduledTasksView_Table_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="ScheduledTasksView_Table_NextRun" xml:space="preserve">
+    <value>Nächster Lauf</value>
+  </data>
+  <data name="ScheduledTasksView_Table_Schedule" xml:space="preserve">
+    <value>Zeitplan</value>
+  </data>
+  <data name="ScheduledTasksView_Table_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="ScheduledTasksView_Table_Target" xml:space="preserve">
+    <value>Ziel</value>
+  </data>
+  <data name="ScheduledTasksView_Table_Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+  <data name="ScheduledTasksView_TaskType_Cleanup" xml:space="preserve">
+    <value>Docker Cleanup</value>
+  </data>
+  <data name="ScheduledTasksView_TaskType_ContainerRestart" xml:space="preserve">
+    <value>Container-Neustart</value>
+  </data>
+  <data name="ScheduledTasksView_TaskType_CustomCommand" xml:space="preserve">
+    <value>Befehl ausführen</value>
+  </data>
+  <data name="ScheduledTasksView_TaskType_DbBackup" xml:space="preserve">
+    <value>Datenbank-Backup</value>
+  </data>
+  <data name="ScheduledTasksView_TaskType_SelfBackup" xml:space="preserve">
+    <value>Whiskers Selbst-Backup</value>
+  </data>
+  <data name="ScheduledTasksView_TaskType_VolumeBackup" xml:space="preserve">
+    <value>Volume-Backup</value>
+  </data>
+  <data name="ScheduledTasksView_Tooltip_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="ScheduledTasksView_Tooltip_RunNow" xml:space="preserve">
+    <value>Jetzt ausführen</value>
+  </data>
+  <data name="ScheduledTasksView_TypeLabel_Cleanup" xml:space="preserve">
+    <value>Cleanup</value>
+  </data>
+  <data name="ScheduledTasksView_TypeLabel_Command" xml:space="preserve">
+    <value>Befehl</value>
+  </data>
+  <data name="ScheduledTasksView_TypeLabel_DbBackup" xml:space="preserve">
+    <value>DB-Backup</value>
+  </data>
+  <data name="ScheduledTasksView_TypeLabel_Restart" xml:space="preserve">
+    <value>Neustart</value>
+  </data>
+  <data name="ScheduledTasksView_TypeLabel_SelfBackup" xml:space="preserve">
+    <value>Selbst-Backup</value>
+  </data>
+  <data name="ScheduledTasksView_TypeLabel_VolumeBackup" xml:space="preserve">
+    <value>Volume-Backup</value>
+  </data>
+  <data name="ServerTerminalView_Error_AdminRequired" xml:space="preserve">
+    <value>Keine Berechtigung — Admin erforderlich.</value>
+  </data>
+  <data name="ServerTerminalView_Error_InitFailed" xml:space="preserve">
+    <value>Fehler beim Initialisieren des Terminals: {0}</value>
+  </data>
+  <data name="ServerTerminalView_Error_ServerNotFound" xml:space="preserve">
+    <value>Server nicht gefunden</value>
+  </data>
+  <data name="ServerTerminalView_Terminal_SessionEnded" xml:space="preserve">
+    <value>Sitzung beendet</value>
+  </data>
+  <data name="ServerTerminalView_Title" xml:space="preserve">
+    <value>Server-Terminal</value>
+  </data>
+  <data name="SslCerts_Button_Renew" xml:space="preserve">
+    <value>Erneuern</value>
+  </data>
+  <data name="SslCerts_Button_RenewAll" xml:space="preserve">
+    <value>Alle erneuern</value>
+  </data>
+  <data name="SslCerts_Chip_DaysLeft" xml:space="preserve">
+    <value>{0} Tage</value>
+  </data>
+  <data name="SslCerts_Chip_ExpiryUnknown" xml:space="preserve">
+    <value>Ablauf unbekannt</value>
+  </data>
+  <data name="SslCerts_Expiry_Unknown" xml:space="preserve">
+    <value>unbekannt</value>
+  </data>
+  <data name="SslCerts_Header_Title" xml:space="preserve">
+    <value>SSL-Zertifikate</value>
+  </data>
+  <data name="SslCerts_NoRecords" xml:space="preserve">
+    <value>Keine SSL-Zertifikate gefunden. Ist certbot installiert?</value>
+  </data>
+  <data name="SslCerts_PageTitle" xml:space="preserve">
+    <value>SSL-Zertifikate - Whiskers</value>
+  </data>
+  <data name="SslCerts_Snackbar_AllRenewed" xml:space="preserve">
+    <value>Alle Zertifikate erneuert</value>
+  </data>
+  <data name="SslCerts_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="SslCerts_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="SslCerts_Snackbar_Renewed" xml:space="preserve">
+    <value>{0} erneuert</value>
+  </data>
+  <data name="SslCerts_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="SslCerts_Table_Certificate" xml:space="preserve">
+    <value>Zertifikat</value>
+  </data>
+  <data name="SslCerts_Table_DaysRemaining" xml:space="preserve">
+    <value>Tage verbleibend</value>
+  </data>
+  <data name="SslCerts_Table_Domains" xml:space="preserve">
+    <value>Domains</value>
+  </data>
+  <data name="SslCerts_Table_ExpiresAt" xml:space="preserve">
+    <value>Läuft ab</value>
+  </data>
+  <data name="SystemdManager_Button_Close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="SystemdManager_Confirm_Restart" xml:space="preserve">
+    <value>Dienst '{0}' neustarten? Der Dienst wird kurzzeitig unterbrochen.</value>
+  </data>
+  <data name="SystemdManager_Confirm_Stop" xml:space="preserve">
+    <value>Dienst '{0}' stoppen? Der Dienst und alle abhängigen Funktionen werden beendet.</value>
+  </data>
+  <data name="SystemdManager_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="SystemdManager_Dialog_ConfirmTitle" xml:space="preserve">
+    <value>Aktion bestätigen</value>
+  </data>
+  <data name="SystemdManager_Dialog_ConfirmYes" xml:space="preserve">
+    <value>Ausführen</value>
+  </data>
+  <data name="SystemdManager_Dialog_JournalTitle" xml:space="preserve">
+    <value>Protokoll: {0}</value>
+  </data>
+  <data name="SystemdManager_Filter_Placeholder" xml:space="preserve">
+    <value>Filtern...</value>
+  </data>
+  <data name="SystemdManager_Header_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="SystemdManager_Header_Description" xml:space="preserve">
+    <value>Beschreibung</value>
+  </data>
+  <data name="SystemdManager_Header_Enabled" xml:space="preserve">
+    <value>Aktiviert</value>
+  </data>
+  <data name="SystemdManager_Header_Service" xml:space="preserve">
+    <value>Dienst</value>
+  </data>
+  <data name="SystemdManager_Header_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="SystemdManager_PageTitle" xml:space="preserve">
+    <value>Dienste - Whiskers</value>
+  </data>
+  <data name="SystemdManager_Snackbar_ActionSuccess" xml:space="preserve">
+    <value>{0}: {1} erfolgreich</value>
+  </data>
+  <data name="SystemdManager_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="SystemdManager_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="SystemdManager_Status_Disabled" xml:space="preserve">
+    <value>deaktiviert</value>
+  </data>
+  <data name="SystemdManager_Status_Enabled" xml:space="preserve">
+    <value>aktiviert</value>
+  </data>
+  <data name="SystemdManager_Subtitle" xml:space="preserve">
+    <value>Systemd-Units starten, stoppen und überwachen</value>
+  </data>
+  <data name="SystemdManager_Title" xml:space="preserve">
+    <value>Systemdienste</value>
+  </data>
+  <data name="SystemdManager_Tooltip_Journal" xml:space="preserve">
+    <value>Protokoll</value>
+  </data>
+  <data name="SystemdManager_Tooltip_Restart" xml:space="preserve">
+    <value>Neustarten</value>
+  </data>
+  <data name="SystemdManager_Tooltip_Start" xml:space="preserve">
+    <value>Starten</value>
+  </data>
+  <data name="SystemdManager_Tooltip_Stop" xml:space="preserve">
+    <value>Stoppen</value>
+  </data>
+  <data name="TerminalView_Error_InitFailed" xml:space="preserve">
+    <value>Fehler beim Initialisieren des Terminals: {0}</value>
+  </data>
+  <data name="TerminalView_Error_NoContainerId" xml:space="preserve">
+    <value>Keine Container-ID angegeben.</value>
+  </data>
+  <data name="TerminalView_Error_OperatorRequired" xml:space="preserve">
+    <value>Keine Berechtigung — Operator erforderlich.</value>
+  </data>
+  <data name="TerminalView_Terminal_SessionEnded" xml:space="preserve">
+    <value>Sitzung beendet</value>
+  </data>
+  <data name="TerminalView_Title" xml:space="preserve">
+    <value>Container-Terminal</value>
+  </data>
+  <data name="VolumeBackupsView_Action_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="VolumeBackupsView_Action_Restore" xml:space="preserve">
+    <value>Wiederherstellen</value>
+  </data>
+  <data name="VolumeBackupsView_Alert_NoBackups" xml:space="preserve">
+    <value>Noch keine Backups vorhanden.</value>
+  </data>
+  <data name="VolumeBackupsView_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="VolumeBackupsView_Button_CreateBackup" xml:space="preserve">
+    <value>Backup erstellen</value>
+  </data>
+  <data name="VolumeBackupsView_Button_StartBackup" xml:space="preserve">
+    <value>Backup starten</value>
+  </data>
+  <data name="VolumeBackupsView_Dialog_CreateTitle" xml:space="preserve">
+    <value>Volume-Backup erstellen</value>
+  </data>
+  <data name="VolumeBackupsView_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Backup von '{0}' vom {1} wirklich löschen?</value>
+  </data>
+  <data name="VolumeBackupsView_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Backup löschen</value>
+  </data>
+  <data name="VolumeBackupsView_Dialog_DeleteYes" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="VolumeBackupsView_Dialog_RestoreMessage" xml:space="preserve">
+    <value>Volume '{0}' aus diesem Backup wiederherstellen? Der aktuelle Inhalt des Volumes wird überschrieben.</value>
+  </data>
+  <data name="VolumeBackupsView_Dialog_RestoreTitle" xml:space="preserve">
+    <value>Volume wiederherstellen</value>
+  </data>
+  <data name="VolumeBackupsView_Dialog_RestoreYes" xml:space="preserve">
+    <value>Wiederherstellen</value>
+  </data>
+  <data name="VolumeBackupsView_Field_Container" xml:space="preserve">
+    <value>Container (optional, für Zuordnung)</value>
+  </data>
+  <data name="VolumeBackupsView_Field_Notes" xml:space="preserve">
+    <value>Notiz (optional)</value>
+  </data>
+  <data name="VolumeBackupsView_Field_TargetServer" xml:space="preserve">
+    <value>Ziel-Server</value>
+  </data>
+  <data name="VolumeBackupsView_Field_Volume" xml:space="preserve">
+    <value>Volume</value>
+  </data>
+  <data name="VolumeBackupsView_Field_VolumeName" xml:space="preserve">
+    <value>Volume-Name</value>
+  </data>
+  <data name="VolumeBackupsView_Header_Subtitle" xml:space="preserve">
+    <value>Volumes sichern und wiederherstellen</value>
+  </data>
+  <data name="VolumeBackupsView_Header_Title" xml:space="preserve">
+    <value>Volume-Backups</value>
+  </data>
+  <data name="VolumeBackupsView_Snackbar_BackupCreated" xml:space="preserve">
+    <value>Backup erstellt: {0} ({1})</value>
+  </data>
+  <data name="VolumeBackupsView_Snackbar_BackupFailed" xml:space="preserve">
+    <value>Backup fehlgeschlagen: {0}</value>
+  </data>
+  <data name="VolumeBackupsView_Snackbar_Deleted" xml:space="preserve">
+    <value>Backup gelöscht.</value>
+  </data>
+  <data name="VolumeBackupsView_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="VolumeBackupsView_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="VolumeBackupsView_Snackbar_RestoreFailed" xml:space="preserve">
+    <value>Wiederherstellung fehlgeschlagen: {0}</value>
+  </data>
+  <data name="VolumeBackupsView_Snackbar_Restored" xml:space="preserve">
+    <value>Volume '{0}' wiederhergestellt aus Backup.</value>
+  </data>
+  <data name="VolumeBackupsView_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="VolumeBackupsView_Table_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="VolumeBackupsView_Table_Created" xml:space="preserve">
+    <value>Erstellt</value>
+  </data>
+  <data name="VolumeBackupsView_Table_Notes" xml:space="preserve">
+    <value>Notiz</value>
+  </data>
+  <data name="VolumeBackupsView_Table_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="VolumeBackupsView_Table_Size" xml:space="preserve">
+    <value>Größe</value>
+  </data>
+  <data name="VolumeBackupsView_Table_Volume" xml:space="preserve">
+    <value>Volume</value>
+  </data>
+  <data name="WebhooksView_Action_Deploy" xml:space="preserve">
+    <value>Compose Deploy (Pull + Up)</value>
+  </data>
+  <data name="WebhooksView_Action_GitDeploy" xml:space="preserve">
+    <value>Git Deploy (Fetch + Build + Up)</value>
+  </data>
+  <data name="WebhooksView_Action_Rebuild" xml:space="preserve">
+    <value>Container neu bauen (Pull + Recreate)</value>
+  </data>
+  <data name="WebhooksView_Action_Restart" xml:space="preserve">
+    <value>Container neustarten</value>
+  </data>
+  <data name="WebhooksView_Alert_Intro" xml:space="preserve">
+    <value>Webhooks können von GitHub, GitLab oder anderen CI/CD-Systemen aufgerufen werden um Container automatisch neu zu starten oder zu deployen.</value>
+  </data>
+  <data name="WebhooksView_Alert_NoGitApps_After" xml:space="preserve">
+    <value> anlegen.</value>
+  </data>
+  <data name="WebhooksView_Alert_NoGitApps_Before" xml:space="preserve">
+    <value>Keine Git-Deploy-Apps vorhanden — zuerst unter </value>
+  </data>
+  <data name="WebhooksView_Alert_NoGitApps_Link" xml:space="preserve">
+    <value>Git Deploy</value>
+  </data>
+  <data name="WebhooksView_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="WebhooksView_Button_Create" xml:space="preserve">
+    <value>Webhook erstellen</value>
+  </data>
+  <data name="WebhooksView_Button_CreateConfirm" xml:space="preserve">
+    <value>Erstellen</value>
+  </data>
+  <data name="WebhooksView_Chip_Active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="WebhooksView_Chip_Disabled" xml:space="preserve">
+    <value>Deaktiviert</value>
+  </data>
+  <data name="WebhooksView_Chip_NoSecret" xml:space="preserve">
+    <value>Kein Secret</value>
+  </data>
+  <data name="WebhooksView_Dialog_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="WebhooksView_Dialog_CreateTitle" xml:space="preserve">
+    <value>Webhook erstellen</value>
+  </data>
+  <data name="WebhooksView_Dialog_DeleteConfirm" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="WebhooksView_Dialog_DeleteMessage" xml:space="preserve">
+    <value>Webhook '{0}' wirklich löschen? Die zugehörige URL wird ungültig und kann nicht mehr ausgelöst werden.</value>
+  </data>
+  <data name="WebhooksView_Dialog_DeleteTitle" xml:space="preserve">
+    <value>Webhook löschen</value>
+  </data>
+  <data name="WebhooksView_Dialog_RegenerateConfirm" xml:space="preserve">
+    <value>Neu generieren</value>
+  </data>
+  <data name="WebhooksView_Dialog_RegenerateMessage" xml:space="preserve">
+    <value>Secret für '{0}' neu generieren? Das alte Secret wird sofort ungültig — CI-Systeme müssen aktualisiert werden.</value>
+  </data>
+  <data name="WebhooksView_Dialog_RegenerateTitle" xml:space="preserve">
+    <value>Secret neu generieren</value>
+  </data>
+  <data name="WebhooksView_Empty_NoWebhooks" xml:space="preserve">
+    <value>Noch keine Webhooks konfiguriert.</value>
+  </data>
+  <data name="WebhooksView_Field_Action" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="WebhooksView_Field_ComposeDir" xml:space="preserve">
+    <value>Compose-Verzeichnis</value>
+  </data>
+  <data name="WebhooksView_Field_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="WebhooksView_Field_GitDeployApp" xml:space="preserve">
+    <value>Git-Deploy-App</value>
+  </data>
+  <data name="WebhooksView_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="WebhooksView_Field_TargetServer" xml:space="preserve">
+    <value>Ziel-Server</value>
+  </data>
+  <data name="WebhooksView_Header_Subtitle" xml:space="preserve">
+    <value>Automatische Deployments und Benachrichtigungen</value>
+  </data>
+  <data name="WebhooksView_Header_Title" xml:space="preserve">
+    <value>Webhooks &amp; CI/CD Trigger</value>
+  </data>
+  <data name="WebhooksView_SecretDialog_CloseButton" xml:space="preserve">
+    <value>Secret gesichert — schließen</value>
+  </data>
+  <data name="WebhooksView_SecretDialog_SecretLabel" xml:space="preserve">
+    <value>Secret</value>
+  </data>
+  <data name="WebhooksView_SecretDialog_Title" xml:space="preserve">
+    <value>Webhook-Secret — einmalige Anzeige</value>
+  </data>
+  <data name="WebhooksView_SecretDialog_UrlLabel" xml:space="preserve">
+    <value>Webhook-URL</value>
+  </data>
+  <data name="WebhooksView_SecretDialog_Warning" xml:space="preserve">
+    <value>Dieses Secret wird nur JETZT angezeigt und kann später nicht mehr abgerufen werden. Im CI-System (z. B. GitHub-Webhook-Secret) hinterlegen — Payload wird als &lt;code&gt;X-Hub-Signature-256&lt;/code&gt; (HMAC-SHA256) signiert erwartet.</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Copied" xml:space="preserve">
+    <value>In die Zwischenablage kopiert.</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Deleted" xml:space="preserve">
+    <value>Webhook gelöscht.</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Disabled" xml:space="preserve">
+    <value>Webhook deaktiviert.</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Enabled" xml:space="preserve">
+    <value>Webhook aktiviert.</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Error" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="WebhooksView_Snackbar_NoPermission" xml:space="preserve">
+    <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
+  </data>
+  <data name="WebhooksView_Snackbar_TestOk" xml:space="preserve">
+    <value>OK: {0}</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Testing" xml:space="preserve">
+    <value>Webhook '{0}' wird getestet (signierter Request)...</value>
+  </data>
+  <data name="WebhooksView_Table_Action" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="WebhooksView_Table_Actions" xml:space="preserve">
+    <value>Aktionen</value>
+  </data>
+  <data name="WebhooksView_Table_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="WebhooksView_Table_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="WebhooksView_Table_Target" xml:space="preserve">
+    <value>Ziel</value>
+  </data>
+  <data name="WebhooksView_Table_Triggered" xml:space="preserve">
+    <value>Ausgelöst</value>
+  </data>
+  <data name="WebhooksView_Table_Url" xml:space="preserve">
+    <value>URL</value>
+  </data>
+  <data name="WebhooksView_Tooltip_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="WebhooksView_Tooltip_Disable" xml:space="preserve">
+    <value>Deaktivieren</value>
+  </data>
+  <data name="WebhooksView_Tooltip_Enable" xml:space="preserve">
+    <value>Aktivieren</value>
+  </data>
+  <data name="WebhooksView_Tooltip_LegacyNoSecret" xml:space="preserve">
+    <value>Legacy-Webhook ohne Secret — deaktiviert. Secret neu generieren, dann wieder aktivieren.</value>
+  </data>
+  <data name="WebhooksView_Tooltip_RegenerateSecret" xml:space="preserve">
+    <value>Secret neu generieren (einmalige Anzeige)</value>
+  </data>
+  <data name="WebhooksView_Tooltip_SendSignedTest" xml:space="preserve">
+    <value>Signierten Test senden</value>
+  </data>
 </root>

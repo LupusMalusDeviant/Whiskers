@@ -11,7 +11,7 @@ namespace Whiskers.Services.Agent;
 public static class ClaudeCodeOutputParser
 {
     private static readonly GuardrailDecision ViaMcp =
-        new(GuardrailVerdict.Allow, "Über die guardrailte Whiskers-MCP ausgeführt.", Array.Empty<string>());
+        new(GuardrailVerdict.Allow, "Executed via the guardrailed Whiskers MCP.", Array.Empty<string>());
 
     public static IReadOnlyList<AgentEvent> ParseLine(string? line)
     {
@@ -66,7 +66,7 @@ public static class ClaudeCodeOutputParser
                     var resultError = root.TryGetProperty("is_error", out var re) && re.ValueKind == JsonValueKind.True;
                     if (resultError)
                         events.Add(new AgentEvent.Failed(
-                            root.TryGetProperty("result", out var rr) ? rr.GetString() ?? "Claude Code meldete einen Fehler." : "Claude Code meldete einen Fehler."));
+                            root.TryGetProperty("result", out var rr) ? rr.GetString() ?? "Claude Code reported an error." : "Claude Code reported an error."));
                     else
                         events.Add(new AgentEvent.TurnCompleted(AgentStopReason.Stop, new AgentUsage(0, 0)));
                     break;

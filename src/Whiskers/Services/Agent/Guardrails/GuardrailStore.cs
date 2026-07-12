@@ -75,7 +75,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         RequireAdmin(editor);
         if (config.Presets.Count == 0)
-            throw new InvalidOperationException("Mindestens ein Preset ist erforderlich.");
+            throw new InvalidOperationException("At least one preset is required.");
 
         await _lock.WaitAsync(ct);
         try
@@ -135,7 +135,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         if (editor.PermissionLevel != McpPermissionLevels.Admin)
             throw new UnauthorizedAccessException(
-                $"Guardrails dürfen nur von Admins geändert werden ({editor.DisplayName} ist '{editor.PermissionLevel}').");
+                $"Guardrails may only be changed by admins ({editor.DisplayName} is '{editor.PermissionLevel}').");
     }
 
     private async Task<GuardrailPolicy?> TryLoadLegacyPolicyAsync()

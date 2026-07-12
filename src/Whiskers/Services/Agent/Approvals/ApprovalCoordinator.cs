@@ -56,7 +56,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = "agent_approval",
-                ImageInfo = $"Agent „{actor}“ möchte „{call.Name}“ ausführen — Freigabe nötig.",
+                ImageInfo = $"Agent \"{actor}\" wants to run \"{call.Name}\" — approval required.",
             });
         }
         catch (Exception ex)

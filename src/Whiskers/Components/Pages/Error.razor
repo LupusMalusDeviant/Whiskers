@@ -1,28 +1,26 @@
 ﻿@page "/Error"
 @attribute [AllowAnonymous]
 @using System.Diagnostics
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Fehler</PageTitle>
+<PageTitle>@L["Error_PageTitle"]</PageTitle>
 
-<h1 class="text-danger">Fehler.</h1>
-<h2 class="text-danger">Bei der Verarbeitung Ihrer Anfrage ist ein Fehler aufgetreten.</h2>
+<h1 class="text-danger">@L["Error_Title"]</h1>
+<h2 class="text-danger">@L["Error_Subtitle"]</h2>
 
 @if (ShowRequestId)
 {
     <p>
-        <strong>Anfragen-ID:</strong> <code>@RequestId</code>
+        <strong>@L["Error_RequestId_Label"]</strong> <code>@RequestId</code>
     </p>
 }
 
-<h3>Entwicklungsmodus</h3>
+<h3>@L["Error_DevMode_Heading"]</h3>
 <p>
-    Der Wechsel zur <strong>Entwicklungs</strong>umgebung zeigt detailliertere Informationen über den aufgetretenen Fehler an.
+    @((MarkupString)L["Error_DevMode_Info"].Value)
 </p>
 <p>
-    <strong>Die Entwicklungsumgebung sollte für bereitgestellte Anwendungen nicht aktiviert werden.</strong>
-    Sie kann dazu führen, dass sensible Informationen aus Ausnahmen an Endbenutzer angezeigt werden.
-    Für lokales Debugging aktivieren Sie die <strong>Entwicklungs</strong>umgebung, indem Sie die Umgebungsvariable <strong>ASPNETCORE_ENVIRONMENT</strong> auf <strong>Development</strong> setzen
-    und die App neu starten.
+    @((MarkupString)L["Error_DevMode_Warning"].Value)
 </p>
 
 @code{

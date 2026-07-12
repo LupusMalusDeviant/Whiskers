@@ -17,6 +17,7 @@
 @inject IApprovalStore ApprovalStore
 @inject IChatWidgetParser WidgetParser
 @inject IJSRuntime JS
+@inject IStringLocalizer<SharedResource> L
 
 @if (Visible)
 {
@@ -24,7 +25,7 @@
     {
         <div style="position: fixed; bottom: 24px; right: 24px; z-index: 1000;">
             <MudBadge Dot="true" Color="Color.Success" Visible="@AgentMode" Overlap="true" Bordered="true">
-                <div @onclick="OpenChat" title="Whiskers-Agent"
+                <div @onclick="OpenChat" title="@L["AiChat_Fab_Tooltip"]"
                      style="width:58px; height:58px; border-radius:50%; cursor:pointer; overflow:hidden;
                             border:2px solid var(--sw-accent-primary); background:var(--sw-bg-elevated);
                             box-shadow:0 4px 22px var(--sw-accent-primary-glow); transition:transform .15s;"
@@ -50,13 +51,13 @@
                  style="padding: 10px 14px; border-bottom: 1px solid var(--sw-glass-border); display: flex; align-items: center; gap: 8px; user-select:none;">
                 <img src="logo.png" alt="Whiskers" width="30" height="30" style="border-radius:50%; flex:0 0 auto;" />
                 <div style="flex:1; min-width:0;">
-                    <div style="font-weight: 600; font-size: 0.9rem;">@(AgentMode ? "Whiskers-Agent" : "Whiskers Assistent")</div>
+                    <div style="font-weight: 600; font-size: 0.9rem;">@(AgentMode ? L["AiChat_Header_AgentTitle"] : L["AiChat_Header_AssistantTitle"])</div>
                     <div style="font-size: 0.7rem; color: var(--sw-text-secondary);">
-                        @if (AgentMode) { <span style="color: var(--sw-accent-green);">● handelnd</span> <text>· kennt diese Seite</text> }
-                        else { <text>Nur-Lese-Berater</text> }
+                        @if (AgentMode) { <span style="color: var(--sw-accent-green);">● @L["AiChat_Header_Acting"]</span> <text>· @L["AiChat_Header_KnowsPage"]</text> }
+                        else { <text>@L["AiChat_Header_ReadOnlyAdvisor"]</text> }
                     </div>
                 </div>
-                <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearChat" title="Chat leeren"
+                <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearChat" title="@L["AiChat_Button_ClearChat"]"
                                Style="color: var(--sw-text-muted);" />
                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _isOpen = false)"
                                Style="color: var(--sw-text-muted);" />
@@ -67,8 +68,8 @@
                 @if (!_messages.Any())
                 {
                     <div style="text-align: center; color: var(--sw-text-muted); padding: 36px 0; font-size: 0.85rem;">
-                        @if (AgentMode) { <text>Ich sehe, was auf deiner Seite ist — sag mir, was ich tun soll.</text> }
-                        else { <text>Frag mich etwas zu deinen Containern, Servern oder Datenbanken.</text> }
+                        @if (AgentMode) { <text>@L["AiChat_Empty_Agent"]</text> }
+                        else { <text>@L["AiChat_Empty_Advisor"]</text> }
                     </div>
                 }
                 @foreach (var msg in _messages)
@@ -90,16 +91,16 @@
                 @if (_pendingConfirm is not null)
                 {
                     <div style="align-self:stretch; padding:8px 10px; border-radius:8px; background:var(--sw-accent-primary-soft); border:1px solid var(--sw-accent-primary);">
-                        <div style="font-size:0.8rem; margin-bottom:6px; overflow-wrap:anywhere;"><b>Freigabe nötig:</b> <code>@_pendingConfirm.Call.Name</code> — @_pendingReason</div>
-                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="@(() => Resolve(true))" Class="mr-2">Genehmigen</MudButton>
-                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" OnClick="@(() => Resolve(false))">Ablehnen</MudButton>
+                        <div style="font-size:0.8rem; margin-bottom:6px; overflow-wrap:anywhere;"><b>@L["AiChat_Approval_Required"]</b> <code>@_pendingConfirm.Call.Name</code> — @_pendingReason</div>
+                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="@(() => Resolve(true))" Class="mr-2">@L["AiChat_Button_Approve"]</MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" OnClick="@(() => Resolve(false))">@L["AiChat_Button_Reject"]</MudButton>
                     </div>
                 }
                 @if (_thinking && _pendingConfirm is null)
                 {
                     <div style="align-self: flex-start; padding: 10px 14px; border-radius: 12px; background: var(--sw-glass); display: flex; align-items: center; gap: 8px;">
                         <MudProgressCircular Size="Size.Small" Indeterminate="true" Style="width: 16px; height: 16px;" />
-                        <span style="color: var(--sw-text-muted); font-size: 0.8rem;">@(AgentMode ? "Arbeitet…" : "Denkt nach…")</span>
+                        <span style="color: var(--sw-text-muted); font-size: 0.8rem;">@(AgentMode ? L["AiChat_Status_Working"] : L["AiChat_Status_Thinking"])</span>
                     </div>
                 }
             </div>
@@ -107,7 +108,7 @@
             @* Input *@
             <div style="padding: 10px 14px; border-top: 1px solid var(--sw-glass-border); flex:0 0 auto;">
                 <MudTextField @bind-Value="_input" Variant="Variant.Outlined"
-                              Placeholder="@(AgentMode ? "Auftrag… (Enter sendet, Shift+Enter = neue Zeile)" : "Nachricht… (Enter sendet)")"
+                              Placeholder="@(AgentMode ? L["AiChat_Input_AgentPlaceholder"].Value : L["AiChat_Input_AdvisorPlaceholder"].Value)"
                               Style="font-size: 0.85rem;" Immediate="true"
                               Lines="1" AutoGrow="true" MaxLines="5"
                               OnKeyDown="OnKeyDown" Disabled="@_thinking"
@@ -116,7 +117,7 @@
                 @if (AgentMode)
                 {
                     <MudSwitch T="bool" @bind-Value="_includeScreenshot" Color="Color.Primary" Size="Size.Small"
-                               Label="Screenshot mitschicken (Vision)" Style="font-size:0.72rem; margin-top:2px;" />
+                               Label="@L["AiChat_Input_IncludeScreenshot"]" Style="font-size:0.72rem; margin-top:2px;" />
                 }
             </div>
         </div>
@@ -194,7 +195,7 @@
         }
         catch (Exception ex)
         {
-            _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "error", Content = $"Fehler: {ex.Message}" });
+            _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "error", Content = L["AiChat_Error_Generic", ex.Message].Value });
         }
         finally
         {

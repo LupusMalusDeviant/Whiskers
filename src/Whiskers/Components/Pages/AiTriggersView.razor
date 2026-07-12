@@ -9,55 +9,54 @@
 @inject ILogMonitorService LogMonitor
 @inject ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>AI-Trigger</PageTitle>
+<PageTitle>@L["AiTriggersView_Title"]</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
     <div style="display:flex; align-items:center; gap:12px;" class="mb-1">
         <MudIcon Icon="@Icons.Material.Filled.Bolt" Color="Color.Primary" />
-        <MudText Typo="Typo.h5">AI-Trigger</MudText>
+        <MudText Typo="Typo.h5">@L["AiTriggersView_Title"]</MudText>
     </div>
     <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
-        Ereignisse, die den Agenten <b>autonom</b> auslösen. Pro Trigger: Ereignistyp(en), optionaler Namensfilter,
-        ein eigener Auftrag/Workflow und das Guardrail-Preset, das den Lauf begrenzt. Bestätigungen werden im
-        autonomen Lauf bis zum Preset-Level automatisch freigegeben. Nur Admins.
+        @((MarkupString)L["AiTriggersView_Intro"].Value)
     </MudText>
 
     @if (!_isAdmin)
     {
-        <MudAlert Severity="Severity.Warning">Nur Admins können AI-Trigger verwalten.</MudAlert>
+        <MudAlert Severity="Severity.Warning">@L["AiTriggersView_AdminOnly_Warning"]</MudAlert>
     }
     else
     {
         <div style="display:flex; gap:8px;" class="mb-3">
-            <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Outlined" OnClick="AddTrigger">Neuer Trigger</MudButton>
+            <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Outlined" OnClick="AddTrigger">@L["AiTriggersView_NewTrigger_Button"]</MudButton>
             <MudSpacer />
-            <MudButton StartIcon="@Icons.Material.Filled.Save" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAll">Speichern</MudButton>
+            <MudButton StartIcon="@Icons.Material.Filled.Save" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAll">@L["AiTriggersView_Save_Button"]</MudButton>
         </div>
 
         <MudPaper Class="pa-3 mb-4" Style="background: var(--sw-glass);">
             <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);" Class="mb-2">
-                Schnell-Vorlagen (fügen einen vorausgefüllten Trigger hinzu — danach „Speichern"):
+                @L["AiTriggersView_Templates_Caption"]
             </MudText>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.BugReport"
-                           OnClick="AddErrorLogSetup">Fehler-Logs → Agent</MudButton>
+                           OnClick="AddErrorLogSetup">@L["AiTriggersView_Template_ErrorLogs_Button"]</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.HealthAndSafety"
-                           OnClick="@(() => AddTemplate("Unhealthy → analysieren/neustarten", new[]{"unhealthy","restart_loop"}, "Prüfe den betroffenen Container (Status, jüngste Logs), bestimme die Ursache und starte ihn neu, falls es ein transienter Fehler ist. Sonst fasse die Ursache zusammen und empfiehl Maßnahmen."))">Unhealthy/Crash-Loop</MudButton>
+                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_Unhealthy_Name"].Value, new[]{"unhealthy","restart_loop"}, "Check the affected container (status, recent logs), determine the cause and restart it if this is a transient failure. Otherwise summarize the cause and recommend actions."))">@L["AiTriggersView_Template_Unhealthy_Button"]</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Memory"
-                           OnClick="@(() => AddTemplate("Hohe CPU untersuchen", new[]{"high_cpu"}, "Untersuche die anhaltend hohe CPU-Last des Containers: prüfe Logs und Metriken, identifiziere die wahrscheinliche Ursache und fasse sie mit einer Handlungsempfehlung zusammen."))">Hohe CPU</MudButton>
+                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_HighCpu_Name"].Value, new[]{"high_cpu"}, "Investigate the container's sustained high CPU load: check logs and metrics, identify the likely cause and summarize it with a recommended action."))">@L["AiTriggersView_Template_HighCpu_Button"]</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Storage"
-                           OnClick="@(() => AddTemplate("Hohe RAM untersuchen", new[]{"high_memory"}, "Untersuche die anhaltend hohe RAM-Nutzung des Containers (mögliches Leck?), prüfe Logs/Metriken und fasse Ursache + Empfehlung zusammen."))">Hohe RAM</MudButton>
+                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_HighMem_Name"].Value, new[]{"high_memory"}, "Investigate the container's sustained high memory usage (possible leak?), check logs/metrics and summarize the cause plus a recommendation."))">@L["AiTriggersView_Template_HighMem_Button"]</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Insights"
-                           OnClick="@(() => AddTemplate("Metrik-Anomalie", new[]{"metric_anomaly"}, "Es wurde ein Ausreißer in den Metriken erkannt. Untersuche den Container und das Umfeld, bewerte ob es kritisch ist und fasse das Ergebnis zusammen."))">Anomalie</MudButton>
+                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_Anomaly_Name"].Value, new[]{"metric_anomaly"}, "Es wurde ein Ausreißer in den Metriken erkannt. Untersuche den Container und das Umfeld, bewerte ob es kritisch ist und fasse das Ergebnis zusammen."))">@L["AiTriggersView_Template_Anomaly_Button"]</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Security"
-                           OnClick="@(() => AddTemplate("Neue CVE → Bericht", new[]{"cve_finding"}, "Bewerte die neu gefundene Schwachstelle: Schweregrad, betroffene Komponente, ob ein Update verfügbar ist, und empfiehl konkrete Schritte."))">Neue CVE</MudButton>
+                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_Cve_Name"].Value, new[]{"cve_finding"}, "Bewerte die neu gefundene Schwachstelle: Schweregrad, betroffene Komponente, ob ein Update verfügbar ist, und empfiehl konkrete Schritte."))">@L["AiTriggersView_Template_Cve_Button"]</MudButton>
             </div>
         </MudPaper>
 
         @if (_triggers.Count == 0)
         {
-            <MudAlert Severity="Severity.Info">Noch keine Trigger. „Neuer Trigger" anlegen.</MudAlert>
+            <MudAlert Severity="Severity.Info">@L["AiTriggersView_Empty"]</MudAlert>
         }
 
         @foreach (var t in _triggers)
@@ -65,19 +64,19 @@
             <MudPaper Class="pa-4 mb-3" Style="@(t.Enabled ? "" : "opacity:0.6;")">
                 <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;" class="mb-2">
                     <MudSwitch @bind-Value="t.Enabled" Color="Color.Success" />
-                    <MudTextField @bind-Value="t.Name" Label="Name" Margin="Margin.Dense" Variant="Variant.Outlined"
+                    <MudTextField @bind-Value="t.Name" Label="@L["AiTriggersView_Name_Label"]" Margin="Margin.Dense" Variant="Variant.Outlined"
                                   Style="min-width:220px;" />
                     <MudSpacer />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                   OnClick="@(() => _triggers.Remove(t))" title="Trigger löschen" />
+                                   OnClick="@(() => _triggers.Remove(t))" title="@L["AiTriggersView_DeleteTrigger_Tooltip"]" />
                 </div>
 
                 <MudGrid>
                     <MudItem xs="12" md="6">
-                        <MudSelect T="string" Label="Ereignisse" MultiSelection="true"
+                        <MudSelect T="string" Label="@L["AiTriggersView_Events_Label"]" MultiSelection="true"
                                    SelectedValues="t.EventTypes" SelectedValuesChanged="@(v => t.EventTypes = v.ToList())"
                                    Margin="Margin.Dense" Variant="Variant.Outlined"
-                                   MultiSelectionTextFunc="@(s => $"{s.Count} Ereignis(se)")">
+                                   MultiSelectionTextFunc="@(s => L["AiTriggersView_EventsCount", s.Count].Value)">
                             @foreach (var e in AiTriggerEvents.All)
                             {
                                 <MudSelectItem T="string" Value="@e.Type">@e.Label</MudSelectItem>
@@ -85,11 +84,11 @@
                         </MudSelect>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="t.NameFilter" Label="Namensfilter (Glob, optional)"
-                                      Placeholder="z.B. prod-*  oder  nginx" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                        <MudTextField @bind-Value="t.NameFilter" Label="@L["AiTriggersView_NameFilter_Label"]"
+                                      Placeholder="@L["AiTriggersView_NameFilter_Placeholder"]" Margin="Margin.Dense" Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudSelect T="string" @bind-Value="t.GuardrailPreset" Label="Guardrail-Preset"
+                        <MudSelect T="string" @bind-Value="t.GuardrailPreset" Label="@L["AiTriggersView_Preset_Label"]"
                                    Margin="Margin.Dense" Variant="Variant.Outlined">
                             @foreach (var p in _presets)
                             {
@@ -98,13 +97,13 @@
                         </MudSelect>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudNumericField @bind-Value="t.CooldownSeconds" Label="Cooldown (Sekunden, pro Container)"
+                        <MudNumericField @bind-Value="t.CooldownSeconds" Label="@L["AiTriggersView_Cooldown_Label"]"
                                          Min="0" Margin="Margin.Dense" Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="t.Prompt" Label="Auftrag / Workflow für den Agenten"
+                        <MudTextField @bind-Value="t.Prompt" Label="@L["AiTriggersView_Prompt_Label"]"
                                       Lines="4" Margin="Margin.Dense" Variant="Variant.Outlined"
-                                      Placeholder="z.B. „Prüfe die Logs des betroffenen Containers, identifiziere die Ursache und starte ihn neu, falls es ein transienter Fehler ist. Fasse die Ursache zusammen." />
+                                      Placeholder="@L["AiTriggersView_Prompt_Placeholder"]" />
                     </MudItem>
                 </MudGrid>
             </MudPaper>
@@ -145,7 +144,7 @@
             Prompt = prompt,
             GuardrailPreset = _presets.FirstOrDefault() ?? "Standard",
         });
-        Snackbar.Add($"Vorlage '{name}' hinzugefügt — nicht vergessen zu speichern.", Severity.Info);
+        Snackbar.Add(L["AiTriggersView_TemplateAdded_Snackbar", name].Value, Severity.Info);
     }
 
     /// <summary>Creates the matching log-alert rule (so log_alert events actually fire) plus the trigger.</summary>
@@ -165,16 +164,16 @@
                     Severity = "error",
                     Enabled = true,
                 });
-                Snackbar.Add("Log-Alert-Regel 'Fehler/Errors' angelegt — feuert bei Fehlern in Container-Logs.", Severity.Success);
+                Snackbar.Add(L["AiTriggersView_LogRuleCreated_Snackbar"].Value, Severity.Success);
             }
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Log-Regel konnte nicht angelegt werden: {ex.Message}", Severity.Warning);
+            Snackbar.Add(L["AiTriggersView_LogRuleFailed_Snackbar", ex.Message].Value, Severity.Warning);
         }
 
-        AddTemplate("Fehler-Logs → Agent", new[] { "log_alert" },
-            "Analysiere die gemeldete Fehlermeldung aus dem Container-Log: rufe die jüngsten Logs ab, bestimme die wahrscheinliche Ursache und behebe sie wenn möglich (im Rahmen der Guardrails). Sonst fasse die Ursache zusammen und empfiehl konkrete Maßnahmen.");
+        AddTemplate(L["AiTriggersView_Template_ErrorLogs_Name"].Value, new[] { "log_alert" },
+            "Analyze the reported error from the container log: fetch the most recent logs, determine the likely cause and fix it if possible (within the bounds of the guardrails). Otherwise summarize the cause and recommend concrete actions.");
     }
 
     private async Task SaveAll()
@@ -184,7 +183,7 @@
         try
         {
             await Store.SaveAsync(_triggers, await BuildPrincipalAsync());
-            Snackbar.Add($"{_triggers.Count} Trigger gespeichert.", Severity.Success);
+            Snackbar.Add(L["AiTriggersView_Saved_Snackbar", _triggers.Count].Value, Severity.Success);
         }
         catch (Exception ex)
         {

@@ -81,66 +81,66 @@ public class AiChatService : IAiChatService
     private readonly ILogger<AiChatService> _logger;
 
     private const string SystemPrompt = """
-        Du bist der Whiskers-Assistent. Du hilfst bei der Verwaltung von Docker-Containern, Servern und Datenbanken innerhalb von Whiskers.
+        You are the Whiskers assistant. You help manage Docker containers, servers, and databases within Whiskers.
 
-        STRENGE REGELN:
-        - Du beantwortest NUR Fragen zu Whiskers, Containern, Servern, Datenbanken, Backups, Netzwerken und Deployments
-        - Du schreibst KEINEN Code, keine Skripte, keine Anleitungen für Programmierung
-        - Du machst KEINE Web-Suchen, keine allgemeinen Wissensfragen
-        - Bei Fragen außerhalb deines Bereichs antwortest du: "Ich bin nur für die Whiskers-Verwaltung zuständig."
-        - Antworte kurz, präzise und auf Deutsch
-        - Verweise den User auf die richtige Seite/Tab in Whiskers wenn möglich
+        STRICT RULES:
+        - You ONLY answer questions about Whiskers, containers, servers, databases, backups, networks, and deployments
+        - You do NOT write code, scripts, or programming tutorials
+        - You do NOT perform web searches or answer general knowledge questions
+        - For questions outside your scope, you reply: "I'm only here to help with managing Whiskers."
+        - Answer in the user's language (match the language they write in)
+        - Point the user to the right page/tab in Whiskers when possible
 
-        SERVERWATCH FEATURES — das kannst du dem User empfehlen:
+        WHISKERS FEATURES — you can recommend these to the user:
 
-        DASHBOARD (Startseite):
-        - Übersicht aller Container mit Status, Health, CPU/Memory
-        - Container starten, stoppen, neustarten per Button
-        - Klick auf Container → Detailseite
+        DASHBOARD (home page):
+        - Overview of all containers with status, health, CPU/memory
+        - Start, stop, restart containers via button
+        - Click a container → detail page
 
-        CONTAINER-DETAIL (Klick auf einen Container):
-        - Tab "Übersicht": ID, Image, Status, Ports, Labels
-        - Tab "Statistiken": CPU/Memory Charts über Zeit
-        - Tab "Logs": Container-Logs anzeigen
-        - Tab "Terminal": Shell direkt im Container öffnen
-        - Tab "Umgebungsvariablen": Env-Vars lesen und .env-Datei bearbeiten. Sensible Werte (Keys, Passwords) sind maskiert
-        - Tab "Datenbank" (nur bei DB-Containern wie PostgreSQL, MySQL, MongoDB, Redis, Neo4j):
-          * Query Builder: Dropdown-basiert, SELECT/COUNT/INSERT/UPDATE/DELETE ohne SQL-Kenntnisse
-          * Query Editor: Freies SQL-Textfeld für komplexe Queries
-          * Ergebnis-Tabelle mit CSV-Export
-          * Tabellen-Browser: Klickbare Tabellen-Karten mit Schema-Ansicht (Spalten, Typen, Keys)
-          * DB-Backup: Ein-Klick pg_dump/mysqldump
-          * Migrationen: SQL-Dateien hochladen und ausführen
-          * Seed/Import: SQL, CSV oder JSON importieren
+        CONTAINER DETAIL (click a container):
+        - Tab "Overview": ID, image, status, ports, labels
+        - Tab "Stats": CPU/memory charts over time
+        - Tab "Logs": view container logs
+        - Tab "Terminal": open a shell directly inside the container
+        - Tab "Environment": read env vars and edit the .env file. Sensitive values (keys, passwords) are masked
+        - Tab "Database" (only for DB containers like PostgreSQL, MySQL, MongoDB, Redis, Neo4j):
+          * Query Builder: dropdown-based, SELECT/COUNT/INSERT/UPDATE/DELETE without SQL knowledge
+          * Query Editor: free-form SQL text field for complex queries
+          * Result table with CSV export
+          * Table browser: clickable table cards with schema view (columns, types, keys)
+          * DB backup: one-click pg_dump/mysqldump
+          * Migrations: upload and run SQL files
+          * Seed/import: import SQL, CSV, or JSON
 
-        DATENBANK-ABFRAGEN:
-        - Der User kann im Datenbank-Tab SQL-Queries direkt ausführen
-        - Query Builder: Aktion wählen (SELECT/COUNT/etc.) → Tabelle wählen → Filter/Spalten → Ausführen
-        - Ergebnisse erscheinen als Tabelle, CSV-Download möglich
-        - Unterstützte DBs: PostgreSQL, MySQL/MariaDB, MongoDB, Redis, Neo4j
-        - DB-Typ wird automatisch am Image-Namen erkannt
+        DATABASE QUERIES:
+        - The user can run SQL queries directly in the Database tab
+        - Query Builder: choose an action (SELECT/COUNT/etc.) → choose a table → filters/columns → run
+        - Results appear as a table, CSV download available
+        - Supported DBs: PostgreSQL, MySQL/MariaDB, MongoDB, Redis, Neo4j
+        - DB type is auto-detected from the image name
 
-        WEITERE SEITEN:
-        - /logs — Log-Suche: Volltextsuche über alle Container-Logs + Alert-Regeln (Pattern → Benachrichtigung)
-        - /graph — Topologie: Interaktives Netzwerk-Diagramm aller Container und Verbindungen
-        - /deploy — Bereitstellen: Einzelne Container oder Docker Compose deployen
-        - /compose — Compose Editor: Visueller Editor für docker-compose.yml
-        - /apps — App Store: 30+ vorkonfigurierte Templates (PostgreSQL, MySQL, Redis, Nginx, WordPress, Grafana, n8n, etc.)
-        - /servers — Server-Verwaltung: Mehrere Server (SSH, TCP) verwalten
-        - /networks — Docker-Netzwerke anzeigen, erstellen, löschen
-        - /backups — Volume-Backups erstellen und wiederherstellen
-        - /tasks — Geplante Tasks: Cron-basierte automatische Backups, Container-Neustarts, Cleanup
-        - /webhooks — CI/CD Webhooks: URL für GitHub/GitLab Deployments erstellen
-        - /diff — Container-Vergleich: Zwei Container side-by-side vergleichen (Image, Env-Vars, Ports, Labels)
-        - /audit-log — Audit-Protokoll: Alle Aktionen nachverfolgen
-        - /settings — Einstellungen: Mattermost, Matrix, Benutzerrollen, Secret Vault, MCP-Keys
+        OTHER PAGES:
+        - /logs — Log search: full-text search across all container logs + alert rules (pattern → notification)
+        - /graph — Topology: interactive network diagram of all containers and connections
+        - /deploy — Deploy: deploy individual containers or Docker Compose stacks
+        - /compose — Compose Editor: visual editor for docker-compose.yml
+        - /apps — App Store: 30+ preconfigured templates (PostgreSQL, MySQL, Redis, Nginx, WordPress, Grafana, n8n, etc.)
+        - /servers — Server management: manage multiple servers (SSH, TCP)
+        - /networks — View, create, delete Docker networks
+        - /backups — Create and restore volume backups
+        - /tasks — Scheduled tasks: cron-based automatic backups, container restarts, cleanup
+        - /webhooks — CI/CD webhooks: create a URL for GitHub/GitLab deployments
+        - /diff — Container comparison: compare two containers side-by-side (image, env vars, ports, labels)
+        - /audit-log — Audit log: track all actions
+        - /settings — Settings: Mattermost, Matrix, user roles, secret vault, MCP keys
 
-        AKTUELLE INFRASTRUKTUR:
+        CURRENT INFRASTRUCTURE:
         {CONTEXT}
 
-        Wenn der User nach einer Datenbank-Abfrage fragt, erkläre ihm wie er den Datenbank-Tab nutzen kann (Container-Detail → Tab "Datenbank" → Query Builder oder Query Editor).
-        Wenn der User einen Container sucht, nenne ihm den Namen und sage dass er im Dashboard darauf klicken kann.
-        Schlage immer konkrete Aktionen vor die der User in der UI ausführen kann.
+        If the user asks about a database query, explain how to use the Database tab (container detail → tab "Database" → Query Builder or Query Editor).
+        If the user is looking for a container, tell them the name and that they can click it in the Dashboard.
+        Always suggest concrete actions the user can perform in the UI.
         """;
 
     public AiChatService(HttpClient httpClient, IOptionsMonitor<AiChatSettings> settings,
@@ -158,7 +158,7 @@ public class AiChatService : IAiChatService
     {
         var config = _settings.CurrentValue;
         if (!config.Enabled || string.IsNullOrEmpty(config.ApiKey))
-            return "AI-Chat ist nicht konfiguriert. Bitte API-Key in den Einstellungen hinterlegen.";
+            return "AI chat is not configured. Please set an API key in Settings.";
 
         // Build context with current infrastructure state
         var context = await BuildContextAsync();
@@ -188,7 +188,7 @@ public class AiChatService : IAiChatService
         catch (Exception ex)
         {
             _logger.LogError(ex, "AI chat failed");
-            return $"Fehler: {ex.Message}";
+            return $"Error: {ex.Message}";
         }
     }
 
@@ -214,7 +214,7 @@ public class AiChatService : IAiChatService
             .GetProperty("choices")[0]
             .GetProperty("message")
             .GetProperty("content")
-            .GetString() ?? "Keine Antwort.";
+            .GetString() ?? "No response.";
     }
 
     private async Task<string> CallAnthropicAsync(AiChatSettings config, List<object> messages, string systemMsg)
@@ -247,7 +247,7 @@ public class AiChatService : IAiChatService
         return json?.RootElement
             .GetProperty("content")[0]
             .GetProperty("text")
-            .GetString() ?? "Keine Antwort.";
+            .GetString() ?? "No response.";
     }
 
     private async Task<string> BuildContextAsync()
@@ -273,23 +273,23 @@ public class AiChatService : IAiChatService
                     .Take(maxDetailed);
 
             var containerList = string.Join("\n", detailed.Select(c =>
-                $"  - {c.Name}: Image={c.Image}, Status={c.State}, Health={c.HealthStatus}, Projekt={c.ComposeProject}, Server={c.ServerName}{(c.IsDatabase ? $", DB={c.DatabaseType}" : "")}"));
+                $"  - {c.Name}: Image={c.Image}, Status={c.State}, Health={c.HealthStatus}, Project={c.ComposeProject}, Server={c.ServerName}{(c.IsDatabase ? $", DB={c.DatabaseType}" : "")}"));
             if (containers.Count > maxDetailed)
-                containerList += $"\n  … und {containers.Count - maxDetailed} weitere (nach Priorität gekürzt)";
+                containerList += $"\n  ... and {containers.Count - maxDetailed} more (trimmed by priority)";
 
             return $"""
-                Server: {containers.Select(c => c.ServerName).Distinct().Count()} Server
-                Container: {containers.Count} gesamt, {running} laufend, {stopped} gestoppt, {unhealthy} unhealthy
-                Datenbank-Container: {string.Join(", ", dbs)}
-                Projekte: {string.Join(", ", projects)}
+                Servers: {containers.Select(c => c.ServerName).Distinct().Count()} servers
+                Container: {containers.Count} total, {running} running, {stopped} stopped, {unhealthy} unhealthy
+                Database containers: {string.Join(", ", dbs)}
+                Projects: {string.Join(", ", projects)}
 
-                Alle Container:
+                All containers:
                 {containerList}
                 """;
         }
         catch
         {
-            return "Kontext konnte nicht geladen werden.";
+            return "Context could not be loaded.";
         }
     }
 }

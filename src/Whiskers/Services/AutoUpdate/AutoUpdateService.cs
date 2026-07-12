@@ -280,7 +280,7 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 
         var snap = await db.UpdateRollbacks.FirstOrDefaultAsync(r => r.Id == rollbackId)
-                   ?? throw new InvalidOperationException("Kein Rollback-Snapshot gefunden.");
+                   ?? throw new InvalidOperationException("No rollback snapshot found.");
 
         var progress = new Progress<string>(msg => _logger.LogDebug("Rollback {Container}: {Msg}", snap.ContainerName, msg));
         await _docker.RollbackContainerAsync(
@@ -299,6 +299,6 @@ public class AutoUpdateService : BackgroundService, IAutoUpdateService
         await db.SaveChangesAsync();
 
         _logger.LogInformation("Manual rollback of {Container} to the previous image completed", snap.ContainerName);
-        return $"{snap.ContainerName} wurde auf das vorherige Image zurückgesetzt.";
+        return $"{snap.ContainerName} was rolled back to the previous image.";
     }
 }

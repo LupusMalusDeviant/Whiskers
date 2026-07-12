@@ -82,10 +82,10 @@ public class MattermostNotificationService : IMattermostNotificationService
         "image_update" => $":arrows_counterclockwise: **Image Update Available** | `{evt.ContainerName}` has a newer image version for `{evt.ImageName}`\n> {evt.ImageInfo}",
         "cve_finding" => $":shield: **CVE Findings** | {evt.ImageName} for {evt.ContainerName}\n> {evt.ImageInfo}",
         "agent_action" => $":robot_face: **AI-Agent** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
-        "high_cpu" => $":fire: **Hohe CPU-Last** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
-        "high_memory" => $":fire: **Hohe RAM-Last** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
-        "high_disk" => $":floppy_disk: **Hohe Festplatten-Last** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
-        "metric_anomaly" => $":chart_with_upwards_trend: **Metrik-Ausreißer** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
+        "high_cpu" => $":fire: **High CPU Load** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
+        "high_memory" => $":fire: **High Memory Load** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
+        "high_disk" => $":floppy_disk: **High Disk Usage** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
+        "metric_anomaly" => $":chart_with_upwards_trend: **Metric Anomaly** | `{evt.ContainerName}`\n> {evt.ImageInfo}",
         _ when evt.EventType.StartsWith("log_alert", StringComparison.Ordinal) =>
             $":mag: **Log-Alert** | `{evt.ContainerName}`\n> {(string.IsNullOrWhiteSpace(evt.ImageInfo) ? evt.Image : evt.ImageInfo)}",
         // Fallback: still surface any detail text instead of dropping it.

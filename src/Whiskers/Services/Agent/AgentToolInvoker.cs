@@ -50,9 +50,9 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
         if (!_registry.Tools.TryGetValue(call.Name, out var entry))
         {
-            var unknown = new GuardrailDecision(GuardrailVerdict.Deny, "Tool nicht im Register.", Array.Empty<string>());
-            await RecordAsync(call.Name, "?", actor, actorType, call.ArgumentsJson, unknown, sw, false, null, "Unbekanntes Tool");
-            return Error(call.Id, $"Unbekanntes Tool '{call.Name}'.", unknown);
+            var unknown = new GuardrailDecision(GuardrailVerdict.Deny, "Tool not in the registry.", Array.Empty<string>());
+            await RecordAsync(call.Name, "?", actor, actorType, call.ArgumentsJson, unknown, sw, false, null, "Unknown tool");
+            return Error(call.Id, $"Unknown tool '{call.Name}'.", unknown);
         }
 
         var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
@@ -63,14 +63,14 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             _logger?.LogWarning("Agent-Tool '{Tool}' blockiert: {Reason}", entry.Name, decision.Reason);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, decision.Reason);
-            return Error(call.Id, $"Durch Guardrails blockiert: {decision.Reason}", decision);
+            return Error(call.Id, $"Blocked by guardrails: {decision.Reason}", decision);
         }
 
         try
         {
             var output = await ExecuteAsync(entry, args, context);
             if (output.Length > MaxOutputChars)
-                output = output[..MaxOutputChars] + $"\n… [gekürzt, {output.Length - MaxOutputChars} Zeichen mehr]";
+                output = output[..MaxOutputChars] + $"\n… [truncated, {output.Length - MaxOutputChars} more characters]";
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null);
             return new AgentToolResult(call.Id, output, false, decision);
         }
@@ -80,13 +80,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             var inner = tie.InnerException;
             _logger?.LogError(inner, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, inner.Message);
-            return Error(call.Id, $"Fehler bei '{entry.Name}': {inner.Message}", decision);
+            return Error(call.Id, $"Error in '{entry.Name}': {inner.Message}", decision);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, ex.Message);
-            return Error(call.Id, $"Fehler bei '{entry.Name}': {ex.Message}", decision);
+            return Error(call.Id, $"Error in '{entry.Name}': {ex.Message}", decision);
         }
     }
 
@@ -146,7 +146,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var arguments = BindArguments(entry.Method, args, sp, out var missing);
             if (missing.Count > 0)
-                return $"Fehlende Pflicht-Argumente: {string.Join(", ", missing)}.";
+                return $"Missing required arguments: {string.Join(", ", missing)}.";
 
             var target = entry.Method.IsStatic ? null : sp.GetService(entry.Method.DeclaringType!);
             var result = entry.Method.Invoke(target, arguments);

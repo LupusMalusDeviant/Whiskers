@@ -7,8 +7,9 @@
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Dienste - Whiskers</PageTitle>
+<PageTitle>@L["SystemdManager_PageTitle"]</PageTitle>
 
 @* RoadToSAP Phase 1: gated by the HostManagement module; when off, ModuleGuard shows a "disabled" notice.
    The ISystemdService injection resolves the Core no-op default either way. *@
@@ -21,12 +22,12 @@
             <MudIcon Icon="@Icons.Material.Filled.MiscellaneousServices" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Systemdienste</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Systemd-Units starten, stoppen und überwachen</MudText>
+            <MudText Typo="Typo.h5">@L["SystemdManager_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["SystemdManager_Subtitle"]</MudText>
         </div>
         <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
         <MudSpacer />
-        <MudTextField @bind-Value="_filter" Placeholder="Filtern..." Adornment="Adornment.Start"
+        <MudTextField @bind-Value="_filter" Placeholder="@L["SystemdManager_Filter_Placeholder"]" Adornment="Adornment.Start"
                       AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" />
     </MudStack>
 </div>
@@ -40,11 +41,11 @@ else
     <MudTable Items="@FilteredServices" Dense="true" Hover="true" Striped="true" Elevation="2"
               FixedHeader="true" Height="calc(100vh - 250px)">
         <HeaderContent>
-            <MudTh>Dienst</MudTh>
-            <MudTh>Status</MudTh>
-            <MudTh>Aktiviert</MudTh>
-            <MudTh>Beschreibung</MudTh>
-            <MudTh>Aktionen</MudTh>
+            <MudTh>@L["SystemdManager_Header_Service"]</MudTh>
+            <MudTh>@L["SystemdManager_Header_Status"]</MudTh>
+            <MudTh>@L["SystemdManager_Header_Enabled"]</MudTh>
+            <MudTh>@L["SystemdManager_Header_Description"]</MudTh>
+            <MudTh>@L["SystemdManager_Header_Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd><MudText Style="font-family: monospace;">@context.Name</MudText></MudTd>
@@ -59,7 +60,7 @@ else
                 <MudChip T="string" Size="Size.Small"
                          Color="@(context.Enabled ? Color.Success : Color.Default)"
                          Variant="Variant.Text">
-                    @(context.Enabled ? "aktiviert" : "deaktiviert")
+                    @(context.Enabled ? L["SystemdManager_Status_Enabled"].Value : L["SystemdManager_Status_Disabled"].Value)
                 </MudChip>
             </MudTd>
             <MudTd><MudText Typo="Typo.body2">@context.Description</MudText></MudTd>
@@ -69,32 +70,32 @@ else
                     @if (context.ActiveState == "active")
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Warning"
-                                       title="Stoppen" OnClick="@(() => ManageService(context.Name, "stop"))" />
+                                       title="@L["SystemdManager_Tooltip_Stop"]" OnClick="@(() => ManageService(context.Name, "stop"))" />
                         <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Info"
-                                       title="Neustarten" OnClick="@(() => ManageService(context.Name, "restart"))" />
+                                       title="@L["SystemdManager_Tooltip_Restart"]" OnClick="@(() => ManageService(context.Name, "restart"))" />
                     }
                     else
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
-                                       title="Starten" OnClick="@(() => ManageService(context.Name, "start"))" />
+                                       title="@L["SystemdManager_Tooltip_Start"]" OnClick="@(() => ManageService(context.Name, "start"))" />
                     }
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.Article" Size="Size.Small" Color="Color.Default"
-                               title="Protokoll" OnClick="@(() => ShowJournal(context.Name))" />
+                               title="@L["SystemdManager_Tooltip_Journal"]" OnClick="@(() => ShowJournal(context.Name))" />
             </MudTd>
         </RowTemplate>
     </MudTable>
 }
 
 <MudDialog Visible="_showJournal" VisibleChanged="@(v => _showJournal = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
-        <TitleContent>Protokoll: @_journalService</TitleContent>
+        <TitleContent>@L["SystemdManager_Dialog_JournalTitle", _journalService ?? ""]</TitleContent>
         <DialogContent>
             <MudPaper Style="max-height: 500px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; padding: 16px; background: #0d1117;">
                 @_journalContent
             </MudPaper>
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="@(() => _showJournal = false)">Schließen</MudButton>
+            <MudButton OnClick="@(() => _showJournal = false)">@L["SystemdManager_Button_Close"]</MudButton>
         </DialogActions>
     </MudDialog>
 
@@ -116,7 +117,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["SystemdManager_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -151,14 +152,14 @@ else
         // Confirm actions that interrupt a running service.
         var confirmPrompt = action switch
         {
-            "stop" => $"Dienst '{name}' stoppen? Der Dienst und alle abhängigen Funktionen werden beendet.",
-            "restart" => $"Dienst '{name}' neustarten? Der Dienst wird kurzzeitig unterbrochen.",
+            "stop" => L["SystemdManager_Confirm_Stop", name].Value,
+            "restart" => L["SystemdManager_Confirm_Restart", name].Value,
             _ => null
         };
         if (confirmPrompt != null)
         {
             var confirmed = await DialogService.ShowMessageBoxAsync(
-                "Aktion bestätigen", confirmPrompt, yesText: "Ausführen", cancelText: "Abbrechen");
+                L["SystemdManager_Dialog_ConfirmTitle"].Value, confirmPrompt, yesText: L["SystemdManager_Dialog_ConfirmYes"].Value, cancelText: L["SystemdManager_Dialog_Cancel"].Value);
             if (confirmed != true) return;
         }
 
@@ -173,11 +174,11 @@ else
             };
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "systemd.manage", "systemd", name, name, details: action, serverId: ServerId, success: result.Success);
-            Snackbar.Add(result.Success ? $"{name}: {action} erfolgreich" : $"{name}: {result.Error}",
+            Snackbar.Add(result.Success ? L["SystemdManager_Snackbar_ActionSuccess", name, action].Value : $"{name}: {result.Error}",
                 result.Success ? Severity.Success : Severity.Error);
             await LoadServices();
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["SystemdManager_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
     private async Task ShowJournal(string name)

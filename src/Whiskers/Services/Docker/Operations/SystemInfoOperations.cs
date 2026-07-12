@@ -160,7 +160,7 @@ internal sealed class SystemInfoOperations
                 ServerId = s.Id,
                 ServerName = s.Name,
                 IsReachable = false,
-                Error = $"Zeitüberschreitung nach {perServerTimeout.TotalSeconds:0}s"
+                Error = $"Timed out after {perServerTimeout.TotalSeconds:0}s"
             });
         });
 

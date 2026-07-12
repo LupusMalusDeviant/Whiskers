@@ -40,12 +40,12 @@ public sealed class PrincipalCeilingRule : IGuardrailRule
         var p = request.Context.Principal;
         if (p.AllowedTools != null && !p.AllowedTools.Contains(request.ToolName))
         {
-            reason = $"'{request.ToolName}' ist nicht in der Tool-Whitelist des Auslösers ({p.DisplayName}).";
+            reason = $"'{request.ToolName}' is not in the trigger principal's tool whitelist ({p.DisplayName}).";
             return GuardrailVerdict.Deny;
         }
         if (GuardrailRuleHelpers.Rank(request.RequiredLevel) > GuardrailRuleHelpers.Rank(p.PermissionLevel))
         {
-            reason = $"'{request.ToolName}' erfordert '{request.RequiredLevel}', der Auslöser hat nur '{p.PermissionLevel}'.";
+            reason = $"'{request.ToolName}' requires '{request.RequiredLevel}', the trigger principal only has '{p.PermissionLevel}'.";
             return GuardrailVerdict.Deny;
         }
         reason = "";
@@ -62,7 +62,7 @@ public sealed class ReadOnlyModeRule : IGuardrailRule
     {
         if (request.Context.Policy.ReadOnlyMode && request.RequiredLevel != McpPermissionLevels.Read)
         {
-            reason = $"Read-Only-Modus aktiv: '{request.ToolName}' ({request.RequiredLevel}) ist blockiert.";
+            reason = $"Read-only mode active: '{request.ToolName}' ({request.RequiredLevel}) is blocked.";
             return GuardrailVerdict.Deny;
         }
         reason = "";
@@ -79,7 +79,7 @@ public sealed class ToolDenyListRule : IGuardrailRule
     {
         if (request.Context.Policy.ToolDenyList.Contains(request.ToolName))
         {
-            reason = $"'{request.ToolName}' steht auf der Deny-Liste der Guardrails.";
+            reason = $"'{request.ToolName}' is on the guardrail deny list.";
             return GuardrailVerdict.Deny;
         }
         reason = "";
@@ -101,7 +101,7 @@ public sealed class ToolAllowListRule : IGuardrailRule
                               || allow.Count > 0;
         if (whitelistActive && !allow.Contains(request.ToolName))
         {
-            reason = $"'{request.ToolName}' ist nicht in der Allow-Liste der Guardrails.";
+            reason = $"'{request.ToolName}' is not on the guardrail allow list.";
             return GuardrailVerdict.Deny;
         }
         reason = "";
@@ -125,7 +125,7 @@ public sealed class ProtectedResourceRule : IGuardrailRule
                 {
                     if (GuardrailRuleHelpers.GlobMatch(glob, value))
                     {
-                        reason = $"'{value}' ist eine geschützte Ressource (Muster '{glob}').";
+                        reason = $"'{value}' is a protected resource (pattern '{glob}').";
                         return GuardrailVerdict.Deny;
                     }
                 }
@@ -152,7 +152,7 @@ public sealed class ForbiddenArgumentRule : IGuardrailRule
                 {
                     if (SafeIsMatch(pattern, value))
                     {
-                        reason = $"Argument enthält ein verbotenes Muster ('{pattern}').";
+                        reason = $"Argument contains a forbidden pattern ('{pattern}').";
                         return GuardrailVerdict.Deny;
                     }
                 }
@@ -187,7 +187,7 @@ public sealed class ConfirmationRule : IGuardrailRule
                                 && request.RequiredLevel != McpPermissionLevels.Read;
         if (aboveAutonomous || writeNeedsConfirm)
         {
-            reason = $"'{request.ToolName}' ({request.RequiredLevel}) erfordert eine Bestätigung.";
+            reason = $"'{request.ToolName}' ({request.RequiredLevel}) requires confirmation.";
             return GuardrailVerdict.Confirm;
         }
         reason = "";

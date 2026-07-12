@@ -6,6 +6,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -13,37 +14,36 @@
             <MudIcon Icon="@Icons.Material.Filled.CloudSync" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Git Deploy</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Repo-URL rein → auf dem Zielserver bauen &amp; deployen</MudText>
+            <MudText Typo="Typo.h5">@L["GitDeployView_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["GitDeployView_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
         @if (_role >= AppRole.Admin)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="@(() => ShowEditDialog(null))">App hinzufügen</MudButton>
+                       OnClick="@(() => ShowEditDialog(null))">@L["GitDeployView_Button_AddApp"]</MudButton>
         }
     </MudStack>
 </div>
 
 <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
-    Das Repository wird auf dem <strong>Zielserver</strong> geklont und mit seiner Compose-Datei gebaut und gestartet.
-    Push-getriggerte Redeploys: einen Webhook mit Aktion „git-deploy" anlegen (HMAC-signiert).
+    @((MarkupString)L["GitDeployView_Alert_Intro"].Value)
 </MudAlert>
 
 @if (!_apps.Any())
 {
-    <MudAlert Severity="Severity.Info">Noch keine Git-Deploy-Apps konfiguriert.</MudAlert>
+    <MudAlert Severity="Severity.Info">@L["GitDeployView_Empty_NoApps"]</MudAlert>
 }
 else
 {
     <MudTable Items="@_apps" Dense="true" Hover="true" Striped="true" Elevation="0">
         <HeaderContent>
-            <MudTh>Name</MudTh>
-            <MudTh>Repository</MudTh>
-            <MudTh>Branch</MudTh>
-            <MudTh>Server</MudTh>
-            <MudTh>Letzter Deploy</MudTh>
-            <MudTh>Aktionen</MudTh>
+            <MudTh>@L["GitDeployView_Table_Name"]</MudTh>
+            <MudTh>@L["GitDeployView_Table_Repository"]</MudTh>
+            <MudTh>@L["GitDeployView_Table_Branch"]</MudTh>
+            <MudTh>@L["GitDeployView_Table_Server"]</MudTh>
+            <MudTh>@L["GitDeployView_Table_LastDeploy"]</MudTh>
+            <MudTh>@L["GitDeployView_Table_Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd><strong>@context.Name</strong></MudTd>
@@ -51,7 +51,7 @@ else
                 <code style="font-size: 0.75rem;">@context.RepoUrl</code>
                 @if (context.HasToken)
                 {
-                    <MudTooltip Text="Privates Repo — Token im Vault">
+                    <MudTooltip Text="@L["GitDeployView_Tooltip_PrivateRepo"]">
                         <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Small" Class="ml-1" Color="Color.Secondary" />
                     </MudTooltip>
                 }
@@ -68,21 +68,21 @@ else
                 }
                 else
                 {
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">nie</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["GitDeployView_Text_Never"]</MudText>
                 }
             </MudTd>
             <MudTd>
                 @if (_role >= AppRole.Operator)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.RocketLaunch" Color="Color.Primary" Size="Size.Small"
-                                   OnClick="@(() => StartDeploy(context))" title="Jetzt deployen" />
+                                   OnClick="@(() => StartDeploy(context))" title="@L["GitDeployView_Tooltip_DeployNow"]" />
                 }
                 @if (_role >= AppRole.Admin)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
-                                   OnClick="@(() => ShowEditDialog(context))" title="Bearbeiten" />
+                                   OnClick="@(() => ShowEditDialog(context))" title="@L["GitDeployView_Tooltip_Edit"]" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                   OnClick="@(() => DeleteApp(context))" title="Löschen" />
+                                   OnClick="@(() => DeleteApp(context))" title="@L["GitDeployView_Tooltip_Delete"]" />
                 }
             </MudTd>
         </RowTemplate>
@@ -92,40 +92,40 @@ else
 @* Add/edit dialog *@
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)"
            Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
-    <TitleContent>@(_editing == null ? "Git-Deploy-App hinzufügen" : "App bearbeiten")</TitleContent>
+    <TitleContent>@(_editing == null ? L["GitDeployView_Dialog_AddTitle"].Value : L["GitDeployView_Dialog_EditTitle"].Value)</TitleContent>
     <DialogContent>
-        <MudTextField @bind-Value="_form.Name" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
-        <MudTextField @bind-Value="_form.RepoUrl" Label="Repository-URL (https)" Variant="Variant.Outlined" Class="mb-3"
+        <MudTextField @bind-Value="_form.Name" Label="@L["GitDeployView_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_form.RepoUrl" Label="@L["GitDeployView_Field_RepoUrl"]" Variant="Variant.Outlined" Class="mb-3"
                       Placeholder="https://github.com/org/app.git" Style="font-family: 'JetBrains Mono', monospace;" />
-        <MudTextField @bind-Value="_form.Branch" Label="Branch" Variant="Variant.Outlined" Class="mb-3" />
-        <MudTextField @bind-Value="_form.ComposePath" Label="Compose-Datei (relativ zum Repo)" Variant="Variant.Outlined" Class="mb-3" />
-        <MudSelect T="string" @bind-Value="_form.ServerId" Label="Zielserver" Variant="Variant.Outlined" Class="mb-3">
+        <MudTextField @bind-Value="_form.Branch" Label="@L["GitDeployView_Field_Branch"]" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_form.ComposePath" Label="@L["GitDeployView_Field_ComposePath"]" Variant="Variant.Outlined" Class="mb-3" />
+        <MudSelect T="string" @bind-Value="_form.ServerId" Label="@L["GitDeployView_Field_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
             @foreach (var srv in _servers)
             {
                 <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
             }
         </MudSelect>
-        <MudTextField @bind-Value="_formToken" Label="Access-Token (optional, für private Repos)" Variant="Variant.Outlined"
+        <MudTextField @bind-Value="_formToken" Label="@L["GitDeployView_Field_AccessToken"]" Variant="Variant.Outlined"
                       InputType="InputType.Password" Class="mb-1"
-                      HelperText="@(_editing?.HasToken == true ? "Ein Token ist im Vault hinterlegt — leer lassen, um es zu behalten." : "Wird verschlüsselt im Vault gespeichert und via GIT_ASKPASS genutzt (nie in Logs/Prozessliste).")" />
+                      HelperText="@(_editing?.HasToken == true ? L["GitDeployView_HelperText_TokenKeep"].Value : L["GitDeployView_HelperText_TokenNew"].Value)" />
         @if (!Vault.IsEnabled)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
-                Ohne <code>VAULT_KEY</code> sind nur öffentliche Repos möglich (kein Token-Speicher).
+                @((MarkupString)L["GitDeployView_Alert_NoVault"].Value)
             </MudAlert>
         }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+        <MudButton OnClick="@(() => _showDialog = false)">@L["GitDeployView_Button_Cancel"]</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveApp"
-                   Disabled="@(string.IsNullOrWhiteSpace(_form.Name) || string.IsNullOrWhiteSpace(_form.RepoUrl))">Speichern</MudButton>
+                   Disabled="@(string.IsNullOrWhiteSpace(_form.Name) || string.IsNullOrWhiteSpace(_form.RepoUrl))">@L["GitDeployView_Button_Save"]</MudButton>
     </DialogActions>
 </MudDialog>
 
 @* Deploy log dialog (same pattern as the onboarding dialog) *@
 <MudDialog Visible="_deploying" VisibleChanged="@(v => { if (!_deployBusy) _deploying = v; })"
            Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
-    <TitleContent>Deploy: @_deployApp?.Name</TitleContent>
+    <TitleContent>@L["GitDeployView_DeployDialog_Title", _deployApp?.Name ?? ""]</TitleContent>
     <DialogContent>
         <MudPaper Class="pa-3" Outlined="true" Style="max-height:55vh; overflow-y:auto; font-size:0.88rem;">
             @foreach (var line in _deployLog)
@@ -140,7 +140,7 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => { if (!_deployBusy) _deploying = false; })" Disabled="_deployBusy">
-            @(_deployBusy ? "Läuft…" : "Schließen")
+            @(_deployBusy ? L["GitDeployView_Button_Running"].Value : L["GitDeployView_Button_Close"].Value)
         </MudButton>
     </DialogActions>
 </MudDialog>
@@ -164,7 +164,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["GitDeployView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -205,30 +205,30 @@ else
             await GitDeploy.SaveAppAsync(_form, token);
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 _editing == null ? "gitdeploy.create" : "gitdeploy.update", "git-deploy", _form.Id, _form.Name, serverId: _form.ServerId);
-            Snackbar.Add($"'{_form.Name}' gespeichert.", Severity.Success);
+            Snackbar.Add(L["GitDeployView_Snackbar_Saved", _form.Name].Value, Severity.Success);
             _showDialog = false;
             _apps = await GitDeploy.GetAppsAsync();
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["GitDeployView_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
     private async Task DeleteApp(Whiskers.Models.GitDeployApp app)
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "App löschen",
-            $"'{app.Name}' wirklich löschen? Der Deploy-Arbeitsordner auf dem Zielserver wird entfernt; laufende Container bleiben bestehen.",
-            yesText: "Löschen", cancelText: "Abbrechen");
+            L["GitDeployView_Dialog_DeleteTitle"].Value,
+            L["GitDeployView_Dialog_DeleteMessage", app.Name].Value,
+            yesText: L["GitDeployView_Dialog_DeleteConfirm"].Value, cancelText: L["GitDeployView_Dialog_Cancel"].Value);
         if (confirmed != true) return;
         try
         {
             await GitDeploy.DeleteAppAsync(app.Id);
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "gitdeploy.delete", "git-deploy", app.Id, app.Name, serverId: app.ServerId);
-            Snackbar.Add("Gelöscht.", Severity.Success);
+            Snackbar.Add(L["GitDeployView_Snackbar_Deleted"].Value, Severity.Success);
             _apps = await GitDeploy.GetAppsAsync();
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["GitDeployView_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
     private async Task StartDeploy(Whiskers.Models.GitDeployApp app)

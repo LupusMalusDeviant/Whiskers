@@ -151,17 +151,17 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
     private static string BuildTaskMessage(AiTrigger t, NotificationEvent evt)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("AUTONOMER TRIGGER-LAUF (kein Mensch wartet auf Rückfragen).");
-        sb.AppendLine($"Ereignis: {AiTriggerEvents.Label(evt.EventType)} ({evt.EventType}).");
+        sb.AppendLine("AUTONOMOUS TRIGGER RUN (no human is waiting to answer follow-up questions).");
+        sb.AppendLine($"Event: {AiTriggerEvents.Label(evt.EventType)} ({evt.EventType}).");
         if (!string.IsNullOrWhiteSpace(evt.ContainerName))
             sb.AppendLine($"Container: {evt.ContainerName} ({evt.Image}).");
-        if (evt.ExitCode is { } ec) sb.AppendLine($"Exit-Code: {ec}.");
-        if (evt.RestartCount is { } rc) sb.AppendLine($"Restart-/Trigger-Zähler: {rc}.");
+        if (evt.ExitCode is { } ec) sb.AppendLine($"Exit code: {ec}.");
+        if (evt.RestartCount is { } rc) sb.AppendLine($"Restart/trigger count: {rc}.");
         if (!string.IsNullOrWhiteSpace(evt.ImageInfo)) sb.AppendLine($"Info: {evt.ImageInfo}.");
         sb.AppendLine();
-        sb.AppendLine("AUFGABE:");
+        sb.AppendLine("TASK:");
         sb.Append(string.IsNullOrWhiteSpace(t.Prompt)
-            ? "Analysiere das Ereignis und ergreife die nötigen Maßnahmen im Rahmen der Guardrails."
+            ? "Analyze the event and take the necessary actions within the bounds of the guardrails."
             : t.Prompt);
         return sb.ToString();
     }

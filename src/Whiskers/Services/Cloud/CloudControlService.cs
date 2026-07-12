@@ -123,13 +123,13 @@ public class CloudControlService : ICloudControlService
     private async Task<(Whiskers.Models.ServerConfig sw, CloudServerInfo info, ICloudProvider provider)> ContextAsync(string idOrName)
     {
         var sw = ResolveWhiskers(idOrName)
-                 ?? throw new InvalidOperationException($"Whiskers-Server nicht gefunden: {idOrName}");
+                 ?? throw new InvalidOperationException($"Whiskers server not found: {idOrName}");
         if (sw.CloudProvider == CloudProvider.None || string.IsNullOrWhiteSpace(sw.CloudApiKey))
-            throw new InvalidOperationException($"Für '{sw.Name}' ist kein Cloud-Provider/API-Key konfiguriert.");
+            throw new InvalidOperationException($"No cloud provider/API key configured for '{sw.Name}'.");
         var provider = ProviderFor(sw.CloudProvider)
-                       ?? throw new InvalidOperationException($"Kein Provider für '{sw.CloudProvider}' registriert.");
+                       ?? throw new InvalidOperationException($"No provider registered for '{sw.CloudProvider}'.");
         var info = await provider.ResolveAsync(sw, sw.CloudApiKey)
-                   ?? throw new InvalidOperationException($"Kein passender {sw.CloudProvider}-Server zu '{sw.Name}' gefunden (IP-Abgleich fehlgeschlagen).");
+                   ?? throw new InvalidOperationException($"No matching {sw.CloudProvider} server found for '{sw.Name}' (IP match failed).");
         return (sw, info, provider);
     }
 

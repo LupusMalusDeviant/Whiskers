@@ -4,28 +4,28 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
 @* F8: registries managed in the UI — credentials go to the vault and are used for authenticated
    image pulls (deploys, updates, app store) when an image reference matches the registry host. *@
 
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-    Private Registries für authentifizierte Pulls: Das Credential wird verschlüsselt im Vault gespeichert und
-    automatisch verwendet, wenn ein Image-Name zum Registry-Host passt (z. B. <code>ghcr.io/…</code>).
+    @((MarkupString)L["RegistriesPanel_Intro"].Value)
 </MudText>
 
 @if (!Vault.IsEnabled)
 {
     <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-        Ohne <code>VAULT_KEY</code> können keine Registry-Credentials gespeichert werden.
+        @((MarkupString)L["RegistriesPanel_Warning_NoVault"].Value)
     </MudAlert>
 }
 
 <MudTable Items="@_registries" Dense="true" Elevation="0" Class="mb-3">
     <HeaderContent>
-        <MudTh>Name</MudTh>
-        <MudTh>Host</MudTh>
-        <MudTh>Benutzer</MudTh>
-        <MudTh>Credential</MudTh>
+        <MudTh>@L["RegistriesPanel_Table_Name"]</MudTh>
+        <MudTh>@L["RegistriesPanel_Table_Host"]</MudTh>
+        <MudTh>@L["RegistriesPanel_Table_User"]</MudTh>
+        <MudTh>@L["RegistriesPanel_Table_Credential"]</MudTh>
         <MudTh />
     </HeaderContent>
     <RowTemplate>
@@ -35,7 +35,7 @@
         <MudTd>
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
                      Color="@(context.HasCredential ? Color.Success : Color.Default)">
-                @(context.HasCredential ? "im Vault" : "keins")
+                @(context.HasCredential ? L["RegistriesPanel_Chip_InVault"] : L["RegistriesPanel_Chip_None"])
             </MudChip>
         </MudTd>
         <MudTd>
@@ -43,29 +43,29 @@
             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Delete(context))" />
         </MudTd>
     </RowTemplate>
-    <NoRecordsContent><MudText Class="pa-2" Typo="Typo.body2">Keine Registries konfiguriert.</MudText></NoRecordsContent>
+    <NoRecordsContent><MudText Class="pa-2" Typo="Typo.body2">@L["RegistriesPanel_Table_Empty"]</MudText></NoRecordsContent>
 </MudTable>
 
 <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-           OnClick="@(() => ShowDialog(null))">Registry hinzufügen</MudButton>
+           OnClick="@(() => ShowDialog(null))">@L["RegistriesPanel_Button_Add"]</MudButton>
 
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)"
            Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
-    <TitleContent>@(_editing == null ? "Registry hinzufügen" : "Registry bearbeiten")</TitleContent>
+    <TitleContent>@(_editing == null ? L["RegistriesPanel_Dialog_TitleAdd"] : L["RegistriesPanel_Dialog_TitleEdit"])</TitleContent>
     <DialogContent>
-        <MudTextField @bind-Value="_form.Name" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
-        <MudTextField @bind-Value="_form.Host" Label="Host" Variant="Variant.Outlined" Class="mb-3"
+        <MudTextField @bind-Value="_form.Name" Label="@L["RegistriesPanel_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_form.Host" Label="@L["RegistriesPanel_Field_Host"]" Variant="Variant.Outlined" Class="mb-3"
                       Placeholder="ghcr.io / harbor.example.com:5000 / docker.io"
-                      HelperText="So wie er in Image-Referenzen vorkommt." />
-        <MudTextField @bind-Value="_form.Username" Label="Benutzername" Variant="Variant.Outlined" Class="mb-3" />
-        <MudTextField @bind-Value="_formCredential" Label="Passwort / Token" Variant="Variant.Outlined"
+                      HelperText="@L["RegistriesPanel_Field_HostHelper"]" />
+        <MudTextField @bind-Value="_form.Username" Label="@L["RegistriesPanel_Field_Username"]" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_formCredential" Label="@L["RegistriesPanel_Field_Credential"]" Variant="Variant.Outlined"
                       InputType="InputType.Password"
-                      HelperText="@(_editing?.HasCredential == true ? "Leer lassen, um das gespeicherte Credential zu behalten." : "Wird verschlüsselt im Vault gespeichert.")" />
+                      HelperText="@(_editing?.HasCredential == true ? L["RegistriesPanel_Field_CredentialKeepHelper"].Value : L["RegistriesPanel_Field_CredentialStoreHelper"].Value)" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+        <MudButton OnClick="@(() => _showDialog = false)">@L["RegistriesPanel_Button_Cancel"]</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save"
-                   Disabled="@(string.IsNullOrWhiteSpace(_form.Name) || string.IsNullOrWhiteSpace(_form.Host))">Speichern</MudButton>
+                   Disabled="@(string.IsNullOrWhiteSpace(_form.Name) || string.IsNullOrWhiteSpace(_form.Host))">@L["RegistriesPanel_Button_Save"]</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -98,23 +98,23 @@
             await Registries.SaveRegistryAsync(_form, cred);
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 _editing == null ? "registry.create" : "registry.update", "registry", _form.Id, _form.Name);
-            Snackbar.Add($"Registry '{_form.Name}' gespeichert.", Severity.Success);
+            Snackbar.Add(L["RegistriesPanel_Snackbar_Saved", _form.Name].Value, Severity.Success);
             _showDialog = false;
             _registries = await Registries.GetRegistriesAsync();
         }
-        catch (Exception ex) { Snackbar.Add($"Fehler: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(L["RegistriesPanel_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
     private async Task Delete(Whiskers.Models.RegistryConfig reg)
     {
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Registry löschen", $"Registry '{reg.Name}' und ihr Vault-Credential löschen?",
-            yesText: "Löschen", cancelText: "Abbrechen");
+            L["RegistriesPanel_Dialog_DeleteTitle"].Value, L["RegistriesPanel_Dialog_DeleteMessage", reg.Name].Value,
+            yesText: L["RegistriesPanel_Button_Delete"].Value, cancelText: L["RegistriesPanel_Button_Cancel"].Value);
         if (confirmed != true) return;
         await Registries.DeleteRegistryAsync(reg.Id);
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
             "registry.delete", "registry", reg.Id, reg.Name);
-        Snackbar.Add("Gelöscht.", Severity.Success);
+        Snackbar.Add(L["RegistriesPanel_Snackbar_Deleted"].Value, Severity.Success);
         _registries = await Registries.GetRegistriesAsync();
     }
 }

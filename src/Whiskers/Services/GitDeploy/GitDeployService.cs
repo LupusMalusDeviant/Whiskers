@@ -84,7 +84,7 @@ public class GitDeployService : IGitDeployService
             else
             {
                 if (!_vault.IsEnabled)
-                    throw new InvalidOperationException("Private Repos benötigen den Vault — VAULT_KEY setzen und neu starten.");
+                    throw new InvalidOperationException("Private repositories require the vault — set VAULT_KEY and restart.");
                 await _vault.SetSecretAsync(TokenVaultKey(app.Id), token.Trim());
                 app.HasToken = true;
             }
@@ -133,7 +133,7 @@ public class GitDeployService : IGitDeployService
     {
         ValidateId(appId);
         var app = await GetAppAsync(appId);
-        if (app is null) return (false, "Git-Deploy-App nicht gefunden.");
+        if (app is null) return (false, "Git deploy app not found.");
 
         var log = new StringBuilder();
         void Report(string line) { progress?.Report(line); log.AppendLine(line); }
@@ -146,17 +146,17 @@ public class GitDeployService : IGitDeployService
             {
                 var token = _vault.IsEnabled ? _vault.GetSecret(TokenVaultKey(appId)) : null;
                 if (string.IsNullOrEmpty(token))
-                    return Fail(Report, log, "Kein Token im Vault gefunden — Token in der App neu hinterlegen.");
-                Report("① Zugangsdaten bereitstellen…");
+                    return Fail(Report, log, "No token found in the vault — store the token in the app again.");
+                Report("① Preparing credentials…");
                 var tokenB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(token));
                 await Sh(app.ServerId, GitDeployCommands.WriteCredentialsCommand(appId, tokenB64), 30, ct);
             }
 
             // 2) Clone or update
-            Report($"② Repository aktualisieren ({app.Branch})…");
+            Report($"② Updating repository ({app.Branch})…");
             await Sh(app.ServerId, GitDeployCommands.CloneOrUpdateCommand(appId, app.RepoUrl, app.Branch, app.HasToken), 300, ct);
             var sha = (await Sh(app.ServerId, GitDeployCommands.CurrentShaCommand(appId), 20, ct)).Output.Trim();
-            Report($"✅ Stand: {sha}");
+            Report($"✅ Revision: {sha}");
 
             // 3) Build
             Report("③ docker compose build…");
@@ -172,12 +172,12 @@ public class GitDeployService : IGitDeployService
             app.LastDeployedSha = sha;
             app.LastDeploySucceeded = true;
             await SaveAppAsync(app, token: null);
-            Report($"🎉 Deploy fertig: {app.Name} @ {sha}");
+            Report($"🎉 Deploy finished: {app.Name} @ {sha}");
             return (true, $"{app.Name} @ {sha}");
         }
         catch (OperationCanceledException)
         {
-            return Fail(Report, log, "Abgebrochen.");
+            return Fail(Report, log, "Cancelled.");
         }
         catch (Exception ex)
         {
@@ -200,7 +200,7 @@ public class GitDeployService : IGitDeployService
         var r = await _executor.ExecuteAsync(serverId, command, TimeSpan.FromSeconds(timeoutSeconds), ct);
         if (!r.Success)
             throw new InvalidOperationException(
-                $"Befehl fehlgeschlagen (exit {r.ExitCode}): {Tail(r.Error, 10)}{Tail(r.Output, 5)}");
+                $"Command failed (exit {r.ExitCode}): {Tail(r.Error, 10)}{Tail(r.Output, 5)}");
         return r;
     }
 

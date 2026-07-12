@@ -5,6 +5,7 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
    enabled (via ModuleGuard), so a disabled module never reaches the ISchedulerService injection. *@
@@ -15,14 +16,14 @@
             <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Geplante Tasks</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Automatische Container-Aktionen planen und verwalten</MudText>
+            <MudText Typo="Typo.h5">@L["ScheduledTasksView_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ScheduledTasksView_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
         @if (_role >= AppRole.Admin)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="ShowCreateDialog">Task erstellen</MudButton>
+                       OnClick="ShowCreateDialog">@L["ScheduledTasksView_Button_CreateTask"]</MudButton>
         }
     </MudStack>
 </div>
@@ -32,25 +33,25 @@
     <MudItem xs="6" sm="3">
         <div class="sw-stat-card" style="text-align: center;">
             <div class="sw-stat-value" style="color: var(--sw-accent-blue);">@_tasks.Count</div>
-            <div class="sw-stat-label">Gesamt</div>
+            <div class="sw-stat-label">@L["ScheduledTasksView_Stat_Total"]</div>
         </div>
     </MudItem>
     <MudItem xs="6" sm="3">
         <div class="sw-stat-card" style="text-align: center;">
             <div class="sw-stat-value" style="color: var(--sw-accent-green);">@_tasks.Count(t => t.Enabled)</div>
-            <div class="sw-stat-label">Aktiv</div>
+            <div class="sw-stat-label">@L["ScheduledTasksView_Stat_Active"]</div>
         </div>
     </MudItem>
     <MudItem xs="6" sm="3">
         <div class="sw-stat-card" style="text-align: center;">
             <div class="sw-stat-value" style="color: var(--sw-accent-green);">@_tasks.Count(t => t.LastSuccess)</div>
-            <div class="sw-stat-label">Letzter Lauf OK</div>
+            <div class="sw-stat-label">@L["ScheduledTasksView_Stat_LastRunOk"]</div>
         </div>
     </MudItem>
     <MudItem xs="6" sm="3">
         <div class="sw-stat-card" style="text-align: center;">
             <div class="sw-stat-value" style="color: var(--sw-accent-red);">@_tasks.Count(t => !t.LastSuccess && t.LastRun != null)</div>
-            <div class="sw-stat-label">Fehlgeschlagen</div>
+            <div class="sw-stat-label">@L["ScheduledTasksView_Stat_Failed"]</div>
         </div>
     </MudItem>
 </MudGrid>
@@ -58,20 +59,20 @@
 @* Task List *@
 @if (!_tasks.Any())
 {
-    <MudAlert Severity="Severity.Info">Noch keine geplanten Tasks. Erstelle einen neuen Task!</MudAlert>
+    <MudAlert Severity="Severity.Info">@L["ScheduledTasksView_Empty_NoTasks"]</MudAlert>
 }
 else
 {
     <MudTable Items="@_tasks" Dense="true" Hover="true" Striped="true" Elevation="0">
         <HeaderContent>
-            <MudTh>Name</MudTh>
-            <MudTh>Typ</MudTh>
-            <MudTh>Zeitplan</MudTh>
-            <MudTh>Ziel</MudTh>
-            <MudTh>Nächster Lauf</MudTh>
-            <MudTh>Letzter Lauf</MudTh>
-            <MudTh>Status</MudTh>
-            <MudTh>Aktionen</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_Name"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_Type"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_Schedule"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_Target"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_NextRun"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_LastRun"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_Status"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd><strong>@context.Name</strong></MudTd>
@@ -97,7 +98,7 @@ else
             <MudTd>
                 @if (context.LastRun == null)
                 {
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted);">Noch nie</MudChip>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted);">@L["ScheduledTasksView_Chip_NeverRun"]</MudChip>
                 }
                 else if (context.LastSuccess)
                 {
@@ -115,14 +116,14 @@ else
                     @if (_role >= AppRole.Operator)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
-                                       OnClick="@(() => RunNow(context))" title="Jetzt ausführen" />
+                                       OnClick="@(() => RunNow(context))" title="@L["ScheduledTasksView_Tooltip_RunNow"]" />
                     }
                     @if (_role >= AppRole.Admin)
                     {
                         <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
                                    ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                       OnClick="@(() => DeleteTask(context))" title="Löschen" />
+                                       OnClick="@(() => DeleteTask(context))" title="@L["ScheduledTasksView_Tooltip_Delete"]" />
                     }
                 </MudStack>
             </MudTd>
@@ -133,14 +134,14 @@ else
 @* Run History *@
 @if (_history.Any())
 {
-    <MudText Typo="Typo.subtitle1" Class="mt-6 mb-2" Style="font-weight: 600;">Letzte Ausführungen</MudText>
+    <MudText Typo="Typo.subtitle1" Class="mt-6 mb-2" Style="font-weight: 600;">@L["ScheduledTasksView_History_Title"]</MudText>
     <MudTable Items="@_history" Dense="true" Hover="true" Striped="true" Elevation="0">
         <HeaderContent>
-            <MudTh>Task</MudTh>
-            <MudTh>Typ</MudTh>
-            <MudTh>Gestartet</MudTh>
-            <MudTh>Dauer</MudTh>
-            <MudTh>Ergebnis</MudTh>
+            <MudTh>@L["ScheduledTasksView_History_Task"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_History_Type"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_History_Started"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_History_Duration"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_History_Result"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd>@context.TaskName</MudTd>
@@ -169,27 +170,27 @@ else
 
 @* Create Dialog *@
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
-        <TitleContent>Task erstellen</TitleContent>
+        <TitleContent>@L["ScheduledTasksView_Dialog_CreateTitle"]</TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="_formName" Label="Name" Variant="Variant.Outlined" Class="mb-3" />
-            <MudSelect T="string" Value="_formServerId" ValueChanged="OnTaskServerChanged" Label="Ziel-Server" Variant="Variant.Outlined" Class="mb-3">
+            <MudTextField @bind-Value="_formName" Label="@L["ScheduledTasksView_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
+            <MudSelect T="string" Value="_formServerId" ValueChanged="OnTaskServerChanged" Label="@L["ScheduledTasksView_Field_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
                 @foreach (var srv in _servers)
                 {
                     <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
                 }
             </MudSelect>
-            <MudSelect T="Whiskers.Models.ScheduledTaskType" @bind-Value="_formType" Label="Typ" Variant="Variant.Outlined" Class="mb-3">
-                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.ContainerRestart">Container-Neustart</MudSelectItem>
-                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.DbBackup">Datenbank-Backup</MudSelectItem>
-                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.VolumeBackup">Volume-Backup</MudSelectItem>
-                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.SelfBackup">Whiskers Selbst-Backup</MudSelectItem>
-                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.CustomCommand">Befehl ausführen</MudSelectItem>
-                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.Cleanup">Docker Cleanup</MudSelectItem>
+            <MudSelect T="Whiskers.Models.ScheduledTaskType" @bind-Value="_formType" Label="@L["ScheduledTasksView_Field_Type"]" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.ContainerRestart">@L["ScheduledTasksView_TaskType_ContainerRestart"]</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.DbBackup">@L["ScheduledTasksView_TaskType_DbBackup"]</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.VolumeBackup">@L["ScheduledTasksView_TaskType_VolumeBackup"]</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.SelfBackup">@L["ScheduledTasksView_TaskType_SelfBackup"]</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.CustomCommand">@L["ScheduledTasksView_TaskType_CustomCommand"]</MudSelectItem>
+                <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.Cleanup">@L["ScheduledTasksView_TaskType_Cleanup"]</MudSelectItem>
             </MudSelect>
 
             @if (_formType is ScheduledTaskType.ContainerRestart or ScheduledTaskType.DbBackup)
             {
-                <MudSelect T="string" @bind-Value="_formTargetId" Label="Container" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelect T="string" @bind-Value="_formTargetId" Label="@L["ScheduledTasksView_Field_Container"]" Variant="Variant.Outlined" Class="mb-3">
                     @foreach (var c in _containers.Where(c => _formType == ScheduledTaskType.DbBackup ? c.IsDatabase : true))
                     {
                         <MudSelectItem Value="@c.Name">@c.Name (@c.Image)</MudSelectItem>
@@ -198,35 +199,35 @@ else
             }
             else if (_formType == ScheduledTaskType.VolumeBackup)
             {
-                <MudTextField @bind-Value="_formTargetId" Label="Volume-Name" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField @bind-Value="_formTargetId" Label="@L["ScheduledTasksView_Field_VolumeName"]" Variant="Variant.Outlined" Class="mb-3" />
             }
             else if (_formType == ScheduledTaskType.CustomCommand)
             {
-                <MudTextField @bind-Value="_formCommand" Label="Befehl" Variant="Variant.Outlined" Class="mb-3"
+                <MudTextField @bind-Value="_formCommand" Label="@L["ScheduledTasksView_Field_Command"]" Variant="Variant.Outlined" Class="mb-3"
                               Style="font-family: 'JetBrains Mono', monospace;" Placeholder="docker system prune -f" />
             }
 
-            <MudTextField @bind-Value="_formCron" Label="Cron-Zeitplan" Variant="Variant.Outlined" Class="mb-3"
+            <MudTextField @bind-Value="_formCron" Label="@L["ScheduledTasksView_Field_CronSchedule"]" Variant="Variant.Outlined" Class="mb-3"
                           Style="font-family: 'JetBrains Mono', monospace;"
-                          HelperText="Format: Min Std Tag Monat Wochentag (z.B. 0 2 * * * = täglich 02:00). Zeiten sind UTC." />
+                          HelperText="@L["ScheduledTasksView_Field_CronHelperText"]" />
 
             <MudStack Row="true" Spacing="1" Class="mb-3">
-                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 2 * * *")">Täglich 02:00</MudButton>
-                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 */6 * * *")">Alle 6h</MudButton>
-                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 3 * * 0")">Sonntag 03:00</MudButton>
-                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 0 1 * *")">Monatlich</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 2 * * *")">@L["ScheduledTasksView_CronPreset_Daily"]</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 */6 * * *")">@L["ScheduledTasksView_CronPreset_Every6h"]</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 3 * * 0")">@L["ScheduledTasksView_CronPreset_Sunday"]</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 0 1 * *")">@L["ScheduledTasksView_CronPreset_Monthly"]</MudButton>
             </MudStack>
 
             @if (_formType is ScheduledTaskType.DbBackup or ScheduledTaskType.VolumeBackup or ScheduledTaskType.SelfBackup)
             {
-                <MudNumericField T="int" @bind-Value="_formMaxBackups" Label="Max. Backups behalten (0 = unbegrenzt)"
+                <MudNumericField T="int" @bind-Value="_formMaxBackups" Label="@L["ScheduledTasksView_Field_MaxBackups"]"
                                  Variant="Variant.Outlined" Min="0" Max="100" />
             }
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="@(() => _showDialog = false)">Abbrechen</MudButton>
+            <MudButton OnClick="@(() => _showDialog = false)">@L["ScheduledTasksView_Button_Cancel"]</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateTask"
-                       Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formCron))">Erstellen</MudButton>
+                       Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formCron))">@L["ScheduledTasksView_Button_Create"]</MudButton>
         </DialogActions>
     </MudDialog>
 
@@ -251,7 +252,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -312,24 +313,24 @@ else
             });
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "task.create", "scheduled-task", _formName, _formName, serverId: _formServerId);
-            Snackbar.Add($"Task '{_formName}' erstellt.", Severity.Success);
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskCreated", _formName].Value, Severity.Success);
             _showDialog = false;
             await LoadData();
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
     private async Task RunNow(Whiskers.Models.ScheduledTaskEntity task)
     {
         if (!Require(AppRole.Operator)) return;
-        Snackbar.Add($"Task '{task.Name}' wird ausgeführt...", Severity.Info);
+        Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskRunning", task.Name].Value, Severity.Info);
         var (success, output) = await Scheduler.RunNowAsync(task.TaskId);
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
             "task.run-now", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId, success: success);
-        Snackbar.Add(success ? $"Erfolgreich: {output}" : $"Fehler: {output}",
+        Snackbar.Add(success ? L["ScheduledTasksView_Snackbar_RunSuccess", output].Value : L["ScheduledTasksView_Snackbar_Error", output].Value,
             success ? Severity.Success : Severity.Error);
         await LoadData();
     }
@@ -348,21 +349,21 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Task löschen",
-            $"Geplanten Task '{task.Name}' wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
-            yesText: "Löschen", cancelText: "Abbrechen");
+            L["ScheduledTasksView_Dialog_DeleteTitle"].Value,
+            L["ScheduledTasksView_Dialog_DeleteMessage", task.Name].Value,
+            yesText: L["ScheduledTasksView_Dialog_DeleteConfirm"].Value, cancelText: L["ScheduledTasksView_Dialog_Cancel"].Value);
         if (confirmed != true) return;
         try
         {
             await Scheduler.DeleteTaskAsync(task.TaskId);
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "task.delete", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
-            Snackbar.Add($"Task '{task.Name}' gelöscht.", Severity.Success);
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskDeleted", task.Name].Value, Severity.Success);
             await LoadData();
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -377,14 +378,14 @@ else
         _ => Color.Default
     };
 
-    private static string GetTypeLabel(ScheduledTaskType type) => type switch
+    private string GetTypeLabel(ScheduledTaskType type) => type switch
     {
-        ScheduledTaskType.ContainerRestart => "Neustart",
-        ScheduledTaskType.DbBackup => "DB-Backup",
-        ScheduledTaskType.VolumeBackup => "Volume-Backup",
-        ScheduledTaskType.SelfBackup => "Selbst-Backup",
-        ScheduledTaskType.CustomCommand => "Befehl",
-        ScheduledTaskType.Cleanup => "Cleanup",
+        ScheduledTaskType.ContainerRestart => L["ScheduledTasksView_TypeLabel_Restart"].Value,
+        ScheduledTaskType.DbBackup => L["ScheduledTasksView_TypeLabel_DbBackup"].Value,
+        ScheduledTaskType.VolumeBackup => L["ScheduledTasksView_TypeLabel_VolumeBackup"].Value,
+        ScheduledTaskType.SelfBackup => L["ScheduledTasksView_TypeLabel_SelfBackup"].Value,
+        ScheduledTaskType.CustomCommand => L["ScheduledTasksView_TypeLabel_Command"].Value,
+        ScheduledTaskType.Cleanup => L["ScheduledTasksView_TypeLabel_Cleanup"].Value,
         _ => type.ToString()
     };
 }

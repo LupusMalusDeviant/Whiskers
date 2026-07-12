@@ -54,7 +54,7 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
     {
         if (editor.PermissionLevel != McpPermissionLevels.Admin)
             throw new UnauthorizedAccessException(
-                $"AI-Trigger dürfen nur von Admins geändert werden ({editor.DisplayName} ist '{editor.PermissionLevel}').");
+                $"AI triggers may only be changed by admins ({editor.DisplayName} is '{editor.PermissionLevel}').");
 
         await _lock.WaitAsync();
         try

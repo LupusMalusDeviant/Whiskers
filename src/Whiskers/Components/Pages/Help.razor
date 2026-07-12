@@ -5,20 +5,21 @@
 @using Whiskers.Services.Help
 @attribute [Authorize]
 @inject IHelpContentService HelpContent
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Hilfe — Whiskers</PageTitle>
+<PageTitle>@L["Help_PageTitle"]</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <div style="display:flex; align-items:center; gap:12px;" class="mb-1">
         <MudIcon Icon="@Icons.Material.Filled.MenuBook" Color="Color.Primary" />
-        <MudText Typo="Typo.h5">Hilfe &amp; Benutzerhandbuch</MudText>
+        <MudText Typo="Typo.h5">@L["Help_Title"]</MudText>
     </div>
     <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--sw-text-secondary);">
-        So benutzt du Whiskers — Kapitel links wählen oder oben suchen.
+        @L["Help_Subtitle"]
     </MudText>
 
     <MudTextField Value="_search" ValueChanged="OnSearch" T="string" Immediate="true"
-                  Placeholder="In der Hilfe suchen…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Placeholder="@L["Help_Search_Placeholder"]" Variant="Variant.Outlined" Margin="Margin.Dense"
                   Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                   Clearable="true" Class="mb-4" Style="max-width:440px;" />
 
@@ -34,7 +35,7 @@
             }
             @if (!FilteredChapters.Any())
             {
-                <div class="sw-help-empty">Keine Treffer für „@_search".</div>
+                <div class="sw-help-empty">@L["Help_Toc_NoResults", _search]</div>
             }
         </nav>
 
@@ -64,7 +65,7 @@
                                 {
                                     <div class="sw-help-shot-box">
                                         <MudIcon Icon="@Icons.Material.Filled.PhotoCamera" Size="Size.Large" />
-                                        <span>Screenshot-Platzhalter</span>
+                                        <span>@L["Help_Figure_ScreenshotPlaceholder"]</span>
                                     </div>
                                 }
                                 <figcaption>@fig.Caption</figcaption>

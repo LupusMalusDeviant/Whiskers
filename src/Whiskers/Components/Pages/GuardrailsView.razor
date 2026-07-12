@@ -9,58 +9,58 @@
 @inject ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>Guardrails</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
     <div style="display:flex; align-items:center; gap:12px;" class="mb-1">
         <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
-                       OnClick="@(() => Nav.NavigateTo("agent"))" title="Zurück zum Agent" />
+                       OnClick="@(() => Nav.NavigateTo("agent"))" title="@L["GuardrailsView_Back_Tooltip"]" />
         <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" />
         <MudText Typo="Typo.h5">Guardrails</MudText>
     </div>
     <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
-        Code-erzwungene, unumgängliche Sicherheits-Policy. Wird am Tool-Boundary durchgesetzt (nicht im Prompt).
-        Lege mehrere Presets an und schalte das aktive um — der Agent benutzt immer das aktive Preset. Nur Admins.
+        @L["GuardrailsView_Intro"]
     </MudText>
 
     @if (!_isAdmin)
     {
-        <MudAlert Severity="Severity.Warning">Nur Admins können die Guardrails ändern.</MudAlert>
+        <MudAlert Severity="Severity.Warning">@L["GuardrailsView_AdminOnly_Warning"]</MudAlert>
     }
     else if (_edit is not null)
     {
         @* Preset bar *@
         <MudPaper Class="pa-4 mb-4">
             <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
-                <MudSelect T="int" Value="_editIndex" ValueChanged="OnSelectPreset" Label="Preset bearbeiten"
+                <MudSelect T="int" Value="_editIndex" ValueChanged="OnSelectPreset" Label="@L["GuardrailsView_PresetSelect_Label"]"
                            Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:220px;">
                     @for (var i = 0; i < _config.Presets.Count; i++)
                     {
                         var idx = i;
                         <MudSelectItem T="int" Value="idx">
-                            @_config.Presets[idx].Name @(_config.Presets[idx].Name == _config.ActivePreset ? " — aktiv" : "")
+                            @_config.Presets[idx].Name @(_config.Presets[idx].Name == _config.ActivePreset ? L["GuardrailsView_Preset_ActiveSuffix"].Value : "")
                         </MudSelectItem>
                     }
                 </MudSelect>
 
-                <MudTextField @bind-Value="_edit.Name" Label="Name" Margin="Margin.Dense"
+                <MudTextField @bind-Value="_edit.Name" Label="@L["GuardrailsView_PresetName_Label"]" Margin="Margin.Dense"
                               Variant="Variant.Outlined" Style="min-width:200px;" />
 
-                <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="NewPreset">Neu</MudButton>
-                <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="DuplicatePreset">Duplizieren</MudButton>
+                <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="NewPreset">@L["GuardrailsView_NewPreset_Button"]</MudButton>
+                <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="DuplicatePreset">@L["GuardrailsView_DuplicatePreset_Button"]</MudButton>
                 <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Delete" Color="Color.Error"
-                           OnClick="DeletePreset" Disabled="@(_config.Presets.Count <= 1)">Löschen</MudButton>
+                           OnClick="DeletePreset" Disabled="@(_config.Presets.Count <= 1)">@L["GuardrailsView_DeletePreset_Button"]</MudButton>
 
                 <MudSpacer />
                 @if (_edit.Name == _config.ActivePreset)
                 {
-                    <MudChip T="string" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">aktiv</MudChip>
+                    <MudChip T="string" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">@L["GuardrailsView_ActiveChip"]</MudChip>
                 }
                 else
                 {
                     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Bolt" OnClick="MakeActive">Als aktiv setzen</MudButton>
+                               StartIcon="@Icons.Material.Filled.Bolt" OnClick="MakeActive">@L["GuardrailsView_MakeActive_Button"]</MudButton>
                 }
             </div>
         </MudPaper>
@@ -70,9 +70,9 @@
             <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
                 <MudIcon Icon="@Icons.Material.Filled.Block" Color="Color.Warning" Size="Size.Large" />
                 <div style="flex:1; min-width:220px;">
-                    <MudText Typo="Typo.subtitle1">Read-Only-Modus (Kill-Switch)</MudText>
+                    <MudText Typo="Typo.subtitle1">@L["GuardrailsView_KillSwitch_Title"]</MudText>
                     <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">
-                        Blockiert sofort alles oberhalb von „read" — egal welche andere Einstellung.
+                        @L["GuardrailsView_KillSwitch_Caption"]
                     </MudText>
                 </div>
                 <MudSwitch @bind-Value="_edit.Policy.ReadOnlyMode" Color="Color.Warning" />
@@ -85,18 +85,18 @@
                 <MudPaper Class="pa-4" Style="height:100%;">
                     <div style="display:flex; align-items:center; gap:8px;" class="mb-3">
                         <MudIcon Icon="@Icons.Material.Filled.Tune" Color="Color.Primary" Size="Size.Small" />
-                        <MudText Typo="Typo.subtitle1">Autonomie &amp; Bestätigung</MudText>
+                        <MudText Typo="Typo.subtitle1">@L["GuardrailsView_Autonomy_Title"]</MudText>
                     </div>
-                    <MudSelect T="string" @bind-Value="_edit.Policy.MaxAutonomousLevel" Label="Autonomes Maximal-Level"
+                    <MudSelect T="string" @bind-Value="_edit.Policy.MaxAutonomousLevel" Label="@L["GuardrailsView_MaxLevel_Label"]"
                                Margin="Margin.Dense" Variant="Variant.Outlined"
-                               HelperText="Höchstes Level OHNE Bestätigung.">
-                        <MudSelectItem Value="@("read")">read — nur lesen</MudSelectItem>
-                        <MudSelectItem Value="@("write")">write — auch ändern</MudSelectItem>
-                        <MudSelectItem Value="@("admin")">admin — alles</MudSelectItem>
+                               HelperText="@L["GuardrailsView_MaxLevel_Helper"]">
+                        <MudSelectItem Value="@("read")">@L["GuardrailsView_Level_Read"]</MudSelectItem>
+                        <MudSelectItem Value="@("write")">@L["GuardrailsView_Level_Write"]</MudSelectItem>
+                        <MudSelectItem Value="@("admin")">@L["GuardrailsView_Level_Admin"]</MudSelectItem>
                     </MudSelect>
                     <MudSwitch @bind-Value="_edit.Policy.RequireConfirmationForWrites" Color="Color.Primary"
-                               Label="Writes erfordern Bestätigung" Class="mt-3" />
-                    <MudNumericField @bind-Value="_edit.Policy.MaxActionsPerSession" Label="Max. Aktionen pro Session"
+                               Label="@L["GuardrailsView_RequireConfirm_Label"]" Class="mt-3" />
+                    <MudNumericField @bind-Value="_edit.Policy.MaxActionsPerSession" Label="@L["GuardrailsView_MaxActions_Label"]"
                                      Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Class="mt-2" />
                 </MudPaper>
             </MudItem>
@@ -106,16 +106,16 @@
                 <MudPaper Class="pa-4" Style="height:100%;">
                     <div style="display:flex; align-items:center; gap:8px;" class="mb-3">
                         <MudIcon Icon="@Icons.Material.Filled.Code" Color="Color.Primary" Size="Size.Small" />
-                        <MudText Typo="Typo.subtitle1">Ressourcen &amp; Muster (Freitext)</MudText>
+                        <MudText Typo="Typo.subtitle1">@L["GuardrailsView_FreeText_Title"]</MudText>
                     </div>
                     <MudTextField Value="@CsvProtected" ValueChanged="@(v => _edit!.Policy.ProtectedResources = SplitCsv(v))"
-                                  T="string" Label="Geschützte Ressourcen (Glob, Komma)" Variant="Variant.Outlined"
+                                  T="string" Label="@L["GuardrailsView_Protected_Label"]" Variant="Variant.Outlined"
                                   Margin="Margin.Dense" Lines="2"
-                                  HelperText="Container/Server/DB, die der Agent nie anfassen darf — z.B. serverwatch*" />
+                                  HelperText="@L["GuardrailsView_Protected_Helper"]" />
                     <MudTextField Value="@CsvForbidden" ValueChanged="@(v => _edit!.Policy.ForbiddenArgPatterns = SplitCsv(v))"
-                                  T="string" Label="Verbotene Argument-Muster (Regex, Komma)" Variant="Variant.Outlined"
+                                  T="string" Label="@L["GuardrailsView_Forbidden_Label"]" Variant="Variant.Outlined"
                                   Margin="Margin.Dense" Lines="2" Class="mt-2"
-                                  HelperText="Regex gegen destruktive Shell-/SQL-Argumente." />
+                                  HelperText="@L["GuardrailsView_Forbidden_Helper"]" />
                 </MudPaper>
             </MudItem>
         </MudGrid>
@@ -124,17 +124,17 @@
         <MudPaper Class="pa-4 mt-4">
             <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;" class="mb-2">
                 <MudIcon Icon="@Icons.Material.Filled.Apps" Color="Color.Primary" Size="Size.Small" />
-                <MudText Typo="Typo.subtitle1">Tools — was geht, was nicht</MudText>
+                <MudText Typo="Typo.subtitle1">@L["GuardrailsView_Tools_Title"]</MudText>
                 <MudSpacer />
-                <MudSelect T="string" Value="_edit.Policy.ToolMode" ValueChanged="OnModeChanged" Label="Modus"
+                <MudSelect T="string" Value="_edit.Policy.ToolMode" ValueChanged="OnModeChanged" Label="@L["GuardrailsView_ToolMode_Label"]"
                            Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:280px;">
-                    <MudSelectItem Value="@("deny")">Deny — alles erlaubt außer abgewählte</MudSelectItem>
-                    <MudSelectItem Value="@("allow")">Whitelist — nur angeklickte erlaubt</MudSelectItem>
+                    <MudSelectItem Value="@("deny")">@L["GuardrailsView_ToolMode_Deny"]</MudSelectItem>
+                    <MudSelectItem Value="@("allow")">@L["GuardrailsView_ToolMode_Allow"]</MudSelectItem>
                 </MudSelect>
             </div>
             <MudText Typo="Typo.caption" Class="mb-3" Style="color: rgba(255,255,255,0.5);">
-                Häkchen = der Agent darf dieses Tool (im Rahmen von Level/Bestätigung) nutzen.
-                @(_edit.Policy.ToolMode == "allow" ? "Whitelist: nichts ist erlaubt außer den Angeklickten." : "Deny: alles ist erlaubt außer den Abgewählten.")
+                @L["GuardrailsView_ToolHint"]
+                @(_edit.Policy.ToolMode == "allow" ? L["GuardrailsView_ToolHint_AllowMode"].Value : L["GuardrailsView_ToolHint_DenyMode"].Value)
             </MudText>
 
             @foreach (var grp in _toolsByCategory)
@@ -142,8 +142,8 @@
                 <div class="mt-2 mb-1" style="display:flex; align-items:center; gap:8px;">
                     <MudText Typo="Typo.subtitle2" Color="Color.Primary">@grp.Key</MudText>
                     <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.4);">(@grp.Count())</MudText>
-                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, true))">Alle</MudButton>
-                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, false))">Keine</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, true))">@L["GuardrailsView_SelectAll_Button"]</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, false))">@L["GuardrailsView_SelectNone_Button"]</MudButton>
                 </div>
                 <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:2px 16px;">
                     @foreach (var t in grp)
@@ -161,7 +161,7 @@
 
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAll"
                    StartIcon="@Icons.Material.Filled.Save" Class="mt-4" Size="Size.Large">
-            Alle Presets speichern
+            @L["GuardrailsView_SaveAll_Button"]
         </MudButton>
     }
 </MudContainer>
@@ -192,7 +192,7 @@
         _edit = _config.Presets[_editIndex];
 
         _toolsByCategory = ToolRegistry.Tools.Values
-            .Select(e => new ToolInfo(e.Name, string.IsNullOrEmpty(e.Category) ? "Andere" : e.Category, e.RequiredLevel))
+            .Select(e => new ToolInfo(e.Name, string.IsNullOrEmpty(e.Category) ? L["GuardrailsView_Category_Other"].Value : e.Category, e.RequiredLevel))
             .OrderBy(t => t.Category).ThenBy(t => t.Name)
             .GroupBy(t => t.Category)
             .ToList();
@@ -255,14 +255,14 @@
 
     private void NewPreset()
     {
-        var name = UniqueName("Neues Preset");
+        var name = UniqueName(L["GuardrailsView_NewPresetDefaultName"].Value);
         _config.Presets.Add(new GuardrailPreset { Name = name, Policy = GuardrailPolicy.SafeDefault() });
         OnSelectPreset(_config.Presets.Count - 1);
     }
 
     private void DuplicatePreset()
     {
-        var copy = new GuardrailPreset { Name = UniqueName(_edit!.Name + " Kopie"), Policy = ClonePolicy(_edit.Policy) };
+        var copy = new GuardrailPreset { Name = UniqueName(L["GuardrailsView_CopySuffix", _edit!.Name].Value), Policy = ClonePolicy(_edit.Policy) };
         _config.Presets.Add(copy);
         OnSelectPreset(_config.Presets.Count - 1);
     }
@@ -297,7 +297,7 @@
         try
         {
             await GuardrailStore.SaveConfigAsync(_config, await BuildPrincipalAsync());
-            Snackbar.Add($"Guardrails gespeichert. Aktiv: {_config.ActivePreset}.", Severity.Success);
+            Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
         }
         catch (Exception ex)
         {

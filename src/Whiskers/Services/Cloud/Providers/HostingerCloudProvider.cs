@@ -20,7 +20,7 @@ public sealed class HostingerCloudProvider : ICloudProvider
     public CloudProvider Provider => CloudProvider.Hostinger;
     public string DisplayName => "Hostinger";
 
-    private const string NameMatchNote = "per Namensabgleich aufgelöst (IP-Abgleich fehlgeschlagen — Ziel ggf. nicht eindeutig)";
+    private const string NameMatchNote = "resolved by name match (IP match failed — target may not be unambiguous)";
 
     private static string? HostOf(Whiskers.Models.ServerConfig c)
         => !string.IsNullOrWhiteSpace(c.SshHost) ? c.SshHost : c.TcpHost;
@@ -65,37 +65,37 @@ public sealed class HostingerCloudProvider : ICloudProvider
     public async Task<string> PowerOnAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         await _hostinger.StartAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): einschalten. (ausgelöst)";
+        return $"{target.Name} ({target.Provider}): power on. (triggered)";
     }
 
     public async Task<string> ShutdownAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         await _hostinger.StopAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): herunterfahren. (ausgelöst)";
+        return $"{target.Name} ({target.Provider}): shut down. (triggered)";
     }
 
     public async Task<string> RebootAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         await _hostinger.RestartAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): neu starten. (ausgelöst)";
+        return $"{target.Name} ({target.Provider}): reboot. (triggered)";
     }
 
     public async Task<string> HardResetAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         // Hostinger exposes no hard power-cycle — a graceful restart is the closest, but won't help a hung VM.
         await _hostinger.RestartAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): kein Hard-Reset verfügbar — stattdessen NEUSTART ausgelöst (bei hängendem System evtl. wirkungslos).";
+        return $"{target.Name} ({target.Provider}): no hard reset available — triggered a RESTART instead (may have no effect on a hung system).";
     }
 
     public async Task<string> CreateSnapshotAsync(CloudServerInfo target, string token, string? description, CancellationToken ct = default)
     {
         await _hostinger.CreateSnapshotAsync(token, target.CloudId, ct);
-        return $"{target.Name}: Snapshot wird erstellt (Hostinger hält nur EINEN Snapshot pro VM — der vorherige wird ersetzt).";
+        return $"{target.Name}: snapshot is being created (Hostinger keeps only ONE snapshot per VM — the previous one is replaced).";
     }
 
     public async Task<string> MetricsAsync(CloudServerInfo target, string token, string type, CancellationToken ct = default)
     {
         var raw = await _hostinger.GetMetricsRawAsync(token, target.CloudId, ct);
-        return $"Hostinger-Metriken für {target.Name} (Rohdaten):\n{ShellUtils.Truncate(raw, 4000)}";
+        return $"Hostinger metrics for {target.Name} (raw data):\n{ShellUtils.Truncate(raw, 4000)}";
     }
 }

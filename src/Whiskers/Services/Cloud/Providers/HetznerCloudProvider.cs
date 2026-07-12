@@ -20,7 +20,7 @@ public sealed class HetznerCloudProvider : ICloudProvider, IHetznerExtensions
 
     // Surfaced when a destructive/power op resolved its target only by name (the IP match failed) — the
     // SshHost is often a mesh/Tailscale address ≠ the cloud public IP, so name-match is easy to get wrong.
-    private const string NameMatchNote = "per Namensabgleich aufgelöst (IP-Abgleich fehlgeschlagen — Ziel ggf. nicht eindeutig)";
+    private const string NameMatchNote = "resolved by name match (IP match failed — target may not be unambiguous)";
 
     private static string? HostOf(Whiskers.Models.ServerConfig c)
         => !string.IsNullOrWhiteSpace(c.SshHost) ? c.SshHost : c.TcpHost;
@@ -69,40 +69,40 @@ public sealed class HetznerCloudProvider : ICloudProvider, IHetznerExtensions
     public async Task<string> PowerOnAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         var a = await _hetzner.PowerOnAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): einschalten. (Aktion: {a?.Status ?? "ausgelöst"})";
+        return $"{target.Name} ({target.Provider}): power on. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> ShutdownAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         var a = await _hetzner.ShutdownAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): herunterfahren. (Aktion: {a?.Status ?? "ausgelöst"})";
+        return $"{target.Name} ({target.Provider}): shut down. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> RebootAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         var a = await _hetzner.RebootAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): neu starten. (Aktion: {a?.Status ?? "ausgelöst"})";
+        return $"{target.Name} ({target.Provider}): reboot. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> HardResetAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
         var a = await _hetzner.ResetAsync(token, target.CloudId, ct);
-        return $"{target.Name} ({target.Provider}): hart zurücksetzen. (Aktion: {a?.Status ?? "ausgelöst"})";
+        return $"{target.Name} ({target.Provider}): hard reset. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> CreateSnapshotAsync(CloudServerInfo target, string token, string? description, CancellationToken ct = default)
     {
         var resp = await _hetzner.CreateSnapshotAsync(token, target.CloudId, description, ct);
-        return $"{target.Name}: Snapshot wird erstellt (Image #{resp?.Image?.Id}).";
+        return $"{target.Name}: snapshot is being created (image #{resp?.Image?.Id}).";
     }
 
     public async Task<string> MetricsAsync(CloudServerInfo target, string token, string type, CancellationToken ct = default)
     {
         var end = DateTime.UtcNow;
         var m = await _hetzner.GetMetricsAsync(token, target.CloudId, type, end.AddMinutes(-30), end, 60, ct);
-        if (m == null || m.TimeSeries.Count == 0) return $"Keine {type}-Metriken für {target.Name}.";
+        if (m == null || m.TimeSeries.Count == 0) return $"No {type} metrics for {target.Name}.";
         var lines = m.TimeSeries.Select(kv => $"- {kv.Key}: {(kv.Value.Latest?.ToString("0.###") ?? "-")}");
-        return $"{type}-Metriken für {target.Name} (letzte Werte):\n{string.Join('\n', lines)}";
+        return $"{type} metrics for {target.Name} (latest values):\n{string.Join('\n', lines)}";
     }
 
     // ── IHetznerExtensions ── delegate to the client, threading the CancellationToken through (OPT-12).

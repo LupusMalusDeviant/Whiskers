@@ -11,8 +11,9 @@
 @inject ICveMonitorService Monitor
 @inject IOptionsMonitor<CveMonitorSettings> SettingsMonitor
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>CVE-Monitor — Whiskers</PageTitle>
+<PageTitle>@L["Cves_PageTitle"]</PageTitle>
 
 @* RoadToSAP Phase 1: gated by the Cve module; when off, ModuleGuard shows a "disabled" notice. The
    ICveFindingsStore / ICveMonitorService / ICveAgeStore injections resolve the Core no-op defaults either way. *@
@@ -21,35 +22,35 @@
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
         <MudIcon Icon="@Icons.Material.Filled.Security" Size="Size.Large" />
-        <MudText Typo="Typo.h5">CVE-Monitor</MudText>
+        <MudText Typo="Typo.h5">@L["Cves_Header_Title"]</MudText>
         <MudSpacer />
 
         @if (!SettingsMonitor.CurrentValue.Enabled)
         {
             <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.PauseCircle">
-                Monitor deaktiviert (Enabled=false)
+                @L["Cves_Chip_MonitorDisabled"]
             </MudChip>
         }
         @if (Store.IsScanning)
         {
             <MudChip T="string" Size="Size.Small" Color="Color.Info">
-                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> Scan läuft …
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> @L["Cves_Chip_Scanning"]
             </MudChip>
         }
         @if (Store.LastScanAt is { } lastScan)
         {
-            <MudText Typo="Typo.body2" Style="color:#888;">Letzter Scan: @lastScan.ToString("yyyy-MM-dd HH:mm 'UTC'")</MudText>
+            <MudText Typo="Typo.body2" Style="color:#888;">@L["Cves_LastScan", lastScan.ToString("yyyy-MM-dd HH:mm 'UTC'")]</MudText>
         }
         else
         {
-            <MudText Typo="Typo.body2" Style="color:#888;">Noch kein Scan abgeschlossen</MudText>
+            <MudText Typo="Typo.body2" Style="color:#888;">@L["Cves_NoScanYet"]</MudText>
         }
 
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
-                   StartIcon="@Icons.Material.Filled.Refresh" OnClick="RebuildAsync">Aktualisieren</MudButton>
+                   StartIcon="@Icons.Material.Filled.Refresh" OnClick="RebuildAsync">@L["Cves_Button_Refresh"]</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerScan"
-                   Disabled="@(Store.IsScanning || !SettingsMonitor.CurrentValue.Enabled)">Jetzt scannen</MudButton>
+                   Disabled="@(Store.IsScanning || !SettingsMonitor.CurrentValue.Enabled)">@L["Cves_Button_ScanNow"]</MudButton>
     </MudStack>
 
     @* Per-server overview cards *@
@@ -65,7 +66,7 @@
                     </MudStack>
                     @if (sum.TotalCount == 0)
                     {
-                        <MudText Typo="Typo.body2" Style="color:#888;" Class="mt-1">Keine Findings</MudText>
+                        <MudText Typo="Typo.body2" Style="color:#888;" Class="mt-1">@L["Cves_Card_NoFindings"]</MudText>
                     }
                     else
                     {
@@ -85,14 +86,14 @@
     <MudPaper Class="pa-3 mb-3" Outlined="true">
         <MudGrid Spacing="2" Class="align-center">
             <MudItem xs="12" sm="3">
-                <MudSelect T="string" @bind-Value="_filterServerId" Label="Server" Variant="Variant.Outlined" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value="@("")">Alle</MudSelectItem>
+                <MudSelect T="string" @bind-Value="_filterServerId" Label="@L["Cves_Filter_ServerLabel"]" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">@L["Cves_Filter_All"]</MudSelectItem>
                     @foreach (var s in _servers) { <MudSelectItem T="string" Value="@s.Id">@s.Name</MudSelectItem> }
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="3">
-                <MudSelect T="string" @bind-Value="_filterMinSeverity" Label="Min. Severity" Variant="Variant.Outlined" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value="@("")">Alle</MudSelectItem>
+                <MudSelect T="string" @bind-Value="_filterMinSeverity" Label="@L["Cves_Filter_MinSeverityLabel"]" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">@L["Cves_Filter_All"]</MudSelectItem>
                     <MudSelectItem T="string" Value="@("Critical")">Critical</MudSelectItem>
                     <MudSelectItem T="string" Value="@("High")">High +</MudSelectItem>
                     <MudSelectItem T="string" Value="@("Medium")">Medium +</MudSelectItem>
@@ -100,17 +101,17 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="3">
-                <MudSelect T="string" @bind-Value="_filterSource" Label="Quelle" Variant="Variant.Outlined" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value="@("")">Beide</MudSelectItem>
+                <MudSelect T="string" @bind-Value="_filterSource" Label="@L["Cves_Filter_SourceLabel"]" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("")">@L["Cves_Filter_SourceBoth"]</MudSelectItem>
                     <MudSelectItem T="string" Value="@("Os")">OS</MudSelectItem>
                     <MudSelectItem T="string" Value="@("Container")">Container</MudSelectItem>
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="3" Class="d-flex align-center">
-                <MudSwitch T="bool" @bind-Value="_onlyFixable" Color="Color.Success" Label="Nur fixbar" />
+                <MudSwitch T="bool" @bind-Value="_onlyFixable" Color="Color.Success" Label="@L["Cves_Filter_OnlyFixable"]" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_filterSearch" Label="Suche (CVE-ID, Paket, Container, Titel)"
+                <MudTextField T="string" @bind-Value="_filterSearch" Label="@L["Cves_Filter_SearchLabel"]"
                               Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
                               Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
             </MudItem>
@@ -120,7 +121,7 @@
     @* Compute the filtered set once per render instead of re-filtering at each usage below. *@
     @{ var filtered = FilteredGroups(); }
     <MudText Typo="Typo.body2" Style="color:#888;" Class="mb-2">
-        @filtered.Count eindeutige CVEs (von @_allGroups.Count gesamt) — eine Zeile pro CVE, aufklappen für betroffene Container/Server.
+        @L["Cves_Summary", filtered.Count, _allGroups.Count]
     </MudText>
 
     @* One row per CVE; expand to see all affected instances *@
@@ -128,12 +129,12 @@
               T="CveGroup" OnRowClick="ToggleRow">
         <HeaderContent>
             <MudTh Style="width:32px;"></MudTh>
-            <MudTh Style="width:90px;">Severity</MudTh>
-            <MudTh>CVE-ID</MudTh>
-            <MudTh Style="width:150px;">Betroffen</MudTh>
-            <MudTh Style="width:150px;">Offen seit</MudTh>
-            <MudTh Style="width:90px;">Fix</MudTh>
-            <MudTh>Titel</MudTh>
+            <MudTh Style="width:90px;">@L["Cves_Table_Severity"]</MudTh>
+            <MudTh>@L["Cves_Table_CveId"]</MudTh>
+            <MudTh Style="width:150px;">@L["Cves_Table_Affected"]</MudTh>
+            <MudTh Style="width:150px;">@L["Cves_Table_OpenSince"]</MudTh>
+            <MudTh Style="width:90px;">@L["Cves_Table_Fix"]</MudTh>
+            <MudTh>@L["Cves_Table_Title"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd>
@@ -150,7 +151,7 @@
                 else { @context.CveId }
                 @if (!context.IsVerified)
                 {
-                    <MudTooltip Text="Pending Security-Update ohne aufgelöste CVE-ID (niedrigere Konfidenz)">
+                    <MudTooltip Text="@L["Cves_Tooltip_Unverified"]">
                         <MudIcon Icon="@Icons.Material.Filled.HelpOutline" Size="Size.Small" Style="vertical-align:middle; color:#888; margin-left:4px;" />
                     </MudTooltip>
                 }
@@ -165,8 +166,8 @@
                     {
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Dns">OS</MudChip>
                     }
-                    <MudTooltip Text="@($"{context.InstanceCount} Instanz(en) auf {context.ServerCount} Server")">
-                        <MudText Typo="Typo.caption" Style="color:#888;">@context.ServerCount Srv</MudText>
+                    <MudTooltip Text="@L["Cves_Tooltip_Instances", context.InstanceCount, context.ServerCount]">
+                        <MudText Typo="Typo.caption" Style="color:#888;">@L["Cves_Label_ServerCount", context.ServerCount]</MudText>
                     </MudTooltip>
                 </MudStack>
             </MudTd>
@@ -178,11 +179,11 @@
             <MudTd>
                 @if (context.HasFix)
                 {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text" Icon="@Icons.Material.Filled.CheckCircle">fixbar</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text" Icon="@Icons.Material.Filled.CheckCircle">@L["Cves_Chip_Fixable"]</MudChip>
                 }
                 else
                 {
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color:#888;">kein Fix</MudChip>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color:#888;">@L["Cves_Chip_NoFix"]</MudChip>
                 }
             </MudTd>
             <MudTd>@TruncateTitle(context.Title)</MudTd>
@@ -193,10 +194,10 @@
                 <MudTr>
                     <td colspan="7" style="background:rgba(255,255,255,0.02); padding:0;">
                         <div class="pa-3">
-                            <MudText Typo="Typo.subtitle2" Class="mb-1">Betroffene Instanzen (@context.InstanceCount)</MudText>
+                            <MudText Typo="Typo.subtitle2" Class="mb-1">@L["Cves_Expanded_Title", context.InstanceCount]</MudText>
                             <MudSimpleTable Dense="true" Striped="true" Style="background:transparent;">
                                 <thead>
-                                    <tr><th>Server</th><th>OS</th><th>Ziel</th><th>Paket</th><th>Installiert → Fix</th><th>Verifiziert</th><th>Offen seit</th></tr>
+                                    <tr><th>@L["Cves_Expanded_Server"]</th><th>@L["Cves_Expanded_Os"]</th><th>@L["Cves_Expanded_Target"]</th><th>@L["Cves_Expanded_Package"]</th><th>@L["Cves_Expanded_InstalledFix"]</th><th>@L["Cves_Expanded_Verified"]</th><th>@L["Cves_Table_OpenSince"]</th></tr>
                                 </thead>
                                 <tbody>
                                     @foreach (var a in context.Affected.OrderBy(a => a.ServerName).ThenBy(a => a.TargetLabel))
@@ -215,15 +216,15 @@
                                                 }
                                             </td>
                                             <td style="font-family:monospace;">@a.Package</td>
-                                            <td style="font-family:monospace; font-size:0.85em;">@(a.InstalledVersion ?? "?") → @(string.IsNullOrEmpty(a.FixedVersion) ? "(kein Fix)" : a.FixedVersion)</td>
+                                            <td style="font-family:monospace; font-size:0.85em;">@(a.InstalledVersion ?? "?") → @(string.IsNullOrEmpty(a.FixedVersion) ? L["Cves_Expanded_NoFix"].Value : a.FixedVersion)</td>
                                             <td>
                                                 @if (a.Verified)
                                                 {
-                                                    <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Success" Size="Size.Small" Title="Installierte Paketversion gematcht" />
+                                                    <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Success" Size="Size.Small" Title="@L["Cves_Tooltip_Verified"]" />
                                                 }
                                                 else
                                                 {
-                                                    <MudIcon Icon="@Icons.Material.Filled.HelpOutline" Size="Size.Small" Style="color:#888;" Title="Pending Update ohne CVE-ID" />
+                                                    <MudIcon Icon="@Icons.Material.Filled.HelpOutline" Size="Size.Small" Style="color:#888;" Title="@L["Cves_Tooltip_PendingNoId"]" />
                                                 }
                                             </td>
                                             <td>@AgeLabel(DateTime.UtcNow - a.FirstSeenUtc)</td>
@@ -237,7 +238,7 @@
             }
         </ChildRowContent>
         <NoRecordsContent>
-            <MudText Typo="Typo.body2">Keine CVEs (oder Filter passt nichts).</MudText>
+            <MudText Typo="Typo.body2">@L["Cves_NoRecords"]</MudText>
         </NoRecordsContent>
         <PagerContent>
             <MudTablePager PageSizeOptions="new int[]{ 25, 50, 100, 250 }" />
@@ -310,14 +311,14 @@
         return q.ToList();
     }
 
-    private static string AgeLabel(TimeSpan age)
+    private string AgeLabel(TimeSpan age)
     {
         var d = (int)age.TotalDays;
-        if (d <= 0) return "heute";
-        if (d == 1) return "1 Tag";
-        if (d < 30) return $"{d} Tage";
-        if (d < 365) return $"{d / 30} Mon.";
-        return $"{d / 365} J. {(d % 365) / 30} Mon.";
+        if (d <= 0) return L["Cves_Age_Today"].Value;
+        if (d == 1) return L["Cves_Age_OneDay"].Value;
+        if (d < 30) return L["Cves_Age_Days", d].Value;
+        if (d < 365) return L["Cves_Age_Months", d / 30].Value;
+        return L["Cves_Age_YearsMonths", d / 365, (d % 365) / 30].Value;
     }
 
     private static Color AgeColor(TimeSpan age) => age.TotalDays switch
@@ -327,8 +328,8 @@
         _ => Color.Default,
     };
 
-    private static string PublishedLabel(DateTime? d) =>
-        d is null ? "Veröffentlichung unbekannt" : $"CVE veröffentlicht: {d.Value:yyyy-MM-dd}";
+    private string PublishedLabel(DateTime? d) =>
+        d is null ? L["Cves_Published_Unknown"].Value : L["Cves_Published_Label", d.Value.ToString("yyyy-MM-dd")].Value;
 
     private static string? TruncateTitle(string? title) =>
         title is null ? null : (title.Length <= 80 ? title : title[..80] + "…");
@@ -345,7 +346,7 @@
     private Task TriggerScan()
     {
         if (Store.IsScanning) return Task.CompletedTask;
-        Snackbar.Add("CVE-Scan gestartet — kann beim ersten Lauf mehrere Minuten dauern (Trivy-DB-Download).", Severity.Info);
+        Snackbar.Add(L["Cves_Snackbar_ScanStarted"].Value, Severity.Info);
         _ = Task.Run(async () =>
         {
             try { await Monitor.RunOneCycleAsync(); }

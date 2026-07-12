@@ -2,6 +2,7 @@
 @inject ITerminalSessionManager SessionManager
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IStringLocalizer<SharedResource> L
 @implements IAsyncDisposable
 
 @* The interactive server/host-shell UI. Rendered by ServerTerminal.razor only when the Terminal module is
@@ -10,7 +11,7 @@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
     <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="" />
-    <MudText Typo="Typo.h5">Server-Terminal</MudText>
+    <MudText Typo="Typo.h5">@L["ServerTerminalView_Title"]</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
 </MudStack>
 
@@ -46,7 +47,7 @@
 
         if (await CurrentUser.GetRoleAsync() < AppRole.Admin)
         {
-            _error = "Keine Berechtigung — Admin erforderlich.";
+            _error = L["ServerTerminalView_Error_AdminRequired"].Value;
             StateHasChanged();
             return;
         }
@@ -56,7 +57,7 @@
             var server = ServerConfigService.GetServer(ServerId);
             if (server == null)
             {
-                _error = "Server nicht gefunden";
+                _error = L["ServerTerminalView_Error_ServerNotFound"].Value;
                 StateHasChanged();
                 return;
             }
@@ -81,7 +82,7 @@
         }
         catch (Exception ex)
         {
-            _error = $"Fehler beim Initialisieren des Terminals: {ex.Message}";
+            _error = L["ServerTerminalView_Error_InitFailed", ex.Message].Value;
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -108,7 +109,7 @@
         await InvokeAsync(async () =>
         {
             await JS.InvokeVoidAsync("Whiskers.Terminal.write", "server-terminal-container",
-                "\r\n\x1b[31m--- Session ended ---\x1b[0m\r\n");
+                $"\r\n\x1b[31m--- {L["ServerTerminalView_Terminal_SessionEnded"].Value} ---\x1b[0m\r\n");
         });
     }
 

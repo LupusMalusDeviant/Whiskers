@@ -4,8 +4,9 @@
 @inject Whiskers.Services.Notifications.IInAppNotificationStore Store
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Benachrichtigungen - Whiskers</PageTitle>
+<PageTitle>@L["NotificationsLog_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -13,68 +14,68 @@
             <MudIcon Icon="@Icons.Material.Filled.Notifications" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Benachrichtigungen</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Verlauf aller Ereignisse (überlebt Neustarts)</MudText>
+            <MudText Typo="Typo.h5">@L["NotificationsLog_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["NotificationsLog_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
 
 <MudStack Row="true" Class="mb-4" Spacing="2" AlignItems="AlignItems.Center" Style="flex-wrap: wrap;">
     <MudSelect T="string" Value="@_severityFilter" ValueChanged="OnSeverityChanged"
-               Label="Schweregrad" Variant="Variant.Outlined" Dense="true" Style="max-width: 180px;" Clearable="true">
-        <MudSelectItem Value="@("Error")">Fehler</MudSelectItem>
-        <MudSelectItem Value="@("Warning")">Warnung</MudSelectItem>
-        <MudSelectItem Value="@("Info")">Info</MudSelectItem>
-        <MudSelectItem Value="@("Success")">Erfolg</MudSelectItem>
+               Label="@L["NotificationsLog_Filter_SeverityLabel"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 180px;" Clearable="true">
+        <MudSelectItem Value="@("Error")">@L["NotificationsLog_Severity_Error"]</MudSelectItem>
+        <MudSelectItem Value="@("Warning")">@L["NotificationsLog_Severity_Warning"]</MudSelectItem>
+        <MudSelectItem Value="@("Info")">@L["NotificationsLog_Severity_Info"]</MudSelectItem>
+        <MudSelectItem Value="@("Success")">@L["NotificationsLog_Severity_Success"]</MudSelectItem>
     </MudSelect>
     <MudSelect T="string" Value="@_typeFilter" ValueChanged="OnTypeChanged"
-               Label="Typ" Variant="Variant.Outlined" Dense="true" Style="max-width: 220px;" Clearable="true">
-        <MudSelectItem Value="@("unhealthy")">Container unhealthy</MudSelectItem>
-        <MudSelectItem Value="@("stopped")">Container gestoppt</MudSelectItem>
-        <MudSelectItem Value="@("oom_killed")">OOM-gekillt</MudSelectItem>
-        <MudSelectItem Value="@("restart_loop")">Restart-Loop</MudSelectItem>
-        <MudSelectItem Value="@("image_update")">Image-Update</MudSelectItem>
-        <MudSelectItem Value="@("cve_finding")">CVE</MudSelectItem>
-        <MudSelectItem Value="@("high_cpu")">Hohe CPU-Last</MudSelectItem>
-        <MudSelectItem Value="@("high_memory")">Hohe RAM-Last</MudSelectItem>
-        <MudSelectItem Value="@("metric_anomaly")">Metrik-Ausreißer</MudSelectItem>
-        <MudSelectItem Value="@("auto_update_failed")">Auto-Update fehlgeschlagen</MudSelectItem>
-        <MudSelectItem Value="@("agent_action")">AI-Agent</MudSelectItem>
-        <MudSelectItem Value="@("agent_approval")">Freigabe erforderlich</MudSelectItem>
+               Label="@L["NotificationsLog_Filter_TypeLabel"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 220px;" Clearable="true">
+        <MudSelectItem Value="@("unhealthy")">@L["NotificationsLog_Type_Unhealthy"]</MudSelectItem>
+        <MudSelectItem Value="@("stopped")">@L["NotificationsLog_Type_Stopped"]</MudSelectItem>
+        <MudSelectItem Value="@("oom_killed")">@L["NotificationsLog_Type_OomKilled"]</MudSelectItem>
+        <MudSelectItem Value="@("restart_loop")">@L["NotificationsLog_Type_RestartLoop"]</MudSelectItem>
+        <MudSelectItem Value="@("image_update")">@L["NotificationsLog_Type_ImageUpdate"]</MudSelectItem>
+        <MudSelectItem Value="@("cve_finding")">@L["NotificationsLog_Type_CveFinding"]</MudSelectItem>
+        <MudSelectItem Value="@("high_cpu")">@L["NotificationsLog_Type_HighCpu"]</MudSelectItem>
+        <MudSelectItem Value="@("high_memory")">@L["NotificationsLog_Type_HighMemory"]</MudSelectItem>
+        <MudSelectItem Value="@("metric_anomaly")">@L["NotificationsLog_Type_MetricAnomaly"]</MudSelectItem>
+        <MudSelectItem Value="@("auto_update_failed")">@L["NotificationsLog_Type_AutoUpdateFailed"]</MudSelectItem>
+        <MudSelectItem Value="@("agent_action")">@L["NotificationsLog_Type_AgentAction"]</MudSelectItem>
+        <MudSelectItem Value="@("agent_approval")">@L["NotificationsLog_Type_AgentApproval"]</MudSelectItem>
     </MudSelect>
     <MudSpacer />
-    <MudText Typo="Typo.body2" Style="color: #888;">@_totalCount Einträge</MudText>
-    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DoneAll" OnClick="MarkAllRead">Als gelesen</MudButton>
-    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAll">Alle löschen</MudButton>
+    <MudText Typo="Typo.body2" Style="color: #888;">@L["NotificationsLog_EntryCount", _totalCount]</MudText>
+    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DoneAll" OnClick="MarkAllRead">@L["NotificationsLog_Button_MarkAllRead"]</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAll">@L["NotificationsLog_Button_ClearAll"]</MudButton>
 </MudStack>
 
 <MudTable Items="@_entries" Dense="true" Hover="true" Striped="true" Loading="@_loading"
           FixedHeader="true" Height="calc(100vh - 280px)">
     <HeaderContent>
-        <MudTh Style="width: 150px;">Zeitpunkt</MudTh>
-        <MudTh Style="width: 60px;">Grad</MudTh>
-        <MudTh Style="width: 240px;">Titel</MudTh>
-        <MudTh>Details</MudTh>
+        <MudTh Style="width: 150px;">@L["NotificationsLog_Table_Timestamp"]</MudTh>
+        <MudTh Style="width: 60px;">@L["NotificationsLog_Table_Severity"]</MudTh>
+        <MudTh Style="width: 240px;">@L["NotificationsLog_Table_Title"]</MudTh>
+        <MudTh>@L["NotificationsLog_Table_Details"]</MudTh>
         <MudTh Style="width: 60px;"></MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Zeitpunkt">
+        <MudTd DataLabel="@L["NotificationsLog_Table_Timestamp"]">
             <MudText Typo="Typo.body2" Style="font-family: monospace;">
                 @context.Timestamp.ToLocalTime().ToString("dd.MM.yy HH:mm:ss")
             </MudText>
         </MudTd>
-        <MudTd DataLabel="Grad">
+        <MudTd DataLabel="@L["NotificationsLog_Table_Severity"]">
             <MudIcon Icon="@SevIcon(context.Severity)" Color="@SevColor(context.Severity)" Size="Size.Small" />
         </MudTd>
-        <MudTd DataLabel="Titel"><MudText Typo="Typo.body2" Style="font-weight: 600;">@context.Title</MudText></MudTd>
-        <MudTd DataLabel="Details">
+        <MudTd DataLabel="@L["NotificationsLog_Table_Title"]"><MudText Typo="Typo.body2" Style="font-weight: 600;">@context.Title</MudText></MudTd>
+        <MudTd DataLabel="@L["NotificationsLog_Table_Details"]">
             <MudText Typo="Typo.caption" Style="color: #aaa; white-space: pre-wrap;">@context.Detail</MudText>
         </MudTd>
         <MudTd>
             @if (context.Link is not null)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small"
-                               OnClick="@(() => Open(context))" title="Öffnen" />
+                               OnClick="@(() => Open(context))" title="@L["NotificationsLog_Button_Open"]" />
             }
         </MudTd>
     </RowTemplate>
@@ -111,14 +112,14 @@
     private async Task OnTypeChanged(string value) { _typeFilter = value; _currentPage = 0; await LoadData(); }
     private async Task OnPageChanged(int page) { _currentPage = page - 1; await LoadData(); }
 
-    private void MarkAllRead() { Store.MarkAllRead(); Snackbar.Add("Als gelesen markiert.", Severity.Success); }
+    private void MarkAllRead() { Store.MarkAllRead(); Snackbar.Add(L["NotificationsLog_Snackbar_MarkedRead"].Value, Severity.Success); }
 
     private async Task ClearAll()
     {
         Store.Clear();
         _currentPage = 0;
         await LoadData();
-        Snackbar.Add("Verlauf geleert.", Severity.Success);
+        Snackbar.Add(L["NotificationsLog_Snackbar_Cleared"].Value, Severity.Success);
     }
 
     private void Open(InAppNotification n)

@@ -39,21 +39,21 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
     {
         if (!IsAvailable)
         {
-            yield return new AgentEvent.Failed("Claude-Code-CLI ist nicht installiert/erreichbar.");
+            yield return new AgentEvent.Failed("Claude Code CLI is not installed/reachable.");
             yield break;
         }
 
         var mcpKey = _config["Agent:ClaudeCode:McpKey"];
         if (string.IsNullOrWhiteSpace(mcpKey))
         {
-            yield return new AgentEvent.Failed("Agent:ClaudeCode:McpKey ist nicht konfiguriert — Claude Code wird nicht gestartet.");
+            yield return new AgentEvent.Failed("Agent:ClaudeCode:McpKey is not configured — Claude Code will not be started.");
             yield break;
         }
         // The agent must never exceed the caller's rights: the configured MCP key's level must be ≤ the principal's.
         var keyConfig = _permissionService?.ValidateKey(mcpKey);
         if (keyConfig != null && !McpPermissionLevels.HasAccess(context.Principal.PermissionLevel, keyConfig.PermissionLevel))
         {
-            yield return new AgentEvent.Failed("Der konfigurierte Claude-Code-Key hat mehr Rechte als der Aufrufer — abgelehnt.");
+            yield return new AgentEvent.Failed("The configured Claude Code key has more rights than the caller — rejected.");
             yield break;
         }
 
@@ -62,7 +62,7 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
         if (process == null)
         {
             CleanupFile(mcpConfigPath);
-            yield return new AgentEvent.Failed("Claude-Code-Prozess konnte nicht gestartet werden.");
+            yield return new AgentEvent.Failed("The Claude Code process could not be started.");
             yield break;
         }
 
@@ -91,7 +91,7 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
                 {
                     var err = await stderrTask;
                     yield return new AgentEvent.Failed(
-                        string.IsNullOrWhiteSpace(err) ? $"Claude Code beendet mit Code {process.ExitCode}." : err.Trim());
+                        string.IsNullOrWhiteSpace(err) ? $"Claude Code exited with code {process.ExitCode}." : err.Trim());
                 }
             }
         }

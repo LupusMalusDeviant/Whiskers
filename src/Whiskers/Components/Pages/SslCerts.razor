@@ -6,8 +6,9 @@
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>SSL-Zertifikate - Whiskers</PageTitle>
+<PageTitle>@L["SslCerts_PageTitle"]</PageTitle>
 
 @* RoadToSAP Phase 1: gated by the HostManagement module; when off, ModuleGuard shows a "disabled" notice.
    The ISslCertService injection resolves the Core no-op default either way. *@
@@ -15,13 +16,13 @@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
     <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
-    <MudText Typo="Typo.h5">SSL-Zertifikate</MudText>
+    <MudText Typo="Typo.h5">@L["SslCerts_Header_Title"]</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
     <MudSpacer />
     @if (_role >= AppRole.Admin)
     {
         <MudButton StartIcon="@Icons.Material.Filled.Autorenew" Color="Color.Primary" Variant="Variant.Filled"
-                   OnClick="RenewAll" Disabled="@_renewing">Alle erneuern</MudButton>
+                   OnClick="RenewAll" Disabled="@_renewing">@L["SslCerts_Button_RenewAll"]</MudButton>
     }
 </MudStack>
 
@@ -33,11 +34,11 @@ else
 {
     <MudTable Items="@_certs" Dense="true" Hover="true" Striped="true" Elevation="2">
         <HeaderContent>
-            <MudTh>Zertifikat</MudTh>
-            <MudTh>Domains</MudTh>
-            <MudTh>Läuft ab</MudTh>
-            <MudTh>Tage verbleibend</MudTh>
-            <MudTh>Aktionen</MudTh>
+            <MudTh>@L["SslCerts_Table_Certificate"]</MudTh>
+            <MudTh>@L["SslCerts_Table_Domains"]</MudTh>
+            <MudTh>@L["SslCerts_Table_ExpiresAt"]</MudTh>
+            <MudTh>@L["SslCerts_Table_DaysRemaining"]</MudTh>
+            <MudTh>@L["SslCerts_Table_Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd><MudText Style="font-family: monospace;">@context.CertName</MudText></MudTd>
@@ -47,12 +48,12 @@ else
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@d</MudChip>
                 }
             </MudTd>
-            <MudTd>@(context.ExpiresAt?.ToString("yyyy-MM-dd") ?? "unbekannt")</MudTd>
+            <MudTd>@(context.ExpiresAt?.ToString("yyyy-MM-dd") ?? L["SslCerts_Expiry_Unknown"].Value)</MudTd>
             <MudTd>
                 <MudChip T="string" Size="Size.Small"
                          Color="@(context.DaysUntilExpiry is not { } d ? Color.Default : d <= 7 ? Color.Error : context.IsExpiringSoon ? Color.Warning : Color.Success)"
                          Variant="Variant.Filled">
-                    @(context.DaysUntilExpiry is { } days ? $"{days} Tage" : "Ablauf unbekannt")
+                    @(context.DaysUntilExpiry is { } days ? L["SslCerts_Chip_DaysLeft", days].Value : L["SslCerts_Chip_ExpiryUnknown"].Value)
                 </MudChip>
             </MudTd>
             <MudTd>
@@ -61,13 +62,13 @@ else
                     <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
                                StartIcon="@Icons.Material.Filled.Autorenew"
                                OnClick="@(() => RenewCert(context.CertName))" Disabled="@_renewing">
-                        Erneuern
+                        @L["SslCerts_Button_Renew"]
                     </MudButton>
                 }
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Class="pa-4">Keine SSL-Zertifikate gefunden. Ist certbot installiert?</MudText>
+            <MudText Class="pa-4">@L["SslCerts_NoRecords"]</MudText>
         </NoRecordsContent>
     </MudTable>
 }
@@ -87,7 +88,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["SslCerts_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -119,7 +120,7 @@ else
             var result = await SslCertService.RenewAsync(ServerId, certName);
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "ssl.renew", "ssl", certName, certName, serverId: ServerId, success: result.Success);
-            Snackbar.Add(result.Success ? $"{certName} erneuert" : $"Fehler: {result.Error}",
+            Snackbar.Add(result.Success ? L["SslCerts_Snackbar_Renewed", certName].Value : L["SslCerts_Snackbar_Error", result.Error].Value,
                 result.Success ? Severity.Success : Severity.Error);
             await LoadCerts();
         }
@@ -137,7 +138,7 @@ else
             var result = await SslCertService.RenewAllAsync(ServerId);
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "ssl.renew", "ssl", "all", "all", serverId: ServerId, success: result.Success);
-            Snackbar.Add(result.Success ? "Alle Zertifikate erneuert" : $"Fehler: {result.Error}",
+            Snackbar.Add(result.Success ? L["SslCerts_Snackbar_AllRenewed"].Value : L["SslCerts_Snackbar_Error", result.Error].Value,
                 result.Success ? Severity.Success : Severity.Error);
             await LoadCerts();
         }

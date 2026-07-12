@@ -52,7 +52,7 @@ public class HetznerApiService : IHetznerService
     private static HttpRequestMessage BuildRequest(string token, HttpMethod method, string path, object? body)
     {
         if (string.IsNullOrWhiteSpace(token))
-            throw new InvalidOperationException("Hetzner-API-Token ist nicht konfiguriert.");
+            throw new InvalidOperationException("Hetzner API token is not configured.");
 
         var req = new HttpRequestMessage(method, $"{BaseUrl}/v1{path}");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -71,12 +71,12 @@ public class HetznerApiService : IHetznerService
 
         var message = statusCode switch
         {
-            401 => "Hetzner-API-Token ist ungültig oder abgelaufen.",
-            403 => "Hetzner-API-Token hat keine ausreichenden Berechtigungen (read-only Token für Schreibaktion?).",
-            404 => $"Hetzner-Ressource nicht gefunden: {response.RequestMessage?.RequestUri?.PathAndQuery}",
-            423 => "Ressource ist gesperrt (eine andere Aktion läuft noch). Bitte erneut versuchen.",
-            429 => "Hetzner-API-Ratelimit erreicht (max. 3600/Stunde). Bitte später erneut versuchen.",
-            _ => $"Hetzner-API-Fehler ({statusCode}): {body}"
+            401 => "Hetzner API token is invalid or expired.",
+            403 => "Hetzner API token has insufficient permissions (read-only token used for a write action?).",
+            404 => $"Hetzner resource not found: {response.RequestMessage?.RequestUri?.PathAndQuery}",
+            423 => "Resource is locked (another action is still running). Please try again.",
+            429 => "Hetzner API rate limit reached (max. 3600/hour). Please try again later.",
+            _ => $"Hetzner API error ({statusCode}): {body}"
         };
 
         throw new HttpRequestException(message, null, response.StatusCode);

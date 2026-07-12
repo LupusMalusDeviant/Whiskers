@@ -1,4 +1,5 @@
-﻿<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
+@inject IStringLocalizer<SharedResource> L
+<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
 
 <dialog id="components-reconnect-modal" data-nosnippet>
     <div class="components-reconnect-container">
@@ -7,25 +8,25 @@
             <div></div>
         </div>
         <p class="components-reconnect-first-attempt-visible">
-            Verbindung zum Server wird wiederhergestellt...
+            @L["ReconnectModal_Text_Reconnecting"]
         </p>
         <p class="components-reconnect-repeated-attempt-visible">
-            Verbindung fehlgeschlagen... erneuter Versuch in <span id="components-seconds-to-next-attempt"></span> Sekunden.
+            @L["ReconnectModal_Text_RetryPrefix"] <span id="components-seconds-to-next-attempt"></span> @L["ReconnectModal_Text_RetrySuffix"]
         </p>
         <p class="components-reconnect-failed-visible">
-            Verbindung fehlgeschlagen.<br />Bitte erneut versuchen oder die Seite neu laden.
+            @((MarkupString)L["ReconnectModal_Text_Failed"].Value)
         </p>
         <button id="components-reconnect-button" class="components-reconnect-failed-visible">
-            Wiederholen
+            @L["ReconnectModal_Button_Retry"]
         </button>
         <p class="components-pause-visible">
-            Die Sitzung wurde vom Server pausiert.
+            @L["ReconnectModal_Text_Paused"]
         </p>
         <p class="components-resume-failed-visible">
-            Sitzung konnte nicht fortgesetzt werden.<br />Bitte erneut versuchen oder die Seite neu laden.
+            @((MarkupString)L["ReconnectModal_Text_ResumeFailed"].Value)
         </p>
         <button id="components-resume-button" class="components-pause-visible components-resume-failed-visible">
-            Fortsetzen
+            @L["ReconnectModal_Button_Resume"]
         </button>
     </div>
 </dialog>

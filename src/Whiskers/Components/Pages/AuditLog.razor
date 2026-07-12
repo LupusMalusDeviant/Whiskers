@@ -1,8 +1,9 @@
 @page "/audit-log"
 @attribute [Authorize]
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLogService
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Audit-Protokoll - Whiskers</PageTitle>
+<PageTitle>@L["AuditLog_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -10,68 +11,68 @@
             <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Audit-Protokoll</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Alle Aktionen und Änderungen nachverfolgen</MudText>
+            <MudText Typo="Typo.h5">@L["AuditLog_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["AuditLog_Header_Subtitle"]</MudText>
         </div>
     </MudStack>
 </div>
 
 <MudStack Row="true" Class="mb-4" Spacing="2">
     <MudSelect T="string" Value="@_actionFilter" ValueChanged="OnActionFilterChanged"
-               Label="Aktion" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;" Clearable="true">
-        <MudSelectItem Value="@("container")">Container</MudSelectItem>
-        <MudSelectItem Value="@("server")">Server</MudSelectItem>
-        <MudSelectItem Value="@("config")">Konfiguration</MudSelectItem>
-        <MudSelectItem Value="@("env")">Umgebungsvariablen</MudSelectItem>
-        <MudSelectItem Value="@("firewall")">Firewall</MudSelectItem>
-        <MudSelectItem Value="@("nginx")">Nginx</MudSelectItem>
-        <MudSelectItem Value="@("network")">Netzwerke</MudSelectItem>
-        <MudSelectItem Value="@("backup")">Backups</MudSelectItem>
-        <MudSelectItem Value="@("deploy")">Deployment</MudSelectItem>
+               Label="@L["AuditLog_Filter_ActionLabel"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;" Clearable="true">
+        <MudSelectItem Value="@("container")">@L["AuditLog_Filter_Container"]</MudSelectItem>
+        <MudSelectItem Value="@("server")">@L["AuditLog_Filter_Server"]</MudSelectItem>
+        <MudSelectItem Value="@("config")">@L["AuditLog_Filter_Config"]</MudSelectItem>
+        <MudSelectItem Value="@("env")">@L["AuditLog_Filter_Env"]</MudSelectItem>
+        <MudSelectItem Value="@("firewall")">@L["AuditLog_Filter_Firewall"]</MudSelectItem>
+        <MudSelectItem Value="@("nginx")">@L["AuditLog_Filter_Nginx"]</MudSelectItem>
+        <MudSelectItem Value="@("network")">@L["AuditLog_Filter_Networks"]</MudSelectItem>
+        <MudSelectItem Value="@("backup")">@L["AuditLog_Filter_Backups"]</MudSelectItem>
+        <MudSelectItem Value="@("deploy")">@L["AuditLog_Filter_Deploy"]</MudSelectItem>
     </MudSelect>
     <MudSelect T="string" Value="@_targetTypeFilter" ValueChanged="OnTargetTypeFilterChanged"
-               Label="Zieltyp" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;" Clearable="true">
-        <MudSelectItem Value="@("container")">Container</MudSelectItem>
-        <MudSelectItem Value="@("server")">Server</MudSelectItem>
-        <MudSelectItem Value="@("config")">Konfiguration</MudSelectItem>
-        <MudSelectItem Value="@("firewall")">Firewall</MudSelectItem>
-        <MudSelectItem Value="@("nginx")">Nginx</MudSelectItem>
-        <MudSelectItem Value="@("network")">Netzwerk</MudSelectItem>
-        <MudSelectItem Value="@("volume")">Volume</MudSelectItem>
+               Label="@L["AuditLog_Filter_TargetTypeLabel"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;" Clearable="true">
+        <MudSelectItem Value="@("container")">@L["AuditLog_Filter_Container"]</MudSelectItem>
+        <MudSelectItem Value="@("server")">@L["AuditLog_Filter_Server"]</MudSelectItem>
+        <MudSelectItem Value="@("config")">@L["AuditLog_Filter_Config"]</MudSelectItem>
+        <MudSelectItem Value="@("firewall")">@L["AuditLog_Filter_Firewall"]</MudSelectItem>
+        <MudSelectItem Value="@("nginx")">@L["AuditLog_Filter_Nginx"]</MudSelectItem>
+        <MudSelectItem Value="@("network")">@L["AuditLog_Filter_Network"]</MudSelectItem>
+        <MudSelectItem Value="@("volume")">@L["AuditLog_Filter_Volume"]</MudSelectItem>
     </MudSelect>
     <MudSpacer />
     <MudText Typo="Typo.body2" Class="align-self-center" Style="color: #888;">
-        @_totalCount Einträge
+        @L["AuditLog_EntryCount", _totalCount]
     </MudText>
 </MudStack>
 
 <MudTable Items="@_entries" Dense="true" Hover="true" Striped="true" Loading="@_loading"
           FixedHeader="true" Height="calc(100vh - 280px)">
     <HeaderContent>
-        <MudTh Style="width: 160px;">Zeitpunkt</MudTh>
-        <MudTh Style="width: 160px;">Akteur</MudTh>
-        <MudTh Style="width: 200px;">Aktion</MudTh>
-        <MudTh>Ziel</MudTh>
-        <MudTh Style="width: 80px;">Status</MudTh>
+        <MudTh Style="width: 160px;">@L["AuditLog_Table_Timestamp"]</MudTh>
+        <MudTh Style="width: 160px;">@L["AuditLog_Table_Actor"]</MudTh>
+        <MudTh Style="width: 200px;">@L["AuditLog_Table_Action"]</MudTh>
+        <MudTh>@L["AuditLog_Table_Target"]</MudTh>
+        <MudTh Style="width: 80px;">@L["AuditLog_Table_Status"]</MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Zeitpunkt">
+        <MudTd DataLabel="@L["AuditLog_Table_Timestamp"]">
             <MudText Typo="Typo.body2" Style="font-family: monospace;">
                 @context.Timestamp.ToLocalTime().ToString("dd.MM.yy HH:mm:ss")
             </MudText>
         </MudTd>
-        <MudTd DataLabel="Akteur">
+        <MudTd DataLabel="@L["AuditLog_Table_Actor"]">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
                      Color="@GetActorColor(context.ActorType)">
                 @context.Actor
             </MudChip>
         </MudTd>
-        <MudTd DataLabel="Aktion">
+        <MudTd DataLabel="@L["AuditLog_Table_Action"]">
             <MudChip T="string" Size="Size.Small" Color="@GetActionColor(context.Action)">
                 @FormatAction(context.Action)
             </MudChip>
         </MudTd>
-        <MudTd DataLabel="Ziel">
+        <MudTd DataLabel="@L["AuditLog_Table_Target"]">
             <code>@context.TargetName</code>
             @if (!string.IsNullOrEmpty(context.Details))
             {
@@ -81,7 +82,7 @@
                 </MudTooltip>
             }
         </MudTd>
-        <MudTd DataLabel="Status">
+        <MudTd DataLabel="@L["AuditLog_Table_Status"]">
             @if (context.Success)
             {
                 <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
@@ -161,31 +162,31 @@
         _ => Color.Info
     };
 
-    private static string FormatAction(string action) => action switch
+    private string FormatAction(string action) => action switch
     {
-        "container.start" => "Container gestartet",
-        "container.stop" => "Container gestoppt",
-        "container.restart" => "Container neugestartet",
-        "container.remove" => "Container entfernt",
-        "container.update" => "Container aktualisiert",
-        "env.save" => "Env-Vars gespeichert",
-        "server.add" => "Server hinzugefügt",
-        "server.update" => "Server bearbeitet",
-        "server.remove" => "Server entfernt",
-        "deploy.app" => "App deployed",
-        "deploy.compose" => "Compose deployed",
-        "config.save" => "Konfiguration gespeichert",
-        "firewall.add" => "Firewall-Regel hinzugefügt",
-        "firewall.remove" => "Firewall-Regel entfernt",
-        "nginx.update" => "Nginx aktualisiert",
-        "systemd.manage" => "Systemd-Service verwaltet",
-        "ssl.renew" => "SSL erneuert",
-        "network.create" => "Netzwerk erstellt",
-        "network.remove" => "Netzwerk entfernt",
-        "backup.create" => "Backup erstellt",
-        "backup.restore" => "Backup wiederhergestellt",
-        "backup.delete" => "Backup gelöscht",
-        "command.execute" => "Befehl ausgeführt",
+        "container.start" => L["AuditLog_Action_ContainerStart"].Value,
+        "container.stop" => L["AuditLog_Action_ContainerStop"].Value,
+        "container.restart" => L["AuditLog_Action_ContainerRestart"].Value,
+        "container.remove" => L["AuditLog_Action_ContainerRemove"].Value,
+        "container.update" => L["AuditLog_Action_ContainerUpdate"].Value,
+        "env.save" => L["AuditLog_Action_EnvSave"].Value,
+        "server.add" => L["AuditLog_Action_ServerAdd"].Value,
+        "server.update" => L["AuditLog_Action_ServerUpdate"].Value,
+        "server.remove" => L["AuditLog_Action_ServerRemove"].Value,
+        "deploy.app" => L["AuditLog_Action_DeployApp"].Value,
+        "deploy.compose" => L["AuditLog_Action_DeployCompose"].Value,
+        "config.save" => L["AuditLog_Action_ConfigSave"].Value,
+        "firewall.add" => L["AuditLog_Action_FirewallAdd"].Value,
+        "firewall.remove" => L["AuditLog_Action_FirewallRemove"].Value,
+        "nginx.update" => L["AuditLog_Action_NginxUpdate"].Value,
+        "systemd.manage" => L["AuditLog_Action_SystemdManage"].Value,
+        "ssl.renew" => L["AuditLog_Action_SslRenew"].Value,
+        "network.create" => L["AuditLog_Action_NetworkCreate"].Value,
+        "network.remove" => L["AuditLog_Action_NetworkRemove"].Value,
+        "backup.create" => L["AuditLog_Action_BackupCreate"].Value,
+        "backup.restore" => L["AuditLog_Action_BackupRestore"].Value,
+        "backup.delete" => L["AuditLog_Action_BackupDelete"].Value,
+        "command.execute" => L["AuditLog_Action_CommandExecute"].Value,
         _ => action
     };
 }

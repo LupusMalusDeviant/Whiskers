@@ -2,6 +2,7 @@
 @inject ITerminalSessionManager SessionManager
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IStringLocalizer<SharedResource> L
 @implements IAsyncDisposable
 
 @* The interactive container-terminal UI. Rendered by Terminal.razor only when the Terminal module is
@@ -10,7 +11,7 @@
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
     <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
                    OnClick="@(() => Nav.NavigateTo($"container/{ServerId}/{ContainerId}"))" />
-    <MudText Typo="Typo.h5">Container-Terminal</MudText>
+    <MudText Typo="Typo.h5">@L["TerminalView_Title"]</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
         @(string.IsNullOrEmpty(ContainerId) ? "" : ContainerId[..Math.Min(12, ContainerId.Length)])
     </MudChip>
@@ -42,14 +43,14 @@
 
         if (string.IsNullOrEmpty(ContainerId))
         {
-            _error = "Keine Container-ID angegeben.";
+            _error = L["TerminalView_Error_NoContainerId"].Value;
             await InvokeAsync(StateHasChanged);
             return;
         }
 
         if (await CurrentUser.GetRoleAsync() < AppRole.Operator)
         {
-            _error = "Keine Berechtigung — Operator erforderlich.";
+            _error = L["TerminalView_Error_OperatorRequired"].Value;
             await InvokeAsync(StateHasChanged);
             return;
         }
@@ -66,7 +67,7 @@
         }
         catch (Exception ex)
         {
-            _error = $"Fehler beim Initialisieren des Terminals: {ex.Message}";
+            _error = L["TerminalView_Error_InitFailed", ex.Message].Value;
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -96,7 +97,7 @@
         await InvokeAsync(async () =>
         {
             await JS.InvokeVoidAsync("Whiskers.Terminal.write", "terminal-container",
-                "\r\n\x1b[31m--- Session ended ---\x1b[0m\r\n");
+                $"\r\n\x1b[31m--- {L["TerminalView_Terminal_SessionEnded"].Value} ---\x1b[0m\r\n");
         });
     }
 

@@ -7,6 +7,7 @@
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>Firewall - Whiskers</PageTitle>
 
@@ -22,11 +23,11 @@
     @if (_role >= AppRole.Admin)
     {
         <MudSwitch T="bool" Value="@_firewallActive" ValueChanged="ToggleFirewall" Color="Color.Success"
-                   Label="@(_firewallActive ? "Aktiv" : "Inaktiv")" />
+                   Label="@(_firewallActive ? L["Firewall_Status_Active"].Value : L["Firewall_Status_Inactive"].Value)" />
     }
     else
     {
-        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@(_firewallActive ? "Aktiv" : "Inaktiv")</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@(_firewallActive ? L["Firewall_Status_Active"].Value : L["Firewall_Status_Inactive"].Value)</MudChip>
     }
 </MudStack>
 
@@ -38,23 +39,23 @@ else
 {
     <MudTable Items="@_rules" Dense="true" Hover="true" Striped="true" Elevation="2">
         <ToolBarContent>
-            <MudText Typo="Typo.h6">Regeln</MudText>
+            <MudText Typo="Typo.h6">@L["Firewall_Table_Title"]</MudText>
             <MudSpacer />
             @if (_role >= AppRole.Admin)
             {
                 <MudButton StartIcon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
-                           OnClick="OpenAddDialog">Regel hinzufügen</MudButton>
+                           OnClick="OpenAddDialog">@L["Firewall_Button_AddRule"]</MudButton>
             }
             <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Default" Variant="Variant.Outlined"
-                       OnClick="LoadRules" Class="ml-2">Aktualisieren</MudButton>
+                       OnClick="LoadRules" Class="ml-2">@L["Firewall_Button_Refresh"]</MudButton>
         </ToolBarContent>
         <HeaderContent>
             <MudTh>#</MudTh>
-            <MudTh>Port</MudTh>
-            <MudTh>Aktion</MudTh>
-            <MudTh>Richtung</MudTh>
-            <MudTh>Von</MudTh>
-            <MudTh>Aktionen</MudTh>
+            <MudTh>@L["Firewall_Header_Port"]</MudTh>
+            <MudTh>@L["Firewall_Header_Action"]</MudTh>
+            <MudTh>@L["Firewall_Header_Direction"]</MudTh>
+            <MudTh>@L["Firewall_Header_From"]</MudTh>
+            <MudTh>@L["Firewall_Header_Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd>@context.Number</MudTd>
@@ -75,7 +76,7 @@ else
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Class="pa-4">Keine Firewall-Regeln konfiguriert.</MudText>
+            <MudText Class="pa-4">@L["Firewall_Empty_NoRules"]</MudText>
         </NoRecordsContent>
     </MudTable>
 }
@@ -95,7 +96,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["Firewall_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -120,7 +121,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler beim Laden der Firewall-Regeln: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["Firewall_Snackbar_LoadError", ex.Message].Value, Severity.Error);
         }
         _loading = false;
     }
@@ -133,8 +134,8 @@ else
         if (!enable)
         {
             var confirmed = await DialogService.ShowMessageBoxAsync(
-                "Firewall deaktivieren", "Firewall wirklich deaktivieren? Alle Ports werden für eingehende Verbindungen geöffnet und der Server ist ungeschützt.",
-                yesText: "Deaktivieren", cancelText: "Abbrechen");
+                L["Firewall_Dialog_DisableTitle"].Value, L["Firewall_Dialog_DisableMessage"].Value,
+                yesText: L["Firewall_Dialog_DisableYes"].Value, cancelText: L["Firewall_Dialog_Cancel"].Value);
             if (confirmed != true) return;
         }
 
@@ -144,11 +145,11 @@ else
             if (result.Success)
             {
                 _firewallActive = enable;
-                Snackbar.Add($"Firewall {(enable ? "aktiviert" : "deaktiviert")}", Severity.Success);
+                Snackbar.Add(enable ? L["Firewall_Snackbar_Enabled"].Value : L["Firewall_Snackbar_Disabled"].Value, Severity.Success);
                 await LoadRules();
             }
             else
-                Snackbar.Add($"Fehler: {result.Error}", Severity.Error);
+                Snackbar.Add(L["Firewall_Snackbar_Error", result.Error ?? ""].Value, Severity.Error);
         }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
@@ -158,7 +159,7 @@ else
         if (!Require(AppRole.Admin)) return;
 
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Regel löschen", $"Firewall-Regel #{ruleNumber} entfernen?", yesText: "Löschen", cancelText: "Abbrechen");
+            L["Firewall_Dialog_DeleteTitle"].Value, L["Firewall_Dialog_DeleteMessage", ruleNumber].Value, yesText: L["Firewall_Dialog_DeleteYes"].Value, cancelText: L["Firewall_Dialog_Cancel"].Value);
         if (confirmed != true) return;
 
         try
@@ -168,11 +169,11 @@ else
             await AuditLog.LogAsync(actor, "web", "firewall.remove", "firewall", ruleNumber.ToString(), $"Rule #{ruleNumber}", serverId: ServerId, success: result.Success);
             if (result.Success)
             {
-                Snackbar.Add("Regel entfernt", Severity.Success);
+                Snackbar.Add(L["Firewall_Snackbar_RuleRemoved"].Value, Severity.Success);
                 await LoadRules();
             }
             else
-                Snackbar.Add($"Fehler: {result.Error}", Severity.Error);
+                Snackbar.Add(L["Firewall_Snackbar_Error", result.Error ?? ""].Value, Severity.Error);
         }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
@@ -185,7 +186,7 @@ else
         {
             { x => x.ServerId, ServerId }
         };
-        var dialog = await DialogService.ShowAsync<AddFirewallRuleDialog>("Firewall-Regel hinzufügen", parameters);
+        var dialog = await DialogService.ShowAsync<AddFirewallRuleDialog>(L["Firewall_Dialog_AddRuleTitle"].Value, parameters);
         var result = await dialog.Result;
         if (result != null && !result.Canceled)
             await LoadRules();

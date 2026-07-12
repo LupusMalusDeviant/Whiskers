@@ -112,20 +112,20 @@ public class MatrixNotificationService : IMatrixNotificationService
             $"🤖 <strong>AI-Agent</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
         ),
         "high_cpu" => (
-            $"🔥 Hohe CPU-Last | {evt.ContainerName}. {evt.ImageInfo}",
-            $"🔥 <strong>Hohe CPU-Last</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+            $"🔥 High CPU Load | {evt.ContainerName}. {evt.ImageInfo}",
+            $"🔥 <strong>High CPU Load</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
         ),
         "high_memory" => (
-            $"🔥 Hohe RAM-Last | {evt.ContainerName}. {evt.ImageInfo}",
-            $"🔥 <strong>Hohe RAM-Last</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+            $"🔥 High Memory Load | {evt.ContainerName}. {evt.ImageInfo}",
+            $"🔥 <strong>High Memory Load</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
         ),
         "high_disk" => (
-            $"💾 Hohe Festplatten-Last | {evt.ContainerName}. {evt.ImageInfo}",
-            $"💾 <strong>Hohe Festplatten-Last</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+            $"💾 High Disk Usage | {evt.ContainerName}. {evt.ImageInfo}",
+            $"💾 <strong>High Disk Usage</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
         ),
         "metric_anomaly" => (
-            $"📈 Metrik-Ausreißer | {evt.ContainerName}. {evt.ImageInfo}",
-            $"📈 <strong>Metrik-Ausreißer</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
+            $"📈 Metric Anomaly | {evt.ContainerName}. {evt.ImageInfo}",
+            $"📈 <strong>Metric Anomaly</strong> | <code>{evt.ContainerName}</code><br/>{evt.ImageInfo}"
         ),
         _ when evt.EventType.StartsWith("log_alert", StringComparison.Ordinal) => (
             $"🔍 Log-Alert | {evt.ContainerName}. {(string.IsNullOrWhiteSpace(evt.ImageInfo) ? evt.Image : evt.ImageInfo)}",

@@ -350,7 +350,7 @@
         // Build the message: attachment contents (for the agent) + the typed prompt.
         var full = new StringBuilder();
         foreach (var a in _attachments)
-            full.Append($"[Angehängte Datei: {a.Name}]\n```\n{a.Content}\n```\n\n");
+            full.Append($"[Attached file: {a.Name}]\n```\n{a.Content}\n```\n\n");
         full.Append(typed);
         var message = full.ToString().Trim();
 

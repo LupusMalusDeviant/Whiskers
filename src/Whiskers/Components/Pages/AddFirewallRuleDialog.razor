@@ -2,28 +2,29 @@
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
 <MudDialog>
     <DialogContent>
         <MudStack Spacing="3">
-            <MudTextField @bind-Value="_port" Label="Port" Placeholder="80 oder 8000:9000" Required="true" />
-            <MudSelect @bind-Value="_protocol" Label="Protokoll">
+            <MudTextField @bind-Value="_port" Label="@L["AddFirewallRuleDialog_Label_Port"]" Placeholder="@L["AddFirewallRuleDialog_Placeholder_Port"]" Required="true" />
+            <MudSelect @bind-Value="_protocol" Label="@L["AddFirewallRuleDialog_Label_Protocol"]">
                 <MudSelectItem Value="@("tcp")">TCP</MudSelectItem>
                 <MudSelectItem Value="@("udp")">UDP</MudSelectItem>
-                <MudSelectItem Value="@("any")">Beide</MudSelectItem>
+                <MudSelectItem Value="@("any")">@L["AddFirewallRuleDialog_Option_Both"]</MudSelectItem>
             </MudSelect>
-            <MudSelect @bind-Value="_action" Label="Aktion">
-                <MudSelectItem Value="@("allow")">Erlauben</MudSelectItem>
-                <MudSelectItem Value="@("deny")">Verweigern</MudSelectItem>
+            <MudSelect @bind-Value="_action" Label="@L["AddFirewallRuleDialog_Label_Action"]">
+                <MudSelectItem Value="@("allow")">@L["AddFirewallRuleDialog_Option_Allow"]</MudSelectItem>
+                <MudSelectItem Value="@("deny")">@L["AddFirewallRuleDialog_Option_Deny"]</MudSelectItem>
             </MudSelect>
-            <MudTextField @bind-Value="_from" Label="Von (optional)" Placeholder="192.168.1.0/24" />
+            <MudTextField @bind-Value="_from" Label="@L["AddFirewallRuleDialog_Label_From"]" Placeholder="192.168.1.0/24" />
         </MudStack>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Abbrechen</MudButton>
+        <MudButton OnClick="Cancel">@L["AddFirewallRuleDialog_Button_Cancel"]</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit" Disabled="@_submitting">
             @if (_submitting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-            Regel hinzufügen
+            @L["AddFirewallRuleDialog_Button_Submit"]
         </MudButton>
     </DialogActions>
 </MudDialog>
@@ -53,11 +54,11 @@
             await AuditLog.LogAsync(actor, "web", "firewall.add", "firewall", ruleDesc, ruleDesc, serverId: ServerId, success: result.Success);
             if (result.Success)
             {
-                Snackbar.Add("Regel hinzugefügt", Severity.Success);
+                Snackbar.Add(L["AddFirewallRuleDialog_Snackbar_RuleAdded"].Value, Severity.Success);
                 MudDialog?.Close(DialogResult.Ok(true));
             }
             else
-                Snackbar.Add($"Fehler: {result.Error}", Severity.Error);
+                Snackbar.Add(L["AddFirewallRuleDialog_Snackbar_Error", result.Error ?? ""].Value, Severity.Error);
         }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         _submitting = false;

@@ -5,6 +5,7 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
 
 @* The interactive volume-backup UI. Rendered by VolumeBackups.razor only when the VolumeBackups module is
    enabled (via ModuleGuard), so a disabled module never reaches the IVolumeBackupService injection. *@
@@ -15,14 +16,14 @@
             <MudIcon Icon="@Icons.Material.Filled.Backup" Size="Size.Large" />
         </div>
         <div>
-            <MudText Typo="Typo.h5">Volume-Backups</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Volumes sichern und wiederherstellen</MudText>
+            <MudText Typo="Typo.h5">@L["VolumeBackupsView_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["VolumeBackupsView_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
         @if (_role >= AppRole.Operator)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Backup"
-                       OnClick="ShowBackupDialog">Backup erstellen</MudButton>
+                       OnClick="ShowBackupDialog">@L["VolumeBackupsView_Button_CreateBackup"]</MudButton>
         }
     </MudStack>
 </div>
@@ -33,19 +34,19 @@
 }
 else if (!_backups.Any())
 {
-    <MudAlert Severity="Severity.Info">Noch keine Backups vorhanden.</MudAlert>
+    <MudAlert Severity="Severity.Info">@L["VolumeBackupsView_Alert_NoBackups"]</MudAlert>
 }
 else
 {
     <MudTable Items="@_backups" Dense="true" Hover="true" Striped="true" Elevation="2">
         <HeaderContent>
-            <MudTh>Volume</MudTh>
-            <MudTh>Container</MudTh>
-            <MudTh>Server</MudTh>
-            <MudTh>Größe</MudTh>
-            <MudTh>Erstellt</MudTh>
-            <MudTh>Notiz</MudTh>
-            <MudTh>Aktionen</MudTh>
+            <MudTh>@L["VolumeBackupsView_Table_Volume"]</MudTh>
+            <MudTh>@L["VolumeBackupsView_Table_Container"]</MudTh>
+            <MudTh>@L["VolumeBackupsView_Table_Server"]</MudTh>
+            <MudTh>@L["VolumeBackupsView_Table_Size"]</MudTh>
+            <MudTh>@L["VolumeBackupsView_Table_Created"]</MudTh>
+            <MudTh>@L["VolumeBackupsView_Table_Notes"]</MudTh>
+            <MudTh>@L["VolumeBackupsView_Table_Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd><code>@context.VolumeName</code></MudTd>
@@ -58,9 +59,9 @@ else
                 @if (_role >= AppRole.Admin)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.Restore" Color="Color.Primary" Size="Size.Small"
-                                   OnClick="@(() => RestoreBackup(context))" title="Wiederherstellen" />
+                                   OnClick="@(() => RestoreBackup(context))" title="@L["VolumeBackupsView_Action_Restore"]" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                   OnClick="@(() => DeleteBackup(context))" title="Löschen" />
+                                   OnClick="@(() => DeleteBackup(context))" title="@L["VolumeBackupsView_Action_Delete"]" />
                 }
             </MudTd>
         </RowTemplate>
@@ -68,9 +69,9 @@ else
 }
 
 <MudDialog Visible="_showBackupDialog" VisibleChanged="@(v => _showBackupDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
-        <TitleContent>Volume-Backup erstellen</TitleContent>
+        <TitleContent>@L["VolumeBackupsView_Dialog_CreateTitle"]</TitleContent>
         <DialogContent>
-            <MudSelect T="string" Value="_backupServerId" ValueChanged="OnBackupServerChanged" Label="Ziel-Server"
+            <MudSelect T="string" Value="_backupServerId" ValueChanged="OnBackupServerChanged" Label="@L["VolumeBackupsView_Field_TargetServer"]"
                        Variant="Variant.Outlined" Class="mb-3">
                 @foreach (var srv in _servers)
                 {
@@ -79,7 +80,7 @@ else
             </MudSelect>
             @if (_volumes.Any())
             {
-                <MudSelect @bind-Value="_selectedVolume" Label="Volume" Variant="Variant.Outlined" Class="mb-3">
+                <MudSelect @bind-Value="_selectedVolume" Label="@L["VolumeBackupsView_Field_Volume"]" Variant="Variant.Outlined" Class="mb-3">
                     @foreach (var v in _volumes.OrderBy(v => !_volumeLabels.ContainsKey(v)).ThenBy(v => v))
                     {
                         <MudSelectItem Value="@v">@GetVolumeDisplayName(v)</MudSelectItem>
@@ -88,20 +89,20 @@ else
             }
             else
             {
-                <MudTextField @bind-Value="_selectedVolume" Label="Volume-Name" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField @bind-Value="_selectedVolume" Label="@L["VolumeBackupsView_Field_VolumeName"]" Variant="Variant.Outlined" Class="mb-3" />
             }
-            <MudTextField @bind-Value="_backupContainerName" Label="Container (optional, für Zuordnung)"
+            <MudTextField @bind-Value="_backupContainerName" Label="@L["VolumeBackupsView_Field_Container"]"
                           Variant="Variant.Outlined" Class="mb-3" />
-            <MudTextField @bind-Value="_backupNotes" Label="Notiz (optional)" Variant="Variant.Outlined" Class="mb-3" />
+            <MudTextField @bind-Value="_backupNotes" Label="@L["VolumeBackupsView_Field_Notes"]" Variant="Variant.Outlined" Class="mb-3" />
             @if (_creating)
             {
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" />
             }
         </DialogContent>
         <DialogActions>
-            <MudButton OnClick="@(() => _showBackupDialog = false)" Disabled="@_creating">Abbrechen</MudButton>
+            <MudButton OnClick="@(() => _showBackupDialog = false)" Disabled="@_creating">@L["VolumeBackupsView_Button_Cancel"]</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateBackup"
-                       Disabled="@(string.IsNullOrWhiteSpace(_selectedVolume) || _creating)">Backup starten</MudButton>
+                       Disabled="@(string.IsNullOrWhiteSpace(_selectedVolume) || _creating)">@L["VolumeBackupsView_Button_StartBackup"]</MudButton>
         </DialogActions>
     </MudDialog>
 
@@ -123,7 +124,7 @@ else
     {
         if (_role < required)
         {
-            Snackbar.Add($"Keine Berechtigung — {required} erforderlich (deine Rolle: {_role}).", Severity.Warning);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
             return false;
         }
         return true;
@@ -153,7 +154,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
         _loading = false;
     }
@@ -214,7 +215,7 @@ else
                 _selectedVolume, _backupContainerName, _backupServerId, _backupNotes);
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "backup.create", "volume", backup.BackupId, _selectedVolume, serverId: _backupServerId == "local" ? null : _backupServerId);
-            Snackbar.Add($"Backup erstellt: {backup.FileName} ({FormatBytes(backup.SizeBytes)})", Severity.Success);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_BackupCreated", backup.FileName, FormatBytes(backup.SizeBytes)].Value, Severity.Success);
             _showBackupDialog = false;
             await LoadBackups();
         }
@@ -222,7 +223,7 @@ else
         {
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "backup.create", "volume", _selectedVolume, _selectedVolume, details: ex.Message, serverId: _backupServerId == "local" ? null : _backupServerId, success: false);
-            Snackbar.Add($"Backup fehlgeschlagen: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_BackupFailed", ex.Message].Value, Severity.Error);
         }
         finally
         {
@@ -234,21 +235,21 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Volume wiederherstellen",
-            $"Volume '{backup.VolumeName}' aus diesem Backup wiederherstellen? Der aktuelle Inhalt des Volumes wird überschrieben.",
-            yesText: "Wiederherstellen", cancelText: "Abbrechen");
+            L["VolumeBackupsView_Dialog_RestoreTitle"].Value,
+            L["VolumeBackupsView_Dialog_RestoreMessage", backup.VolumeName].Value,
+            yesText: L["VolumeBackupsView_Dialog_RestoreYes"].Value, cancelText: L["VolumeBackupsView_Button_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await BackupService.RestoreVolumeAsync(backup.BackupId);
             await AuditLog.LogAsync(actor, "web", "backup.restore", "volume", backup.BackupId, backup.VolumeName, serverId: backup.ServerId);
-            Snackbar.Add($"Volume '{backup.VolumeName}' wiederhergestellt aus Backup.", Severity.Success);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_Restored", backup.VolumeName].Value, Severity.Success);
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "backup.restore", "volume", backup.BackupId, backup.VolumeName, details: ex.Message, serverId: backup.ServerId, success: false);
-            Snackbar.Add($"Wiederherstellung fehlgeschlagen: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_RestoreFailed", ex.Message].Value, Severity.Error);
         }
     }
 
@@ -256,22 +257,22 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Backup löschen",
-            $"Backup von '{backup.VolumeName}' vom {backup.CreatedAt.ToLocalTime():dd.MM.yy HH:mm} wirklich löschen?",
-            yesText: "Löschen", cancelText: "Abbrechen");
+            L["VolumeBackupsView_Dialog_DeleteTitle"].Value,
+            L["VolumeBackupsView_Dialog_DeleteMessage", backup.VolumeName, backup.CreatedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value,
+            yesText: L["VolumeBackupsView_Dialog_DeleteYes"].Value, cancelText: L["VolumeBackupsView_Button_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await BackupService.DeleteBackupAsync(backup.BackupId);
             await AuditLog.LogAsync(actor, "web", "backup.delete", "volume", backup.BackupId, backup.VolumeName, serverId: backup.ServerId);
-            Snackbar.Add("Backup gelöscht.", Severity.Success);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_Deleted"].Value, Severity.Success);
             await LoadBackups();
         }
         catch (Exception ex)
         {
             await AuditLog.LogAsync(actor, "web", "backup.delete", "volume", backup.BackupId, backup.VolumeName, details: ex.Message, serverId: backup.ServerId, success: false);
-            Snackbar.Add($"Fehler: {ex.Message}", Severity.Error);
+            Snackbar.Add(L["VolumeBackupsView_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 

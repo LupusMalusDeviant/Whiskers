@@ -4,6 +4,7 @@
 @using Whiskers.Services.Docker
 @inject IMetricsQueryService MetricsQuery
 @inject IDockerService Docker
+@inject IStringLocalizer<SharedResource> L
 
 @if (Spec is null)
 {
@@ -16,7 +17,7 @@ else if (Spec.Kind == ChatWidgetKind.Chart)
             <MudIcon Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Color="Color.Primary" />
             <MudText Typo="Typo.subtitle2">@Title</MudText>
             <MudSpacer />
-            <MudText Typo="Typo.caption" Color="Color.Secondary">@_subtitle</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@L["ChatWidget_Chart_Subtitle"]</MudText>
         </MudStack>
         @if (_loading)
         {
@@ -25,7 +26,7 @@ else if (Spec.Kind == ChatWidgetKind.Chart)
         else if (_history.Count == 0)
         {
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="py-4" Align="Align.Center">
-                Keine Metrikdaten für die letzte Stunde.
+                @L["ChatWidget_Chart_NoData"]
             </MudText>
         }
         else
@@ -84,7 +85,6 @@ else
     private List<MetricPoint> _history = new();
     private ApexCharts.ApexChartOptions<MetricPoint> _options = CreateOptions("#2196F3");
     private string _seriesName = "CPU %";
-    private string _subtitle = "letzte Stunde";
 
     // Status-card state
     private string _statusName = "";
@@ -95,8 +95,8 @@ else
     private double? _latestMem;
 
     private string Title => Spec is null ? "" : Spec.Metric == ChatWidgetMetric.Memory
-        ? $"Speicher · {ShortId}"
-        : $"CPU · {ShortId}";
+        ? L["ChatWidget_Title_Memory", ShortId].Value
+        : L["ChatWidget_Title_Cpu", ShortId].Value;
 
     private string ShortId => Spec is null ? "" : Spec.Id.Length > 12 ? Spec.Id[..12] : Spec.Id;
 
@@ -120,7 +120,7 @@ else
         try
         {
             var isMem = Spec!.Metric == ChatWidgetMetric.Memory;
-            _seriesName = isMem ? "Speicher %" : "CPU %";
+            _seriesName = isMem ? L["ChatWidget_Series_Memory"].Value : L["ChatWidget_Series_Cpu"].Value;
             _options = CreateOptions(isMem ? "#9C27B0" : "#2196F3");
 
             _history = Spec.Target == ChatWidgetTarget.Server
@@ -157,24 +157,24 @@ else
                     return;
                 }
                 _statusName = ShortId;
-                _statusLine = "Container nicht gefunden";
-                _statusLabel = "unbekannt";
+                _statusLine = L["ChatWidget_Status_ContainerNotFound"].Value;
+                _statusLabel = L["ChatWidget_Status_Unknown"].Value;
             }
             else
             {
                 _statusName = Spec.Id;
-                _statusLine = "Server";
+                _statusLine = L["ChatWidget_Status_Server"].Value;
                 var cpu = await MetricsQuery.GetServerCpuHistoryAsync(Spec.Id, Window);
                 _latestCpu = LastValue(cpu);
                 _latestMem = LastValue(await MetricsQuery.GetServerMemoryHistoryAsync(Spec.Id, Window));
                 (_statusLabel, _statusColor) = _latestCpu is not null
-                    ? ("erreichbar", Color.Success)
-                    : ("keine Daten", Color.Default);
+                    ? (L["ChatWidget_Status_Reachable"].Value, Color.Success)
+                    : (L["ChatWidget_Status_NoData"].Value, Color.Default);
             }
         }
         catch
         {
-            _statusLabel = "Fehler";
+            _statusLabel = L["ChatWidget_Status_Error"].Value;
             _statusColor = Color.Error;
         }
     }
@@ -183,15 +183,15 @@ else
 
     private static double? LastValue(List<MetricPoint> pts) => pts.Count == 0 ? null : pts[^1].Value;
 
-    private static (string, Color) StateChip(string state, string health)
+    private (string, Color) StateChip(string state, string health)
     {
         if (health == "unhealthy") return ("unhealthy", Color.Error);
         return state?.ToLowerInvariant() switch
         {
-            "running" => (health == "healthy" ? "healthy" : "läuft", Color.Success),
-            "exited" or "dead" => ("gestoppt", Color.Error),
-            "restarting" => ("Neustart", Color.Warning),
-            "paused" => ("pausiert", Color.Warning),
+            "running" => (health == "healthy" ? "healthy" : L["ChatWidget_State_Running"].Value, Color.Success),
+            "exited" or "dead" => (L["ChatWidget_State_Stopped"].Value, Color.Error),
+            "restarting" => (L["ChatWidget_State_Restarting"].Value, Color.Warning),
+            "paused" => (L["ChatWidget_State_Paused"].Value, Color.Warning),
             _ => (string.IsNullOrEmpty(state) ? "—" : state, Color.Default),
         };
     }
