@@ -52,6 +52,28 @@ else
 
                 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@a.Reason</MudText>
 
+                @if (a.RiskLevel is not null || a.TargetServer is not null || a.TargetWorkload is not null || a.GuardrailPreset is not null)
+                {
+                    <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Class="mb-2">
+                        @if (a.RiskLevel is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@RiskColor(a.RiskLevel)">@L["ApprovalsView_Risk", a.RiskLevel]</MudChip>
+                        }
+                        @if (a.TargetServer is not null || a.TargetWorkload is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Dns">@($"{a.TargetServer ?? "—"} / {a.TargetWorkload ?? "—"}")</MudChip>
+                        }
+                        @if (a.GuardrailPreset is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Icon="@Icons.Material.Filled.Shield">@a.GuardrailPreset</MudChip>
+                        }
+                        @if (a.GuardrailRule is not null)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@L["ApprovalsView_Rule", a.GuardrailRule]</MudText>
+                        }
+                    </MudStack>
+                }
+
                 @if (!string.IsNullOrWhiteSpace(a.ParamsJson))
                 {
                     <MudExpansionPanels Elevation="0" Class="mb-2">
@@ -168,6 +190,13 @@ else
     {
         "admin" => Color.Error,
         "write" => Color.Warning,
+        _ => Color.Success,
+    };
+
+    private static Color RiskColor(string risk) => risk switch
+    {
+        "high" => Color.Error,
+        "medium" => Color.Warning,
         _ => Color.Success,
     };
 

@@ -34,6 +34,10 @@
                         {
                             <tr><td><b>@L["AgentCallDetailDialog_Field_Server"]</b></td><td>@Entry.ServerId</td></tr>
                         }
+                        @if (!string.IsNullOrEmpty(Entry.CorrelationId))
+                        {
+                            <tr><td><b>@L["AgentCallDetailDialog_Field_Correlation"]</b></td><td><code>@Entry.CorrelationId</code></td></tr>
+                        }
                     </tbody>
                 </MudSimpleTable>
 

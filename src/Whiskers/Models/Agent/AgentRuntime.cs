@@ -46,7 +46,7 @@ public abstract record AgentEvent
 {
     public sealed record AssistantDelta(string Text) : AgentEvent;
     public sealed record ToolProposed(AgentToolCall Call, GuardrailDecision Decision) : AgentEvent;
-    public sealed record ConfirmationRequired(AgentToolCall Call, string Reason) : AgentEvent;
+    public sealed record ConfirmationRequired(AgentToolCall Call, string Reason, GuardrailDecision Decision) : AgentEvent;
     public sealed record ToolExecuted(AgentToolResult Result) : AgentEvent;
     public sealed record TurnCompleted(AgentStopReason Reason, AgentUsage Usage) : AgentEvent;
     public sealed record Failed(string Message) : AgentEvent;

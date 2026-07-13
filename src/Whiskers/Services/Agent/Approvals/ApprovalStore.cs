@@ -42,8 +42,13 @@ public sealed class ApprovalStore : IApprovalStore
 
     private readonly ConcurrentDictionary<string, Entry> _entries = new();
     private readonly ILogger<ApprovalStore>? _logger;
+    private readonly TimeSpan _ttl;
 
-    public ApprovalStore(ILogger<ApprovalStore>? logger = null) => _logger = logger;
+    public ApprovalStore(ILogger<ApprovalStore>? logger = null, TimeSpan? approvalTtl = null)
+    {
+        _logger = logger;
+        _ttl = approvalTtl ?? TimeSpan.FromMinutes(15);
+    }
 
     public event Action? Changed;
 
@@ -69,6 +74,13 @@ public sealed class ApprovalStore : IApprovalStore
             ParamsJson = request.ParamsJson,
             Reason = request.Reason,
             Diff = request.Diff,
+            ExpiresAt = DateTime.UtcNow.Add(_ttl),
+            CorrelationId = request.CorrelationId,
+            RiskLevel = request.RiskLevel,
+            TargetServer = request.TargetServer,
+            TargetWorkload = request.TargetWorkload,
+            GuardrailPreset = request.GuardrailPreset,
+            GuardrailRule = request.GuardrailRule,
         };
         _entries[approval.Id] = new Entry(approval, resolver);
         TrimResolved();

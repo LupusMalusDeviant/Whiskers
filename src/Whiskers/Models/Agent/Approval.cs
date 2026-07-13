@@ -21,7 +21,15 @@ public sealed record ApprovalRequest(
     string Level,
     string? ParamsJson,
     string Reason,
-    string? Diff = null);
+    string? Diff = null,
+    // WP-05 correlation + richer approval context (all display-only; the executed call is bound by
+    // ToolCallId, never by these fields).
+    string? CorrelationId = null,
+    string? RiskLevel = null,
+    string? TargetServer = null,
+    string? TargetWorkload = null,
+    string? GuardrailPreset = null,
+    string? GuardrailRule = null);
 
 /// <summary>A pending (or resolved) request for a human to approve/reject a single agent tool call.
 /// Lives in-memory only: resolving it must reach the live <see cref="Services.Agent.IAgentSession"/>
@@ -47,6 +55,21 @@ public sealed class Approval
     public required string Reason { get; init; }
     /// <summary>Optional human-readable change preview (reserved; real per-tool diffs are roadmap).</summary>
     public string? Diff { get; init; }
+
+    // WP-05: correlation + richer context so the approval card explains what is being decided.
+    // These are display-only — execution is bound to <see cref="ToolCallId"/>, not to these values.
+    /// <summary>Correlation id shared with the recorded history entry and the raised notification.</summary>
+    public string? CorrelationId { get; init; }
+    /// <summary>Coarse risk level derived from the tool's required permission: low | medium | high.</summary>
+    public string? RiskLevel { get; init; }
+    /// <summary>Best-effort target server id/name parsed from the (redacted) arguments, if present.</summary>
+    public string? TargetServer { get; init; }
+    /// <summary>Best-effort target workload (container/pod/name) parsed from the arguments, if present.</summary>
+    public string? TargetWorkload { get; init; }
+    /// <summary>The active guardrail preset that produced the Confirm verdict.</summary>
+    public string? GuardrailPreset { get; init; }
+    /// <summary>The guardrail rule id(s) that matched.</summary>
+    public string? GuardrailRule { get; init; }
 
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;

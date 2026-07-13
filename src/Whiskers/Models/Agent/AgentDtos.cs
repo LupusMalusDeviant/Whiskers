@@ -19,7 +19,15 @@ public sealed record AgentToolDefinition(string Name, string Description, JsonEl
 /// <summary>A tool call requested by the model. <paramref name="ProviderSignature"/> carries an
 /// opaque per-provider token that MUST be replayed with the call on the next request — e.g. Gemini's
 /// <c>thoughtSignature</c> for thinking models (omitting it is a hard 400). Null for providers that don't use one.</summary>
-public sealed record AgentToolCall(string Id, string Name, string ArgumentsJson, string? ProviderSignature = null);
+public sealed record AgentToolCall(string Id, string Name, string ArgumentsJson, string? ProviderSignature = null)
+{
+    /// <summary>Stable, globally-unique correlation id assigned when the call is created (WP-05).
+    /// Unlike <see cref="Id"/> (the provider's tool_call id, which is only unique within a turn and
+    /// can collide across sessions), this ties the SAME call object as it flows through the guardrail
+    /// decision, the approval, the execution and the recorded history/notification. Because the one
+    /// call instance is passed to both the approval bridge and the invoker, all of them see the same id.</summary>
+    public string CorrelationId { get; init; } = Guid.NewGuid().ToString("N");
+}
 
 public sealed record AgentMessage(
     AgentRole Role,
