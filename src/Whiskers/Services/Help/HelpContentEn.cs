@@ -20,14 +20,21 @@ internal static class HelpContentEn
             new List<HelpSection>
             {
                 new("What is Whiskers?", """
-                    **Whiskers** is your central web control plane for a fleet of Docker hosts:
-                    containers, images, networks, databases, firewall, Nginx, systemd, SSL, metrics and
-                    logs — all in one place. The same capabilities are optionally available to an **AI**
-                    through a locked-down **MCP endpoint** (see the *AI Agent* and *MCP Server* chapters).
+                    **Whiskers** is a self-hosted **control plane** that lets humans and AI agents operate
+                    infrastructure without handing them unrestricted SSH or root access: every action is
+                    permissioned, policy-checked and auditable. Instead of a shell, operators (human **or**
+                    AI) use explicit tools — gated by permissions, checked by code-enforced guardrails, and,
+                    for sensitive actions, held for your approval.
 
-                    The design goal is **SSH-key-free operation**: hosts are reached over a private mesh
-                    with mutual TLS (mTLS), so there is no long-lived private key lying around for anyone
-                    to steal.
+                    That one control plane reaches Docker hosts and Kubernetes workloads — containers, images,
+                    networks, databases, firewall, Nginx, systemd, SSL, metrics and logs — and exposes the
+                    same capabilities to an **AI** through a locked-down **MCP endpoint** (see the *AI Agent*
+                    and *MCP Server* chapters). The reach is evidence of coverage; the point is governed,
+                    accountable operations.
+
+                    A design goal is **SSH-key-free steady-state operation**: after a one-time bootstrap,
+                    hosts are reached over a private mesh with mutual TLS (mTLS), so no long-lived private key
+                    lies around for anyone to steal.
                     """),
                 new("First Launch & Signing In", """
                     On **first launch**, the **setup wizard** walks you through the initial configuration

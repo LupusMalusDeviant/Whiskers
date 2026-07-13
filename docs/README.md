@@ -19,4 +19,4 @@ Every source folder under [`../src/Whiskers/`](../src/Whiskers/) carries its own
 ## Conventions
 
 - **Interface-first**: services live behind an `IFoo` interface; consumers depend on the interface.
-- **English** in-code comments and XML docs throughout; user-facing UI strings are German.
+- **English** in-code comments and XML docs throughout; the user-facing UI is localized (English default, German available) via `IStringLocalizer` / `.resx`.

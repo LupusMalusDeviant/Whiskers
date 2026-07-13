@@ -21,13 +21,13 @@ any public disclosure (coordinated disclosure).
 
 ## Supported versions
 
-Whiskers is currently **beta** (`0.11.0`). Only the latest release / `main` receives security
+Whiskers is currently **beta** (`0.12.x`). Only the latest release / `main` receives security
 fixes. There is no long-term-support branch yet.
 
 | Version | Supported |
 |---|---|
-| `0.11.x` (beta) | ✅ latest only |
-| `< 0.9` | ❌ |
+| `0.12.x` (beta) | ✅ latest only |
+| `< 0.12` | ❌ |
 
 ## Security model (summary)
 

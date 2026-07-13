@@ -26,14 +26,22 @@ public sealed class HelpContentService : IHelpContentService
             new List<HelpSection>
             {
                 new("Was ist Whiskers?", """
-                    **Whiskers** ist deine zentrale Web-Steuerung für eine Flotte von Docker-Hosts:
-                    Container, Images, Netzwerke, Datenbanken, Firewall, Nginx, systemd, SSL, Metriken und
-                    Logs, alles an einem Ort. Dieselben Fähigkeiten stehen optional einer **KI** über einen
-                    abgesicherten **MCP-Endpunkt** zur Verfügung (siehe Kapitel *KI-Agent* und *MCP-Server*).
+                    **Whiskers** ist eine selbst gehostete **Control Plane**, mit der Menschen und KI-Agenten
+                    Infrastruktur bedienen können, ohne unkontrollierten SSH- oder Root-Zugriff zu erhalten:
+                    Jede Aktion ist berechtigt, durch Richtlinien geprüft und nachvollziehbar protokolliert.
+                    Statt einer Shell nutzen die Bedienenden (Mensch **oder** KI) explizite Werkzeuge —
+                    begrenzt durch Berechtigungen, geprüft durch im Code erzwungene Guardrails und, bei
+                    heiklen Aktionen, zurückgehalten für deine Freigabe.
 
-                    Designziel ist **SSH-schlüsselfreier Betrieb**: Hosts werden über ein privates Mesh mit
-                    gegenseitigem TLS (mTLS) angesprochen, sodass kein dauerhafter Privatschlüssel herumliegt,
-                    den jemand stehlen könnte.
+                    Diese eine Control Plane erreicht Docker-Hosts und Kubernetes-Workloads — Container,
+                    Images, Netzwerke, Datenbanken, Firewall, Nginx, systemd, SSL, Metriken und Logs — und
+                    stellt dieselben Fähigkeiten optional einer **KI** über einen abgesicherten
+                    **MCP-Endpunkt** bereit (siehe Kapitel *KI-Agent* und *MCP-Server*). Die Reichweite ist
+                    der Beleg, der Kern sind kontrollierte, nachvollziehbare Operationen.
+
+                    Ein Designziel ist **SSH-schlüsselfreier Regelbetrieb**: Nach einem einmaligen Bootstrap
+                    werden Hosts über ein privates Mesh mit gegenseitigem TLS (mTLS) angesprochen, sodass kein
+                    dauerhafter Privatschlüssel herumliegt, den jemand stehlen könnte.
                     """),
                 new("Erster Start & Anmelden", """
                     Beim **ersten Start** führt dich der **Setup-Wizard** im Browser durch die Einrichtung:
