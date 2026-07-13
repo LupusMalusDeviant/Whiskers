@@ -392,13 +392,42 @@ See [.env.example](.env.example) for the full, commented list.
 
 ## Screenshots
 
-A walkthrough of the hero workflow — unhealthy workload → agent analysis → guardrail decision →
-approval request → approved execution → audit trail — lives on the project website:
-**[whiskers.app.lupusmalus.dev](https://whiskers.app.lupusmalus.dev)**. The in-app handbook (*Help*)
-carries screenshots for every area.
+The screens below trace the governance model end to end — **controlled access**, **enforced
+governance**, **complete accountability**. A live walkthrough of the hero workflow (unhealthy workload
+→ agent analysis → guardrail decision → approval → execution → audit trail) lives on the project
+website: **[whiskers.app.lupusmalus.dev](https://whiskers.app.lupusmalus.dev)**, and the in-app
+handbook (*Help*) carries screenshots for every area.
 
-> Refreshed hero-workflow screenshots and a short demo video are tracked as a separate work item and
-> will be embedded here once captured.
+**Guardrails — enforced governance.** A code-enforced, non-bypassable policy checked at the tool
+boundary (not in the prompt): a read-only kill switch, the highest level allowed without confirmation,
+protected resources, and forbidden argument patterns.
+
+![Guardrails: a code-enforced policy with a read-only kill switch, maximum autonomous level, protected resources and forbidden argument patterns](docs/product/screenshots/governance-guardrails.png)
+
+**Agent History — controlled access.** Every agent/MCP tool call, with actor, privilege level
+(read / write / admin), the guardrail verdict (Allow / Confirm / Deny), duration and outcome.
+
+![Agent History: a table of tool calls showing actor, level, verdict and status, including an admin-level call denied by policy](docs/product/screenshots/governance-agent-history.png)
+
+**Audit Log — complete accountability.** The approval and execution trail: who approved what, which
+action a guardrail blocked, and the resulting change.
+
+![Audit Log: approval-granted and guardrail-denied entries with actor, action and target](docs/product/screenshots/governance-audit-log.png)
+
+**Secure AI Operations — a governed starting point.** Connect a client, mint a least-privilege
+read-only key, and activate a starter guardrail preset (Observe only / Safe operations / Approval
+required).
+
+![Secure AI Operations onboarding: connect a client, create a read-only key, choose a starter guardrail preset](docs/product/screenshots/governance-ai-operations.png)
+
+**Dashboard — the reach.** Real-time status across Docker hosts and Kubernetes workloads, with live
+host metrics — the surface the governance model sits in front of.
+
+![Container overview dashboard: total/running/stopped/unhealthy counts and a connected Docker host with live CPU and memory charts](docs/product/screenshots/dashboard-overview.png)
+
+> Screenshots are captured against an anonymized demo dataset. See
+> [docs/product/demo-script.md](docs/product/demo-script.md) for the scripted walkthrough and
+> [docs/product/screenshots.md](docs/product/screenshots.md) for how each image is reproduced.
 
 ---
 
