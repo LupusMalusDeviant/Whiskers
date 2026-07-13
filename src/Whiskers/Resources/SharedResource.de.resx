@@ -2556,7 +2556,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Genehmigen</value>
   </data>
   <data name="ApprovalsView_Empty_Hint" xml:space="preserve">
-    <value>Sobald ein Agent eine bestätigungspflichtige Aktion ausführen möchte, erscheint sie hier.</value>
+    <value>Wenn ein Werkzeug auf „Bestätigen" steht, hält Whiskers die Ausführung hier an, bis eine berechtigte Person freigibt oder ablehnt — mit Akteur, Ziel, Parametern (Secrets redigiert) und Begründung.</value>
   </data>
   <data name="ApprovalsView_Empty_Title" xml:space="preserve">
     <value>Keine offenen Freigaben.</value>
@@ -3189,7 +3189,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Ressourcen &amp; Muster (Freitext)</value>
   </data>
   <data name="GuardrailsView_Intro" xml:space="preserve">
-    <value>Code-erzwungene, unumgängliche Sicherheits-Policy. Wird am Tool-Boundary durchgesetzt (nicht im Prompt). Lege mehrere Presets an und schalte das aktive um — der Agent benutzt immer das aktive Preset. Nur Admins.</value>
+    <value>Lege fest, was eine KI tun darf. Guardrails sind eine im Code erzwungene, unumgängliche Richtlinie am Werkzeug-Boundary (nicht im Prompt): sichere Aktionen erlauben, heikle per Freigabe („Bestätigen") absichern, Verbotenes blockieren. Presets anlegen und das aktive umschalten — der Agent nutzt immer das aktive Preset. Nur Admins.</value>
   </data>
   <data name="GuardrailsView_KillSwitch_Caption" xml:space="preserve">
     <value>Blockiert sofort alles oberhalb von „read" — egal welche andere Einstellung.</value>
@@ -4408,5 +4408,20 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="ApprovalsView_Rule" xml:space="preserve">
     <value>Regel: {0}</value>
+  </data>
+  <data name="AgentHistory_Empty_Body" xml:space="preserve">
+    <value>Jeder Werkzeug-Aufruf einer KI wird hier festgehalten — Werkzeug, Akteur, Guardrail-Entscheidung, Parameter (Secrets redigiert) und Ergebnis. Die lückenlose, manipulationssichere Aufzeichnung dessen, was ein Agent getan hat.</value>
+  </data>
+  <data name="AgentHistory_Empty_Title" xml:space="preserve">
+    <value>Noch keine Agenten-Aktivität</value>
+  </data>
+  <data name="ApprovalsView_Empty_GuardrailsLink" xml:space="preserve">
+    <value>Guardrails konfigurieren</value>
+  </data>
+  <data name="AuditLog_Empty_Body" xml:space="preserve">
+    <value>Benutzer-Aktionen in Whiskers werden hier festgehalten — wer wann was an welchem Ziel getan hat. Ergänzt die Agent-History, die KI-Aktionen aufzeichnet.</value>
+  </data>
+  <data name="AuditLog_Empty_Title" xml:space="preserve">
+    <value>Noch keine Audit-Einträge</value>
   </data>
 </root>

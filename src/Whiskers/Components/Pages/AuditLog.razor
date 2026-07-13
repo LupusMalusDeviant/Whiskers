@@ -93,6 +93,15 @@
             }
         </MudTd>
     </RowTemplate>
+    <NoRecordsContent>
+        <div style="text-align:center; padding:2rem 1rem;">
+            <MudIcon Icon="@Icons.Material.Filled.FactCheck" Size="Size.Large" Color="Color.Primary" Class="mb-2" />
+            <MudText Typo="Typo.body1">@L["AuditLog_Empty_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Style="max-width:520px; margin:0.25rem auto 0;">
+                @L["AuditLog_Empty_Body"]
+            </MudText>
+        </div>
+    </NoRecordsContent>
 </MudTable>
 
 @if (_totalCount > _pageSize)
