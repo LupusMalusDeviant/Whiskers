@@ -2556,7 +2556,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Approve</value>
   </data>
   <data name="ApprovalsView_Empty_Hint" xml:space="preserve">
-    <value>As soon as an agent wants to run an action that requires confirmation, it will appear here.</value>
+    <value>When a tool is set to Confirm, Whiskers pauses execution here until an authorized user approves or rejects it — showing the actor, target, parameters (secrets redacted) and rationale.</value>
   </data>
   <data name="ApprovalsView_Empty_Title" xml:space="preserve">
     <value>No pending approvals.</value>
@@ -3189,7 +3189,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Resources &amp; patterns (free text)</value>
   </data>
   <data name="GuardrailsView_Intro" xml:space="preserve">
-    <value>Code-enforced, non-bypassable security policy. Enforced at the tool boundary (not in the prompt). Create multiple presets and switch the active one — the agent always uses the active preset. Admins only.</value>
+    <value>Decide what an AI agent may do. Guardrails are a code-enforced, non-bypassable policy checked at the tool boundary (not in the prompt): allow safe actions, require human approval (Confirm) for sensitive ones, and block what the agent must never run. Create presets and switch the active one — the agent always uses the active preset. Admins only.</value>
   </data>
   <data name="GuardrailsView_KillSwitch_Caption" xml:space="preserve">
     <value>Immediately blocks everything above "read" — regardless of any other setting.</value>
@@ -4408,5 +4408,20 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="ApprovalsView_Rule" xml:space="preserve">
     <value>Rule: {0}</value>
+  </data>
+  <data name="AgentHistory_Empty_Body" xml:space="preserve">
+    <value>Every tool an AI agent runs is recorded here — the tool, the actor, the guardrail decision, the parameters (secrets redacted) and the result. It is the complete, tamper-evident record of what an agent did.</value>
+  </data>
+  <data name="AgentHistory_Empty_Title" xml:space="preserve">
+    <value>No agent activity yet</value>
+  </data>
+  <data name="ApprovalsView_Empty_GuardrailsLink" xml:space="preserve">
+    <value>Configure guardrails</value>
+  </data>
+  <data name="AuditLog_Empty_Body" xml:space="preserve">
+    <value>User actions in Whiskers are recorded here — who did what, to which target, and when. It complements the Agent History, which records what AI agents do.</value>
+  </data>
+  <data name="AuditLog_Empty_Title" xml:space="preserve">
+    <value>No audit entries yet</value>
   </data>
 </root>

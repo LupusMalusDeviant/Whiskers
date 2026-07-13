@@ -26,9 +26,11 @@
     <MudPaper Class="pa-8" Outlined="true" Style="text-align: center;">
         <MudIcon Icon="@Icons.Material.Filled.TaskAlt" Size="Size.Large" Color="Color.Success" Class="mb-2" />
         <MudText Typo="Typo.body1">@L["ApprovalsView_Empty_Title"]</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Style="max-width:560px; margin:0.25rem auto 0;">
             @L["ApprovalsView_Empty_Hint"]
         </MudText>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" Class="mt-2"
+                   StartIcon="@Icons.Material.Filled.Shield" Href="guardrails">@L["ApprovalsView_Empty_GuardrailsLink"]</MudButton>
     </MudPaper>
 }
 else
