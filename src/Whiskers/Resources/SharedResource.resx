@@ -4400,4 +4400,136 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Table_Tags" xml:space="preserve">
     <value>Group / Tags</value>
   </data>
+  <data name="AiOps_Activate_Button" xml:space="preserve">
+    <value>Activate</value>
+  </data>
+  <data name="AiOps_Active_Chip" xml:space="preserve">
+    <value>active</value>
+  </data>
+  <data name="AiOps_AdminOnly" xml:space="preserve">
+    <value>This guided setup is available to administrators. You can still read the governance pages (Guardrails, Approvals, Agent History) with your current role.</value>
+  </data>
+  <data name="AiOps_Copied" xml:space="preserve">
+    <value>Copied to clipboard.</value>
+  </data>
+  <data name="AiOps_CreateKey_Button" xml:space="preserve">
+    <value>Create read-only key</value>
+  </data>
+  <data name="AiOps_Footer_Note" xml:space="preserve">
+    <value>You can change the key permissions under Settings &gt; MCP and the active preset on the Guardrails page at any time.</value>
+  </data>
+  <data name="AiOps_Header_Subtitle" xml:space="preserve">
+    <value>Set up a governed AI agent in a few minutes</value>
+  </data>
+  <data name="AiOps_Header_Title" xml:space="preserve">
+    <value>Secure AI Operations</value>
+  </data>
+  <data name="AiOps_Intro" xml:space="preserve">
+    <value>Whiskers lets an AI agent operate your infrastructure without handing it a shell: it can only use explicit tools, gated by permissions, checked by code-enforced guardrails, and — for sensitive actions — held for your approval. Every step is recorded. This page walks you through a safe starting point. Everything here is optional and can be changed later.</value>
+  </data>
+  <data name="AiOps_KeyName" xml:space="preserve">
+    <value>AI operations onboarding</value>
+  </data>
+  <data name="AiOps_Key_Created" xml:space="preserve">
+    <value>Read-only MCP key created.</value>
+  </data>
+  <data name="AiOps_Key_ShownOnce" xml:space="preserve">
+    <value>Copy this key now — it is shown only once here. You can manage keys later under Settings &gt; MCP.</value>
+  </data>
+  <data name="AiOps_Link_Agent" xml:space="preserve">
+    <value>Open the agent</value>
+  </data>
+  <data name="AiOps_Link_Approvals" xml:space="preserve">
+    <value>Approvals</value>
+  </data>
+  <data name="AiOps_Link_History" xml:space="preserve">
+    <value>Agent History</value>
+  </data>
+  <data name="AiOps_Mode_External_Body" xml:space="preserve">
+    <value>Connect a client like Claude Code to the MCP endpoint using an API key.</value>
+  </data>
+  <data name="AiOps_Mode_External_Link" xml:space="preserve">
+    <value>Open MCP settings</value>
+  </data>
+  <data name="AiOps_Mode_External_Title" xml:space="preserve">
+    <value>External MCP client</value>
+  </data>
+  <data name="AiOps_Mode_InApp_Body" xml:space="preserve">
+    <value>Use the built-in agent — it advises, or acts within the same guardrails.</value>
+  </data>
+  <data name="AiOps_Mode_InApp_Link" xml:space="preserve">
+    <value>Open the agent</value>
+  </data>
+  <data name="AiOps_Mode_InApp_Title" xml:space="preserve">
+    <value>In-app advisor / agent</value>
+  </data>
+  <data name="AiOps_Mode_Skip_Body" xml:space="preserve">
+    <value>You can come back any time — nothing here is required to run Whiskers.</value>
+  </data>
+  <data name="AiOps_Mode_Skip_Title" xml:space="preserve">
+    <value>Skip for now</value>
+  </data>
+  <data name="AiOps_PageTitle" xml:space="preserve">
+    <value>Secure AI Operations - Whiskers</value>
+  </data>
+  <data name="AiOps_Preset_Activated" xml:space="preserve">
+    <value>Guardrail preset "{0}" is now active.</value>
+  </data>
+  <data name="AiOps_Preset_Approval_Desc" xml:space="preserve">
+    <value>The strictest starter: every write needs approval, admin/destructive tools blocked, and a small action budget per run.</value>
+  </data>
+  <data name="AiOps_Preset_Approval_Name" xml:space="preserve">
+    <value>Approval required</value>
+  </data>
+  <data name="AiOps_Preset_Observe_Desc" xml:space="preserve">
+    <value>The agent may read and analyze, but cannot change anything.</value>
+  </data>
+  <data name="AiOps_Preset_Observe_Name" xml:space="preserve">
+    <value>Observe only</value>
+  </data>
+  <data name="AiOps_Preset_Safe_Desc" xml:space="preserve">
+    <value>Reads run automatically; every write waits for your approval; admin and destructive tools are blocked.</value>
+  </data>
+  <data name="AiOps_Preset_Safe_Name" xml:space="preserve">
+    <value>Safe operations</value>
+  </data>
+  <data name="AiOps_Preview_ReadOnly" xml:space="preserve">
+    <value>Reads run · everything above read is blocked.</value>
+  </data>
+  <data name="AiOps_Preview_Standard" xml:space="preserve">
+    <value>Reads run automatically · writes require approval · {0} high-risk tools blocked · up to {1} actions per session.</value>
+  </data>
+  <data name="AiOps_Preview_Title" xml:space="preserve">
+    <value>Preview policy</value>
+  </data>
+  <data name="AiOps_Step1_Title" xml:space="preserve">
+    <value>Choose how AI connects</value>
+  </data>
+  <data name="AiOps_Step2_Body" xml:space="preserve">
+    <value>Start with a key that can only read. You can grant more later — least privilege first.</value>
+  </data>
+  <data name="AiOps_Step2_Title" xml:space="preserve">
+    <value>Create a read-only MCP key</value>
+  </data>
+  <data name="AiOps_Step3_Body" xml:space="preserve">
+    <value>Preview the exact policy before you activate it. Activating replaces this named preset and makes it active; your other presets are kept. Refine it any time on the Guardrails page.</value>
+  </data>
+  <data name="AiOps_Step3_Title" xml:space="preserve">
+    <value>Choose a starter guardrail preset</value>
+  </data>
+  <data name="AiOps_Step4_Body" xml:space="preserve">
+    <value>Ask the agent something read-only (e.g. list unhealthy containers). If it proposes a write, you will get an approval. Then check the Agent History for the full record.</value>
+  </data>
+  <data name="AiOps_Step4_Title" xml:space="preserve">
+    <value>Try it and verify</value>
+  </data>
+  <data name="Nav_AiOperations" xml:space="preserve">
+    <value>AI Operations</value>
+  </data>
+  <data name="ProductionReadinessPanel_AiOpsLink" xml:space="preserve">
+    <value>Set up secure AI operations</value>
+  </data>
+  <data name="Setup_Done_AiOps" xml:space="preserve">
+    <value>Tip: after signing in, open "AI Operations" to set up a governed AI agent — a read-only key and a safe guardrail preset in a couple of clicks.</value>
+  </data>
 </root>
