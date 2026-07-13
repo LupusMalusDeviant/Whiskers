@@ -4,6 +4,16 @@ All notable changes to Whiskers are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer
 (0.x = pre-1.0, minor bumps may contain breaking changes — noted explicitly).
 
+## [Unreleased]
+
+### Added
+- **Full English UI + in-app handbook.** Every page, notification and the handbook are localized;
+  English is the default and the app follows the browser language (switch anytime). The AI chat
+  now answers in the user's language.
+- **Keyless-signed release images (cosign / Sigstore).** Release images are signed with the release
+  workflow's GitHub OIDC identity and logged in Rekor — verify with `cosign verify` (see README →
+  Security → Supply chain). Complements the existing Trivy gate, SLSA provenance and SBOM.
+
 ## [0.12.1] — 2026-07-11
 
 Security hardening plus the features that landed right after the 0.12.0 tag was cut.

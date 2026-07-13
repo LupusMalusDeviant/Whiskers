@@ -148,7 +148,7 @@ The app listens on `127.0.0.1:5100` by default (`HOST_BIND` / `HOST_PORT`) and n
 
 ### First sign-in
 
-Three options: (1) **local login** — set `WHISKERS_ADMIN_EMAIL` + a `WHISKERS_ADMIN_PASSWORD_FILE` to seed a local admin account (email + password), no IdP required; (2) **Google** or **generic OIDC** (see [Configuration](#configuration)); or (3) for a localhost-only trial, `AUTH_DISABLED=true` (never on a public bind). A guided setup wizard (roadmap *outOfTheBox W1*) will make this fully interactive.
+On first launch a **guided setup wizard** in the browser creates the admin account — no `.env` and no config file required. From then on you sign in with that **local login** (email + password). Alternatives: seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`; use **Google** or **generic OIDC** (see [Configuration](#configuration)); or, for a localhost-only trial, `AUTH_DISABLED=true` (never on a public bind).
 
 ### Behind an Nginx reverse proxy
 
@@ -357,6 +357,24 @@ dotnet run --project src/Whiskers/Whiskers.csproj
 - Secrets live in `.env` and `/app/data` (both gitignored / volume-mounted), never in the image or repository.
 - MCP access is gated by per-key Read/Write/Admin permissions; the acting agent is bounded by code-enforced guardrails.
 - **Full-repo security review & remediation** (see the [security-fixes changelog](docs/reviews/2026-07-07-security-fixes-changelog.md)): all critical and high findings, plus most medium/low issues and performance optimizations, are fixed — e.g. per-key RBAC enforced on **every** path (including the agent and MCP), the secret vault moved to **AES-256-GCM + PBKDF2** with transparent migration, schema managed by **EF Core migrations**, trust-critical images **pinned by digest**, forwarded-header trust restricted, and the Prometheus `/metrics` endpoint gated behind a scrape token.
+
+### Supply chain
+
+Every published release image is, from **v0.12.1** on:
+
+- **scanned before it ships** — the release pipeline builds the image, runs a Trivy scan, and **fails the whole run on any CRITICAL** so a vulnerable image is never pushed;
+- **built multi-arch with provenance + an SBOM attestation** (SLSA provenance and an SPDX SBOM are attached to the image, and a standalone SBOM is a release asset);
+- **keyless-signed with [cosign](https://github.com/sigstore/cosign)** (Sigstore) — the signature is bound to the release workflow's GitHub OIDC identity and recorded in the public Rekor transparency log; no signing key is held by anyone.
+
+Verify the signature before you run it:
+
+```bash
+cosign verify ghcr.io/lupusmalusdeviant/whiskers:0.12.1 \
+  --certificate-identity-regexp '^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+A valid result means the image was built by this repository's release workflow from a tag — not rebuilt or tampered with. (Images published before v0.12.1 are provenance-attested but not cosign-signed.)
 
 If you discover a security issue, please report it privately, see [SECURITY.md](SECURITY.md).
 
