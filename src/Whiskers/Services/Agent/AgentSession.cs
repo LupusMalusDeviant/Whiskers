@@ -146,7 +146,7 @@ public sealed class AgentSession : IAgentSession
                     bool? approved;
                     try
                     {
-                        yield return new AgentEvent.ConfirmationRequired(call, decision.Reason);
+                        yield return new AgentEvent.ConfirmationRequired(call, decision.Reason, decision);
                         try { approved = await tcs.Task.WaitAsync(ct); }
                         catch (OperationCanceledException) { approved = null; }
                     }

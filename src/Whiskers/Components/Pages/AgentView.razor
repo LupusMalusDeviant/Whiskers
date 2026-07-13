@@ -388,7 +388,7 @@
                         // Register centrally so the bell + "Freigaben" page can also decide.
                         if (_session is not null && _context is not null)
                         {
-                            var approval = await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason);
+                            var approval = await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason, c.Decision);
                             _pendingApprovalId = approval.Id;
                         }
                         break;

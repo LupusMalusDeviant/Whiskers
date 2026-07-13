@@ -51,7 +51,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (!_registry.Tools.TryGetValue(call.Name, out var entry))
         {
             var unknown = new GuardrailDecision(GuardrailVerdict.Deny, "Tool not in the registry.", Array.Empty<string>());
-            await RecordAsync(call.Name, "?", actor, actorType, call.ArgumentsJson, unknown, sw, false, null, "Unknown tool");
+            await RecordAsync(call.Name, "?", actor, actorType, call.ArgumentsJson, unknown, sw, false, null, "Unknown tool", call.CorrelationId);
             return Error(call.Id, $"Unknown tool '{call.Name}'.", unknown);
         }
 
@@ -62,7 +62,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (decision.Verdict == GuardrailVerdict.Deny)
         {
             _logger?.LogWarning("Agent-Tool '{Tool}' blockiert: {Reason}", entry.Name, decision.Reason);
-            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, decision.Reason);
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, decision.Reason, call.CorrelationId);
             return Error(call.Id, $"Blocked by guardrails: {decision.Reason}", decision);
         }
 
@@ -71,7 +71,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             var output = await ExecuteAsync(entry, args, context);
             if (output.Length > MaxOutputChars)
                 output = output[..MaxOutputChars] + $"\n… [truncated, {output.Length - MaxOutputChars} more characters]";
-            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null);
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null, call.CorrelationId);
             return new AgentToolResult(call.Id, output, false, decision);
         }
         catch (TargetInvocationException tie) when (tie.InnerException is not null)
@@ -79,13 +79,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             // Reflection wraps the tool's real exception — surface the inner message, not the wrapper's.
             var inner = tie.InnerException;
             _logger?.LogError(inner, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
-            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, inner.Message);
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, inner.Message, call.CorrelationId);
             return Error(call.Id, $"Error in '{entry.Name}': {inner.Message}", decision);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
-            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, ex.Message);
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, null, ex.Message, call.CorrelationId);
             return Error(call.Id, $"Error in '{entry.Name}': {ex.Message}", decision);
         }
     }
@@ -107,7 +107,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     /// <summary>Records the tool call for the Agent-History/observability log (secrets redacted).</summary>
     private async Task RecordAsync(
         string tool, string level, string actor, string actorType, string? rawArgs,
-        GuardrailDecision decision, Stopwatch sw, bool success, string? output, string? error)
+        GuardrailDecision decision, Stopwatch sw, bool success, string? output, string? error,
+        string? correlationId)
     {
         if (_callLog is null) return;
         sw.Stop();
@@ -120,6 +121,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 ActorType = actorType,
                 ToolName = tool,
                 Level = level,
+                CorrelationId = correlationId,
                 ParamsJson = Cap(SecretRedactor.Redact(rawArgs), 4000),
                 Verdict = decision.Verdict.ToString().ToLowerInvariant(),
                 Success = success,

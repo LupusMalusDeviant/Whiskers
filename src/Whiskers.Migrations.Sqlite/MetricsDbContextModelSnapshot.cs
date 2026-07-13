@@ -173,6 +173,9 @@ namespace Whiskers.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("DurationMs")
                         .HasColumnType("INTEGER");
 

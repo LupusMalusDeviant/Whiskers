@@ -265,7 +265,7 @@
                     _pendingConfirm = c;
                     _pendingReason = c.Reason;
                     if (_session is not null && _context is not null)
-                        _pendingApprovalId = (await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason)).Id;
+                        _pendingApprovalId = (await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason, c.Decision)).Id;
                     StateHasChanged();
                     await ScrollToBottom();
                     break;

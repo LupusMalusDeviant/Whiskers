@@ -4400,4 +4400,13 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Table_Tags" xml:space="preserve">
     <value>Group / Tags</value>
   </data>
+  <data name="AgentCallDetailDialog_Field_Correlation" xml:space="preserve">
+    <value>Correlation</value>
+  </data>
+  <data name="ApprovalsView_Risk" xml:space="preserve">
+    <value>Risk: {0}</value>
+  </data>
+  <data name="ApprovalsView_Rule" xml:space="preserve">
+    <value>Rule: {0}</value>
+  </data>
 </root>

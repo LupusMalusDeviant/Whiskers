@@ -17,6 +17,12 @@ public class McpToolCallEntity
     /// <summary>Required permission level of the tool: read | write | admin.</summary>
     public string Level { get; set; } = "read";
 
+    /// <summary>Stable per-tool-call correlation id (WP-05): ties this recorded call to its guardrail
+    /// decision, approval (if any), execution result and the raised notification, so the full
+    /// Observe → Propose → Check → Approve → Execute → Verify → Audit chain can be followed by one id.
+    /// Null for direct external MCP calls that never ran through the in-process agent loop.</summary>
+    public string? CorrelationId { get; set; }
+
     /// <summary>The tool arguments as JSON, secrets redacted.</summary>
     public string? ParamsJson { get; set; }
 

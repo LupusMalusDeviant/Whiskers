@@ -4400,4 +4400,13 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Table_Tags" xml:space="preserve">
     <value>Gruppe / Tags</value>
   </data>
+  <data name="AgentCallDetailDialog_Field_Correlation" xml:space="preserve">
+    <value>Korrelation</value>
+  </data>
+  <data name="ApprovalsView_Risk" xml:space="preserve">
+    <value>Risiko: {0}</value>
+  </data>
+  <data name="ApprovalsView_Rule" xml:space="preserve">
+    <value>Regel: {0}</value>
+  </data>
 </root>
