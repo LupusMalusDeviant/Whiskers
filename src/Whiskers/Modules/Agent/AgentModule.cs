@@ -34,7 +34,9 @@ public sealed class AgentModule : IWhiskersModule
     // "agent-history" stays in Core — it is MCP-call observability, not the acting agent.
     public IReadOnlyList<NavItem> NavItems { get; } = new[]
     {
-        new NavItem("agent",       "Nav_Agent",      Icons.Material.Filled.SmartToy,  "Automatisierung", AppRole.Viewer, 340),
+        new NavItem("agent",         "Nav_Agent",         Icons.Material.Filled.SmartToy,   "Automatisierung", AppRole.Viewer, 340),
+        // WP-06: guided "Secure AI Operations" onboarding — admin-only (it can create a key + activate a preset).
+        new NavItem("ai-operations", "Nav_AiOperations",  Icons.Material.Filled.Rocket,     "Automatisierung", AppRole.Admin,  345),
         new NavItem("guardrails",  "Nav_Guardrails", Icons.Material.Filled.Shield,    "Automatisierung", AppRole.Viewer, 350),
         new NavItem("approvals",   "Nav_Approvals",  Icons.Material.Filled.Approval,  "Automatisierung", AppRole.Viewer, 360),
         new NavItem("ai-triggers", "Nav_AiTriggers", Icons.Material.Filled.Bolt,      "Automatisierung", AppRole.Viewer, 370),

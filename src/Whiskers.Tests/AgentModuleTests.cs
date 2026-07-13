@@ -32,10 +32,10 @@ public class AgentModuleTests
     }
 
     [Fact]
-    public void Contributes_the_four_automation_nav_entries()
+    public void Contributes_the_automation_nav_entries()
     {
         var nav = new AgentModule().NavItems;
-        Assert.Equal(new[] { "agent", "guardrails", "approvals", "ai-triggers" }, nav.Select(n => n.Href).ToArray());
+        Assert.Equal(new[] { "agent", "ai-operations", "guardrails", "approvals", "ai-triggers" }, nav.Select(n => n.Href).ToArray());
         Assert.All(nav, n => Assert.Equal("Automatisierung", n.Group));
     }
 

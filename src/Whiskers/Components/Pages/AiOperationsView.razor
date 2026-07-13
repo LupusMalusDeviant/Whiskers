@@ -1,0 +1,197 @@
+@page "/ai-operations"
+@attribute [Authorize]
+@using Whiskers.Configuration
+@using Whiskers.Models
+@using Whiskers.Models.Agent
+@inject Whiskers.Services.Mcp.IMcpPermissionService Mcp
+@inject Whiskers.Services.Agent.Guardrails.IGuardrailStore GuardrailStore
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
+@inject IJSRuntime JS
+
+<PageTitle>@L["AiOps_PageTitle"]</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon"><MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Large" /></div>
+        <div>
+            <MudText Typo="Typo.h5">@L["AiOps_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["AiOps_Header_Subtitle"]</MudText>
+        </div>
+    </MudStack>
+</div>
+
+@if (!_isAdmin)
+{
+    <MudAlert Severity="Severity.Info">@L["AiOps_AdminOnly"]</MudAlert>
+}
+else
+{
+    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4" Style="max-width:760px;">@L["AiOps_Intro"]</MudText>
+
+    @* Step 1 — how AI connects (guidance + links; no mutation) *@
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="mb-2"><b>1.</b> @L["AiOps_Step1_Title"]</MudText>
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudPaper Class="pa-3" Outlined="true" Style="height:100%;">
+                    <MudText Typo="Typo.subtitle2">@L["AiOps_Mode_External_Title"]</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AiOps_Mode_External_Body"]</MudText>
+                    <div class="mt-2"><MudLink Href="settings">@L["AiOps_Mode_External_Link"]</MudLink></div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudPaper Class="pa-3" Outlined="true" Style="height:100%;">
+                    <MudText Typo="Typo.subtitle2">@L["AiOps_Mode_InApp_Title"]</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AiOps_Mode_InApp_Body"]</MudText>
+                    <div class="mt-2"><MudLink Href="agent">@L["AiOps_Mode_InApp_Link"]</MudLink></div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudPaper Class="pa-3" Outlined="true" Style="height:100%;">
+                    <MudText Typo="Typo.subtitle2">@L["AiOps_Mode_Skip_Title"]</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AiOps_Mode_Skip_Body"]</MudText>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @* Step 2 — read-only MCP key (reuses AddApiKeyAsync; one-time display) *@
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="mb-2"><b>2.</b> @L["AiOps_Step2_Title"]</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@L["AiOps_Step2_Body"]</MudText>
+        @if (_mcpKey is null)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Key"
+                       Disabled="@_busy" OnClick="CreateKey">@L["AiOps_CreateKey_Button"]</MudButton>
+        }
+        else
+        {
+            <MudTextField T="string" Value="_mcpKey" ReadOnly="true" Variant="Variant.Outlined"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.ContentCopy"
+                          OnAdornmentClick="@(() => Copy(_mcpKey!))" Class="mb-1" />
+            <MudAlert Severity="Severity.Warning" Dense="true">@L["AiOps_Key_ShownOnce"]</MudAlert>
+        }
+    </MudPaper>
+
+    @* Step 3 — starter guardrail preset (full policy preview before activation) *@
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="mb-2"><b>3.</b> @L["AiOps_Step3_Title"]</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@L["AiOps_Step3_Body"]</MudText>
+        <MudGrid>
+            @foreach (var (name, displayName, desc) in _presetCards)
+            {
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="pa-3" Outlined="true" Style="height:100%;"
+                              Class:sw-active="@(_activePreset == name)">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-1">
+                            <MudText Typo="Typo.subtitle2">@displayName</MudText>
+                            @if (_activePreset == name)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">@L["AiOps_Active_Chip"]</MudChip>
+                            }
+                        </MudStack>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@desc</MudText>
+                        <MudExpansionPanels Elevation="0" Class="my-2">
+                            <MudExpansionPanel Text="@L["AiOps_Preview_Title"].Value" Dense="true">
+                                <MudText Typo="Typo.caption" Style="white-space:pre-line;">@Preview(name)</MudText>
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                                   Disabled="@(_busy || _activePreset == name)"
+                                   OnClick="@(() => ActivatePreset(name))">@L["AiOps_Activate_Button"]</MudButton>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudPaper>
+
+    @* Step 4 — try it & verify (links to the live governance surfaces) *@
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="mb-2"><b>4.</b> @L["AiOps_Step4_Title"]</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@L["AiOps_Step4_Body"]</MudText>
+        <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.SmartToy" Href="agent">@L["AiOps_Link_Agent"]</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Approval" Href="approvals">@L["AiOps_Link_Approvals"]</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Policy" Href="agent-history">@L["AiOps_Link_History"]</MudButton>
+        </MudStack>
+    </MudPaper>
+
+    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AiOps_Footer_Note"]</MudText>
+}
+
+<style>.sw-active { border-color: var(--mud-palette-success) !important; }</style>
+
+@code {
+    private bool _isAdmin;
+    private bool _busy;
+    private string? _mcpKey;
+    private string? _activePreset;
+
+    private (string name, string display, string desc)[] _presetCards = Array.Empty<(string, string, string)>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+        _activePreset = GuardrailStore.Config.ActivePreset;
+        _presetCards = new[]
+        {
+            (AiOperationsPresets.ObserveOnly,      L["AiOps_Preset_Observe_Name"].Value,  L["AiOps_Preset_Observe_Desc"].Value),
+            (AiOperationsPresets.SafeOperations,   L["AiOps_Preset_Safe_Name"].Value,     L["AiOps_Preset_Safe_Desc"].Value),
+            (AiOperationsPresets.ApprovalRequired, L["AiOps_Preset_Approval_Name"].Value, L["AiOps_Preset_Approval_Desc"].Value),
+        };
+    }
+
+    private async Task CreateKey()
+    {
+        if (!_isAdmin) return;
+        _busy = true;
+        try
+        {
+            var cfg = await Mcp.AddApiKeyAsync(L["AiOps_KeyName"].Value, McpPermissionLevels.Read);
+            _mcpKey = cfg.Key;   // shown once here; not re-displayed after leaving
+            Snackbar.Add(L["AiOps_Key_Created"].Value, Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ActivatePreset(string name)
+    {
+        if (!_isAdmin) return;
+        _busy = true;
+        try
+        {
+            // Preserve the operator's other presets; replace/add this starter and make it active.
+            var cfg = GuardrailStore.Config;
+            var presets = cfg.Presets.Where(p => p.Name != name).ToList();
+            presets.Add(new GuardrailPreset { Name = name, Policy = AiOperationsPresets.PolicyFor(name) });
+            await GuardrailStore.SaveConfigAsync(
+                new GuardrailConfig { ActivePreset = name, Presets = presets },
+                await BuildPrincipalAsync());
+            _activePreset = name;
+            Snackbar.Add(L["AiOps_Preset_Activated", name].Value, Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private string Preview(string name)
+    {
+        var p = AiOperationsPresets.PolicyFor(name);
+        if (p.ReadOnlyMode)
+            return L["AiOps_Preview_ReadOnly"].Value;
+        return L["AiOps_Preview_Standard", p.ToolDenyList.Count, p.MaxActionsPerSession].Value;
+    }
+
+    private async Task Copy(string text)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); Snackbar.Add(L["AiOps_Copied"].Value, Severity.Info); }
+        catch { /* clipboard may be unavailable */ }
+    }
+
+    private async Task<AgentPrincipal> BuildPrincipalAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
+        return new AgentPrincipal(AgentPrincipalKind.WebUser, email, McpPermissionLevels.Admin, null, UserEmail: email);
+    }
+}

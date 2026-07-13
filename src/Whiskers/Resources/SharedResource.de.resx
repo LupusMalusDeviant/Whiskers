@@ -4424,4 +4424,136 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AuditLog_Empty_Title" xml:space="preserve">
     <value>Noch keine Audit-Einträge</value>
   </data>
+  <data name="AiOps_Activate_Button" xml:space="preserve">
+    <value>Aktivieren</value>
+  </data>
+  <data name="AiOps_Active_Chip" xml:space="preserve">
+    <value>aktiv</value>
+  </data>
+  <data name="AiOps_AdminOnly" xml:space="preserve">
+    <value>Diese geführte Einrichtung ist Administratoren vorbehalten. Die Governance-Seiten (Guardrails, Freigaben, Agent-History) kannst du mit deiner Rolle trotzdem ansehen.</value>
+  </data>
+  <data name="AiOps_Copied" xml:space="preserve">
+    <value>In die Zwischenablage kopiert.</value>
+  </data>
+  <data name="AiOps_CreateKey_Button" xml:space="preserve">
+    <value>Read-only-Key erstellen</value>
+  </data>
+  <data name="AiOps_Footer_Note" xml:space="preserve">
+    <value>Key-Berechtigungen änderst du jederzeit unter Einstellungen &gt; MCP, das aktive Preset auf der Guardrails-Seite.</value>
+  </data>
+  <data name="AiOps_Header_Subtitle" xml:space="preserve">
+    <value>Einen kontrollierten KI-Agenten in wenigen Minuten einrichten</value>
+  </data>
+  <data name="AiOps_Header_Title" xml:space="preserve">
+    <value>Sicherer KI-Betrieb</value>
+  </data>
+  <data name="AiOps_Intro" xml:space="preserve">
+    <value>Mit Whiskers kann ein KI-Agent deine Infrastruktur bedienen, ohne eine Shell zu bekommen: Er nutzt nur explizite Werkzeuge, begrenzt durch Berechtigungen, geprüft durch im Code erzwungene Guardrails und — bei heiklen Aktionen — zurückgehalten für deine Freigabe. Jeder Schritt wird protokolliert. Diese Seite führt dich zu einem sicheren Startpunkt. Alles hier ist optional und später änderbar.</value>
+  </data>
+  <data name="AiOps_KeyName" xml:space="preserve">
+    <value>KI-Betrieb-Onboarding</value>
+  </data>
+  <data name="AiOps_Key_Created" xml:space="preserve">
+    <value>Read-only-MCP-Key erstellt.</value>
+  </data>
+  <data name="AiOps_Key_ShownOnce" xml:space="preserve">
+    <value>Kopiere diesen Key jetzt — er wird hier nur einmal angezeigt. Keys verwaltest du später unter Einstellungen &gt; MCP.</value>
+  </data>
+  <data name="AiOps_Link_Agent" xml:space="preserve">
+    <value>Agent öffnen</value>
+  </data>
+  <data name="AiOps_Link_Approvals" xml:space="preserve">
+    <value>Freigaben</value>
+  </data>
+  <data name="AiOps_Link_History" xml:space="preserve">
+    <value>Agent-History</value>
+  </data>
+  <data name="AiOps_Mode_External_Body" xml:space="preserve">
+    <value>Einen Client wie Claude Code per API-Key an den MCP-Endpunkt anbinden.</value>
+  </data>
+  <data name="AiOps_Mode_External_Link" xml:space="preserve">
+    <value>MCP-Einstellungen öffnen</value>
+  </data>
+  <data name="AiOps_Mode_External_Title" xml:space="preserve">
+    <value>Externer MCP-Client</value>
+  </data>
+  <data name="AiOps_Mode_InApp_Body" xml:space="preserve">
+    <value>Den eingebauten Agenten nutzen — er berät oder handelt innerhalb derselben Guardrails.</value>
+  </data>
+  <data name="AiOps_Mode_InApp_Link" xml:space="preserve">
+    <value>Agent öffnen</value>
+  </data>
+  <data name="AiOps_Mode_InApp_Title" xml:space="preserve">
+    <value>In-App-Berater / -Agent</value>
+  </data>
+  <data name="AiOps_Mode_Skip_Body" xml:space="preserve">
+    <value>Du kannst jederzeit zurückkehren — nichts davon ist für den Betrieb von Whiskers nötig.</value>
+  </data>
+  <data name="AiOps_Mode_Skip_Title" xml:space="preserve">
+    <value>Vorerst überspringen</value>
+  </data>
+  <data name="AiOps_PageTitle" xml:space="preserve">
+    <value>Sicherer KI-Betrieb - Whiskers</value>
+  </data>
+  <data name="AiOps_Preset_Activated" xml:space="preserve">
+    <value>Guardrail-Preset „{0}" ist jetzt aktiv.</value>
+  </data>
+  <data name="AiOps_Preset_Approval_Desc" xml:space="preserve">
+    <value>Der strengste Start: jeder Schreibzugriff braucht Freigabe, Admin-/destruktive Werkzeuge blockiert, kleines Aktions-Budget pro Lauf.</value>
+  </data>
+  <data name="AiOps_Preset_Approval_Name" xml:space="preserve">
+    <value>Freigabe erforderlich</value>
+  </data>
+  <data name="AiOps_Preset_Observe_Desc" xml:space="preserve">
+    <value>Der Agent darf lesen und analysieren, aber nichts verändern.</value>
+  </data>
+  <data name="AiOps_Preset_Observe_Name" xml:space="preserve">
+    <value>Nur beobachten</value>
+  </data>
+  <data name="AiOps_Preset_Safe_Desc" xml:space="preserve">
+    <value>Lesezugriffe laufen automatisch; jeder Schreibzugriff wartet auf deine Freigabe; Admin- und destruktive Werkzeuge sind blockiert.</value>
+  </data>
+  <data name="AiOps_Preset_Safe_Name" xml:space="preserve">
+    <value>Sichere Operationen</value>
+  </data>
+  <data name="AiOps_Preview_ReadOnly" xml:space="preserve">
+    <value>Lesezugriffe laufen · alles über Lesen ist blockiert.</value>
+  </data>
+  <data name="AiOps_Preview_Standard" xml:space="preserve">
+    <value>Lesezugriffe laufen automatisch · Schreibzugriffe brauchen Freigabe · {0} risikoreiche Werkzeuge blockiert · bis zu {1} Aktionen pro Sitzung.</value>
+  </data>
+  <data name="AiOps_Preview_Title" xml:space="preserve">
+    <value>Richtlinie ansehen</value>
+  </data>
+  <data name="AiOps_Step1_Title" xml:space="preserve">
+    <value>Wählen, wie die KI sich verbindet</value>
+  </data>
+  <data name="AiOps_Step2_Body" xml:space="preserve">
+    <value>Beginne mit einem Key, der nur lesen darf. Mehr kannst du später vergeben — erst wenig Rechte.</value>
+  </data>
+  <data name="AiOps_Step2_Title" xml:space="preserve">
+    <value>Einen Read-only-MCP-Key erstellen</value>
+  </data>
+  <data name="AiOps_Step3_Body" xml:space="preserve">
+    <value>Sieh dir die genaue Richtlinie an, bevor du sie aktivierst. Aktivieren ersetzt dieses benannte Preset und macht es aktiv; deine anderen Presets bleiben erhalten. Verfeinern kannst du es jederzeit auf der Guardrails-Seite.</value>
+  </data>
+  <data name="AiOps_Step3_Title" xml:space="preserve">
+    <value>Ein Start-Guardrail-Preset wählen</value>
+  </data>
+  <data name="AiOps_Step4_Body" xml:space="preserve">
+    <value>Frag den Agenten etwas Lesendes (z. B. ungesunde Container auflisten). Schlägt er einen Schreibzugriff vor, bekommst du eine Freigabe. Prüfe danach die Agent-History für die lückenlose Aufzeichnung.</value>
+  </data>
+  <data name="AiOps_Step4_Title" xml:space="preserve">
+    <value>Ausprobieren und prüfen</value>
+  </data>
+  <data name="Nav_AiOperations" xml:space="preserve">
+    <value>KI-Betrieb</value>
+  </data>
+  <data name="ProductionReadinessPanel_AiOpsLink" xml:space="preserve">
+    <value>Sicheren KI-Betrieb einrichten</value>
+  </data>
+  <data name="Setup_Done_AiOps" xml:space="preserve">
+    <value>Tipp: Nach dem Anmelden „KI-Betrieb" öffnen, um einen kontrollierten KI-Agenten einzurichten — Read-only-Key und sicheres Guardrail-Preset mit wenigen Klicks.</value>
+  </data>
 </root>

@@ -77,6 +77,7 @@ else
 {
     <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Done_Title"]</MudText>
     <MudText Typo="Typo.body2" Class="mb-3">@L["Setup_Done_Body"]</MudText>
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.Rocket">@L["Setup_Done_AiOps"]</MudAlert>
     @if (_error != null) { <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert> }
     <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="_busy" OnClick="CompleteAsync">
         @L["Setup_Done_Complete"]
