@@ -10,6 +10,9 @@ All notable changes to Whiskers are documented here. The format follows
 - **Full English UI + in-app handbook.** Every page, notification and the handbook are localized;
   English is the default and the app follows the browser language (switch anytime). The AI chat
   now answers in the user's language.
+- **Server groups & tags.** Give each server an optional group and free-form tags; the dashboard
+  gains a group/tag filter and the `list_servers` MCP tool takes an optional `tag` filter — quick
+  ways to narrow a larger fleet.
 - **Keyless-signed release images (cosign / Sigstore).** Release images are signed with the release
   workflow's GitHub OIDC identity and logged in Rekor — verify with `cosign verify` (see README →
   Security → Supply chain). Complements the existing Trivy gate, SLSA provenance and SBOM.

@@ -4379,4 +4379,25 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="WebhooksView_Tooltip_SendSignedTest" xml:space="preserve">
     <value>Signierten Test senden</value>
   </data>
+  <data name="Dashboard_Filter_All" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="Dashboard_Filter_Label" xml:space="preserve">
+    <value>Filter</value>
+  </data>
+  <data name="Servers_Field_Group" xml:space="preserve">
+    <value>Gruppe</value>
+  </data>
+  <data name="Servers_Field_Group_Help" xml:space="preserve">
+    <value>Optional — gruppiert Server auf dem Dashboard.</value>
+  </data>
+  <data name="Servers_Field_Tags" xml:space="preserve">
+    <value>Tags</value>
+  </data>
+  <data name="Servers_Field_Tags_Help" xml:space="preserve">
+    <value>Kommagetrennt, z. B. prod, eu, database.</value>
+  </data>
+  <data name="Servers_Table_Tags" xml:space="preserve">
+    <value>Gruppe / Tags</value>
+  </data>
 </root>

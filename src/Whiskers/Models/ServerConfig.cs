@@ -89,6 +89,12 @@ public class ServerConfig
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; } = true;
 
+    // Organization (F9): a single optional Group (dashboard heading / filter) and free-form Tags.
+    // Both are purely for the operator's own filtering across a larger fleet; they carry no
+    // connection semantics. Persisted in servers.json; empty/null = ungrouped / untagged.
+    public string? Group { get; set; }
+    public List<string> Tags { get; set; } = new();
+
     // Copy for the edit-form dialog. MemberwiseClone (instead of a hand-listed `new ServerConfig
     // { ... }`) guarantees that newly-added fields can never be silently dropped when a server is
     // edited and saved; the only reference-typed member (KubeNamespaces) is deep-copied so the
@@ -97,6 +103,7 @@ public class ServerConfig
     {
         var copy = (ServerConfig)MemberwiseClone();
         copy.KubeNamespaces = new List<string>(KubeNamespaces);
+        copy.Tags = new List<string>(Tags);
         return copy;
     }
 }

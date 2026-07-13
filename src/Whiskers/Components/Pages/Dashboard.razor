@@ -124,8 +124,25 @@
     </MudPaper>
 }
 
+@* F9: group/tag filter — only shown once at least one server carries a group or tag. *@
+@if (_allTags.Any())
+{
+    <div class="mb-3" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <MudIcon Icon="@Icons.Material.Filled.FilterList" Size="Size.Small" Title="@L["Dashboard_Filter_Label"]" />
+        <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                 Variant="@(_filterTag == null ? Variant.Filled : Variant.Outlined)"
+                 OnClick="@(() => SetFilter(null))">@L["Dashboard_Filter_All"]</MudChip>
+        @foreach (var t in _allTags)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Default"
+                     Variant="@(string.Equals(_filterTag, t, StringComparison.OrdinalIgnoreCase) ? Variant.Filled : Variant.Outlined)"
+                     OnClick="@(() => SetFilter(t))">@t</MudChip>
+        }
+    </div>
+}
+
 @* Grouped Container Tables *@
-@foreach (var serverGroup in _grouped)
+@foreach (var serverGroup in VisibleGroups)
 {
     <div class="sw-server-header">
         <MudIconButton Icon="@(_expandedServers.Contains(serverGroup.ServerId) ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
@@ -414,6 +431,20 @@
     // update, so the name is the stable key). Populated each refresh; drives the per-row rollback button.
     private Dictionary<string, Whiskers.Models.UpdateRollbackEntity> _rollbacks = new();
     private List<ServerGroupViewModel> _grouped = new();
+
+    // F9 dashboard filter: the currently-selected group/tag (null = show all). The chip set is the
+    // union of every group name and tag across the fleet; a server matches if its Group equals the
+    // selection or one of its Tags does (case-insensitive).
+    private string? _filterTag;
+    private IEnumerable<string> _allTags => _grouped
+        .SelectMany(g => (g.Group is { Length: > 0 } grp ? new[] { grp } : Array.Empty<string>()).Concat(g.Tags))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+    private IEnumerable<ServerGroupViewModel> VisibleGroups => _filterTag == null
+        ? _grouped
+        : _grouped.Where(g => string.Equals(g.Group, _filterTag, StringComparison.OrdinalIgnoreCase)
+                              || g.Tags.Any(t => string.Equals(t, _filterTag, StringComparison.OrdinalIgnoreCase)));
+    private void SetFilter(string? tag) => _filterTag = tag;
     private Dictionary<string, ServerSystemInfo> _serverInfos = new();
     private HashSet<string> _expandedServers = new();
     private Dictionary<string, List<MetricPoint>> _serverCpuHistory = new();
@@ -613,10 +644,13 @@
                 var name = _serverInfos.TryGetValue(id, out var si) && !string.IsNullOrEmpty(si.ServerName)
                     ? si.ServerName
                     : list.FirstOrDefault()?.ServerName ?? id;
+                var cfg = ServerConfigService.GetServer(id);
                 return new ServerGroupViewModel
                 {
                     ServerId = id,
                     ServerName = name,
+                    Group = cfg?.Group,
+                    Tags = cfg?.Tags ?? new List<string>(),
                     Projects = list
                         .GroupBy(c => c.ComposeProject)
                         .OrderBy(g => g.Key)
@@ -886,6 +920,8 @@
     {
         public string ServerId { get; set; } = string.Empty;
         public string ServerName { get; set; } = string.Empty;
+        public string? Group { get; set; }
+        public List<string> Tags { get; set; } = new();
         public List<ProjectGroupViewModel> Projects { get; set; } = new();
     }
 

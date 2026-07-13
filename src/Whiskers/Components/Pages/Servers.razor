@@ -38,6 +38,7 @@
         <MudTh>@L["Servers_Table_Name"]</MudTh>
         <MudTh>@L["Servers_Table_Host"]</MudTh>
         <MudTh>@L["Servers_Table_Type"]</MudTh>
+        <MudTh>@L["Servers_Table_Tags"]</MudTh>
         <MudTh>@L["Servers_Table_Status"]</MudTh>
         <MudTh>@L["Servers_Table_Actions"]</MudTh>
     </HeaderContent>
@@ -68,6 +69,17 @@
                      Color="@(context.ConnectionType == Whiskers.Models.ConnectionType.SSH ? Color.Warning : context.ConnectionType == Whiskers.Models.ConnectionType.TCP ? Color.Info : Color.Success)">
                 @context.ConnectionType
             </MudChip>
+        </MudTd>
+        <MudTd>
+            @if (!string.IsNullOrEmpty(context.Group))
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Filled" Class="mr-1"
+                         Icon="@Icons.Material.Filled.Folder">@context.Group</MudChip>
+            }
+            @foreach (var tag in context.Tags)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Class="mr-1">@tag</MudChip>
+            }
         </MudTd>
         <MudTd>
             @if (_testResults.TryGetValue(context.Id, out var result))
@@ -113,6 +125,10 @@
         <TitleContent>@(_editingServer == null ? L["Servers_Dialog_TitleAdd"].Value : L["Servers_Dialog_TitleEdit"].Value)</TitleContent>
         <DialogContent>
             <MudTextField @bind-Value="_form.Name" Label="@L["Servers_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
+            <MudTextField @bind-Value="_form.Group" Label="@L["Servers_Field_Group"]" Variant="Variant.Outlined" Class="mb-3"
+                          HelperText="@L["Servers_Field_Group_Help"]" />
+            <MudTextField @bind-Value="_tagsCsv" Label="@L["Servers_Field_Tags"]" Variant="Variant.Outlined" Class="mb-3"
+                          HelperText="@L["Servers_Field_Tags_Help"]" />
             <MudSelect @bind-Value="_form.ConnectionType" Label="@L["Servers_Field_ConnectionType"]" Variant="Variant.Outlined" Class="mb-3">
                 <MudSelectItem Value="Whiskers.Models.ConnectionType.TCP">@L["Servers_ConnType_Tcp"]</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ConnectionType.SSH">@L["Servers_ConnType_Ssh"]</MudSelectItem>
@@ -291,6 +307,7 @@
     // in the form/servers.json; namespaces are edited as a comma-separated string.
     private string _kubeconfigYaml = "";
     private string _kubeNamespacesCsv = "";
+    private string _tagsCsv = "";
     private HashSet<string> _testing = new();
     private Dictionary<string, TestResult> _testResults = new();
 
@@ -342,6 +359,7 @@
         _hasCloudKey = false;
         _kubeconfigYaml = "";
         _kubeNamespacesCsv = "";
+        _tagsCsv = "";
         _connectError = null;
         _useSshPassword = false;
         _showDialog = true;
@@ -357,6 +375,7 @@
         _hasCloudKey = !string.IsNullOrWhiteSpace(server.CloudApiKey);
         _kubeconfigYaml = "";                               // never prefill the secret (vault-only)
         _kubeNamespacesCsv = string.Join(", ", server.KubeNamespaces);
+        _tagsCsv = string.Join(", ", server.Tags);
         _connectError = null;
         _useSshPassword = false;
         _showDialog = true;
@@ -396,6 +415,14 @@
 
         // Key vs password are mutually exclusive — drop a stale password if the user picked key auth.
         if (!_useSshPassword) _form.SshPassword = null;
+
+        // F9 organization: normalize Group (blank → null) and Tags (trim, drop empties, dedupe
+        // case-insensitively, preserve first-seen order).
+        _form.Group = string.IsNullOrWhiteSpace(_form.Group) ? null : _form.Group.Trim();
+        _form.Tags = _tagsCsv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         if (_editingServer != null)

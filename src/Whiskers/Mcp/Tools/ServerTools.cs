@@ -13,24 +13,39 @@ namespace Whiskers.Mcp.Tools;
 [McpServerToolType]
 public class ServerTools
 {
-    [McpServerTool, Description("List all configured servers with their connection type and status.")]
+    [McpServerTool, Description("List all configured servers with their connection type and status. Optionally filter by a group or tag (case-insensitive) to narrow a large fleet.")]
     public static async Task<string> ListServers(
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IServerConfigService serverConfig)
+        IServerConfigService serverConfig,
+        [Description("Optional group name or tag to filter by (case-insensitive). Omit to list all servers.")] string? tag = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_servers");
         if (denied != null) return denied;
         var servers = serverConfig.GetEnabledServers();
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            var t = tag.Trim();
+            servers = servers
+                .Where(s => string.Equals(s.Group, t, StringComparison.OrdinalIgnoreCase)
+                            || s.Tags.Any(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
         var infos = await docker.GetAllServerSystemInfoAsync();
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Configured servers ({servers.Count}):");
+        sb.AppendLine(string.IsNullOrWhiteSpace(tag)
+            ? $"Configured servers ({servers.Count}):"
+            : $"Configured servers matching '{tag}' ({servers.Count}):");
         foreach (var server in servers)
         {
             var info = infos.GetValueOrDefault(server.Id);
-            sb.AppendLine($"- {server.Name} (ID: {server.Id}, Type: {server.ConnectionType})");
+            var org = new List<string>();
+            if (!string.IsNullOrEmpty(server.Group)) org.Add($"Group: {server.Group}");
+            if (server.Tags.Count > 0) org.Add($"Tags: {string.Join(", ", server.Tags)}");
+            var orgSuffix = org.Count > 0 ? $" [{string.Join("; ", org)}]" : "";
+            sb.AppendLine($"- {server.Name} (ID: {server.Id}, Type: {server.ConnectionType}){orgSuffix}");
             if (server.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
                 sb.AppendLine("  Kubernetes cluster — pods are shown on the dashboard (workload provider); MCP tool coverage follows in Track B.3.");
             else if (info?.IsReachable == true)

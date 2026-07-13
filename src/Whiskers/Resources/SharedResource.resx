@@ -4379,4 +4379,25 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="WebhooksView_Tooltip_SendSignedTest" xml:space="preserve">
     <value>Send signed test</value>
   </data>
+  <data name="Dashboard_Filter_All" xml:space="preserve">
+    <value>All</value>
+  </data>
+  <data name="Dashboard_Filter_Label" xml:space="preserve">
+    <value>Filter</value>
+  </data>
+  <data name="Servers_Field_Group" xml:space="preserve">
+    <value>Group</value>
+  </data>
+  <data name="Servers_Field_Group_Help" xml:space="preserve">
+    <value>Optional — groups servers on the dashboard.</value>
+  </data>
+  <data name="Servers_Field_Tags" xml:space="preserve">
+    <value>Tags</value>
+  </data>
+  <data name="Servers_Field_Tags_Help" xml:space="preserve">
+    <value>Comma-separated, e.g. prod, eu, database.</value>
+  </data>
+  <data name="Servers_Table_Tags" xml:space="preserve">
+    <value>Group / Tags</value>
+  </data>
 </root>
