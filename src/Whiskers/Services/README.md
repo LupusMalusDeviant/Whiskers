@@ -1,6 +1,6 @@
 # Services
 
-All of Whiskers's business logic lives here. Each subfolder is one cohesive capability, defined **interface-first** (`IFoo` + `Foo`) and registered in [`Program.cs`](../Program.cs). UI components ([`../Components`](../Components)) and MCP tools ([`../Mcp`](../Mcp)) depend on these interfaces.
+All of Whiskers's business logic lives here. Each subfolder is one cohesive capability, defined **interface-first** (`IFoo` + `Foo`) and registered from the composition root in [`../Startup/`](../Startup/) (Core services + each enabled module's `ConfigureServices`). UI components ([`../Components`](../Components)) and MCP tools ([`../Mcp`](../Mcp)) depend on these interfaces.
 
 Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 
@@ -14,6 +14,7 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`Terminal/`](Terminal/) | Interactive web-terminal sessions (host and container) |
 | [`Persistence/`](Persistence/) | SQLite (EF Core) database context and generic JSON file stores |
 | [`Database/`](Database/) | Detect and query databases running inside managed containers |
+| [`Maintenance/`](Maintenance/) | Process-wide maintenance flag: gates requests with 503 and drains `/readyz` while a self-restore is staged |
 
 ## Monitoring & security
 
@@ -34,7 +35,7 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`ImageSearch/`](ImageSearch/) | Search container images across multiple registries ("marketplaces": Docker Hub, GHCR, Harbor) |
 | [`ImageUpdate/`](ImageUpdate/) | Detect newer image tags/digests in registries |
 | [`AutoUpdate/`](AutoUpdate/) | Scheduled automatic container updates |
-| [`Backup/`](Backup/) | Volume backup operations |
+| [`Backup/`](Backup/) | Docker **volume** backups, plus Whiskers' own **self-backup & restore** of `/app/data` (VAULT_KEY-encrypted archives, crash-safe deferred-swap restore) |
 | [`Onboarding/`](Onboarding/) | One-click mesh + mTLS server onboarding (Tailscale, step-ca, ghostunnel) |
 | [`Vpn/`](Vpn/) | Pluggable mesh-VPN bring-up (Tailscale / NetBird / none) decoupled from the app image |
 
@@ -56,7 +57,6 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`Auth/`](Auth/) | Roles, email whitelist, and the current-user accessor |
 | [`Mcp/`](Mcp/) | MCP permission service and API-key store (the authorization layer for MCP tools) |
 | [`Vault/`](Vault/) | Encrypted-at-rest storage for secrets (API keys, tokens) |
-| [`ConfigExport/`](ConfigExport/) | Export non-secret app configuration as JSON |
 | [`AiChat/`](AiChat/) | Read-only advisor chat (guidance only, no actions) |
 | [`Agent/`](Agent/) | The acting agent: multi-provider LLM loop with inescapable guardrails (presets) + AI triggers for autonomous runs |
 

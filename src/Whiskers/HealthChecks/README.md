@@ -1,8 +1,9 @@
 # HealthChecks
 
 Liveness and readiness probes for orchestrators (the container `HEALTHCHECK`, Kubernetes probes, and
-the guided installer). Registered in [`Program.cs`](../Program.cs) via `AddHealthChecks()` and exposed
-as two anonymous HTTP endpoints.
+the guided installer). Registered via `AddHealthChecks()` in
+[`../Startup/WhiskersHostingExtensions.cs`](../Startup/WhiskersHostingExtensions.cs) and exposed as two
+anonymous HTTP endpoints.
 
 ## Endpoints
 
@@ -21,6 +22,8 @@ descriptions or exceptions, so nothing internal leaks. Note `/health` (no `z`) i
 |---|---|
 | `DbReadyCheck.cs` | Readiness: `MetricsDbContext.Database.CanConnectAsync` (a fresh context is resolved per probe through a scope). Tag `ready`. |
 | `ServerConfigReadyCheck.cs` | Readiness: `IServerConfigService.IsInitialized` — the fleet registry finished loading at startup. Tag `ready`. |
+| `MaintenanceReadyCheck.cs` | Readiness: `Unhealthy` while [`IMaintenanceStateService`](../Services/Maintenance/) is in maintenance (an F3 self-restore is staged and the process is about to restart), so load balancers drain. Tag `ready`. Deliberately readiness-only: `/healthz` is what the container `HEALTHCHECK` probes, so entering maintenance must never make Docker kill the app mid-restore. |
 
-To add a readiness check: implement `IHealthCheck` and register it in `Program.cs` with
+To add a readiness check: implement `IHealthCheck` and register it in
+[`../Startup/WhiskersHostingExtensions.cs`](../Startup/WhiskersHostingExtensions.cs) with
 `AddCheck<T>("name", tags: new[] { "ready" })`. Leave the tag off to make it liveness-only (rare).
