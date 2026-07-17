@@ -4,18 +4,48 @@ All notable changes to Whiskers are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer
 (0.x = pre-1.0, minor bumps may contain breaking changes — noted explicitly).
 
-## [Unreleased]
+## [0.13.0] — 2026-07-17
+
+The governance story, end to end: every agent action now carries one correlation id from guardrail
+through approval to history, a guided setup takes you from zero to a governed agent in four steps,
+and the whole UI is available in English.
 
 ### Added
 - **Full English UI + in-app handbook.** Every page, notification and the handbook are localized;
   English is the default and the app follows the browser language (switch anytime). The AI chat
   now answers in the user's language.
+- **Guided "Secure AI Operations" setup.** A new admin-only **AI Operations** page walks you to a
+  governed agent in four steps: choose how AI connects, create a read-only MCP key (shown once),
+  pick one of three starter guardrail presets (*Observe only* / *Safe operations* / *Approval
+  required*) with a full policy preview before you activate it, then try it and verify. It reuses the
+  existing key and guardrail flows — no new secret handling.
+- **End-to-end correlated governance chain.** Every agent tool call carries a stable correlation id
+  from guardrail → approval → execution → history and notification, so one action reads as one thread.
+  Approvals now show the *real* required permission level, a derived risk band, the target
+  server/workload and the guardrail preset + rule that matched — on the approval card and in the
+  call-detail dialog.
 - **Server groups & tags.** Give each server an optional group and free-form tags; the dashboard
   gains a group/tag filter and the `list_servers` MCP tool takes an optional `tag` filter — quick
   ways to narrow a larger fleet.
 - **Keyless-signed release images (cosign / Sigstore).** Release images are signed with the release
   workflow's GitHub OIDC identity and logged in Rekor — verify with `cosign verify` (see README →
   Security → Supply chain). Complements the existing Trivy gate, SLSA provenance and SBOM.
+
+### Changed
+- **The governance surfaces explain themselves.** Agent History, Audit Log, Approvals and Guardrails
+  now lead with what they are for; the Approvals empty state spells out that Confirm genuinely pauses
+  execution, and Guardrails opens with the allow/confirm/block framing.
+- Documentation restructured around the governance positioning, with screenshots and a demo script.
+
+### Fixed
+- **CI never actually ran the test suite.** `Whiskers.Tests` was missing from the solution file, so
+  `dotnet test --no-build` exited 0 without executing a single test — every green CI run before this
+  release was build + boot-gate only. The project is now in the solution and the Test step fails on a
+  silently-empty run.
+
+### Upgrading
+- Adds one additive, nullable migration (the correlation id on the MCP call log) for both SQLite and
+  PostgreSQL. It runs automatically on first start — no action required.
 
 ## [0.12.1] — 2026-07-11
 

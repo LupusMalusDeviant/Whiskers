@@ -287,7 +287,7 @@ Every published release image is, from **v0.12.1** on:
 Verify the signature before you run it:
 
 ```bash
-cosign verify ghcr.io/lupusmalusdeviant/whiskers:0.12.1 \
+cosign verify ghcr.io/lupusmalusdeviant/whiskers:0.13.0 \
   --certificate-identity-regexp '^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
