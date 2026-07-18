@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Resolve the version once. A pushed tag uses itself; a manual run uses the input. `latest` only moves
       # on a real tag push (never on a manual/dispatch build, so testing can't clobber the stable tag).
@@ -158,7 +158,7 @@ jobs:
     needs: release
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve version
         id: ver
