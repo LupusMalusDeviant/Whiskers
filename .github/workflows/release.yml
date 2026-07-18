@@ -137,7 +137,7 @@ jobs:
           echo "assets:"; ls -l dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: github.event_name == 'push'
         with:
           name: Whiskers ${{ steps.ver.outputs.raw }}
