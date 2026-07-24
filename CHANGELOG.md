@@ -15,6 +15,9 @@ All notable changes to Whiskers are documented here. The format follows
   `IEnumerable<Type>`. Added `McpToolRegistrationTests` to guard the overload binding, since MCP tool
   serving previously had no test coverage.
 
+### Added
+- The running app version is shown in the sidebar, under the Whiskers wordmark.
+
 ## [0.13.0] — 2026-07-17
 
 The governance story, end to end: every agent action now carries one correlation id from guardrail

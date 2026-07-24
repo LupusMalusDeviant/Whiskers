@@ -611,6 +611,18 @@ code, pre, .monospace {
     font-weight: 700;
     letter-spacing: -0.02em;
 }
+/* Brand wordmark + version tag, stacked under the logo image */
+.sw-sidebar-brand {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+}
+.sw-sidebar-version {
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    opacity: 0.55;
+}
 
 /* Tooltips */
 .mud-tooltip {
