@@ -12,7 +12,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <!-- Local-auth (F1): the IdentityUserContext + AppUser live here so both migration assemblies (which
          reference only this project) can scaffold the Identity schema. Users only — roles stay in roles.json. -->
-    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.10" />
   </ItemGroup>
 
 </Project>
