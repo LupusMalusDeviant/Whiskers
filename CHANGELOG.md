@@ -4,6 +4,17 @@ All notable changes to Whiskers are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer
 (0.x = pre-1.0, minor bumps may contain breaking changes — noted explicitly).
 
+## [0.13.1] — 2026-07-24
+
+### Fixed
+- **The MCP server exposed no tools.** The module-driven MCP registration (added in 0.12.0) passed the
+  enabled modules' tool types as a `Type[]`, which binds to the generic `WithTools<T>(T target)` overload
+  instead of `WithTools(IEnumerable<Type>)` and registers **zero** tools. As a result the server
+  advertised only the `logging` capability and every client got `-32601 "Method 'tools/list' is not
+  available."` — the entire tool surface was invisible over MCP. Fixed by passing the tool types as
+  `IEnumerable<Type>`. Added `McpToolRegistrationTests` to guard the overload binding, since MCP tool
+  serving previously had no test coverage.
+
 ## [0.13.0] — 2026-07-17
 
 The governance story, end to end: every agent action now carries one correlation id from guardrail

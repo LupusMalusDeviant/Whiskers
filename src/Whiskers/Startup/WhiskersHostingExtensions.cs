@@ -114,9 +114,17 @@ public static class WhiskersHostingExtensions
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddSingleton<Whiskers.Mcp.IMcpApiKeyStore, McpApiKeyStore>();
         builder.Services.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, McpPermissionService>();
+        // The tool-types argument MUST be statically typed IEnumerable<Type>, never Type[]. WithTools has both a
+        // WithTools(IEnumerable<Type>) overload and a generic WithTools<T>(T target) overload; a Type[] argument
+        // binds to the generic one (Type[]->Type[] is an identity conversion and out-competes the
+        // Type[]->IEnumerable<Type> conversion), which then scans the *array type itself* for [McpServerTool]
+        // methods, finds none, and registers ZERO tools — the whole MCP tool surface silently vanishes (initialize
+        // advertises only "logging" and tools/list answers -32601). Keeping the IEnumerable<Type> static type forces
+        // the intended overload. Regression-guarded by McpToolRegistrationTests.
+        IEnumerable<Type> mcpToolTypes = modules.SelectMany(m => m.McpToolTypes).ToArray();
         builder.Services.AddMcpServer()
             .WithHttpTransport()
-            .WithTools(modules.SelectMany(m => m.McpToolTypes).ToArray());
+            .WithTools(mcpToolTypes);
 
         // Nav + tool registry from the enabled modules' merged metadata.
         builder.Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(

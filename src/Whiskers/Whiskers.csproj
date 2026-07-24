@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
-    <Version>0.13.0</Version>
+    <Version>0.13.1</Version>
     <Product>Whiskers</Product>
   </PropertyGroup>
 
