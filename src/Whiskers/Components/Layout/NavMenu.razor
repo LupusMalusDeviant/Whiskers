@@ -5,7 +5,7 @@
     <img src="brand.png?v=4" alt="Whiskers" class="sw-sidebar-logo-img" />
     <div class="sw-sidebar-brand">
         <span class="sw-gradient-text sw-logo-text">Whiskers</span>
-        <span class="sw-sidebar-version">@Whiskers.Utils.AppVersion.Display</span>
+        <span class="sw-sidebar-version">@_version</span>
     </div>
 </div>
 
@@ -37,6 +37,12 @@
 </MudNavMenu>
 
 @code {
+    // Running app version as a plain x.x.x, resolved once from the assembly. Kept as a field so the markup
+    // is a bare @_version expression: a namespace-qualified @Foo.Bar.Baz in markup — or any letter directly
+    // before the @ (e.g. "v@…") — can be swallowed by Razor's email-address literal heuristic and rendered
+    // verbatim instead of evaluated.
+    private static readonly string _version = Whiskers.Utils.AppVersion.Display;
+
     // Group heading icons — sidebar-shell metadata (NavItem carries only the per-item icon).
     private static readonly Dictionary<string, string> GroupIcons = new()
     {
