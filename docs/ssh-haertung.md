@@ -7,7 +7,7 @@ Ablauf, wie er am 06.10.2026 auf **BurgCloud** gefahren wurde (BurgCloudMVC-Bean
 
 | Server | Passwort-Anmeldung | fail2ban | Fehlversuche | Stand |
 |---|---|---|---|---|
-| BurgCloud (Debian 12) | war an | lief, sah aber nichts (las leere `auth.log`) | 87.921 seit 28.09., 379 in einer Stunde | **Schritt 1–2 erledigt 06.10.2026**, Schritt 3 wartet auf das Tailnet des Arbeitsrechners |
+| BurgCloud (Debian 12) | war an | lief, sah aber nichts (las leere `auth.log`) | 87.921 seit 28.09., 379 in einer Stunde | **erledigt 06.10.2026** (Schritt 1–3, Port 22 seit 19:37 öffentlich zu) |
 | Rabenhof (Ubuntu 26.04) | an | **inaktiv** | 416.009 seit 06.08. | offen |
 | Zirkuswagen (Ubuntu 24.04) | an | **inaktiv** | Zählung lief in Timeout | offen |
 | AppServer (Ubuntu 26.04) | an | **inaktiv** | 0 | offen |
@@ -96,13 +96,33 @@ muss `Total failed` > 0 sein, solange Port 22 öffentlich ist; der eigene Anschl
 
 ## 3. Port 22 nur über das Tailnet
 
+**Vorher prüfen: Tailscale-SSH.** Ist auf dem Server `tailscale debug prefs | grep RunSSH` → `true`, fängt
+tailscaled Port 22 auf der Tailnet-Adresse ab, *bevor* sshd ihn sieht (`ss` zeigt trotzdem nur sshd). Je nach
+Tailnet-Richtlinie verlangt es dann bei jeder Verbindung eine Bestätigung im Browser („Tailscale SSH requires an
+additional check“) – für Deploy und Skripte unbrauchbar, die Verbindung hängt einfach. Wer es nicht nutzt
+(`journalctl -u tailscaled | grep ssh-conn`), schaltet es ab: `sudo tailscale set --ssh=false` (zurück mit
+`--ssh=true`). Danach beantwortet sshd mit Schlüssel auch den Tailnet-Port 22. BurgCloud: einzige Nutzung in
+30 Tagen waren die eigenen Tests.
+
 Reihenfolge, damit sich niemand aussperrt:
 
-1. Jeder, der sich anmeldet, ist im Tailnet (Arbeitsrechner, Whiskers/Badwolf) und erreicht `<tailnet-ip>:22`.
-2. `~/.ssh/config` und Git-Remotes auf die Tailnet-Adresse bzw. den MagicDNS-Namen umstellen, testen.
+1. Jeder, der sich anmeldet, erreicht `<tailnet-ip>:22` – selbst im Tailnet oder über **Badwolf als
+   Sprungrechner** (Badwolf steht im LAN und im Tailnet; der Schlüssel bleibt auf dem Arbeitsrechner):
+   ```
+   Host <server>
+       HostName <tailnet-ip>
+       ProxyJump badwolf
+       HostKeyAlias <öffentliche-ip>   # derselbe Host-Schlüssel wie bisher, kein neuer known_hosts-Eintrag
+   ```
+   So am 06.10.2026 für BurgCloud; der Arbeitsrechner braucht dafür kein Tailscale. Folge: SSH vom
+   Arbeitsrechner hängt an Badwolf; fällt Badwolf aus, bleibt die Hetzner-Konsole.
+2. Anmeldung, Git-Remotes (`git ls-remote`) und Skripte über den neuen Weg testen; sshd muss
+   `Accepted publickey … from <badwolf-tailnet-ip>` protokollieren.
 3. In der **Hetzner-Cloud-Firewall** die Regel für Port 22 entfernen (Whiskers kann nur UFW, nicht die
    Hetzner-Firewall). Docker-Ports umgehen UFW, deshalb die Hetzner-Firewall.
-4. Von außen prüfen: `timeout 6 bash -c '</dev/tcp/<öffentliche-ip>/22'` muss scheitern, über das Tailnet klappt es.
+4. Von außen prüfen: `timeout 6 bash -c '</dev/tcp/<öffentliche-ip>/22'` muss scheitern – für IPv4 **und** IPv6;
+   eine IPv6-Zeitüberschreitung zählt nur, wenn derselbe Rechner Port 443 über IPv6 erreicht. Danach im Journal:
+   keine externen sshd-Zeilen mehr (BurgCloud: vorher ~6/min, danach 0).
 
 CI-Deploys per SSH (GitHub Actions) brechen damit – bei BurgCloud gewollt: Deploy künftig über Whiskers, die
 Workflows sind seit 06.10.2026 abgeschaltet.
