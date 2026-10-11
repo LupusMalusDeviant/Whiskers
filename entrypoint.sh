@@ -11,6 +11,15 @@ if [ -n "$VPN_PROVIDER" ]; then
     exec dotnet Whiskers.dll
 fi
 
+# With network_mode: host and Tailscale already running on the host, a second tailscaled here cannot open
+# tailscale0 ("TUN device busy") and its start-up still disturbs the host daemon — on Badwolf every container
+# restart cost 1-2 minutes of tailnet outage. If the interface exists, the VPN is someone else's job.
+if [ -e /sys/class/net/tailscale0 ] && [ "${VPN_FORCE_LEGACY_TAILSCALE:-}" != "1" ]; then
+    echo "[entrypoint] tailscale0 already exists (host-managed Tailscale) — skipping legacy bring-up."
+    echo "[entrypoint] Starting Whiskers..."
+    exec dotnet Whiskers.dll
+fi
+
 # --- Legacy Tailscale bring-up (used when VPN_PROVIDER is unset) ---
 # Start Tailscale daemon in background (state persisted in /app/data/tailscale)
 mkdir -p /app/data/tailscale
