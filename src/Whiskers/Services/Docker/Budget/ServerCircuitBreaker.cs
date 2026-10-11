@@ -94,8 +94,13 @@ public sealed class ServerCircuitBreaker : IServerCircuitBreaker
     public void RecordFailure(string serverId, Exception exception)
     {
         // A circuit that opens on application-level errors would trip on a healthy host — only transport
-        // failures and our own timeouts say anything about reachability.
-        if (!IsHealthSignal(exception)) return;
+        // failures and our own timeouts say anything about reachability. Such an error still ends a probe,
+        // though: returning with the slot taken left the circuit half-open with nobody allowed through.
+        if (!IsHealthSignal(exception))
+        {
+            ReleaseProbe(serverId);
+            return;
+        }
 
         var c = _circuits.GetOrAdd(serverId, _ => new Circuit());
         var threshold = Math.Max(1, _settings.CurrentValue.CircuitFailureThreshold);
@@ -139,6 +144,18 @@ public sealed class ServerCircuitBreaker : IServerCircuitBreaker
         // Resolved lazily like the notification above — the circuit breaker is constructed before most of the
         // graph and must not take a hard dependency on it.
         RecordForOutcome(serverId, failures);
+    }
+
+    public void ReleaseProbe(string serverId)
+    {
+        var c = _circuits.GetOrAdd(serverId, _ => new Circuit());
+        lock (c.Gate)
+        {
+            // Only a probe that is still pending: after a success the circuit is closed, after a failed probe
+            // it is open again, and in both cases there is nothing left to release.
+            if (c.State == ServerCircuitState.HalfOpen)
+                c.ProbeInFlight = false;
+        }
     }
 
     public ServerCircuitSnapshot Snapshot(string serverId)

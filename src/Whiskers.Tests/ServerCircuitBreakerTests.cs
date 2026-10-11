@@ -146,6 +146,55 @@ public class ServerCircuitBreakerTests
     }
 
     [Fact]
+    public void A_probe_that_hits_an_application_error_lets_the_next_caller_probe_again()
+    {
+        var (circuit, _) = Build(threshold: 1, cooldownSeconds: 1);
+        circuit.RecordFailure("badwolf", TransportFailure());
+        Thread.Sleep(1100);
+
+        circuit.ThrowIfOpen("badwolf");                                                     // probe
+        circuit.RecordFailure("badwolf", new InvalidOperationException("No such container")); // host answered
+
+        // Before the fix the slot stayed taken here and every later call failed fast until a restart.
+        Assert.Equal(ServerCircuitState.HalfOpen, circuit.Snapshot("badwolf").State);
+        circuit.ThrowIfOpen("badwolf");   // the next caller becomes the probe instead of being refused
+    }
+
+    [Fact]
+    public void A_probe_released_without_a_verdict_does_not_keep_the_server_paused()
+    {
+        var (circuit, _) = Build(threshold: 1, cooldownSeconds: 1);
+        circuit.RecordFailure("badwolf", TransportFailure());
+        Thread.Sleep(1100);
+
+        circuit.ThrowIfOpen("badwolf");   // probe, which then never reaches the host (client build threw)
+        circuit.ReleaseProbe("badwolf");
+
+        circuit.ThrowIfOpen("badwolf");   // a new probe is allowed
+        circuit.RecordSuccess("badwolf");
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+    }
+
+    [Fact]
+    public void Releasing_after_the_probe_was_settled_changes_nothing()
+    {
+        var (circuit, sent) = Build(threshold: 1, cooldownSeconds: 1);
+        circuit.RecordFailure("badwolf", TransportFailure());
+        Thread.Sleep(1100);
+
+        circuit.ThrowIfOpen("badwolf");
+        circuit.RecordFailure("badwolf", TransportFailure());   // probe failed → open again
+        circuit.ReleaseProbe("badwolf");                         // the finally in the caller runs anyway
+
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
+        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("badwolf"));
+
+        circuit.ReleaseProbe("burgcloud");                       // never seen, closed: harmless
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("burgcloud").State);
+        Assert.Single(sent.Events);
+    }
+
+    [Fact]
     public void One_broken_server_does_not_pause_the_others()
     {
         var (circuit, _) = Build(threshold: 1);

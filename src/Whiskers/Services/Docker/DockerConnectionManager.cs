@@ -119,22 +119,30 @@ public class DockerConnectionManager : IDockerConnectionManager
     {
         var budgetKey = serverId ?? _serverConfig.GetDefaultServer()?.Id ?? "local";
         _circuit.ThrowIfOpen(budgetKey);
-
-        var client = await GetClientAsync(serverId);
         try
         {
-            var result = await _budget.RunAsync(budgetKey, () => operation(client), default, singleFlightKey);
-            _circuit.RecordSuccess(budgetKey);
-            return result;
+            var client = await GetClientAsync(serverId);
+            try
+            {
+                var result = await _budget.RunAsync(budgetKey, () => operation(client), default, singleFlightKey);
+                _circuit.RecordSuccess(budgetKey);
+                return result;
+            }
+            catch (Exception ex) when (ex is not Budget.DuplicateRequestException
+                                       and not Budget.BudgetSaturatedException)
+            {
+                // A discarded duplicate is not a health signal — the server never saw it. Neither is a call that
+                // ran out of time in our own queue: blaming the host for our backlog opens circuits across the
+                // whole fleet at once, which is what happened on 2026-08-27.
+                _circuit.RecordFailure(budgetKey, ex);
+                throw;
+            }
         }
-        catch (Exception ex) when (ex is not Budget.DuplicateRequestException
-                                   and not Budget.BudgetSaturatedException)
+        finally
         {
-            // A discarded duplicate is not a health signal — the server never saw it. Neither is a call that
-            // ran out of time in our own queue: blaming the host for our backlog opens circuits across the
-            // whole fleet at once, which is what happened on 2026-08-27.
-            _circuit.RecordFailure(budgetKey, ex);
-            throw;
+            // If this call was the half-open probe and ended without a verdict (client build threw, duplicate,
+            // saturation), free the slot — otherwise the server stays "paused" until Whiskers restarts.
+            _circuit.ReleaseProbe(budgetKey);
         }
     }
 
@@ -155,7 +163,21 @@ public class DockerConnectionManager : IDockerConnectionManager
         // Fail fast while the circuit is open: a host that answers nothing does not get healthier from being
         // asked again by five loops every cycle, and the attempt costs Whiskers a slot it could use elsewhere.
         _circuit.ThrowIfOpen(budgetKey);
+        try
+        {
+            return await ExecuteWithRetryAsync(serverId, budgetKey, operation, singleFlightKey);
+        }
+        finally
+        {
+            // Same as in ExecuteGuardedAsync: a probe that ended without a verdict (a DockerApiException the
+            // catches below don't handle, a failing client build) must not keep the slot.
+            _circuit.ReleaseProbe(budgetKey);
+        }
+    }
 
+    private async Task<T> ExecuteWithRetryAsync<T>(
+        string? serverId, string budgetKey, Func<DockerClient, Task<T>> operation, string? singleFlightKey)
+    {
         var client = await GetClientAsync(serverId);
         try
         {

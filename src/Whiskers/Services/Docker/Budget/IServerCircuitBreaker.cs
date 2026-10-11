@@ -52,6 +52,12 @@ public interface IServerCircuitBreaker
     /// about the host's health, and counting it would open the circuit on a perfectly healthy server.</summary>
     void RecordFailure(string serverId, Exception exception);
 
+    /// <summary>Ends a half-open probe that produced no verdict — the call never reached the host (client
+    /// build failed, our own queue gave up) or the host answered with an application error. Without this the
+    /// probe slot stays taken and every later caller fails fast until Whiskers restarts. Idempotent: a no-op
+    /// once <see cref="RecordSuccess"/> or <see cref="RecordFailure"/> has already settled the probe.</summary>
+    void ReleaseProbe(string serverId);
+
     ServerCircuitSnapshot Snapshot(string serverId);
     IReadOnlyList<ServerCircuitSnapshot> SnapshotAll();
 }
