@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
@@ -19,11 +20,12 @@ namespace Whiskers.Tests;
 public class ServerCircuitBreakerTests
 {
     private static (IServerCircuitBreaker Circuit, FakeNotifications Sent) Build(
-        int threshold = 3, int cooldownSeconds = 60)
+        int threshold = 3, int cooldownSeconds = 60, IHostApplicationLifetime? lifetime = null)
     {
         var sent = new FakeNotifications();
         var services = new ServiceCollection();
         services.AddSingleton<INotificationService>(sent);
+        if (lifetime is not null) services.AddSingleton(lifetime);
         services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(
             new FakeServerConfig(new ServerConfig { Id = "badwolf", Name = "Badwolf", IsDefault = true }));
 
@@ -40,6 +42,39 @@ public class ServerCircuitBreakerTests
     }
 
     private static Exception TransportFailure() => new TimeoutException("host did not answer");
+
+    private sealed class StoppingLifetime : IHostApplicationLifetime
+    {
+        private readonly CancellationTokenSource _stopping = new();
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => _stopping.Token;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+        public void StopApplication() => _stopping.Cancel();
+    }
+
+    [Fact]
+    public void Cancellations_while_Whiskers_shuts_down_do_not_count_against_the_server()
+    {
+        var lifetime = new StoppingLifetime();
+        var (circuit, sent) = Build(threshold: 2, lifetime: lifetime);
+        lifetime.StopApplication();
+
+        circuit.RecordFailure("badwolf", new OperationCanceledException());
+        circuit.RecordFailure("badwolf", new OperationCanceledException());
+        circuit.RecordFailure("badwolf", new TaskCanceledException());
+
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+        Assert.Empty(sent.Events);
+    }
+
+    [Fact]
+    public void A_timeout_still_counts_while_running_normally()
+    {
+        var (circuit, _) = Build(threshold: 2, lifetime: new StoppingLifetime()); // not stopping
+        circuit.RecordFailure("badwolf", new OperationCanceledException());
+        circuit.RecordFailure("badwolf", new OperationCanceledException());
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
+    }
 
     [Fact]
     public void Opens_after_the_configured_run_of_failures_and_says_so()

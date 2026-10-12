@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
@@ -168,9 +169,27 @@ public sealed class ServerCircuitBreaker : IServerCircuitBreaker
     public IReadOnlyList<ServerCircuitSnapshot> SnapshotAll() =>
         _circuits.Keys.Select(Snapshot).OrderBy(s => s.ServerId, StringComparer.Ordinal).ToList();
 
-    /// <summary>Transport-level failures and our own timeouts. Everything else is the server answering.</summary>
-    private static bool IsHealthSignal(Exception ex) =>
-        ex is TimeoutException or OperationCanceledException || DockerConnectionManager.IsConnectionFailure(ex);
+    /// <summary>Transport-level failures and our own timeouts. Everything else is the server answering.
+    /// A cancellation while Whiskers itself is shutting down is not a timeout either: the loops' stopping token
+    /// is linked into every in-flight read, so a restart used to tally one "failure" per open call against
+    /// every server — the host had done nothing, Whiskers had hung up on it.</summary>
+    private bool IsHealthSignal(Exception ex)
+    {
+        if (ex is OperationCanceledException && IsShuttingDown()) return false;
+        return ex is TimeoutException or OperationCanceledException || DockerConnectionManager.IsConnectionFailure(ex);
+    }
+
+    private bool IsShuttingDown()
+    {
+        try
+        {
+            return _serviceProvider.GetService<IHostApplicationLifetime>()?.ApplicationStopping.IsCancellationRequested == true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return true; // the container is already being torn down
+        }
+    }
 
     /// <summary>Reports a transition. Never lets a notification failure break the Docker path — the circuit's
     /// job is to protect the server, and it must keep doing that even if no channel is reachable.</summary>
