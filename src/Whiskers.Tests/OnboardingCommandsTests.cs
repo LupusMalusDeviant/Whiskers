@@ -43,18 +43,6 @@ public class OnboardingCommandsTests
     }
 
     [Fact]
-    public void CertCreate_builds_paths_and_sans_from_slug_and_ip()
-    {
-        var cmd = OnboardingCommands.CertCreate("step-ca", "badwolf", "100.64.0.7");
-        Assert.Contains("docker exec step-ca step certificate create badwolf-dockerproxy", cmd);
-        Assert.Contains("/home/step/certs/badwolf-server.crt", cmd);
-        Assert.Contains("--san 100.64.0.7 --san badwolf", cmd);
-        Assert.Contains("--not-after 8760h", cmd);
-        // no quoting characters needed — inputs are slug/IP-validated upstream
-        Assert.DoesNotContain("\"", cmd);
-    }
-
-    [Fact]
     public void WriteFileB64_pipes_base64_through_tee_and_creates_the_directory()
     {
         var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("services: {}\n"));

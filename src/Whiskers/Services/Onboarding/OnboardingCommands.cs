@@ -22,13 +22,6 @@ public static class OnboardingCommands
     public static string TailscaleUp(string slug) =>
         $"sudo systemd-run --collect --unit=ts-up tailscale up --accept-dns=false --hostname={slug}";
 
-    public static string CertCreate(string stepCaContainer, string slug, string tsIp) =>
-        $"docker exec {stepCaContainer} step certificate create {slug}-dockerproxy " +
-        $"/home/step/certs/{slug}-server.crt /home/step/secrets/{slug}-server.key " +
-        $"--ca /home/step/certs/intermediate_ca.crt --ca-key /home/step/secrets/intermediate_ca_key " +
-        $"--ca-password-file /home/step/secrets/password --san {tsIp} --san {slug} " +
-        $"--not-after 8760h --no-password --insecure --bundle --force";
-
     /// <summary>Writes a file on the target by piping base64 through <c>sudo tee</c> — content
     /// never touches shell quoting. The directory part must be a fixed, code-owned path.</summary>
     public static string WriteFileB64(string path, string b64)

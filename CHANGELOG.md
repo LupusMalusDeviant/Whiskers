@@ -32,6 +32,9 @@ All notable changes to Whiskers are documented here. The format follows
   the request. This affected the pre-existing container metrics too, not only the new self-metrics.
 
 ### Added
+- **`renew_mtls_certificate` renews a proxy certificate without locking anyone out.** The host generates a new
+  key, step-ca signs the CSR, and ghostunnel restarts with it. Before the swap the host arms a three-minute timer
+  that restores the previous certificate unless Whiskers confirms through the new one. Admin-only, audited.
 - **Warnings before a certificate expires.** Whiskers now watches its mTLS client certificate and CA bundle, the
   certificate of every mTLS proxy and certbot's certificates on all servers. It notifies 30, 14 and 7 days before
   expiry and once more on expiry (`certificate_expiring` / `certificate_expired`). An expired client certificate
@@ -263,6 +266,10 @@ All notable changes to Whiskers are documented here. The format follows
   surfaced once alerts started arriving from hosts other than the default one.
 
 ### Security
+- **Onboarding no longer ships the proxy's private key across the network.** The key was generated on Badwolf
+  and sent base64-encoded through the command channel. It is now generated on the new host; only the CSR and the
+  signed certificate travel. Whiskers refuses any CSR that asks for more than the host's own name and IP, so a
+  compromised host cannot obtain a certificate for another host.
 - Matrix messages are built from an HTML-encoded copy of the event. The log-alert detail now carries the
   matched log line — third-party text that must not reach an HTML body unescaped.
 

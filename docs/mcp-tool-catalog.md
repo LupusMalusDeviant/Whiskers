@@ -59,6 +59,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `pause_server_checks` | write | Pause Whiskers' own background checks (health, logs, metrics, CVE, image updates) for one server, for a bounded number of minutes. Use this when Whiskers itself is the load on a host. Interactive access keeps working, so the server can still be inspected. The pause is announced, expires by itself, and is reminded about if it outlives its reason. This does NOT stop the containers on that server and does NOT block anything running there. |
 | `remove_firewall_rule` | write | Remove a firewall rule by its number. |
 | `remove_network` | write | Remove a Docker network by name or ID. |
+| `renew_mtls_certificate` | admin | Renew the mTLS certificate of a server's Docker proxy (ghostunnel). A new key is generated on the host, step-ca signs it, and the proxy restarts with it. If Whiskers cannot reach the host with the new certificate, the host restores the previous one by itself after 3 minutes. Admin only. |
 | `renew_ssl_certificate` | write | Renew an SSL certificate using certbot. |
 | `restart_container` | write | Restart a Docker container. |
 | `resume_server_checks` | write | Resume Whiskers' background checks for a server that was paused. Safe to call even if it is not paused. Turning monitoring back on is never the dangerous direction, so this has no time limit. |
@@ -155,5 +156,5 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 |---|---|
 | read | 45 |
 | write | 34 |
-| admin | 4 |
-| **total** | **83** |
+| admin | 5 |
+| **total** | **84** |

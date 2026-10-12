@@ -231,6 +231,7 @@ public static class WhiskersHostingExtensions
 
         // Host command execution + server management. IHostCommandExecutor stays in Core (shared by many services).
         builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
+        builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsCertificateService, Whiskers.Services.Certificates.MtlsCertificateService>();
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
 
         // Metrics database — SQLite (zero-config default) or PostgreSQL, selected by Database:Provider

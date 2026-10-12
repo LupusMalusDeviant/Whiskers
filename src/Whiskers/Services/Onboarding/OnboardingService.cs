@@ -1,3 +1,4 @@
+using Whiskers.Services.Certificates;
 using System.Net;
 using System.Text;
 using Whiskers.Configuration;
@@ -33,11 +34,11 @@ public class OnboardingService : IOnboardingService
     private readonly IServerConfigService _serverConfig;
     private readonly IDockerService _docker;
     private readonly ILogger<OnboardingService> _logger;
+    private readonly IMtlsCertificateService _certificates;
 
     // Deployment-specific paths (match this Whiskers install). The shared client cert + CA that
     // every managed host's ghostunnel is verified against live here (created during the first
     // migration); only the per-host SERVER cert is issued anew.
-    private const string StepCaContainer = "step-ca";
     private const string DockerProxyPort = "2376";
     private readonly string _mtlsCertDir; // /app/data/mtls by default: client.crt/key + ca.crt (shared)
     private const string VmComposeDirOnHost = "/opt/telemetry-vm";   // holds scrape.yml + compose
@@ -47,10 +48,12 @@ public class OnboardingService : IOnboardingService
         IHostCommandExecutor exec,
         IServerConfigService serverConfig,
         IDockerService docker,
+        IMtlsCertificateService certificates,
         ILogger<OnboardingService> logger,
         DataPathOptions? dataPaths = null)
     {
         _exec = exec;
+        _certificates = certificates;
         _serverConfig = serverConfig;
         _docker = docker;
         _logger = logger;
@@ -162,25 +165,17 @@ public class OnboardingService : IOnboardingService
             await Sh(serverId, "cd /opt/telemetry && sudo docker compose up -d", TimeSpan.FromMinutes(2), ct);
             completed.Add(step);
 
-            // 5) Issue the per-host server cert from step-ca (on local) ---------------------------
+            // 5) Issue the per-host server cert: the key is generated ON the host and never leaves it; only
+            // the CSR travels to step-ca (on local) and the signed certificate travels back. It used to be the
+            // other way round — key made on Badwolf, shipped base64 through the command channel.
             step = OnboardingStep.Certificate;
-            progress.Report("⑥ Server-Zertifikat ausstellen (step-ca)…");
-            await Sh("local", OnboardingCommands.CertCreate(StepCaContainer, slug, tsIp), TimeSpan.FromSeconds(60), ct);
-
-            var serverCrtB64 = (await Sh("local", $"base64 -w0 /opt/step-ca/certs/{slug}-server.crt", TimeSpan.FromSeconds(20), ct)).Output.Trim();
-            var serverKeyB64 = (await Sh("local", $"base64 -w0 /opt/step-ca/secrets/{slug}-server.key", TimeSpan.FromSeconds(20), ct)).Output.Trim();
-            // CA bundle = root + intermediate (ghostunnel must complete the chain for the leaf-only .NET client)
-            var caBundleB64 = (await Sh("local", "cat /opt/step-ca/certs/root_ca.crt /opt/step-ca/certs/intermediate_ca.crt | base64 -w0", TimeSpan.FromSeconds(20), ct)).Output.Trim();
+            progress.Report("⑥ Server-Zertifikat ausstellen (Schlüssel auf dem Host, step-ca signiert)…");
+            await _certificates.IssueForNewHostAsync(serverId, MtlsIdentity.ForNewHost(slug, tsIp), ct);
             completed.Add(step);
 
             // 6) Deploy socket-proxy + ghostunnel (mTLS) on the new host -------------------------
             step = OnboardingStep.MtlsProxy;
             progress.Report("⑦ socket-proxy + ghostunnel (mTLS) deployen…");
-            await Sh(serverId, "sudo mkdir -p /opt/dockerproxy/certs", TimeSpan.FromSeconds(20), ct);
-            await WriteFileB64(serverId, "/opt/dockerproxy/certs/server.crt", serverCrtB64, ct);
-            await WriteFileB64(serverId, "/opt/dockerproxy/certs/server.key", serverKeyB64, ct);
-            await WriteFileB64(serverId, "/opt/dockerproxy/certs/ca.crt", caBundleB64, ct);
-            await Sh(serverId, "sudo chmod 600 /opt/dockerproxy/certs/server.key", TimeSpan.FromSeconds(20), ct);
             await WriteFile(serverId, "/opt/dockerproxy/docker-compose.yml", OnboardingCommands.DockerProxyCompose(tsIp), ct);
             await Sh(serverId, "cd /opt/dockerproxy && sudo docker compose up -d", TimeSpan.FromMinutes(2), ct);
             completed.Add(step);

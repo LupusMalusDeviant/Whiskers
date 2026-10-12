@@ -97,6 +97,7 @@ public static class McpPermissionLevels
         // can mount the host root = de-facto root on the host. Keep them above the write boundary.
         ["deploy_app"] = Admin,
         ["deploy_compose"] = Admin,
+        ["renew_mtls_certificate"] = Admin,  // swaps the key of a proxy every command to that host passes through
         ["add_firewall_rule"] = Write,
         ["remove_firewall_rule"] = Write,
         ["update_nginx_config"] = Write,
@@ -214,6 +215,7 @@ public static class McpPermissionLevels
         ["disconnect_container_from_network"] = "Netzwerk",
         ["deploy_app"] = "Deployment",
         ["deploy_compose"] = "Deployment",
+        ["renew_mtls_certificate"] = "Server",
         ["get_update_status"] = "Monitoring",
         ["get_cve_summary"] = "Monitoring",
         ["get_server_cves"] = "Monitoring",

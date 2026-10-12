@@ -24,7 +24,7 @@ public class McpToolRegistrationTests
     /// that nobody listed here, fails the build instead of quietly changing what the server serves.</summary>
     private static readonly Dictionary<string, int> ExpectedToolsPerModule = new(StringComparer.Ordinal)
     {
-        ["all-in-one"]    = 46,   // ContainerTools 12, ServerTools 13, MonitoringTools 4, NetworkTools 5, DatabaseTools 6, LoopSuspensionTools 3, SelfStatusTools 1, HostLoadTools 1, ActionOutcomeTools 1
+        ["all-in-one"]    = 47,   // ContainerTools 12, ServerTools 14, MonitoringTools 4, NetworkTools 5, DatabaseTools 6, LoopSuspensionTools 3, SelfStatusTools 1, HostLoadTools 1, ActionOutcomeTools 1
         ["scheduler"]     = 4,
         ["logmonitor"]    = 4,    // LogTools 3, LogHygieneTools 1 (Plan-0007 WP-MCP)
         ["cve"]           = 4,

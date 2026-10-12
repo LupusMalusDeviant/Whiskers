@@ -14,6 +14,30 @@ namespace Whiskers.Mcp.Tools;
 [McpServerToolType]
 public class ServerTools
 {
+    [McpToolLevel(McpPermissionLevels.Admin)]
+    [McpServerTool, Description("Renew the mTLS certificate of a server's Docker proxy (ghostunnel). A new key is generated on the host, " +
+        "step-ca signs it, and the proxy restarts with it. If Whiskers cannot reach the host with the new certificate, the host " +
+        "restores the previous one by itself after 3 minutes. Admin only.")]
+    public static async Task<string> RenewMtlsCertificate(
+        IHttpContextAccessor httpContextAccessor,
+        IMcpPermissionService permissionService,
+        Whiskers.Services.Certificates.IMtlsCertificateService certificates,
+        IAuditLogService auditLog,
+        [Description("Server ID")] string serverId,
+        CancellationToken cancellationToken = default)
+    {
+        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "renew_mtls_certificate");
+        if (denied != null) return denied;
+        if (string.IsNullOrWhiteSpace(serverId))
+            return "Server ID is required.";
+
+        var result = await certificates.RenewAsync(serverId, cancellationToken);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "certificate.renew_mtls", "server", serverId, serverId,
+            details: result.Message, serverId: serverId, success: result.Success);
+        return result.Message;
+    }
+
     [McpToolLevel(McpPermissionLevels.Read)]
     [McpServerTool, Description("List all configured servers with their connection type and status. Optionally filter by a group or tag (case-insensitive) to narrow a large fleet.")]
     public static async Task<string> ListServers(
