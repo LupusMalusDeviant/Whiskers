@@ -38,16 +38,27 @@ public class TailscaleVpnProvider : IVpnProvider
             return;
         }
 
-        // 1) Ensure the daemon is running.
-        var status = await VpnProcessRunner.RunAsync("tailscale", $"{SocketArg} status", ct, 5000);
-        var daemonUp = status.ExitCode is 0 or 1; // 0 = up, 1 = running but logged out; 127/other = no daemon
-        if (!daemonUp)
+        // 1) Ensure the daemon is running — unless the HOST already runs Tailscale. In a host-network container
+        //    a second tailscaled fights the host daemon for tailscale0 and makes it restart, which dropped every
+        //    mesh connection for one to two minutes on each Whiskers restart (Badwolf, 2026-10).
+        var status = await VpnProcessRunner.RunAsync("tailscale", $"{SocketArg} status --json", ct, 5000);
+        var daemonResponds = DaemonResponds(status);
+        var decision = DecideDaemon(daemonResponds, HostInterfacePresent(),
+            Environment.GetEnvironmentVariable("VPN_FORCE_LEGACY_TAILSCALE") == "1");
+        if (decision == DaemonDecision.HostManaged)
+        {
+            _logger.LogInformation("[vpn:tailscale] tailscale0 already exists and no daemon answers on {Socket} — " +
+                "Tailscale is host-managed, not starting a second tailscaled (VPN_FORCE_LEGACY_TAILSCALE=1 overrides)",
+                ts.Socket);
+            return;
+        }
+        if (decision == DaemonDecision.Start)
         {
             Directory.CreateDirectory(ts.StateDir);
             Directory.CreateDirectory(Path.GetDirectoryName(ts.Socket)!);
             _logger.LogInformation("[vpn:tailscale] starting tailscaled");
             VpnProcessRunner.StartDetached("tailscaled",
-                $"--state={ts.StateDir}/tailscaled.state --socket={ts.Socket}", _logger);
+                $"--state={ts.StateDir}/tailscaled.state --socket={ts.Socket}", _logger, "tailscaled");
             await Task.Delay(2000, ct); // give the daemon a moment to create its socket
         }
 
@@ -70,6 +81,33 @@ public class TailscaleVpnProvider : IVpnProvider
         else
             _logger.LogWarning("[vpn:tailscale] up failed: {Err}", up.StdErr.Trim());
     }
+
+    internal enum DaemonDecision { UseRunning, Start, HostManaged }
+
+    /// <summary>The daemon answers when <c>status --json</c> yields a JSON object with a <c>BackendState</c> —
+    /// "Running", "NeedsLogin" and "Stopped" all mean a live daemon. The exit code alone is not enough: the CLI
+    /// also exits 1 when it cannot reach any daemon, which the old check read as "running but logged out".</summary>
+    internal static bool DaemonResponds(VpnProcessRunner.Result status)
+    {
+        if (status.ExitCode is not (0 or 1) || string.IsNullOrWhiteSpace(status.StdOut)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(status.StdOut);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("BackendState", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    internal static DaemonDecision DecideDaemon(bool daemonResponds, bool hostInterfacePresent, bool forceLegacy) =>
+        daemonResponds ? DaemonDecision.UseRunning
+        : hostInterfacePresent && !forceLegacy ? DaemonDecision.HostManaged
+        : DaemonDecision.Start;
+
+    private static bool HostInterfacePresent() => Directory.Exists("/sys/class/net/tailscale0");
 
     public async Task<VpnStatus> GetStatusAsync(CancellationToken ct = default)
     {

@@ -14,7 +14,7 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
 | `VpnBootstrapHostedService.cs` | On startup brings the active provider up (replaces the entrypoint Tailscale bring-up); no-op for `none`. |
 | `VpnSettings.cs` | Config (`Vpn` section): `Provider` (none\|tailscale\|netbird), hostname, per-provider keys/URLs. |
 | `VpnProcessRunner.cs` | Internal helper to run the VPN CLIs and start daemons detached. |
-| `Providers/TailscaleVpnProvider.cs` | Tailscale — ensures `tailscaled` is up, then `tailscale up` with the auth key (Headscale-capable via LoginServer). |
+| `Providers/TailscaleVpnProvider.cs` | Tailscale — ensures `tailscaled` is up, then `tailscale up` with the auth key (Headscale-capable via LoginServer). A daemon counts as running only when `status --json` answers with a `BackendState` (exit code 1 also means "no daemon"). If no daemon answers but `tailscale0` already exists, Tailscale is **host-managed** and no second `tailscaled` is started — it would make the host daemon restart and cut the tailnet (`VPN_FORCE_LEGACY_TAILSCALE=1` overrides, same as `entrypoint.sh`). |
 | `Providers/NetbirdVpnProvider.cs` | NetBird — `netbird up` with a setup key, optional self-hosted management URL. |
 | `Providers/NoopVpnProvider.cs` | VPN managed on host/sidecar — the decoupled default. |
 

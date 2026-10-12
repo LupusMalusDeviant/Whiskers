@@ -63,9 +63,12 @@ internal static class VpnProcessRunner
         return new Result(proc.ExitCode, stdout.ToString(), stderr.ToString());
     }
 
-    /// <summary>Start a long-running daemon detached (output discarded). Returns false if the binary can't be launched.</summary>
-    public static bool StartDetached(string file, string arguments, ILogger logger)
+    /// <summary>Start a long-running daemon detached. Its output goes to the debug log (redacted) and an exit is
+    /// logged as a warning — a daemon that died right after start used to vanish without a trace. Returns false
+    /// if the binary can't be launched.</summary>
+    public static bool StartDetached(string file, string arguments, ILogger logger, string? logName = null)
     {
+        var name = logName ?? file;
         try
         {
             var psi = new ProcessStartInfo
@@ -77,11 +80,16 @@ internal static class VpnProcessRunner
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            var proc = Process.Start(psi);
-            if (proc == null) return false;
-            // Drain pipes so the daemon doesn't block on a full buffer; we don't keep the output.
-            proc.OutputDataReceived += (_, _) => { };
-            proc.ErrorDataReceived += (_, _) => { };
+            var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            // Drain the pipes (a full buffer would block the daemon) and keep the lines in the debug log.
+            proc.OutputDataReceived += (_, e) => { if (e.Data != null) logger.LogDebug("[{Daemon}] {Line}", name, Utils.SecretRedactor.Redact(e.Data)); };
+            proc.ErrorDataReceived += (_, e) => { if (e.Data != null) logger.LogDebug("[{Daemon}] {Line}", name, Utils.SecretRedactor.Redact(e.Data)); };
+            proc.Exited += (_, _) =>
+            {
+                try { logger.LogWarning("[{Daemon}] exited with code {Code}", name, proc.ExitCode); }
+                catch (InvalidOperationException) { /* process object already released */ }
+            };
+            if (!proc.Start()) return false;
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
             return true;
