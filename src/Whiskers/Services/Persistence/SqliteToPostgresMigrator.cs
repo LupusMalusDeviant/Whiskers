@@ -8,13 +8,55 @@ namespace Whiskers.Services.Persistence;
 ///
 /// Data-safety contract (project requirement): the <b>source is never modified</b> — it is only read — and
 /// the <b>target must be freshly migrated and empty</b> (the tool aborts on a non-empty target; it never
-/// merges). The 15 tables have surrogate <c>long</c> primary keys and <b>no foreign keys between them</b>,
+/// merges). The metrics tables have surrogate <c>long</c> primary keys and <b>no foreign keys between them</b>,
 /// so rows are re-inserted WITHOUT their old <c>Id</c> and the target assigns fresh identity values (which
 /// also advances the sequence correctly). The meaningful unique business keys (<c>BackupId</c>, <c>TaskId</c>,
-/// <c>RuleId</c>, <c>IdentityKey</c>, …) are ordinary columns and copy across unchanged.</summary>
+/// <c>RuleId</c>, <c>IdentityKey</c>, …) are ordinary columns and copy across unchanged.
+///
+/// The local-login users live in a second context (<see cref="WhiskersIdentityDbContext"/>) against the same
+/// database and are copied too — with their ids kept, because claims, logins and tokens reference them.
+/// Every entity of <see cref="MetricsDbContext"/> must appear in <see cref="MetricsTables"/>; a test enforces
+/// that, so a new table cannot silently be left behind (it once was: three tables and the users).</summary>
 public static class SqliteToPostgresMigrator
 {
     private const int BatchSize = 5000;
+
+    /// <summary>One copyable metrics table: its name for the report, its entity type (for the coverage test),
+    /// an emptiness probe for the target and the copy itself.</summary>
+    internal sealed record Table(
+        string Name,
+        Type EntityType,
+        Func<MetricsDbContext, CancellationToken, Task<bool>> AnyAsync,
+        Func<MetricsDbContext, MetricsDbContext, CancellationToken, Task<int>> CopyAsync);
+
+    private static Table T<TEntity>(string name, Func<MetricsDbContext, DbSet<TEntity>> set, Action<TEntity> resetId)
+        where TEntity : class =>
+        new(name, typeof(TEntity),
+            (ctx, ct) => set(ctx).AnyAsync(ct),
+            (src, dst, ct) => CopyAsync(set(src), dst, resetId, ct));
+
+    /// <summary>Every metrics table. No foreign keys between them, so any order is safe.</summary>
+    internal static readonly IReadOnlyList<Table> MetricsTables =
+    [
+        T("ContainerMetrics",  c => c.ContainerMetrics,  e => e.Id = 0),
+        T("ServerMetrics",     c => c.ServerMetrics,     e => e.Id = 0),
+        T("AlertHistory",      c => c.AlertHistory,      e => e.Id = 0),
+        T("AuditLog",          c => c.AuditLog,          e => e.Id = 0),
+        T("McpToolCalls",      c => c.McpToolCalls,      e => e.Id = 0),
+        T("VolumeBackups",     c => c.VolumeBackups,     e => e.Id = 0),
+        T("ScheduledTasks",    c => c.ScheduledTasks,    e => e.Id = 0),
+        T("TaskRunHistory",    c => c.TaskRunHistory,    e => e.Id = 0),
+        T("LogAlertRules",     c => c.LogAlertRules,     e => e.Id = 0),
+        T("UpdatePolicies",    c => c.UpdatePolicies,    e => e.Id = 0),
+        T("UpdateHistory",     c => c.UpdateHistory,     e => e.Id = 0),
+        T("UpdateRollbacks",   c => c.UpdateRollbacks,   e => e.Id = 0),
+        T("Webhooks",          c => c.Webhooks,          e => e.Id = 0),
+        T("WebhookLogs",       c => c.WebhookLogs,       e => e.Id = 0),
+        T("CveFirstSeen",      c => c.CveFirstSeen,      e => e.Id = 0),
+        T("Notifications",     c => c.Notifications,     e => e.Id = 0),
+        T("SelfMetricSamples", c => c.SelfMetricSamples, e => e.Id = 0),
+        T("ActionOutcomes",    c => c.ActionOutcomes,    e => e.Id = 0),
+    ];
 
     /// <summary>CLI entry point: builds the SQLite source + PostgreSQL target contexts, migrates the target
     /// schema, then copies the data. Returns a process exit code (0 = success; non-zero = aborted/failed).</summary>
@@ -39,15 +81,33 @@ public static class SqliteToPostgresMigrator
         var pgOptions = new DbContextOptionsBuilder<MetricsDbContext>()
             .UseNpgsql(targetConnection, o => o.MigrationsAssembly("Whiskers.Migrations.Postgres"))
             .Options;
+        // Same database, own history table — mirrors DatabaseRegistration.
+        var idSqliteOptions = new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+            .UseSqlite(dataPaths.DbConnectionString, o =>
+            {
+                o.MigrationsAssembly("Whiskers.Migrations.Sqlite");
+                o.MigrationsHistoryTable("__IdentityMigrationsHistory");
+            })
+            .Options;
+        var idPgOptions = new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+            .UseNpgsql(targetConnection, o =>
+            {
+                o.MigrationsAssembly("Whiskers.Migrations.Postgres");
+                o.MigrationsHistoryTable("__IdentityMigrationsHistory");
+            })
+            .Options;
 
         await using var source = new MetricsDbContext(sqliteOptions);
         await using var target = new MetricsDbContext(pgOptions);
+        await using var idSource = new WhiskersIdentityDbContext(idSqliteOptions);
+        await using var idTarget = new WhiskersIdentityDbContext(idPgOptions);
 
         try
         {
             await log.WriteLineAsync("Bringing the target schema up to date (PostgreSQL migrate)…");
             await target.Database.MigrateAsync(ct);
-            return await MigrateDataAsync(source, target, log, ct);
+            await idTarget.Database.MigrateAsync(ct);
+            return await MigrateDataAsync(source, target, log, ct, idSource, idTarget);
         }
         catch (Exception ex)
         {
@@ -57,12 +117,17 @@ public static class SqliteToPostgresMigrator
         }
     }
 
-    /// <summary>Provider-agnostic core: aborts if the target holds any data, otherwise copies all 15 tables
-    /// and prints a per-table row-count report. Exposed for tests, which drive it with two SQLite contexts.</summary>
+    /// <summary>Provider-agnostic core: aborts if the target holds any data, otherwise copies every metrics
+    /// table (and, when both identity contexts are given, the local users) and prints a per-table row-count
+    /// report. Exposed for tests, which drive it with SQLite contexts.</summary>
     public static async Task<int> MigrateDataAsync(MetricsDbContext source, MetricsDbContext target,
-        TextWriter log, CancellationToken ct = default)
+        TextWriter log, CancellationToken ct = default,
+        WhiskersIdentityDbContext? identitySource = null, WhiskersIdentityDbContext? identityTarget = null)
     {
-        var occupied = await FirstNonEmptyTableAsync(target, ct);
+        var copyIdentity = identitySource is not null && identityTarget is not null;
+
+        var occupied = await FirstNonEmptyTableAsync(target, ct)
+                       ?? (copyIdentity ? await FirstNonEmptyIdentityTableAsync(identityTarget!, ct) : null);
         if (occupied is not null)
         {
             await log.WriteLineAsync($"ABORT: the target already contains data (table '{occupied}' is not empty). " +
@@ -70,25 +135,17 @@ public static class SqliteToPostgresMigrator
             return 3;
         }
 
-        // No FK ordering constraints (the 15 tables are independent), so any order is safe.
-        var report = new List<(string Table, int Rows)>
+        var report = new List<(string Table, int Rows)>();
+        foreach (var table in MetricsTables)
+            report.Add((table.Name, await table.CopyAsync(source, target, ct)));
+
+        if (copyIdentity)
         {
-            ("ContainerMetrics", await CopyAsync(source.ContainerMetrics, target, e => e.Id = 0, ct)),
-            ("ServerMetrics",    await CopyAsync(source.ServerMetrics,    target, e => e.Id = 0, ct)),
-            ("AlertHistory",     await CopyAsync(source.AlertHistory,     target, e => e.Id = 0, ct)),
-            ("AuditLog",         await CopyAsync(source.AuditLog,         target, e => e.Id = 0, ct)),
-            ("McpToolCalls",     await CopyAsync(source.McpToolCalls,     target, e => e.Id = 0, ct)),
-            ("VolumeBackups",    await CopyAsync(source.VolumeBackups,    target, e => e.Id = 0, ct)),
-            ("ScheduledTasks",   await CopyAsync(source.ScheduledTasks,   target, e => e.Id = 0, ct)),
-            ("TaskRunHistory",   await CopyAsync(source.TaskRunHistory,   target, e => e.Id = 0, ct)),
-            ("LogAlertRules",    await CopyAsync(source.LogAlertRules,    target, e => e.Id = 0, ct)),
-            ("UpdatePolicies",   await CopyAsync(source.UpdatePolicies,   target, e => e.Id = 0, ct)),
-            ("UpdateHistory",    await CopyAsync(source.UpdateHistory,    target, e => e.Id = 0, ct)),
-            ("Webhooks",         await CopyAsync(source.Webhooks,         target, e => e.Id = 0, ct)),
-            ("WebhookLogs",      await CopyAsync(source.WebhookLogs,      target, e => e.Id = 0, ct)),
-            ("CveFirstSeen",     await CopyAsync(source.CveFirstSeen,     target, e => e.Id = 0, ct)),
-            ("Notifications",    await CopyAsync(source.Notifications,    target, e => e.Id = 0, ct)),
-        };
+            if ((await identitySource!.Database.GetAppliedMigrationsAsync(ct)).Any())
+                report.AddRange(await CopyIdentityAsync(identitySource, identityTarget!, ct));
+            else
+                await log.WriteLineAsync("Note: the source has no local-login tables (never migrated) — no users to copy.");
+        }
 
         await log.WriteLineAsync("");
         await log.WriteLineAsync("Done. Rows copied per table:");
@@ -107,27 +164,34 @@ public static class SqliteToPostgresMigrator
     /// <summary>Returns the name of the first non-empty target table, or null if every table is empty.</summary>
     private static async Task<string?> FirstNonEmptyTableAsync(MetricsDbContext t, CancellationToken ct)
     {
-        if (await t.ContainerMetrics.AnyAsync(ct)) return "ContainerMetrics";
-        if (await t.ServerMetrics.AnyAsync(ct)) return "ServerMetrics";
-        if (await t.AlertHistory.AnyAsync(ct)) return "AlertHistory";
-        if (await t.AuditLog.AnyAsync(ct)) return "AuditLog";
-        if (await t.McpToolCalls.AnyAsync(ct)) return "McpToolCalls";
-        if (await t.VolumeBackups.AnyAsync(ct)) return "VolumeBackups";
-        if (await t.ScheduledTasks.AnyAsync(ct)) return "ScheduledTasks";
-        if (await t.TaskRunHistory.AnyAsync(ct)) return "TaskRunHistory";
-        if (await t.LogAlertRules.AnyAsync(ct)) return "LogAlertRules";
-        if (await t.UpdatePolicies.AnyAsync(ct)) return "UpdatePolicies";
-        if (await t.UpdateHistory.AnyAsync(ct)) return "UpdateHistory";
-        if (await t.Webhooks.AnyAsync(ct)) return "Webhooks";
-        if (await t.WebhookLogs.AnyAsync(ct)) return "WebhookLogs";
-        if (await t.CveFirstSeen.AnyAsync(ct)) return "CveFirstSeen";
-        if (await t.Notifications.AnyAsync(ct)) return "Notifications";
+        foreach (var table in MetricsTables)
+            if (await table.AnyAsync(t, ct)) return table.Name;
         return null;
     }
 
+    private static async Task<string?> FirstNonEmptyIdentityTableAsync(WhiskersIdentityDbContext t, CancellationToken ct)
+    {
+        if (await t.Users.AnyAsync(ct)) return "AspNetUsers";
+        if (await t.UserClaims.AnyAsync(ct)) return "AspNetUserClaims";
+        if (await t.UserLogins.AnyAsync(ct)) return "AspNetUserLogins";
+        if (await t.UserTokens.AnyAsync(ct)) return "AspNetUserTokens";
+        return null;
+    }
+
+    /// <summary>Users first (claims, logins and tokens reference them), ids and password hashes unchanged.
+    /// Only the claims' surrogate int key is reassigned by the target.</summary>
+    private static async Task<IReadOnlyList<(string Table, int Rows)>> CopyIdentityAsync(
+        WhiskersIdentityDbContext source, WhiskersIdentityDbContext target, CancellationToken ct) =>
+    [
+        ("AspNetUsers",      await CopyAsync(source.Users,      target, _ => { }, ct)),
+        ("AspNetUserClaims", await CopyAsync(source.UserClaims, target, c => c.Id = 0, ct)),
+        ("AspNetUserLogins", await CopyAsync(source.UserLogins, target, _ => { }, ct)),
+        ("AspNetUserTokens", await CopyAsync(source.UserTokens, target, _ => { }, ct)),
+    ];
+
     /// <summary>Streams one table from the source (never loading it whole) and inserts it into the target in
     /// batches. <paramref name="resetId"/> zeroes the surrogate PK so the target assigns a fresh identity.</summary>
-    private static async Task<int> CopyAsync<T>(IQueryable<T> source, MetricsDbContext target,
+    private static async Task<int> CopyAsync<T>(IQueryable<T> source, DbContext target,
         Action<T> resetId, CancellationToken ct) where T : class
     {
         var total = 0;
@@ -144,7 +208,7 @@ public static class SqliteToPostgresMigrator
         return total;
     }
 
-    private static async Task<int> FlushAsync<T>(MetricsDbContext target, List<T> buffer, CancellationToken ct)
+    private static async Task<int> FlushAsync<T>(DbContext target, List<T> buffer, CancellationToken ct)
         where T : class
     {
         target.Set<T>().AddRange(buffer);

@@ -103,6 +103,102 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Every_entity_of_the_model_is_copied()
+    {
+        // A table added to MetricsDbContext without a line in the migrator is silent data loss on the move to
+        // PostgreSQL. It happened once (UpdateRollbacks, SelfMetricSamples, ActionOutcomes) — this pins it.
+        using var ctx = NewDb(NewDbPath());
+        var modelled = ctx.Model.GetEntityTypes().Where(e => !e.IsOwned()).Select(e => e.ClrType).ToHashSet();
+        var copied = SqliteToPostgresMigrator.MetricsTables.Select(t => t.EntityType).ToHashSet();
+
+        Assert.Empty(modelled.Except(copied).Select(t => t.Name));
+        Assert.Empty(copied.Except(modelled).Select(t => t.Name));
+    }
+
+    [Fact]
+    public async Task Copies_the_tables_added_after_the_first_release()
+    {
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.UpdateRollbacks.Add(new UpdateRollbackEntity { Id = 5, ContainerId = "c1", ContainerName = "web", OldImageRef = "sha256:old", CapturedAt = DateTime.UtcNow });
+            src.SelfMetricSamples.Add(new SelfMetricSampleEntity { Id = 6, ServerId = "s1" });
+            src.ActionOutcomes.Add(new ActionOutcomeEntity { Id = 7, CorrelationId = "corr-1", ServerId = "s1" });
+            await src.SaveChangesAsync();
+        }
+
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            Assert.Equal(0, await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null));
+
+        await using var check = NewDb(dstPath);
+        Assert.Equal("sha256:old", (await check.UpdateRollbacks.SingleAsync()).OldImageRef);
+        Assert.Equal(1, await check.SelfMetricSamples.CountAsync());
+        Assert.Equal("corr-1", (await check.ActionOutcomes.SingleAsync()).CorrelationId);
+    }
+
+    private static WhiskersIdentityDbContext NewIdentityDb(string path)
+    {
+        // Metrics tables first: EnsureCreated does nothing on a file that already has (identity) tables.
+        using (NewDb(path)) { }
+        var ctx = new WhiskersIdentityDbContext(
+            new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+                .UseSqlite($"Data Source={path}", o =>
+                {
+                    o.MigrationsAssembly("Whiskers.Migrations.Sqlite");
+                    o.MigrationsHistoryTable("__IdentityMigrationsHistory");
+                }).Options);
+        ctx.Database.Migrate();
+        return ctx;
+    }
+
+    [Fact]
+    public async Task Copies_local_users_with_their_ids_and_password_hashes()
+    {
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var id = NewIdentityDb(srcPath))
+        {
+            id.Users.Add(new AppUser { Id = "user-1", UserName = "admin@example.org", NormalizedUserName = "ADMIN@EXAMPLE.ORG", Email = "admin@example.org", PasswordHash = "HASH" });
+            id.UserClaims.Add(new Microsoft.AspNetCore.Identity.IdentityUserClaim<string> { Id = 9, UserId = "user-1", ClaimType = "c", ClaimValue = "v" });
+            await id.SaveChangesAsync();
+        }
+
+        int rc;
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+        await using (var idSrc = NewIdentityDb(srcPath))
+        await using (var idDst = NewIdentityDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null, default, idSrc, idDst);
+
+        Assert.Equal(0, rc);
+        await using var check = NewIdentityDb(dstPath);
+        var user = await check.Users.SingleAsync();
+        Assert.Equal("user-1", user.Id);
+        Assert.Equal("HASH", user.PasswordHash);
+        Assert.Equal("user-1", (await check.UserClaims.SingleAsync()).UserId);
+    }
+
+    [Fact]
+    public async Task Aborts_when_the_target_already_has_local_users()
+    {
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var id = NewIdentityDb(dstPath))
+        {
+            id.Users.Add(new AppUser { Id = "seeded", UserName = "x", NormalizedUserName = "X" });
+            await id.SaveChangesAsync();
+        }
+
+        await using var src = NewDb(srcPath);
+        await using var dst = NewDb(dstPath);
+        await using var idSrc = NewIdentityDb(srcPath);
+        await using var idDst = NewIdentityDb(dstPath);
+        Assert.Equal(3, await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null, default, idSrc, idDst));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
