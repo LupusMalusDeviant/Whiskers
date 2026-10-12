@@ -2048,6 +2048,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Settings_Label_ApiUrlOptional" xml:space="preserve">
     <value>API URL (optional)</value>
   </data>
+  <data name="Settings_Label_WebhookSecret" xml:space="preserve">
+    <value>Signing secret (optional)</value>
+  </data>
+  <data name="Settings_Help_WebhookSecret" xml:space="preserve">
+    <value>HMAC-SHA256; the receiver can verify origin and freshness</value>
+  </data>
   <data name="Settings_Label_BotToken" xml:space="preserve">
     <value>Bot token</value>
   </data>

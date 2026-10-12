@@ -1,3 +1,4 @@
+using Whiskers.Models;
 using Whiskers.Services.Notifications;
 
 namespace Whiskers.Tests;
@@ -36,5 +37,25 @@ public class NotificationThrottlerTests
         var t = new NotificationThrottler(60);
         t.Record("c1", "stopped");
         Assert.False(t.IsThrottled("c1", "restart_loop", 60));
+    }
+
+    [Fact]
+    public void The_same_event_on_two_servers_is_two_alerts()
+    {
+        var t = new NotificationThrottler(60);
+        t.Record(new NotificationEvent { ServerId = "a", EventType = "high_disk" });
+        Assert.True(t.IsThrottled(new NotificationEvent { ServerId = "a", EventType = "high_disk" }, 60));
+        Assert.False(t.IsThrottled(new NotificationEvent { ServerId = "b", EventType = "high_disk" }, 60));
+    }
+
+    [Theory]
+    [InlineData("server_unreachable")]
+    [InlineData("server_recovered")]
+    public void Reachability_transitions_are_never_throttled(string eventType)
+    {
+        var t = new NotificationThrottler(60);
+        var evt = new NotificationEvent { ServerId = "a", EventType = eventType };
+        t.Record(evt);
+        Assert.False(t.IsThrottled(evt, 60));
     }
 }

@@ -2048,6 +2048,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Settings_Label_ApiUrlOptional" xml:space="preserve">
     <value>API-URL (optional)</value>
   </data>
+  <data name="Settings_Label_WebhookSecret" xml:space="preserve">
+    <value>Signatur-Secret (optional)</value>
+  </data>
+  <data name="Settings_Help_WebhookSecret" xml:space="preserve">
+    <value>HMAC-SHA256; der Empfänger prüft Herkunft und Frische</value>
+  </data>
   <data name="Settings_Label_BotToken" xml:space="preserve">
     <value>Bot-Token</value>
   </data>

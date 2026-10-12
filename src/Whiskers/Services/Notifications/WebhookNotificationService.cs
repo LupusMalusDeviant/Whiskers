@@ -1,4 +1,7 @@
-using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -25,11 +28,11 @@ public class WebhookNotificationService : IWebhookNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Url)) return;
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes)) return;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
         try
         {
             await PostAsync(c, evt);
-            _throttler.Record(evt.ContainerId, evt.EventType);
+            _throttler.Record(evt);
             _logger.LogInformation("Webhook notification sent: {EventType}", evt.EventType);
         }
         catch (Exception ex) { _logger.LogError(ex, "Failed to send webhook notification"); }
@@ -51,11 +54,38 @@ public class WebhookNotificationService : IWebhookNotificationService
             title,
             detail = NotificationFormatter.Detail(evt),
             severity,
+            server = evt.ServerName,
+            serverId = evt.ServerId,
             container = evt.ContainerName,
             image = evt.Image,
             timestamp = evt.Timestamp,
         };
-        var resp = await _http.PostAsJsonAsync(c.Url, payload);
+        // Serialize once and sign exactly the bytes that go on the wire.
+        var body = JsonSerializer.SerializeToUtf8Bytes(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var request = new HttpRequestMessage(HttpMethod.Post, c.Url) { Content = new ByteArrayContent(body) };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        foreach (var (name, value) in SignatureHeaders(c.Secret, body, DateTimeOffset.UtcNow))
+            request.Headers.TryAddWithoutValidation(name, value);
+
+        var resp = await _http.SendAsync(request);
         resp.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>The signature headers for <paramref name="body"/>, or none when no secret is configured.
+    /// V2 binds the timestamp into the MAC so a captured request cannot be replayed later; the GitHub-style
+    /// header is for receivers that only know that scheme.</summary>
+    internal static IReadOnlyList<(string Name, string Value)> SignatureHeaders(string? secret, byte[] body, DateTimeOffset now)
+    {
+        if (string.IsNullOrEmpty(secret)) return [];
+
+        var key = Encoding.UTF8.GetBytes(secret);
+        var timestamp = now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var signed = Encoding.UTF8.GetBytes(timestamp + ".").Concat(body).ToArray();
+        return
+        [
+            ("X-Webhook-Timestamp", timestamp),
+            ("X-Webhook-Signature-V2", Convert.ToHexStringLower(HMACSHA256.HashData(key, signed))),
+            ("X-Hub-Signature-256", "sha256=" + Convert.ToHexStringLower(HMACSHA256.HashData(key, body))),
+        ];
     }
 }

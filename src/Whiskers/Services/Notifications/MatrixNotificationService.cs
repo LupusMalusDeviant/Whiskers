@@ -31,7 +31,7 @@ public class MatrixNotificationService : IMatrixNotificationService
             string.IsNullOrWhiteSpace(config.AccessToken) || string.IsNullOrWhiteSpace(config.RoomId))
             return;
 
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes))
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
             return;
 
         try
@@ -39,7 +39,7 @@ public class MatrixNotificationService : IMatrixNotificationService
             var (plain, html) = FormatMessage(evt);
             await SendMatrixMessage(config, plain, html);
 
-            _throttler.Record(evt.ContainerId, evt.EventType);
+            _throttler.Record(evt);
             _logger.LogInformation("Matrix notification sent: {EventType} for {Container}",
                 evt.EventType, evt.ContainerName);
         }

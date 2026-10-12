@@ -29,7 +29,7 @@ public class MattermostNotificationService : IMattermostNotificationService
         if (!config.Enabled || string.IsNullOrWhiteSpace(config.WebhookUrl))
             return;
 
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes))
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
             return;
 
         try
@@ -45,7 +45,7 @@ public class MattermostNotificationService : IMattermostNotificationService
             var response = await _httpClient.PostAsJsonAsync(config.WebhookUrl, payload);
             response.EnsureSuccessStatusCode();
 
-            _throttler.Record(evt.ContainerId, evt.EventType);
+            _throttler.Record(evt);
             _logger.LogInformation("Mattermost notification sent: {EventType} for {Container}",
                 evt.EventType, evt.ContainerName);
         }

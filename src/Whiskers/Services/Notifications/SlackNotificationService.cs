@@ -24,12 +24,12 @@ public class SlackNotificationService : ISlackNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.WebhookUrl)) return;
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes)) return;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
         try
         {
             var (title, severity) = NotificationFormatter.Describe(evt);
             await PostAsync(c, title, NotificationFormatter.Detail(evt), severity);
-            _throttler.Record(evt.ContainerId, evt.EventType);
+            _throttler.Record(evt);
             _logger.LogInformation("Slack notification sent: {EventType}", evt.EventType);
         }
         catch (Exception ex) { _logger.LogError(ex, "Failed to send Slack notification"); }

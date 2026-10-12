@@ -24,11 +24,11 @@ public class TelegramNotificationService : ITelegramNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.BotToken) || string.IsNullOrWhiteSpace(c.ChatId)) return;
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes)) return;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
         try
         {
             await PostAsync(c, NotificationFormatter.PlainText(evt));
-            _throttler.Record(evt.ContainerId, evt.EventType);
+            _throttler.Record(evt);
             _logger.LogInformation("Telegram notification sent: {EventType}", evt.EventType);
         }
         catch (Exception ex) { _logger.LogError(ex, "Failed to send Telegram notification"); }

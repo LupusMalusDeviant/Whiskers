@@ -155,7 +155,8 @@ else
         <MudText Typo="Typo.subtitle2" Class="mb-1">@L["Settings_Heading_GenericWebhook"]</MudText>
         <MudGrid>
             <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_whEnabled" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_whUrl" Label="URL (POST JSON)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="8"><MudTextField @bind-Value="_whUrl" Label="URL (POST JSON)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudTextField @bind-Value="_whSecret" Label="@L["Settings_Label_WebhookSecret"]" HelperText="@L["Settings_Help_WebhookSecret"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
@@ -691,7 +692,7 @@ else
     private bool _dcEnabled; private string _dcWebhook = "";
     private bool _slEnabled; private string _slWebhook = "";
     private bool _mailEnabled; private string _mailHost = ""; private int _mailPort = 587; private bool _mailSsl = true; private string _mailUser = ""; private string _mailPass = ""; private string _mailFrom = ""; private string _mailTo = "";
-    private bool _whEnabled; private string _whUrl = "";
+    private bool _whEnabled; private string _whUrl = ""; private string _whSecret = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -744,7 +745,7 @@ else
         var dc = DiscordOptions.CurrentValue; _dcEnabled = dc.Enabled; _dcWebhook = dc.WebhookUrl;
         var sl = SlackOptions.CurrentValue; _slEnabled = sl.Enabled; _slWebhook = sl.WebhookUrl;
         var ml = EmailOptions.CurrentValue; _mailEnabled = ml.Enabled; _mailHost = ml.Host; _mailPort = ml.Port; _mailSsl = ml.UseSsl; _mailUser = ml.Username; _mailPass = ml.Password; _mailFrom = ml.From; _mailTo = ml.To;
-        var wh = WebhookOptions.CurrentValue; _whEnabled = wh.Enabled; _whUrl = wh.Url;
+        var wh = WebhookOptions.CurrentValue; _whEnabled = wh.Enabled; _whUrl = wh.Url; _whSecret = wh.Secret;
     }
 
     private async Task SaveNotifications()
@@ -918,7 +919,7 @@ else
         });
         await AppSettings.SaveSectionAsync("WebhookNotification", new WebhookNotificationSettings
         {
-            Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
+            Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", Secret = _whSecret ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
         });
         await Audit("notification-channels");
         Snackbar.Add(L["Settings_Snackbar_ChannelsSaved"].Value, Severity.Success);

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Whiskers.Models;
 
 namespace Whiskers.Services.Notifications;
 
@@ -35,4 +36,22 @@ public class NotificationThrottler
         foreach (var kv in _lastSent)
             if (kv.Value < cutoff) _lastSent.TryRemove(kv.Key, out _);
     }
+
+    /// <summary>Event-aware throttle check. The key includes the server, so the same event on two hosts is
+    /// two alerts: server-level events carry no container id, and keyed on that alone the second host to
+    /// drop off within the window was silently swallowed — exactly when a mesh outage takes several down at
+    /// once. Reachability transitions are never throttled: the tracker already announces each outage once
+    /// and closes it with exactly one recovery, so dropping one would leave an outage without its end.</summary>
+    public bool IsThrottled(NotificationEvent evt, int minutes) =>
+        !IsTransition(evt.EventType) && IsThrottled(KeyFor(evt), evt.EventType, minutes);
+
+    public void Record(NotificationEvent evt)
+    {
+        if (!IsTransition(evt.EventType)) Record(KeyFor(evt), evt.EventType);
+    }
+
+    private static bool IsTransition(string eventType) =>
+        eventType is "server_unreachable" or "server_recovered";
+
+    private static string KeyFor(NotificationEvent evt) => $"{evt.ServerId}/{evt.ContainerId}";
 }

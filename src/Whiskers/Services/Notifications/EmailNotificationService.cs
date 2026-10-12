@@ -23,12 +23,12 @@ public class EmailNotificationService : IEmailNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return;
-        if (_throttler.IsThrottled(evt.ContainerId, evt.EventType, _settings.CurrentValue.ThrottleMinutes)) return;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
         try
         {
             var (title, _) = NotificationFormatter.Describe(evt);
             await SendMailAsync(c, $"[Whiskers] {title}", NotificationFormatter.PlainText(evt));
-            _throttler.Record(evt.ContainerId, evt.EventType);
+            _throttler.Record(evt);
             _logger.LogInformation("Email notification sent: {EventType}", evt.EventType);
         }
         catch (Exception ex) { _logger.LogError(ex, "Failed to send email notification"); }
