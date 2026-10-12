@@ -155,7 +155,9 @@ public sealed class SelfMetricsTests : IDisposable
         var docker = new FakeDocker(
             new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Badwolf" })
         {
-            FetchDelay = TimeSpan.FromMilliseconds(300)
+            // Hangs rather than answering late: a finite delay raced the 40 ms timeout, and on a starved CI
+            // runner both timers came due together and the fetch could "succeed" (CI run 38304968400).
+            FetchHangs = true
         };
 
         await Monitor(docker, metrics, TimeSpan.FromMilliseconds(40)).RunScanCycleAsync(CancellationToken.None);
