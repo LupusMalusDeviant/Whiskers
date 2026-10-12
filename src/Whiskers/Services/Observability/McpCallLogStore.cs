@@ -73,8 +73,18 @@ public sealed class McpCallLogStore : IMcpCallLogStore
         IQueryable<McpToolCallEntity> q,
         string? actor, string? tool, string? verdict, bool writesOnly, DateTime? since)
     {
-        if (!string.IsNullOrWhiteSpace(actor)) q = q.Where(e => e.Actor.Contains(actor));
-        if (!string.IsNullOrWhiteSpace(tool)) q = q.Where(e => e.ToolName.Contains(tool));
+        // Case-insensitive on every provider: Contains translates to instr()/strpos(), which are case-sensitive,
+        // so "Admin@…" would not find "admin@…". Lowering both sides works the same on SQLite and PostgreSQL.
+        if (!string.IsNullOrWhiteSpace(actor))
+        {
+            var a = actor.ToLowerInvariant();
+            q = q.Where(e => e.Actor.ToLower().Contains(a));
+        }
+        if (!string.IsNullOrWhiteSpace(tool))
+        {
+            var t = tool.ToLowerInvariant();
+            q = q.Where(e => e.ToolName.ToLower().Contains(t));
+        }
         if (!string.IsNullOrWhiteSpace(verdict)) q = q.Where(e => e.Verdict == verdict);
         if (writesOnly) q = q.Where(e => e.Level != "read");
         if (since is { } s) q = q.Where(e => e.Timestamp >= s);
