@@ -16,18 +16,31 @@ repository. Include:
 - affected version / commit,
 - any suggested remediation.
 
-You will get an acknowledgement as soon as possible. Please allow reasonable time for a fix before
-any public disclosure (coordinated disclosure).
+### What you can expect
+
+Whiskers has a single maintainer, so these are commitments sized to that — not a staffed SOC:
+
+| Step | Target |
+|---|---|
+| Acknowledgement of your report | within **72 hours** |
+| Triage: confirmed or not, severity (CVSS) | within **7 days** |
+| Fix released for **critical / high** | within **14 days** of confirmation |
+| Fix released for **medium / low** | within **30 days**, or with the next release |
+| Public advisory (GitHub Security Advisory, credit if you want it) | with the fixed release |
+
+If a target slips, you will hear so — with a reason and a new date — rather than silence. Please allow
+until the fixed release before any public disclosure (coordinated disclosure); after 90 days you are free
+to disclose regardless.
 
 ## Supported versions
 
-Whiskers is currently **beta** (`0.12.x`). Only the latest release / `main` receives security
+Whiskers is currently **beta** (`0.13.x`). Only the latest release / `main` receives security
 fixes. There is no long-term-support branch yet.
 
 | Version | Supported |
 |---|---|
-| `0.12.x` (beta) | ✅ latest only |
-| `< 0.12` | ❌ |
+| `0.13.x` (beta) | ✅ latest only |
+| `< 0.13` | ❌ |
 
 ## Security model (summary)
 
