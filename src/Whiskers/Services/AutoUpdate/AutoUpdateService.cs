@@ -18,6 +18,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     private readonly IImageUpdateStore _updateStore;
     private readonly INotificationService _notifications;
     private readonly ILogger<AutoUpdateService> _logger;
+    private readonly Whiskers.Services.Observability.SelfMetrics.ISelfMetrics _selfMetrics;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
@@ -26,12 +27,14 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         IDockerService docker,
         IImageUpdateStore updateStore,
         INotificationService notifications,
+        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
         ILogger<AutoUpdateService> logger)
     {
         _scopeFactory = scopeFactory;
         _docker = docker;
         _updateStore = updateStore;
         _notifications = notifications;
+        _selfMetrics = selfMetrics;
         _logger = logger;
     }
 
@@ -42,6 +45,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var startedAt = DateTime.UtcNow;
+            var success = true;
             try
             {
                 // WaitAsync bounds the cycle to shutdown: RecreateContainerAsync pulls an image and can
@@ -50,8 +55,13 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                success = false;
                 _logger.LogError(ex, "Auto-update check failed");
             }
+
+            // Reports like every other loop, so a stalled auto-updater shows up on /self-status and in the
+            // supervisor instead of looking like "no updates due".
+            _selfMetrics.RecordCycle("autoupdate", "*", DateTime.UtcNow - startedAt, success, CheckInterval);
 
             await Task.Delay(CheckInterval, stoppingToken);
         }

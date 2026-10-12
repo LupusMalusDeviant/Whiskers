@@ -11,6 +11,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITaskExecutor _executor;
     private readonly ILogger<SchedulerService> _logger;
+    private readonly Whiskers.Services.Observability.SelfMetrics.ISelfMetrics _selfMetrics;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
     // Per-taskId in-flight guard so the same task never runs twice concurrently.
     private readonly ConcurrentDictionary<string, byte> _running = new();
@@ -18,10 +19,12 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
     public SchedulerService(
         IServiceScopeFactory scopeFactory,
         ITaskExecutor executor,
+        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
         ILogger<SchedulerService> logger)
     {
         _scopeFactory = scopeFactory;
         _executor = executor;
+        _selfMetrics = selfMetrics;
         _logger = logger;
     }
 
@@ -34,14 +37,21 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var startedAt = DateTime.UtcNow;
+            var success = true;
             try
             {
                 await CheckAndRunDueTasks(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                success = false;
                 _logger.LogError(ex, "Scheduler check failed");
             }
+
+            // Reports like every other loop: a scheduler that stopped ticking would otherwise look exactly
+            // like one with nothing due — and the nightly backups would silently stop with it.
+            _selfMetrics.RecordCycle("scheduler", "*", DateTime.UtcNow - startedAt, success, CheckInterval);
 
             await Task.Delay(CheckInterval, stoppingToken);
         }
