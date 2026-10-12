@@ -35,6 +35,7 @@ public class WorkloadProviderTests
         Assert.False(c.SupportsHostShell);
         Assert.False(c.SupportsNetworks);
         Assert.False(c.SupportsResourceEdit);
+        Assert.False(c.SupportsExec); // no pod exec implementation yet
         Assert.Equal("scale", c.StartStopSemantics);
     }
 

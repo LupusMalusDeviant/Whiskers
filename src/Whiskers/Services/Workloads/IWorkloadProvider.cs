@@ -22,9 +22,11 @@ public sealed record WorkloadCapabilities(
         SupportsResourceEdit: true, SupportsExec: true, SupportsStats: true,
         StartStopSemantics: "container");
 
+    // SupportsExec stays false until pod exec over the WebSocket API exists — the flag claimed it while nothing
+    // implemented it, and a capability that lies is worse than one that is missing.
     public static readonly WorkloadCapabilities Kubernetes = new(
         SupportsCompose: false, SupportsHostShell: false, SupportsNetworks: false,
-        SupportsResourceEdit: false, SupportsExec: true, SupportsStats: false,
+        SupportsResourceEdit: false, SupportsExec: false, SupportsStats: false,
         StartStopSemantics: "scale");
 }
 
