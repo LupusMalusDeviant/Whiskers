@@ -48,6 +48,8 @@ public static class AiTriggerEvents
         ("high_cpu",      "Hohe CPU-Last (Schwellwert)"),
         ("high_memory",   "Hohe RAM-Last (Schwellwert)"),
         ("metric_anomaly", "Metrik-Ausreißer (Anomalie)"),
+        ("certificate_expiring", "Zertifikat läuft bald ab"),
+        ("certificate_expired",  "Zertifikat abgelaufen"),
     };
 
     public static string Label(string type) =>

@@ -25,6 +25,8 @@ public static class NotificationFormatter
         "webhook_disabled" => ("Webhook disabled", "Warning"),
         "server_unreachable" => ("Server unreachable", "Error"),
         "server_recovered" => ("Server reachable again", "Info"),
+        "certificate_expiring" => ("Certificate expires soon", "Warning"),
+        "certificate_expired" => ("Certificate expired", "Error"),
         // Whiskers throttling ITSELF. Never silent: a self-imposed pause that nobody is told about
         // turns "quiet" into "blind", and hides the next incident behind the fix for the last one.
         "host_cpu_anomaly" => ("Server CPU is far from this host's normal", "Warning"),
@@ -76,6 +78,7 @@ public static class NotificationFormatter
                 or "server_throttled" or "server_throttling_ended") return "servers";
         if (e.EventType.StartsWith("host_")) return "servers";
         if (e.EventType == "log_rotation_missing") return "servers";
+        if (e.EventType is "certificate_expiring" or "certificate_expired") return "servers";
         if (e.EventType is "loops_paused" or "loops_resumed") return "servers";
         if (e.EventType is "monitoring_stalled" or "monitoring_resumed") return "servers";
         if (e.EventType is "log_scan_suspended" or "log_scan_resumed") return "logs";

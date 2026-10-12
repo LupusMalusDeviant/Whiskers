@@ -41,7 +41,9 @@ public class SslCertService : ISslCertService
     public async Task<List<SslCertificate>> ListCertificatesAsync(string serverId)
     {
         var result = await _executor.ExecuteAsync(serverId,
-            "certbot certificates 2>/dev/null",
+            // A host without certbot simply has no certbot certificates; reporting that as a failure made the
+            // certificate monitor log a warning for every such server, twice a day.
+            "command -v certbot >/dev/null 2>&1 || exit 0; certbot certificates 2>/dev/null",
             timeout: TimeSpan.FromSeconds(60));
 
         var certs = new List<SslCertificate>();

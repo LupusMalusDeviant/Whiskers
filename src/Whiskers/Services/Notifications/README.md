@@ -45,6 +45,14 @@ Each channel has its own interface (distinct strategies) so the composite can en
 stops answering the fleet-wide container listing. They carry `ServerId`/`ServerName` instead of a
 container, link to `/servers`, and are available as AI-trigger event types.
 
+`certificate_expiring` (Warning) / `certificate_expired` (Error) come from the certificate monitor
+(`Services/Certificates/`). Every 12 hours it reads Whiskers' mTLS client certificate and CA bundle from disk,
+the certificate each mTLS proxy presents in its handshake, and certbot's certificates on every enabled server.
+Each certificate is announced once per stage — 30, 14 and 7 days ahead, then on expiry. The last announced stage
+is kept in `certificate-alerts.json`, so a restart does not repeat an alert. A renewed certificate has a new
+fingerprint (certbot: a new expiry date) and starts over. These events are deduplicated at the source and are
+never throttled.
+
 ## Secret hygiene
 
 The capability-bearing channels put their secret in the request URL (Telegram bot token in the path; Discord/Slack/Mattermost/ntfy/webhook secret URLs). Those `System.Net.Http.HttpClient.*` logger categories are raised to Warning in `Program.cs`, so the default HttpClient request logging can't write the token/URL to the app log.

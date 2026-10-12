@@ -50,8 +50,10 @@ public class NotificationThrottler
         if (!IsTransition(evt.EventType)) Record(KeyFor(evt), evt.EventType);
     }
 
+    // Certificate alerts are deduplicated at the source (one per stage per certificate, persisted), and several
+    // certificates on one server reach a stage together — the throttle key would swallow all but the first.
     private static bool IsTransition(string eventType) =>
-        eventType is "server_unreachable" or "server_recovered";
+        eventType is "server_unreachable" or "server_recovered" or "certificate_expiring" or "certificate_expired";
 
     private static string KeyFor(NotificationEvent evt) => $"{evt.ServerId}/{evt.ContainerId}";
 }

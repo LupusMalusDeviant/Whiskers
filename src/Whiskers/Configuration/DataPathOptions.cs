@@ -82,6 +82,7 @@ public sealed class DataPathOptions
     public string NotificationPrefsJson => P("notification-prefs.json");
     public string GuardrailsJson => P("guardrails.json");
     public string CveFindingsJson => P("cve-findings.json");
+    public string CertificateAlertsJson => P("certificate-alerts.json");
     public string AiTriggersJson => P("ai-triggers.json");
 
     // --- Directories ---

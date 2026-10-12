@@ -32,6 +32,10 @@ All notable changes to Whiskers are documented here. The format follows
   the request. This affected the pre-existing container metrics too, not only the new self-metrics.
 
 ### Added
+- **Warnings before a certificate expires.** Whiskers now watches its mTLS client certificate and CA bundle, the
+  certificate of every mTLS proxy and certbot's certificates on all servers. It notifies 30, 14 and 7 days before
+  expiry and once more on expiry (`certificate_expiring` / `certificate_expired`). An expired client certificate
+  or CA used to take every SSH-free server down at once with no warning beforehand.
 - **The generic outbound webhook can sign its requests.** With a secret set (Settings → generic webhook) every
   POST carries `X-Webhook-Timestamp` + `X-Webhook-Signature-V2` (HMAC-SHA256 over `<timestamp>.<body>`, so a
   captured request cannot be replayed) and the GitHub-style `X-Hub-Signature-256`. Receivers that require a

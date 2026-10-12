@@ -163,6 +163,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Observability.Outcomes.IActionOutcomeService,
             Whiskers.Services.Observability.Outcomes.ActionOutcomeService>();
         builder.Services.AddHostedService<Whiskers.Services.Observability.Outcomes.ActionOutcomeSweeper>();
+        // Warns before an mTLS or certbot certificate expires (NextToImplement C1).
+        builder.Services.AddHostedService<Whiskers.Services.Certificates.CertificateMonitor>();
         // Last known reading per server, so a page paints from what the loops already learned instead of
         // asking the whole fleet again while the user waits.
         builder.Services.AddSingleton<Whiskers.Services.Observability.IFleetSnapshotCache, Whiskers.Services.Observability.FleetSnapshotCache>();
