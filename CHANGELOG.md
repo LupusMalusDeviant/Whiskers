@@ -7,6 +7,18 @@ All notable changes to Whiskers are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **A server stayed paused until the next restart after a probe that produced no verdict.** When the half-open
+  probe of the per-server circuit breaker ended in an application error or was cancelled, nothing cleared the
+  probe flag, so every later caller was refused and the server looked throttled forever. The probe is now
+  released on every exit path; a transport failure still re-opens the circuit as before.
+- **Restarting Whiskers briefly cut the whole tailnet when the host already runs Tailscale.** With
+  `VPN_PROVIDER` unset, the entrypoint started a second `tailscaled` inside the host-network container, which
+  made the host daemon restart and dropped every mesh connection for one to two minutes. The entrypoint now
+  skips its legacy bring-up when `tailscale0` already exists (`VPN_FORCE_LEGACY_TAILSCALE=1` restores it).
+- **The second server to go down within the throttle window was never reported.** Server-level events carry no
+  container id, so every channel throttled them on one shared key — exactly when a mesh outage takes several
+  hosts down at once. The key now includes the server, and reachability transitions are never throttled (the
+  tracker already announces each outage once and closes it with exactly one recovery).
 - **A background loop that ran on time and failed every single cycle was reported as healthy.** The
   supervisory rule fell back to the last *attempt* when a loop had never succeeded, so a permanently failing
   loop kept resetting its own age to zero and never triggered — the exact shape of the 2026-08-26 incident,
@@ -20,6 +32,11 @@ All notable changes to Whiskers are documented here. The format follows
   the request. This affected the pre-existing container metrics too, not only the new self-metrics.
 
 ### Added
+- **The generic outbound webhook can sign its requests.** With a secret set (Settings → generic webhook) every
+  POST carries `X-Webhook-Timestamp` + `X-Webhook-Signature-V2` (HMAC-SHA256 over `<timestamp>.<body>`, so a
+  captured request cannot be replayed) and the GitHub-style `X-Hub-Signature-256`. Receivers that require a
+  signature — e.g. a Hermes agent webhook route that forwards alerts to Telegram — now accept Whiskers alerts.
+  The payload also names the server (`server`, `serverId`).
 - **"Did the automatic actions help?" is now a section on `/self-status`**, directly above the timeline that
   says what Whiskers did. A hit rate is shown only once at least five outcomes have been judged — "67%" from
   three attempts reads as a measurement and is a coin toss — and it is marked unreliable when more outcomes
