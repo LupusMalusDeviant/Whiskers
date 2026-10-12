@@ -67,6 +67,8 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
                     "Settings → MCP; the key value is NOT written to the log.", defaultKey.PermissionLevel);
             }
 
+            changed |= EnforceCodeFloor(data);
+
             if (changed)
                 await _store.SaveAsync(data);
 
@@ -206,14 +208,36 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         Category = t.Category
     };
 
+    /// <summary>A stored level may make a tool stricter than the code declares, never looser. Without this floor a
+    /// level persisted in <c>mcp-permissions.json</c> outlived every tightening in code: raising
+    /// <c>hetzner_enable_rescue</c> to admin changed nothing on an existing install, because the old "write" was
+    /// already on disk. Returns whether anything was raised.</summary>
+    internal bool EnforceCodeFloor(McpPermissionData data)
+    {
+        var raised = false;
+        foreach (var (tool, config) in data.Tools)
+        {
+            if (!McpPermissionLevels.DefaultToolLevels.TryGetValue(tool, out var floor)) continue;
+            if (McpPermissionLevels.GetRank(config.RequiredLevel) >= McpPermissionLevels.GetRank(floor)) continue;
+
+            _logger.LogWarning("MCP tool {Tool}: stored level {Stored} is looser than the code's {Floor} — raised to {Floor}",
+                tool, config.RequiredLevel, floor, floor);
+            config.RequiredLevel = floor;
+            raised = true;
+        }
+        return raised;
+    }
+
     /// <summary>
-    /// Updates the full permission data from the UI.
+    /// Updates the full permission data from the UI. Levels below the code's floor are raised (see
+    /// <see cref="EnforceCodeFloor"/>).
     /// </summary>
     public async Task SavePermissionDataAsync(McpPermissionData data)
     {
         await _lock.WaitAsync();
         try
         {
+            EnforceCodeFloor(data);
             _data = data;
             await _store.SaveAsync(_data);
             _logger.LogInformation("MCP permissions saved: {KeyCount} keys, {ToolCount} tools",

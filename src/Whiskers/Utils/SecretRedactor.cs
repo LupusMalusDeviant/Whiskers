@@ -22,9 +22,40 @@ public static class SecretRedactor
     private static readonly Regex EnvPassword = new(
         @"(MYSQL_PWD|PGPASSWORD|REDISCLI_AUTH)=\S+", RegexOptions.Compiled, Timeout);
 
-    // password=x, token: x, api_key=x, bearer x, etc.  →  $1=***
+    // Secret-bearing key names, English and German (UI strings and tool output are partly German:
+    // "Temporäres root-Passwort: …" passed straight through before).
+    private const string SecretKeys =
+        @"password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer";
+
+    // password=x, token: x, api_key=x, Passwort: x, etc.  →  $1=***
     private static readonly Regex KeyedSecret = new(
-        @"(?i)(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|authorization|bearer)\s*[=:]\s*\S+",
+        $@"(?i)({SecretKeys})\s*[=:]\s*\S+",
+        RegexOptions.Compiled, Timeout);
+
+    // JSON form: "password": "x"  →  "password":"***"  (the key is followed by a quote, so KeyedSecret misses it)
+    private static readonly Regex JsonSecret = new(
+        $@"(?i)""([\w-]*(?:{SecretKeys})[\w-]*)""\s*:\s*""(?:[^""\\]|\\.)*""",
+        RegexOptions.Compiled, Timeout);
+
+    // Authorization: Bearer <token> without a colon after "Bearer"  →  Bearer ***
+    private static readonly Regex BearerToken = new(
+        @"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}",
+        RegexOptions.Compiled, Timeout);
+
+    // Credentials in a URL: scheme://user:pass@host  →  scheme://user:***@host
+    private static readonly Regex UrlCredentials = new(
+        @"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@/]+@",
+        RegexOptions.Compiled, Timeout);
+
+    // PEM private keys (certificates are public and stay readable).
+    private static readonly Regex PemPrivateKey = new(
+        @"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)",
+        RegexOptions.Compiled, Timeout);
+
+    // A long base64 run is almost always an encoded blob — e.g. a key shipped as `echo <b64> | base64 -d`.
+    // 200+ characters keeps image digests (64 hex) and ordinary tokens in log lines readable.
+    private static readonly Regex LongBase64 = new(
+        @"[A-Za-z0-9+/]{200,}={0,2}",
         RegexOptions.Compiled, Timeout);
 
     public static string Redact(string? input)
@@ -38,6 +69,11 @@ public static class SecretRedactor
             s = EnvPassword.Replace(s, m => $"{m.Groups[1].Value}=***");
             s = MysqlPwFlag.Replace(s, "-p***");
             s = RedisAuthFlag.Replace(s, "-a ***");
+            s = PemPrivateKey.Replace(s, "[REDACTED PRIVATE KEY]");
+            s = LongBase64.Replace(s, "[REDACTED BASE64]");
+            s = UrlCredentials.Replace(s, m => $"{m.Groups[1].Value}:***@");
+            s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
+            s = BearerToken.Replace(s, "Bearer ***");
             s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");
             return s;
         }

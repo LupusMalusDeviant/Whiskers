@@ -84,7 +84,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `hetzner_disable_backups` | write | Disable Hetzner automated backups for a server (by Whiskers name or id). Existing backups are deleted. |
 | `hetzner_disable_rescue` | write | Disable Hetzner rescue mode on a server (by Whiskers name or id). |
 | `hetzner_enable_backups` | write | Enable Hetzner automated daily backups for a server (by Whiskers name or id). Adds ~20% to the server price. |
-| `hetzner_enable_rescue` | write | Enable Hetzner rescue mode on a server (by Whiskers name or id), then it must be reset to boot into rescue. Returns the temporary root password. Recovery when the OS won't boot. |
+| `hetzner_enable_rescue` | admin | Enable Hetzner rescue mode on a server (by Whiskers name or id), then it must be reset to boot into rescue. Returns the temporary root password. Recovery when the OS won't boot. |
 | `hetzner_list_snapshots` | read | List Hetzner snapshots in the account of a given Whiskers server (by name or id). |
 | `list_cloud_servers` | read | List all Whiskers servers that have a cloud provider (Hetzner/Hostinger) configured, with their live power status, type, location, IP, and (Hetzner) traffic usage. |
 
@@ -154,6 +154,6 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | Level | Tools |
 |---|---|
 | read | 45 |
-| write | 35 |
-| admin | 3 |
+| write | 34 |
+| admin | 4 |
 | **total** | **83** |

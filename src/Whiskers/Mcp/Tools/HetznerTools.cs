@@ -18,7 +18,8 @@ namespace Whiskers.Mcp.Tools;
 [McpServerToolType]
 public class HetznerTools
 {
-    [McpToolLevel(McpPermissionLevels.Write)]
+    // Admin, not Write: the response carries a root password for the server — a full credential.
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Enable Hetzner rescue mode on a server (by Whiskers name or id), then it must be reset to boot into rescue. Returns the temporary root password. Recovery when the OS won't boot.")]
     public static async Task<string> HetznerEnableRescue(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,

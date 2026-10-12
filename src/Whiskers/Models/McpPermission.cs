@@ -169,7 +169,7 @@ public static class McpPermissionLevels
 
         // Hetzner-only extras
         ["hetzner_list_snapshots"] = Read,
-        ["hetzner_enable_rescue"] = Write,
+        ["hetzner_enable_rescue"] = Admin,   // issues a root password for the server
         ["hetzner_disable_rescue"] = Write,
         ["hetzner_enable_backups"] = Write,
         ["hetzner_disable_backups"] = Write,

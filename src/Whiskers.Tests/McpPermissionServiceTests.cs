@@ -26,6 +26,33 @@ public sealed class McpPermissionServiceTests : IDisposable
         Assert.DoesNotContain(logger.Messages, m => Regex.IsMatch(m, "[0-9a-fA-F]{64}"));
     }
 
+    [Fact]
+    public async Task A_stored_level_looser_than_the_code_is_raised_but_a_stricter_one_is_kept()
+    {
+        // An existing install persisted hetzner_enable_rescue as "write" before the code raised it to admin.
+        Directory.CreateDirectory(_dir);
+        var paths = new DataPathOptions(_dir);
+        await File.WriteAllTextAsync(paths.McpPermissionsJson, """
+            {"ApiKeys":[],"Tools":{
+              "hetzner_enable_rescue":{"Enabled":true,"RequiredLevel":"write","Category":"Cloud"},
+              "list_servers":{"Enabled":true,"RequiredLevel":"admin","Category":"Server"}
+            }}
+            """);
+
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        await svc.InitializeAsync();
+
+        var tools = svc.GetPermissionData().Tools;
+        Assert.Equal("admin", tools["hetzner_enable_rescue"].RequiredLevel);
+        Assert.Equal("admin", tools["list_servers"].RequiredLevel); // stricter than code (read): operator's choice stays
+
+        // The UI path cannot lower it again either.
+        var data = svc.GetPermissionData();
+        data.Tools["hetzner_enable_rescue"].RequiredLevel = "read";
+        await svc.SavePermissionDataAsync(data);
+        Assert.Equal("admin", svc.GetPermissionData().Tools["hetzner_enable_rescue"].RequiredLevel);
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort temp cleanup */ }
