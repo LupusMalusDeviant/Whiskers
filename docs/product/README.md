@@ -11,5 +11,5 @@ their product language from here so README, website and in-app help stay consist
 | [screenshots.md](screenshots.md) | Canonical product screenshots mapped to the three pillars, capture conventions, and anonymization rules. Images live in [screenshots/](screenshots/). |
 
 > These are the source of truth for *how we talk about Whiskers*, not a feature backlog. Product
-> and roadmap work items live under [../roadmap/](../roadmap/); architecture and security live in
+> work items are tracked in the maintainer's planning list; architecture and security live in
 > [../ARCHITECTURE.md](../ARCHITECTURE.md) and [../../SECURITY.md](../../SECURITY.md).

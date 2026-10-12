@@ -35,4 +35,4 @@ servers — the seam is their only path.
 ## Related
 
 - Docker backend: [`../Docker/`](../Docker/)
-- Roadmap: `docs/roadmap/kubernetesImplement.md` (Track B)
+- Design history: the former `docs/roadmap/kubernetesImplement.md` (Track B), in git history up to `9961355`

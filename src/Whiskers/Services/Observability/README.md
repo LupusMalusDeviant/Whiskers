@@ -94,3 +94,12 @@ For each call: timestamp, actor + actor type, tool name, required permission lev
 - Dashboard: [`../../Components/Pages/AgentHistory.razor`](../../Components/Pages/AgentHistory.razor)
 - Secret redaction: [`../../Utils/SecretRedactor.cs`](../../Utils/)
 - Guardrail verdicts: [`../Agent/Guardrails/`](../Agent/Guardrails/)
+
+## Decisions worth keeping
+
+- **The emergency stop does not survive a restart** — otherwise the pause outlives its reason.
+- **No automatic pause when a server's circuit opens** — the circuit already blocks the traffic; a second
+  mechanism would only hide it.
+- **No staggered resume** after a pause — measured: resuming does not cause a request storm.
+- **Action outcomes:** "not measurable" never counts as success, and a success rate is shown only from five
+  judged outcomes on. Automatic undo stays off until the observed rates justify it.

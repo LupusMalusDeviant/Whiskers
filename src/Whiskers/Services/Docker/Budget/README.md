@@ -48,6 +48,13 @@ Configure via `ServerBudget:BackgroundConcurrency` / `:InteractiveConcurrency`, 
 under `ServerBudget:PerServer:<serverId>:` — see
 [`Configuration/ServerBudgetSettings.cs`](../../../Configuration/ServerBudgetSettings.cs).
 
+## What is deliberately not budgeted
+
+The budget covers the steady background read traffic only. Mutating and long-running operations (restart,
+recreate, exec, pulls) bypass it on purpose: when a server is struggling, the circuit would otherwise cut the
+operator off from exactly the repair they need. Single-flight applies to background callers only.
+`DockerBudgetCoverageTests` pins the list of bypasses as a ratchet — a new one has to be added there with a reason.
+
 ## How you would notice it is wrong
 
 A cap has two failure modes and only one of them is loud:

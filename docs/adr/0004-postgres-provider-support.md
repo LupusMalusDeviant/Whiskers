@@ -1,6 +1,6 @@
 # ADR-0004: PostgreSQL-Provider-Support und Multi-Provider-Migrations-Architektur
 
-- **Status:** Vorgeschlagen (2026-07-09)
+- **Status:** Akzeptiert und umgesetzt (vorgeschlagen 2026-07-09; Provider, Migrations-Assemblies und `SqliteToPostgresMigrator` gemergt)
 - **Datum:** 2026-07-09
 - **Autor:** LupusMalusDeviant
 - **Konsultiert:** —
@@ -118,10 +118,10 @@ Ausschlaggebend waren die Baseline-Sicherheit (ADR-0003) und der Verzicht auf ei
 
 ### Scope
 
-Gilt nur für die 15 EF-Core-Tabellen des `MetricsDbContext`. Nicht betroffen: die `JsonFileStore`-Konfigurationsspeicher (`servers.json`, `vault.json`, …) und die DataProtection-Keys — deren mögliche DB-Migration ist ein separates Thema (`changeme.md` C7).
+Gilt nur für die 15 EF-Core-Tabellen des `MetricsDbContext`. Nicht betroffen: die `JsonFileStore`-Konfigurationsspeicher (`servers.json`, `vault.json`, …) und die DataProtection-Keys — deren mögliche DB-Migration ist ein separates Thema (früher `changeme.md` C7, heute in der internen Planungsliste).
 
 ### Referenzen
 
 - [ADR-0003 — EF-Core-Migrations-Baseline](./0003-ef-core-migrations-baseline.md) (wird ergänzt, nicht ersetzt)
-- `docs/roadmap/stableDB.md` (Schritte 3/8 durch dieses ADR korrigiert)
+- Früherer Plan `docs/roadmap/stableDB.md` (Schritte 3/8 durch dieses ADR korrigiert; in der Git-Historie bis `9961355`)
 - EF Core Docs — „Managing Migrations" / „Using a Separate Migrations Project"

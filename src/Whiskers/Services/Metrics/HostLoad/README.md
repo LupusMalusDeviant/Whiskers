@@ -66,5 +66,5 @@ to catch the incident it was written for.
 
 The replay series is **reconstructed from the incident report's documented values, not recorded**. It proves
 the rules fire; it cannot prove they stay quiet through a normal week, because it has none of the texture
-that produces false alarms. That second question needs the real series and is still open — see
-[Plan-0004](../../../../../docs/plans/0004-host-und-baseline-alarme.md).
+that produces false alarms. That second question needs the real series and is still open: a two-week field run measuring the hit and
+false-alarm rates.

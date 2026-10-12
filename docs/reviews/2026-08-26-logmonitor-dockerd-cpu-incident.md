@@ -3,7 +3,7 @@
 **Betroffen:** BurgCloud (Hetzner, 2 Kerne, Debian 12) — Docker 29.5.2, 10 Container
 **Dauer:** 20.08.2026 14:02 UTC bis 26.08.2026 15:07 UTC (6 Tage)
 **Komponente:** `Services/LogMonitor/LogMonitorService.cs`, `Services/Docker/Operations/ContainerOperations.cs`
-**Status:** Auf dem Server entschärft, im Code offen
+**Status:** Auf dem Server entschärft; im Code behoben (v0.12.x/0.13.0: Abbruch bis in die Leseschleife, Lastbudget und Schutzschalter, Fensterdeckel und Aussperrung, Selbstbeobachtung, Host-/Baseline-Alarme, Hygiene-Inventar — siehe CHANGELOG)
 
 ## Kurzfassung
 
