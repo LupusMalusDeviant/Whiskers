@@ -13,6 +13,32 @@ namespace Whiskers.Mcp.Tools;
 [McpServerToolType]
 public class MonitoringTools
 {
+    private static readonly System.Text.RegularExpressions.Regex ServiceNameRegex = new(@"^[a-zA-Z0-9._@-]+\z");
+
+    // journalctl's own vocabulary and nothing else. The value is appended to a shell line that runs as root on
+    // the host, and this tool is Read-level: an unchecked priority was command execution for any read key.
+    // \z, not $: in .NET "$" also matches before a trailing newline, and a newline ends the shell command.
+    private static readonly System.Text.RegularExpressions.Regex PriorityRegex = new(
+        @"^(emerg|alert|crit|err|warning|notice|info|debug|[0-7])(\.\.(emerg|alert|crit|err|warning|notice|info|debug|[0-7]))?\z");
+
+    /// <summary>Builds the journalctl line. Callers must have validated <paramref name="serviceName"/> and
+    /// <paramref name="priority"/>; this throws rather than build an unsafe line if they did not.</summary>
+    internal static string BuildJournalctlCommand(string? serviceName, int lines, string? priority)
+    {
+        var cmd = "journalctl --no-pager";
+        if (!string.IsNullOrWhiteSpace(serviceName))
+        {
+            if (!ServiceNameRegex.IsMatch(serviceName)) throw new ArgumentException("Invalid service name.", nameof(serviceName));
+            cmd += $" -u {serviceName}";
+        }
+        if (!string.IsNullOrWhiteSpace(priority))
+        {
+            if (!PriorityRegex.IsMatch(priority)) throw new ArgumentException("Invalid priority.", nameof(priority));
+            cmd += $" -p {priority}";
+        }
+        return cmd + $" -n {Math.Clamp(lines, 1, 1000)}";
+    }
+
     [McpToolLevel(McpPermissionLevels.Read)]
     [McpServerTool, Description("Get a health summary of all containers across all servers.")]
     public static async Task<string> GetHealthSummary(
@@ -135,17 +161,11 @@ public class MonitoringTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_server_logs");
         if (denied != null) return denied;
-        var cmd = "journalctl --no-pager";
-        if (!string.IsNullOrWhiteSpace(serviceName))
-        {
-            // Validate service name
-            if (!System.Text.RegularExpressions.Regex.IsMatch(serviceName, @"^[a-zA-Z0-9._@-]+$"))
-                return "Error: Invalid service name.";
-            cmd += $" -u {serviceName}";
-        }
-        if (!string.IsNullOrWhiteSpace(priority))
-            cmd += $" -p {priority}";
-        cmd += $" -n {Math.Clamp(lines, 1, 1000)}";
+        if (!string.IsNullOrWhiteSpace(serviceName) && !ServiceNameRegex.IsMatch(serviceName))
+            return "Error: Invalid service name.";
+        if (!string.IsNullOrWhiteSpace(priority) && !PriorityRegex.IsMatch(priority))
+            return "Error: Invalid priority. Use emerg, alert, crit, err, warning, notice, info, debug, 0-7 or a range like err..warning.";
+        var cmd = BuildJournalctlCommand(serviceName, lines, priority);
 
         var result = await executor.ExecuteAsync(serverId, cmd, TimeSpan.FromSeconds(15));
         return result.Success ? result.Output : $"Error: {result.Error}";
