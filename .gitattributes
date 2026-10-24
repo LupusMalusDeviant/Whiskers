@@ -8,6 +8,8 @@ docker-compose*.yml text eol=lf
 .dockerignore  text eol=lf
 .gitignore     text eol=lf
 .gitattributes text eol=lf
+# borg-fleet scripts and units have no .sh suffix but run on Linux hosts.
+deploy/borg-fleet/** text eol=lf
 
 # Default: let Git handle detection.
 *              text=auto
