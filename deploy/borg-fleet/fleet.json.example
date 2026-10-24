@@ -1,0 +1,15 @@
+{
+  "box_id": 681842,
+  "hetzner_token_file": "/root/.config/storagebox/token",
+  "whiskers_mcp_url": "http://127.0.0.1:5100/mcp",
+  "times": {
+    "local": "01:15",
+    "zirkuswagen": "01:45",
+    "burgcloud": "02:15",
+    "infomaniak": "02:45",
+    "rabenhof": "03:15",
+    "hetzner-apps": "03:45",
+    "a1a73e7c3050": "04:15",
+    "hostinger-kvm2": "04:45"
+  }
+}

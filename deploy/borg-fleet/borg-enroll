@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""borg-enroll — enrol one Whiskers-managed server into the borg fleet backup (runs on Badwolf).
+
+    borg-enroll <whiskers-server-id> [--time HH:MM] [--first-run]
+
+Idempotent: re-running repairs a half-finished enrolment and changes nothing on a finished one.
+
+Steps:
+  1. install/refresh borg-fleet-client on the target (via the Whiskers MCP execute_command)
+  2. `prepare` on the target  -> borg installed, backup key + passphrase created, pubkey returned
+  3. Storage Box sub-account "whiskers-<id>" (Hetzner API) -> authorized_keys written via SFTP:
+       the server's key forced to `borg serve --append-only` (cannot delete), plus the
+       Badwolf admin key (unrestricted, used only by borg-fleet-prune)
+  4. `init` on the target    -> repo created (repokey-blake2, append_only=1), nightly timer
+  5. passphrase + repokey escrowed under /root/.config/borg-fleet/escrow/<id>/ (0600)
+
+Files (Badwolf, root only):
+  /root/.config/borg-fleet/fleet.json       box id/host, Whiskers MCP URL, timer slots
+  /root/.config/borg-fleet/hetzner-token    Hetzner API token (project of the Storage Box)
+  /root/.config/borg-fleet/whiskers-mcp-key Whiskers MCP API key with execute_command
+  /root/.config/borg-fleet/admin_ed25519    admin (prune) key, generated on first use
+  /root/.config/borg-fleet/servers/<id>.json enrolment record (no secrets)
+"""
+import base64, hashlib, json, os, secrets, string, subprocess, sys, tempfile, time
+import urllib.error, urllib.request
+
+CFG_DIR = "/root/.config/borg-fleet"
+CLIENT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "borg-fleet-client")
+API = "https://api.hetzner.com/v1"
+
+
+def die(msg):
+    print(f"borg-enroll: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def read(path):
+    with open(path) as f:
+        return f.read().strip()
+
+
+# --- Hetzner Storage Box API ------------------------------------------------------------------
+
+class Box:
+    def __init__(self, token, box_id):
+        self.token, self.id = token, box_id
+
+    def call(self, method, path, body=None, allow_404=False):
+        req = urllib.request.Request(API + path, method=method,
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Authorization": f"Bearer {self.token}",
+                                              "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if allow_404 and e.code == 404:
+                return None
+            die(f"Hetzner API {method} {path} -> {e.code}: {e.read().decode(errors='replace')[:500]}")
+
+    def info(self):
+        return self.call("GET", f"/storage_boxes/{self.id}")["storage_box"]
+
+    def subaccounts(self):
+        return self.call("GET", f"/storage_boxes/{self.id}/subaccounts")["subaccounts"]
+
+    def find_subaccount(self, server_id):
+        for s in self.subaccounts():
+            if (s.get("labels") or {}).get("whiskers-server") == server_id:
+                return s
+        return None
+
+    def wait_subaccount(self, sub_id):
+        # A fresh sub-account answers 404 until its create action has finished.
+        for _ in range(60):
+            r = self.call("GET", f"/storage_boxes/{self.id}/subaccounts/{sub_id}", allow_404=True)
+            if r and r["subaccount"].get("username"):
+                return r["subaccount"]
+            time.sleep(2)
+        die(f"sub-account {sub_id} has no username after 120 s")
+
+    def create_subaccount(self, server_id, password):
+        r = self.call("POST", f"/storage_boxes/{self.id}/subaccounts", {
+            "name": f"whiskers-{server_id}"[:64],
+            "home_directory": f"whiskers-{server_id}",
+            "password": password,
+            "description": f"borg-fleet backup of Whiskers server {server_id}",
+            "labels": {"whiskers-server": server_id, "managed-by": "borg-fleet"},
+            "access_settings": {"reachable_externally": True, "ssh_enabled": True,
+                                "samba_enabled": False, "webdav_enabled": False, "readonly": False},
+        })
+        return self.wait_subaccount(r["subaccount"]["id"])
+
+    def wait_action(self, action):
+        for _ in range(60):
+            if action["status"] != "running":
+                break
+            time.sleep(2)
+            action = self.call("GET", f"/storage_boxes/actions/{action['id']}")["action"]
+        if action["status"] != "success":
+            die(f"Hetzner action {action['command']} ended {action['status']}: {action.get('error')}")
+
+    def reset_password(self, sub_id, password):
+        r = self.call("POST", f"/storage_boxes/{self.id}/subaccounts/{sub_id}/actions/reset_subaccount_password",
+                      {"password": password})
+        self.wait_action(r["action"])
+
+
+def new_password():
+    alphabet = string.ascii_letters + string.digits
+    core = "".join(secrets.choice(alphabet) for _ in range(28))
+    return "Bf7#" + core  # upper, lower, digit, special guaranteed
+
+
+# --- Whiskers MCP (streamable HTTP) ----------------------------------------------------------
+
+class Whiskers:
+    def __init__(self, url, key):
+        self.url, self.key, self.session, self.n = url, key, None, 0
+
+    def _post(self, payload):
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
+                   "Accept": "application/json, text/event-stream"}
+        if self.session:
+            headers["Mcp-Session-Id"] = self.session
+        req = urllib.request.Request(self.url, data=json.dumps(payload).encode(), headers=headers)
+        with urllib.request.urlopen(req, timeout=700) as r:
+            self.session = r.headers.get("Mcp-Session-Id") or self.session
+            body = r.read().decode()
+        if not body.strip():
+            return None
+        if body.lstrip().startswith("{"):
+            return json.loads(body)
+        for line in body.splitlines():  # SSE: take the last data: frame carrying a result
+            if line.startswith("data:"):
+                msg = json.loads(line[5:])
+                if "result" in msg or "error" in msg:
+                    return msg
+        return None
+
+    def _rpc(self, method, params):
+        self.n += 1
+        msg = self._post({"jsonrpc": "2.0", "id": self.n, "method": method, "params": params})
+        if msg and "error" in msg:
+            die(f"MCP {method}: {msg['error']}")
+        return msg["result"]
+
+    def connect(self):
+        self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                 "clientInfo": {"name": "borg-enroll", "version": "1"}})
+        self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    def run(self, server_id, command, timeout=600):
+        res = self._rpc("tools/call", {"name": "execute_command", "arguments": {
+            "serverId": server_id, "command": command, "timeoutSeconds": timeout}})
+        text = "\n".join(c.get("text", "") for c in res.get("content", []))
+        code = 0
+        if text.startswith("Exit code:"):
+            code = int(text.split("\n", 1)[0].split(":")[1])
+        return code, text
+
+
+def kv(text):
+    return dict(l.split("=", 1) for l in text.splitlines() if "=" in l and l.split("=", 1)[0].isupper())
+
+
+# --- main -------------------------------------------------------------------------------------
+
+def slot(cfg, server_id):
+    if server_id in cfg.get("times", {}):
+        return cfg["times"][server_id]
+    # Deterministic 15-minute slot between 00:30 and 05:15 for servers without a fixed time.
+    h = int(hashlib.sha256(server_id.encode()).hexdigest(), 16) % 20
+    m = 30 + h * 15
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def sftp_write_authorized_keys(user, host, password, content):
+    with tempfile.TemporaryDirectory() as d:
+        ak = os.path.join(d, "authorized_keys")
+        with open(ak, "w") as f:
+            f.write(content)
+        batch = f"-mkdir .ssh\nput {ak} .ssh/authorized_keys\nchmod 600 .ssh/authorized_keys\nls -l .ssh\n"
+        env = dict(os.environ, SSHPASS=password)
+        # No "-b": sftp's batch mode forces BatchMode=yes and thereby disables password auth.
+        # Commands come from stdin instead; "-mkdir" tolerates an existing .ssh.
+        p = subprocess.run(["sshpass", "-e", "sftp", "-P", "23", "-o", "BatchMode=no",
+                            "-o", "StrictHostKeyChecking=accept-new",
+                            "-o", f"UserKnownHostsFile={CFG_DIR}/known_hosts",
+                            "-o", "PubkeyAuthentication=no", "-o", "PreferredAuthentications=password",
+                            f"{user}@{host}"], input=batch, text=True, env=env, capture_output=True)
+        if p.returncode != 0 or "authorized_keys" not in p.stdout:
+            die(f"sftp authorized_keys upload failed: {p.stderr.strip()} {p.stdout[-300:]}")
+
+
+def main(argv):
+    if not argv or argv[0].startswith("-"):
+        die(__doc__)
+    server_id = argv[0]
+    first_run = "--first-run" in argv
+    cfg = json.load(open(f"{CFG_DIR}/fleet.json"))
+    time_slot = argv[argv.index("--time") + 1] if "--time" in argv else slot(cfg, server_id)
+
+    box = Box(read(cfg.get("hetzner_token_file", f"{CFG_DIR}/hetzner-token")), cfg["box_id"])
+    info = box.info()
+    host = info["server"]
+    if not info.get("snapshot_plan"):
+        # Box-side daily snapshots: out of reach of every SSH key, incl. Badwolf's admin key.
+        box.call("POST", f"/storage_boxes/{box.id}/actions/enable_snapshot_plan",
+                 {"max_snapshots": 14, "hour": 6, "minute": 30, "day_of_week": None, "day_of_month": None})
+        print("box: snapshot plan enabled (daily 06:30 UTC, keep 14)")
+    wk = Whiskers(cfg["whiskers_mcp_url"], read(f"{CFG_DIR}/whiskers-mcp-key"))
+    wk.connect()
+
+    admin_key = f"{CFG_DIR}/admin_ed25519"
+    if not os.path.exists(admin_key):
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "borg-fleet-admin@badwolf",
+                        "-f", admin_key], check=True)
+
+    # 1+2: client script + prepare
+    b64 = base64.b64encode(open(CLIENT, "rb").read()).decode()
+    code, out = wk.run(server_id,
+                       # tee + mv, not "install /dev/stdin": uutils install (Ubuntu 26.04) fails on long pipes
+                       f"echo {b64} | base64 -d | sudo tee /usr/local/sbin/borg-fleet-client.new >/dev/null"
+                       f" && sudo chmod 755 /usr/local/sbin/borg-fleet-client.new"
+                       f" && sudo mv /usr/local/sbin/borg-fleet-client.new /usr/local/sbin/borg-fleet-client"
+                       f" && sudo /usr/local/sbin/borg-fleet-client prepare")
+    if code != 0:
+        die(f"prepare failed on {server_id}:\n{out}")
+    prep = kv(out)
+    version = prep["BORG_VERSION"]
+    remote_path = "borg-1.4" if version.startswith("1.4") else "borg-1.2"
+    print(f"[{server_id}] borg {version} -> remote {remote_path}")
+
+    # 3: sub-account + keys
+    sub = box.find_subaccount(server_id)
+    password = new_password()
+    if sub is None:
+        sub = box.create_subaccount(server_id, password)
+        print(f"[{server_id}] created sub-account {sub['username']}")
+    else:
+        box.reset_password(sub["id"], password)
+        print(f"[{server_id}] reusing sub-account {sub['username']}")
+    user = sub["username"]
+    authorized = (
+        f'command="{remote_path} serve --append-only --restrict-to-repository borg",restrict '
+        f'{prep["PUBKEY"]}\n'
+        f'{read(admin_key + ".pub")}\n')
+    sftp_write_authorized_keys(user, host, password, authorized)
+    # Lock password login again by rotating to a value nobody keeps.
+    box.reset_password(sub["id"], new_password())
+
+    # 4: init + timer
+    repo = f"ssh://{user}@{host}:23/./borg"
+    code, out = wk.run(server_id, f"sudo /usr/local/sbin/borg-fleet-client init '{repo}' {time_slot} {remote_path}")
+    if code != 0:
+        die(f"init failed on {server_id}:\n{out}")
+    res = kv(out)
+
+    # 5: escrow
+    esc = f"{CFG_DIR}/escrow/{server_id}"
+    os.makedirs(esc, mode=0o700, exist_ok=True)
+    with open(os.open(f"{esc}/passphrase", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        f.write(res["PASSPHRASE"] + "\n")
+    with open(os.open(f"{esc}/repokey", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+        f.write(base64.b64decode(res["REPOKEY_B64"]))
+    os.makedirs(f"{CFG_DIR}/servers", mode=0o700, exist_ok=True)
+    record = {"server_id": server_id, "subaccount": user, "subaccount_id": sub["id"], "repo": repo,
+              "remote_path": remote_path, "time": time_slot, "borg_version": version,
+              "enrolled": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    json.dump(record, open(f"{CFG_DIR}/servers/{server_id}.json", "w"), indent=2)
+    print(f"[{server_id}] repo {res.get('REPO')} {repo}, timer {time_slot} (next {res.get('TIMER')})")
+
+    if first_run:
+        code, out = wk.run(server_id, "sudo systemd-run --collect --unit=borg-fleet-first "
+                                      "/usr/local/sbin/borg-fleet-client backup", timeout=30)
+        print(f"[{server_id}] first backup started (journalctl -u borg-fleet-first)")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

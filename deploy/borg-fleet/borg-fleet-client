@@ -1,0 +1,223 @@
+#!/bin/bash
+# borg-fleet-client — runs on every backed-up server (installed to /usr/local/sbin).
+#
+# Stages (all idempotent, all print machine-readable "KEY=value" lines for borg-enroll):
+#   prepare                     install borg, create the backup SSH key + repo passphrase
+#   init REPO TIME REMOTE_PATH  write config, trust the box host key, create the repo
+#                               (append-only), install + enable the nightly timer
+#   backup                      DB dumps -> borg create (called by the systemd service)
+#   status                      print the last run's status file
+#
+# The server's key is forced to "borg serve --append-only" on the Storage Box side, so this
+# script can add archives but never delete or prune them. Pruning runs from Badwolf
+# (borg-fleet-prune) with a separate, unrestricted admin key.
+set -euo pipefail
+
+CONF=/etc/borg-fleet/borg-fleet.env
+KEY=/root/.ssh/borg_fleet_ed25519
+PASSFILE=/etc/borg-fleet/passphrase
+DUMPDIR=/var/backups/borg-fleet
+STATEDIR=/var/lib/borg-fleet
+SELF=/usr/local/sbin/borg-fleet-client
+
+log() { echo "[$(date -Is)] $*"; }
+
+stage_prepare() {
+    if ! command -v borg >/dev/null; then
+        export DEBIAN_FRONTEND=noninteractive
+        # Wait for unattended-upgrades instead of failing on the dpkg lock.
+        apt-get -o DPkg::Lock::Timeout=600 update -qq >/dev/null
+        apt-get -o DPkg::Lock::Timeout=600 install -y -qq borgbackup >/dev/null
+    fi
+    install -d -m 700 /etc/borg-fleet /root/.ssh "$STATEDIR"
+    install -d -m 700 "$DUMPDIR"
+    [ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N '' -C "borg-fleet@$(hostname)" -f "$KEY"
+    if [ ! -s "$PASSFILE" ]; then
+        (umask 077; head -c 48 /dev/urandom | base64 -w0 | tr -d '/+=' > "$PASSFILE")
+    fi
+    chmod 600 "$PASSFILE"
+    echo "BORG_VERSION=$(borg --version | awk '{print $2}')"
+    echo "PUBKEY=$(cat "$KEY.pub")"
+}
+
+stage_init() {
+    local repo=$1 time=$2 remote_path=$3
+    local hostport=${repo#ssh://*@}; hostport=${hostport%%/*}
+    local host=${hostport%:*} port=${hostport##*:}
+
+    cat > "$CONF" <<EOF
+BORG_REPO=$repo
+BORG_REMOTE_PATH=$remote_path
+BORG_RSH="ssh -i $KEY -o IdentitiesOnly=yes -o BatchMode=yes -o ServerAliveInterval=30 -o UserKnownHostsFile=/etc/borg-fleet/known_hosts"
+BORG_PASSCOMMAND="cat $PASSFILE"
+BORG_FLEET_TIME=$time
+EOF
+    chmod 600 "$CONF"
+    # Pin the box host keys once (TOFU at enrol time, strict afterwards).
+    [ -s /etc/borg-fleet/known_hosts ] || ssh-keyscan -p "$port" -t ed25519,rsa "$host" 2>/dev/null > /etc/borg-fleet/known_hosts
+    [ -s /etc/borg-fleet/known_hosts ] || { echo "ERROR=cannot reach $host:$port"; exit 3; }
+
+    set -a; . "$CONF"; set +a
+    if borg info >/dev/null 2>&1; then
+        echo "REPO=exists"
+    else
+        borg init --encryption=repokey-blake2 --append-only
+        echo "REPO=created"
+    fi
+    # Recovery material for Badwolf's escrow: the repokey export (useless without the passphrase).
+    # Only ever read back by borg-enroll over the local Whiskers MCP endpoint, whose call log
+    # records arguments but not output.
+    echo "PASSPHRASE=$(cat "$PASSFILE")"
+    echo "REPOKEY_B64=$(borg key export "$BORG_REPO" | base64 -w0)"
+
+    cat > /etc/systemd/system/borg-fleet-backup.service <<EOF
+[Unit]
+Description=borg-fleet nightly backup to the Hetzner Storage Box
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=$SELF backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+EOF
+    cat > /etc/systemd/system/borg-fleet-backup.timer <<EOF
+[Unit]
+Description=borg-fleet nightly backup timer
+
+[Timer]
+OnCalendar=*-*-* $time:00 Europe/Berlin
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now borg-fleet-backup.timer >/dev/null
+    echo "TIMER=$(systemctl show borg-fleet-backup.timer -p NextElapseUSecRealtime --value)"
+}
+
+# --- backup ---------------------------------------------------------------------------------
+
+db_kind() {  # prints gitlab|postgres|mysql|"" for a running container
+    local env; env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null) || return 0
+    if docker exec "$1" sh -c 'command -v gitlab-ctl' >/dev/null 2>&1; then echo gitlab
+    elif grep -qE '^(POSTGRES_PASSWORD|POSTGRES_USER|PGDATA)=' <<<"$env" \
+       || docker exec "$1" sh -c 'command -v pg_dumpall' >/dev/null 2>&1; then echo postgres
+    elif grep -qE '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|MYSQL_DATABASE|MARIADB_DATABASE)=' <<<"$env"; then echo mysql
+    fi
+}
+
+dump_databases() {
+    rm -rf "$DUMPDIR/db.new"; install -d -m 700 "$DUMPDIR/db.new"
+    local rc=0 c kind
+    command -v docker >/dev/null || { mv -T "$DUMPDIR/db.new" "$DUMPDIR/db"; return 0; }
+    for c in $(docker ps --format '{{.Names}}'); do
+        kind=$(db_kind "$c")
+        case $kind in
+          gitlab)  # Omnibus: bundled Postgres listens on its own socket dir, runs as gitlab-psql
+            log "dump gitlab postgres $c"
+            docker exec -u gitlab-psql "$c" /opt/gitlab/embedded/bin/pg_dumpall -h /var/opt/gitlab/postgresql \
+              | gzip -6 > "$DUMPDIR/db.new/$c.pg_dumpall.sql.gz" || { log "WARN: dump of $c failed"; rc=1; } ;;
+          postgres)
+            log "dump postgres $c"
+            docker exec "$c" sh -c 'exec pg_dumpall -U "${POSTGRES_USER:-postgres}"' \
+              | gzip -6 > "$DUMPDIR/db.new/$c.pg_dumpall.sql.gz" || { log "WARN: dump of $c failed"; rc=1; } ;;
+          mysql)
+            log "dump mysql $c"
+            docker exec "$c" sh -c 'export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"; D=$(command -v mariadb-dump || command -v mysqldump);
+                exec "$D" --all-databases --single-transaction --routines --events -uroot' \
+              | gzip -6 > "$DUMPDIR/db.new/$c.mysqldump.sql.gz" || { log "WARN: dump of $c failed"; rc=1; } ;;
+        esac
+        # Remember the live data dirs so borg skips them (dumps instead of hot copies).
+        if [ "$kind" = gitlab ]; then
+            docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/opt/gitlab"}}{{println .Source}}{{end}}{{end}}' "$c" \
+              | grep -v '^$' | sed 's|$|/postgresql/data|' >> "$DUMPDIR/db.new/.live-datadirs" || true
+        elif [ -n "$kind" ]; then
+            docker inspect -f '{{range .Mounts}}{{if or (eq .Destination "/var/lib/postgresql/data") (eq .Destination "/var/lib/postgresql") (eq .Destination "/var/lib/mysql")}}{{println .Source}}{{end}}{{end}}' "$c" \
+              | grep -v '^$' >> "$DUMPDIR/db.new/.live-datadirs" || true
+        fi
+    done
+    rm -rf "$DUMPDIR/db"; mv -T "$DUMPDIR/db.new" "$DUMPDIR/db"
+    return $rc
+}
+
+snapshot_sqlite() {  # consistent copies of SQLite files via the online-backup API
+    rm -rf "$DUMPDIR/sqlite"; install -d -m 700 "$DUMPDIR/sqlite"
+    command -v python3 >/dev/null || return 0
+    python3 - "$DUMPDIR/sqlite" "$@" <<'PY' || log "WARN: sqlite snapshot had errors"
+import os, subprocess, sys
+# Each copy runs in its own process with a deadline: Python's backup() retries forever while
+# another process holds a write lock (seen with Kira's library.db), which would stall the run.
+COPY = ("import sqlite3,sys; s=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True,timeout=30);"
+        "t=sqlite3.connect(sys.argv[2]); s.backup(t); t.close(); s.close()")
+out, roots = sys.argv[1], sys.argv[2:]
+for root in roots:
+    for d, dirs, files in os.walk(root):
+        if d.startswith(out): continue
+        for f in files:
+            p, dst = os.path.join(d, f), None
+            try:
+                if os.path.islink(p) or os.path.getsize(p) < 512 or os.path.getsize(p) > 8 << 30: continue
+                with open(p, 'rb') as fh:
+                    if fh.read(16) != b'SQLite format 3\x00': continue
+                dst = os.path.join(out, p.strip('/').replace('/', '__'))
+                subprocess.run([sys.executable, '-c', COPY, p, dst], check=True, timeout=300)
+            except Exception as e:
+                print(f'sqlite skip {p}: {e}', file=sys.stderr)
+                if dst and os.path.exists(dst): os.remove(dst)  # no half copies
+PY
+}
+
+stage_backup() {
+    exec 9>"$STATEDIR/lock"; flock -n 9 || { log "another run is active"; exit 0; }
+    set -a; . "$CONF"; set +a
+    local started rc=0 warn=0
+    started=$(date -Is)
+
+    dump_databases || warn=1
+
+    # Back up the usual roots plus every bind-mount source of running containers.
+    local paths=(/etc /home /root /opt /srv /usr/local /var/lib/docker/volumes "$DUMPDIR")
+    if command -v docker >/dev/null; then
+        while read -r src; do
+            [ -e "$src" ] || continue
+            case $src in /|/proc*|/sys*|/dev*|/run*|/var/run*|/var/lib/docker/*|*.sock) continue ;; esac
+            case $src in /etc/*|/home/*|/root/*|/opt/*|/srv/*|/usr/local/*) continue ;; esac  # already covered
+            paths+=("$src")
+        done < <(docker ps -q | xargs -r docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' | sort -u)
+    fi
+    local existing=(); for p in "${paths[@]}"; do [ -e "$p" ] && existing+=("$p"); done
+
+    snapshot_sqlite /opt /srv /home /root /var/lib/docker/volumes || true
+
+    local excludes=(--exclude-caches --exclude-if-present .nobackup
+        --exclude '/root/.cache' --exclude '/home/*/.cache' --exclude 'sh:**/node_modules'
+        --exclude '*.sqlite-wal' --exclude '*.db-wal' --exclude '*.db-shm' --exclude '*.sqlite-shm')
+    if [ -s "$DUMPDIR/db/.live-datadirs" ]; then
+        while read -r d; do excludes+=(--exclude "$d"); done < "$DUMPDIR/db/.live-datadirs"
+    fi
+
+    log "borg create: ${existing[*]}"
+    borg create --stats --compression zstd,6 "${excludes[@]}" \
+        "::{hostname}-{now:%Y-%m-%dT%H:%M}" "${existing[@]}" || rc=$?
+    # borg rc 1 = warnings (e.g. a file changed while read) — the archive is still valid.
+    local result=ok
+    [ $rc -ge 2 ] && result=failed
+    [ $rc -eq 1 ] || [ $warn -eq 1 ] && [ $result = ok ] && result=warning
+    printf '{"started":"%s","finished":"%s","result":"%s","borg_rc":%d}\n' \
+        "$started" "$(date -Is)" "$result" "$rc" > "$STATEDIR/last-status.json"
+    log "result=$result rc=$rc"
+    [ $result = failed ] && exit 2 || exit 0
+}
+
+case ${1:-} in
+    prepare) stage_prepare ;;
+    init)    stage_init "$2" "$3" "$4" ;;
+    backup)  stage_backup ;;
+    status)  cat "$STATEDIR/last-status.json" 2>/dev/null || echo '{"result":"never"}' ;;
+    *) echo "usage: $0 prepare|init REPO HH:MM REMOTE_PATH|backup|status" >&2; exit 64 ;;
+esac

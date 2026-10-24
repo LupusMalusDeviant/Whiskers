@@ -9,6 +9,7 @@ Deployment assets — the pieces used to install and run Whiskers, separate from
 | [`helm/whiskers/`](helm/whiskers/) | Helm chart for running Whiskers **on** Kubernetes (Track A): single replica + Recreate, non-root/read-only, PVC data dir, optional Postgres/ingress/Tailscale sidecar. Published as an OCI artifact (`oci://ghcr.io/lupusmalusdeviant/charts/whiskers`) by the release pipeline; linted + render-checked by [`chart-ci.yml`](../.github/workflows/chart-ci.yml). |
 | [`k8s/`](k8s/) | Assets for **managing** a Kubernetes cluster *from* Whiskers (Track B): least-privilege `whiskers-agent` RBAC manifest + kubeconfig onboarding guide. |
 | [`telemetry/`](telemetry/) | mTLS / socket-proxy templates for the hardened remote-monitoring posture. |
+| [`borg-fleet/`](borg-fleet/) | Nightly append-only BorgBackup of every managed server to its own Hetzner Storage Box sub-account; `borg-enroll <server-id>` enrols a server in one command. |
 
 ## Release pipeline
 

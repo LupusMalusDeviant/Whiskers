@@ -1,0 +1,10 @@
+[Unit]
+Description=borg-fleet weekly prune/compact of all enrolled repos (admin key)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/borg-fleet/borg-fleet-prune
+Nice=10
+TimeoutStartSec=8h

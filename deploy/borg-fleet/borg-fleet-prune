@@ -1,0 +1,65 @@
+#!/bin/bash
+# borg-fleet-prune — weekly retention for every enrolled repo (runs on Badwolf, admin key).
+#
+# The backed-up servers can only append (forced `borg serve --append-only` + append_only=1 in
+# the repo config). Retention therefore needs the unrestricted admin key: for each repo this
+# script
+#   1. lists the archives while the repo is still append-only and compares the list with the
+#      one recorded last week — if archives that existed then are missing now, someone tampered
+#      with the repo (append-only only *defers* deletions to the next non-append-only write) and
+#      the repo is skipped and reported instead of pruned,
+#   2. flips append_only to 0 in the repo config (SFTP), prunes + compacts, flips it back to 1.
+#
+#   borg-fleet-prune [server-id ...]     (default: all enrolled servers)
+set -uo pipefail
+
+CFG=/root/.config/borg-fleet
+KEEP=(--keep-daily 14 --keep-weekly 8 --keep-monthly 12)
+ADMIN="$CFG/admin_ed25519"
+export BORG_RSH="ssh -i $ADMIN -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile=$CFG/known_hosts"
+rc_all=0
+
+set_append_only() {  # user host value
+    local tmp; tmp=$(mktemp -d)
+    sftp -q -P 23 -i "$ADMIN" -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile="$CFG/known_hosts" \
+        "$2@$3" <<<"get borg/config $tmp/config" >/dev/null || { rm -rf "$tmp"; return 1; }
+    sed -i "s/^append_only = .*/append_only = $1/" "$tmp/config"
+    grep -q "^append_only = $1$" "$tmp/config" || { rm -rf "$tmp"; return 1; }
+    sftp -q -P 23 -i "$ADMIN" -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile="$CFG/known_hosts" \
+        "$2@$3" <<<"put $tmp/config borg/config" >/dev/null
+    local r=$?; rm -rf "$tmp"; return $r
+}
+
+prune_one() {
+    local id=$1 rec="$CFG/servers/$1.json"
+    local repo user host remote
+    repo=$(python3 -c "import json;print(json.load(open('$rec'))['repo'])")
+    remote=$(python3 -c "import json;print(json.load(open('$rec'))['remote_path'])")
+    user=${repo#ssh://}; user=${user%%@*}
+    host=${repo#ssh://*@}; host=${host%%:*}
+    export BORG_REPO=$repo BORG_REMOTE_PATH=$remote BORG_PASSCOMMAND="cat $CFG/escrow/$id/passphrase"
+
+    local list="$CFG/servers/$id.archives" now
+    now=$(borg list --short) || { echo "[$id] cannot list repo"; return 1; }
+    if [ -s "$list" ]; then
+        local missing; missing=$(comm -23 <(sort "$list") <(sort <<<"$now"))
+        if [ -n "$missing" ]; then
+            echo "[$id] ABORT: archives vanished since last prune (possible tampering):"; echo "$missing"
+            return 2
+        fi
+    fi
+
+    set_append_only 0 "$user" "$host" || { echo "[$id] cannot clear append_only"; return 1; }
+    local r=0
+    borg prune --list --stats "${KEEP[@]}" || r=$?
+    [ $r -lt 2 ] && { borg compact || r=$?; }
+    set_append_only 1 "$user" "$host" || { echo "[$id] CRITICAL: append_only not restored"; return 3; }
+    borg list --short > "$list"
+    echo "[$id] pruned (rc=$r), $(wc -l < "$list") archives kept"
+    return $(( r >= 2 ? 1 : 0 ))
+}
+
+ids=("$@")
+[ ${#ids[@]} -eq 0 ] && for f in "$CFG"/servers/*.json; do ids+=("$(basename "$f" .json)"); done
+for id in "${ids[@]}"; do prune_one "$id" || rc_all=1; done
+exit $rc_all
