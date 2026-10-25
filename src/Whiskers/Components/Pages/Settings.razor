@@ -519,6 +519,20 @@ else
                         </MudTd>
                     </RowTemplate>
                 </MudTable>
+                @if (ImplicitWhitelistUsers.Any())
+                {
+                    @* Shown, not saved: these users get the default role until someone assigns one on purpose. *@
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                        @L["Settings_Roles_ImplicitHint", _defaultRole]
+                        <div class="mt-1" style="display:flex; gap:6px; flex-wrap:wrap;">
+                            @foreach (var email in ImplicitWhitelistUsers)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                         OnClick="@(() => _newRoleEmail = email)">@email · @_defaultRole</MudChip>
+                            }
+                        </div>
+                    </MudAlert>
+                }
             </MudItem>
             <MudItem xs="12">
                 <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
@@ -654,6 +668,10 @@ else
 
     // Roles
     private List<Whiskers.Models.UserRoleEntry> _roleEntries = new();
+    private Whiskers.Models.AppRole _defaultRole = Whiskers.Models.AppRole.Viewer;
+    // Whitelisted (may sign in) but without an explicit role entry — they get _defaultRole.
+    private IEnumerable<string> ImplicitWhitelistUsers => _whitelistEmails
+        .Where(e => !_roleEntries.Any(r => r.Email.Equals(e, StringComparison.OrdinalIgnoreCase)));
     private string _newRoleEmail = "";
     private Whiskers.Models.AppRole _newRoleRole = Whiskers.Models.AppRole.Operator;
 
@@ -710,13 +728,13 @@ else
         _mcpApiKeys = mcpData.ApiKeys;
         _mcpTools = mcpData.Tools;
 
-        // Roles — merge whitelisted users that aren't in roles yet
-        _roleEntries = RoleService.GetRoleData().Roles;
-        foreach (var email in _whitelistEmails)
-        {
-            if (!_roleEntries.Any(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
-                _roleEntries.Add(new Whiskers.Models.UserRoleEntry { Email = email, Role = Whiskers.Models.AppRole.Admin });
-        }
+        // Roles — only the explicit entries. Whitelisted users without one used to be merged in here as Admin:
+        // the page showed them as Admin while RoleService gave them the default role, and the next SaveRoles
+        // (any role change by anyone) persisted every such row as a real Admin entry. They are now listed
+        // separately with the role they actually have (see ImplicitWhitelistUsers).
+        var roleData = RoleService.GetRoleData();
+        _roleEntries = roleData.Roles;
+        _defaultRole = roleData.DefaultRole;
 
         // Vault
         LoadVault();
@@ -990,21 +1008,35 @@ else
         if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         var newKey = await McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel);
-        // Reload from service to avoid duplicates from reference sharing
-        var mcpData = McpPermissionService.GetPermissionData();
-        _mcpApiKeys = mcpData.ApiKeys;
+        ReloadApiKeysKeepingPendingToggles();
         _revealedKeys.Add(newKey.Id); // Show the new key immediately
         _newKeyName = "";
+        // Name and level only — the key value never goes into the audit log.
+        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "mcp.key.create", "mcp-api-key",
+            newKey.Id, newKey.Name, details: $"Level: {newKey.PermissionLevel}");
         Snackbar.Add(L["Settings_Snackbar_ApiKeyCreated", newKey.Name].Value, Severity.Success);
     }
 
     private async Task RemoveApiKey(string id)
     {
+        // Same guard as every other write on this page — hiding the page is not authorization.
+        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
+        var name = _mcpApiKeys.FirstOrDefault(k => k.Id == id)?.Name ?? id;
         await McpPermissionService.RemoveApiKeyAsync(id);
-        // Reload from service to stay in sync
-        var mcpData = McpPermissionService.GetPermissionData();
-        _mcpApiKeys = mcpData.ApiKeys;
+        ReloadApiKeysKeepingPendingToggles();
+        _revealedKeys.Remove(id);
+        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "mcp.key.delete", "mcp-api-key", id, name);
         Snackbar.Add(L["Settings_Snackbar_ApiKeyDeleted"].Value, Severity.Info);
+    }
+
+    // Add/remove persist immediately, the "active" switches only on "Save". Reloading the list after an
+    // add/remove used to drop every switch flipped but not yet saved — carry those over by key id.
+    private void ReloadApiKeysKeepingPendingToggles()
+    {
+        var pending = _mcpApiKeys.ToDictionary(k => k.Id, k => k.Enabled);
+        _mcpApiKeys = McpPermissionService.GetPermissionData().ApiKeys;
+        foreach (var k in _mcpApiKeys)
+            if (pending.TryGetValue(k.Id, out var enabled)) k.Enabled = enabled;
     }
 
     private async Task SaveMcpPermissions()
@@ -1127,7 +1159,8 @@ else
     private async Task SaveRoles()
     {
         if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
-        await RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData { Roles = _roleEntries });
+        // DefaultRole travels along: without it every role change reset a configured default to Viewer.
+        await RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData { Roles = _roleEntries, DefaultRole = _defaultRole });
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         await AuditLog.LogAsync(actor, "web", "config.save", "config", "roles", "Benutzerrollen");
         Snackbar.Add(L["Settings_Snackbar_RolesSaved"].Value, Severity.Success);

@@ -6,6 +6,18 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Settings → User roles could hand out Admin by accident.** Whitelisted addresses without a role entry were
+  merged into the role table as Admin. The server gave them the default role, but the next save of *any* role
+  wrote those phantom Admin rows to `roles.json` — also for addresses deleted from the role list earlier. The
+  table now shows only explicit entries; whitelisted addresses without one are listed below it with the role
+  they really get, and a click on one starts assigning a role on purpose.
+- **Saving roles reset the default role** to Viewer, because the page did not carry it through.
+- **Creating or deleting an MCP API key discarded unsaved "active" toggles** of the other keys. Pending toggles
+  now survive the reload.
+- **Deleting an MCP API key had no admin check and no audit entry.** It now requires Admin, and both create and
+  delete are written to the audit log (`mcp.key.create` / `mcp.key.delete`, never the key value).
+
 ## [0.14.0] — 2026-10-25
 
 AutoPatch, measured update risk, DNS records over MCP — and a full pass over the UI for buttons that claimed

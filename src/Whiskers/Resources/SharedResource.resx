@@ -4694,4 +4694,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Dashboard_FirstServer_SubtitleNoLocal" xml:space="preserve">
     <value>No local Docker host is reachable (is the Docker socket mounted?) — you can still connect your fleet.</value>
   </data>
+  <data name="Settings_Roles_ImplicitHint" xml:space="preserve">
+    <value>Whitelisted without their own role — they currently have the default role {0}. Click an address to assign a role on purpose.</value>
+  </data>
 </root>

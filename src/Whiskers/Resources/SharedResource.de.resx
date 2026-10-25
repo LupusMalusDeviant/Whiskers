@@ -4694,4 +4694,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Dashboard_FirstServer_SubtitleNoLocal" xml:space="preserve">
     <value>Kein lokaler Docker-Host erreichbar (ist der Docker-Socket eingebunden?) — Ihre Flotte können Sie trotzdem verbinden.</value>
   </data>
+  <data name="Settings_Roles_ImplicitHint" xml:space="preserve">
+    <value>Auf der Whitelist, aber ohne eigene Rolle — sie haben derzeit die Standardrolle {0}. Adresse anklicken, um bewusst eine Rolle zu vergeben.</value>
+  </data>
 </root>
