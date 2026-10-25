@@ -298,7 +298,7 @@ Every published release image is, from **v0.12.1** on:
 Verify the signature before you run it:
 
 ```bash
-cosign verify ghcr.io/lupusmalusdeviant/whiskers:0.13.0 \
+cosign verify ghcr.io/lupusmalusdeviant/whiskers:0.15.0 \
   --certificate-identity-regexp '^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -345,7 +345,7 @@ Behind a reverse proxy on a subpath (`PATH_BASE=/whiskers`) the URL becomes
 
 > **Note for older index entries (e.g. MCP directories that crawled the ServerWatch-era README):**
 > Whiskers was called *ServerWatch* before the rebrand in v0.12. The old flat, unscoped key file
-> `/app/data/api-keys.json` is **gone**: its last compatibility fallback was removed after v0.14.1, no code
+> `/app/data/api-keys.json` is **gone**: its last compatibility fallback was removed in v0.15.0, no code
 > path reads it, and a leftover copy is deleted on start. MCP access works only with a scoped key created
 > in the web UI, and those keys are stored as SHA-256 hashes, never in plaintext.
 

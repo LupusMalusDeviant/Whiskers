@@ -2,7 +2,7 @@
 
 The **MCP (Model Context Protocol) server**: how external AI agents (e.g. Claude Code) operate Whiskers. This folder holds the request-authentication pipeline and the permission-check helper; the tools themselves live in [`Tools/`](Tools/).
 
-Every MCP request carries a `Bearer <API-KEY>` header. The middleware authenticates it before ASP.NET's default OAuth challenge runs, and each tool calls `McpPermissionCheck` to enforce its Read/Write/Admin level for that key. Keys live in the permission service ([`Services/Mcp`](../Services/Mcp/), created in the UI under *Settings → MCP*); the ServerWatch-era flat `api-keys.json` store and its unscoped fallback were removed after 0.14.1.
+Every MCP request carries a `Bearer <API-KEY>` header. The middleware authenticates it before ASP.NET's default OAuth challenge runs, and each tool calls `McpPermissionCheck` to enforce its Read/Write/Admin level for that key. Keys live in the permission service ([`Services/Mcp`](../Services/Mcp/), created in the UI under *Settings → MCP*); the ServerWatch-era flat `api-keys.json` store and its unscoped fallback were removed in 0.15.0.
 
 ## Files
 

@@ -6,19 +6,22 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
-- **MCP `serverInfo`.** `initialize` now reports name, title, version, description, website and icon, so MCP
-  clients and directories show what the server is instead of the bare assembly name.
-- **`lhm.plugin.json`**: the LobeHub Marketplace manifest (owner declaration), generated with
-  `lhm plugin init` from the running server — 86 tools, 2 resources, 4 prompts.
-- **MCP prompts and resources.** Four user-invokable prompts (`triage_unhealthy_containers`,
-  `security_review_server`, `plan_safe_update`, `investigate_host_load`) package common operations workflows,
-  with a built-in stop before any write. Two read-only resources describe the MCP surface:
-  `whiskers://tools/catalog` and `whiskers://me/permissions` (the caller's own scope and callable tools).
+## [0.15.0] — 2026-10-26
 
-### Fixed
-- The Helm chart's fallback `version`/`appVersion` still read 0.12.1; releases stamp both from the tag, but
-  directories that read the file showed a stale version.
+Hardens the MCP surface and finishes the ServerWatch → Whiskers clean-up. MCP keys are now stored only as hashes.
+Direct MCP tool calls now pass the same guardrails as the agent. The server ships prompts, resources and full
+`serverInfo`.
+
+### ⚠️ Upgrade notes
+- **Copy new MCP keys when you create them.** Only the hash is stored now, so *Settings → MCP* can no longer
+  reveal or copy an existing key. Existing keys are converted on the first start and keep working.
+- **External MCP write calls may now need an approval.** Under the default guardrail preset, write tools
+  called directly by an external client (including the Claude Code runtime) raise an approval on the
+  *Approvals* page. Repeat the identical call within 10 minutes after approving it. Adjust the active preset
+  if that is too strict for your setup.
+- **Fresh installs no longer create a default MCP key.** Create one under *Settings → MCP*.
+- **Leftover `api-keys.json` / `initial-mcp-key.txt` are deleted on start.** Their keys were no longer
+  accepted for any tool call.
 
 ### Security
 - **The ServerWatch-era flat MCP key store is gone.** `api-keys.json` held unscoped plaintext keys and was
@@ -26,7 +29,6 @@ All notable changes to Whiskers are documented here. The format follows
   `initial-mcp-key.txt` are removed; leftover files are deleted on start. MCP access now works only with a
   key created under *Settings → MCP* with a Read / Write / Admin scope. The setup wizard no longer shows an
   initial key and points there instead.
-
 - **MCP API keys are stored only as SHA-256 hashes.** New keys come from the CSPRNG (256 bits) and are shown
   once at creation; `mcp-permissions.json` keeps only the hash and the last four characters. Existing
   plaintext keys are converted on the first start and keep working. A fresh install no longer creates an
@@ -41,6 +43,16 @@ All notable changes to Whiskers are documented here. The format follows
   need an approval. If that is too strict, adjust the active guardrail preset (autonomous level,
   confirmation for writes) — the preset applies to the agent as well.
 
+### Added
+- **MCP `serverInfo`.** `initialize` now reports name, title, version, description, website and icon, so MCP
+  clients and directories show what the server is instead of the bare assembly name.
+- **`lhm.plugin.json`**: the LobeHub Marketplace manifest (owner declaration), generated with
+  `lhm plugin init` from the running server — 86 tools, 2 resources, 4 prompts.
+- **MCP prompts and resources.** Four user-invokable prompts (`triage_unhealthy_containers`,
+  `security_review_server`, `plan_safe_update`, `investigate_host_load`) package common operations workflows,
+  with a built-in stop before any write. Two read-only resources describe the MCP surface:
+  `whiskers://tools/catalog` and `whiskers://me/permissions` (the caller's own scope and callable tools).
+
 ### Changed
 - **Remaining ServerWatch names cleaned up.** README examples use the `whiskers` MCP server key and
   `/whiskers` paths; `WHISKERS_SELF_CONTAINERS` replaces `SERVERWATCH_SELF_CONTAINERS` (the old name is
@@ -48,6 +60,12 @@ All notable changes to Whiskers are documented here. The format follows
   protects `whiskers*` as well as `serverwatch*`. Names that existing installs depend on — the compose
   service/volume `serverwatch`, Prometheus `serverwatch_*` metrics, the Data Protection application name,
   the mTLS client CN, the Trivy cache volume and the host-shell label — stay unchanged on purpose.
+- **Architecture rules moved to `docs/ARCHITECTURE.md`.** Application shape, security-critical areas,
+  protected layers and engineering rules now live there. `CLAUDE.md` is no longer tracked.
+
+### Fixed
+- The Helm chart's fallback `version`/`appVersion` still read 0.12.1; releases stamp both from the tag, but
+  directories that read the file showed a stale version.
 
 ## [0.14.1] — 2026-10-25
 
