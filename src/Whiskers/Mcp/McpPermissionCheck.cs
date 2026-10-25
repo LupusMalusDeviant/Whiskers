@@ -50,7 +50,7 @@ public static class McpPermissionCheck
     }
 
     /// <summary>Maps the authenticated web user's AppRole to an MCP permission level string.</summary>
-    private static string WebUserLevel(HttpContext httpContext)
+    internal static string WebUserLevel(HttpContext httpContext)
     {
         // In-process agent tool execution: enforce the caller's real level from the claim, never admin.
         if (httpContext.User.Identity?.AuthenticationType == AuthConstants.AgentSyntheticScheme)

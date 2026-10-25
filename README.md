@@ -366,6 +366,23 @@ Behind a reverse proxy on a subpath (`PATH_BASE=/whiskers`) the URL becomes
 The complete, current list with permission levels is in [docs/mcp-tool-catalog.md](docs/mcp-tool-catalog.md)
 and in the web UI under *Settings > MCP*.
 
+**Prompts** (user-invokable workflows; they only return instructions, every tool call they lead to is still
+scope- and guardrail-checked):
+
+| Prompt | What it does |
+|---|---|
+| `triage_unhealthy_containers` | Read-only diagnosis of unhealthy/stopped/restarting containers, ranked fixes |
+| `security_review_server` | Read-only review of one server: CVEs, firewall, TLS expiry, unexpected services |
+| `plan_safe_update` | Risk, blast radius and CVE check for an image update, plan with rollback — stops before changing anything |
+| `investigate_host_load` | Explains host load, including load no container accounts for |
+
+**Resources** (read-only context about the MCP surface itself, no infrastructure data):
+
+| URI | Content |
+|---|---|
+| `whiskers://tools/catalog` | Every served tool with its required level and whether it is enabled |
+| `whiskers://me/permissions` | The caller's own scope and the tools it may call |
+
 ### How the policy layer applies
 
 Whiskers' AI guardrails are a **deterministic policy-enforcement layer** (Read / Write / Admin scopes,

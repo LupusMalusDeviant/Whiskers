@@ -126,6 +126,9 @@ public static class WhiskersHostingExtensions
         builder.Services.AddMcpServer()
             .WithHttpTransport()
             .WithTools(mcpToolTypes)
+            // User-invokable workflows and read-only context about the MCP surface itself (no infrastructure data).
+            .WithPrompts<Whiskers.Mcp.Prompts.OperationsPrompts>()
+            .WithResources<Whiskers.Mcp.Resources.WhiskersResources>()
             // Direct tool calls pass the same guardrail policy as the in-process agent (see McpGuardrailFilter).
             .WithRequestFilters(filters => filters.AddCallToolFilter(McpGuardrailFilter.Create));
 

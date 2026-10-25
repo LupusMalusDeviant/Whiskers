@@ -6,6 +6,16 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **MCP prompts and resources.** Four user-invokable prompts (`triage_unhealthy_containers`,
+  `security_review_server`, `plan_safe_update`, `investigate_host_load`) package common operations workflows,
+  with a built-in stop before any write. Two read-only resources describe the MCP surface:
+  `whiskers://tools/catalog` and `whiskers://me/permissions` (the caller's own scope and callable tools).
+
+### Fixed
+- The Helm chart's fallback `version`/`appVersion` still read 0.12.1; releases stamp both from the tag, but
+  directories that read the file showed a stale version.
+
 ### Security
 - **The ServerWatch-era flat MCP key store is gone.** `api-keys.json` held unscoped plaintext keys and was
   still accepted as a fallback at the `/mcp` gate. That fallback, the store and the one-time
