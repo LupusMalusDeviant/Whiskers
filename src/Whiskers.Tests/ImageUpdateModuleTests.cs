@@ -32,7 +32,10 @@ public class ImageUpdateModuleTests
         var module = new ImageUpdateModule();
         Assert.Equal("image-updates", module.Id);
         Assert.Empty(module.NavItems);
-        Assert.Equal(typeof(Whiskers.Mcp.Tools.UpdateRiskTools), Assert.Single(module.McpToolTypes));
+        // Auto-patch (2026-10-25) added its status/preview tools next to it, for the same reason.
+        Assert.Equal(
+            [typeof(Whiskers.Mcp.Tools.UpdateRiskTools), typeof(Whiskers.Mcp.Tools.AutoPatchTools)],
+            module.McpToolTypes);
         // One type, two tools on it: assess_update_risk (GAP-6) and get_blast_radius (GAP-7).
     }
 

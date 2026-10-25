@@ -85,6 +85,9 @@ public class DockerService : IDockerService
     public Task<ContainerLogConfiguration?> GetLogConfigurationAsync(string containerId, string? serverId = null)
         => _containers.GetLogConfigurationAsync(containerId, serverId);
 
+    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null)
+        => _containers.GetConfiguredImageAsync(containerId, serverId);
+
     public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null)
         => _containers.GetContainerEnvAsync(containerId, serverId);
 

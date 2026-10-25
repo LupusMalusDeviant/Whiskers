@@ -33,7 +33,7 @@ public class McpToolRegistrationTests
         ["gitdeploy"]     = 1,    // Plan-0013 WP4 — read-only
         ["volumebackups"] = 2,    // Plan-0013 WP4 — read-only
         ["notifications"] = 1,    // Plan-0013 WP4 — read-only
-        ["image-updates"] = 2,    // GAP-6 assess_update_risk + GAP-7 get_blast_radius, both read-only
+        ["image-updates"] = 4,    // GAP-6 assess_update_risk + GAP-7 get_blast_radius (read-only); auto-patch status (read) + preview (dry run, write)
         ["dns"]           = 3,    // list_dns_records, set_dns_record, delete_dns_record (Infomaniak)
     };
 

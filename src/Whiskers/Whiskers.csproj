@@ -44,4 +44,9 @@
     <InternalsVisibleTo Include="Whiskers.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shipped to the hosts by ScriptAutoPatchRunner; a fixed logical name so the namespace layout can move. -->
+    <EmbeddedResource Include="Services\AutoPatch\img-update.sh" LogicalName="Whiskers.AutoPatch.img-update.sh" />
+  </ItemGroup>
+
 </Project>

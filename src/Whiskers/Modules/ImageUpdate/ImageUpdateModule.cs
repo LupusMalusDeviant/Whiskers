@@ -25,7 +25,11 @@ public sealed class ImageUpdateModule : IWhiskersModule
     public IReadOnlyList<string> DependsOn => Array.Empty<string>();
     public IReadOnlyList<NavItem> NavItems => Array.Empty<NavItem>();
     // GAP-6: "what would this update change?" belongs to the module that knows about images.
-    public IReadOnlyList<Type> McpToolTypes { get; } = new[] { typeof(Whiskers.Mcp.Tools.UpdateRiskTools) };
+    public IReadOnlyList<Type> McpToolTypes { get; } = new[]
+    {
+        typeof(Whiskers.Mcp.Tools.UpdateRiskTools),
+        typeof(Whiskers.Mcp.Tools.AutoPatchTools),
+    };
     public Task InitializeAsync(IServiceProvider sp, CancellationToken ct) => Task.CompletedTask;
 
     public void ConfigureServices(IServiceCollection services, IConfiguration config)
@@ -48,5 +52,13 @@ public sealed class ImageUpdateModule : IWhiskersModule
 
         // Auto-update (opt-in only) — moved verbatim.
         services.AddSingletonWithInterfaceAndHostedService<AutoUpdateService, IAutoUpdateService>();
+
+        // Fleet-wide security auto-patching (2026-10-25). Off by default and a dry run when first enabled;
+        // the "AutoPatch" section of app-settings.json switches it live.
+        services.Configure<AutoPatchSettings>(config.GetSection("AutoPatch"));
+        services.AddSingleton<Whiskers.Services.AutoPatch.IAutoPatchRunner,
+                              Whiskers.Services.AutoPatch.ScriptAutoPatchRunner>();
+        services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.AutoPatch.AutoPatchService,
+                                                           Whiskers.Services.AutoPatch.IAutoPatchService>();
     }
 }

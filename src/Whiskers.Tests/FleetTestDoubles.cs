@@ -221,6 +221,7 @@ internal sealed class FakeDocker : IDockerService
         => Task.FromResult<Whiskers.Services.ImageUpdate.ImageContract?>(null);
 
     public Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null) => throw new NotSupportedException();
+    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null) => throw new NotSupportedException();
     public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null) => throw new NotSupportedException();

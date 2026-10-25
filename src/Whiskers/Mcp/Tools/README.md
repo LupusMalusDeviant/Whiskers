@@ -23,6 +23,7 @@ The canonical tool > permission-level map lives in [`../../Models/McpPermission.
 | `GitDeployTools.cs` | `list_git_deploy_apps` — repos, branches, last deploy outcome. **Read-only** (Plan-0013 WP4) |
 | `VolumeBackupTools.cs` | `list_volume_backups`, `list_volumes` — answers "when was this volume last backed up?". **Read-only** |
 | `NotificationTools.cs` | `list_recent_alerts` — the alert history Whiskers has raised. **Read-only** |
+| `AutoPatchTools.cs` | `get_auto_patch_status` (read) — last nightly security auto-patch report; `preview_auto_patch` (write) — dry run in the background, recreates nothing. No tool applies patches. See [`../../Services/AutoPatch/`](../../Services/AutoPatch/) |
 | `McpInputValidation.cs` | Boundary input-validation helpers (safe project name, unambiguous container resolution) |
 
 The three read-only groups closed real gaps: their modules contributed no tools at all, so the agent could not

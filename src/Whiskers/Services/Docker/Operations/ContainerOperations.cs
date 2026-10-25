@@ -60,6 +60,7 @@ internal sealed class ContainerOperations
         Id = c.ID,
         Name = c.Names.FirstOrDefault()?.TrimStart('/') ?? c.ID[..12],
         Image = c.Image,
+        ImageId = c.ImageID ?? string.Empty,
         Status = c.Status,
         State = c.State,
         Created = c.Created,
@@ -356,6 +357,25 @@ internal sealed class ContainerOperations
             (int)inspect.State.ExitCode,
             inspect.State.OOMKilled
         );
+    }
+
+    /// <summary>The image reference the container was created from (<c>Config.Image</c>), or null when it cannot
+    /// be inspected. A listing only shows the name while the tag still points at the running image — after a
+    /// newer pull it shows the bare image ID, and only the inspect still knows which name to check.</summary>
+    public async Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null)
+    {
+        try
+        {
+            var inspect = await _connectionManager.ExecuteGuardedAsync(
+                serverId, c => c.Containers.InspectContainerAsync(containerId),
+                singleFlightKey: $"configuredimage:{containerId}");
+            return string.IsNullOrWhiteSpace(inspect.Config?.Image) ? null : inspect.Config.Image;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not inspect container {Container} for its image", containerId);
+            return null;
+        }
     }
 
     /// <summary>Reads the container's log-driver configuration (Plan-0007 WP3).

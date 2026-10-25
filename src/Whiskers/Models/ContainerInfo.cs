@@ -6,6 +6,10 @@ public class ContainerInfo
     public string ShortId => Id.Length >= 12 ? Id[..12] : Id;
     public string Name { get; set; } = string.Empty;
     public string Image { get; set; } = string.Empty;
+    /// <summary>ID of the image the container actually runs. Not the same as what <see cref="Image"/> names:
+    /// once the tag moves on to a newer pull, the container keeps running the old ID — and Docker then lists
+    /// <see cref="Image"/> as that bare ID instead of the name. Empty when the source does not report it.</summary>
+    public string ImageId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
     public DateTime Created { get; set; }

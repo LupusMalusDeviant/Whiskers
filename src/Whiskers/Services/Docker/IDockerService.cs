@@ -25,6 +25,10 @@ public interface IDockerService
     Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync();
     Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null);
 
+    /// <summary>The image reference a container was created from (its <c>Config.Image</c>), or null when it
+    /// cannot be inspected. Needed because a listing shows a bare image ID once the tag has moved on.</summary>
+    Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null);
+
     /// <summary>What an image declares about how it runs — for measuring update risk before recreating
     /// anything (GAP-6). Null when the image cannot be inspected.</summary>
     Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null);

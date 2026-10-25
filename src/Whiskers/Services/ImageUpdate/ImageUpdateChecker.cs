@@ -182,19 +182,51 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
     public static bool IsDigestPinned(string image)
         => image.Contains("@sha256:", StringComparison.Ordinal);
 
+    /// <summary>True when a listed "image" is really a bare image ID (<c>e9e1a1e18e8e</c>,
+    /// <c>sha256:…</c>). Docker lists a container that way once its tag has moved on to a newer image.</summary>
+    public static bool LooksLikeImageId(string image)
+        => System.Text.RegularExpressions.Regex.IsMatch(image, "^(sha256:)?[0-9a-f]{12,64}$");
+
+    /// <summary>
+    /// Which image name to ask the registry about, and which local image stands for "what runs now".
+    ///
+    /// <para>Reading the local digest through the TAG (the old behaviour) compares the registry with whatever
+    /// was pulled last — not with what the container runs. Any pull without a recreate (a manual one, the
+    /// candidate pull of <c>assess_update_risk</c>) therefore made a stale container look current. Worse, the
+    /// listing then shows the bare old image ID instead of the name, so the registry was asked about
+    /// "e9e1a1e18e8e" and the check ended as "could not reach registry". Found 2026-10-25 with 305 fixable
+    /// CVEs on containers whose newer image had been on disk for weeks.</para>
+    /// </summary>
+    /// <param name="listedImage">The image as the container listing shows it.</param>
+    /// <param name="configuredImage">The container's <c>Config.Image</c>, when it had to be looked up.</param>
+    /// <param name="runningImageId">The ID of the image the container runs, when known.</param>
+    public static (string Image, string LocalRef) ResolveCheckRefs(
+        string listedImage, string? configuredImage, string? runningImageId)
+    {
+        var image = LooksLikeImageId(listedImage) && !string.IsNullOrWhiteSpace(configuredImage)
+            ? configuredImage
+            : listedImage;
+        var localRef = string.IsNullOrWhiteSpace(runningImageId) ? image : runningImageId;
+        return (image, localRef);
+    }
+
     private async Task<ImageUpdateInfo?> CheckSingleImageAsync(
         IDockerService docker, ContainerInfo container, CancellationToken ct)
     {
         try
         {
-            var image = container.Image;
+            var configured = LooksLikeImageId(container.Image)
+                ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId)
+                : null;
+            var (image, localRef) = ResolveCheckRefs(container.Image, configured, container.ImageId);
 
-            // Skip digest-pinned images — a pin is a pin, there's no newer version to check.
-            if (IsDigestPinned(image))
+            // Skip digest-pinned images — a pin is a pin, there's no newer version to check. A bare ID that
+            // could not be resolved to a name has nothing to ask a registry about either.
+            if (IsDigestPinned(image) || LooksLikeImageId(image))
                 return null;
 
-            // Get local digest
-            var localDigest = await docker.GetImageDigestAsync(image, container.ServerId);
+            // Local digest of the image the container RUNS, not of whatever the tag points at now.
+            var localDigest = await docker.GetImageDigestAsync(localRef, container.ServerId);
 
             // Get remote digest
             var remoteDigest = await _registry.GetRemoteDigestAsync(image);

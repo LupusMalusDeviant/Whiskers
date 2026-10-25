@@ -76,6 +76,8 @@ public static class McpPermissionLevels
         ["get_container_metrics"] = Read,
         ["get_server_metrics"] = Read,
         ["get_update_status"] = Read,
+        // Reads the last nightly auto-patch report; touches nothing.
+        ["get_auto_patch_status"] = Read,
         ["get_cve_summary"] = Read,
         ["get_server_cves"] = Read,
         ["get_container_cves"] = Read,
@@ -93,6 +95,8 @@ public static class McpPermissionLevels
         ["stop_container"] = Write,
         ["restart_container"] = Write,
         ["update_container"] = Write,
+        // Dry run only: pulls candidate images and puts the old tags back, recreates nothing.
+        ["preview_auto_patch"] = Write,
         // Admin (not Write): both accept arbitrary host bind-mounts / images, so a container they create
         // can mount the host root = de-facto root on the host. Keep them above the write boundary.
         ["deploy_app"] = Admin,
@@ -217,6 +221,8 @@ public static class McpPermissionLevels
         ["deploy_compose"] = "Deployment",
         ["renew_mtls_certificate"] = "Server",
         ["get_update_status"] = "Monitoring",
+        ["get_auto_patch_status"] = "Monitoring",
+        ["preview_auto_patch"] = "Container",
         ["get_cve_summary"] = "Monitoring",
         ["get_server_cves"] = "Monitoring",
         ["get_container_cves"] = "Monitoring",

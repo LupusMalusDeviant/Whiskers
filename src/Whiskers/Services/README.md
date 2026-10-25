@@ -35,6 +35,7 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`ImageSearch/`](ImageSearch/) | Search container images across multiple registries ("marketplaces": Docker Hub, GHCR, Harbor) |
 | [`ImageUpdate/`](ImageUpdate/) | Detect newer image tags/digests in registries |
 | [`AutoUpdate/`](AutoUpdate/) | Scheduled automatic container updates |
+| [`AutoPatch/`](AutoPatch/) | Nightly same-tag security patching of containers with fixable CVEs |
 | [`Backup/`](Backup/) | Docker **volume** backups, plus Whiskers' own **self-backup & restore** of `/app/data` (VAULT_KEY-encrypted archives, crash-safe deferred-swap restore) |
 | [`Onboarding/`](Onboarding/) | One-click mesh + mTLS server onboarding (Tailscale, step-ca, ghostunnel) |
 | [`Vpn/`](Vpn/) | Pluggable mesh-VPN bring-up (Tailscale / NetBird / none) decoupled from the app image |

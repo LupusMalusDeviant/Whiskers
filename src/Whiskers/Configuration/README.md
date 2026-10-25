@@ -16,6 +16,7 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | `MetricsSettings.cs` | Metric collection cadence / retention; `ScrapeToken` gates the Prometheus `/metrics` endpoint (disabled when unset). |
 | `HealthMonitorSettings.cs` | Health-monitor thresholds. |
 | `ImageUpdateSettings.cs` | Image-update check cadence. |
+| `AutoPatchSettings.cs` | Nightly security auto-patching (section `AutoPatch`): on/off, dry run, window hour, severity, limit, exclusions. |
 | `CveMonitorSettings.cs` | CVE scan cadence. |
 | `MattermostSettings.cs` / `MatrixSettings.cs` | Notification channel settings. |
 | `TerminalSettings.cs` | Web-terminal settings. |
