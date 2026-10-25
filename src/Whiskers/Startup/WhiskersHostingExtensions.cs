@@ -123,7 +123,29 @@ public static class WhiskersHostingExtensions
         // advertises only "logging" and tools/list answers -32601). Keeping the IEnumerable<Type> static type forces
         // the intended overload. Regression-guarded by McpToolRegistrationTests.
         IEnumerable<Type> mcpToolTypes = modules.SelectMany(m => m.McpToolTypes).ToArray();
-        builder.Services.AddMcpServer()
+        builder.Services.AddMcpServer(options =>
+            {
+                // What `initialize` reports as serverInfo. MCP clients and directories (LobeHub, Glama) show
+                // these fields; without them a client only sees the SDK's assembly name and no description.
+                options.ServerInfo = new ModelContextProtocol.Protocol.Implementation
+                {
+                    Name = "whiskers",
+                    Title = "Whiskers",
+                    Version = Whiskers.Utils.AppVersion.Display,
+                    Description = "Governed infrastructure operations for AI agents: Docker hosts, Kubernetes "
+                        + "workloads, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin), "
+                        + "code-enforced guardrails and human approvals. Self-hosted, SSH-key-free (mesh + mTLS).",
+                    WebsiteUrl = "https://github.com/LupusMalusDeviant/Whiskers",
+                    Icons =
+                    [
+                        new ModelContextProtocol.Protocol.Icon
+                        {
+                            Source = "https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/src/Whiskers/wwwroot/brand.png",
+                            MimeType = "image/png",
+                        },
+                    ],
+                };
+            })
             .WithHttpTransport()
             .WithTools(mcpToolTypes)
             // User-invokable workflows and read-only context about the MCP surface itself (no infrastructure data).

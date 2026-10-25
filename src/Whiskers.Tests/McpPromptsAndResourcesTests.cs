@@ -32,6 +32,20 @@ public class McpPromptsAndResourcesTests
                         new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") }));
                 });
             using var client = factory.CreateClient();
+
+            // serverInfo is what MCP clients and directories (LobeHub, Glama) display for this server.
+            using (var init = await McpServedSurfaceTests.PostAsync(client, null, """
+                       {"jsonrpc":"2.0","id":19,"method":"initialize","params":{"protocolVersion":"2025-06-18",
+                        "capabilities":{},"clientInfo":{"name":"whiskers-tests","version":"1.0"}}}
+                       """))
+            {
+                using var doc = JsonDocument.Parse(McpServedSurfaceTests.ExtractJsonRpcPayload(await init.Content.ReadAsStringAsync()));
+                var info = doc.RootElement.GetProperty("result").GetProperty("serverInfo");
+                Assert.Equal("whiskers", info.GetProperty("name").GetString());
+                Assert.Equal(Whiskers.Utils.AppVersion.Display, info.GetProperty("version").GetString());
+                Assert.False(string.IsNullOrWhiteSpace(info.GetProperty("description").GetString()));
+            }
+
             var session = await McpServedSurfaceTests.InitializeAsync(client);
 
             // Prompts: listed, and a prompt renders its argument and names real tools.
