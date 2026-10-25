@@ -364,14 +364,16 @@
         _running = true;
         StateHasChanged();
 
-        if (_session is null)
-        {
-            _context = await BuildContextAsync();
-            _session = await AgentService.StartSessionAsync(_context, _seedHistory);
-        }
-
         try
         {
+            // Session start lives inside the try so a failure surfaces as an error line
+            // and the finally clears _running instead of leaving the chat stuck busy.
+            if (_session is null)
+            {
+                _context = await BuildContextAsync();
+                _session = await AgentService.StartSessionAsync(_context, _seedHistory);
+            }
+
             await foreach (var ev in _session.SendAsync(message))
             {
                 switch (ev)

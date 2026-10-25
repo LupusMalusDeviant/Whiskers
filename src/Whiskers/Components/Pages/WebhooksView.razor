@@ -130,7 +130,7 @@ else
                     <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
                 }
             </MudSelect>
-            <MudSelect T="string" @bind-Value="_formAction" Label="@L["WebhooksView_Field_Action"]" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelect T="string" Value="_formAction" ValueChanged="OnFormActionChanged" Label="@L["WebhooksView_Field_Action"]" Variant="Variant.Outlined" Class="mb-3">
                 <MudSelectItem Value="@("restart")">@L["WebhooksView_Action_Restart"]</MudSelectItem>
                 <MudSelectItem Value="@("rebuild")">@L["WebhooksView_Action_Rebuild"]</MudSelectItem>
                 <MudSelectItem Value="@("deploy")">@L["WebhooksView_Action_Deploy"]</MudSelectItem>
@@ -222,10 +222,20 @@ else
         await LoadContainersForServer();
     }
 
+    // The target means something different per action (container name / compose dir / git app id),
+    // so a value picked for one action must not silently carry over to another.
+    private void OnFormActionChanged(string action)
+    {
+        _formAction = action;
+        _formTarget = "";
+    }
+
     private async Task LoadContainersForServer()
     {
         var sid = _formServerId == "local" ? null : _formServerId;
-        _containers = (await DockerService.ListContainersAsync(all: false, serverId: sid)).ToList();
+        // all: true — a stopped container is a legitimate restart/rebuild target too. The server-scoped
+        // overload is used on purpose; ListAllContainersAsync spans the whole fleet.
+        _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
     }
 
     private async Task CreateWebhook()
@@ -309,8 +319,11 @@ else
     private async Task CopyToClipboard(string? text)
     {
         if (string.IsNullOrEmpty(text)) return;
-        await JS.InvokeVoidAsync("swClipboard.copy", text);
-        Snackbar.Add(L["WebhooksView_Snackbar_Copied"].Value, Severity.Success);
+        bool copied;
+        try { copied = await JS.InvokeAsync<bool>("swClipboard.copy", text); }
+        catch { copied = false; }
+        if (copied) Snackbar.Add(L["WebhooksView_Snackbar_Copied"].Value, Severity.Success);
+        else Snackbar.Add(L["Clipboard_CopyFailed_Manual"].Value, Severity.Warning);
     }
 
     private async Task DeleteWebhook(Whiskers.Models.WebhookEntity wh)

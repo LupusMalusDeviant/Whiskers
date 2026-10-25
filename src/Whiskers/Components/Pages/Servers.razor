@@ -529,6 +529,10 @@
             if (_sshKeyData != null && _sshKeyFileName != null)
                 await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
 
+            // The server now exists: if the connection probe fails and the user fixes the form and
+            // saves again, that retry must UPDATE this entry instead of adding a duplicate id.
+            _editingServer = ServerConfigService.GetServer(_form.Id);
+
             await AuditLog.LogAsync(actor, "web", "server.add", "server", _form.Id, _form.Name, serverId: _form.Id);
         }
 
@@ -665,19 +669,27 @@
         _testResults.Remove(server.Id);
         StateHasChanged();
 
+        // A bounded wait like the save path — but no client eviction: this is a read-only check on a server
+        // that is in use, and dropping the shared client would cut every loop and circuit using it right now.
+        var timeout = TimeSpan.FromSeconds(12);
         try
         {
+            using var cts = new System.Threading.CancellationTokenSource(timeout);
             if (server.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
             {
-                var pods = await WorkloadFactory.GetForServer(server.Id).ListWorkloadsAsync(all: true);
+                var pods = await WorkloadFactory.GetForServer(server.Id).ListWorkloadsAsync(all: true, cts.Token);
                 _testResults[server.Id] = new TestResult { Success = true, ContainerCount = pods.Count };
                 return;
             }
 
-            var client = await ConnectionManager.GetClientAsync(server.Id);
+            var client = await ConnectionManager.GetClientAsync(server.Id).WaitAsync(cts.Token);
             var containers = await client.Containers.ListContainersAsync(
-                new Docker.DotNet.Models.ContainersListParameters { All = true });
+                new Docker.DotNet.Models.ContainersListParameters { All = true }, cts.Token);
             _testResults[server.Id] = new TestResult { Success = true, ContainerCount = containers.Count };
+        }
+        catch (OperationCanceledException)
+        {
+            _testResults[server.Id] = new TestResult { Success = false, Error = L["Servers_Status_Timeout", timeout.TotalSeconds].Value };
         }
         catch (Exception ex)
         {

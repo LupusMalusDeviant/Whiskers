@@ -97,7 +97,9 @@ else
             <MudTd><MudChip T="string" Size="Size.Small" Color="@GetSeverityColor(context.Severity)">@context.Severity</MudChip></MudTd>
             <MudTd>@context.TriggerCount×@(context.LastTriggered != null ? $" ({context.LastTriggered.Value.ToLocalTime():dd.MM. HH:mm})" : "")</MudTd>
             <MudTd>
+                @* Disabled below Operator: a viewer's toggle would flip visually but never be saved. *@
                 <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
+                           Disabled="@(_role < AppRole.Operator)"
                            ValueChanged="@((bool v) => ToggleRule(context, v))" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                OnClick="@(() => DeleteRule(context))" title="@L["LogSearchView_Rules_DeleteTooltip"]" />
@@ -169,8 +171,16 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
-        _containers = (await DockerService.ListAllContainersAsync(all: false)).ToList();
-        _rules = await MonitorService.GetRulesAsync();
+        try
+        {
+            // Stopped containers keep their logs and can be a rule target, so offer them too.
+            _containers = (await DockerService.ListAllContainersAsync(all: true)).ToList();
+            _rules = await MonitorService.GetRulesAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["LogSearchView_Snackbar_LoadError", ex.Message].Value, Severity.Error);
+        }
     }
 
     private async Task Search()
@@ -218,7 +228,12 @@ else
     private async Task ToggleRule(Whiskers.Models.LogAlertRuleEntity rule, bool enabled)
     {
         if (!Require(AppRole.Operator)) return;
-        await MonitorService.ToggleRuleAsync(rule.RuleId, enabled);
+        try
+        {
+            await MonitorService.ToggleRuleAsync(rule.RuleId, enabled);
+        }
+        catch (Exception ex) { Snackbar.Add(L["LogSearchView_Snackbar_Error", ex.Message].Value, Severity.Error); }
+        // Reload either way so the switch reflects the persisted state.
         _rules = await MonitorService.GetRulesAsync();
     }
 

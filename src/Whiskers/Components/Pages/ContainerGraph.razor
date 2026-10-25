@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject IJSRuntime JS
+@inject ISnackbar Snackbar
 @inject IStringLocalizer<SharedResource> L
 @implements IAsyncDisposable
 
@@ -110,7 +111,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Graph load failed: {ex.Message}");
+            // Refresh used to fail silently into a stale or empty graph.
+            Snackbar.Add(L["ContainerGraph_LoadFailed", ex.Message].Value, Severity.Error);
         }
     }
 

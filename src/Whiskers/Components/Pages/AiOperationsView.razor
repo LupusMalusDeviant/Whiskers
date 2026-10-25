@@ -185,8 +185,11 @@ else
 
     private async Task Copy(string text)
     {
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); Snackbar.Add(L["AiOps_Copied"].Value, Severity.Info); }
-        catch { /* clipboard may be unavailable */ }
+        bool copied;
+        try { copied = await JS.InvokeAsync<bool>("swClipboard.copy", text); }
+        catch { copied = false; }
+        if (copied) Snackbar.Add(L["AiOps_Copied"].Value, Severity.Info);
+        else Snackbar.Add(L["Clipboard_CopyFailed_Manual"].Value, Severity.Warning);
     }
 
     private async Task<AgentPrincipal> BuildPrincipalAsync()

@@ -107,7 +107,7 @@
 
             @* Input *@
             <div style="padding: 10px 14px; border-top: 1px solid var(--sw-glass-border); flex:0 0 auto;">
-                <MudTextField @bind-Value="_input" Variant="Variant.Outlined"
+                <MudTextField @ref="_inputRef" T="string" Value="_input" ValueChanged="OnInputChanged" Variant="Variant.Outlined"
                               Placeholder="@(AgentMode ? L["AiChat_Input_AgentPlaceholder"].Value : L["AiChat_Input_AdvisorPlaceholder"].Value)"
                               Style="font-size: 0.85rem;" Immediate="true"
                               Lines="1" AutoGrow="true" MaxLines="5"
@@ -133,6 +133,7 @@
     private bool _dragArmed;
     private bool _includeScreenshot;
     private string _input = "";
+    private MudTextField<string>? _inputRef;
     private string _userEmail = "";
     private List<Whiskers.Services.AiChat.ChatMessage> _messages = new();
 
@@ -203,9 +204,30 @@
             _pendingConfirm = null;
             _pendingApprovalId = null;
             _streaming = null;
+            // Persist both modes here (once) — agent-mode turns were previously never saved. Only the
+            // conversation itself: tool and error rows can carry command output (and with it secrets), and the
+            // advisor never reads them back anyway.
+            try
+            {
+                await HistoryStore.SaveAsync(_userEmail,
+                    _messages.Where(m => m.Role is "user" or "assistant").ToList());
+            }
+            catch { }
+            // Enter in the AutoGrow textarea also inserts a newline whose input event arrives after
+            // the send cleared _input; force the field empty so the sent text does not come back.
+            _input = "";
+            try { if (_inputRef is not null) await _inputRef.ClearAsync(); } catch { }
             StateHasChanged();
             await ScrollToBottom();
         }
+    }
+
+    private void OnInputChanged(string? value)
+    {
+        // The field is disabled while a turn runs, so any change arriving then is the
+        // late echo of the Enter key that triggered the send — ignore it.
+        if (_thinking) return;
+        _input = value ?? "";
     }
 
     private async Task SendAdvisorAsync(string userMsg)
@@ -213,7 +235,6 @@
         var recent = _messages.SkipLast(1).TakeLast(10).ToList();
         var response = await ChatService.ChatAsync(userMsg, recent);
         _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "assistant", Content = response });
-        await HistoryStore.SaveAsync(_userEmail, _messages);
     }
 
     private async Task SendAgentAsync(string userMsg)

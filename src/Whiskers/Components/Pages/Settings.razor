@@ -248,7 +248,7 @@ else
                     </MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                                StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerCveScan"
-                               Disabled="@(CveStore.IsScanning || !cveCfg.Enabled)">
+                               Disabled="@(_cveScanRequested || CveStore.IsScanning || !cveCfg.Enabled)">
                         @L["Settings_Button_ScanNow"]
                     </MudButton>
                 </MudStack>
@@ -302,38 +302,37 @@ else
     @* DNS provider (Modules/Dns): one global token for zone records; hidden when the module is off. *@
     @if (ModuleRegistry.IsEnabled("dns"))
     {
-    <MudExpansionPanel Text="DNS (Infomaniak)" Icon="@Icons.Material.Filled.Language">
+    <MudExpansionPanel Text="@L["Settings_Dns_Panel"]" Icon="@Icons.Material.Filled.Language">
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-            Zugang zur DNS-API des Anbieters für die MCP-Werkzeuge <code>list_dns_records</code>, <code>set_dns_record</code> und <code>delete_dns_record</code>.
-            Infomaniak: Token unter <em>Manager → Entwickler → API-Tokens</em> mit Berechtigung <em>domain</em> anlegen.
-            Das Token wird nur hier gespeichert, nie in Antworten oder Protokollen ausgegeben.
+            @* Static markup from our own resource file (code/em tags), not user input. *@
+            @((MarkupString)L["Settings_Dns_Info"].Value)
         </MudAlert>
         <MudGrid>
             <MudItem xs="12" md="4">
-                <MudSelect T="string" @bind-Value="_dnsProvider" Label="Anbieter" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelect T="string" @bind-Value="_dnsProvider" Label="@L["Settings_Dns_Provider"]" Variant="Variant.Outlined" Margin="Margin.Dense">
                     <MudSelectItem Value="@("infomaniak")">Infomaniak</MudSelectItem>
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" md="4">
-                <MudNumericField @bind-Value="_dnsDefaultTtl" Label="Standard-TTL (Sekunden)" Min="60" Max="86400" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudNumericField @bind-Value="_dnsDefaultTtl" Label="@L["Settings_Dns_DefaultTtl"]" Min="60" Max="86400" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
             <MudItem xs="12" md="4">
-                <MudTextField Value="@DnsTokenStatus" ReadOnly="true" Label="Token-Status" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField Value="@DnsTokenStatus" ReadOnly="true" Label="@L["Settings_Dns_TokenStatus"]" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_dnsApiToken" Label="API-Token" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password"
-                              HelperText="Leer lassen, um das gespeicherte Token zu behalten." />
+                <MudTextField @bind-Value="_dnsApiToken" Label="@L["Settings_Dns_ApiToken"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password"
+                              HelperText="@L["Settings_Dns_ApiTokenHelper"]" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_dnsAllowedZones" Label="Erlaubte Zonen (kommagetrennt, leer = alle)" Variant="Variant.Outlined" Margin="Margin.Dense"
-                              Placeholder="lupusmalus.dev, example.org" HelperText="Die Werkzeuge dürfen nur diese Zonen lesen und ändern." />
+                <MudTextField @bind-Value="_dnsAllowedZones" Label="@L["Settings_Dns_AllowedZones"]" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Placeholder="lupusmalus.dev, example.org" HelperText="@L["Settings_Dns_AllowedZonesHelper"]" />
             </MudItem>
         </MudGrid>
         <MudStack Row="true" Class="mt-3" Spacing="2">
             <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveDns"
-                       StartIcon="@Icons.Material.Filled.Save">DNS speichern</MudButton>
+                       StartIcon="@Icons.Material.Filled.Save">@L["Settings_Dns_Button_Save"]</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearDnsToken" Disabled="@(!_dnsHasToken)"
-                       StartIcon="@Icons.Material.Filled.DeleteForever">Token entfernen</MudButton>
+                       StartIcon="@Icons.Material.Filled.DeleteForever">@L["Settings_Dns_Button_ClearToken"]</MudButton>
         </MudStack>
     </MudExpansionPanel>
     }
@@ -415,7 +414,7 @@ else
                         <MudIconButton Icon="@(_revealedKeys.Contains(context.Id) ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                                        Size="Size.Small" OnClick="@(() => ToggleKeyVisibility(context.Id))" />
                         <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
-                                       OnClick="@(async () => await CopyKey(context.Key))" />
+                                       OnClick="@(async () => await CopyKey(context))" />
                     </MudStack>
                 </MudTd>
                 <MudTd>
@@ -683,7 +682,9 @@ else
     private bool _termEnabled = true; private string _termShell = "/bin/bash"; private int _termMaxSessions = 5; private int _termIdle = 30;
     private string _dnsProvider = "infomaniak"; private string _dnsApiToken = ""; private string _dnsAllowedZones = ""; private int _dnsDefaultTtl = 300; private bool _dnsHasToken;
     // The stored token is never bound into the page — only whether one exists and its last characters.
-    private string DnsTokenStatus => _dnsHasToken ? $"hinterlegt (…{_dnsTokenTail})" : "kein Token hinterlegt";
+    private string DnsTokenStatus => _dnsHasToken
+        ? L["Settings_Dns_TokenStored", _dnsTokenTail].Value
+        : L["Settings_Dns_TokenNone"].Value;
     private string _dnsTokenTail = "";
     private bool _aiEnabled; private string _aiProvider = "openai"; private string _aiModel = ""; private string _aiApiUrl = ""; private string _aiApiKey = "";
     // Additional notification channels
@@ -859,7 +860,7 @@ else
         _dnsApiToken = "";
         _dnsHasToken = !string.IsNullOrWhiteSpace(token);
         _dnsTokenTail = _dnsHasToken && token.Length >= 4 ? token[^4..] : "";
-        Snackbar.Add("DNS-Einstellungen gespeichert", Severity.Success);
+        Snackbar.Add(L["Settings_Dns_Snackbar_Saved"].Value, Severity.Success);
     }
 
     private async Task ClearDnsToken()
@@ -874,7 +875,7 @@ else
         });
         await Audit("dns");
         _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
-        Snackbar.Add("DNS-Token entfernt", Severity.Info);
+        Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
     }
 
     private async Task SaveAiChat()
@@ -951,12 +952,21 @@ else
             _revealedKeys.Add(keyId);
     }
 
-    private async Task CopyKey(string key)
+    private async Task CopyKey(Whiskers.Models.McpApiKeyConfig apiKey)
     {
-        // Copy to the clipboard via JS — never echo the key value in a toast.
-        try { await JS.InvokeVoidAsync("swClipboard.copy", key); }
-        catch { /* clipboard unavailable */ }
-        Snackbar.Add(L["Settings_Snackbar_KeyCopied"].Value, Severity.Success);
+        // Copy to the clipboard via JS — never echo the key value in a toast. Report success only when the
+        // browser confirms it; otherwise show the key so it can be selected by hand.
+        bool copied;
+        try { copied = await JS.InvokeAsync<bool>("swClipboard.copy", apiKey.Key); }
+        catch { copied = false; }
+
+        if (copied)
+            Snackbar.Add(L["Settings_Snackbar_KeyCopied"].Value, Severity.Success);
+        else
+        {
+            _revealedKeys.Add(apiKey.Id);
+            Snackbar.Add(L["Clipboard_CopyFailed_Manual"].Value, Severity.Warning);
+        }
     }
 
     private Color GetLevelColor(string level) => level switch
@@ -1170,14 +1180,38 @@ else
 
     // === CVE Monitor ===
 
+    // Set synchronously on click — CveStore.IsScanning flips only once the background cycle runs.
+    private bool _cveScanRequested;
+
     private Task TriggerCveScan()
     {
-        if (CveStore.IsScanning) return Task.CompletedTask;
+        if (_cveScanRequested || CveStore.IsScanning) return Task.CompletedTask;
+        _cveScanRequested = true;
         Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info);
         _ = Task.Run(async () =>
         {
+            string? error = null;
             try { await CveMonitor.RunOneCycleAsync(); }
-            catch (Exception ex) { Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}");
+            }
+
+            // Report completion and refresh the "last scan" line / button state.
+            try
+            {
+                await InvokeAsync(() =>
+                {
+                    _cveScanRequested = false;
+                    if (error is null)
+                        Snackbar.Add(L["Cves_Snackbar_ScanFinished"].Value, MudBlazor.Severity.Success);
+                    else
+                        Snackbar.Add(L["Cves_Snackbar_ScanFailed", error].Value, MudBlazor.Severity.Error);
+                    StateHasChanged();
+                });
+            }
+            catch (ObjectDisposedException) { /* user left the page mid-scan */ }
         });
         return Task.CompletedTask;
     }

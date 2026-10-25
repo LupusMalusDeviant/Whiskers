@@ -123,11 +123,21 @@ else
             _seriesName = isMem ? L["ChatWidget_Series_Memory"].Value : L["ChatWidget_Series_Cpu"].Value;
             _options = CreateOptions(isMem ? "#9C27B0" : "#2196F3");
 
-            _history = Spec.Target == ChatWidgetTarget.Server
-                ? (isMem ? await MetricsQuery.GetServerMemoryHistoryAsync(ServerId, Window)
-                         : await MetricsQuery.GetServerCpuHistoryAsync(ServerId, Window))
-                : (isMem ? await MetricsQuery.GetContainerMemoryHistoryAsync(Spec.Id, ServerId, Window)
-                         : await MetricsQuery.GetContainerCpuHistoryAsync(Spec.Id, ServerId, Window));
+            if (Spec.Target == ChatWidgetTarget.Server)
+            {
+                _history = isMem ? await MetricsQuery.GetServerMemoryHistoryAsync(ServerId, Window)
+                                 : await MetricsQuery.GetServerCpuHistoryAsync(ServerId, Window);
+            }
+            else
+            {
+                // The spec only carries a (possibly short) container id — resolve the full id and
+                // the server it actually runs on, as LoadStatusAsync does, instead of assuming "local".
+                var c = await FindContainerAsync();
+                var id = c?.Id ?? Spec.Id;
+                var sid = c?.ServerId ?? ServerId;
+                _history = isMem ? await MetricsQuery.GetContainerMemoryHistoryAsync(id, sid, Window)
+                                 : await MetricsQuery.GetContainerCpuHistoryAsync(id, sid, Window);
+            }
         }
         catch
         {
@@ -145,8 +155,7 @@ else
         {
             if (Spec!.Target == ChatWidgetTarget.Container)
             {
-                var all = await Docker.ListAllContainersAsync(all: true);
-                var c = all.FirstOrDefault(x => x.Id == Spec.Id || x.Id.StartsWith(Spec.Id, StringComparison.OrdinalIgnoreCase));
+                var c = await FindContainerAsync();
                 if (c is not null)
                 {
                     _statusName = c.Name;
@@ -177,6 +186,12 @@ else
             _statusLabel = L["ChatWidget_Status_Error"].Value;
             _statusColor = Color.Error;
         }
+    }
+
+    private async Task<ContainerInfo?> FindContainerAsync()
+    {
+        var all = await Docker.ListAllContainersAsync(all: true);
+        return all.FirstOrDefault(x => x.Id == Spec!.Id || x.Id.StartsWith(Spec.Id, StringComparison.OrdinalIgnoreCase));
     }
 
     private string ServerId => string.IsNullOrEmpty(Spec?.Id) ? "local" : (Spec!.Target == ChatWidgetTarget.Server ? Spec.Id : "local");

@@ -102,7 +102,7 @@
     <value>Use a local account (email + password)</value>
   </data>
   <data name="Setup_Admin_PwHint" xml:space="preserve">
-    <value>At least 12 characters.</value>
+    <value>At least 12 characters, with upper- and lowercase letters, a digit and a special character.</value>
   </data>
   <data name="Setup_Admin_PwConfirm" xml:space="preserve">
     <value>Confirm password</value>
@@ -4567,5 +4567,131 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Setup_Done_AiOps" xml:space="preserve">
     <value>Tip: after signing in, open "AI Operations" to set up a governed AI agent — a read-only key and a safe guardrail preset in a couple of clicks.</value>
+  </data>
+  <data name="Clipboard_Copied" xml:space="preserve">
+    <value>Copied to clipboard.</value>
+  </data>
+  <data name="Clipboard_CopyFailed_Manual" xml:space="preserve">
+    <value>Copying was not possible in this browser (it only works over HTTPS or with an active click). The value is shown — select it and copy it with Ctrl+C.</value>
+  </data>
+  <data name="Dashboard_StateFilter_Tooltip" xml:space="preserve">
+    <value>Click to show only these containers (click again to clear)</value>
+  </data>
+  <data name="Dashboard_StateFilter_None" xml:space="preserve">
+    <value>No container matches this filter.</value>
+  </data>
+  <data name="Cves_Snackbar_ScanFinished" xml:space="preserve">
+    <value>CVE scan finished.</value>
+  </data>
+  <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
+    <value>CVE scan failed: {0}</value>
+  </data>
+  <data name="Setup_Server_LocalNotConnected" xml:space="preserve">
+    <value>No local Docker host reachable (is the Docker socket mounted?). You can add servers after setup.</value>
+  </data>
+  <data name="HealthReports_Error_ContainersFailed" xml:space="preserve">
+    <value>Could not load the container list (filter shows stored records only): {0}</value>
+  </data>
+  <data name="Dashboard_Server_CachedAge" xml:space="preserve">
+    <value>From the cache, {0} s old — refreshing now</value>
+  </data>
+  <data name="ContainerDetail_Db_NoCredentials" xml:space="preserve">
+    <value>No database credentials could be read from this container, so queries can't run.</value>
+  </data>
+  <data name="Deploy_Snackbar_Duplicate" xml:space="preserve">
+    <value>'{0}' appears twice — each host port and each variable may only be set once.</value>
+  </data>
+  <data name="ContainerGraph_LoadFailed" xml:space="preserve">
+    <value>Could not load the topology: {0}</value>
+  </data>
+  <data name="VolumeBackups_VolumesLoadFailed" xml:space="preserve">
+    <value>Could not list volumes ({0}) — enter the volume name by hand.</value>
+  </data>
+  <data name="Settings_Dns_Panel" xml:space="preserve">
+    <value>DNS (Infomaniak)</value>
+  </data>
+  <data name="Settings_Dns_Info" xml:space="preserve">
+    <value>Access to the provider's DNS API for the MCP tools &lt;code&gt;list_dns_records&lt;/code&gt;, &lt;code&gt;set_dns_record&lt;/code&gt; and &lt;code&gt;delete_dns_record&lt;/code&gt;. Infomaniak: create a token under &lt;em&gt;Manager → Developer → API tokens&lt;/em&gt; with the &lt;em&gt;domain&lt;/em&gt; scope. The token is stored only here and never shown in responses or logs.</value>
+  </data>
+  <data name="Settings_Dns_Provider" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="Settings_Dns_DefaultTtl" xml:space="preserve">
+    <value>Default TTL (seconds)</value>
+  </data>
+  <data name="Settings_Dns_TokenStatus" xml:space="preserve">
+    <value>Token status</value>
+  </data>
+  <data name="Settings_Dns_ApiToken" xml:space="preserve">
+    <value>API token</value>
+  </data>
+  <data name="Settings_Dns_ApiTokenHelper" xml:space="preserve">
+    <value>Leave empty to keep the stored token.</value>
+  </data>
+  <data name="Settings_Dns_AllowedZones" xml:space="preserve">
+    <value>Allowed zones (comma-separated, empty = all)</value>
+  </data>
+  <data name="Settings_Dns_AllowedZonesHelper" xml:space="preserve">
+    <value>The tools may only read and change these zones.</value>
+  </data>
+  <data name="Settings_Dns_Button_Save" xml:space="preserve">
+    <value>Save DNS</value>
+  </data>
+  <data name="Settings_Dns_Button_ClearToken" xml:space="preserve">
+    <value>Remove token</value>
+  </data>
+  <data name="Settings_Dns_TokenStored" xml:space="preserve">
+    <value>stored (…{0})</value>
+  </data>
+  <data name="Settings_Dns_TokenNone" xml:space="preserve">
+    <value>no token stored</value>
+  </data>
+  <data name="Settings_Dns_Snackbar_Saved" xml:space="preserve">
+    <value>DNS settings saved</value>
+  </data>
+  <data name="Settings_Dns_Snackbar_TokenCleared" xml:space="preserve">
+    <value>DNS token removed</value>
+  </data>
+  <data name="GuardrailsView_DuplicateName_Snackbar" xml:space="preserve">
+    <value>A preset named "{0}" already exists.</value>
+  </data>
+  <data name="ScheduledTasksView_Field_CronInvalid" xml:space="preserve">
+    <value>Invalid cron expression (5 fields: minute hour day month weekday).</value>
+  </data>
+  <data name="NotificationBell_Title" xml:space="preserve">
+    <value>Notifications</value>
+  </data>
+  <data name="NotificationBell_Clear" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="NotificationBell_Empty" xml:space="preserve">
+    <value>No notifications</value>
+  </data>
+  <data name="NotificationBell_ShowAll" xml:space="preserve">
+    <value>Show all</value>
+  </data>
+  <data name="Layout_ThemeTooltip" xml:space="preserve">
+    <value>Theme</value>
+  </data>
+  <data name="ApprovalsView_NotFound_Snackbar" xml:space="preserve">
+    <value>This approval no longer exists (session ended or app restarted).</value>
+  </data>
+  <data name="ApprovalsView_AlreadyResolved_Snackbar" xml:space="preserve">
+    <value>This approval is no longer pending (status: {0}).</value>
+  </data>
+  <data name="ApprovalsView_ResolveFailed_Snackbar" xml:space="preserve">
+    <value>The approval could not be resolved — it was probably decided at the same moment.</value>
+  </data>
+  <data name="ApprovalsView_ResolveError_Snackbar" xml:space="preserve">
+    <value>Error resolving the approval: {0}</value>
+  </data>
+  <data name="LogSearchView_Snackbar_LoadError" xml:space="preserve">
+    <value>Error loading containers or alert rules: {0}</value>
+  </data>
+  <data name="Dashboard_FirstServer_SubtitleNeutral" xml:space="preserve">
+    <value>Connect your fleet.</value>
+  </data>
+  <data name="Dashboard_FirstServer_SubtitleNoLocal" xml:space="preserve">
+    <value>No local Docker host is reachable (is the Docker socket mounted?) — you can still connect your fleet.</value>
   </data>
 </root>

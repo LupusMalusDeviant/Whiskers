@@ -62,8 +62,7 @@
 
             _session = SessionManager.CreateSession(ContainerId, ServerId);
 
-            _ = ReadStreamAsync(_session.Process!.StandardOutput, _cts.Token);
-            _ = ReadStreamAsync(_session.Process!.StandardError, _cts.Token);
+            _ = PumpStreamsAsync(_session.Process!.StandardOutput, _session.Process!.StandardError, _cts.Token);
         }
         catch (Exception ex)
         {
@@ -93,12 +92,21 @@
         }
         catch (OperationCanceledException) { }
         catch { }
+    }
 
-        await InvokeAsync(async () =>
+    // stdout and stderr each end on their own; announce the end once, after both are done.
+    private async Task PumpStreamsAsync(System.IO.StreamReader stdout, System.IO.StreamReader stderr, CancellationToken ct)
+    {
+        await Task.WhenAll(ReadStreamAsync(stdout, ct), ReadStreamAsync(stderr, ct));
+        try
         {
-            await JS.InvokeVoidAsync("Whiskers.Terminal.write", "terminal-container",
-                $"\r\n\x1b[31m--- {L["TerminalView_Terminal_SessionEnded"].Value} ---\x1b[0m\r\n");
-        });
+            await InvokeAsync(async () =>
+            {
+                await JS.InvokeVoidAsync("Whiskers.Terminal.write", "terminal-container",
+                    $"\r\n\x1b[31m--- {L["TerminalView_Terminal_SessionEnded"].Value} ---\x1b[0m\r\n");
+            });
+        }
+        catch { /* circuit or terminal already gone */ }
     }
 
     [JSInvokable]

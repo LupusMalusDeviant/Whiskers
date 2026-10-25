@@ -77,8 +77,7 @@
                 _session = SessionManager.CreateSshSession(server);
             }
 
-            _ = ReadStreamAsync(_session.Process!.StandardOutput, _cts.Token);
-            _ = ReadStreamAsync(_session.Process!.StandardError, _cts.Token);
+            _ = PumpStreamsAsync(_session.Process!.StandardOutput, _session.Process!.StandardError, _cts.Token);
         }
         catch (Exception ex)
         {
@@ -96,6 +95,9 @@
             {
                 var bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length);
                 if (bytesRead == 0) break;
+
+                // Streaming output is activity too — keep the session from being idle-killed mid-output.
+                _session?.Touch();
                 var text = new string(buffer, 0, bytesRead);
                 await InvokeAsync(async () =>
                 {
@@ -105,12 +107,21 @@
         }
         catch (OperationCanceledException) { }
         catch { }
+    }
 
-        await InvokeAsync(async () =>
+    // stdout and stderr each end on their own; announce the end once, after both are done.
+    private async Task PumpStreamsAsync(System.IO.StreamReader stdout, System.IO.StreamReader stderr, CancellationToken ct)
+    {
+        await Task.WhenAll(ReadStreamAsync(stdout, ct), ReadStreamAsync(stderr, ct));
+        try
         {
-            await JS.InvokeVoidAsync("Whiskers.Terminal.write", "server-terminal-container",
-                $"\r\n\x1b[31m--- {L["ServerTerminalView_Terminal_SessionEnded"].Value} ---\x1b[0m\r\n");
-        });
+            await InvokeAsync(async () =>
+            {
+                await JS.InvokeVoidAsync("Whiskers.Terminal.write", "server-terminal-container",
+                    $"\r\n\x1b[31m--- {L["ServerTerminalView_Terminal_SessionEnded"].Value} ---\x1b[0m\r\n");
+            });
+        }
+        catch { /* circuit or terminal already gone */ }
     }
 
     [JSInvokable]

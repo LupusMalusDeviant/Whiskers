@@ -30,18 +30,12 @@
     </MudSelect>
     <MudSelect T="string" Value="@_typeFilter" ValueChanged="OnTypeChanged"
                Label="@L["NotificationsLog_Filter_TypeLabel"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 220px;" Clearable="true">
-        <MudSelectItem Value="@("unhealthy")">@L["NotificationsLog_Type_Unhealthy"]</MudSelectItem>
-        <MudSelectItem Value="@("stopped")">@L["NotificationsLog_Type_Stopped"]</MudSelectItem>
-        <MudSelectItem Value="@("oom_killed")">@L["NotificationsLog_Type_OomKilled"]</MudSelectItem>
-        <MudSelectItem Value="@("restart_loop")">@L["NotificationsLog_Type_RestartLoop"]</MudSelectItem>
-        <MudSelectItem Value="@("image_update")">@L["NotificationsLog_Type_ImageUpdate"]</MudSelectItem>
-        <MudSelectItem Value="@("cve_finding")">@L["NotificationsLog_Type_CveFinding"]</MudSelectItem>
-        <MudSelectItem Value="@("high_cpu")">@L["NotificationsLog_Type_HighCpu"]</MudSelectItem>
-        <MudSelectItem Value="@("high_memory")">@L["NotificationsLog_Type_HighMemory"]</MudSelectItem>
-        <MudSelectItem Value="@("metric_anomaly")">@L["NotificationsLog_Type_MetricAnomaly"]</MudSelectItem>
-        <MudSelectItem Value="@("auto_update_failed")">@L["NotificationsLog_Type_AutoUpdateFailed"]</MudSelectItem>
-        <MudSelectItem Value="@("agent_action")">@L["NotificationsLog_Type_AgentAction"]</MudSelectItem>
-        <MudSelectItem Value="@("agent_approval")">@L["NotificationsLog_Type_AgentApproval"]</MudSelectItem>
+        @* Options are the event types actually present in the history (plus the active filter), so a new
+           event type emitted by NotificationFormatter can't be missing from a hard-coded list. *@
+        @foreach (var type in _eventTypes)
+        {
+            <MudSelectItem Value="@type">@TypeLabel(type)</MudSelectItem>
+        }
     </MudSelect>
     <MudSpacer />
     <MudText Typo="Typo.body2" Style="color: #888;">@L["NotificationsLog_EntryCount", _totalCount]</MudText>
@@ -98,7 +92,54 @@
     private int _currentPage;
     private const int _pageSize = 50;
 
-    protected override async Task OnInitializedAsync() => await LoadData();
+    private List<string> _eventTypes = new();
+
+    // Localized labels for the event types we know; anything else is shown by its raw id.
+    private static readonly Dictionary<string, string> TypeLabelKeys = new(StringComparer.Ordinal)
+    {
+        ["unhealthy"] = "NotificationsLog_Type_Unhealthy",
+        ["stopped"] = "NotificationsLog_Type_Stopped",
+        ["oom_killed"] = "NotificationsLog_Type_OomKilled",
+        ["restart_loop"] = "NotificationsLog_Type_RestartLoop",
+        ["image_update"] = "NotificationsLog_Type_ImageUpdate",
+        ["cve_finding"] = "NotificationsLog_Type_CveFinding",
+        ["high_cpu"] = "NotificationsLog_Type_HighCpu",
+        ["high_memory"] = "NotificationsLog_Type_HighMemory",
+        ["metric_anomaly"] = "NotificationsLog_Type_MetricAnomaly",
+        ["auto_update_failed"] = "NotificationsLog_Type_AutoUpdateFailed",
+        ["agent_action"] = "NotificationsLog_Type_AgentAction",
+        ["agent_approval"] = "NotificationsLog_Type_AgentApproval",
+    };
+
+    private string TypeLabel(string type) =>
+        TypeLabelKeys.TryGetValue(type, out var key) ? L[key].Value : type;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadEventTypes();
+        await LoadData();
+    }
+
+    // The store has no "distinct types" query, so read the persisted history once (it is capped at
+    // 2000 rows) and collect the types present. Runs on load and after clearing — not per page/filter.
+    private async Task LoadEventTypes()
+    {
+        try
+        {
+            var all = await Store.QueryAsync(severity: null, eventType: null, skip: 0, take: 2000);
+            _eventTypes = all.Select(n => n.EventType)
+                .Concat(Store.Recent.Select(n => n.EventType))
+                .Concat(_typeFilter is null ? Array.Empty<string>() : new[] { _typeFilter })
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(TypeLabel, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            _eventTypes = new();   // filter just offers nothing; the table load reports its own errors
+        }
+    }
 
     private async Task LoadData()
     {
@@ -118,6 +159,8 @@
     {
         Store.Clear();
         _currentPage = 0;
+        _typeFilter = null;
+        await LoadEventTypes();
         await LoadData();
         Snackbar.Add(L["NotificationsLog_Snackbar_Cleared"].Value, Severity.Success);
     }

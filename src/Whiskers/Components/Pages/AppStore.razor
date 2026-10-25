@@ -230,7 +230,7 @@
 
         <MudTextField @bind-Value="_deployProjectName" Label="@L["AppStore_Label_ProjectName"]" Variant="Variant.Outlined" Class="mb-3" Placeholder="my-app" />
 
-        <MudSelect T="string" @bind-Value="_deployServerId" Label="@L["AppStore_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
+        <MudSelect T="string" Value="_deployServerId" ValueChanged="OnDeployServerChanged" Label="@L["AppStore_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
             @foreach (var srv in _servers)
             {
                 <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
@@ -293,7 +293,7 @@
                           Placeholder="my-app" />
 
             @* Server Selection *@
-            <MudSelect T="string" @bind-Value="_deployServerId" Label="@L["AppStore_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelect T="string" Value="_deployServerId" ValueChanged="OnDeployServerChanged" Label="@L["AppStore_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
                 @foreach (var srv in _servers)
                 {
                     <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
@@ -440,14 +440,31 @@
         _portConflicts.Clear();
 
         // Load servers
-        _servers = ServerConfigService.GetEnabledServers();
-        _deployServerId = _servers.FirstOrDefault()?.Id ?? "local";
+        _servers = ServerConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes) // compose = Docker hosts only
+            .ToList();
+        _deployServerId = DefaultDeployServerId();
 
         // Load used ports for conflict detection
         await LoadUsedPorts();
         CheckPortConflicts();
 
         _showDialog = true;
+    }
+
+    private string DefaultDeployServerId()
+    {
+        var def = ServerConfigService.GetDefaultServer()?.Id;
+        return _servers.Any(s => s.Id == def) ? def! : _servers.FirstOrDefault()?.Id ?? "local";
+    }
+
+    // Port conflicts belong to the target server: reload them when it changes, or a conflict on the first
+    // server would block a deploy to the second while the second's real conflicts went unnoticed.
+    private async Task OnDeployServerChanged(string id)
+    {
+        _deployServerId = id;
+        await LoadUsedPorts();
+        CheckPortConflicts();
     }
 
     private async Task LoadUsedPorts()
@@ -573,8 +590,10 @@
         _deployPorts = "";
         _availableTags = new();
 
-        _servers = ServerConfigService.GetEnabledServers();
-        _deployServerId = _servers.FirstOrDefault()?.Id ?? "local";
+        _servers = ServerConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes) // compose = Docker hosts only
+            .ToList();
+        _deployServerId = DefaultDeployServerId();
 
         _showRegistryDialog = true;
 

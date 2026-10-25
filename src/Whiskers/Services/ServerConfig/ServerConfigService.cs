@@ -130,9 +130,15 @@ public class ServerConfigService : IServerConfigService, IInitializable
 
     public async Task AddServerAsync(Models.ServerConfig server)
     {
+        ArgumentNullException.ThrowIfNull(server);
         await _lock.WaitAsync();
         try
         {
+            // Ids must be unique: a duplicate would make every id lookup ambiguous (GetServer also
+            // matches case-insensitively, so case variants count as duplicates too).
+            if (_cached.Servers.Any(s => string.Equals(s.Id, server.Id, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"A server with the id '{server.Id}' already exists.");
+
             // Copy-on-write: build a new list + data object and swap the reference atomically, so the
             // lock-free readers always see a fully-consistent immutable snapshot.
             var servers = new List<Models.ServerConfig>(_cached.Servers) { server };

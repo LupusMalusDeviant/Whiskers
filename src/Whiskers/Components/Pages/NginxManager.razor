@@ -20,10 +20,11 @@
     <MudText Typo="Typo.h5">@L["NginxManager_Title"]</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
     <MudSpacer />
-    <MudButton StartIcon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Variant="Variant.Outlined"
-               OnClick="TestConfig">@L["NginxManager_Button_TestConfig"]</MudButton>
+    @* `nginx -t` runs a command on the host — gated like every other nginx action on this page. *@
     @if (_role >= AppRole.Admin)
     {
+        <MudButton StartIcon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Variant="Variant.Outlined"
+                   OnClick="TestConfig">@L["NginxManager_Button_TestConfig"]</MudButton>
         <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Info" Variant="Variant.Outlined"
                    OnClick="ReloadNginx" Class="ml-2">@L["NginxManager_Button_Reload"]</MudButton>
     }
@@ -193,9 +194,15 @@ else
 
     private async Task TestConfig()
     {
-        var result = await NginxService.TestConfigAsync(ServerId);
-        Snackbar.Add(result.Success ? L["NginxManager_Snackbar_TestSuccess"].Value : L["NginxManager_Snackbar_TestFailed", result.Error ?? ""].Value,
-            result.Success ? Severity.Success : Severity.Error);
+        if (!Require(AppRole.Admin)) return;
+
+        try
+        {
+            var result = await NginxService.TestConfigAsync(ServerId);
+            Snackbar.Add(result.Success ? L["NginxManager_Snackbar_TestSuccess"].Value : L["NginxManager_Snackbar_TestFailed", result.Error ?? ""].Value,
+                result.Success ? Severity.Success : Severity.Error);
+        }
+        catch (Exception ex) { Snackbar.Add(L["NginxManager_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
     private async Task ReloadNginx()

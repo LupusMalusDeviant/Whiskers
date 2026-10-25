@@ -172,14 +172,14 @@ else
 <MudDialog Visible="_showDialog" VisibleChanged="@(v => _showDialog = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
         <TitleContent>@L["ScheduledTasksView_Dialog_CreateTitle"]</TitleContent>
         <DialogContent>
-            <MudTextField @bind-Value="_formName" Label="@L["ScheduledTasksView_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
+            <MudTextField @bind-Value="_formName" Immediate="true" Label="@L["ScheduledTasksView_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" />
             <MudSelect T="string" Value="_formServerId" ValueChanged="OnTaskServerChanged" Label="@L["ScheduledTasksView_Field_TargetServer"]" Variant="Variant.Outlined" Class="mb-3">
                 @foreach (var srv in _servers)
                 {
                     <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
                 }
             </MudSelect>
-            <MudSelect T="Whiskers.Models.ScheduledTaskType" @bind-Value="_formType" Label="@L["ScheduledTasksView_Field_Type"]" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelect T="Whiskers.Models.ScheduledTaskType" Value="_formType" ValueChanged="OnTaskTypeChanged" Label="@L["ScheduledTasksView_Field_Type"]" Variant="Variant.Outlined" Class="mb-3">
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.ContainerRestart">@L["ScheduledTasksView_TaskType_ContainerRestart"]</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.DbBackup">@L["ScheduledTasksView_TaskType_DbBackup"]</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ScheduledTaskType.VolumeBackup">@L["ScheduledTasksView_TaskType_VolumeBackup"]</MudSelectItem>
@@ -199,17 +199,18 @@ else
             }
             else if (_formType == ScheduledTaskType.VolumeBackup)
             {
-                <MudTextField @bind-Value="_formTargetId" Label="@L["ScheduledTasksView_Field_VolumeName"]" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField @bind-Value="_formTargetId" Immediate="true" Label="@L["ScheduledTasksView_Field_VolumeName"]" Variant="Variant.Outlined" Class="mb-3" />
             }
             else if (_formType == ScheduledTaskType.CustomCommand)
             {
-                <MudTextField @bind-Value="_formCommand" Label="@L["ScheduledTasksView_Field_Command"]" Variant="Variant.Outlined" Class="mb-3"
+                <MudTextField @bind-Value="_formCommand" Immediate="true" Label="@L["ScheduledTasksView_Field_Command"]" Variant="Variant.Outlined" Class="mb-3"
                               Style="font-family: 'JetBrains Mono', monospace;" Placeholder="docker system prune -f" />
             }
 
-            <MudTextField @bind-Value="_formCron" Label="@L["ScheduledTasksView_Field_CronSchedule"]" Variant="Variant.Outlined" Class="mb-3"
+            <MudTextField @bind-Value="_formCron" Immediate="true" Label="@L["ScheduledTasksView_Field_CronSchedule"]" Variant="Variant.Outlined" Class="mb-3"
                           Style="font-family: 'JetBrains Mono', monospace;"
-                          HelperText="@L["ScheduledTasksView_Field_CronHelperText"]" />
+                          HelperText="@L["ScheduledTasksView_Field_CronHelperText"]"
+                          Error="@(!string.IsNullOrWhiteSpace(_formCron) && !IsCronValid)" ErrorText="@L["ScheduledTasksView_Field_CronInvalid"]" />
 
             <MudStack Row="true" Spacing="1" Class="mb-3">
                 <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _formCron = "0 2 * * *")">@L["ScheduledTasksView_CronPreset_Daily"]</MudButton>
@@ -227,7 +228,7 @@ else
         <DialogActions>
             <MudButton OnClick="@(() => _showDialog = false)">@L["ScheduledTasksView_Button_Cancel"]</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateTask"
-                       Disabled="@(string.IsNullOrWhiteSpace(_formName) || string.IsNullOrWhiteSpace(_formCron))">@L["ScheduledTasksView_Button_Create"]</MudButton>
+                       Disabled="@(!CanCreate)">@L["ScheduledTasksView_Button_Create"]</MudButton>
         </DialogActions>
     </MudDialog>
 
@@ -279,6 +280,28 @@ else
         _showDialog = true;
     }
 
+    // Cron is parsed exactly like the scheduler does (5-field, no seconds), so the form
+    // cannot persist an expression the scheduler would later reject.
+    private bool IsCronValid => Whiskers.Services.Scheduler.SchedulerService.TryParseCron(_formCron.Trim(), out _);
+
+    // Each task type needs its own target: a container, a volume name or a command.
+    private bool HasRequiredTarget => _formType switch
+    {
+        ScheduledTaskType.ContainerRestart or ScheduledTaskType.DbBackup or ScheduledTaskType.VolumeBackup
+            => !string.IsNullOrWhiteSpace(_formTargetId),
+        ScheduledTaskType.CustomCommand => !string.IsNullOrWhiteSpace(_formCommand),
+        _ => true
+    };
+
+    private bool CanCreate => !string.IsNullOrWhiteSpace(_formName) && IsCronValid && HasRequiredTarget;
+
+    private void OnTaskTypeChanged(ScheduledTaskType type)
+    {
+        // A target picked for the previous type (e.g. a container name) is meaningless for the new one.
+        if (type != _formType) { _formTargetId = ""; _formCommand = ""; }
+        _formType = type;
+    }
+
     private async Task OnTaskServerChanged(string serverId)
     {
         _formServerId = serverId;
@@ -295,6 +318,7 @@ else
     private async Task CreateTask()
     {
         if (!Require(AppRole.Admin)) return;
+        if (!CanCreate) return;
         try
         {
             var config = new Dictionary<string, string>();
@@ -304,7 +328,7 @@ else
             await Scheduler.CreateTaskAsync(new Whiskers.Models.ScheduledTaskEntity
             {
                 Name = _formName,
-                CronExpression = _formCron,
+                CronExpression = _formCron.Trim(),
                 TaskType = _formType,
                 TargetId = _formTargetId,
                 TargetName = _formTargetId,
@@ -327,7 +351,16 @@ else
     {
         if (!Require(AppRole.Operator)) return;
         Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskRunning", task.Name].Value, Severity.Info);
-        var (success, output) = await Scheduler.RunNowAsync(task.TaskId);
+        bool success;
+        string output;
+        try
+        {
+            (success, output) = await Scheduler.RunNowAsync(task.TaskId);
+        }
+        catch (Exception ex)
+        {
+            (success, output) = (false, ex.Message);
+        }
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
             "task.run-now", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId, success: success);
         Snackbar.Add(success ? L["ScheduledTasksView_Snackbar_RunSuccess", output].Value : L["ScheduledTasksView_Snackbar_Error", output].Value,

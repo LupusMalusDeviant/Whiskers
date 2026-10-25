@@ -18,9 +18,14 @@
     </MudStack>
 </div>
 
+@if (_containersError != null)
+{
+    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@L["HealthReports_Error_ContainersFailed", _containersError]</MudAlert>
+}
+
 <MudGrid>
     <MudItem xs="12" md="4">
-        <MudSelect T="string" @bind-Value="_selectedContainerId" Label="Container" Variant="Variant.Outlined"
+        <MudSelect T="string" Value="_selectedContainerId" ValueChanged="OnContainerChanged" Label="Container" Variant="Variant.Outlined"
                    Dense="true" Class="mb-4">
             <MudSelectItem T="string" Value="@("all")">@L["HealthReports_Filter_AllContainers"]</MudSelectItem>
             @foreach (var c in _containers)
@@ -30,7 +35,7 @@
         </MudSelect>
     </MudItem>
     <MudItem xs="12" md="4">
-        <MudSelect T="int" @bind-Value="_hoursWindow" Label="@L["HealthReports_Filter_TimeWindowLabel"]" Variant="Variant.Outlined" Dense="true">
+        <MudSelect T="int" Value="_hoursWindow" ValueChanged="OnWindowChanged" Label="@L["HealthReports_Filter_TimeWindowLabel"]" Variant="Variant.Outlined" Dense="true">
             <MudSelectItem T="int" Value="1">@L["HealthReports_Filter_LastHour"]</MudSelectItem>
             <MudSelectItem T="int" Value="6">@L["HealthReports_Filter_Last6Hours"]</MudSelectItem>
             <MudSelectItem T="int" Value="12">@L["HealthReports_Filter_Last12Hours"]</MudSelectItem>
@@ -88,9 +93,33 @@
     private string _selectedContainerId = "all";
     private int _hoursWindow = 24;
 
+    private string? _containersError;
+
     protected override async Task OnInitializedAsync()
     {
-        _containers = (await DockerService.ListContainersAsync()).ToList();
+        // The container list only feeds the filter; if Docker is unreachable the stored health
+        // records are still worth showing, so fail soft with a visible notice.
+        try
+        {
+            _containers = (await DockerService.ListContainersAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            _containersError = ex.Message;
+        }
+        LoadRecords();
+    }
+
+    // The filters apply immediately — previously they only took effect after "Refresh".
+    private void OnContainerChanged(string value)
+    {
+        _selectedContainerId = value;
+        LoadRecords();
+    }
+
+    private void OnWindowChanged(int value)
+    {
+        _hoursWindow = value;
         LoadRecords();
     }
 

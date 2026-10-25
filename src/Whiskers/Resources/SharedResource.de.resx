@@ -102,7 +102,7 @@
     <value>Lokales Konto verwenden (E-Mail + Passwort)</value>
   </data>
   <data name="Setup_Admin_PwHint" xml:space="preserve">
-    <value>Mindestens 12 Zeichen.</value>
+    <value>Mindestens 12 Zeichen, mit Groß- und Kleinbuchstaben, einer Ziffer und einem Sonderzeichen.</value>
   </data>
   <data name="Setup_Admin_PwConfirm" xml:space="preserve">
     <value>Passwort bestätigen</value>
@@ -4567,5 +4567,131 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Setup_Done_AiOps" xml:space="preserve">
     <value>Tipp: Nach dem Anmelden „KI-Betrieb" öffnen, um einen kontrollierten KI-Agenten einzurichten — Read-only-Key und sicheres Guardrail-Preset mit wenigen Klicks.</value>
+  </data>
+  <data name="Clipboard_Copied" xml:space="preserve">
+    <value>In die Zwischenablage kopiert.</value>
+  </data>
+  <data name="Clipboard_CopyFailed_Manual" xml:space="preserve">
+    <value>Kopieren war in diesem Browser nicht möglich (nur über HTTPS bzw. direkt nach einem Klick). Der Wert ist eingeblendet — markieren und mit Strg+C kopieren.</value>
+  </data>
+  <data name="Dashboard_StateFilter_Tooltip" xml:space="preserve">
+    <value>Klicken zeigt nur diese Container (erneut klicken hebt den Filter auf)</value>
+  </data>
+  <data name="Dashboard_StateFilter_None" xml:space="preserve">
+    <value>Kein Container passt zu diesem Filter.</value>
+  </data>
+  <data name="Cves_Snackbar_ScanFinished" xml:space="preserve">
+    <value>CVE-Scan abgeschlossen.</value>
+  </data>
+  <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
+    <value>CVE-Scan fehlgeschlagen: {0}</value>
+  </data>
+  <data name="Setup_Server_LocalNotConnected" xml:space="preserve">
+    <value>Kein lokaler Docker-Host erreichbar (ist der Docker-Socket eingebunden?). Server lassen sich nach der Einrichtung hinzufügen.</value>
+  </data>
+  <data name="HealthReports_Error_ContainersFailed" xml:space="preserve">
+    <value>Containerliste konnte nicht geladen werden (Filter zeigt nur gespeicherte Einträge): {0}</value>
+  </data>
+  <data name="Dashboard_Server_CachedAge" xml:space="preserve">
+    <value>Aus dem Zwischenspeicher, {0} s alt — wird gerade aktualisiert</value>
+  </data>
+  <data name="ContainerDetail_Db_NoCredentials" xml:space="preserve">
+    <value>Aus diesem Container ließen sich keine Datenbank-Zugangsdaten lesen, daher können keine Abfragen laufen.</value>
+  </data>
+  <data name="Deploy_Snackbar_Duplicate" xml:space="preserve">
+    <value>'{0}' kommt doppelt vor — jeder Host-Port und jede Variable darf nur einmal gesetzt sein.</value>
+  </data>
+  <data name="ContainerGraph_LoadFailed" xml:space="preserve">
+    <value>Topologie konnte nicht geladen werden: {0}</value>
+  </data>
+  <data name="VolumeBackups_VolumesLoadFailed" xml:space="preserve">
+    <value>Volumes konnten nicht gelistet werden ({0}) — Volume-Namen bitte von Hand eingeben.</value>
+  </data>
+  <data name="Settings_Dns_Panel" xml:space="preserve">
+    <value>DNS (Infomaniak)</value>
+  </data>
+  <data name="Settings_Dns_Info" xml:space="preserve">
+    <value>Zugang zur DNS-API des Anbieters für die MCP-Werkzeuge &lt;code&gt;list_dns_records&lt;/code&gt;, &lt;code&gt;set_dns_record&lt;/code&gt; und &lt;code&gt;delete_dns_record&lt;/code&gt;. Infomaniak: Token unter &lt;em&gt;Manager → Entwickler → API-Tokens&lt;/em&gt; mit Berechtigung &lt;em&gt;domain&lt;/em&gt; anlegen. Das Token wird nur hier gespeichert, nie in Antworten oder Protokollen ausgegeben.</value>
+  </data>
+  <data name="Settings_Dns_Provider" xml:space="preserve">
+    <value>Anbieter</value>
+  </data>
+  <data name="Settings_Dns_DefaultTtl" xml:space="preserve">
+    <value>Standard-TTL (Sekunden)</value>
+  </data>
+  <data name="Settings_Dns_TokenStatus" xml:space="preserve">
+    <value>Token-Status</value>
+  </data>
+  <data name="Settings_Dns_ApiToken" xml:space="preserve">
+    <value>API-Token</value>
+  </data>
+  <data name="Settings_Dns_ApiTokenHelper" xml:space="preserve">
+    <value>Leer lassen, um das gespeicherte Token zu behalten.</value>
+  </data>
+  <data name="Settings_Dns_AllowedZones" xml:space="preserve">
+    <value>Erlaubte Zonen (kommagetrennt, leer = alle)</value>
+  </data>
+  <data name="Settings_Dns_AllowedZonesHelper" xml:space="preserve">
+    <value>Die Werkzeuge dürfen nur diese Zonen lesen und ändern.</value>
+  </data>
+  <data name="Settings_Dns_Button_Save" xml:space="preserve">
+    <value>DNS speichern</value>
+  </data>
+  <data name="Settings_Dns_Button_ClearToken" xml:space="preserve">
+    <value>Token entfernen</value>
+  </data>
+  <data name="Settings_Dns_TokenStored" xml:space="preserve">
+    <value>hinterlegt (…{0})</value>
+  </data>
+  <data name="Settings_Dns_TokenNone" xml:space="preserve">
+    <value>kein Token hinterlegt</value>
+  </data>
+  <data name="Settings_Dns_Snackbar_Saved" xml:space="preserve">
+    <value>DNS-Einstellungen gespeichert</value>
+  </data>
+  <data name="Settings_Dns_Snackbar_TokenCleared" xml:space="preserve">
+    <value>DNS-Token entfernt</value>
+  </data>
+  <data name="GuardrailsView_DuplicateName_Snackbar" xml:space="preserve">
+    <value>Eine Vorlage namens „{0}“ existiert bereits.</value>
+  </data>
+  <data name="ScheduledTasksView_Field_CronInvalid" xml:space="preserve">
+    <value>Ungültiger Cron-Ausdruck (5 Felder: Minute Stunde Tag Monat Wochentag).</value>
+  </data>
+  <data name="NotificationBell_Title" xml:space="preserve">
+    <value>Benachrichtigungen</value>
+  </data>
+  <data name="NotificationBell_Clear" xml:space="preserve">
+    <value>Leeren</value>
+  </data>
+  <data name="NotificationBell_Empty" xml:space="preserve">
+    <value>Keine Benachrichtigungen</value>
+  </data>
+  <data name="NotificationBell_ShowAll" xml:space="preserve">
+    <value>Alle anzeigen</value>
+  </data>
+  <data name="Layout_ThemeTooltip" xml:space="preserve">
+    <value>Design</value>
+  </data>
+  <data name="ApprovalsView_NotFound_Snackbar" xml:space="preserve">
+    <value>Diese Freigabe existiert nicht mehr (Sitzung beendet oder App neu gestartet).</value>
+  </data>
+  <data name="ApprovalsView_AlreadyResolved_Snackbar" xml:space="preserve">
+    <value>Diese Freigabe ist nicht mehr offen (Status: {0}).</value>
+  </data>
+  <data name="ApprovalsView_ResolveFailed_Snackbar" xml:space="preserve">
+    <value>Die Freigabe konnte nicht entschieden werden — vermutlich wurde sie gleichzeitig entschieden.</value>
+  </data>
+  <data name="ApprovalsView_ResolveError_Snackbar" xml:space="preserve">
+    <value>Fehler beim Entscheiden der Freigabe: {0}</value>
+  </data>
+  <data name="LogSearchView_Snackbar_LoadError" xml:space="preserve">
+    <value>Fehler beim Laden der Container oder Alarmregeln: {0}</value>
+  </data>
+  <data name="Dashboard_FirstServer_SubtitleNeutral" xml:space="preserve">
+    <value>Verbinden Sie jetzt Ihre Flotte.</value>
+  </data>
+  <data name="Dashboard_FirstServer_SubtitleNoLocal" xml:space="preserve">
+    <value>Kein lokaler Docker-Host erreichbar (ist der Docker-Socket eingebunden?) — Ihre Flotte können Sie trotzdem verbinden.</value>
   </data>
 </root>

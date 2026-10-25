@@ -50,7 +50,7 @@
                    StartIcon="@Icons.Material.Filled.Refresh" OnClick="RebuildAsync">@L["Cves_Button_Refresh"]</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerScan"
-                   Disabled="@(Store.IsScanning || !SettingsMonitor.CurrentValue.Enabled)">@L["Cves_Button_ScanNow"]</MudButton>
+                   Disabled="@(_scanRequested || Store.IsScanning || !SettingsMonitor.CurrentValue.Enabled)">@L["Cves_Button_ScanNow"]</MudButton>
     </MudStack>
 
     @* Per-server overview cards *@
@@ -343,14 +343,45 @@
         _ => Color.Default
     };
 
+    // Set synchronously on click: Store.IsScanning only flips once the cycle is running on the
+    // background thread, so without this flag a quick double-click could queue a second scan.
+    private bool _scanRequested;
+
     private Task TriggerScan()
     {
-        if (Store.IsScanning) return Task.CompletedTask;
+        if (_scanRequested || Store.IsScanning) return Task.CompletedTask;
+        _scanRequested = true;
         Snackbar.Add(L["Cves_Snackbar_ScanStarted"].Value, Severity.Info);
+        // Run off the circuit so the page stays responsive, then refresh the findings once the
+        // cycle is done (the store is updated in place, but this page only rebuilds on demand).
         _ = Task.Run(async () =>
         {
+            string? error = null;
             try { await Monitor.RunOneCycleAsync(); }
-            catch (Exception ex) { Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}");
+            }
+
+            try
+            {
+                await InvokeAsync(async () =>
+                {
+                    _scanRequested = false;
+                    if (error is null)
+                    {
+                        await RebuildAsync();
+                        Snackbar.Add(L["Cves_Snackbar_ScanFinished"].Value, Severity.Success);
+                    }
+                    else
+                    {
+                        Snackbar.Add(L["Cves_Snackbar_ScanFailed", error].Value, Severity.Error);
+                        StateHasChanged();
+                    }
+                });
+            }
+            catch (ObjectDisposedException) { /* user left the page mid-scan */ }
         });
         return Task.CompletedTask;
     }

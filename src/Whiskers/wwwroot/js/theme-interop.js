@@ -31,10 +31,39 @@ window.swChat = {
     }
 };
 
-// Clipboard copy (used to copy an MCP API key without echoing it in a toast).
+// Clipboard copy (MCP API keys, VAULT_KEY, webhook secrets) without echoing the value in a toast.
+// Resolves to true only when the text really reached the clipboard. navigator.clipboard exists only in a
+// secure context (HTTPS or localhost) — Whiskers reached over plain http on a tailnet address has none —
+// and it rejects without a focused document. The old version swallowed both and the page reported
+// "copied" while the clipboard held whatever was there before. The fallback copies through a hidden
+// textarea, which works on plain http as long as the click is still the active user gesture.
 window.swClipboard = {
-    copy: function (text) {
-        try { return navigator.clipboard.writeText(text); } catch (e) { return Promise.resolve(); }
+    copy: async function (text) {
+        if (typeof text !== 'string' || text.length === 0) return false;
+        if (navigator.clipboard && window.isSecureContext) {
+            try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall back below */ }
+        }
+        var ta = document.createElement('textarea');
+        try {
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-1000px';
+            ta.style.opacity = '0';
+            // Insert next to the focused element rather than at <body>: a modal dialog's focus trap
+            // (MudBlazor) would otherwise pull focus back out of the textarea and the copy fails.
+            var active = document.activeElement;
+            var host = (active && active !== document.body && active.parentNode) || document.body;
+            host.appendChild(ta);
+            ta.focus();
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            return document.execCommand('copy') === true;
+        } catch (e) {
+            return false;
+        } finally {
+            if (ta.parentNode) ta.parentNode.removeChild(ta);
+        }
     }
 };
 

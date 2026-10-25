@@ -217,7 +217,9 @@
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
-        _servers = ServerConfigService.GetEnabledServers();
+        _servers = ServerConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes) // compose = Docker hosts only
+            .ToList();
         _serverId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
     }
 
@@ -230,13 +232,20 @@
             return;
         }
 
-        _formRequest.PortMappings = _ports
-            .Where(p => !string.IsNullOrWhiteSpace(p.Host) && !string.IsNullOrWhiteSpace(p.Container))
-            .ToDictionary(p => p.Host, p => p.Container);
+        var ports = _ports.Where(p => !string.IsNullOrWhiteSpace(p.Host) && !string.IsNullOrWhiteSpace(p.Container)).ToList();
+        var envs = _envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToList();
+        // ToDictionary throws on a duplicate — outside the try below that tore down the circuit instead of
+        // telling the user which entry is doubled.
+        var dup = ports.GroupBy(p => p.Host.Trim()).FirstOrDefault(g => g.Count() > 1)?.Key
+               ?? envs.GroupBy(e => e.Key.Trim()).FirstOrDefault(g => g.Count() > 1)?.Key;
+        if (dup != null)
+        {
+            Snackbar.Add(L["Deploy_Snackbar_Duplicate", dup].Value, Severity.Warning);
+            return;
+        }
+        _formRequest.PortMappings = ports.ToDictionary(p => p.Host.Trim(), p => p.Container);
         _formRequest.Volumes = _volumes.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
-        _formRequest.EnvironmentVars = _envVars
-            .Where(e => !string.IsNullOrWhiteSpace(e.Key))
-            .ToDictionary(e => e.Key, e => e.Value ?? "");
+        _formRequest.EnvironmentVars = envs.ToDictionary(e => e.Key.Trim(), e => e.Value ?? "");
 
         _deploying = true;
         _deployProgress = "";

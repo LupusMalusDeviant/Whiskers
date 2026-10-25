@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["ContainerDiff_Title"] - Whiskers</PageTitle>
@@ -80,17 +81,20 @@ else if (_left != null || _right != null)
     private List<KeyValuePair<string, string>>? _rightEnv;
     private List<DiffRow> _diffRows = new();
 
+    private AppRole _role = AppRole.Viewer;
+
     protected override async Task OnInitializedAsync()
     {
-        _containers = (await DockerService.ListAllContainersAsync(all: true)).ToList();
+        _role = await CurrentUser.GetRoleAsync();
+        try { _containers = (await DockerService.ListAllContainersAsync(all: true)).ToList(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
 
     private async Task OnLeftChanged(string id)
     {
         _leftId = id;
         _left = _containers.FirstOrDefault(c => c.Id == id);
-        if (_left != null)
-            _leftEnv = await DockerService.GetContainerEnvAsync(_left.Id);
+        _leftEnv = _left == null ? null : await LoadEnvAsync(_left);
         await BuildDiff();
     }
 
@@ -98,9 +102,21 @@ else if (_left != null || _right != null)
     {
         _rightId = id;
         _right = _containers.FirstOrDefault(c => c.Id == id);
-        if (_right != null)
-            _rightEnv = await DockerService.GetContainerEnvAsync(_right.Id);
+        _rightEnv = _right == null ? null : await LoadEnvAsync(_right);
         await BuildDiff();
+    }
+
+    // The container's own server, not the default one: the picker lists the whole fleet. Env is Operator+ like
+    // the env tab on the detail page (MIT-37) — a Viewer gets the diff without it.
+    private async Task<List<KeyValuePair<string, string>>?> LoadEnvAsync(ContainerInfo c)
+    {
+        if (_role < AppRole.Operator) return null;
+        try { return await DockerService.GetContainerEnvAsync(c.Id, c.ServerId); }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return null;
+        }
     }
 
     private Task BuildDiff()

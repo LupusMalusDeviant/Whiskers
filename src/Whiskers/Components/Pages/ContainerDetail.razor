@@ -370,11 +370,15 @@ else
                         <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
                                    OnClick="@(() => _dotEnvEntries.Add(new EnvEntry { IsNew = true, IsSensitive = false }))">@L["ContainerDetail_Env_AddVariable"]</MudButton>
                         <MudSpacer />
+                        @* Writing .env and restarting is Admin-only in SaveEnvAndRestart; Operators may read here. *@
+                        @if (_role >= AppRole.Admin)
+                        {
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_envSaving"
                                    StartIcon="@Icons.Material.Filled.Save" OnClick="SaveEnvAndRestart">
                             @if (_envSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
                             @L["ContainerDetail_Env_SaveAndRestart"]
                         </MudButton>
+                        }
                     </MudStack>
                 }
                 else
@@ -388,8 +392,9 @@ else
         </MudTabPanel>
         }
 
-        @* Database Tab - only visible for database containers *@
-        @if (_container.IsDatabase)
+        @* Database Tab - only for database containers, and Operator+ like the env tab: loading it reads the
+           container env for the credentials and exposes the DB user and schema (MIT-37). *@
+        @if (_container.IsDatabase && _role >= AppRole.Operator)
         {
             <MudTabPanel Text="@L["ContainerDetail_Tab_Database"]" Icon="@Icons.Material.Filled.Storage">
                 @if (!_dbLoaded)
@@ -424,6 +429,9 @@ else
 
                     @* Quick Actions Row *@
                     <MudGrid Class="mb-4">
+                        @* Backup and seed import are Admin-only in their handlers — don't offer them to anyone else. *@
+                        @if (_role >= AppRole.Admin)
+                        {
                         <MudItem xs="6" sm="3">
                             <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="BackupDatabase">
                                 @if (_dbBackingUp)
@@ -437,18 +445,22 @@ else
                                 <div class="sw-stat-label">@L["ContainerDetail_Db_Backup"]</div>
                             </div>
                         </MudItem>
+                        }
                         <MudItem xs="6" sm="3">
                             <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowMigrationPanel">
                                 <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" Size="Size.Large" />
                                 <div class="sw-stat-label">@L["ContainerDetail_Db_Migrations"]</div>
                             </div>
                         </MudItem>
+                        @if (_role >= AppRole.Admin)
+                        {
                         <MudItem xs="6" sm="3">
                             <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowSeedPanel">
                                 <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" Size="Size.Large" />
                                 <div class="sw-stat-label">@L["ContainerDetail_Db_SeedImport"]</div>
                             </div>
                         </MudItem>
+                        }
                         <MudItem xs="6" sm="3">
                             <div class="sw-stat-card" style="text-align: center;">
                                 <div class="sw-stat-value" style="color: var(--sw-accent-blue);">@_dbTables.Count</div>
@@ -605,13 +617,13 @@ else
                             <MudStack Row="true" Spacing="2" Class="mb-3">
                                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                                            StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunMigration"
-                                           Disabled="@_dbMigrating">
+                                           Disabled="@(_dbMigrating || _role < AppRole.Admin)">
                                     @if (_dbMigrating) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
                                     @L["ContainerDetail_Db_RunMigration"]
                                 </MudButton>
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                            StartIcon="@Icons.Material.Filled.Undo" OnClick="RollbackMigration"
-                                           Disabled="@_dbMigrating">Rollback</MudButton>
+                                           Disabled="@(_dbMigrating || _role < AppRole.Admin)">Rollback</MudButton>
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                            StartIcon="@Icons.Material.Filled.List" OnClick="CheckMigrationStatus">Status</MudButton>
                             </MudStack>
@@ -625,7 +637,7 @@ else
                                 @if (_migrationFileName != null)
                                 {
                                     <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
-                                               OnClick="ExecuteMigrationFile" Disabled="@_dbMigrating"
+                                               OnClick="ExecuteMigrationFile" Disabled="@(_dbMigrating || _role < AppRole.Admin)"
                                                StartIcon="@Icons.Material.Filled.PlayArrow">@L["ContainerDetail_Db_ExecuteFile"]</MudButton>
                                 }
                             </MudStack>
@@ -795,7 +807,7 @@ else
                             <MudStack Row="true" Spacing="2">
                                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQuery"
                                            StartIcon="@Icons.Material.Filled.PlayArrow"
-                                           Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting)">
+                                           Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting || _role < AppRole.Operator)">
                                     @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
                                     @L["ContainerDetail_Db_Execute"]
                                 </MudButton>
@@ -859,7 +871,9 @@ else
 
         <MudTabPanel Text="@L["ContainerDetail_Tab_Cves"]" Icon="@Icons.Material.Filled.Security">
             @{
-                var cveResult = CveStore.Get(ServerId, ContainerId);
+                // Not the route values: a notification deep link (/container/{id}) carries no server, and the
+                // route id may be the short form while the store is keyed by the full one.
+                var cveResult = CveStore.Get(_resolvedServerId ?? "local", _container.Id);
             }
             @if (cveResult == null)
             {
@@ -933,6 +947,13 @@ else
     private Timer? _refreshTimer;
     private int _refreshing; // reentrancy guard for the periodic refresh (MIT-34)
     private int _activeTab;
+
+    // Tab positions shift with what is rendered: the env and database tabs exist for Operator+ only, the
+    // database tab only for database containers. Fixed numbers sent a Viewer's database click to the env
+    // loader (which then read the env the role may not see) and left the database tab spinning forever.
+    private const int TerminalTabIndex = 4;
+    private int EnvTabIndex => _role >= AppRole.Operator ? 5 : -1;
+    private int DbTabIndex => _container?.IsDatabase == true && _role >= AppRole.Operator ? 6 : -1;
 
     // Chart state
     private string _chartPeriod = "1h";
@@ -1015,7 +1036,11 @@ else
         public bool IsSensitive { get; set; }
 
         /// <summary>Returns the effective value to write: new value if edited, otherwise original.</summary>
-        public string EffectiveValue => IsEditing || IsNew ? Value : OriginalValue;
+        /// A sensitive value opened for editing starts empty (the stored secret is never sent to the browser), so
+        /// an edit left empty means "keep" — writing it would silently wipe the secret.
+        public string EffectiveValue => IsNew ? Value
+            : IsEditing && (!IsSensitive || !string.IsNullOrEmpty(Value)) ? Value
+            : OriginalValue;
     }
 
     private AppRole _role = AppRole.Viewer;
@@ -1046,7 +1071,7 @@ else
             try
             {
                 // Only refresh stats when NOT on terminal tab to avoid interference
-                if (_activeTab != 4)
+                if (_activeTab != TerminalTabIndex)
                 {
                     await LoadContainer();
                     await InvokeAsync(StateHasChanged);
@@ -1059,22 +1084,22 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Initialize terminal when tab is switched to terminal (index 4)
-        if (_activeTab == 4 && !_termInitialized && _container?.State == "running")
+        // Initialize terminal when tab is switched to terminal
+        if (_activeTab == TerminalTabIndex && !_termInitialized && _container?.State == "running")
         {
             _termInitialized = true;
             await InitTerminal();
         }
 
-        // Load env vars when tab is switched to env (index 5)
-        if (_activeTab == 5 && !_envLoaded)
+        // Load env vars when tab is switched to env (Operator+ only — the tab does not exist for a Viewer)
+        if (_activeTab == EnvTabIndex && !_envLoaded)
         {
             await LoadEnvVars();
             await InvokeAsync(StateHasChanged);
         }
 
-        // Load database info when tab is switched to database (index 6, only for DB containers)
-        if (_activeTab == 6 && _container?.IsDatabase == true && !_dbLoaded)
+        // Load database info when tab is switched to database (only for DB containers)
+        if (_activeTab == DbTabIndex && _container?.IsDatabase == true && !_dbLoaded)
         {
             await LoadDatabaseInfo();
             await InvokeAsync(StateHasChanged);
@@ -1771,7 +1796,12 @@ else
     private async Task ExecuteQuery()
     {
         if (!Require(AppRole.Operator)) return;
-        if (string.IsNullOrWhiteSpace(_dbQuery) || _dbCreds == null || _container == null) return;
+        if (_dbCreds == null)
+        {
+            Snackbar.Add(L["ContainerDetail_Db_NoCredentials"].Value, Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_dbQuery) || _container == null) return;
         _dbExecuting = true;
         _dbResult = null;
 

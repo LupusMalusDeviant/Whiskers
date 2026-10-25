@@ -20,7 +20,7 @@
         </div>
         <MudSpacer />
         <Whiskers.Components.Shared.NotificationBell />
-        <MudMenu Icon="@Icons.Material.Filled.Palette" Color="Color.Inherit" title="Theme"
+        <MudMenu Icon="@Icons.Material.Filled.Palette" Color="Color.Inherit" title="@L["Layout_ThemeTooltip"]"
                  AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
             @* F12: dark / light / system mode — independent of the accent theme below. *@
             @foreach (var (mode, icon, label) in new[]

@@ -44,7 +44,7 @@
                     }
                 </MudSelect>
 
-                <MudTextField @bind-Value="_edit.Name" Label="@L["GuardrailsView_PresetName_Label"]" Margin="Margin.Dense"
+                <MudTextField T="string" Value="_edit.Name" ValueChanged="OnRenamePreset" Label="@L["GuardrailsView_PresetName_Label"]" Margin="Margin.Dense"
                               Variant="Variant.Outlined" Style="min-width:200px;" />
 
                 <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="NewPreset">@L["GuardrailsView_NewPreset_Button"]</MudButton>
@@ -278,6 +278,23 @@
 
     private void MakeActive() => _config.ActivePreset = _edit!.Name;
 
+    // Renames the edited preset. ActivePreset is a name reference, so it must follow
+    // the rename, otherwise SaveAll would silently fall back to Presets[0].
+    private void OnRenamePreset(string? newName)
+    {
+        newName = newName?.Trim() ?? "";
+        var oldName = _edit!.Name;
+        if (newName == oldName) return;
+        if (newName.Length > 0 && _config.Presets.Any(p => !ReferenceEquals(p, _edit) && p.Name == newName))
+        {
+            Snackbar.Add(L["GuardrailsView_DuplicateName_Snackbar", newName].Value, Severity.Warning);
+            return;
+        }
+        var wasActive = oldName == _config.ActivePreset;
+        _edit.Name = newName;
+        if (wasActive) _config.ActivePreset = newName;
+    }
+
     private string UniqueName(string baseName)
     {
         var name = baseName;
@@ -288,9 +305,12 @@
 
     private async Task SaveAll()
     {
-        // Reconcile: drop empty names, keep ActivePreset valid.
+        // Reconcile: drop empty names, keep ActivePreset valid. The active preset is
+        // resolved by reference first so renaming an empty-named active preset keeps it active.
+        var active = _config.Presets.FirstOrDefault(p => p.Name == _config.ActivePreset);
         foreach (var p in _config.Presets)
             if (string.IsNullOrWhiteSpace(p.Name)) p.Name = UniqueName("Preset");
+        if (active is not null) _config.ActivePreset = active.Name;
         if (!_config.Presets.Any(p => p.Name == _config.ActivePreset))
             _config.ActivePreset = _config.Presets[0].Name;
 

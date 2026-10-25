@@ -27,7 +27,7 @@
     }
     else
     {
-        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@(_firewallActive ? L["Firewall_Status_Active"].Value : L["Firewall_Status_Inactive"].Value)</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="@(_firewallActive ? Color.Success : Color.Error)" Variant="Variant.Outlined">@(_firewallActive ? L["Firewall_Status_Active"].Value : L["Firewall_Status_Inactive"].Value)</MudChip>
     }
 </MudStack>
 

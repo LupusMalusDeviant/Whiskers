@@ -10,6 +10,9 @@
 @inject Whiskers.Configuration.DataPathOptions DataPaths
 @inject IJSRuntime JS
 @inject IStringLocalizer<SharedResource> L
+@inject Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Identity.IdentityOptions> IdentityOpts
+@inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfig
+@inject Whiskers.Services.Docker.IDockerConnectionManager ConnectionManager
 
 <MudText Typo="Typo.overline" Color="Color.Secondary">@L["Setup_Step", _step + 1, 5]</MudText>
 <MudProgressLinear Value="@((_step + 1) * 20)" Color="Color.Primary" Rounded="true" Class="mb-4" />
@@ -33,7 +36,8 @@ else if (_step == 1)
     @if (_isLocal)
     {
         <MudTextField @bind-Value="_password" Label="@L["Login_Field_Password"]" InputType="InputType.Password" Immediate="true"
-                      HelperText="@L["Setup_Admin_PwHint"]" Class="mb-2" />
+                      HelperText="@L["Setup_Admin_PwHint"]" Class="mb-2"
+                      Error="@(_password.Length > 0 && !PasswordMeetsPolicy)" ErrorText="@L["Setup_Admin_PwHint"]" />
         <MudTextField @bind-Value="_passwordConfirm" Label="@L["Setup_Admin_PwConfirm"]" InputType="InputType.Password" Immediate="true" />
     }
     else
@@ -64,12 +68,31 @@ else if (_step == 2)
                       AdornmentIcon="@Icons.Material.Filled.ContentCopy" OnAdornmentClick="@(() => Copy(_generatedVaultKey!))" Class="mb-1" />
         <MudText Typo="Typo.caption" Class="d-block">@L["Setup_Security_VaultKeyHint"]</MudText>
     }
+    @if (_copied == true)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Success" Class="d-block mt-2">@L["Clipboard_Copied"]</MudText>
+    }
+    else if (_copied == false)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-2">@L["Clipboard_CopyFailed_Manual"]</MudText>
+    }
 }
 @* Step 3 — First server *@
 else if (_step == 3)
 {
     <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Server_Title"]</MudText>
-    <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">@L["Setup_Server_LocalConnected"]</MudAlert>
+    @if (_localDockerOk is null)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+    }
+    else if (_localDockerOk == true)
+    {
+        <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">@L["Setup_Server_LocalConnected"]</MudAlert>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@L["Setup_Server_LocalNotConnected"]</MudAlert>
+    }
     <MudText Typo="Typo.body2">@L["Setup_Server_Body"]</MudText>
 }
 @* Step 4 — Done *@
@@ -125,28 +148,97 @@ else
     private bool CanNext => _step switch
     {
         1 => !string.IsNullOrWhiteSpace(_email)
-             && (!_isLocal || (_password.Length >= 12 && _password == _passwordConfirm)),
+             && (!_isLocal || (PasswordMeetsPolicy && _password == _passwordConfirm)),
         _ => true
     };
 
-    private void Next() { if (_step < 4 && CanNext) _step++; }
+    // Mirrors the Identity password policy, read from the same options Identity validates against. Checking only
+    // the length let a password through this step that CompleteSetupAsync then rejected — on the last step, in
+    // Identity's English wording.
+    private bool PasswordMeetsPolicy
+    {
+        get
+        {
+            var p = IdentityOpts.Value.Password;
+            return _password.Length >= p.RequiredLength
+                // ASCII classes, exactly like Identity's PasswordValidator — char.IsUpper would count "Ä".
+                && (!p.RequireDigit || _password.Any(char.IsAsciiDigit))
+                && (!p.RequireLowercase || _password.Any(char.IsAsciiLetterLower))
+                && (!p.RequireUppercase || _password.Any(char.IsAsciiLetterUpper))
+                && (!p.RequireNonAlphanumeric || _password.Any(c => !char.IsAsciiLetterOrDigit(c)))
+                && _password.Distinct().Count() >= p.RequiredUniqueChars;
+        }
+    }
+
+    private async Task Next()
+    {
+        if (_step >= 4 || !CanNext) return;
+        _step++;
+        if (_step == 3) await ProbeLocalDockerAsync();
+    }
+
+    // Null = probe running; true/false = whether the local Docker host answered. The first-server
+    // step used to claim "connected" unconditionally, even without a mounted socket.
+    private bool? _localDockerOk;
+
+    private async Task ProbeLocalDockerAsync()
+    {
+        _localDockerOk = null;
+        StateHasChanged();
+        try
+        {
+            // The default server, whatever its transport (socket, socket-proxy over TCP, ...).
+            var local = ServerConfig.GetDefaultServer();
+            if (local is null) { _localDockerOk = false; return; }
+
+            // Cheapest real round-trip: list at most one running container, bounded by a timeout.
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var client = await ConnectionManager.GetClientAsync(local.Id).WaitAsync(cts.Token);
+            await client.Containers.ListContainersAsync(
+                new Docker.DotNet.Models.ContainersListParameters { Limit = 1 }, cts.Token);
+            _localDockerOk = true;
+        }
+        catch
+        {
+            _localDockerOk = false;
+        }
+    }
     private void Back() { if (_step > 0) _step--; }
+
+    // Null = nothing copied yet; true/false = what the last copy click did. The values are shown in read-only
+    // fields, so a failed copy can be finished by hand — but only if the page says it failed.
+    private bool? _copied;
 
     private async Task Copy(string value)
     {
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); } catch { }
+        try { _copied = await JS.InvokeAsync<bool>("swClipboard.copy", value); }
+        catch { _copied = false; }
     }
 
     private async Task CompleteAsync()
     {
         _busy = true; _error = null;
-        var result = await SetupState.CompleteSetupAsync(new SetupAdminRequest
+        SetupCompletionResult result;
+        try
         {
-            IsLocal = _isLocal,
-            Email = _email.Trim(),
-            Password = _isLocal ? _password : null
-        });
-        _busy = false;
+            result = await SetupState.CompleteSetupAsync(new SetupAdminRequest
+            {
+                IsLocal = _isLocal,
+                Email = _email.Trim(),
+                Password = _isLocal ? _password : null
+            });
+        }
+        catch (Exception ex)
+        {
+            // Unexpected failure (DB, Identity store, …): show it and re-enable the button instead of
+            // leaving the wizard stuck in the busy state.
+            _error = ex.Message;
+            return;
+        }
+        finally
+        {
+            _busy = false;
+        }
 
         if (result.Status == SetupCompletionStatus.Failed)
         {

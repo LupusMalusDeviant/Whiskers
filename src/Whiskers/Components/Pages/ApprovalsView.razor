@@ -171,8 +171,24 @@ else
             var by = await CurrentUser.GetEmailAsync() ?? "web";
             var level = RoleToLevel(await CurrentUser.GetRoleAsync());
             var ok = await ApprovalStore.ResolveAsync(approvalId, approved, by, level);
-            if (!ok && approved)
-                Snackbar.Add(L["ApprovalsView_NoPermission_Snackbar"].Value, Severity.Error);
+            if (!ok)
+            {
+                // ResolveAsync returns false both for "no longer pending" and "insufficient level" —
+                // look at the approval again to tell the user which one it was.
+                var current = ApprovalStore.Get(approvalId);
+                if (current is null)
+                    Snackbar.Add(L["ApprovalsView_NotFound_Snackbar"].Value, Severity.Warning);
+                else if (current.Status != ApprovalStatus.Pending)
+                    Snackbar.Add(L["ApprovalsView_AlreadyResolved_Snackbar", StatusLabel(current.Status)].Value, Severity.Warning);
+                else if (approved)
+                    Snackbar.Add(L["ApprovalsView_NoPermission_Snackbar"].Value, Severity.Error);
+                else
+                    Snackbar.Add(L["ApprovalsView_ResolveFailed_Snackbar"].Value, Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["ApprovalsView_ResolveError_Snackbar", ex.Message].Value, Severity.Error);
         }
         finally
         {

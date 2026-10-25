@@ -77,22 +77,29 @@
         </div>
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <div class="sw-stat-card sw-red">
+        @* The two problem tiles double as filters: one click shows exactly the containers they count. *@
+        <div class="sw-stat-card sw-red" role="button" tabindex="0" title="@L["Dashboard_StateFilter_Tooltip"]"
+             style="@StateTileStyle(StateFilter.Stopped)"
+             @onclick="@(() => ToggleStateFilter(StateFilter.Stopped))"
+             @onkeydown="@(e => OnStateTileKey(e, StateFilter.Stopped))">
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudIcon Icon="@Icons.Material.Filled.StopCircle" Class="sw-stat-icon mr-3" />
                 <div>
-                    <div class="sw-stat-value">@_containers.Count(c => c.State == "exited")</div>
+                    <div class="sw-stat-value">@_containers.Count(IsStopped)</div>
                     <div class="sw-stat-label">@L["Dashboard_Stat_Stopped"]</div>
                 </div>
             </MudStack>
         </div>
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <div class="sw-stat-card sw-amber">
+        <div class="sw-stat-card sw-amber" role="button" tabindex="0" title="@L["Dashboard_StateFilter_Tooltip"]"
+             style="@StateTileStyle(StateFilter.Unhealthy)"
+             @onclick="@(() => ToggleStateFilter(StateFilter.Unhealthy))"
+             @onkeydown="@(e => OnStateTileKey(e, StateFilter.Unhealthy))">
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudIcon Icon="@Icons.Material.Filled.Warning" Class="sw-stat-icon mr-3" />
                 <div>
-                    <div class="sw-stat-value">@_containers.Count(c => c.HealthStatus == "unhealthy")</div>
+                    <div class="sw-stat-value">@_containers.Count(IsUnhealthy)</div>
                     <div class="sw-stat-label">@L["Dashboard_Stat_Unhealthy"]</div>
                 </div>
             </MudStack>
@@ -110,8 +117,11 @@
             <MudIcon Icon="@Icons.Material.Filled.RocketLaunch" Color="Color.Primary" Size="Size.Large" />
             <div>
                 <MudText Typo="Typo.h6">@L["Dashboard_FirstServer_Title"]</MudText>
+                @* "Connected ✓" only once the probe said so — the card used to claim it on hosts with no socket. *@
                 <MudText Typo="Typo.body2" Color="Color.Secondary">
-                    @L["Dashboard_FirstServer_Subtitle"]
+                    @(_serverInfos.Count == 0 ? L["Dashboard_FirstServer_SubtitleNeutral"]
+                      : GetServerReachable("local") ? L["Dashboard_FirstServer_Subtitle"]
+                      : L["Dashboard_FirstServer_SubtitleNoLocal"])
                 </MudText>
             </div>
         </MudStack>
@@ -164,6 +174,22 @@
     </div>
 }
 
+@if (_stateFilter != StateFilter.None)
+{
+    <div class="mb-3" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" />
+        <MudChip T="string" Size="Size.Small"
+                 Color="@(_stateFilter == StateFilter.Stopped ? Color.Error : Color.Warning)"
+                 OnClose="@(_ => ToggleStateFilter(_stateFilter))">
+            @(_stateFilter == StateFilter.Stopped ? L["Dashboard_Stat_Stopped"] : L["Dashboard_Stat_Unhealthy"])
+        </MudChip>
+        @if (!VisibleGroups.Any())
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Dashboard_StateFilter_None"]</MudText>
+        }
+    </div>
+}
+
 @* Grouped Container Tables *@
 @foreach (var serverGroup in VisibleGroups)
 {
@@ -191,7 +217,7 @@
                    the server right now. *@
                 @if (_infoAge.TryGetValue(serverGroup.ServerId, out var cachedAge))
                 {
-                    <MudTooltip Text="@($"Aus dem Zwischenspeicher, {cachedAge.TotalSeconds:F0} s alt — wird gerade aktualisiert")">
+                    <MudTooltip Text="@L["Dashboard_Server_CachedAge", cachedAge.TotalSeconds.ToString("F0")]">
                         <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small"
                                  Style="color:rgba(255,255,255,0.35); margin-left:4px;" />
                     </MudTooltip>
@@ -341,9 +367,10 @@
         </div>
     }
 
-    @if (_expandedServers.Contains(serverGroup.ServerId))
+    @* An active state filter opens every server it matches — the point of the click is to see the containers. *@
+    @if (_expandedServers.Contains(serverGroup.ServerId) || _stateFilter != StateFilter.None)
     {
-        foreach (var projectGroup in serverGroup.Projects)
+        foreach (var projectGroup in FilteredProjects(serverGroup))
         {
         <div class="sw-project-label">
             <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" />
@@ -496,11 +523,39 @@
         .SelectMany(g => (g.Group is { Length: > 0 } grp ? new[] { grp } : Array.Empty<string>()).Concat(g.Tags))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
-    private IEnumerable<ServerGroupViewModel> VisibleGroups => _filterTag == null
+    private IEnumerable<ServerGroupViewModel> VisibleGroups => (_filterTag == null
         ? _grouped
         : _grouped.Where(g => string.Equals(g.Group, _filterTag, StringComparison.OrdinalIgnoreCase)
-                              || g.Tags.Any(t => string.Equals(t, _filterTag, StringComparison.OrdinalIgnoreCase)));
+                              || g.Tags.Any(t => string.Equals(t, _filterTag, StringComparison.OrdinalIgnoreCase))))
+        .Where(g => _stateFilter == StateFilter.None || FilteredProjects(g).Any());
     private void SetFilter(string? tag) => _filterTag = tag;
+
+    // State filter behind the "stopped" / "unhealthy" tiles. Tile and filter share one predicate, so without a
+    // group/tag filter the number on a tile is the number of rows the click shows; with one, the rows narrow
+    // further while the tiles keep counting the whole fleet.
+    private enum StateFilter { None, Stopped, Unhealthy }
+    private StateFilter _stateFilter = StateFilter.None;
+    private static bool IsStopped(ContainerInfo c) => c.State == "exited";
+    private static bool IsUnhealthy(ContainerInfo c) => c.HealthStatus == "unhealthy";
+    private bool MatchesState(ContainerInfo c) => _stateFilter switch
+    {
+        StateFilter.Stopped => IsStopped(c),
+        StateFilter.Unhealthy => IsUnhealthy(c),
+        _ => true
+    };
+    private IEnumerable<ProjectGroupViewModel> FilteredProjects(ServerGroupViewModel g) => _stateFilter == StateFilter.None
+        ? g.Projects
+        : g.Projects
+            .Select(p => new ProjectGroupViewModel { Project = p.Project, Containers = p.Containers.Where(MatchesState).ToList() })
+            .Where(p => p.Containers.Count > 0);
+    private void ToggleStateFilter(StateFilter f) => _stateFilter = _stateFilter == f ? StateFilter.None : f;
+    private void OnStateTileKey(KeyboardEventArgs e, StateFilter f)
+    {
+        if (e.Key is "Enter" or " ") ToggleStateFilter(f);
+    }
+    private string StateTileStyle(StateFilter f) => _stateFilter == f
+        ? "cursor:pointer; outline:2px solid currentColor; outline-offset:2px;"
+        : "cursor:pointer;";
     private Dictionary<string, ServerSystemInfo> _serverInfos = new();
     private HashSet<string> _expandedServers = new();
     private Dictionary<string, List<MetricPoint>> _serverCpuHistory = new();

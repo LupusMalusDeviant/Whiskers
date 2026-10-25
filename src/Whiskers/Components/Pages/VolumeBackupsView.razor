@@ -140,7 +140,9 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
-        _servers = ServerConfigService.GetEnabledServers();
+        _servers = ServerConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes) // compose = Docker hosts only
+            .ToList();
         _backupServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
         await LoadBackups();
     }
@@ -202,7 +204,12 @@ else
                 }
             }
         }
-        catch { _volumes = new(); }
+        catch (Exception ex)
+        {
+            // Falls back to the free-text volume field — say why, or the fallback looks like the normal UI.
+            _volumes = new();
+            Snackbar.Add(L["VolumeBackups_VolumesLoadFailed", ex.Message].Value, Severity.Warning);
+        }
     }
 
     private async Task CreateBackup()

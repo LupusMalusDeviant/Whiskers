@@ -45,8 +45,11 @@
                         <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">@(string.IsNullOrEmpty(s.Image) ? L["ComposeEditor_Label_NoImage"].Value : s.Image)</MudText>
                     </MudStack>
                     <MudSpacer />
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                   OnClick="@(() => _services.Remove(s))" />
+                    @* stopPropagation: the card's own click would otherwise re-select the service just removed *@
+                    <span @onclick:stopPropagation="true">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => RemoveService(s))" />
+                    </span>
                 </MudStack>
             </MudPaper>
         }
@@ -140,6 +143,12 @@
 @code {
     private List<ComposeService> _services = new();
     private ComposeService? _selectedService;
+
+    private void RemoveService(ComposeService s)
+    {
+        _services.Remove(s);
+        if (_selectedService == s) _selectedService = null;
+    }
     private string _projectName = "";
     private bool _deploying;
     private AppRole _role = AppRole.Viewer;
@@ -159,7 +168,9 @@
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
-        _servers = ServerConfigService.GetEnabledServers();
+        _servers = ServerConfigService.GetEnabledServers()
+            .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes) // compose = Docker hosts only
+            .ToList();
         _serverId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
     }
 

@@ -3,6 +3,7 @@
 @inject Whiskers.Services.Notifications.IInAppNotificationStore Store
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
 
 @* The activator is a plain MudMenu Icon button — the exact pattern the (working) theme menu uses.
    The MudBadge only wraps it to show the unread count; it does not intercept the click. *@
@@ -15,15 +16,15 @@
 
 <MudBadge Content="@Store.UnreadCount" Max="99" Visible="@(Store.UnreadCount > 0)" Color="Color.Error" Overlap="true" Bordered="true" Class="sw-notify-badge">
     <MudMenu Icon="@(Store.UnreadCount > 0 ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
-             Color="Color.Inherit" title="Benachrichtigungen"
+             Color="Color.Inherit" title="@L["NotificationBell_Title"]"
              OpenChanged="OnOpenChanged" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
         <div style="min-width:340px; max-width:440px;">
             <div style="display:flex; align-items:center; padding:8px 12px;">
-                <MudText Typo="Typo.subtitle2">Benachrichtigungen</MudText>
+                <MudText Typo="Typo.subtitle2">@L["NotificationBell_Title"]</MudText>
                 <MudSpacer />
                 @if (recent.Count > 0)
                 {
-                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Clear">Leeren</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Clear">@L["NotificationBell_Clear"]</MudButton>
                 }
             </div>
             <MudDivider />
@@ -40,7 +41,7 @@
             }
             else if (visible.Count == 0)
             {
-                <div style="padding:24px; text-align:center; color:rgba(255,255,255,0.4);">Keine Benachrichtigungen</div>
+                <div style="padding:24px; text-align:center; color:rgba(255,255,255,0.4);">@L["NotificationBell_Empty"]</div>
             }
             else
             {
@@ -67,7 +68,7 @@
             <MudDivider />
             <div style="display:flex; justify-content:center; padding:6px;">
                 <MudButton Size="Size.Small" Variant="Variant.Text" FullWidth="true"
-                           OnClick="@(() => Nav.NavigateTo("notifications"))">Alle anzeigen</MudButton>
+                           OnClick="@(() => Nav.NavigateTo("notifications"))">@L["NotificationBell_ShowAll"]</MudButton>
             </div>
         </div>
     </MudMenu>
@@ -88,7 +89,7 @@
         StateHasChanged();
     });
 
-    /// <summary>How many entries the dropdown shows. The rest are one click away under "Alle anzeigen" —
+    /// <summary>How many entries the dropdown shows. The rest are one click away under "Show all" —
     /// nobody scrolls a hundred toasts, and every one of them is a component on the page.</summary>
     private const int DropdownLimit = 15;
 

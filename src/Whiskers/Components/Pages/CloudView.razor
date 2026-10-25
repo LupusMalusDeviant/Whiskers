@@ -4,6 +4,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive cloud-control UI. Rendered by Cloud.razor only when the CloudControl module is enabled
@@ -42,6 +43,11 @@
         <MudTd>
             <MudText Typo="Typo.body2" Style="font-weight: 500;">@context.WhiskersName</MudText>
             <MudText Typo="Typo.caption" Color="Color.Secondary">@context.Name (#@context.CloudId)</MudText>
+            @if (!string.IsNullOrEmpty(context.Note))
+            {
+                @* Lookup error or weak (name-only) match — the operator should see it before acting. *@
+                <MudText Typo="Typo.caption" Color="@(context.Status == "error" ? Color.Error : Color.Warning)" Style="display:block;">@context.Note</MudText>
+            }
         </MudTd>
         <MudTd>@context.Provider</MudTd>
         <MudTd>
@@ -60,7 +66,8 @@
             }
         </MudTd>
         <MudTd>
-            @if (_role >= AppRole.Admin)
+            @* "error" means the cloud lookup failed — there is no resolved server to act on. *@
+            @if (_role >= AppRole.Admin && context.Status != "error")
             {
                 @if (context.Status == "running")
                 {
@@ -147,11 +154,28 @@
                 "snapshot" => await CloudControl.CreateSnapshotAsync(s.WhiskersId, $"{s.Name} {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC"),
                 _ => L["CloudView_Snackbar_UnknownAction"].Value
             };
+            await AuditCloudActionAsync(s, action, success: true);
             Snackbar.Add(msg, Severity.Success);
             await LoadAll();
         }
-        catch (Exception ex) { Snackbar.Add(L["CloudView_Snackbar_ActionError", action, s.WhiskersName, ex.Message].Value, Severity.Error); }
+        catch (Exception ex)
+        {
+            await AuditCloudActionAsync(s, action, success: false, details: ex.Message);
+            Snackbar.Add(L["CloudView_Snackbar_ActionError", action, s.WhiskersName, ex.Message].Value, Severity.Error);
+        }
         finally { _busy = false; }
+    }
+
+    // Out-of-band power/snapshot actions are destructive — record each attempt like the other admin views do.
+    private async Task AuditCloudActionAsync(CloudServerInfo s, string action, bool success, string? details = null)
+    {
+        try
+        {
+            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
+            await AuditLog.LogAsync(actor, "web", $"cloud.{action}", "cloud", s.CloudId.ToString(), s.WhiskersName,
+                details: details, serverId: s.WhiskersId, success: success);
+        }
+        catch { /* auditing must never mask the action's own result */ }
     }
 
     private static Color GetStatusColor(string status) => status?.ToLowerInvariant() switch

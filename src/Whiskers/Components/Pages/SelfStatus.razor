@@ -165,7 +165,14 @@ else
 @* Plan-0006 WP5. The question this answers is not "what did Whiskers do" — the timeline below covers that
    — but "did any of it help". Whiskers has always counted an action as successful when the call returned
    without an error, and this section is the first place that assumption is put next to a measurement. *@
-<MudText Typo="Typo.h6" Class="mt-6 mb-2">Did the automatic actions help?</MudText>
+@* These two database-backed sections are not on the five-second timer (see RefreshTimelineAsync), so
+   each gets an explicit refresh — both buttons reload both sections. *@
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-6 mb-2">
+    <MudText Typo="Typo.h6">Did the automatic actions help?</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
+               Disabled="_timelineLoading" OnClick="RefreshTimelineOnDemandAsync">Refresh</MudButton>
+</MudStack>
 
 @if (_outcomeRows.Count == 0)
 {
@@ -238,6 +245,8 @@ else
     <MudText Typo="Typo.h6">What has been happening</MudText>
     <MudSpacer />
     <MudText Typo="Typo.caption">last 6 hours · times shown in @_timeZoneLabel</MudText>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
+               Disabled="_timelineLoading" OnClick="RefreshTimelineOnDemandAsync">Refresh</MudButton>
 </MudStack>
 
 @if (_timeline.Count == 0)
@@ -353,6 +362,17 @@ else
             _outcomeRows = Array.Empty<OutcomeRow>();
             _overdueWarning = "";
         }
+    }
+
+    private bool _timelineLoading;
+
+    /// <summary>The on-demand path the page header promises: re-reads the timeline and outcome sections.</summary>
+    private async Task RefreshTimelineOnDemandAsync()
+    {
+        if (_timelineLoading) return;
+        _timelineLoading = true;
+        try { await RefreshTimelineAsync(); }
+        finally { _timelineLoading = false; }
     }
 
     /// <summary>The one place a UTC instant becomes a local one. Everything upstream stays UTC (Plan-0003 WP5.2).</summary>
