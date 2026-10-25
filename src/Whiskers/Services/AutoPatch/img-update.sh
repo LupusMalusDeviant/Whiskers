@@ -13,6 +13,7 @@
 #     so an update never silently ships unrelated compose changes. Asked of compose itself with a
 #     dry-run `up` while the tag points at the running image (IGNORE_DRIFT=1 overrides; only for an
 #     operator who has compared the configuration by hand - Whiskers never sets it)
+#   - image built on the host by compose (com.docker.compose.project label on the image)  -> skip
 #   - databases (postgres/mysql/mariadb): verified dump first, otherwise abort
 # Env:   DRY_RUN=1  stop after the guards, put the old tag back, report UPD-WOULD-UPDATE
 # Usage: img-update.sh <container>
@@ -50,6 +51,13 @@ major() { echo "$1" | grep -oE '^[vV]?[0-9]+' | tr -d vV; }
 
 echo "container=$C project=$PROJ service=$SVC image=$IMG old=$(echo "$OLD_ID" | cut -c8-19) health_before=$PRE_H"
 [ -n "$SVC" ] && [ -n "$DIR" ] || { echo UPD-ABORT no-compose-labels; exit 1; }
+
+# Built on this host: there is no registry copy to pull. Not decided by RepoDigests - under the containerd
+# image store a local build has one too.
+BUILT_BY=$(docker image inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$OLD_ID" 2>/dev/null)
+if [ -n "$BUILT_BY" ] && [ "$BUILT_BY" != "<no value>" ]; then
+    echo "UPD-SKIP-LOCAL-BUILD project=$BUILT_BY"; exit 0
+fi
 
 # Drift guard: would `up` change anything about this container other than its image? Not by comparing
 # the config-hash label with `config --hash`: for every service with an env_file the two never match,

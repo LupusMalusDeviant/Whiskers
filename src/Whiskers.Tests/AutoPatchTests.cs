@@ -183,6 +183,32 @@ public class AutoPatchTests
     }
 
     [Fact]
+    public void An_image_compose_built_on_the_host_does_not_take_a_slot()
+    {
+        // The second dry run: nine of ten slots went to self-built images, where a pull can only say "no change".
+        var plan = AutoPatchPlanner.Plan(
+            [Compose("edda-web", image: "edda-web"), Compose("caddy")],
+            [Scan("edda-web", "local", (CveSeverity.High, "1")), Scan("caddy", "local", (CveSeverity.High, "1"))],
+            new AutoPatchSettings(),
+            isLocalBuild: c => c.Name == "edda-web");
+
+        Assert.Equal(["caddy"], plan.Candidates.Select(c => c.Container.Name));
+        Assert.Contains("rebuild with --pull", Assert.Single(plan.Skipped).Reason);
+    }
+
+    [Fact]
+    public void Compose_built_is_read_from_the_image_label_not_from_the_registry_digest()
+    {
+        // Under the containerd image store a local build carries a RepoDigest too, so only the label decides.
+        static ImageContract With(Dictionary<string, string>? labels)
+            => ImageContract.Empty with { Labels = labels };
+
+        Assert.True(With(new() { ["com.docker.compose.project"] = "edda", ["com.docker.compose.service"] = "web" }).IsComposeBuilt);
+        Assert.False(With(new() { ["org.opencontainers.image.version"] = "2.11.7" }).IsComposeBuilt);
+        Assert.False(With(null).IsComposeBuilt);
+    }
+
+    [Fact]
     public void A_known_update_goes_before_one_the_check_has_no_answer_for()
     {
         var plan = AutoPatchPlanner.Plan(
@@ -205,6 +231,7 @@ public class AutoPatchTests
     [InlineData("UPD-WOULD-UPDATE 16.14 -> 16.15", AutoPatchResultKind.WouldUpdate, "16.14 -> 16.15")]
     [InlineData("UPD-SKIP-MAJOR 2.11 -> 3.0", AutoPatchResultKind.SkippedMajor, "2.11 -> 3.0")]
     [InlineData("UPD-SKIP-UNKNOWN-MAJOR tag=latest", AutoPatchResultKind.SkippedUnknownMajor, "tag=latest")]
+    [InlineData("UPD-SKIP-LOCAL-BUILD project=edda", AutoPatchResultKind.SkippedLocalBuild, "project=edda")]
     [InlineData("UPD-ABORT compose-drift run=a file=b", AutoPatchResultKind.Aborted, "compose-drift run=a file=b")]
     [InlineData("UPD-FAILED-ROLLBACK-VERIFIED", AutoPatchResultKind.RolledBack, "")]
     [InlineData("UPD-FAILED-ROLLBACK-NOT-VERIFIED", AutoPatchResultKind.RollbackNotVerified, "")]
@@ -258,6 +285,8 @@ public class AutoPatchTests
         // asked of compose itself; the hash comparison must not come back.
         Assert.Contains("--dry-run up -d --no-deps", text);
         Assert.DoesNotContain("dc config --hash", text);
+        // The host-side second line for self-built images, read from the image label.
+        Assert.Contains("UPD-SKIP-LOCAL-BUILD", text);
         // 2026-10-25: a date-only backup tag let authentik's postgres overwrite pack-postgres' on the same host.
         Assert.Contains("BK=\"$REPO:pre-upd-${TS:0:8}-$C\"", text);
         Assert.Matches("^[0-9a-f]{64}$", sha);

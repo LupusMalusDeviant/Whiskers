@@ -127,7 +127,10 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
 
         var containers = await _docker.ListAllContainersAsync(all: false);
-        var plan = AutoPatchPlanner.Plan(containers, _cves.GetAll(), settings, UpdateAvailable);
+        var results = _cves.GetAll();
+        var localBuilds = await FindLocalBuildsAsync(containers, results);
+        var plan = AutoPatchPlanner.Plan(containers, results, settings, UpdateAvailable,
+            c => localBuilds.Contains((c.ServerId, c.Name)));
         LastCycle = new(started, null, dryRun, [], plan.Skipped);
 
         _logger.LogInformation("Auto-patch cycle started ({Mode}): {Candidates} candidate(s), {Skipped} skipped",
@@ -170,6 +173,26 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         LastCycle = LastCycle! with { CompletedAt = _utcNow() };
         _logger.LogInformation("Auto-patch cycle done: {Summary}",
             string.Join(", ", entries.GroupBy(e => e.Kind).Select(g => $"{g.Count()} {g.Key}")));
+    }
+
+    /// <summary>Which containers with findings run an image compose built on the host. One image inspect per
+    /// such container; an image that cannot be inspected counts as not local — the host script checks the same
+    /// label again before it pulls anything.</summary>
+    private async Task<HashSet<(string ServerId, string Name)>> FindLocalBuildsAsync(
+        IEnumerable<ContainerInfo> containers, IEnumerable<Whiskers.Models.Cve.CveScanResult> results)
+    {
+        var withFindings = results
+            .Where(r => r.Findings.Count > 0 && !string.IsNullOrEmpty(r.ContainerName))
+            .Select(r => (r.ServerId.ToUpperInvariant(), r.ContainerName!.ToUpperInvariant()))
+            .ToHashSet();
+        var local = new HashSet<(string, string)>();
+        foreach (var c in containers.Where(c => withFindings.Contains((c.ServerId.ToUpperInvariant(), c.Name.ToUpperInvariant()))))
+        {
+            var imageRef = string.IsNullOrEmpty(c.ImageId) ? c.Image : c.ImageId;
+            var contract = await _docker.GetImageContractAsync(imageRef, c.ServerId);
+            if (contract?.IsComposeBuilt == true) local.Add((c.ServerId, c.Name));
+        }
+        return local;
     }
 
     /// <summary>The update check's answer for one container; null when it has none or its check failed.</summary>

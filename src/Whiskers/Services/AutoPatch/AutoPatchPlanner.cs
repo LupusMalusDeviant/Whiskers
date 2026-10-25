@@ -35,6 +35,7 @@ public static class AutoPatchPlanner
     /// <summary>Opt-out label. <c>whiskers.autopatch=false</c> on a service keeps it out of every cycle.</summary>
     public const string OptOutLabel = "whiskers.autopatch";
 
+    /// <param name="isLocalBuild">True for a container whose image compose built on the host.</param>
     /// <param name="updateAvailable">What the update check knows about a container: true = a newer image is
     /// published for its tag, false = checked and already on the newest one, null = no answer. Null for every
     /// container when omitted.</param>
@@ -42,7 +43,8 @@ public static class AutoPatchPlanner
         IEnumerable<ContainerInfo> containers,
         IEnumerable<CveScanResult> cveResults,
         AutoPatchSettings settings,
-        Func<ContainerInfo, bool?>? updateAvailable = null)
+        Func<ContainerInfo, bool?>? updateAvailable = null,
+        Func<ContainerInfo, bool>? isLocalBuild = null)
     {
         ArgumentNullException.ThrowIfNull(containers);
         ArgumentNullException.ThrowIfNull(cveResults);
@@ -69,6 +71,10 @@ public static class AutoPatchPlanner
             if (count == 0) continue;   // nothing to fix — not even worth a line in the report
 
             var reason = SkipReason(c, excluded);
+            // Built on the host: no registry holds a newer copy, so a pull can only ever say "no change" —
+            // the second dry run gave nine of ten slots to these. They get newer by a rebuild with --pull.
+            if (reason is null && isLocalBuild?.Invoke(c) == true)
+                reason = "built locally — a pull cannot update it; rebuild with --pull";
             var update = updateAvailable?.Invoke(c);
             // Checked and already on the newest image of its tag: the findings are in the upstream image
             // itself, and no pull can remove them. The first dry run (2026-10-25) spent eight of its ten

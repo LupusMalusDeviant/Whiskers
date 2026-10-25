@@ -14,6 +14,8 @@ public enum AutoPatchResultKind
     SkippedMajor,
     /// <summary>Floating tag without a readable version — a major jump cannot be ruled out.</summary>
     SkippedUnknownMajor,
+    /// <summary>The image was built on the host — no registry to pull a newer one from.</summary>
+    SkippedLocalBuild,
     /// <summary>Stopped before anything changed (compose drift, unverified dump, no compose labels).</summary>
     Aborted,
     /// <summary>The new image failed its check; the old one runs again and passed the check.</summary>
@@ -59,6 +61,7 @@ public sealed record AutoPatchOutcome(AutoPatchResultKind Kind, string Detail)
             "WOULD-UPDATE" => AutoPatchResultKind.WouldUpdate,
             "SKIP-MAJOR" => AutoPatchResultKind.SkippedMajor,
             "SKIP-UNKNOWN-MAJOR" => AutoPatchResultKind.SkippedUnknownMajor,
+            "SKIP-LOCAL-BUILD" => AutoPatchResultKind.SkippedLocalBuild,
             "ABORT" => AutoPatchResultKind.Aborted,
             "FAILED-ROLLBACK-VERIFIED" => AutoPatchResultKind.RolledBack,
             "FAILED-ROLLBACK-NOT-VERIFIED" => AutoPatchResultKind.RollbackNotVerified,

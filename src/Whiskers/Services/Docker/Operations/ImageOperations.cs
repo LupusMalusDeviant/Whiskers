@@ -93,7 +93,8 @@ internal sealed class ImageOperations
                 new HashSet<string>(cfg?.Volumes?.Keys ?? []),
                 string.IsNullOrWhiteSpace(cfg?.WorkingDir) ? null : cfg.WorkingDir,
                 cfg?.Healthcheck?.Test is { Count: > 0 },
-                inspect.Os);
+                inspect.Os,
+                cfg?.Labels is { } labels ? new Dictionary<string, string>(labels) : null);
         }
         catch (Exception ex)
         {
