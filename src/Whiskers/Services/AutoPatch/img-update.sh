@@ -10,8 +10,9 @@
 #   - major guard: the image version's major changes (e.g. caddy:latest 2 -> 3)          -> skip
 #   - unknown major on a floating tag (latest/server/...) without a version label        -> skip
 #   - compose drift: the compose file no longer matches the running container            -> abort,
-#     so an update never silently ships unrelated compose changes (IGNORE_DRIFT=1 overrides; only
-#     for an operator who has compared the configuration by hand - Whiskers never sets it)
+#     so an update never silently ships unrelated compose changes. Asked of compose itself with a
+#     dry-run `up` while the tag points at the running image (IGNORE_DRIFT=1 overrides; only for an
+#     operator who has compared the configuration by hand - Whiskers never sets it)
 #   - databases (postgres/mysql/mariadb): verified dump first, otherwise abort
 # Env:   DRY_RUN=1  stop after the guards, put the old tag back, report UPD-WOULD-UPDATE
 # Usage: img-update.sh <container>
@@ -24,7 +25,6 @@ lbl() { docker inspect -f "{{index .Config.Labels \"$1\"}}" "$C"; }
 DIR=$(lbl com.docker.compose.project.working_dir)
 PROJ=$(lbl com.docker.compose.project)
 SVC=$(lbl com.docker.compose.service)
-HASH_RUN=$(lbl com.docker.compose.config-hash)
 IFS=, read -ra FS <<< "$(lbl com.docker.compose.project.config_files)"
 CF=(); for f in "${FS[@]}"; do CF+=(-f "$f"); done
 dc() { (cd "$DIR" && docker compose -p "$PROJ" "${CF[@]}" "$@"); }
@@ -51,10 +51,17 @@ major() { echo "$1" | grep -oE '^[vV]?[0-9]+' | tr -d vV; }
 echo "container=$C project=$PROJ service=$SVC image=$IMG old=$(echo "$OLD_ID" | cut -c8-19) health_before=$PRE_H"
 [ -n "$SVC" ] && [ -n "$DIR" ] || { echo UPD-ABORT no-compose-labels; exit 1; }
 
-# Drift guard: compose's own hash of the service config must still match the running container.
-HASH_NOW=$(dc config --hash "$SVC" 2>/dev/null | awk '{print $2}')
-if [ -z "$IGNORE_DRIFT" ] && [ -n "$HASH_RUN" ] && [ -n "$HASH_NOW" ] && [ "$HASH_RUN" != "$HASH_NOW" ]; then
-    echo "UPD-ABORT compose-drift run=$HASH_RUN file=$HASH_NOW"; exit 1
+# Drift guard: would `up` change anything about this container other than its image? Not by comparing
+# the config-hash label with `config --hash`: for every service with an env_file the two never match,
+# not even right after compose created the container (2026-10-25, all six env_file services on Badwolf).
+# So compose is asked directly, with a dry run, while the tag points at the image that runs - then
+# "Running" means the file still describes this container and anything else is drift.
+TAG_BEFORE=$(docker image inspect -f '{{.Id}}' "$IMG" 2>/dev/null)
+docker tag "$OLD_ID" "$IMG"
+PLAN=$(dc --dry-run up -d --no-deps --no-build --pull never "$SVC" 2>&1)
+[ -n "$TAG_BEFORE" ] && docker tag "$TAG_BEFORE" "$IMG"
+if [ -z "$IGNORE_DRIFT" ] && ! grep -qE "Container $C +Running" <<< "$PLAN"; then
+    echo "UPD-ABORT compose-drift $(grep -m1 -iE 'container|error' <<< "$PLAN" | tr -s ' ')"; exit 1
 fi
 
 docker tag "$OLD_ID" "$BK" && echo "backup_tag=$BK"

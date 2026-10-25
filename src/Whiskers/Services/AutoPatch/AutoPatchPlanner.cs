@@ -6,7 +6,9 @@ namespace Whiskers.Services.AutoPatch;
 
 /// <summary>A container the nightly cycle will try to patch.</summary>
 /// <param name="FixableFindings">Findings at or above the configured severity that name a fixed version.</param>
-public sealed record AutoPatchCandidate(ContainerInfo Container, int FixableFindings)
+/// <param name="UpdateKnown">True when the update check saw a newer image for the tag, null when it has no
+/// answer for this container (not checked yet, recreated since, registry unreachable).</param>
+public sealed record AutoPatchCandidate(ContainerInfo Container, int FixableFindings, bool? UpdateKnown = null)
 {
     public bool IsDatabase => Container.IsDatabase;
 }
@@ -33,10 +35,14 @@ public static class AutoPatchPlanner
     /// <summary>Opt-out label. <c>whiskers.autopatch=false</c> on a service keeps it out of every cycle.</summary>
     public const string OptOutLabel = "whiskers.autopatch";
 
+    /// <param name="updateAvailable">What the update check knows about a container: true = a newer image is
+    /// published for its tag, false = checked and already on the newest one, null = no answer. Null for every
+    /// container when omitted.</param>
     public static AutoPatchPlan Plan(
         IEnumerable<ContainerInfo> containers,
         IEnumerable<CveScanResult> cveResults,
-        AutoPatchSettings settings)
+        AutoPatchSettings settings,
+        Func<ContainerInfo, bool?>? updateAvailable = null)
     {
         ArgumentNullException.ThrowIfNull(containers);
         ArgumentNullException.ThrowIfNull(cveResults);
@@ -63,16 +69,24 @@ public static class AutoPatchPlanner
             if (count == 0) continue;   // nothing to fix — not even worth a line in the report
 
             var reason = SkipReason(c, excluded);
+            var update = updateAvailable?.Invoke(c);
+            // Checked and already on the newest image of its tag: the findings are in the upstream image
+            // itself, and no pull can remove them. The first dry run (2026-10-25) spent eight of its ten
+            // slots on exactly these, while containers with a real update waited for "next night".
+            if (reason is null && update == false)
+                reason = "already on the newest image of its tag — the remaining findings are upstream's";
+
             if (reason is not null)
                 skipped.Add(new AutoPatchSkip(c.ServerId, c.Name, reason));
             else
-                candidates.Add(new AutoPatchCandidate(c, count));
+                candidates.Add(new AutoPatchCandidate(c, count, update));
         }
 
         // Stateless services first: if the night goes wrong, it goes wrong on a proxy before it reaches a
-        // database. Within a group, the most findings first.
+        // database. Within a group, a known update before an unknown one, then the most findings first.
         var ordered = candidates
             .OrderBy(x => x.IsDatabase)
+            .ThenBy(x => x.UpdateKnown == true ? 0 : 1)
             .ThenByDescending(x => x.FixableFindings)
             .ThenBy(x => x.Container.ServerId, StringComparer.OrdinalIgnoreCase)
             .ThenBy(x => x.Container.Name, StringComparer.OrdinalIgnoreCase)

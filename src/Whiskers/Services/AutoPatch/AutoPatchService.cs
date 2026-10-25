@@ -3,6 +3,7 @@ using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Cve;
 using Whiskers.Services.Docker;
+using Whiskers.Services.ImageUpdate;
 using Whiskers.Services.Notifications;
 using Whiskers.Services.Persistence;
 
@@ -23,6 +24,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     private readonly IOptionsMonitor<AutoPatchSettings> _settings;
     private readonly IDockerService _docker;
     private readonly ICveFindingsStore _cves;
+    private readonly IImageUpdateStore _updates;
     private readonly IAutoPatchRunner _runner;
     private readonly INotificationService _notifications;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -36,16 +38,18 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         IOptionsMonitor<AutoPatchSettings> settings,
         IDockerService docker,
         ICveFindingsStore cves,
+        IImageUpdateStore updates,
         IAutoPatchRunner runner,
         INotificationService notifications,
         IServiceScopeFactory scopeFactory,
         ILogger<AutoPatchService> logger)
-        : this(settings, docker, cves, runner, notifications, scopeFactory, logger, () => DateTime.UtcNow) { }
+        : this(settings, docker, cves, updates, runner, notifications, scopeFactory, logger, () => DateTime.UtcNow) { }
 
     internal AutoPatchService(
         IOptionsMonitor<AutoPatchSettings> settings,
         IDockerService docker,
         ICveFindingsStore cves,
+        IImageUpdateStore updates,
         IAutoPatchRunner runner,
         INotificationService notifications,
         IServiceScopeFactory scopeFactory,
@@ -55,6 +59,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         _settings = settings;
         _docker = docker;
         _cves = cves;
+        _updates = updates;
         _runner = runner;
         _notifications = notifications;
         _scopeFactory = scopeFactory;
@@ -122,7 +127,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
 
         var containers = await _docker.ListAllContainersAsync(all: false);
-        var plan = AutoPatchPlanner.Plan(containers, _cves.GetAll(), settings);
+        var plan = AutoPatchPlanner.Plan(containers, _cves.GetAll(), settings, UpdateAvailable);
         LastCycle = new(started, null, dryRun, [], plan.Skipped);
 
         _logger.LogInformation("Auto-patch cycle started ({Mode}): {Candidates} candidate(s), {Skipped} skipped",
@@ -166,6 +171,10 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         _logger.LogInformation("Auto-patch cycle done: {Summary}",
             string.Join(", ", entries.GroupBy(e => e.Kind).Select(g => $"{g.Count()} {g.Key}")));
     }
+
+    /// <summary>The update check's answer for one container; null when it has none or its check failed.</summary>
+    private bool? UpdateAvailable(ContainerInfo c)
+        => _updates.Get(c.Id, c.ServerId) is { Error: null } info ? info.UpdateAvailable : null;
 
     private async Task RecordHistoryAsync(ContainerInfo c, AutoPatchOutcome outcome, DateTime startedAt)
     {

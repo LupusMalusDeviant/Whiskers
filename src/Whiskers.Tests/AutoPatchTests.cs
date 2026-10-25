@@ -168,6 +168,35 @@ public class AutoPatchTests
         Assert.Contains("limit", Assert.Single(plan.Skipped, s => s.ContainerName == "db").Reason);
     }
 
+    [Fact]
+    public void A_container_already_on_the_newest_image_of_its_tag_does_not_take_a_slot()
+    {
+        // The first dry run: eight of ten slots went to containers whose findings sit in the upstream image.
+        var plan = AutoPatchPlanner.Plan(
+            [Compose("current"), Compose("stale"), Compose("unknown")],
+            new[] { "current", "stale", "unknown" }.Select(n => Scan(n, "local", (CveSeverity.High, "1"))),
+            new AutoPatchSettings(),
+            c => c.Name switch { "current" => false, "stale" => true, _ => null });
+
+        Assert.Equal(["stale", "unknown"], plan.Candidates.Select(c => c.Container.Name));
+        Assert.Contains("upstream", Assert.Single(plan.Skipped).Reason);
+    }
+
+    [Fact]
+    public void A_known_update_goes_before_one_the_check_has_no_answer_for()
+    {
+        var plan = AutoPatchPlanner.Plan(
+            [Compose("unknown-many"), Compose("known-few")],
+            [
+                Scan("unknown-many", "local", (CveSeverity.High, "1"), (CveSeverity.High, "1"), (CveSeverity.High, "1")),
+                Scan("known-few", "local", (CveSeverity.High, "1")),
+            ],
+            new AutoPatchSettings(),
+            c => c.Name == "known-few" ? true : null);
+
+        Assert.Equal(["known-few", "unknown-many"], plan.Candidates.Select(c => c.Container.Name));
+    }
+
     // ---------------------------------------------------------------- the script's verdict
 
     [Theory]
@@ -225,6 +254,10 @@ public class AutoPatchTests
         Assert.DoesNotContain('\r', text);
         Assert.StartsWith("#!/bin/bash", text);
         Assert.Contains("UPD-WOULD-UPDATE", text);
+        // 2026-10-25: the config-hash label never matches `config --hash` for env_file services, so drift is
+        // asked of compose itself; the hash comparison must not come back.
+        Assert.Contains("--dry-run up -d --no-deps", text);
+        Assert.DoesNotContain("dc config --hash", text);
         // 2026-10-25: a date-only backup tag let authentik's postgres overwrite pack-postgres' on the same host.
         Assert.Contains("BK=\"$REPO:pre-upd-${TS:0:8}-$C\"", text);
         Assert.Matches("^[0-9a-f]{64}$", sha);
@@ -375,7 +408,8 @@ public class AutoPatchTests
 
     private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
         FakeNotifications notifications, AutoPatchSettings settings, params ContainerInfo[] containers)
-        => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store, runner,
+        => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
+            new NoopImageUpdateStore(), runner,
             notifications, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger<AutoPatchService>.Instance);
 
