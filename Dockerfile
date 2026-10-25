@@ -54,8 +54,8 @@ RUN chmod +x /app/entrypoint.sh
 # in-container VPN daemon. Hardened deployments opt in with `user: "10001:10001"` in compose
 # (see docker-compose.hardened.yml). A fresh named data volume inherits this ownership; bind-mounts
 # must be chowned by the operator. We chown /app so the app can write /app/data when run as 10001.
-RUN groupadd -g 10001 serverwatch 2>/dev/null || true \
-    && useradd -u 10001 -g 10001 -M -s /usr/sbin/nologin serverwatch 2>/dev/null || true \
+RUN groupadd -g 10001 whiskers 2>/dev/null || true \
+    && useradd -u 10001 -g 10001 -M -s /usr/sbin/nologin whiskers 2>/dev/null || true \
     && mkdir -p /app/data \
     && chown -R 10001:10001 /app
 

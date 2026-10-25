@@ -5,7 +5,7 @@ Why the log-alert scan steps over certain containers, and how that decision is m
 | File | Purpose |
 |---|---|
 | `ILogScanExclusions.cs` | The contract: which containers are skipped, with a machine-readable reason and a human-readable justification. |
-| `LogScanExclusions.cs` | Access-path detection plus the `SERVERWATCH_SELF_CONTAINERS` override. |
+| `LogScanExclusions.cs` | Access-path detection plus the `WHISKERS_SELF_CONTAINERS` override (legacy `SERVERWATCH_SELF_CONTAINERS` still read). |
 | `ILogInventory.cs` / `LogInventory.cs` | The daily reading: rotation limit, log file size, growth per day, free disk. |
 | `LogHygieneAdvice.cs` | Turns a reading into a severity, a description with a deadline, and a runnable command. |
 | `LogHygieneMonitor.cs` | Runs the survey once a day and raises `log_rotation_missing` when a finding crosses the threshold. |
@@ -33,7 +33,7 @@ every host that reuses the port.
 
 **Only the outermost hop is knowable.** Where Whiskers talks to a tunnel which talks to a socket proxy, the
 tunnel is detected and the proxy behind it is not — nothing in a container list says who talks to whom. The
-detection says so in its own justification text and names `SERVERWATCH_SELF_CONTAINERS` as the way to add the
+detection says so in its own justification text and names `WHISKERS_SELF_CONTAINERS` as the way to add the
 second hop, so an operator is told rather than left to notice.
 
 ## The exclusion must not become the blind spot

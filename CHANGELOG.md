@@ -6,6 +6,21 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- **The ServerWatch-era flat MCP key store is gone.** `api-keys.json` held unscoped plaintext keys and was
+  still accepted as a fallback at the `/mcp` gate. That fallback, the store and the one-time
+  `initial-mcp-key.txt` are removed; leftover files are deleted on start. MCP access now works only with a
+  key created under *Settings → MCP* with a Read / Write / Admin scope. The setup wizard no longer shows an
+  initial key and points there instead.
+
+### Changed
+- **Remaining ServerWatch names cleaned up.** README examples use the `whiskers` MCP server key and
+  `/whiskers` paths; `WHISKERS_SELF_CONTAINERS` replaces `SERVERWATCH_SELF_CONTAINERS` (the old name is
+  still read) and its default now covers both `whiskers` and `serverwatch`; the safe guardrail default
+  protects `whiskers*` as well as `serverwatch*`. Names that existing installs depend on — the compose
+  service/volume `serverwatch`, Prometheus `serverwatch_*` metrics, the Data Protection application name,
+  the mTLS client CN, the Trivy cache volume and the host-shell label — stay unchanged on purpose.
+
 ## [0.14.1] — 2026-10-25
 
 Security fix in Settings: the role table could turn whitelisted addresses into Admins on the next save.

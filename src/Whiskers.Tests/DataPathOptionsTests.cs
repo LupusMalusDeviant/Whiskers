@@ -29,7 +29,7 @@ public class DataPathOptionsTests
 
         Assert.Equal("/var/lib/whiskers", paths.RootDir);
         Assert.Equal("/var/lib/whiskers/metrics.db", paths.DbPath);
-        Assert.Equal("/var/lib/whiskers/api-keys.json", paths.ApiKeysJson);
+        Assert.Equal("/var/lib/whiskers/mcp-permissions.json", paths.McpPermissionsJson);
         Assert.Equal("/var/lib/whiskers/agent-chat", paths.AgentChatDir);
         Assert.Equal("/var/lib/whiskers/tailscale", paths.TailscaleStateDir);
     }

@@ -40,6 +40,8 @@ public static class WhiskersHostingExtensions
         // Persist data protection keys so antiforgery tokens survive container restarts
         builder.Services.AddDataProtection()
             .PersistKeysToFileSystem(new DirectoryInfo(dataPaths.KeysDir))
+            // Pre-rebrand application name, kept deliberately: it is the Data Protection discriminator, and
+            // changing it would invalidate every existing auth cookie and DP-protected payload.
             .SetApplicationName("ServerWatch");
     }
 
@@ -112,7 +114,6 @@ public static class WhiskersHostingExtensions
         // MCP Server + Permissions. Tools come from the enabled modules (RoadToSAP Phase 1) instead of a fixed
         // .WithTools<>() list, so a disabled module's tools drop off the MCP surface automatically.
         builder.Services.AddHttpContextAccessor();
-        builder.Services.AddSingleton<Whiskers.Mcp.IMcpApiKeyStore, McpApiKeyStore>();
         builder.Services.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, McpPermissionService>();
         // The tool-types argument MUST be statically typed IEnumerable<Type>, never Type[]. WithTools has both a
         // WithTools(IEnumerable<Type>) overload and a generic WithTools<T>(T target) overload; a Type[] argument
@@ -298,7 +299,6 @@ public static class WhiskersHostingExtensions
         builder.Services.AddInitializable<Whiskers.Services.Notifications.IContainerNotificationPrefsService>(); // 30
         builder.Services.AddInitializable<Whiskers.Services.Vault.IVaultService>();                 // 40
         builder.Services.AddInitializable<Whiskers.Services.ServerConfig.IServerConfigService>();   // 50
-        builder.Services.AddInitializable<Whiskers.Mcp.IMcpApiKeyStore>();                          // 60
         builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>();           // 70
         // GuardrailStore (80) + AiTriggerStore (90) warm-ups moved to Modules/Agent (RoadToSAP §3.8): the module
         // registers its own AddInitializable when enabled, so they run in Order then and drop out when the agent is off.

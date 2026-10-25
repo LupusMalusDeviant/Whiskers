@@ -204,7 +204,7 @@ internal sealed class SystemInfoOperations
         if (_statsCache.TryGetValue(cacheKey, out (double cpu, long mem) cachedRes))
             return cachedRes;
 
-        // Try to exec into the serverwatch container itself (which has /proc/1/root access)
+        // Try to exec into the Whiskers container itself (which has /proc/1/root access)
         // Simpler approach: read from the host /proc mount
         try
         {

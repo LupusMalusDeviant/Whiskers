@@ -41,7 +41,7 @@ public class GuardrailPolicy
         MaxAutonomousLevel = "read",
         ReadOnlyMode = false,
         RequireConfirmationForWrites = true,
-        ProtectedResources = { "serverwatch*" },
+        ProtectedResources = { "whiskers*", "serverwatch*" },   // current + pre-rebrand container name
         ForbiddenArgPatterns =
         {
             @"rm\s+-rf\s+/",

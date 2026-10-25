@@ -25,7 +25,7 @@ public class HostCommandExecutor : IHostCommandExecutor
     // Directory holding SSH connection-multiplexing control sockets. Reusing a master connection
     // across calls avoids a fresh TCP+auth handshake on every command (hundreds of ms each).
     private static readonly string ControlDir =
-        Path.Combine(Path.GetTempPath(), "serverwatch-ssh");
+        Path.Combine(Path.GetTempPath(), "whiskers-ssh");
 
     public HostCommandExecutor(IServerConfigService serverConfigService, IDockerService docker, ILogger<HostCommandExecutor> logger)
     {

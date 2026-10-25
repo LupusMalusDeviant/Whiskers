@@ -1,6 +1,6 @@
 # Services/Agent/Guardrails
 
-The agent's **code-enforced security policy**. This is the authoritative gate: it evaluates every planned tool call *before* execution and is called by both the [`AgentToolInvoker`](../AgentToolInvoker.cs) and `McpPermissionCheck`. Rules are stateless and fully LLM-independent, guardrails live in code and data, never in the prompt, so the model cannot talk its way past them.
+The agent's **code-enforced security policy**. This is the authoritative gate: it evaluates every tool call the in-process agent plans *before* execution, from [`AgentToolInvoker`](../AgentToolInvoker.cs) — no matter whether the agent was started from the web UI or via the MCP `instruct_agent` tool. Direct tool calls from an external MCP client do not pass through it; they are bounded by `McpPermissionCheck` (the key's scope) only. Rules are stateless and fully LLM-independent, guardrails live in code and data, never in the prompt, so the model cannot talk its way past them.
 
 Aggregation is **most-restrictive-wins**: any `Deny` beats everything, otherwise a `Confirm` wins, otherwise `Allow`.
 

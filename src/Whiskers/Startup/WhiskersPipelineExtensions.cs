@@ -260,10 +260,9 @@ public static class WhiskersPipelineExtensions
                 if (authHeader != null && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) // NIED-1: scheme is case-insensitive
                 {
                     var key = authHeader["Bearer ".Length..];
-                    // Validate via new permission service (or legacy store for backwards compat)
-                    if (permService?.ValidateKey(key) != null) return true;
-                    var legacyStore = httpContext?.RequestServices.GetService<Whiskers.Mcp.IMcpApiKeyStore>();
-                    return legacyStore?.ValidateKey(key) == true;
+                    // The permission service is the only key source. The pre-0.15 flat `api-keys.json`
+                    // fallback is gone, so a key without a scope can no longer pass this gate.
+                    return permService?.ValidateKey(key) != null;
                 }
                 // Also allow authenticated web users
                 return context.User.Identity?.IsAuthenticated == true;
@@ -343,6 +342,8 @@ public static class WhiskersPipelineExtensions
             {
                 var containers = await docker.ListAllContainersAsync(all: true);
 
+                // Metric names keep their pre-rebrand `serverwatch_` prefix so existing Prometheus
+                // dashboards and alert rules keep working; renaming them is a breaking change for scrapers.
                 // Container counts
                 sb.AppendLine($"# HELP serverwatch_containers_total Total number of containers");
                 sb.AppendLine($"# TYPE serverwatch_containers_total gauge");

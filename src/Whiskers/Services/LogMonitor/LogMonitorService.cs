@@ -85,11 +85,10 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
     // "all containers" rule reads those back they re-match the pattern and create a
     // self-amplifying trigger loop (this is what ran the "Echte Fehler" rule up to 133×).
     // Self-monitoring, if ever wanted, must be a deliberate out-of-band mechanism, not this.
-    // Override the excluded name(s) via SERVERWATCH_SELF_CONTAINERS (comma-separated).
-    private static readonly HashSet<string> SelfContainerNames = new(
-        (Environment.GetEnvironmentVariable("SERVERWATCH_SELF_CONTAINERS") ?? "serverwatch")
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-        StringComparer.OrdinalIgnoreCase);
+    // Override the excluded name(s) via WHISKERS_SELF_CONTAINERS (comma-separated; the legacy
+    // SERVERWATCH_SELF_CONTAINERS is still read) — same source as the log-hygiene exclusions.
+    private static readonly IReadOnlySet<string> SelfContainerNames =
+        Hygiene.LogScanExclusions.ManualNamesFromEnvironment();
 
     public LogMonitorService(
         IServiceScopeFactory scopeFactory,

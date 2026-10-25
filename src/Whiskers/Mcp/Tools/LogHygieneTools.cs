@@ -83,7 +83,7 @@ public class LogHygieneTools
             return string.IsNullOrWhiteSpace(serverId)
                 ? "No containers are excluded from the log-alert scan. On a host Whiskers reaches through a " +
                   "tunnel or socket proxy, expect at least one — if there is none, the access path may not be " +
-                  "detectable from the container list and may need SERVERWATCH_SELF_CONTAINERS."
+                  "detectable from the container list and may need WHISKERS_SELF_CONTAINERS."
                 : $"No containers are excluded from the log-alert scan on '{serverId}'.";
         }
 

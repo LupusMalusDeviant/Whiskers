@@ -22,7 +22,7 @@ public sealed class MetricsDbContextFactory : IDesignTimeDbContextFactory<Metric
             builder.UseNpgsql("Host=localhost;Database=whiskers_design",
                 npg => npg.MigrationsAssembly("Whiskers.Migrations.Postgres"));
         else
-            builder.UseSqlite("Data Source=serverwatch-design.db",
+            builder.UseSqlite("Data Source=whiskers-design.db",
                 sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite"));
 
         return new MetricsDbContext(builder.Options);

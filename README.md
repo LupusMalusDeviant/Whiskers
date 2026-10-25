@@ -126,8 +126,8 @@ On first launch a **guided setup wizard** in the browser creates the admin accou
 <summary>Behind an Nginx reverse proxy</summary>
 
 ```nginx
-location /serverwatch/ {
-    proxy_pass http://127.0.0.1:5100/serverwatch/;
+location /whiskers/ {
+    proxy_pass http://127.0.0.1:5100/whiskers/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
@@ -135,14 +135,14 @@ location /serverwatch/ {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-Prefix /serverwatch;
+    proxy_set_header X-Forwarded-Prefix /whiskers;
     proxy_read_timeout 300s;
     proxy_buffer_size 128k;
     proxy_buffers 4 256k;
 }
 ```
 
-When serving under a subpath, set `PATH_BASE=/serverwatch` in `.env`.
+When serving under a subpath, set `PATH_BASE=/whiskers` in `.env`.
 </details>
 
 <details>
@@ -255,24 +255,34 @@ for you:
 
 ## Architecture & security
 
-Whiskers manages hosts across three independent planes, each moved off SSH at steady state:
+Whiskers manages each onboarded host across three separate planes. None of them uses SSH in steady
+state, and none of them needs a stored SSH key:
 
 | Plane | What | Transport |
 |---|---|---|
 | **Telemetry** | host CPU/RAM/disk, container stats | `node_exporter` → VictoriaMetrics (pull over the mesh) |
-| **Docker control** | list/restart/deploy/inspect | Docker Engine API over **mTLS** + verb-whitelisting proxy |
-| **Shell** | `execute_command`, systemd, journald, edits | one-shot privileged `nsenter` container over the same mTLS channel |
+| **Docker API** | list/restart/deploy/inspect | Docker Engine API over **mTLS** (client certificate, CN-pinned) + verb-whitelisting socket proxy |
+| **Host control** | `execute_command`, systemd, journald, edits | one-shot privileged `nsenter` container, driven over the same mTLS Docker channel |
 
-A **one-time bootstrap SSH** connection during onboarding moves a host onto a private WireGuard mesh
-(Tailscale/NetBird), installs telemetry + the mTLS Docker proxy, then removes the bootstrap
-credentials. After that, **steady-state operation runs without a standing private SSH key** — the
-central attack surface is gone. The full design, PKI (step-ca), onboarding flow and trade-offs are in
-**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+**SSH is a bootstrap channel only.** Onboarding opens a single SSH connection — with host-key
+verification (trust-on-first-use, pinned afterwards) — to join the host to a private WireGuard mesh
+(Tailscale/NetBird), roll out the mTLS certificates and the Docker proxy, and install telemetry. The
+bootstrap credential (uploaded key or a password held in memory only) is then deleted. From that point
+on the host is operated **key-free over the three mTLS/mesh planes**; Whiskers holds no standing SSH
+key for it. (A server that was added as a plain SSH connection and never onboarded keeps using SSH until
+it is migrated.)
+
+**What these planes are, honestly:** the Docker-API and host-control planes are **root-equivalent on
+the managed host** — creating a container or running `nsenter` is root by construction. mTLS and the mesh
+decide *who* can reach that power; scopes, guardrails and approvals decide *what* a given caller may do
+with it. The full design, PKI (step-ca), onboarding flow and trade-offs are in
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**; the threat model is in [SECURITY.md](SECURITY.md).
 
 ### Security summary
 
 - **No standing SSH key** for managed hosts in steady state; management ports are **mesh-bound**, nothing management-related is exposed to the public internet by design.
-- **MCP access is gated per API key** (Read / Write / Admin); the acting agent is bounded by **code-enforced guardrails** and can never exceed the rights of whoever/whatever triggered it.
+- **Deterministic policy enforcement, not prompt instructions.** Every MCP tool call — from a signed-in web user, an external MCP client or the in-process agent — passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list). Agent-executed calls additionally pass the guardrail engine: action classification (Allow / Confirm / Block, protected resources, forbidden arguments) and human-in-the-loop approval for `Confirm`. See [How the policy layer applies](#how-the-policy-layer-applies).
+- **MCP API keys** are created in the web UI with an explicit scope; the ServerWatch-era unscoped key file `api-keys.json` no longer exists (see the [MCP server](#mcp-server) section).
 - **Secrets** (`.env`, the encrypted vault, the DB) live under `/app/data` / `.env`, both gitignored and volume-mounted — never baked into the image or committed.
 - **Full-repo security review & remediation** (see the [security-fixes changelog](docs/reviews/2026-07-07-security-fixes-changelog.md)): all critical and high findings, plus most medium/low issues, are fixed — per-key RBAC on **every** path (including the agent and MCP), the vault on **AES-256-GCM + PBKDF2**, schema via **EF Core migrations**, trust-critical images **pinned by digest**, restricted forwarded-header trust, and a scrape-token-gated `/metrics`.
 
@@ -300,20 +310,44 @@ If you discover a security issue, please report it privately — see [SECURITY.m
 
 ## MCP server
 
-Whiskers ships an integrated MCP server so AI agents (e.g. Claude Code) can operate your infrastructure. Add it to your MCP client:
+Whiskers ships an integrated MCP server (Streamable HTTP, endpoint `/mcp`) so AI agents (e.g. Claude Code)
+can operate your infrastructure. Add it to your MCP client:
 
 ```json
 {
   "mcpServers": {
-    "serverwatch": {
-      "url": "https://your-server.com/serverwatch/mcp",
-      "headers": { "Authorization": "Bearer <API-KEY>" }
+    "whiskers": {
+      "type": "http",
+      "url": "https://whiskers.example.com/mcp",
+      "headers": { "Authorization": "Bearer <WHISKERS_MCP_API_KEY>" }
     }
   }
 }
 ```
 
-**Permissions are enforced per API key** as Read / Write / Admin. Tools span:
+Behind a reverse proxy on a subpath (`PATH_BASE=/whiskers`) the URL becomes
+`https://example.com/whiskers/mcp`; for a local instance it is `http://localhost:5100/mcp`.
+
+### API keys and scopes
+
+- **Keys are created in the web UI** under *Settings → MCP* by an Admin. Each key carries exactly one
+  scope — **Read**, **Write** or **Admin** — or, instead of a scope, an explicit list of allowed tools.
+  Keys can be disabled or deleted there at any time; a disabled key is rejected on the next request.
+- **Every tool declares its minimum scope in code** and the check runs on every call. A scoped key never
+  reaches a tool above its scope; a tool without a configured level is denied (fail-closed); an Admin can
+  switch individual tools off for every key.
+- **Key handling:** keys are 64-character random values, compared in constant time and persisted in the
+  application's data directory (`mcp-permissions.json`, next to the other Whiskers state — never in the
+  image or the repository). The key value is not written to the log. Requests without a valid key are
+  rejected before any tool runs.
+
+> **Note for older index entries (e.g. MCP directories that crawled the ServerWatch-era README):**
+> Whiskers was called *ServerWatch* before the rebrand in v0.12. The old flat, unscoped key file
+> `/app/data/api-keys.json` is **gone**: its last compatibility fallback was removed after v0.14.1, no code
+> path reads it, and a leftover copy is deleted on start. MCP access works only with a scoped key created
+> in the web UI.
+
+**Tools span:**
 
 - **Containers**: list/inspect/logs/metrics/env, start/stop/restart/update
 - **Server & host**: info, logs, metrics, health summary, `execute_command` (Admin)
@@ -327,7 +361,20 @@ Whiskers ships an integrated MCP server so AI agents (e.g. Claude Code) can oper
 - **Cloud (out-of-band)**: Hetzner & Hostinger power/snapshot/metrics
 - **Agent**: `instruct_agent` (delegate a natural-language task to the in-process agent)
 
-The complete, current list with permission levels is in the web UI under *Settings > MCP*.
+The complete, current list with permission levels is in [docs/mcp-tool-catalog.md](docs/mcp-tool-catalog.md)
+and in the web UI under *Settings > MCP*.
+
+### How the policy layer applies
+
+Whiskers' AI guardrails are a **deterministic policy-enforcement layer** (Read / Write / Admin scopes,
+action classification and human-in-the-loop approvals), evaluated in code at the tool boundary — never
+in a prompt, so no model output can talk its way past it.
+
+| Caller | Scope check (Read / Write / Admin, tool allow-list) | Guardrail engine (Allow / Confirm / Block) | Recorded in |
+|---|---|---|---|
+| Web UI user | ✅ by role (Viewer → Read, Operator → Write, Admin → Admin) | ✅ for actions run through the agent | Audit Log |
+| External MCP client, direct tool call | ✅ by API key | — (bounded by the key's scope; give external clients the least scope they need) | Agent History |
+| In-process agent (triggered from the UI **or** via MCP `instruct_agent`) | ✅ capped at the triggering user's / key's scope | ✅ every call; `Confirm` pauses until a human approves the exact action + parameters | Agent History |
 
 ---
 
@@ -337,7 +384,7 @@ Beyond the MCP server (which serves *external* agents), Whiskers has an **in-pro
 
 Its safety model is enforced in code, not in the prompt:
 
-- **Guardrails** (a separate, admin-only `guardrails.json`) define inescapable Allow/Confirm/Deny rules evaluated at the tool boundary, "most-restrictive wins".
+- **Guardrails** (a separate, admin-only `guardrails.json`) are a deterministic policy-enforcement layer: Allow/Confirm/Deny rules evaluated at the tool boundary, "most-restrictive wins", identical whether the agent was started from the web UI or via MCP.
 - The agent **inherits the rights of whoever triggered it** (web user or MCP key) and can never exceed them.
 - **Hybrid autonomy**: reads run autonomously; writes/admin actions require confirmation.
 
@@ -371,7 +418,7 @@ See [.env.example](.env.example) for the full, commented list.
 ### Notable runtime details
 
 - **Email whitelist**: managed in the UI under *Settings > Authentication*; changes apply without a restart.
-- **MCP API key**: auto-generated on first start and written to `initial-mcp-key.txt` (mode `0600`, next to `api-keys.json` in the data volume) — **not** to the logs, which record only the file path. Retrieve it, then delete the file.
+- **MCP API keys**: managed in the UI under *Settings > MCP* (scope Read / Write / Admin per key). A fresh install starts with one **Read**-scoped key there; its value is never written to the logs. Grant Write/Admin only to keys that need it.
 - **Data persistence**: the metrics database (SQLite by default, or PostgreSQL), JSON stores and certificates live under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`); never in the image.
 - **Health probes**: anonymous `/healthz` (liveness) and `/readyz` (readiness) endpoints; the image ships a Docker `HEALTHCHECK` and Kubernetes can use them as probes. (`/health` without the `z` is the in-app status page.)
 

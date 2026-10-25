@@ -124,7 +124,7 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
         psi.ArgumentList.Add("--permission-mode");
         psi.ArgumentList.Add("default");
         psi.ArgumentList.Add("--allowedTools");
-        psi.ArgumentList.Add("mcp__serverwatch");
+        psi.ArgumentList.Add("mcp__whiskers");
         // Never let the CLI touch the local filesystem/shell — only our guardrailed MCP tools.
         psi.ArgumentList.Add("--disallowedTools");
         psi.ArgumentList.Add("Edit,Write,Bash,NotebookEdit");
@@ -143,7 +143,7 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
         {
             ["mcpServers"] = new JsonObject
             {
-                ["serverwatch"] = new JsonObject
+                ["whiskers"] = new JsonObject
                 {
                     ["type"] = "http",
                     ["url"] = url,
@@ -152,7 +152,7 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
             }
         };
 
-        var path = Path.Combine(Path.GetTempPath(), $"serverwatch-agent-mcp-{Guid.NewGuid():N}.json");
+        var path = Path.Combine(Path.GetTempPath(), $"whiskers-agent-mcp-{Guid.NewGuid():N}.json");
         File.WriteAllText(path, json.ToJsonString());
         // The file holds a bearer key — make it owner-only (Linux; the app runs in Linux containers).
         if (!OperatingSystem.IsWindows())

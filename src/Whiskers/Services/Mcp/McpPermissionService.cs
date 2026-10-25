@@ -10,6 +10,7 @@ namespace Whiskers.Services.Mcp;
 public class McpPermissionService : IMcpPermissionService, IInitializable
 {
     private readonly JsonFileStore<McpPermissionData> _store;
+    private readonly DataPathOptions _dataPaths;
     private readonly ILogger<McpPermissionService> _logger;
     private McpPermissionData _data = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -17,13 +18,16 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
     public McpPermissionService(ILogger<McpPermissionService> logger, DataPathOptions? dataPaths = null)
     {
         _logger = logger;
-        _store = new JsonFileStore<McpPermissionData>((dataPaths ?? DataPathOptions.Default).McpPermissionsJson);
+        _dataPaths = dataPaths ?? DataPathOptions.Default;
+        _store = new JsonFileStore<McpPermissionData>(_dataPaths.McpPermissionsJson);
     }
 
     public int Order => 70;
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {
+        PurgeLegacyKeyFiles();
+
         await _lock.WaitAsync();
         try
         {
@@ -80,6 +84,31 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         finally
         {
             _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Deletes the files of the removed ServerWatch-era flat key store (<c>api-keys.json</c> and its
+    /// <c>initial-mcp-key.txt</c>). Their keys were unscoped plaintext secrets that no code path accepts
+    /// any more; leaving them in the data volume (and in every self-backup) would only keep them exposed.
+    /// They are deliberately not migrated: importing an unscoped key would mean inventing a scope for it.
+    /// </summary>
+    private void PurgeLegacyKeyFiles()
+    {
+        foreach (var path in new[] { _dataPaths.LegacyApiKeysJson, _dataPaths.LegacyInitialMcpKeyFile })
+        {
+            try
+            {
+                if (!File.Exists(path)) continue;
+                File.Delete(path);
+                _logger.LogWarning(
+                    "Deleted legacy MCP key file {Path}: the flat key store was removed and its keys are no " +
+                    "longer accepted. Create scoped keys under Settings → MCP.", path);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not delete legacy MCP key file {Path}; remove it manually", path);
+            }
         }
     }
 

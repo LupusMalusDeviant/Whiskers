@@ -65,8 +65,12 @@ public sealed class DataPathOptions
     public string AppSettingsJson => P("app-settings.json");
 
     // --- JSON config stores ---
-    public string ApiKeysJson => P("api-keys.json");
     public string McpPermissionsJson => P("mcp-permissions.json");
+
+    /// <summary>Files of the removed flat MCP key store (ServerWatch era, before 0.15): unscoped plaintext keys.
+    /// Only referenced so <c>McpPermissionService</c> can delete leftovers on start — nothing reads them.</summary>
+    public string LegacyApiKeysJson => P("api-keys.json");
+    public string LegacyInitialMcpKeyFile => P("initial-mcp-key.txt");
 
     /// <summary>What the image-update checker knows. Persisted since 2026-08-28: the store used to live only
     /// in memory, so every restart wiped it and — with a six-hour check interval — Whiskers spent hours
@@ -76,9 +80,8 @@ public sealed class DataPathOptions
     public string VaultJson => P("vault.json");
     public string RolesJson => P("roles.json");
     public string WhitelistJson => P("whitelist.json");
-    // W1 setup wizard: first-run completion mirror flag + the one-time MCP key surface file (shared with McpApiKeyStore).
+    // W1 setup wizard: first-run completion mirror flag.
     public string SetupCompleteFlag => P("setup-complete");
-    public string InitialMcpKeyFile => P("initial-mcp-key.txt");
     public string NotificationPrefsJson => P("notification-prefs.json");
     public string GuardrailsJson => P("guardrails.json");
     public string CveFindingsJson => P("cve-findings.json");

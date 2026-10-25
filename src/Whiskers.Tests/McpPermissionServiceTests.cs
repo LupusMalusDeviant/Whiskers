@@ -6,7 +6,7 @@ using Whiskers.Services.Mcp;
 namespace Whiskers.Tests;
 
 // C6 (extended): the permission system also generates a default MCP API key on first run and used to
-// log it verbatim — the same leak as the legacy McpApiKeyStore. It must never reach the log.
+// log it verbatim — the same leak as the removed legacy McpApiKeyStore. It must never reach the log.
 public sealed class McpPermissionServiceTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"mcpperm-{Guid.NewGuid():N}");
@@ -51,6 +51,24 @@ public sealed class McpPermissionServiceTests : IDisposable
         data.Tools["hetzner_enable_rescue"].RequiredLevel = "read";
         await svc.SavePermissionDataAsync(data);
         Assert.Equal("admin", svc.GetPermissionData().Tools["hetzner_enable_rescue"].RequiredLevel);
+    }
+
+    [Fact]
+    public async Task Leftover_files_of_the_removed_flat_key_store_are_deleted_on_start()
+    {
+        // ServerWatch-era installs still carry api-keys.json (unscoped plaintext keys) and possibly the
+        // initial-mcp-key.txt next to it. Nothing accepts those keys any more, so they must not linger.
+        Directory.CreateDirectory(_dir);
+        var paths = new DataPathOptions(_dir);
+        await File.WriteAllTextAsync(paths.LegacyApiKeysJson, """{"Keys":["deadbeef"]}""");
+        await File.WriteAllTextAsync(paths.LegacyInitialMcpKeyFile, "deadbeef");
+
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        await svc.InitializeAsync();
+
+        Assert.False(File.Exists(paths.LegacyApiKeysJson));
+        Assert.False(File.Exists(paths.LegacyInitialMcpKeyFile));
+        Assert.Null(svc.ValidateKey("deadbeef"));
     }
 
     public void Dispose()

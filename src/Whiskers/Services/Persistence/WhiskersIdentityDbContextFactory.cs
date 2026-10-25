@@ -24,7 +24,7 @@ public sealed class WhiskersIdentityDbContextFactory : IDesignTimeDbContextFacto
                 npg.MigrationsHistoryTable("__IdentityMigrationsHistory");
             });
         else
-            builder.UseSqlite("Data Source=serverwatch-design.db", sql =>
+            builder.UseSqlite("Data Source=whiskers-design.db", sql =>
             {
                 sql.MigrationsAssembly("Whiskers.Migrations.Sqlite");
                 sql.MigrationsHistoryTable("__IdentityMigrationsHistory");
