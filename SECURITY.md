@@ -74,14 +74,18 @@ built in).
 - **Scopes** apply identically to every MCP tool call: a signed-in web user is mapped by role
   (Viewer → Read, Operator → Write, Admin → Admin), an MCP API key by its scope (or explicit tool list),
   the in-process agent by the scope of whoever triggered it — it can never exceed that.
-- **Guardrails** (Allow / Confirm / Block, protected resources, forbidden arguments; most-restrictive wins)
-  apply to every call the in-process agent executes, whether it was started from the web UI or via the
-  MCP `instruct_agent` tool. `Confirm` pauses the call until an authorized human approves the exact action
-  and parameters. **Direct tool calls from an external MCP client are bounded by the key's scope only**,
-  not by the guardrail engine — issue external keys with the least scope they need.
+- **Guardrails** (Allow / Confirm / Block, protected resources, forbidden arguments, read-only kill switch;
+  most-restrictive wins) apply identically to every tool call: those the in-process agent executes
+  (started from the web UI or via the MCP `instruct_agent` tool) and **direct tool calls from external MCP
+  clients**. For the agent, `Confirm` pauses the run until an authorized human approves the exact action
+  and parameters. For a direct call it raises the same approval and refuses the call; once approved, the
+  identical call (same caller, tool and arguments) runs exactly once within 10 minutes. Approving requires
+  at least the level the action needs. The engine ships with the agent module (on by default); with that
+  module disabled, direct calls are bounded by their scope alone.
 - **MCP API keys** are created in the web UI (*Settings → MCP*) with an explicit scope and can be disabled
-  or deleted there. The ServerWatch-era flat key file `api-keys.json` (unscoped) has been removed
-  completely; leftover copies are deleted on start.
+  or deleted there. A key is 256 bits from a CSPRNG, shown once at creation, and **stored only as its
+  SHA-256 hash**; presented keys are hashed and compared in constant time. The ServerWatch-era flat key file
+  `api-keys.json` (unscoped, plaintext) has been removed completely; leftover copies are deleted on start.
 - **Accountability:** user actions land in the Audit Log; every agent and direct MCP tool call lands in
   Agent History (actor/key, redacted parameters, decision, result).
 
@@ -93,7 +97,7 @@ built in).
   a compromised Whiskers instance is root on every managed host.** The controls above decide who reaches
   that capability; they do not reduce what it is.
 - **The Whiskers instance is the crown jewel.** Its data directory holds the mTLS client key, the vault,
-  the MCP keys (`mcp-permissions.json`), provider tokens and the database. Vault-stored secrets are
+  the MCP key hashes (`mcp-permissions.json`), provider tokens and the database. Vault-stored secrets are
   encrypted at rest (AES-256-GCM, key derived from `VAULT_KEY`); other files in the data directory rely on
   file-system and volume protection. Whoever can read that directory, or run code in the Whiskers
   container, can act as Whiskers.

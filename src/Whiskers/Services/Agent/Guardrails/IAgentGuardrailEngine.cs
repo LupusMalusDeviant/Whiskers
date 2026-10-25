@@ -5,8 +5,8 @@ namespace Whiskers.Services.Agent.Guardrails;
 
 /// <summary>Evaluates a planned tool call BEFORE execution. Fully LLM-independent.
 /// Aggregates all IGuardrailRule with "most-restrictive wins": a Deny beats everything,
-/// otherwise a Confirm wins, otherwise Allow. Called by both the IAgentToolInvoker AND McpPermissionCheck
-/// — this is the only path to side effects and therefore inescapable.</summary>
+/// otherwise a Confirm wins, otherwise Allow. Called by the IAgentToolInvoker (agent calls) AND the
+/// DirectMcpCallGuard (direct MCP tool calls) — together they cover every path to a tool's side effects.</summary>
 public interface IAgentGuardrailEngine
 {
     GuardrailDecision Evaluate(GuardrailRequest request);

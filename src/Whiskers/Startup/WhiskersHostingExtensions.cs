@@ -125,7 +125,9 @@ public static class WhiskersHostingExtensions
         IEnumerable<Type> mcpToolTypes = modules.SelectMany(m => m.McpToolTypes).ToArray();
         builder.Services.AddMcpServer()
             .WithHttpTransport()
-            .WithTools(mcpToolTypes);
+            .WithTools(mcpToolTypes)
+            // Direct tool calls pass the same guardrail policy as the in-process agent (see McpGuardrailFilter).
+            .WithRequestFilters(filters => filters.AddCallToolFilter(McpGuardrailFilter.Create));
 
         // Nav + tool registry from the enabled modules' merged metadata.
         builder.Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(

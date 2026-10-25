@@ -282,7 +282,7 @@ with it. The full design, PKI (step-ca), onboarding flow and trade-offs are in
 ### Security summary
 
 - **No standing SSH key** for managed hosts in steady state; management ports are **mesh-bound**, nothing management-related is exposed to the public internet by design.
-- **Deterministic policy enforcement, not prompt instructions.** Every MCP tool call — from a signed-in web user, an external MCP client or the in-process agent — passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list). Agent-executed calls additionally pass the guardrail engine: action classification (Allow / Confirm / Block, protected resources, forbidden arguments) and human-in-the-loop approval for `Confirm`. See [How the policy layer applies](#how-the-policy-layer-applies).
+- **Deterministic policy enforcement, not prompt instructions.** Every MCP tool call — from a signed-in web user, an external MCP client or the in-process agent — passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list). Every one of them then also passes the same guardrail engine: action classification (Allow / Confirm / Block, protected resources, forbidden arguments, read-only kill switch) and human-in-the-loop approval for `Confirm`. See [How the policy layer applies](#how-the-policy-layer-applies).
 - **MCP API keys** are created in the web UI with an explicit scope; the ServerWatch-era unscoped key file `api-keys.json` no longer exists (see the [MCP server](#mcp-server) section).
 - **Secrets** (`.env`, the encrypted vault, the DB) live under `/app/data` / `.env`, both gitignored and volume-mounted — never baked into the image or committed.
 - **Full-repo security review & remediation** (see the [security-fixes changelog](docs/reviews/2026-07-07-security-fixes-changelog.md)): all critical and high findings, plus most medium/low issues, are fixed — per-key RBAC on **every** path (including the agent and MCP), the vault on **AES-256-GCM + PBKDF2**, schema via **EF Core migrations**, trust-critical images **pinned by digest**, restricted forwarded-header trust, and a scrape-token-gated `/metrics`.
@@ -337,16 +337,17 @@ Behind a reverse proxy on a subpath (`PATH_BASE=/whiskers`) the URL becomes
 - **Every tool declares its minimum scope in code** and the check runs on every call. A scoped key never
   reaches a tool above its scope; a tool without a configured level is denied (fail-closed); an Admin can
   switch individual tools off for every key.
-- **Key handling:** keys are 64-character random values, compared in constant time and persisted in the
-  application's data directory (`mcp-permissions.json`, next to the other Whiskers state — never in the
-  image or the repository). The key value is not written to the log. Requests without a valid key are
-  rejected before any tool runs.
+- **Keys are stored only as hashes.** A key is 256 bits from a cryptographic RNG; Whiskers shows it
+  **once**, right after creation, and persists only its SHA-256 hash plus the last four characters for
+  recognition. A presented key is hashed and compared in constant time. Neither the key nor any part of a
+  rejected token is written to the log. Someone who reads the data directory or a backup gets hashes, which
+  do not authenticate. Requests without a valid key are rejected before any tool runs.
 
 > **Note for older index entries (e.g. MCP directories that crawled the ServerWatch-era README):**
 > Whiskers was called *ServerWatch* before the rebrand in v0.12. The old flat, unscoped key file
 > `/app/data/api-keys.json` is **gone**: its last compatibility fallback was removed after v0.14.1, no code
 > path reads it, and a leftover copy is deleted on start. MCP access works only with a scoped key created
-> in the web UI.
+> in the web UI, and those keys are stored as SHA-256 hashes, never in plaintext.
 
 **Tools span:**
 
@@ -373,9 +374,13 @@ in a prompt, so no model output can talk its way past it.
 
 | Caller | Scope check (Read / Write / Admin, tool allow-list) | Guardrail engine (Allow / Confirm / Block) | Recorded in |
 |---|---|---|---|
-| Web UI user | ✅ by role (Viewer → Read, Operator → Write, Admin → Admin) | ✅ for actions run through the agent | Audit Log |
-| External MCP client, direct tool call | ✅ by API key | — (bounded by the key's scope; give external clients the least scope they need) | Agent History |
-| In-process agent (triggered from the UI **or** via MCP `instruct_agent`) | ✅ capped at the triggering user's / key's scope | ✅ every call; `Confirm` pauses until a human approves the exact action + parameters | Agent History |
+| External MCP client, direct tool call | ✅ by API key | ✅ every call; `Confirm` raises an approval, and the **identical** call runs **once** after a human approved it (approve-then-retry, valid 10 min) | Agent History |
+| Signed-in web user calling `/mcp` | ✅ by role (Viewer → Read, Operator → Write, Admin → Admin) | ✅ same as above | Agent History |
+| In-process agent (triggered from the UI **or** via MCP `instruct_agent`) | ✅ capped at the triggering user's / key's scope | ✅ every call; `Confirm` pauses the run until a human approves the exact action + parameters | Agent History |
+
+Approvals are resolved on the *Approvals* page; approving requires at least the level the action needs.
+The guardrail engine is part of the agent module (on by default). With that module switched off there is
+no Approvals page either, and direct calls are bounded by their scope alone.
 
 ---
 
@@ -419,7 +424,7 @@ See [.env.example](.env.example) for the full, commented list.
 ### Notable runtime details
 
 - **Email whitelist**: managed in the UI under *Settings > Authentication*; changes apply without a restart.
-- **MCP API keys**: managed in the UI under *Settings > MCP* (scope Read / Write / Admin per key). A fresh install starts with one **Read**-scoped key there; its value is never written to the logs. Grant Write/Admin only to keys that need it.
+- **MCP API keys**: created in the UI under *Settings > MCP* (scope Read / Write / Admin per key). A fresh install has none. The key is shown once at creation and stored only as a SHA-256 hash — copy it then. Keys from older versions are converted to hashes on the first start and keep working. Grant Write/Admin only to keys that need it.
 - **Data persistence**: the metrics database (SQLite by default, or PostgreSQL), JSON stores and certificates live under the data directory (`WHISKERS_DATA_DIR`, default `/app/data`); never in the image.
 - **Health probes**: anonymous `/healthz` (liveness) and `/readyz` (readiness) endpoints; the image ships a Docker `HEALTHCHECK` and Kubernetes can use them as probes. (`/health` without the `z` is the in-app status page.)
 

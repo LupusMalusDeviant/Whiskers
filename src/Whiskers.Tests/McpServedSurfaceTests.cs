@@ -68,7 +68,7 @@ public class McpServedSurfaceTests
         }
     }
 
-    private static async Task<string> InitializeAsync(HttpClient client)
+    internal static async Task<string> InitializeAsync(HttpClient client)
     {
         var response = await PostAsync(client, sessionId: null, """
             {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
@@ -122,7 +122,7 @@ public class McpServedSurfaceTests
             .ToList();
     }
 
-    private static Task<HttpResponseMessage> PostAsync(HttpClient client, string? sessionId, string json)
+    internal static Task<HttpResponseMessage> PostAsync(HttpClient client, string? sessionId, string json)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
         {
@@ -135,7 +135,7 @@ public class McpServedSurfaceTests
     }
 
     /// <summary>The transport may answer as plain JSON or as a single SSE event; take the payload from either.</summary>
-    private static string ExtractJsonRpcPayload(string body)
+    internal static string ExtractJsonRpcPayload(string body)
     {
         var trimmed = body.TrimStart();
         if (trimmed.StartsWith('{')) return trimmed;

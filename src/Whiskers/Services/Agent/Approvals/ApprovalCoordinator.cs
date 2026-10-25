@@ -85,7 +85,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     }
 
     /// <summary>Coarse risk band from the tool's required permission level (display-only).</summary>
-    private static string RiskOf(string level) => McpPermissionLevels.Normalize(level) switch
+    internal static string RiskOf(string level) => McpPermissionLevels.Normalize(level) switch
     {
         "admin" => "high",
         "write" => "medium",
@@ -97,7 +97,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     private static readonly string[] ServerKeys = { "serverId", "server", "serverName" };
     private static readonly string[] WorkloadKeys = { "containerId", "container", "name", "pod", "workload", "service" };
 
-    private static (string? server, string? workload) ExtractTarget(string? argsJson)
+    internal static (string? server, string? workload) ExtractTarget(string? argsJson)
     {
         if (string.IsNullOrWhiteSpace(argsJson)) return (null, null);
         try

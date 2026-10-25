@@ -13,6 +13,20 @@ All notable changes to Whiskers are documented here. The format follows
   key created under *Settings → MCP* with a Read / Write / Admin scope. The setup wizard no longer shows an
   initial key and points there instead.
 
+- **MCP API keys are stored only as SHA-256 hashes.** New keys come from the CSPRNG (256 bits) and are shown
+  once at creation; `mcp-permissions.json` keeps only the hash and the last four characters. Existing
+  plaintext keys are converted on the first start and keep working. A fresh install no longer creates an
+  unseen default key, a settings save can no longer alter key material, and rejected tokens are no longer
+  logged with a prefix. **Behaviour change:** the key column in *Settings → MCP* can no longer reveal or
+  copy an existing key — copy a new key right after creating it.
+- **Guardrails now apply to direct MCP tool calls.** An external client calling a tool directly was bounded
+  by its key's scope only; protected resources, forbidden arguments, the read-only switch and required
+  approvals applied to the in-process agent alone. Every `tools/call` now passes the same guardrail engine.
+  `Confirm` raises a Human-in-the-Loop approval; once approved, the identical call runs once within
+  10 minutes. **Behaviour change:** under the default policy, write tools called by external clients now
+  need an approval. If that is too strict, adjust the active guardrail preset (autonomous level,
+  confirmation for writes) — the preset applies to the agent as well.
+
 ### Changed
 - **Remaining ServerWatch names cleaned up.** README examples use the `whiskers` MCP server key and
   `/whiskers` paths; `WHISKERS_SELF_CONTAINERS` replaces `SERVERWATCH_SELF_CONTAINERS` (the old name is
