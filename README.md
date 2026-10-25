@@ -20,6 +20,7 @@ governed by <strong>permissions, code-enforced guardrails, approvals and a compl
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0" /></a>
 <a href="https://dotnet.microsoft.com/"><img src="https://img.shields.io/badge/.NET-10.0-512BD4.svg" alt=".NET" /></a>
 <a href="https://learn.microsoft.com/aspnet/core/blazor/"><img src="https://img.shields.io/badge/Blazor-Server-512BD4.svg" alt="Blazor" /></a>
+<a href="https://lobehub.com/mcp/lupusmalusdeviant-whiskers"><img src="https://lobehub.com/badge/mcp/lupusmalusdeviant-whiskers" alt="MCP Badge" /></a>
 </p>
 
 > ⚠️ **Beta.** Whiskers is under active development and not yet API-stable.
