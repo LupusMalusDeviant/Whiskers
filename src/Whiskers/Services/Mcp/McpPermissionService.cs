@@ -51,25 +51,9 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
                 }
             }
 
-            // Generate default API key if none exist
-            if (data.ApiKeys.Count == 0)
-            {
-                var defaultKey = new McpApiKeyConfig
-                {
-                    Name = "Standard",
-                    Key = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
-                    PermissionLevel = McpPermissionLevels.Read,
-                    Enabled = true
-                };
-                data.ApiKeys.Add(defaultKey);
-                changed = true;
-                // SECURITY (C6): never log the key value — logs land in `docker logs` / aggregators.
-                // Permission-system keys are managed in the UI (Settings → MCP-Rechte) and persisted in
-                // mcp-permissions.json, so the operator retrieves it there instead of from the log.
-                _logger.LogWarning(
-                    "Generated a default MCP API key (Level: {Level}). Manage it in the UI under " +
-                    "Settings → MCP; the key value is NOT written to the log.", defaultKey.PermissionLevel);
-            }
+            // No default key is generated: only the hash is stored, so a key nobody saw at creation could never
+            // be shown again. Keys are created in the UI (Settings → MCP) and displayed once to their creator.
+            changed |= MigratePlaintextKeys(data);
 
             changed |= EnforceCodeFloor(data);
 
@@ -112,17 +96,39 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         }
     }
 
-    /// <summary>
-    /// Constant-time comparison of a stored key against a provided key. Keys are kept as-is
-    /// (plaintext); this only removes the early-exit timing side channel of an ordinal `==`.
-    /// </summary>
-    private static bool KeysMatch(string storedKey, string providedKey)
+    /// <summary>Lower-case hex SHA-256 of a key — the only form a key is persisted in.</summary>
+    internal static string HashKey(string key) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
+
+    private static string HintOf(string key) => key.Length >= 4 ? key[^4..] : "";
+
+    /// <summary>Files written before key hashing hold the plaintext <c>Key</c>. Replace it with its hash in place
+    /// (the key keeps working, its clients need no change) and drop the plaintext. Returns whether anything
+    /// was migrated, so the caller rewrites the file and the plaintext leaves the disk.</summary>
+    internal bool MigratePlaintextKeys(McpPermissionData data)
     {
-        if (string.IsNullOrEmpty(storedKey) || string.IsNullOrEmpty(providedKey))
+        var migrated = 0;
+        foreach (var k in data.ApiKeys)
+        {
+            if (string.IsNullOrEmpty(k.Key)) continue;
+            if (string.IsNullOrEmpty(k.KeyHash)) k.KeyHash = HashKey(k.Key);
+            if (string.IsNullOrEmpty(k.KeyHint)) k.KeyHint = HintOf(k.Key);
+            k.Key = null;
+            migrated++;
+        }
+        if (migrated > 0)
+            _logger.LogWarning("Migrated {Count} MCP API key(s) from plaintext to SHA-256 hashes", migrated);
+        return migrated > 0;
+    }
+
+    /// <summary>Constant-time comparison of two hex hashes (the early exit of <c>==</c> would leak a prefix match).</summary>
+    private static bool HashesMatch(string storedHash, string providedHash)
+    {
+        if (string.IsNullOrEmpty(storedHash))
             return false;
         return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(storedKey),
-            Encoding.UTF8.GetBytes(providedKey));
+            Encoding.ASCII.GetBytes(storedHash),
+            Encoding.ASCII.GetBytes(providedHash));
     }
 
     /// <summary>
@@ -132,8 +138,9 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
     {
         if (string.IsNullOrEmpty(key))
             return null;
+        var hash = HashKey(key);
         // Single reference read = consistent immutable snapshot (writers swap _data atomically).
-        return _data.ApiKeys.FirstOrDefault(k => k.Enabled && KeysMatch(k.Key, key));
+        return _data.ApiKeys.FirstOrDefault(k => k.Enabled && HashesMatch(k.KeyHash, hash));
     }
 
     /// <summary>
@@ -148,8 +155,8 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         var keyConfig = ValidateKey(key);
         if (keyConfig == null)
         {
-            _logger.LogWarning("IsToolAllowed: key not found or disabled. Provided key starts with: {KeyPrefix}, total keys in store: {Count}",
-                key.Length > 8 ? key[..8] : key, data.ApiKeys.Count);
+            // Never log any part of the presented token — not even a prefix.
+            _logger.LogWarning("IsToolAllowed: key not found or disabled ({Count} keys in store)", data.ApiKeys.Count);
             return false;
         }
 
@@ -223,7 +230,8 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
     {
         Id = k.Id,
         Name = k.Name,
-        Key = k.Key,
+        KeyHash = k.KeyHash,
+        KeyHint = k.KeyHint,
         PermissionLevel = k.PermissionLevel,
         Enabled = k.Enabled,
         CreatedAt = k.CreatedAt,
@@ -266,6 +274,20 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         await _lock.WaitAsync();
         try
         {
+            // The UI edits name, level, tool list and the active flag — never the key material. Take the hash
+            // from the stored key with the same id, and drop entries the store does not know (keys are only
+            // ever created by AddApiKeyAsync), so a crafted save cannot plant a key of its own.
+            var stored = _data.ApiKeys.ToDictionary(k => k.Id);
+            data.ApiKeys = data.ApiKeys
+                .Where(k => stored.ContainsKey(k.Id))
+                .Select(k =>
+                {
+                    k.KeyHash = stored[k.Id].KeyHash;
+                    k.KeyHint = stored[k.Id].KeyHint;
+                    k.Key = null;
+                    return k;
+                })
+                .ToList();
             EnforceCodeFloor(data);
             _data = data;
             await _store.SaveAsync(_data);
@@ -283,10 +305,13 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
     /// </summary>
     public async Task<McpApiKeyConfig> AddApiKeyAsync(string name, string permissionLevel)
     {
+        // 256 bits from the CSPRNG, 64 hex characters — the same shape as the GUID-based keys before.
+        var plaintext = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
         var keyConfig = new McpApiKeyConfig
         {
             Name = name,
-            Key = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
+            KeyHash = HashKey(plaintext),
+            KeyHint = HintOf(plaintext),
             PermissionLevel = permissionLevel,
             Enabled = true
         };
@@ -309,7 +334,10 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         }
 
         _logger.LogInformation("New MCP API key created: {Name} (Level: {Level})", name, permissionLevel);
-        return keyConfig;
+        // The caller gets the plaintext exactly once; the stored instance never had it.
+        var shown = CloneKey(keyConfig);
+        shown.Key = plaintext;
+        return shown;
     }
 
     /// <summary>

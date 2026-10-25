@@ -12,7 +12,7 @@ public sealed class McpPermissionServiceTests : IDisposable
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"mcpperm-{Guid.NewGuid():N}");
 
     [Fact]
-    public async Task First_run_generates_a_key_but_never_logs_a_key_value()
+    public async Task First_run_creates_no_key_because_a_hashed_key_could_never_be_shown()
     {
         Directory.CreateDirectory(_dir);
         var logger = new ListLogger<McpPermissionService>();
@@ -20,10 +20,75 @@ public sealed class McpPermissionServiceTests : IDisposable
 
         await svc.InitializeAsync();
 
-        // A default key was created (the store reports one key)...
-        Assert.Contains(logger.Messages, m => m.Contains("1 keys"));
-        // ...but no log line may contain a 64-hex key value (Guid-N + Guid-N).
+        Assert.Empty(svc.GetPermissionData().ApiKeys);
         Assert.DoesNotContain(logger.Messages, m => Regex.IsMatch(m, "[0-9a-fA-F]{64}"));
+    }
+
+    [Fact]
+    public async Task A_new_key_is_returned_once_in_plaintext_but_only_its_hash_reaches_the_disk()
+    {
+        Directory.CreateDirectory(_dir);
+        var paths = new DataPathOptions(_dir);
+        var logger = new ListLogger<McpPermissionService>();
+        var svc = new McpPermissionService(logger, paths);
+        await svc.InitializeAsync();
+
+        var created = await svc.AddApiKeyAsync("ci", "write");
+
+        Assert.Matches("^[0-9a-f]{64}$", created.Key!);
+        var file = await File.ReadAllTextAsync(paths.McpPermissionsJson);
+        Assert.DoesNotContain(created.Key!, file);
+        Assert.Contains(McpPermissionService.HashKey(created.Key!), file);
+        Assert.Null(Assert.Single(svc.GetPermissionData().ApiKeys).Key);
+        Assert.Equal(created.Key![^4..], svc.GetPermissionData().ApiKeys[0].KeyHint);
+        Assert.DoesNotContain(logger.Messages, m => m.Contains(created.Key!));
+
+        // The plaintext still authenticates; its hash (what an attacker reading the file gets) does not.
+        Assert.Equal(created.Id, svc.ValidateKey(created.Key!)?.Id);
+        Assert.Null(svc.ValidateKey(McpPermissionService.HashKey(created.Key!)));
+
+        // ...and it survives a restart.
+        var reloaded = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        await reloaded.InitializeAsync();
+        Assert.Equal(created.Id, reloaded.ValidateKey(created.Key!)?.Id);
+    }
+
+    [Fact]
+    public async Task Plaintext_keys_from_an_older_file_are_migrated_to_hashes_and_keep_working()
+    {
+        Directory.CreateDirectory(_dir);
+        var paths = new DataPathOptions(_dir);
+        const string legacyKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        await File.WriteAllTextAsync(paths.McpPermissionsJson, $$$"""
+            {"ApiKeys":[{"Id":"k1","Name":"old","Key":"{{{legacyKey}}}","PermissionLevel":"read","Enabled":true}],"Tools":{}}
+            """);
+
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        await svc.InitializeAsync();
+
+        Assert.Equal("k1", svc.ValidateKey(legacyKey)?.Id);
+        var file = await File.ReadAllTextAsync(paths.McpPermissionsJson);
+        Assert.DoesNotContain(legacyKey, file);
+        Assert.Contains(McpPermissionService.HashKey(legacyKey), file);
+    }
+
+    [Fact]
+    public async Task Saving_from_the_UI_can_neither_plant_a_key_nor_change_key_material()
+    {
+        Directory.CreateDirectory(_dir);
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), new DataPathOptions(_dir));
+        await svc.InitializeAsync();
+        var real = await svc.AddApiKeyAsync("real", "read");
+
+        var data = svc.GetPermissionData();
+        data.ApiKeys[0].KeyHash = McpPermissionService.HashKey("attacker");
+        data.ApiKeys.Add(new Whiskers.Models.McpApiKeyConfig
+            { Id = "planted", Name = "x", KeyHash = McpPermissionService.HashKey("planted"), PermissionLevel = "admin" });
+        await svc.SavePermissionDataAsync(data);
+
+        Assert.Null(svc.ValidateKey("attacker"));
+        Assert.Null(svc.ValidateKey("planted"));
+        Assert.Equal(real.Id, svc.ValidateKey(real.Key!)?.Id);
     }
 
     [Fact]

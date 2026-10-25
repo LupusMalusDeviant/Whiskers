@@ -11,6 +11,8 @@ public interface IMcpPermissionService
     HashSet<string> GetAllowedTools(string key);
     McpPermissionData GetPermissionData();
     Task SavePermissionDataAsync(McpPermissionData data);
+    /// <summary>Creates a key. The returned instance is the only place its plaintext <c>Key</c> ever appears —
+    /// only the SHA-256 hash is stored, so the caller must show it to the user now.</summary>
     Task<McpApiKeyConfig> AddApiKeyAsync(string name, string permissionLevel);
     Task RemoveApiKeyAsync(string id);
     Task SetToolEnabledAsync(string toolName, bool enabled);

@@ -2256,7 +2256,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>AI-Chat gespeichert (gilt sofort).</value>
   </data>
   <data name="Settings_Snackbar_ApiKeyCreated" xml:space="preserve">
-    <value>API-Schlüssel '{0}' erstellt. Bitte kopieren und sicher aufbewahren!</value>
+    <value>API-Schlüssel '{0}' erstellt. Jetzt kopieren — gespeichert wird nur sein Hash, er kann nicht erneut angezeigt werden.</value>
   </data>
   <data name="Settings_Snackbar_ApiKeyDeleted" xml:space="preserve">
     <value>API-Schlüssel gelöscht.</value>

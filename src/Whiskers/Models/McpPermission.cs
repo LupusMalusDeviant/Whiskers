@@ -10,7 +10,15 @@ public class McpApiKeyConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     public string Name { get; set; } = "";
-    public string Key { get; set; } = "";
+    /// <summary>The plaintext key. Set ONLY on the instance <c>AddApiKeyAsync</c> returns (shown to the creator once)
+    /// and when an old file is read for migration; never persisted — <c>null</c> is skipped on write.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Key { get; set; }
+    /// <summary>Lower-case hex SHA-256 of the key — what is stored and compared. A fast hash is enough here: keys
+    /// are 256-bit random values, so there is nothing for a slow KDF to protect against brute force.</summary>
+    public string KeyHash { get; set; } = "";
+    /// <summary>The key's last four characters, so the UI can tell keys apart without holding the secret.</summary>
+    public string KeyHint { get; set; } = "";
     public string PermissionLevel { get; set; } = "read"; // read, write, admin
     public bool Enabled { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
