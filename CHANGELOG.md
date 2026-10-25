@@ -6,6 +6,41 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-25
+
+AutoPatch, measured update risk, DNS records over MCP — and a full pass over the UI for buttons that claimed
+success without checking, filters that did not filter and pages that crashed on empty data.
+
+### Fixed
+- **Copying an API key (or any other value) silently did nothing over plain HTTP.** `navigator.clipboard` exists
+  only in a secure context, the error was swallowed and the page reported "copied" anyway. Copying now falls back
+  to a selection copy, reports the real outcome, and when it fails it reveals the value and says to copy it by hand.
+- **The image update check never saw stale containers.** It read the local digest through the tag, so any pull
+  without a recreate made an outdated container look current — and once the tag moved, Docker listed the container
+  by its bare image id and the registry was asked about that id ("could not reach registry"). The check now
+  compares the registry with the image the container actually runs.
+- **Container detail:** for a Viewer the tab positions shifted, so the database tab spun forever while the hidden
+  env tab's loader ran instead; buttons for Admin-only database and `.env` actions were shown to roles the handler
+  then refused; saving `.env` after opening a secret for editing without typing wiped the secret; the CVE tab of a
+  notification deep link always said "no scan".
+- **Adding a server twice.** Save → failed connection probe → corrected host → Save again created a second entry
+  with the same id. A retry now updates the first entry, and the store refuses duplicate ids.
+- **Renaming the active guardrail preset silently activated a different one** (the first in the list).
+- **The setup wizard accepted a password the account creation then rejected** — on the last step, in Identity's
+  English wording. The admin step now checks the real password policy and names it; the "local Docker host
+  connected" step actually probes the host.
+- Pages that ignored their own controls or failures: "Scan now" on the CVE page never refreshed it; health-report
+  filters applied only after Refresh; the notification log could not filter most event types; the self-status
+  timeline never refreshed; App Store port conflicts were computed for the first server, not the chosen target;
+  the container diff read env from the default server; duplicate ports or variables in the deploy form crashed
+  the page; a failed agent start left the chat busy for good; agent-mode chats in the floating widget were never
+  saved; terminals printed "session ended" twice; scheduled tasks could be created without a target or with an
+  invalid cron expression.
+- Kubernetes servers are no longer offered as targets for compose deploys, the compose editor, the App Store or
+  volume backups.
+- Cloud power and snapshot actions are now written to the audit log, like every other host action.
+- English UI showed German in the notification bell and the DNS settings panel.
+
 ### Fixed
 - **A server stayed paused until the next restart after a probe that produced no verdict.** When the half-open
   probe of the per-server circuit breaker ended in an application error or was cancelled, nothing cleared the
@@ -32,6 +67,19 @@ All notable changes to Whiskers are documented here. The format follows
   the request. This affected the pre-existing container metrics too, not only the new self-metrics.
 
 ### Added
+- **Dashboard: the "Stopped" and "Unhealthy" tiles filter.** One click shows exactly the containers the tile
+  counts, across all servers (combined with the group/tag filter); a chip or a second click clears it.
+- **AutoPatch — nightly same-tag security patching (opt-in, off by default, dry run by default).** Rolls a
+  container onto the newest image of its own tag through compose: never across a major version, skipped when the
+  compose file has drifted from the running container or the image is built on the host, databases dumped and
+  verified first, health-checked afterwards with automatic rollback. `get_auto_patch_status` and
+  `preview_auto_patch` show what it would do.
+- **Measured update risk.** `assess_update_risk` pulls the candidate image and compares it with the running one;
+  `get_blast_radius` lists what a change takes down with it.
+- **DNS records over MCP** (module `dns`, Infomaniak): `list_dns_records`, `set_dns_record` (idempotent),
+  `delete_dns_record`, restricted to allowed zones.
+- **borg-fleet** (`deploy/borg-fleet`): nightly append-only backups of every server to a storage box, one
+  sub-account per server.
 - **`renew_mtls_certificate` renews a proxy certificate without locking anyone out.** The host generates a new
   key, step-ca signs the CSR, and ghostunnel restarts with it. Before the swap the host arms a three-minute timer
   that restores the previous certificate unless Whiskers confirms through the new one. Admin-only, audited.
