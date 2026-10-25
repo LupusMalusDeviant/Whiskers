@@ -32,7 +32,9 @@ IMG=$(docker inspect -f '{{.Config.Image}}' "$C")
 OLD_ID=$(docker inspect -f '{{.Image}}' "$C")
 REPO=${IMG%:*}; [ "$REPO" = "$IMG" ] && REPO=$IMG
 TAG=${IMG##*:}; [ "$TAG" = "$IMG" ] && TAG=latest
-BK="$REPO:pre-upd-${TS:0:8}"
+# Per container: two services on one host often share a repo (two postgres:*), and a date-only tag
+# would let the second backup overwrite the first.
+BK="$REPO:pre-upd-${TS:0:8}-$C"
 PRE_H=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$C")
 
 # Version of an image: OCI label first, then the usual *_VERSION env of official images.

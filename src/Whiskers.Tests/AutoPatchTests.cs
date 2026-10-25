@@ -225,6 +225,8 @@ public class AutoPatchTests
         Assert.DoesNotContain('\r', text);
         Assert.StartsWith("#!/bin/bash", text);
         Assert.Contains("UPD-WOULD-UPDATE", text);
+        // 2026-10-25: a date-only backup tag let authentik's postgres overwrite pack-postgres' on the same host.
+        Assert.Contains("BK=\"$REPO:pre-upd-${TS:0:8}-$C\"", text);
         Assert.Matches("^[0-9a-f]{64}$", sha);
     }
 
