@@ -7,6 +7,10 @@ All notable changes to Whiskers are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **MCP `serverInfo`.** `initialize` now reports name, title, version, description, website and icon, so MCP
+  clients and directories show what the server is instead of the bare assembly name.
+- **`lhm.plugin.json`**: the LobeHub Marketplace manifest (owner declaration), generated with
+  `lhm plugin init` from the running server — 86 tools, 2 resources, 4 prompts.
 - **MCP prompts and resources.** Four user-invokable prompts (`triage_unhealthy_containers`,
   `security_review_server`, `plan_safe_update`, `investigate_host_load`) package common operations workflows,
   with a built-in stop before any write. Two read-only resources describe the MCP surface:
