@@ -29,7 +29,9 @@ curl --max-time 5 http://<public-ip>:9100/metrics   # MUST time out / be refused
 ## Persistence
 
 VictoriaMetrics storage lives under `/opt/serverwatch-telemetry/vm-storage` (bind-mount, survives
-rebuilds).
+rebuilds). The path, like the `tag:serverwatch` controller tag in `tailscale-acl.json`, keeps the project's
+pre-rebrand name (Whiskers was called ServerWatch before v0.12) so existing hosts and tailnet ACLs keep
+working unchanged.
 
 ## Metric contract (what Whiskers queries)
 

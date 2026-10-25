@@ -14,7 +14,7 @@ Der Review empfiehlt `-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=
 
 - MITM auf den SSH-Pfaden erschweren, ohne die Erstverbindungs-UX zu ändern.
 - **Keine Selbst-Aussperrung** von der verwalteten Infrastruktur.
-- Respektieren der CLAUDE.md-Grenze: der mTLS/WireGuard-Netzwerk-Layer und die SSH-/Auth-Pfade sind „Off-Limits" ohne ausdrückliche Erlaubnis.
+- Respektieren der Projekt-Grenze (heute: docs/ARCHITECTURE.md, „Protected layers"): der mTLS/WireGuard-Netzwerk-Layer und die SSH-/Auth-Pfade sind „Off-Limits" ohne ausdrückliche Erlaubnis.
 
 ## Optionen
 
@@ -27,7 +27,7 @@ Der Review empfiehlt `-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=
 **Option 2 — zurückgestellt.** Begründung:
 
 - Diese Docker-Hosts werden regelmäßig rebootet/neu aufgesetzt; ein Host-Key-Wechsel nach einem Rebuild würde mit `accept-new` **alle** SSH-verwalteten Server gleichzeitig unerreichbar machen — genau die Fehlerklasse „alle SSH-Server Unreachable", die schon einmal auftrat (Tunnel-Leak-Historie).
-- CLAUDE.md markiert den Netzwerk-/Auth-Layer explizit als Off-Limits ohne ausdrückliche Erlaubnis.
+- Die Projekt-Regeln (heute docs/ARCHITECTURE.md) markieren den Netzwerk-/Auth-Layer explizit als Off-Limits ohne ausdrückliche Erlaubnis.
 
 Der fertige Patch liegt bereit (siehe unten) und wird nach ausdrücklicher Freigabe umgesetzt — dann zusammen mit dem Anlegen von `/app/data/ssh-keys/` und idealerweise dem Vorab-Hinterlegen der erwarteten Host-Keys pro Server (Richtung Option 3), um Rebuild-bedingte Ausfälle abzufangen.
 

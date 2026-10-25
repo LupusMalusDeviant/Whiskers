@@ -7,7 +7,7 @@ namespace Whiskers.Services.Backup;
 /// <summary>
 /// Streaming authenticated encryption for self-backup archives (framed AES-256-GCM). The key is derived
 /// from the <c>VAULT_KEY</c> passphrase with PBKDF2 (600k, SHA-256) over a per-archive random salt that is
-/// stored in the plaintext header — the key itself is NEVER written to the archive (CLAUDE.md guardrail:
+/// stored in the plaintext header — the key itself is NEVER written to the archive (docs/ARCHITECTURE.md engineering rule:
 /// no key next to the ciphertext). The per-archive salt also keeps this key cryptographically distinct from
 /// the vault master key even though both derive from the same passphrase.
 ///

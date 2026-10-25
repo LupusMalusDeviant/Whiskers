@@ -44,13 +44,65 @@ fixes. There is no long-term-support branch yet.
 
 ## Security model (summary)
 
-- **No standing SSH key** for managed hosts in steady state, management runs over a private
-  WireGuard mesh with mutual-TLS Docker access. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-- **Management ports are mesh-bound**: nothing management-related is exposed to the public internet
-  by design.
-- **MCP access is gated per API key** as Read / Write / Admin.
-- **The acting agent is bounded by code-enforced guardrails** evaluated at the tool boundary (not in
-  the prompt) and can never exceed the rights of whoever/whatever triggered it.
+### Architecture in one paragraph
+
+Whiskers is a **single-replica appliance**: one Blazor Server process with its background loops and its
+state (SQLite by default, PostgreSQL optional) in one data directory. Compose runs one container and the
+Helm chart pins `replicas: 1` with a `Recreate` strategy; there is no clustering and no shared session
+store. Availability and backup of that one instance are the operator's responsibility (self-backup is
+built in).
+
+### Transport: SSH for bootstrap, mTLS planes for operation
+
+- **SSH is used only to bootstrap a host.** Onboarding opens one SSH connection, with host-key
+  verification (trust-on-first-use, then pinned), to join the host to a private WireGuard mesh
+  (Tailscale/NetBird) and roll out the mTLS certificates, the Docker proxy and telemetry. The bootstrap
+  credential is deleted afterwards. A server added as a plain SSH connection and not yet onboarded keeps
+  using SSH until it is migrated.
+- **Steady-state operation runs key-free over three separate planes:** telemetry (`node_exporter` →
+  VictoriaMetrics over the mesh), the Docker API (Docker Engine API over mutual TLS, client CN pinned,
+  behind a verb-whitelisting socket proxy) and host control (a one-shot `nsenter` container driven over
+  the same mTLS channel). Whiskers holds **no standing SSH key** for an onboarded host. See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Management ports are mesh-bound**: nothing management-related is exposed to the public internet by
+  design.
+
+### Policy enforcement (scopes, guardrails, approvals)
+
+- **Deterministic policy-enforcement layer (Read/Write/Admin scopes, action classification and
+  human-in-the-loop approvals)**, evaluated in code at the tool boundary — not in a prompt.
+- **Scopes** apply identically to every MCP tool call: a signed-in web user is mapped by role
+  (Viewer → Read, Operator → Write, Admin → Admin), an MCP API key by its scope (or explicit tool list),
+  the in-process agent by the scope of whoever triggered it — it can never exceed that.
+- **Guardrails** (Allow / Confirm / Block, protected resources, forbidden arguments, read-only kill switch;
+  most-restrictive wins) apply identically to every tool call: those the in-process agent executes
+  (started from the web UI or via the MCP `instruct_agent` tool) and **direct tool calls from external MCP
+  clients**. For the agent, `Confirm` pauses the run until an authorized human approves the exact action
+  and parameters. For a direct call it raises the same approval and refuses the call; once approved, the
+  identical call (same caller, tool and arguments) runs exactly once within 10 minutes. Approving requires
+  at least the level the action needs. The engine ships with the agent module (on by default); with that
+  module disabled, direct calls are bounded by their scope alone.
+- **MCP API keys** are created in the web UI (*Settings → MCP*) with an explicit scope and can be disabled
+  or deleted there. A key is 256 bits from a CSPRNG, shown once at creation, and **stored only as its
+  SHA-256 hash**; presented keys are hashed and compared in constant time. The ServerWatch-era flat key file
+  `api-keys.json` (unscoped, plaintext) has been removed completely; leftover copies are deleted on start.
+- **Accountability:** user actions land in the Audit Log; every agent and direct MCP tool call lands in
+  Agent History (actor/key, redacted parameters, decision, result).
+
+### Threat model: what is and is not protected
+
+- **The Docker-API and host-control planes are root-equivalent on the managed host.** Creating a container
+  (needed for deploys) or running `nsenter` is root by construction; the socket proxy's verb whitelist
+  narrows the API surface but does not change that. Consequently, **an Admin-scoped key, an Admin user or
+  a compromised Whiskers instance is root on every managed host.** The controls above decide who reaches
+  that capability; they do not reduce what it is.
+- **The Whiskers instance is the crown jewel.** Its data directory holds the mTLS client key, the vault,
+  the MCP key hashes (`mcp-permissions.json`), provider tokens and the database. Vault-stored secrets are
+  encrypted at rest (AES-256-GCM, key derived from `VAULT_KEY`); other files in the data directory rely on
+  file-system and volume protection. Whoever can read that directory, or run code in the Whiskers
+  container, can act as Whiskers.
+- **The default `docker-compose.yml` profile is privileged** (host PID namespace) so it can manage its own
+  host. Use `docker-compose.hardened.yml` when Whiskers only manages remote hosts.
 - **Secrets** (`.env`, API keys, tokens, certificates, the encrypted vault, the SQLite DB) live under
   `/app/data` / `.env`, both gitignored and volume-mounted, never baked into the image or committed.
 

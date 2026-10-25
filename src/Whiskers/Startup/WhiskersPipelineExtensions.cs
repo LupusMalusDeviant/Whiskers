@@ -16,7 +16,7 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Startup;
 
 /// <summary>The HTTP request pipeline + startup warm-up, moved <b>verbatim</b> from Program.cs. The middleware
-/// ORDER is security-critical (CLAUDE.md Off-Limits): forwarded headers first, then the fixed
+/// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): forwarded headers first, then the fixed
 /// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. This method keeps
 /// every <c>Use*</c>/<c>Map*</c> call in the exact same order as before — nothing is reordered, only relocated
 /// (the McpCallLog middleware still sits between the endpoint maps exactly where it did).</summary>
@@ -260,10 +260,9 @@ public static class WhiskersPipelineExtensions
                 if (authHeader != null && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) // NIED-1: scheme is case-insensitive
                 {
                     var key = authHeader["Bearer ".Length..];
-                    // Validate via new permission service (or legacy store for backwards compat)
-                    if (permService?.ValidateKey(key) != null) return true;
-                    var legacyStore = httpContext?.RequestServices.GetService<Whiskers.Mcp.IMcpApiKeyStore>();
-                    return legacyStore?.ValidateKey(key) == true;
+                    // The permission service is the only key source. The pre-0.15 flat `api-keys.json`
+                    // fallback is gone, so a key without a scope can no longer pass this gate.
+                    return permService?.ValidateKey(key) != null;
                 }
                 // Also allow authenticated web users
                 return context.User.Identity?.IsAuthenticated == true;
@@ -343,6 +342,8 @@ public static class WhiskersPipelineExtensions
             {
                 var containers = await docker.ListAllContainersAsync(all: true);
 
+                // Metric names keep their pre-rebrand `serverwatch_` prefix so existing Prometheus
+                // dashboards and alert rules keep working; renaming them is a breaking change for scrapers.
                 // Container counts
                 sb.AppendLine($"# HELP serverwatch_containers_total Total number of containers");
                 sb.AppendLine($"# TYPE serverwatch_containers_total gauge");

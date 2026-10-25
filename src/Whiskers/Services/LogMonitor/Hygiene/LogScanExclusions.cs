@@ -13,7 +13,7 @@ namespace Whiskers.Services.LogMonitor.Hygiene;
 /// <para><b>What this does not detect.</b> Only the outermost hop is knowable. On a host where Whiskers talks
 /// to a tunnel which talks to a socket proxy, the tunnel is found and the proxy behind it is not — nothing in
 /// the container list says who talks to whom. That second hop is what
-/// <c>SERVERWATCH_SELF_CONTAINERS</c> is for, and <see cref="Evaluate"/> says so in the detail text of the hop
+/// <c>WHISKERS_SELF_CONTAINERS</c> is for, and <see cref="Evaluate"/> says so in the detail text of the hop
 /// it did find, so the operator is told rather than left to notice.</para>
 /// </summary>
 public sealed class LogScanExclusions : ILogScanExclusions
@@ -33,11 +33,15 @@ public sealed class LogScanExclusions : ILogScanExclusions
         _manualNames = manualNames ?? ManualNamesFromEnvironment();
     }
 
-    /// <summary>The manual override, unchanged from before: <c>SERVERWATCH_SELF_CONTAINERS</c>, comma-separated.
-    /// It takes precedence over detection — an operator who names a container knows something the port table
-    /// does not.</summary>
+    /// <summary>The manual override: <c>WHISKERS_SELF_CONTAINERS</c>, comma-separated. The pre-rebrand name
+    /// <c>SERVERWATCH_SELF_CONTAINERS</c> is still honoured when the new one is unset, so existing <c>.env</c>
+    /// files keep working. The default covers both container names Whiskers ships with (installer:
+    /// <c>whiskers</c>, repository compose files: <c>serverwatch</c>). It takes precedence over detection — an
+    /// operator who names a container knows something the port table does not.</summary>
     public static IReadOnlySet<string> ManualNamesFromEnvironment() => new HashSet<string>(
-        (Environment.GetEnvironmentVariable("SERVERWATCH_SELF_CONTAINERS") ?? "serverwatch")
+        (Environment.GetEnvironmentVariable("WHISKERS_SELF_CONTAINERS")
+         ?? Environment.GetEnvironmentVariable("SERVERWATCH_SELF_CONTAINERS")
+         ?? "whiskers,serverwatch")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
         StringComparer.OrdinalIgnoreCase);
 
@@ -75,7 +79,7 @@ public sealed class LogScanExclusions : ILogScanExclusions
         //    cannot show, such as a socket proxy sitting behind the tunnel.
         if (_selfServerIds.Contains(container.ServerId) && _manualNames.Contains(container.Name))
             return new LogScanExclusion(server.Id, container.Id, container.Name, "configured",
-                "Named in SERVERWATCH_SELF_CONTAINERS, on the host Whiskers runs on. Whiskers' own container " +
+                "Named in WHISKERS_SELF_CONTAINERS, on the host Whiskers runs on. Whiskers' own container " +
                 "is here by default: scanning it feeds its own alert lines back into the rules.");
 
         // 2. The access path — the only detection that is not a guess.
@@ -90,7 +94,7 @@ public sealed class LogScanExclusions : ILogScanExclusions
             $"Whiskers reaches Docker on this server through {target.Host}:{target.Port}, which this container " +
             $"publishes. Every request Whiskers makes is a line in its log. If it forwards to a further " +
             $"container (a socket proxy behind a tunnel), that one is not detectable from the container list — " +
-            $"add it to SERVERWATCH_SELF_CONTAINERS.");
+            $"add it to WHISKERS_SELF_CONTAINERS.");
     }
 
     /// <summary>The address:port this server's configuration tells us to connect to, or null when there is

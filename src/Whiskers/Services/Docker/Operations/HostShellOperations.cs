@@ -15,7 +15,8 @@ internal sealed class HostShellOperations
 
     private const string HostShellImage = "alpine:latest";
     // Label stamped on every one-shot host-shell helper container so leaked ones (from a run that
-    // was interrupted before its finally-remove) can be identified and swept later.
+    // was interrupted before its finally-remove) can be identified and swept later. The pre-rebrand
+    // (ServerWatch) name is kept on purpose: renaming it would hide helpers leaked by older versions from the sweep.
     private const string HostShellLabel = "serverwatch.hostshell";
 
     public HostShellOperations(

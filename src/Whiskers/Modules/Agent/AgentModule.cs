@@ -78,6 +78,9 @@ public sealed class AgentModule : IWhiskersModule
             Whiskers.Services.Agent.AgentPrincipalResolver>();
         services.AddSingleton<Whiskers.Services.Agent.Approvals.IApprovalStore,
             Whiskers.Services.Agent.Approvals.ApprovalStore>();
+        // Guardrails for DIRECT MCP tool calls (external clients), wired into the MCP server by McpGuardrailFilter.
+        services.AddSingleton<Whiskers.Services.Agent.Guardrails.IDirectMcpCallGuard,
+            Whiskers.Services.Agent.Guardrails.DirectMcpCallGuard>();
         services.AddSingleton<Whiskers.Services.Agent.Approvals.IApprovalCoordinator,
             Whiskers.Services.Agent.Approvals.ApprovalCoordinator>();
         services.AddSingleton<Whiskers.Services.Agent.Chat.IChatWidgetParser,

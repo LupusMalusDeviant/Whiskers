@@ -164,7 +164,7 @@ public class LogScanExclusionTests
 
         var found = detector.Evaluate(ReachedOverTcp(), new[] { Container("ghostunnel", ("0.0.0.0", 2376, 2376)) });
 
-        Assert.Contains("SERVERWATCH_SELF_CONTAINERS", Assert.Single(found).Detail);
+        Assert.Contains("WHISKERS_SELF_CONTAINERS", Assert.Single(found).Detail);
     }
 
     [Fact]

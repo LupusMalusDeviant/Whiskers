@@ -19,6 +19,8 @@ public class TrivyScanner : ITrivyScanner
     private readonly IOptionsMonitor<CveMonitorSettings> _settings;
     private readonly ILogger<TrivyScanner> _logger;
 
+    // Pre-rebrand (ServerWatch) volume name, kept so existing hosts reuse their vulnerability-DB cache
+    // instead of orphaning it and downloading a second copy.
     private const string CacheVolume = "serverwatch-trivy-cache";
 
     /// <summary>
@@ -71,7 +73,7 @@ public class TrivyScanner : ITrivyScanner
         // a named volume so subsequent scans are fast.
         // Mount the host Docker socket so Trivy's "docker" image source can scan
         // locally-built images that exist only in the daemon with no registry to pull from
-        // (e.g. compose-built app images like `rabenhof-web`, `serverwatch-web`). Without it
+        // (e.g. compose-built app images like `rabenhof-web`, `whiskers-web`). Without it
         // Trivy fails those with a FATAL "unable to find the specified image". Registry
         // images continue to resolve exactly as before.
         string Command(bool fromRegistry) =>

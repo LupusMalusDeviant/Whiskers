@@ -2,16 +2,15 @@
 
 The **MCP (Model Context Protocol) server**: how external AI agents (e.g. Claude Code) operate Whiskers. This folder holds the request-authentication pipeline and the permission-check helper; the tools themselves live in [`Tools/`](Tools/).
 
-Every MCP request carries a `Bearer <API-KEY>` header. The middleware authenticates it before ASP.NET's default OAuth challenge runs, and each tool calls `McpPermissionCheck` to enforce its Read/Write/Admin level for that key.
+Every MCP request carries a `Bearer <API-KEY>` header. The middleware authenticates it before ASP.NET's default OAuth challenge runs, and each tool calls `McpPermissionCheck` to enforce its Read/Write/Admin level for that key. Keys live in the permission service ([`Services/Mcp`](../Services/Mcp/), created in the UI under *Settings → MCP*); the ServerWatch-era flat `api-keys.json` store and its unscoped fallback were removed after 0.14.1.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `McpBearerAuthMiddleware.cs` | Authenticates MCP requests by Bearer token before the Google OAuth challenge kicks in (so API clients aren't redirected to a login page). |
+| `McpGuardrailFilter.cs` | `tools/call` filter registered on the MCP server: runs every direct tool call through `DirectMcpCallGuard` (the agent's guardrail policy) before the tool method, and records the verdict for the call log. Fails closed when the caller cannot be identified. |
 | `McpCallLogMiddleware.cs` | Records every external/direct `tools/call` (callers that bypass the in-process agent) into the Agent-History log via [`IMcpCallLogStore`](../Services/Observability/). Sniffs the JSON-RPC envelope only, never alters the request, never throws. The in-process agent path is logged separately in [`AgentToolInvoker`](../Services/Agent/AgentToolInvoker.cs). |
-| `McpApiKeyAuth.cs` | `McpApiKeyStore`, the API-key store backing authentication. On first run it generates an admin key and writes it to a `0600` `initial-mcp-key.txt` next to `api-keys.json` — **never to the log** (only the file path is logged). The setup wizard will later surface it once and delete the file. |
-| `IMcpApiKeyStore.cs` | Legacy flat API-key store interface (kept for backwards compatibility). |
 | `McpPermissionCheck.cs` | Helper called from inside tool methods: extracts the API key (or the web user's role) from the HTTP context and checks the required permission level. Returns a denial message or `null` if allowed. |
 | `McpToolLevelAttribute.cs` | `[McpToolLevel(...)]` — declares a tool's minimum permission level **on the method**, next to `[McpServerTool]`. A declaration only: the request path still reads `McpPermissionLevels.DefaultToolLevels`. It exists because an unlisted tool falls back to `admin`, so a forgotten dictionary entry yields a tool that is registered and listed but denied to the agent on every call, with nothing logged. |
 | `McpToolLevelCatalog.cs` | Reads those declarations by reflection and shapes them like `DefaultToolLevels` so the two can be compared, plus the method-name → wire-name (snake_case) derivation. Never on the request path — a bug here fails a test, not a request. Feeds the tool-catalog snapshot (Plan-0013 WP3). |

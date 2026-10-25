@@ -15,7 +15,9 @@
 set -u
 
 PROBE_PORT=${TAILNET_GUARD_PORT:-2376}
-SERVERS_JSON=/opt/ServerWatch/data/servers.json
+# Whiskers' servers.json on this host. The default is the maintainer's pre-rebrand install directory;
+# override it with WHISKERS_SERVERS_JSON for any other layout.
+SERVERS_JSON=${WHISKERS_SERVERS_JSON:-/opt/ServerWatch/data/servers.json}
 CHECK_ONLY=0
 [ "${1:-}" = "--check-only" ] && CHECK_ONLY=1
 

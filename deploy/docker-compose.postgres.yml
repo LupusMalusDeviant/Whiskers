@@ -28,6 +28,7 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Must match the app service name in docker-compose.yml (pre-rebrand `serverwatch`, kept for existing installs).
   serverwatch:
     environment:
       - WHISKERS_DB_PROVIDER=postgres

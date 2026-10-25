@@ -6,6 +6,35 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- **The ServerWatch-era flat MCP key store is gone.** `api-keys.json` held unscoped plaintext keys and was
+  still accepted as a fallback at the `/mcp` gate. That fallback, the store and the one-time
+  `initial-mcp-key.txt` are removed; leftover files are deleted on start. MCP access now works only with a
+  key created under *Settings → MCP* with a Read / Write / Admin scope. The setup wizard no longer shows an
+  initial key and points there instead.
+
+- **MCP API keys are stored only as SHA-256 hashes.** New keys come from the CSPRNG (256 bits) and are shown
+  once at creation; `mcp-permissions.json` keeps only the hash and the last four characters. Existing
+  plaintext keys are converted on the first start and keep working. A fresh install no longer creates an
+  unseen default key, a settings save can no longer alter key material, and rejected tokens are no longer
+  logged with a prefix. **Behaviour change:** the key column in *Settings → MCP* can no longer reveal or
+  copy an existing key — copy a new key right after creating it.
+- **Guardrails now apply to direct MCP tool calls.** An external client calling a tool directly was bounded
+  by its key's scope only; protected resources, forbidden arguments, the read-only switch and required
+  approvals applied to the in-process agent alone. Every `tools/call` now passes the same guardrail engine.
+  `Confirm` raises a Human-in-the-Loop approval; once approved, the identical call runs once within
+  10 minutes. **Behaviour change:** under the default policy, write tools called by external clients now
+  need an approval. If that is too strict, adjust the active guardrail preset (autonomous level,
+  confirmation for writes) — the preset applies to the agent as well.
+
+### Changed
+- **Remaining ServerWatch names cleaned up.** README examples use the `whiskers` MCP server key and
+  `/whiskers` paths; `WHISKERS_SELF_CONTAINERS` replaces `SERVERWATCH_SELF_CONTAINERS` (the old name is
+  still read) and its default now covers both `whiskers` and `serverwatch`; the safe guardrail default
+  protects `whiskers*` as well as `serverwatch*`. Names that existing installs depend on — the compose
+  service/volume `serverwatch`, Prometheus `serverwatch_*` metrics, the Data Protection application name,
+  the mTLS client CN, the Trivy cache volume and the host-shell label — stay unchanged on purpose.
+
 ## [0.14.1] — 2026-10-25
 
 Security fix in Settings: the role table could turn whitelisted addresses into Admins on the next save.

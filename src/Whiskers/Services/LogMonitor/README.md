@@ -22,7 +22,7 @@ same fleet-wide list `ContainerHealthMonitor` uses). Consequences worth knowing:
 - A rule counts as "all containers" only when **both** `ContainerId` and `ContainerName` are null. A
   name-only filter (what the UI dialog and `create_log_alert` produce) matches that name on **every**
   server; there is no per-server rule scope yet — that would need a new column on `LogAlertRuleEntity`.
-- The self-log guard (`SERVERWATCH_SELF_CONTAINERS`, default `serverwatch`) only applies to the server
+- The self-log guard (`WHISKERS_SELF_CONTAINERS`, legacy `SERVERWATCH_SELF_CONTAINERS`; default `whiskers,serverwatch`) only applies to the server
   Whiskers itself runs on (`ConnectionType.Local`, else the default server) — a namesake on a remote host
   is a different process and stays monitored.
 

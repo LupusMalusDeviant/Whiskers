@@ -2,7 +2,7 @@
 
 - **Status:** Akzeptiert (2026-07-07)
 - **Betrifft:** `src/Whiskers/Services/Vault/VaultService.cs`, `src/Whiskers/Models/VaultEntry.cs`
-- **Bezug:** Full-Repo-Review 2026-07-06, Finding HOCH-4; Sicherheits-Leitplanke „keine selbstgebaute/unauth. Krypto" (CLAUDE.md)
+- **Bezug:** Full-Repo-Review 2026-07-06, Finding HOCH-4; Sicherheits-Leitplanke „keine selbstgebaute/unauth. Krypto" (heute: docs/ARCHITECTURE.md, „Engineering rules")
 
 ## Kontext
 

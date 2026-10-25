@@ -21,7 +21,8 @@ public enum AgentOrigin
 {
     WebUi,        // human in the Whiskers UI
     McpTool,      // external agent calls the instruct_agent tool via /mcp
-    Trigger       // autonomous run started by an AI trigger (no human)
+    Trigger,      // autonomous run started by an AI trigger (no human)
+    McpDirect     // external MCP client calling a tool directly, not through the agent
 }
 
 /// <summary>Full execution context of a tool call — flows into the gate and the audit.</summary>

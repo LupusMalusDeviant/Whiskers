@@ -7,7 +7,6 @@
 @inject NavigationManager Nav
 @inject ISetupStateService SetupState
 @inject Whiskers.Services.Vault.IVaultService Vault
-@inject Whiskers.Configuration.DataPathOptions DataPaths
 @inject IJSRuntime JS
 @inject IStringLocalizer<SharedResource> L
 @inject Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Identity.IdentityOptions> IdentityOpts
@@ -46,17 +45,11 @@ else if (_step == 1)
     }
     @if (_error != null) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
 }
-@* Step 2 — Security basics (MCP key + VAULT_KEY) *@
+@* Step 2 — Security basics (MCP key hint + VAULT_KEY) *@
 else if (_step == 2)
 {
     <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Security_Title"]</MudText>
-    @if (_mcpKey != null)
-    {
-        <MudText Typo="Typo.subtitle2">@L["Setup_Security_McpKey"]</MudText>
-        <MudTextField T="string" Value="_mcpKey" ReadOnly="true" Adornment="Adornment.End"
-                      AdornmentIcon="@Icons.Material.Filled.ContentCopy" OnAdornmentClick="@(() => Copy(_mcpKey!))" Class="mb-1" />
-        <MudText Typo="Typo.caption" Class="mb-4 d-block">@L["Setup_Security_McpKeyHint"]</MudText>
-    }
+    <MudText Typo="Typo.body2" Class="mb-4 d-block">@L["Setup_Security_McpKeyHint"]</MudText>
     @if (_vaultEnabled)
     {
         <MudAlert Severity="Severity.Success" Dense="true">@L["Setup_Security_VaultOn"]</MudAlert>
@@ -121,7 +114,6 @@ else
     private string _email = "";
     private string _password = "";
     private string _passwordConfirm = "";
-    private string? _mcpKey;
     private bool _vaultEnabled;
     private string? _generatedVaultKey;
     private bool _busy;
@@ -139,10 +131,6 @@ else
         _vaultEnabled = Vault.IsEnabled;
         if (!_vaultEnabled)
             _generatedVaultKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-
-        // One-time MCP admin key surfaced by McpApiKeyStore (C6); deleted on completion.
-        try { if (File.Exists(DataPaths.InitialMcpKeyFile)) _mcpKey = File.ReadAllText(DataPaths.InitialMcpKeyFile).Trim(); }
-        catch { /* best-effort — the key stays valid in api-keys.json regardless */ }
     }
 
     private bool CanNext => _step switch
@@ -246,8 +234,7 @@ else
             _step = 1;   // back to the admin step to fix it
             return;
         }
-        // Success (or someone just won the race): drop the one-time MCP key file, then sign in via /login-local.
-        try { if (File.Exists(DataPaths.InitialMcpKeyFile)) File.Delete(DataPaths.InitialMcpKeyFile); } catch { }
+        // Success (or someone just won the race): sign in via /login-local.
         Nav.NavigateTo("login", forceLoad: true);
     }
 }

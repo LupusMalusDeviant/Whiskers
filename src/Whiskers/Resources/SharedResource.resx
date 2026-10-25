@@ -113,11 +113,8 @@
   <data name="Setup_Security_Title" xml:space="preserve">
     <value>Security basics</value>
   </data>
-  <data name="Setup_Security_McpKey" xml:space="preserve">
-    <value>Initial MCP API key</value>
-  </data>
   <data name="Setup_Security_McpKeyHint" xml:space="preserve">
-    <value>Copy it now — it won't be shown again. Manage keys later in Settings → MCP.</value>
+    <value>MCP API keys are created in Settings → MCP, each scoped to Read, Write or Admin.</value>
   </data>
   <data name="Setup_Security_VaultOn" xml:space="preserve">
     <value>Secrets vault is active (AES-256-GCM).</value>
@@ -2259,7 +2256,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>AI chat saved (effective immediately).</value>
   </data>
   <data name="Settings_Snackbar_ApiKeyCreated" xml:space="preserve">
-    <value>API key '{0}' created. Copy it and store it safely!</value>
+    <value>API key '{0}' created. Copy it now — only its hash is stored, it cannot be shown again.</value>
   </data>
   <data name="Settings_Snackbar_ApiKeyDeleted" xml:space="preserve">
     <value>API key deleted.</value>
@@ -3246,7 +3243,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>— active</value>
   </data>
   <data name="GuardrailsView_Protected_Helper" xml:space="preserve">
-    <value>Containers/servers/DBs the agent must never touch — e.g. serverwatch*</value>
+    <value>Containers/servers/DBs the agent must never touch — e.g. whiskers*</value>
   </data>
   <data name="GuardrailsView_Protected_Label" xml:space="preserve">
     <value>Protected resources (glob, comma-separated)</value>

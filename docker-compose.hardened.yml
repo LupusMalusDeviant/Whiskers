@@ -60,10 +60,12 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Service/container/volume keep the pre-rebrand name `serverwatch` so existing installs keep their data
+  # volume (see the note in docker-compose.yml).
   serverwatch:
     build: .
     # Or pull a prebuilt image that includes the non-root user:
-    # image: ${SERVERWATCH_IMAGE:-serverwatch:local}
+    # image: ${WHISKERS_IMAGE:-ghcr.io/lupusmalusdeviant/whiskers:latest}
     container_name: serverwatch
     depends_on:
       - socket-proxy

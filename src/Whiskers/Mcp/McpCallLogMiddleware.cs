@@ -150,7 +150,7 @@ public sealed class McpCallLogMiddleware
                 ? $"key:{(string.IsNullOrWhiteSpace(cfg.Name) ? cfg.Id : cfg.Name)}"
                 : "key:unbekannt";
             var allowed = perm?.IsToolAllowed(key, tool) ?? false;
-            return (actor, allowed ? "allow" : "deny");
+            return (actor, allowed ? GuardrailVerdictOf(context) : "deny");
         }
 
         // Cookie-authenticated web user POSTing directly to /mcp.
@@ -159,11 +159,16 @@ public sealed class McpCallLogMiddleware
             var email = context.User.FindFirst(ClaimTypes.Email)?.Value
                         ?? context.User.Identity.Name
                         ?? "web";
-            return (email, "allow");
+            return (email, GuardrailVerdictOf(context));
         }
 
         return ("anonym", "deny");
     }
+
+    /// <summary>The guardrail filter's verdict for this request ("allow", "confirm", "deny"); "allow" when it did
+    /// not run (agent module off). One verdict per request, which is exact for the usual single tools/call.</summary>
+    private static string GuardrailVerdictOf(HttpContext context) =>
+        context.Items.TryGetValue(McpGuardrailFilter.VerdictItemKey, out var v) && v is string s ? s : "allow";
 
     private static string? Cap(string? s, int max) =>
         s is null ? null : (s.Length > max ? s[..max] + "…" : s);

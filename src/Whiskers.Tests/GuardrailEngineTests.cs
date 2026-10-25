@@ -178,9 +178,10 @@ public class GuardrailEngineTests
     }
 
     [Fact]
-    public void SafeDefault_protects_serverwatch_and_blocks_forkbomb()
+    public void SafeDefault_protects_whiskers_and_blocks_forkbomb()
     {
         var policy = GuardrailPolicy.SafeDefault();
+        Assert.Contains("whiskers*", policy.ProtectedResources);
         Assert.Contains("serverwatch*", policy.ProtectedResources);
         var d = Engine.Evaluate(Request("execute_command", McpPermissionLevels.Admin,
             policy, Principal(McpPermissionLevels.Admin), ("command", ":(){ :|:& };:")));

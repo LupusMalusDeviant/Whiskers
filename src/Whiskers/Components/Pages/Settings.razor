@@ -407,15 +407,19 @@ else
             <RowTemplate>
                 <MudTd>@context.Name</MudTd>
                 <MudTd>
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                        <MudText Typo="Typo.body2" Style="font-family: monospace;">
-                            @((_revealedKeys.Contains(context.Id)) ? context.Key : context.Key[..8] + "..." + context.Key[^4..])
-                        </MudText>
-                        <MudIconButton Icon="@(_revealedKeys.Contains(context.Id) ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                                       Size="Size.Small" OnClick="@(() => ToggleKeyVisibility(context.Id))" />
-                        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
-                                       OnClick="@(async () => await CopyKey(context))" />
-                    </MudStack>
+                    @* Only the hash is stored: the full key exists here only right after its creation, in this circuit. *@
+                    @if (_freshKey is { } fresh && fresh.Id == context.Id)
+                    {
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                            <MudText Typo="Typo.body2" Style="font-family: monospace;">@fresh.Value</MudText>
+                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                                           OnClick="@(async () => await CopyKey(fresh.Value))" />
+                        </MudStack>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Style="font-family: monospace;">••••••••@context.KeyHint</MudText>
+                    }
                 </MudTd>
                 <MudTd>
                     <MudChip T="string" Size="Size.Small" Color="@GetLevelColor(context.PermissionLevel)">
@@ -686,7 +690,8 @@ else
     private string _newKeyName = "";
     private string _newKeyLevel = "read";
     private bool _savingMcp;
-    private HashSet<string> _revealedKeys = new();
+    // The plaintext of the key created last, shown until the page is left — the store keeps only its hash.
+    private (string Id, string Value)? _freshKey;
 
     // Editable settings (saved live to app-settings.json, no restart)
     private bool _mmEnabled; private string _mmWebhook = ""; private string _mmChannel = ""; private string _mmBot = ""; private int _mmThrottle = 5;
@@ -964,27 +969,18 @@ else
         catch { }
     }
 
-    private void ToggleKeyVisibility(string keyId)
-    {
-        if (!_revealedKeys.Remove(keyId))
-            _revealedKeys.Add(keyId);
-    }
-
-    private async Task CopyKey(Whiskers.Models.McpApiKeyConfig apiKey)
+    private async Task CopyKey(string value)
     {
         // Copy to the clipboard via JS — never echo the key value in a toast. Report success only when the
-        // browser confirms it; otherwise show the key so it can be selected by hand.
+        // browser confirms it; otherwise the key stays on screen so it can be selected by hand.
         bool copied;
-        try { copied = await JS.InvokeAsync<bool>("swClipboard.copy", apiKey.Key); }
+        try { copied = await JS.InvokeAsync<bool>("swClipboard.copy", value); }
         catch { copied = false; }
 
         if (copied)
             Snackbar.Add(L["Settings_Snackbar_KeyCopied"].Value, Severity.Success);
         else
-        {
-            _revealedKeys.Add(apiKey.Id);
             Snackbar.Add(L["Clipboard_CopyFailed_Manual"].Value, Severity.Warning);
-        }
     }
 
     private Color GetLevelColor(string level) => level switch
@@ -1009,7 +1005,7 @@ else
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         var newKey = await McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel);
         ReloadApiKeysKeepingPendingToggles();
-        _revealedKeys.Add(newKey.Id); // Show the new key immediately
+        _freshKey = (newKey.Id, newKey.Key!); // shown now, never again
         _newKeyName = "";
         // Name and level only — the key value never goes into the audit log.
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "mcp.key.create", "mcp-api-key",
@@ -1024,7 +1020,7 @@ else
         var name = _mcpApiKeys.FirstOrDefault(k => k.Id == id)?.Name ?? id;
         await McpPermissionService.RemoveApiKeyAsync(id);
         ReloadApiKeysKeepingPendingToggles();
-        _revealedKeys.Remove(id);
+        if (_freshKey?.Id == id) _freshKey = null;
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "mcp.key.delete", "mcp-api-key", id, name);
         Snackbar.Add(L["Settings_Snackbar_ApiKeyDeleted"].Value, Severity.Info);
     }

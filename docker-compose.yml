@@ -12,6 +12,9 @@
 # (non-root, no privileged, socket-proxy, dropped caps). See docs/container-hardening.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# The service, container and volume keep their pre-rebrand name `serverwatch` (Whiskers was called
+# ServerWatch before v0.12): renaming them would make `docker compose up` create a new, empty data
+# volume and a second container on existing installs. New installs via deploy/install.sh use `whiskers`.
 services:
   serverwatch:
     build: .

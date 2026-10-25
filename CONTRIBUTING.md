@@ -8,6 +8,9 @@ and pull requests are very welcome.
 - **Open an issue first** for anything non-trivial (a feature, a refactor, a behavioural change),
   so we can agree on the approach before you invest time.
 - **Security issues:** please do **not** open a public issue, follow [SECURITY.md](SECURITY.md).
+- **Security-critical areas and protected layers** are listed in
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#security-critical-areas-and-change-control); changes there
+  need an explicit decision.
 - Be respectful. Assume good intent.
 
 ## Development setup
