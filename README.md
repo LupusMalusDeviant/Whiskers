@@ -536,7 +536,7 @@ Whiskers/
 │   │   └── Program.cs          # composition root (DI, middleware, MCP, auth)
 │   └── Whiskers.Tests/      # xUnit test suite
 ├── deploy/telemetry/           # mesh/mTLS deploy templates (node_exporter, VictoriaMetrics, Tailscale ACL)
-├── docs/ARCHITECTURE.md        # SSH-key-free architecture
+├── docs/ARCHITECTURE.md        # architecture, security-critical areas & change control
 ├── docs/product/               # product positioning (see docs/product/POSITIONING.md)
 ├── Dockerfile
 ├── docker-compose.yml

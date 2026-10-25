@@ -16,7 +16,7 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Startup;
 
 /// <summary>The HTTP request pipeline + startup warm-up, moved <b>verbatim</b> from Program.cs. The middleware
-/// ORDER is security-critical (CLAUDE.md Off-Limits): forwarded headers first, then the fixed
+/// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): forwarded headers first, then the fixed
 /// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. This method keeps
 /// every <c>Use*</c>/<c>Map*</c> call in the exact same order as before — nothing is reordered, only relocated
 /// (the McpCallLog middleware still sits between the endpoint maps exactly where it did).</summary>

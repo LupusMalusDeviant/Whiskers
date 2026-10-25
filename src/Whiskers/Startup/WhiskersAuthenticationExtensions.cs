@@ -8,7 +8,7 @@ namespace Whiskers.Startup;
 
 /// <summary>The authentication wiring — cookie session + optional Google/OIDC providers, or full bypass for
 /// trusted LAN-only deployments. Isolated from the rest of the composition root because it is the
-/// security-sensitive Off-Limits zone (CLAUDE.md, ADR-0002): the fail-open whitelist re-check, the provider
+/// security-sensitive protected layer (docs/ARCHITECTURE.md, ADR-0002): the fail-open whitelist re-check, the provider
 /// events, and the cookie policy are moved here <b>verbatim</b> from Program.cs — same branches, same order,
 /// same semantics. Only the location changed; the middleware ORDER that enforces auth lives in
 /// <see cref="WhiskersPipelineExtensions"/> and is likewise unchanged.</summary>

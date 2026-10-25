@@ -166,3 +166,53 @@ tool methods answer cleanly when the module is off.
 extracted module has its own folder + README there and a one-page reference under
 [`docs/modules/`](modules/). [`Modules/HelloWorld`](../src/Whiskers/Modules/HelloWorld/) is a deliberately
 minimal, disabled-by-default example that documents the whole pattern — copy it to start a new module.
+
+## Application shape
+
+- **Stack:** C# / .NET 10, ASP.NET Core (Blazor Server), EF Core (SQLite by default, PostgreSQL optional),
+  MudBlazor, Docker.DotNet, and an embedded MCP server (ModelContextProtocol, Streamable HTTP on `/mcp`).
+- **Single-replica appliance.** One process holds the Blazor circuits, the background loops and the state
+  in one data directory (`WHISKERS_DATA_DIR`, default `/app/data`). Compose runs one container; the Helm
+  chart pins `replicas: 1` with a `Recreate` strategy. There is no clustering and no shared session store.
+- **Composition root:** [`src/Whiskers/Program.cs`](../src/Whiskers/Program.cs) with the extension methods in
+  [`src/Whiskers/Startup/`](../src/Whiskers/Startup/) — DI, the middleware pipeline, MCP server registration,
+  OAuth/OIDC, SignalR hubs and webhook endpoints.
+- **Layout:** `Components/` (Blazor UI), `Mcp/` + `Mcp/Tools/` (MCP authentication, guardrail filter, tool
+  definitions), `Services/` (all business logic), `Hubs/` (SignalR), `Configuration/` (typed settings),
+  `Models/`, `Utils/` (secret redaction, shell quoting); tests in `src/Whiskers.Tests/` (xUnit). Every folder
+  carries a README describing its files.
+- **Conventions:** interface-first services registered in DI; null checks / `ArgumentException` at service
+  boundaries; in-code comments and XML docs in English; user-facing strings localized (English default,
+  German).
+
+## Security-critical areas and change control
+
+Three areas carry most of the risk. Changes there get a dedicated review and tests that pin the behaviour:
+
+1. **Command and query execution on managed hosts** — `HostCommandExecutor` (nsenter, mTLS, legacy SSH),
+   the `execute_command` / `execute_query` tools and `DatabaseService`.
+2. **Authentication, authorization and secrets** — the email whitelist and OAuth/OIDC, MCP keys (stored as
+   SHA-256 hashes) and per-key scopes, the guardrail engine and approvals, `VaultService`, cloud API and SSH
+   keys, `SecretRedactor`.
+3. **Destructive cloud operations** — power actions (`cloud_hard_reset`, shutdown, reboot) and
+   snapshot/backup changes (`hetzner_delete_snapshot`, `hetzner_disable_backups`).
+
+**Protected layers.** The following are not changed or relaxed without an explicit, recorded decision
+(an ADR or the maintainer's sign-off on the pull request):
+
+- the authentication middleware and its order (forwarded headers first, fail-closed authorization, cookie
+  validation, the whitelist re-check);
+- the mTLS / WireGuard network layer (certificates, allowed client CN, mesh binding) and the
+  docker-socket-proxy verb whitelist.
+
+**Engineering rules** that came out of the 2026-07 full-repository security review:
+
+- **No automatic confirmation of write or admin actions** by an agent, and no synthetic admin principals.
+  Authorization (scope + guardrails) is checked on **every** path, including MCP and external callers.
+- **No home-grown or unauthenticated cryptography** — no AES-CBC without a MAC, no key stored next to its
+  ciphertext. Use AES-GCM or the .NET Data Protection API (see [ADR-0001](adr/0001-vault-aead-gcm-pbkdf2.md)).
+- **Uploads are validated server-side** by MIME type and magic bytes; `Html.Raw` only after server-side
+  sanitization.
+- **Secrets never reach logs** — not in full, not as a prefix.
+
+Priorities, in order: security, then maintainability and readability.
