@@ -6,6 +6,10 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-10-25
+
+Security fix in Settings: the role table could turn whitelisted addresses into Admins on the next save.
+
 ### Fixed
 - **Settings → User roles could hand out Admin by accident.** Whitelisted addresses without a role entry were
   merged into the role table as Admin. The server gave them the default role, but the next save of *any* role
