@@ -144,7 +144,7 @@ under `pid: host` · F-22 legacy AiChat client without cancellation · F-23 rele
 
 ## 6. Mutation surface (summary)
 
-The B report inventories **87 mutation paths**: 41 MCP tools, 4 agent paths, 8 background/webhook/system paths, 3 terminals and 34 groups of UI handlers (≈70 handlers). It records each one as *Actor → AuthN → AuthZ → Guardrail → Approval → Execution → Verification → Audit*.
+The B report inventories **90 mutation paths** (corrected from 87 in WP11a; the rows add up to 90): 41 MCP tools, 4 agent paths, 8 background/webhook/system paths, 3 terminals and 34 groups of UI handlers (≈70 handlers). It records each one as *Actor → AuthN → AuthZ → Guardrail → Approval → Execution → Verification → Audit*.
 
 | Path class | AuthN | AuthZ | Guardrail | Approval | Verification | Audit |
 |---|---|---|---|---|---|---|

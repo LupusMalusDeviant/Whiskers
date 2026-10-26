@@ -135,7 +135,7 @@ Common columns for every MCP row unless stated: Actor/AuthN = API key (Bearer) o
 | U-33 | `ApprovalsView.razor:166` approve/reject (agent + direct MCP) | resolver level ≥ approval level (`ApprovalStore.cs:118-125`) | releases pending action / grants retry | **NO** (in-memory store only) | — |
 | U-34 | `Settings.razor` MCP keys/perm levels/roles/whitelist/vault/terminal settings | Admin (`:52`) | config stores | yes (`:967`, `:1011`, `:1024`, `:1049`, `:1098`, `:1161`, `:1205`) | — |
 
-**Total mutation paths inventoried: 87** (41 MCP tools + 4 agent paths + 8 background/webhook/system + 3 terminals + 34 UI handler groups covering ~70 individual handlers).
+**Total mutation paths inventoried: 90** (41 MCP tools + 4 agent paths + 8 background/webhook/system + 3 terminals + 34 UI handler groups covering ~70 individual handlers).
 
 ## 2. Paths that mutate WITHOUT the full auth + authz + policy + audit chain
 

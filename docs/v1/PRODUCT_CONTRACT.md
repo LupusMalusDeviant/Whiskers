@@ -1,0 +1,280 @@
+# Whiskers v1.0 — Product Contract
+
+| | |
+|---|---|
+| Status | **Accepted** (WP11a). Decisions PC-D1…PC-D8 accepted by the maintainer on 2026-10-26. |
+| Baseline | `main` @ `498e70d` (0.15.0) + PR #41 (WP1) |
+| Date | 2026-10-26 |
+| Companion | [`SECURITY_INVARIANTS.md`](SECURITY_INVARIANTS.md) (INV-xx), [`TECHNICAL_AUDIT.md`](TECHNICAL_AUDIT.md) (TA-xx), [`audit/B-mutations.md`](audit/B-mutations.md) (path inventory) |
+
+## 1. The promise
+
+> **Give AI agents production access without giving them unrestricted production credentials.**
+
+Whiskers is a self-hosted control plane between people, AI agents and infrastructure (Docker hosts, Kubernetes
+workloads, host services, cloud servers, DNS, databases). The agent never holds a host credential. It asks
+Whiskers, and Whiskers decides, executes, verifies and records.
+
+**The contract.** *No infrastructure mutation that Whiskers performs bypasses authentication, authorization,
+policy, a required approval, or audit.*
+
+The original wording limited this to mutations "through the agent/MCP control plane". Decision PC-D1 widens it
+to **every mutation Whiskers performs**, whatever the entry point. Reason: the audit
+shows that the UI, the scheduler, AutoUpdate, AutoPatch, webhooks and terminals reach the same executors. If they
+stay outside the contract, an agent that can create a scheduled task, a webhook or a log alert can launder a
+mutation through them (B-02, B-11e, B-06). A contract with that hole cannot be defended to a security team.
+
+## 2. Hero workflow
+
+```
+Observe → Propose → Policy check → Human approval → Execute → Verify → Audit
+```
+
+| Step | What happens | Owner after WP2 |
+|---|---|---|
+| Observe | Read-only tools and pages gather state. Reads are authorized but not policy-gated. | MCP read tools, UI |
+| Propose | A principal (human, agent, automation) requests a capability on a target with arguments. | Entry point |
+| Policy check | The policy engine decides Allow / Confirm / Deny for exactly that call; the decision is persisted. | Mutation Gateway |
+| Human approval | On Confirm, a durable, hash-bound approval is raised; an eligible second person decides. | Mutation Gateway + approval store |
+| Execute | The gateway executes the call that was decided and approved, under a deadline and an operation id. | Mutation Gateway |
+| Verify | The capability's verifier checks the result; the outcome is recorded honestly. | Mutation Gateway |
+| Audit | One tamper-evident event per attempt links all of the above. | Mutation Gateway |
+
+## 3. Definitions
+
+**Infrastructure mutation.** Any action that changes state outside Whiskers' own read models: containers,
+images, networks, volumes, K8s workloads, compose projects, host packages and services, firewall, nginx,
+certificates, cloud server power and snapshots, DNS records, database contents, backups and restores, files on
+managed hosts. Also included, because they **cause** future mutations: creating or changing scheduled tasks,
+webhooks, git-deploy apps, log alerts, AI triggers, guardrail policy, keys, roles and the whitelist.
+
+**Principal.** Who acts (INV-01). Kinds:
+
+| Kind | Example | Authenticated by |
+|---|---|---|
+| Human | an operator in the web UI | OIDC / Google / local login |
+| ApiKey | an external MCP client | Bearer key (hashed) |
+| Agent | an in-process agent session | on behalf of a Human or ApiKey principal (ceiling, INV-02) |
+| Automation | scheduled task, AutoUpdate, AutoPatch, AI trigger | on behalf of a recorded owner (INV-04) |
+| Webhook | an inbound CI call | HMAC + freshness + delivery id (INV-42) |
+| System | boot-time housekeeping that touches no managed infrastructure | — |
+
+**Capability.** A named mutating action with one required level (INV-13), for example `container.restart`,
+`host.exec`, `compose.deploy`. MCP tools, UI handlers and automation map onto capabilities.
+
+**Surface.** The entry point: `mcp`, `agent`, `ui`, `automation`, `webhook`, `terminal`.
+
+## 4. Requirements per chain stage
+
+Each stage lists the target behaviour and the invariants that make it testable.
+
+| Stage | Required behaviour | Invariants |
+|---|---|---|
+| Actor | A structured principal, never a string; on-behalf-of chains are explicit. | INV-01, 02, 04, 05, 06 |
+| AuthN | Every request is authenticated; synthetic principals cannot be presented; sessions and keys can be revoked immediately. | INV-03, 07–12 |
+| AuthZ | One capability table for all surfaces; root-equivalent capabilities are Admin-only; handler-side checks only. | INV-13–19 |
+| Policy | Every mutation gets a persisted decision; kill switch everywhere; protected resources on resolved targets; fail closed. | INV-20–29 |
+| Approval | Durable, hash-bound, single-use, expiring, separation of duties. | INV-30–37 |
+| Execution | Only through the gateway; operation id; deadline; injection-safe arguments; replay-safe webhooks. | INV-38–42 |
+| Verification | A verifier per capability; honest outcome. | INV-43, 44 |
+| Audit | One complete, redacted, tamper-evident event per attempt, written before execution. | INV-45–51 |
+| Secrets | Vault for all infrastructure credentials; honest self-reports; authentic restores. | INV-51–56 |
+| Target isolation | One resolved target per mutation; per-host credentials; Whiskers protects itself. | INV-57–59 |
+
+## 5. Scope and stated limits
+
+These are deliberate. They must appear in the product documentation (WP11b) so nobody reads more into the
+contract than it says.
+
+1. **Whiskers is root-equivalent by design.** The host-control plane runs commands as host root. Docker create
+   rights are root on the host. The contract governs *who may reach* that power and *what is recorded*; it
+   does not make the power smaller.
+2. **An Admin with shell access to the Whiskers host is outside the contract.** They can edit the database,
+   the JSON stores and the binaries. The audit hash chain (INV-49) makes such edits *detectable*, not
+   impossible.
+3. **Commands typed inside an interactive terminal are not policy-checked one by one.** The contract covers
+   opening the session (authorization, kill switch, audit) and, depending on PC-D2, a transcript.
+4. **Single replica.** Whiskers 1.0 is a single-instance appliance. Availability and RPO/RTO follow from that
+   and are documented in the backup guide (WP11b).
+5. **No per-server or tenant scoping in 1.0.** A principal's level applies to every managed server (A-17).
+6. **Out-of-band changes are invisible.** Changes made directly on a host, in a cloud console or via another
+   tool are not governed. Whiskers may observe their effects; it does not attribute them.
+
+## 6. Decisions
+
+All eight decisions were accepted on 2026-10-26 as recommended. The alternatives stay listed so the reasoning remains
+traceable.
+
+| ID | Question | Decision | Rejected alternative | Affects |
+|---|---|---|---|---|
+| PC-D1 | Does the contract cover every mutation, or only agent/MCP? | **Every mutation.** Human UI actions go through the gateway: authorization, kill switch, protected resources, audit. They need an approval only where policy says so for humans (default: never). | Agent/MCP only, documenting UI, automation and terminals as out of scope. Leaves the laundering paths open (§1). | INV-20, 21, 38; TA-26 |
+| PC-D2 | Terminals: what is recorded? | Session open/close audited (INV-47); host shell and container shell both Admin; kill switch blocks opening; **no keystroke transcript** in 1.0, stated as a limit. | Full transcript with redaction. Higher value for auditors, but stores secrets typed into shells. | INV-19, 47 |
+| PC-D3 | Level of `execute_query` (arbitrary SQL as DB superuser, incl. `COPY … TO PROGRAM`). | **Admin** on every surface. | Keep Write and add SQL classification. Classification is a denylist and fails like INV-25. | INV-19; TA-43 |
+| PC-D4 | Separation of duties for approvals. | Non-interactive requests (direct MCP, AI trigger, scheduled task) cannot be approved by the requesting principal. Interactive chat may self-confirm unless a policy flag `requireSecondApprover` is set. A single-admin install must be able to work: the flag defaults off, and self-approval is audited as such. | Strict four-eyes everywhere. Unusable for single-operator installs. | INV-33 |
+| PC-D5 | What happens when the audit store cannot be written? | **Fail closed:** no intent record, no mutation. Break-glass is host access, which is outside the contract (§5.2). | Fail open with ILogger fallback, as today. | INV-48 |
+| PC-D6 | Owner of unattended automation. | Every scheduled task, AI trigger, webhook and git-deploy app stores its owner. Each run re-checks the owner's authority; if it is gone, the item is suspended and an Admin is notified. | Re-check only at creation. | INV-04 |
+| PC-D7 | Autonomy of AI triggers. | Read-only by default. Write requires an explicit per-trigger allowlist of capabilities and targets; anything else is Confirm, which for an unattended run means Deny. | Keep `MaxLevel=write` default. | INV-23, 27 |
+| PC-D8 | Policy engine and modules. | The policy engine and approvals are **core**, independent of the Agent module. Disabling the agent removes the agent, not the guardrails. | Keep them in the Agent module and document that MCP is unguarded without it. | INV-26 |
+
+## 7. Path matrix (current state)
+
+One row per mutation path from [`audit/B-mutations.md`](audit/B-mutations.md), updated for WP1. Each row shows
+the chain **Actor → AuthN → AuthZ → Policy → Approval → Execution → Verification → Audit** as it is today,
+and the invariants the path violates.
+
+**Every gap is a v1 blocker.** A row is done when its gap column is empty.
+
+Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR?** guardrails only when the Agent module is on
+(INV-26) · **AL** AuditLog row · **AH** Agent History row only.
+
+**Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
+INV-22 (no decision record), INV-38 (no gateway), INV-39 (no operation id), INV-45 (no complete audit event),
+INV-48 (audit after the fact, fail-open), INV-49 (no tamper evidence). Rows below list only the path-specific gaps.
+
+### 7.1 MCP tools (direct `/mcp` calls; the in-process agent invokes the same methods)
+
+Common to all M rows: Actor = API key or web user · AuthN ✅ (Bearer / cookie) · AuthZ ✅ scope check in tool, but
+the Enabled switch and stored levels apply to keys only (INV-15) · Policy GR? (INV-26) with targets not resolved
+(INV-24) · Approval ⚠️ approve-then-retry, in memory (INV-30–34) · Execution = direct service call.
+
+| ID | Tool | Level | Verification | Audit | Path-specific gaps |
+|---|---|---|---|---|---|
+| M-01 | `start_container` | write | ❌ | AL ✅ | INV-43 |
+| M-02 | `stop_container` | write | ❌ | AL ✅ | INV-43, 59 |
+| M-03 | `restart_container` | write | ❌ | AL ✅ | INV-43, 59 |
+| M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | AL ✅ | INV-43, 44, 53 |
+| M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43, 24 (YAML free text) |
+| M-06 | `set_container_env` | write | ❌ | AL ✅ | INV-43, 51 |
+| M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43, 24 |
+| M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text), 43 |
+| M-09 | `add_firewall_rule` | write (UI: Admin) | ❌ | AL ✅ | INV-13, 43 |
+| M-10 | `remove_firewall_rule` | write (UI: Admin) | ❌ | AL ✅ | INV-13, 43 |
+| M-11 | `update_nginx_config` | write (UI: Admin) | ⚠️ `nginx -t` pre-check | AL ✅ | INV-13, 41 (E-03) |
+| M-12 | `manage_systemd_service` | write (UI: Admin) | ❌ | AL ✅ | INV-13, 43 |
+| M-13 | `renew_ssl_certificate` | write | ❌ | AL ✅ | INV-43 |
+| M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service | AL ✅ | INV-58 |
+| M-15 | `execute_query` | write | ❌ | ❌ AH only | INV-19 (PC-D3), 24, 43, 45 |
+| M-16 | `backup_database` | write | ❌ | AL ✅ | INV-43 |
+| M-17 | `set_dns_record` | write | ❌ | AL ✅ | INV-43, 52 (DNS token) |
+| M-18 | `delete_dns_record` | write | ❌ | AL ✅ | INV-43, 52 |
+| M-19 | `create_network` | write (UI: Admin) | ❌ | AL ✅ | INV-13 |
+| M-20 | `remove_network` | write (UI: Admin) | ❌ | AL ✅ | INV-13 |
+| M-21 | `connect_container_to_network` | write | ❌ | ❌ AH only | INV-45 |
+| M-22 | `disconnect_container_from_network` | write | ❌ | ❌ AH only | INV-45 |
+| M-23 | `create_scheduled_task` | write (+admin for custom command) | n/a | AL ✅ | INV-04, 34 (approval at write level) |
+| M-24 | `delete_scheduled_task` | write | n/a | AL ✅ | — |
+| M-25 | `run_scheduled_task` | write (+admin for custom command) | ❌ | AL ✅ | INV-24 (policy sees only `taskId`), 30, 43 |
+| M-26 | `cloud_power_on` | write | ❌ | ❌ AH only | INV-43, 45, 52 |
+| M-27 | `cloud_shutdown` | write (UI: Admin) | ❌ | ❌ AH only | INV-13, 43, 45, 52 |
+| M-28 | `cloud_reboot` | write | ❌ | ❌ AH only | INV-43, 45, 52 |
+| M-29 | `cloud_hard_reset` | write (UI: Admin) | ❌ | ❌ AH only | INV-13, 43, 45, 52 |
+| M-30 | `cloud_create_snapshot` | write | ❌ | ❌ AH only | INV-43, 45, 52 |
+| M-31 | `hetzner_enable_rescue` | admin | ❌ | AL ✅ | INV-51 (returns root password), 52 |
+| M-32 | `hetzner_disable_rescue` | write | ❌ | ❌ AH only | INV-45, 52 |
+| M-33 | `hetzner_enable_backups` | write | ❌ | ❌ AH only | INV-45, 52 |
+| M-34 | `hetzner_disable_backups` (deletes backups) | write (UI: Admin) | ❌ | ❌ AH only | INV-13, 45, 52 |
+| M-35 | `hetzner_change_server_type` | write | ❌ | ❌ AH only | INV-13, 43, 45, 52 |
+| M-36 | `hetzner_delete_snapshot` (irreversible) | write | ❌ | ❌ AH only | INV-13, 45, 52 |
+| M-37 | `create_log_alert` (feeds AI triggers) | write | n/a | ❌ AH only | INV-27, 45, 46 |
+| M-38 | `pause_server_checks` | write | n/a | ❌ AH only | INV-45 |
+| M-39 | `resume_server_checks` | write | n/a | ❌ AH only | INV-45 |
+| M-40 | `preview_auto_patch` (pulls images) | write | n/a | ❌ AH only | INV-45 |
+| M-41 | `instruct_agent` → agent run | read | per tool | per tool | INV-08 (in-flight run survives key revocation) |
+
+### 7.2 Agent paths
+
+| ID | Path | Actor | AuthN | AuthZ | Policy | Approval | Execution | Verification | Audit | Path-specific gaps |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling; ⚠️ ignores Enabled (INV-15) | ✅ | ⚠️ self-confirm, in memory, orphan risk | invoker → tool | ❌ | per tool (AL/AH as in 7.1) | INV-15, 31, 32, 36 |
+| A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling | ✅ | Confirm → auto-deny ✅ | invoker → tool | ❌ | per tool | INV-08, 15 |
+| A-03 | AI trigger | Automation (`ai-trigger`) | n/a | ⚠️ `MaxLevel`, no owner | ❌ global preset, not pinned | Confirm → auto-deny ✅; Allow runs unattended | invoker → tool | ❌ | per tool + `agent.run` | INV-04, 06, 15, 23, 27, 40 |
+| A-04 | Claude Code CLI runtime (dead code) | fixed key | ✅ key | ⚠️ fail-open rights check | GR? | approve-then-retry | MCP | ❌ | per tool | remove or fix (C-20); INV-02 |
+
+### 7.3 Background services, scheduler, webhooks
+
+| ID | Path | Actor | AuthN | AuthZ at run | Policy | Approval | Execution | Verification | Audit | Path-specific gaps |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S-01 | Scheduler cron (incl. custom root command, prune, retention `rm -f`) | system, owner not stored | n/a | ❌ | ❌ | ❌ | `TaskExecutor` → host/Docker | ❌ | ❌ `TaskRunHistory` only | INV-04, 20, 21, 43, 45 |
+| S-02 | AutoUpdate | system | n/a | config only | ❌ | ❌ | `RecreateContainerAsync` | ⚠️ 15 s state check, no rollback | ❌ `UpdateHistory` only | INV-04, 20, 21, 44, 45, 59 |
+| S-03 | AutoPatch nightly | system | n/a | config opt-in | ❌ own exclude list only | ❌ | `img-update.sh` as root | ✅ script verify + rollback | ❌ notification only | INV-04, 20, 21, 24, 45, 59 |
+| S-04 | Webhook `POST /api/webhooks/{id}` | anonymous + HMAC | ⚠️ HMAC, no replay protection | config only | ❌ | ❌ | restart / recreate / compose up as root | ❌ | ❌ `WebhookLogs` only | INV-04, 20, 21, 42, 45 |
+| S-05 | Git deploy (via S-04 or U-29) | inherits caller | inherits | ❌ in service | ❌ | ❌ | clone + compose up | ❌ | ⚠️ UI only | INV-04, 20, 41 (branch), 45 |
+| S-06 | Health / log / CVE / cert monitors | system | — | — | — | — | no direct mutation; emits events → A-03 | — | — | INV-27 (event text → prompt) |
+| S-07 | VPN bootstrap at startup | system | — | — | — | — | `EnsureUpAsync` local | ❌ | ❌ log only | INV-41 (E-08), 45 |
+| S-08 | Retention purge of AuditLog + Agent History | system | — | — | — | — | hard delete after 90 days | — | ❌ | INV-50 |
+
+### 7.4 Interactive terminals
+
+| ID | Path | AuthZ | Policy | Approval | Execution | Audit | Path-specific gaps |
+|---|---|---|---|---|---|---|---|
+| T-01 | Container terminal `/terminal/{srv}/{ctr}` | Operator | ❌ | n/a | `docker exec` (remote: SSH as root first) | ❌ | INV-19 (PC-D2: Admin), 21, 47, 59 |
+| T-02 | Embedded terminal in container detail | Operator | ❌ | n/a | same | ❌ | INV-19, 21, 47, 59 |
+| T-03 | Host shell `/server-terminal/{srv}` | Admin | ❌ | n/a | `nsenter` / SSH root | ❌ | INV-09 (session outlives demotion), 21, 47 |
+
+### 7.5 Web UI handlers
+
+Common to all U rows: Actor = Human (cookie) · AuthN ✅ · AuthZ = `Require(role)` in the handler, role cached per
+circuit (INV-09) · Policy ❌ and kill switch ❌ (INV-20, 21; PC-D1) · Approval n/a for humans under PC-D1 ·
+Execution = direct service call.
+
+| ID | Handler | Role | Verification | Audit | Path-specific gaps |
+|---|---|---|---|---|---|
+| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | AL ✅ | INV-43, 59 |
+| U-02 | Dashboard remove (force) | Admin | ❌ | AL ✅ | INV-43, 59 |
+| U-03 | Dashboard update | Operator | ❌ | AL ✅ | INV-43, 53 |
+| U-04 | Dashboard rollback | Operator | ❌ | AL ✅ | INV-43, 53 |
+| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | AL ✅ | INV-43, 59 |
+| U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | AL ✅ | INV-51 |
+| U-07 | Container detail DB query (arbitrary SQL) | Operator | ❌ | ❌ | INV-19 (PC-D3), 45 |
+| U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | ❌ | INV-45 |
+| U-09 | Container detail DB backup | Admin | ❌ | ❌ | INV-45 |
+| U-10 | Deploy form / raw compose | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
+| U-11 | App store template / registry image | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
+| U-12 | Compose editor | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
+| U-13 | Networks create/remove | Admin | ❌ | AL ✅ | INV-13 (MCP: write) |
+| U-14 | Firewall enable/disable UFW | Admin | ❌ | ❌ | INV-45 |
+| U-15 | Firewall rule add/remove (dialog submit unchecked) | Admin | ❌ | AL ✅ | INV-17 |
+| U-16 | Nginx save/enable/disable site | Admin | ⚠️ `nginx -t` | AL ✅ | INV-41 (E-03) |
+| U-17 | Nginx reload | Admin | ❌ | ❌ | INV-45 |
+| U-18 | Systemd start/stop/restart | Admin | ❌ | AL ✅ | INV-43 |
+| U-19 | SSL certificate renew | Admin | ❌ | AL ✅ | INV-43 |
+| U-20 | Servers add/update/delete (+ vault secrets, SSH keys) | Admin | — | AL ✅ | INV-41 (TA-42 SSH user/host), 52 |
+| U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | ❌ | INV-45 |
+| U-22 | Servers pause/resume checks | **markup only** | — | AL ✅ | INV-17 |
+| U-23 | Cloud power / snapshot | Admin | ❌ | AL ✅ | INV-43, 52 |
+| U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | AL ✅ | INV-43 |
+| U-25 | Self-backup create / delete / restore | Admin | ⚠️ archive validation | AL ✅ | INV-55 |
+| U-26 | Scheduled tasks create / toggle / delete | Admin | — | AL ✅ | INV-04 |
+| U-27 | Scheduled task "Run now" (incl. custom command) | **Operator** | ❌ | AL ✅ | INV-19 (B-10), 43 |
+| U-28 | Webhooks create / regenerate / toggle / delete / test | Admin; test = Operator | — | AL ✅ | INV-04, 19 (test fires the real action at Operator) |
+| U-29 | Git-deploy app save / delete; deploy | Admin; deploy = Operator | ❌ | save/delete ❌, deploy ✅ | INV-41 (branch), 46 |
+| U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |
+| U-31 | AI triggers save (prompt, preset, MaxLevel) | Admin | — | ❌ ILogger only | INV-23, 27, 28, 46 |
+| U-32 | Guardrail policy edit / preset switch / kill switch | Admin | — | ❌ ILogger only | INV-28, 46 |
+| U-33 | Approvals approve / reject | approve: level ≥ tool level; reject: anyone | — | ❌ | INV-31, 32, 33, 34, 37 |
+| U-34 | Settings: keys, tool levels, roles, whitelist, vault, terminal | Admin | — | AL ✅ | INV-15, 16, 17 (C-24) |
+
+### 7.6 Totals
+
+*Correction:* the inventory summary in `audit/B-mutations.md` and `TECHNICAL_AUDIT.md` §6 said 87 paths; its rows add up
+to 41 + 4 + 8 + 3 + 34 = **90**. Both documents are corrected in this PR.
+
+| Class | Paths | Paths with path-specific gaps |
+|---|---|---|
+| MCP tools | 41 | 40 |
+| Agent | 4 | 4 |
+| Background / webhook / system | 8 | 8 |
+| Terminals | 3 | 3 |
+| UI handler groups | 34 | 34 |
+| **Total** | **90** | **89** (M-24 has no path-specific gap) |
+
+All 90 paths are blocked today by the shared gaps (INV-01, 22, 38, 39, 45, 48, 49). WP2 (gateway) closes most of
+them structurally. The path-specific gaps then close in WP3–WP7.
+
+## 8. How this document is maintained
+
+- A new mutating MCP tool, UI handler or background job gets a row in §7 in the same PR.
+- When a WP closes a gap, the PR removes the invariant from the row's gap column and updates the invariant's
+  status in `SECURITY_INVARIANTS.md`.
+- When the gateway exists, §7 will be generated from the capability table (WP2) and checked in CI, so that the
+  document cannot drift from the code.
