@@ -248,7 +248,7 @@
 
     private async Task Deploy()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
         if (string.IsNullOrWhiteSpace(_projectName)) return;
         if (_projectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_projectName, @"^[a-zA-Z0-9._-]+$"))
         {

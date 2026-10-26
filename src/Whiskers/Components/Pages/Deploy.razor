@@ -225,7 +225,7 @@
 
     private async Task DeployFromForm()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
         if (string.IsNullOrWhiteSpace(_formRequest.Image))
         {
             Snackbar.Add(L["Deploy_Snackbar_ImageRequired"].Value, Severity.Warning);
@@ -284,7 +284,7 @@
 
     private async Task DeployFromCompose()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
         _deploying = true;
         _deployProgress = "";
         try

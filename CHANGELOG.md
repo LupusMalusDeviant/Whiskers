@@ -6,6 +6,38 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
+
+### ⚠️ Upgrade notes
+- **Deploying from the UI now requires Admin** (was Operator): the deploy form, the compose editor and the app store.
+  A compose file can mount `/` or run privileged, which is root on the host. The MCP deploy tools already
+  required Admin.
+- **The first-run wizard asks for a one-time setup token.** It is printed by the installer and written to
+  `/app/data/setup-token.txt` (mode 0600), or preset with `WHISKERS_SETUP_TOKEN`. Instances that already have
+  an admin are not affected.
+- **`AUTH_DISABLED=true` now only serves the trusted network.** Allowed are loopback, RFC1918, CGNAT/Tailscale
+  and IPv6 ULA clients, with an IP or `localhost` as host name and no cross-site `Origin`. Behind a reverse
+  proxy with a host name, add it via `Auth__DisabledAllowedHosts__0=…`.
+
+### Security
+- **Critical — Operator could gain host root through the UI deploy** (TA-01). UI deploys need Admin now. App-store
+  template values may no longer contain line breaks or control characters, which could inject YAML.
+- **First-run setup could be claimed by whoever reached the port first** (TA-02). It now requires a one-time
+  token. Removing or demoting the last Admin is refused at the service boundary, so setup can no longer be
+  re-opened that way.
+- **Local login had no brute-force protection** (TA-03). Five wrong passwords lock the account for 15 minutes,
+  login POSTs are rate-limited to 10 per minute per client, and unknown accounts cost the same hashing time as
+  real ones.
+- **`AUTH_DISABLED` made every network client an Admin** (TA-11). The trusted-network, Host and Origin checks above
+  apply. With auth enabled, a cookie carrying a synthetic identity (`AuthDisabled`, `AgentSynthetic`) is now
+  rejected; before, anyone holding the DataProtection keys could forge an Admin cookie that skipped the whitelist.
+- **The Trivy image is pinned by digest in the code default too** (TA-14). An operator-configured image without
+  a digest now logs a warning.
+
+### Fixed
+- The installer no longer recommends `Auth__Disabled=true` for first sign-in. It prints the setup token and
+  points to `VAULT_KEY`.
+
 ## [0.15.0] — 2026-10-26
 
 Hardens the MCP surface and finishes the ServerWatch → Whiskers clean-up. MCP keys are now stored only as hashes.

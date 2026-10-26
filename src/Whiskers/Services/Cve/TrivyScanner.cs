@@ -18,6 +18,7 @@ public class TrivyScanner : ITrivyScanner
     private readonly IHostCommandExecutor _executor;
     private readonly IOptionsMonitor<CveMonitorSettings> _settings;
     private readonly ILogger<TrivyScanner> _logger;
+    private volatile bool _warnedUnpinned;
 
     // Pre-rebrand (ServerWatch) volume name, kept so existing hosts reuse their vulnerability-DB cache
     // instead of orphaning it and downloading a second copy.
@@ -69,6 +70,13 @@ public class TrivyScanner : ITrivyScanner
         }
 
         var trivyImage = _settings.CurrentValue.TrivyImage;
+        // Runs with docker.sock on the target host: an image without a digest lets whoever controls the tag decide
+        // what executes as root there. Not blocked (the operator chose it), but never silent.
+        if (!trivyImage.Contains("@sha256:", StringComparison.Ordinal) && !_warnedUnpinned)
+        {
+            _warnedUnpinned = true;
+            _logger.LogWarning("CveMonitor:TrivyImage '{Image}' is not pinned by digest; pin it (image@sha256:…)", trivyImage);
+        }
         // We scan ALL severities and filter at notify/display time. Trivy DB persists in
         // a named volume so subsequent scans are fast.
         // Mount the host Docker socket so Trivy's "docker" image source can scan

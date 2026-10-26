@@ -7,6 +7,8 @@ public sealed class SetupAdminRequest
     public bool IsLocal { get; init; }
     public string Email { get; init; } = "";
     public string? Password { get; init; }   // required when IsLocal
+    /// <summary>The one-time setup token (see <see cref="ISetupStateService.VerifySetupToken"/>). Required.</summary>
+    public string? SetupToken { get; init; }
 }
 
 public enum SetupCompletionStatus { Success, AlreadyComplete, Failed }

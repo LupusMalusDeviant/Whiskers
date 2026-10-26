@@ -135,8 +135,20 @@ public static class WhiskersPipelineExtensions
         // principal so [Authorize]-protected pages render without a login flow.
         if (authDisabled)
         {
+            var access = Whiskers.Services.Auth.AuthDisabledAccessPolicy.FromConfiguration(app.Configuration);
             app.Use(async (ctx, next) =>
             {
+                // Every request below this point is an Admin — refuse anything that is not plainly from the trusted
+                // network (public client, DNS-rebinding Host, cross-site Origin). See AuthDisabledAccessPolicy.
+                var refused = access.Check(ctx.Connection.RemoteIpAddress, ctx.Request.Host.Value, ctx.Request.Headers.Origin);
+                if (refused is not null)
+                {
+                    ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Whiskers.AuthDisabled")
+                        .LogWarning("Auth:Disabled request refused ({Reason}) from {Remote}", refused, ctx.Connection.RemoteIpAddress);
+                    ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await ctx.Response.WriteAsync($"Forbidden: Auth:Disabled only serves the trusted network ({refused}).");
+                    return;
+                }
                 var identity = new ClaimsIdentity(new[]
                 {
                     new Claim(ClaimTypes.Name, "local"),
@@ -150,6 +162,8 @@ public static class WhiskersPipelineExtensions
 
         app.UseMiddleware<Whiskers.Mcp.McpBearerAuthMiddleware>();
         app.UseAuthorization();
+        // Endpoint-scoped limits only (the login POST); nothing else is throttled.
+        app.UseRateLimiter();
 
         // Liveness/readiness probes for orchestrators (Docker HEALTHCHECK, K8s probes). Anonymous and
         // additive — this does NOT change the auth middleware order. The response body is the status word
@@ -216,9 +230,23 @@ public static class WhiskersPipelineExtensions
                 Whiskers.Services.Auth.IWhitelistService whitelist) =>
             {
                 var user = await users.FindByEmailAsync(email ?? "");
-                // Generic failure for both "no such user" and "wrong password" — no account enumeration.
-                if (user is null || !await users.CheckPasswordAsync(user, password ?? ""))
+                // Generic failure for "no such user", "wrong password" and "locked out" — no account enumeration.
+                if (user is null)
+                {
+                    // Spend the same hashing work as a real check so response time doesn't reveal unknown accounts.
+                    LocalLoginTiming.BurnPasswordCheck(users, password);
                     return Results.Redirect(configuredPathBase + "/login?error=invalid");
+                }
+                // CheckPasswordAsync neither honours nor counts lockout (audit TA-03), so do both explicitly:
+                // MaxFailedAccessAttempts (5) wrong passwords lock the account for DefaultLockoutTimeSpan.
+                if (await users.IsLockedOutAsync(user))
+                    return Results.Redirect(configuredPathBase + "/login?error=invalid");
+                if (!await users.CheckPasswordAsync(user, password ?? ""))
+                {
+                    await users.AccessFailedAsync(user);
+                    return Results.Redirect(configuredPathBase + "/login?error=invalid");
+                }
+                await users.ResetAccessFailedCountAsync(user);
 
                 if (!whitelist.IsEmailAllowed(user.Email))
                     return Results.Redirect(configuredPathBase + "/login?error=unauthorized");
@@ -235,7 +263,7 @@ public static class WhiskersPipelineExtensions
                 await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
                     new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = true });
                 return Results.Redirect(configuredPathBase + "/");
-            }).AllowAnonymous();
+            }).AllowAnonymous().RequireRateLimiting(LocalLoginTiming.RateLimitPolicy);
         }
 
         app.MapGet("/logout", async (HttpContext ctx) =>

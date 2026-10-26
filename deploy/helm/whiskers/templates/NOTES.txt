@@ -7,6 +7,9 @@ Whiskers ist installiert.
    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "whiskers.fullname" . }} 8080:{{ .Values.service.port }}
    → http://localhost:8080  (Erststart: Setup-Wizard legt den Admin an)
 
+3. Setup-Token für den Wizard (nur beim Erststart; first-run setup token):
+   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "whiskers.fullname" . }} -- cat /app/data/setup-token.txt
+
 {{- if not (or .Values.vault.existingSecret .Values.vault.key) }}
 
 HINWEIS: Kein VAULT_KEY gesetzt — der Secret-Vault (kubeconfig-basierte Kubernetes-Server,

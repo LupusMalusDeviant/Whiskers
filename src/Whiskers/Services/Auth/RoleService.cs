@@ -113,6 +113,7 @@ public class RoleService : IRoleService, IInitializable
     {
         // Clone before persisting/caching so the caller's mutable object can't alias the enforcement state.
         var copy = Snapshot(data);
+        EnsureAdminRemains(GetRoleData(), copy);
         await _store.SaveAsync(copy);
         SetData(copy);
         _logger.LogInformation("Roles updated: {Count} entries, default={Default}", copy.Roles.Count, copy.DefaultRole);
@@ -124,11 +125,14 @@ public class RoleService : IRoleService, IInitializable
         _lock.EnterWriteLock();
         try
         {
-            var existing = _data.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+            var next = Snapshot(_data);
+            var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
                 existing.Role = role;
             else
-                _data.Roles.Add(new UserRoleEntry { Email = email, Role = role });
+                next.Roles.Add(new UserRoleEntry { Email = email, Role = role });
+            EnsureAdminRemains(_data, next);
+            _data = next;
             // Snapshot inside the lock; persist outside — never serialize the live list another writer may mutate.
             snapshot = Snapshot(_data);
         }
@@ -143,12 +147,24 @@ public class RoleService : IRoleService, IInitializable
         _lock.EnterWriteLock();
         try
         {
-            _data.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+            var next = Snapshot(_data);
+            next.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+            EnsureAdminRemains(_data, next);
+            _data = next;
             snapshot = Snapshot(_data);
         }
         finally { _lock.ExitWriteLock(); }
 
         await _store.SaveAsync(snapshot);
+    }
+
+    /// <summary>Once an instance has an explicit Admin it must keep one. Without an explicit Admin the first-run
+    /// wizard counts as not completed, so removing or demoting the last Admin re-opened setup on the next start
+    /// (audit TA-02). Only explicit entries count — a default role of Admin is not an administrator anyone chose.</summary>
+    private static void EnsureAdminRemains(UserRoleData current, UserRoleData next)
+    {
+        if (current.Roles.Any(r => r.Role == AppRole.Admin) && !next.Roles.Any(r => r.Role == AppRole.Admin))
+            throw new InvalidOperationException("At least one user must keep the Admin role.");
     }
 
     // Deep copy: cached/persisted state can never be aliased by a caller's mutable object, and

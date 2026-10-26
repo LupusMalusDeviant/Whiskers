@@ -497,7 +497,7 @@
 
     private async Task DeployTemplate()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
         if (_selectedTemplate == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
         {
@@ -518,6 +518,14 @@
         if (_portConflicts.Any())
         {
             Snackbar.Add(L["AppStore_Snackbar_FixPortConflicts"].Value, Severity.Warning);
+            return;
+        }
+
+        // Values are pasted into the compose YAML verbatim; a line break would let a value add YAML of its own
+        // (a host mount, privileged: true). Template variables are single-line by nature, so refuse the rest.
+        if (_deployVars.Values.Any(v => v is not null && v.Any(char.IsControl)))
+        {
+            Snackbar.Add(L["AppStore_Snackbar_InvalidVariable"].Value, Severity.Error);
             return;
         }
 
@@ -612,7 +620,7 @@
 
     private async Task DeployRegistryImage()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
         if (_selectedImage == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
         {

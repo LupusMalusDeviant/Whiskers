@@ -21,10 +21,14 @@
 {
     <MudText Typo="Typo.h6" Class="mb-2">@L["Setup_Welcome_Title"]</MudText>
     <MudText Typo="Typo.body2" Class="mb-4">@L["Setup_Welcome_Body"]</MudText>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 mb-4">
         <MudButton Variant="Variant.Outlined" Size="Size.Small" Href="set-culture?culture=en&redirect=/setup">English</MudButton>
         <MudButton Variant="Variant.Outlined" Size="Size.Small" Href="set-culture?culture=de&redirect=/setup">Deutsch</MudButton>
     </div>
+    @* Proves access to the server, not just to the port: whoever completes this wizard becomes Admin. *@
+    <MudTextField @bind-Value="_setupToken" Label="@L["Setup_Token_Label"]" Immediate="true" InputType="InputType.Password"
+                  HelperText="@L["Setup_Token_Hint"]" Error="@(!string.IsNullOrWhiteSpace(_setupToken) && !_tokenOk)"
+                  ErrorText="@L["Setup_Token_Wrong"]" />
 }
 @* Step 1 — Admin account *@
 else if (_step == 1)
@@ -133,8 +137,12 @@ else
             _generatedVaultKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     }
 
+    private string _setupToken = "";
+    private bool _tokenOk => SetupState.VerifySetupToken(_setupToken);
+
     private bool CanNext => _step switch
     {
+        0 => _tokenOk,
         1 => !string.IsNullOrWhiteSpace(_email)
              && (!_isLocal || (PasswordMeetsPolicy && _password == _passwordConfirm)),
         _ => true
@@ -213,7 +221,8 @@ else
             {
                 IsLocal = _isLocal,
                 Email = _email.Trim(),
-                Password = _isLocal ? _password : null
+                Password = _isLocal ? _password : null,
+                SetupToken = _setupToken
             });
         }
         catch (Exception ex)

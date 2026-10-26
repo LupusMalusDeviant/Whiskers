@@ -6,5 +6,9 @@ namespace Whiskers.Services.Setup;
 public interface ISetupStateService
 {
     bool IsSetupComplete { get; }
+    /// <summary>Checks the one-time setup token. Until an admin exists, whoever completes the wizard becomes
+    /// Admin — root on every managed host — so the wizard must prove access to the server, not just to the port
+    /// (audit TA-02). The token comes from <c>WHISKERS_SETUP_TOKEN</c> or the generated <c>setup-token.txt</c>.</summary>
+    bool VerifySetupToken(string? token);
     Task<SetupCompletionResult> CompleteSetupAsync(SetupAdminRequest req, CancellationToken ct = default);
 }

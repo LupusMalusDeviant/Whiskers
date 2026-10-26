@@ -181,14 +181,27 @@ else
   warn "Whiskers started but /healthz did not answer within ~2 min. Check logs: ( cd $DIR && ${DC[*]} logs -f )"
 fi
 
+# The first-run wizard asks for a one-time setup token so that reaching the port is not enough to become Admin.
+SETUP_TOKEN="$(docker exec whiskers cat /app/data/setup-token.txt 2>/dev/null || true)"
+
 cat <<EOF
 
 ${B}Next steps${N}
-  • Open ${URL}
-  • First sign-in needs an auth provider until the setup wizard ships (outOfTheBox W1):
-      – Google or generic OIDC  → set the provider vars (see .env.example) and re-run, or
-      – localhost-only trial    → add \`- Auth__Disabled=true\` under environment: in $COMPOSE, then
-                                    ( cd $DIR && ${DC[*]} up -d )   ${Y}(never do this on a public bind)${N}
+  • Open ${URL} — the setup wizard creates the administrator account.
+EOF
+if [ -n "$SETUP_TOKEN" ]; then
+  cat <<EOF
+  • Setup token (asked for on the first page; it stops working once an admin exists):
+        ${B}${SETUP_TOKEN}${N}
+EOF
+else
+  cat <<EOF
+  • Setup token: docker exec whiskers cat /app/data/setup-token.txt
+    (no file means setup is already complete)
+EOF
+fi
+cat <<EOF
+  • Set a VAULT_KEY before storing secrets (see .env.example), then:  ( cd $DIR && ${DC[*]} up -d )
   • Update later:  bash install.sh            (re-run = pull + up)
   • Logs:          ( cd $DIR && ${DC[*]} logs -f )
   • Hardened/K8s:  see the README and docker-compose.hardened.yml

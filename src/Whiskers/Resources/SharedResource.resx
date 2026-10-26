@@ -4694,4 +4694,19 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Settings_Roles_ImplicitHint" xml:space="preserve">
     <value>Whitelisted without their own role — they currently have the default role {0}. Click an address to assign a role on purpose.</value>
   </data>
+  <data name="Settings_Snackbar_LastAdmin" xml:space="preserve">
+    <value>At least one user must keep the Admin role — the change was not saved.</value>
+  </data>
+  <data name="Setup_Token_Label" xml:space="preserve">
+    <value>Setup token</value>
+  </data>
+  <data name="Setup_Token_Hint" xml:space="preserve">
+    <value>Shown nowhere on purpose. Read it on the server: docker exec whiskers cat /app/data/setup-token.txt (or the value of WHISKERS_SETUP_TOKEN).</value>
+  </data>
+  <data name="Setup_Token_Wrong" xml:space="preserve">
+    <value>This token does not match.</value>
+  </data>
+  <data name="AppStore_Snackbar_InvalidVariable" xml:space="preserve">
+    <value>Template values must be a single line without control characters.</value>
+  </data>
 </root>

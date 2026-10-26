@@ -80,8 +80,10 @@ public sealed class DataPathOptions
     public string VaultJson => P("vault.json");
     public string RolesJson => P("roles.json");
     public string WhitelistJson => P("whitelist.json");
-    // W1 setup wizard: first-run completion mirror flag.
+    // W1 setup wizard: first-run completion mirror flag, and the one-time token the wizard requires (0600,
+    // deleted once an admin exists).
     public string SetupCompleteFlag => P("setup-complete");
+    public string SetupTokenFile => P("setup-token.txt");
     public string NotificationPrefsJson => P("notification-prefs.json");
     public string GuardrailsJson => P("guardrails.json");
     public string CveFindingsJson => P("cve-findings.json");

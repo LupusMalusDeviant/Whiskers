@@ -109,7 +109,10 @@ built in).
 ## Hardening checklist for operators
 
 - Set `AUTH_DISABLED=false` and put a real IdP (Google OAuth or OIDC) in front, or keep the app on a
-  trusted private network only.
+  trusted private network only. With `AUTH_DISABLED=true` Whiskers itself refuses public client addresses,
+  non-IP host names (DNS rebinding) and cross-site origins; narrow `Auth:DisabledAllowedNetworks` further.
+- Complete the setup wizard right after installation. It requires the one-time token from
+  `/app/data/setup-token.txt` (or `WHISKERS_SETUP_TOKEN`), so an exposed port alone is not enough to claim Admin.
 - Keep the email whitelist tight; review roles under *Settings > Authentication*.
 - Issue MCP API keys with the **least** permission level needed.
 - Keep the agent's guardrail presets restrictive; only widen autonomy deliberately.
