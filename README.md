@@ -1,30 +1,24 @@
-<p align="center">
-  <img src="src/Whiskers/wwwroot/brand.png" alt="Whiskers logo" width="150" height="150" />
-</p>
+![Whiskers logo](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/src/Whiskers/wwwroot/brand.png)
 
-<h1 align="center">Whiskers</h1>
+# Whiskers
 
-<p align="center"><strong>Controlled infrastructure operations for humans and AI agents.</strong></p>
+**Controlled infrastructure operations for humans and AI agents.**
 
-<p align="center">
-Whiskers is a <strong>self-hosted control plane</strong> for Docker hosts and Kubernetes workloads.
+Whiskers is a **self-hosted control plane** for Docker hosts and Kubernetes workloads.
 Instead of handing operators or AI agents unrestricted SSH access, it exposes explicit tools
-governed by <strong>permissions, code-enforced guardrails, approvals and a complete action history</strong>.
-</p>
+governed by **permissions, code-enforced guardrails, approvals and a complete action history**.
 
-<p align="center"><em>Bootstrap a host once, then operate over mesh + mTLS without a standing private SSH key.</em></p>
+*Bootstrap a host once, then operate over mesh + mTLS without a standing private SSH key.*
 
-<p align="center">
-<a href="https://github.com/LupusMalusDeviant/Whiskers/releases"><img src="https://img.shields.io/github/v/release/LupusMalusDeviant/Whiskers?color=orange" alt="Release" /></a>
-<a href="#roadmap--beta"><img src="https://img.shields.io/badge/status-beta-yellow.svg" alt="Status" /></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0" /></a>
-<a href="https://dotnet.microsoft.com/"><img src="https://img.shields.io/badge/.NET-10.0-512BD4.svg" alt=".NET" /></a>
-<a href="https://learn.microsoft.com/aspnet/core/blazor/"><img src="https://img.shields.io/badge/Blazor-Server-512BD4.svg" alt="Blazor" /></a>
-<a href="https://lobehub.com/mcp/lupusmalusdeviant-whiskers"><img src="https://lobehub.com/badge/mcp/lupusmalusdeviant-whiskers" alt="MCP Badge" /></a>
-</p>
+[![Release](https://img.shields.io/github/v/release/LupusMalusDeviant/Whiskers?color=orange)](https://github.com/LupusMalusDeviant/Whiskers/releases)
+[![Status](https://img.shields.io/badge/status-beta-yellow.svg)](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#roadmap--beta)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/LupusMalusDeviant/Whiskers/blob/main/LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
+[![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4.svg)](https://learn.microsoft.com/aspnet/core/blazor/)
+[![MCP Badge](https://lobehub.com/badge/mcp/lupusmalusdeviant-whiskers)](https://lobehub.com/mcp/lupusmalusdeviant-whiskers)
 
 > ⚠️ **Beta.** Whiskers is under active development and not yet API-stable.
-> Run it on a trusted network, review the [security policy](SECURITY.md), and expect breaking
+> Run it on a trusted network, review the [security policy](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md), and expect breaking
 > changes before `1.0`.
 
 ---
@@ -44,7 +38,7 @@ between:
 
 The same control plane reaches Docker, Kubernetes, logs, deployments, services and CVE context — but
 that reach is evidence of coverage, not the headline. The headline is **governed, accountable
-operations**. See [docs/product/POSITIONING.md](docs/product/POSITIONING.md) for the full positioning.
+operations**. See [docs/product/POSITIONING.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/product/POSITIONING.md) for the full positioning.
 
 ### How governance works
 
@@ -77,19 +71,19 @@ flowchart LR
 
 ## Table of contents
 
-- [Quick start](#quick-start)
-- [The hero workflow](#the-hero-workflow)
-- [Capabilities](#capabilities)
-- [Architecture & security](#architecture--security)
-- [MCP server](#mcp-server)
-- [AI agent](#ai-agent-optional)
-- [Configuration](#configuration)
-- [Screenshots](#screenshots)
-- [Roadmap & beta](#roadmap--beta)
-- [Project structure](#project-structure)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
+- [Quick start](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#quick-start)
+- [The hero workflow](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#the-hero-workflow)
+- [Capabilities](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#capabilities)
+- [Architecture & security](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#architecture--security)
+- [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server)
+- [AI agent](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#ai-agent-optional)
+- [Configuration](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#configuration)
+- [Screenshots](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#screenshots)
+- [Roadmap & beta](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#roadmap--beta)
+- [Project structure](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#project-structure)
+- [Development](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#development)
+- [Contributing](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#contributing)
+- [License](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#license)
 
 ---
 
@@ -113,13 +107,32 @@ Open `http://127.0.0.1:5100`. The installer accepts `--port`, `--bind`, `--data`
 
 ### Standard — Docker Compose
 
-Download `docker-compose.yml` from the [latest release](https://github.com/LupusMalusDeviant/Whiskers/releases) (already pinned to the image), then `docker compose up -d`. Optional settings go in a `.env` beside it — **everything is optional**, Whiskers runs with none (see [.env.example](.env.example)).
+Download `docker-compose.yml` from the [latest release](https://github.com/LupusMalusDeviant/Whiskers/releases) (already pinned to the image), then `docker compose up -d`. Optional settings go in a `.env` beside it — **everything is optional**, Whiskers runs with none (see [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example)).
 
 The app listens on `127.0.0.1:5100` by default (`HOST_BIND` / `HOST_PORT`) and never binds publicly unless you change the bind.
 
 ### First sign-in
 
-On first launch a **guided setup wizard** in the browser creates the admin account — no `.env` and no config file required. Because whoever completes the wizard becomes Admin, it first asks for a **one-time setup token** that only someone with access to the server can read: `docker exec whiskers cat /app/data/setup-token.txt` (the installer prints it; Helm users `kubectl exec` the same path, or preset it with `WHISKERS_SETUP_TOKEN`). From then on you sign in with that **local login** (email + password; 5 wrong passwords lock the account for 15 minutes, and login attempts are rate-limited per client). Alternatives: seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`; use **Google** or **generic OIDC** (see [Configuration](#configuration)); or, for a trial on a trusted network, `AUTH_DISABLED=true` — every request is then an Admin, so Whiskers only answers clients from private networks, with an IP or `localhost` as host name and without a foreign `Origin` (see [Configuration](#configuration)).
+On first launch a **guided setup wizard** in the browser creates the admin account — no `.env` and no config file required. Because whoever completes the wizard becomes Admin, it first asks for a **one-time setup token** that only someone with access to the server can read: `docker exec whiskers cat /app/data/setup-token.txt` (the installer prints it; Helm users `kubectl exec` the same path, or preset it with `WHISKERS_SETUP_TOKEN`). From then on you sign in with that **local login** (email + password; 5 wrong passwords lock the account for 15 minutes, and login attempts are rate-limited per client). Alternatives: seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`; use **Google** or **generic OIDC** (see [Configuration](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#configuration)); or, for a trial on a trusted network, `AUTH_DISABLED=true` — every request is then an Admin, so Whiskers only answers clients from private networks, with an IP or `localhost` as host name and without a foreign `Origin` (see [Configuration](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#configuration)).
+
+### Connect an MCP client
+
+Whiskers is **self-hosted**: there is no hosted or cloud endpoint. Your MCP client talks to your own instance at
+`/mcp` (Streamable HTTP) with an API key created under *Settings → MCP*:
+
+```json
+{
+  "mcpServers": {
+    "whiskers": {
+      "type": "http",
+      "url": "http://localhost:5100/mcp",
+      "headers": { "Authorization": "Bearer <WHISKERS_MCP_API_KEY>" }
+    }
+  }
+}
+```
+
+Details, scopes and the guardrail behaviour are in [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server).
 
 ### More install options
 
@@ -155,7 +168,7 @@ When serving under a subpath, set `PATH_BASE=/whiskers` in `.env`.
   `privileged`, dropped capabilities, read-only rootfs, and Docker access through a verb-restricted
   socket-proxy. Trades away local host-shell management for a much smaller attack surface.
 
-See **[docs/container-hardening.md](docs/container-hardening.md)** for the full matrix and trade-offs.
+See **[docs/container-hardening.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/container-hardening.md)** for the full matrix and trade-offs.
 </details>
 
 <details>
@@ -172,8 +185,8 @@ kubectl port-forward svc/whiskers 8080:8080   # → http://localhost:8080 (setup
 
 Single-replica by design (Blazor Server + stateful loops), non-root, read-only rootfs, PVC-backed
 data. All values, ingress/WebSocket notes and the Postgres variant:
-**[deploy/helm/whiskers/README.md](deploy/helm/whiskers/README.md)**. To *manage* a cluster from
-Whiskers instead, see **[deploy/k8s/README.md](deploy/k8s/README.md)**.
+**[deploy/helm/whiskers/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/helm/whiskers/README.md)**. To *manage* a cluster from
+Whiskers instead, see **[deploy/k8s/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/k8s/README.md)**.
 </details>
 
 <details>
@@ -185,7 +198,7 @@ cd Whiskers
 docker compose up -d          # builds the image locally
 ```
 
-Copy [.env.example](.env.example) to `.env` to override any defaults. `.env` is gitignored — secrets never land in the repository.
+Copy [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example) to `.env` to override any defaults. `.env` is gitignored — secrets never land in the repository.
 </details>
 
 ---
@@ -236,7 +249,7 @@ for you:
 - **Secrets vault** — stored secrets encrypted at rest (AES-256-GCM); sensitive values redacted before logging and persistence.
 - **Mandatory HMAC webhook secrets** (`X-Hub-Signature-256`-compatible) and **fail-closed authorization** — every endpoint requires authentication unless it explicitly opts out.
 - **SSH host-key verification** (trust-on-first-use) on every ssh path.
-- **Mesh + mTLS** steady-state operation (see [Architecture & security](#architecture--security)).
+- **Mesh + mTLS** steady-state operation (see [Architecture & security](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#architecture--security)).
 
 ### Resilience
 
@@ -246,7 +259,7 @@ for you:
 
 ### Integrations
 
-- **MCP server** — the authenticated interface for external AI clients (see [MCP server](#mcp-server)).
+- **MCP server** — the authenticated interface for external AI clients (see [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server)).
 - **Cloud control (out-of-band)** — provider-agnostic power / snapshot / metrics (Hetzner, Hostinger) via the provider API, even when SSH/Docker is temporarily unreachable.
 - **Registries** — private-registry credentials in the vault, used automatically for authenticated pulls.
 - **Database** — SQLite (zero-config) or PostgreSQL via Entity Framework Core.
@@ -277,15 +290,15 @@ it is migrated.)
 the managed host** — creating a container or running `nsenter` is root by construction. mTLS and the mesh
 decide *who* can reach that power; scopes, guardrails and approvals decide *what* a given caller may do
 with it. The full design, PKI (step-ca), onboarding flow and trade-offs are in
-**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**; the threat model is in [SECURITY.md](SECURITY.md).
+**[docs/ARCHITECTURE.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/ARCHITECTURE.md)**; the threat model is in [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md).
 
 ### Security summary
 
 - **No standing SSH key** for managed hosts in steady state; management ports are **mesh-bound**, nothing management-related is exposed to the public internet by design.
-- **Deterministic policy enforcement, not prompt instructions.** Every MCP tool call — from a signed-in web user, an external MCP client or the in-process agent — passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list). Every one of them then also passes the same guardrail engine: action classification (Allow / Confirm / Block, protected resources, forbidden arguments, read-only kill switch) and human-in-the-loop approval for `Confirm`. See [How the policy layer applies](#how-the-policy-layer-applies).
-- **MCP API keys** are created in the web UI with an explicit scope; the ServerWatch-era unscoped key file `api-keys.json` no longer exists (see the [MCP server](#mcp-server) section).
+- **Deterministic policy enforcement, not prompt instructions.** Every MCP tool call — from a signed-in web user, an external MCP client or the in-process agent — passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list). Every one of them then also passes the same guardrail engine: action classification (Allow / Confirm / Block, protected resources, forbidden arguments, read-only kill switch) and human-in-the-loop approval for `Confirm`. See [How the policy layer applies](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#how-the-policy-layer-applies).
+- **MCP API keys** are created in the web UI with an explicit scope; the ServerWatch-era unscoped key file `api-keys.json` no longer exists (see the [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server) section).
 - **Secrets** (`.env`, the encrypted vault, the DB) live under `/app/data` / `.env`, both gitignored and volume-mounted — never baked into the image or committed.
-- **Full-repo security review & remediation** (see the [security-fixes changelog](docs/reviews/2026-07-07-security-fixes-changelog.md)): all critical and high findings, plus most medium/low issues, are fixed — per-key RBAC on **every** path (including the agent and MCP), the vault on **AES-256-GCM + PBKDF2**, schema via **EF Core migrations**, trust-critical images **pinned by digest**, restricted forwarded-header trust, and a scrape-token-gated `/metrics`.
+- **Full-repo security review & remediation** (see the [security-fixes changelog](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/reviews/2026-07-07-security-fixes-changelog.md)): all critical and high findings, plus most medium/low issues, are fixed — per-key RBAC on **every** path (including the agent and MCP), the vault on **AES-256-GCM + PBKDF2**, schema via **EF Core migrations**, trust-critical images **pinned by digest**, restricted forwarded-header trust, and a scrape-token-gated `/metrics`.
 
 ### Supply chain
 
@@ -305,7 +318,7 @@ cosign verify ghcr.io/lupusmalusdeviant/whiskers:0.15.0 \
 
 A valid result means the image was built by this repository's release workflow from a tag — not rebuilt or tampered with. (Images published before v0.12.1 are provenance-attested but not cosign-signed.)
 
-If you discover a security issue, please report it privately — see [SECURITY.md](SECURITY.md).
+If you discover a security issue, please report it privately — see [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md).
 
 ---
 
@@ -363,7 +376,7 @@ Behind a reverse proxy on a subpath (`PATH_BASE=/whiskers`) the URL becomes
 - **Cloud (out-of-band)**: Hetzner & Hostinger power/snapshot/metrics
 - **Agent**: `instruct_agent` (delegate a natural-language task to the in-process agent)
 
-The complete, current list with permission levels is in [docs/mcp-tool-catalog.md](docs/mcp-tool-catalog.md)
+The complete, current list with permission levels is in [docs/mcp-tool-catalog.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/mcp-tool-catalog.md)
 and in the web UI under *Settings > MCP*.
 
 **Prompts** (user-invokable workflows; they only return instructions, every tool call they lead to is still
@@ -411,7 +424,7 @@ Its safety model is enforced in code, not in the prompt:
 - The agent **inherits the rights of whoever triggered it** (web user or MCP key) and can never exceed them.
 - **Hybrid autonomy**: reads run autonomously; writes/admin actions require confirmation.
 
-See [src/Whiskers/Services/Agent/](src/Whiskers/Services/Agent/) for the implementation.
+See [src/Whiskers/Services/Agent/](https://github.com/LupusMalusDeviant/Whiskers/tree/main/src/Whiskers/Services/Agent/) for the implementation.
 
 ---
 
@@ -436,7 +449,7 @@ Whiskers is configured entirely through environment variables (`.env`); **everyt
 | Data directory | `WHISKERS_DATA_DIR` | Root for SQLite, JSON stores, keys & certificates (default `/app/data`); repoint at any volume / host path |
 | Database | `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION`, `WHISKERS_DB_CONNECTION_FILE` | `sqlite` (default, zero-config) or `postgres`. For Postgres set a connection string, or mount it as a file and point `_FILE` at it. Ready-to-run overlay: `deploy/docker-compose.postgres.yml`. |
 
-See [.env.example](.env.example) for the full, commented list.
+See [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example) for the full, commented list.
 
 ### Notable runtime details
 
@@ -472,32 +485,32 @@ handbook (*Help*) carries screenshots for every area.
 boundary (not in the prompt): a read-only kill switch, the highest level allowed without confirmation,
 protected resources, and forbidden argument patterns.
 
-![Guardrails: a code-enforced policy with a read-only kill switch, maximum autonomous level, protected resources and forbidden argument patterns](docs/product/screenshots/governance-guardrails.png)
+![Guardrails: a code-enforced policy with a read-only kill switch, maximum autonomous level, protected resources and forbidden argument patterns](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/docs/product/screenshots/governance-guardrails.png)
 
 **Agent History — controlled access.** Every agent/MCP tool call, with actor, privilege level
 (read / write / admin), the guardrail verdict (Allow / Confirm / Deny), duration and outcome.
 
-![Agent History: a table of tool calls showing actor, level, verdict and status, including an admin-level call denied by policy](docs/product/screenshots/governance-agent-history.png)
+![Agent History: a table of tool calls showing actor, level, verdict and status, including an admin-level call denied by policy](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/docs/product/screenshots/governance-agent-history.png)
 
 **Audit Log — complete accountability.** The approval and execution trail: who approved what, which
 action a guardrail blocked, and the resulting change.
 
-![Audit Log: approval-granted and guardrail-denied entries with actor, action and target](docs/product/screenshots/governance-audit-log.png)
+![Audit Log: approval-granted and guardrail-denied entries with actor, action and target](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/docs/product/screenshots/governance-audit-log.png)
 
 **Secure AI Operations — a governed starting point.** Connect a client, mint a least-privilege
 read-only key, and activate a starter guardrail preset (Observe only / Safe operations / Approval
 required).
 
-![Secure AI Operations onboarding: connect a client, create a read-only key, choose a starter guardrail preset](docs/product/screenshots/governance-ai-operations.png)
+![Secure AI Operations onboarding: connect a client, create a read-only key, choose a starter guardrail preset](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/docs/product/screenshots/governance-ai-operations.png)
 
 **Dashboard — the reach.** Real-time status across Docker hosts and Kubernetes workloads, with live
 host metrics — the surface the governance model sits in front of.
 
-![Container overview dashboard: total/running/stopped/unhealthy counts and a connected Docker host with live CPU and memory charts](docs/product/screenshots/dashboard-overview.png)
+![Container overview dashboard: total/running/stopped/unhealthy counts and a connected Docker host with live CPU and memory charts](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/docs/product/screenshots/dashboard-overview.png)
 
 > Screenshots are captured against an anonymized demo dataset. See
-> [docs/product/demo-script.md](docs/product/demo-script.md) for the scripted walkthrough and
-> [docs/product/screenshots.md](docs/product/screenshots.md) for how each image is reproduced.
+> [docs/product/demo-script.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/product/demo-script.md) for the scripted walkthrough and
+> [docs/product/screenshots.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/product/screenshots.md) for how each image is reproduced.
 
 ---
 
@@ -528,7 +541,7 @@ chat widgets)
 - **Break-glass / disaster recovery**: short-lived SSH certificates issued via step-ca as an
   auditable emergency-access path when the normal control plane is unavailable.
 - **Distroless/chiseled "remote" image** for the hardened profile (a locked-down container profile
-  and a pluggable Tailscale/NetBird VPN already ship — see [docs/container-hardening.md](docs/container-hardening.md)).
+  and a pluggable Tailscale/NetBird VPN already ship — see [docs/container-hardening.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/container-hardening.md)).
 
 Have a request? Open an issue.
 
@@ -560,7 +573,7 @@ Whiskers/
 └── README.md
 ```
 
-The `Services/` tree is the heart of the app — see [src/Whiskers/Services/README.md](src/Whiskers/Services/README.md) for a guided tour.
+The `Services/` tree is the heart of the app — see [src/Whiskers/Services/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/src/Whiskers/Services/README.md) for a guided tour.
 
 ### Code conventions
 
@@ -598,6 +611,6 @@ Issues and pull requests are welcome. Please:
 
 ## License
 
-Apache License 2.0, see [LICENSE](LICENSE).
+Apache License 2.0, see [LICENSE](https://github.com/LupusMalusDeviant/Whiskers/blob/main/LICENSE).
 
 Copyright © 2026 Whiskers Contributors
