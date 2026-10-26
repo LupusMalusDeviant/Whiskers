@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Draft for review** (WP11a) |
+| Status | **Accepted** (WP11a, 2026-10-26) |
 | Baseline | `main` @ `498e70d` (0.15.0) + PR #41 (WP1) |
 | Date | 2026-10-26 |
 | Companion | [`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md) (what the product promises), [`TECHNICAL_AUDIT.md`](TECHNICAL_AUDIT.md) (evidence) |
@@ -12,7 +12,7 @@ Each one has a stable ID, a statement that a test can decide, its current status
 The [`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md) path matrix refers to these IDs.
 
 **Release rule.** v1.0 ships only when every invariant below is ✅ and its named test exists and passes. A
-deliberate exception needs a recorded decision in [`PRODUCT_CONTRACT.md` §6](PRODUCT_CONTRACT.md#6-decisions-needed)
+deliberate exception needs a recorded decision in [`PRODUCT_CONTRACT.md` §6](PRODUCT_CONTRACT.md#6-decisions)
 and a matching limitation in the product documentation. `RELEASE_GATE.md` (WP11b) will check this table
 mechanically, so keep its format: one row per invariant, the ID in the first column, the status symbol at the start
 of the third.
@@ -61,7 +61,7 @@ of the third.
 
 | ID | Invariant | Status | Evidence / gap | Test | WP |
 |---|---|---|---|---|---|
-| INV-20 | No infrastructure mutation executes without a policy decision taken for exactly that call, on every surface (agent, MCP, UI, automation, webhook, terminal open). | ❌ | Only the agent and direct MCP calls are evaluated. TA-04, TA-26, TA-27. Scope for UI depends on decision PC-D1. | `MutationGatewayCoverageTests` *(planned, WP2)* | WP2 |
+| INV-20 | No infrastructure mutation executes without a policy decision taken for exactly that call, on every surface (agent, MCP, UI, automation, webhook, terminal open). | ❌ | Only the agent and direct MCP calls are evaluated. TA-04, TA-26, TA-27. Scope includes UI (PC-D1). | `MutationGatewayCoverageTests` *(planned, WP2)* | WP2 |
 | INV-21 | While the read-only kill switch is on, every mutation on every path is denied, and no new terminal session opens. The only exception is switching the kill switch off (Admin, audited). | ❌ | Applies to agent and direct MCP only. B-02, B-09. | `KillSwitchTests` *(planned, WP6, wire test)* | WP6 |
 | INV-22 | Every policy decision is persisted as a decision record (id, time, principal, capability, resolved target, input hash, policy version hash, preset, matched rules, verdict) **before** the mutation runs. Approvals and audit events reference it by id. | ❌ | Decisions are transient. Phase 4. | `PolicyDecisionRecordTests` *(planned, WP4)* | WP4 |
 | INV-23 | The effective policy of a run is fixed when the run starts. For an AI trigger it is the trigger's pinned preset, combined most-restrictively with the global kill switch. | ❌ | Trigger runs read the global live preset. TA-07, C-01. | `TriggerPolicyPinningTests` *(planned, WP4)* | WP4 |
@@ -79,7 +79,7 @@ of the third.
 | INV-30 | An approval binds a hash over (principal, credential, capability, normalized arguments, resolved target, policy decision id, expiry). A call executes on an approval only if its own hash is identical. Changed arguments or a changed target need a new approval. | ⚠️ | Direct MCP binds actor + tool + raw args (no target, no policy). The agent path binds the in-memory call object. audit C §1 (approval integrity). | `ApprovalBindingTests` *(planned, WP3)* | WP3 |
 | INV-31 | Approvals and their decisions are durable: they survive a restart, and their history is never truncated by a count cap. | ❌ | In memory, 200 resolved entries kept. TA-06c, C-04. | `ApprovalPersistenceTests` *(planned, WP3)* | WP3 |
 | INV-32 | An expired approval can be neither approved nor executed. Expiry is checked at resolve time **and** at execution time. | ❌ | `ResolveAsync` does not check `ExpiresAt`. TA-18, C-07. | `ApprovalStoreTests` (new cases, WP3) | WP3 |
-| INV-33 | The principal that requested an approval cannot approve it when the request is non-interactive (direct MCP, AI trigger, scheduled task). Interactive agent chat may self-confirm only if policy allows it. | ❌ | Self-approval is not prevented anywhere. TA-18, C-10. Needs decision PC-D4. | `ApprovalSeparationOfDutyTests` *(planned, WP3)* | WP3 |
+| INV-33 | The principal that requested an approval cannot approve it when the request is non-interactive (direct MCP, AI trigger, scheduled task). Interactive agent chat may self-confirm only if policy allows it. | ❌ | Self-approval is not prevented anywhere. TA-18, C-10. Rule per PC-D4. | `ApprovalSeparationOfDutyTests` *(planned, WP3)* | WP3 |
 | INV-34 | The approver's level is at least the **effective** level of the action (for example Admin for a scheduled custom command, not the tool's Write level). | ⚠️ | The level check exists; the level used is the tool level. TA-18, B-11a, C-11. | `ApprovalSeparationOfDutyTests` *(planned, WP3)* | WP3 |
 | INV-35 | An approval is single-use. Concurrent attempts to execute on one approval result in exactly one execution. | ⚠️ | Holds in memory (CAS / atomic `TryRemove`). Must hold again once approvals are persisted. | `ApprovalStoreTests.Resolving_twice_returns_false_and_runs_resolver_once`, `DirectMcpCallGuardTests.Confirm_raises_one_approval_and_the_identical_call_runs_once_after_a_human_approves`; `ApprovalConcurrencyTests` *(planned, WP3)* | WP3 |
 | INV-36 | An approval whose requesting session has ended does not execute unattended. It expires with the session. | ❌ | An orphaned session still executes a later approval. C-08. | `ApprovalStoreTests.CancelForSession_denies_only_that_sessions_pending_approvals` (partial); `OrphanedApprovalTests` *(planned, WP3)* | WP3 |
@@ -108,8 +108,8 @@ of the third.
 |---|---|---|---|---|---|
 | INV-45 | Every mutation attempt — allowed, denied, waiting for approval, failed — produces exactly one audit event with: principal (INV-01), surface, capability, resolved target, redacted arguments, decision id, approval id and approver, outcome, verification result, duration, operation id. | ❌ | Many paths write nothing to the AuditLog (B-04, B-07); none writes the full field set. TA-06. | `AuditCompletenessTests` *(planned, WP5)* | WP5 |
 | INV-46 | Every security-relevant configuration change is audited: roles, whitelist, keys, tool levels, guardrails, presets, triggers, webhooks, git-deploy apps, log alerts, authentication events, backup downloads. | ⚠️ | Settings writes are audited. Guardrails, triggers, log alerts, git-deploy save/delete, auth events and backup downloads are not. TA-06b, A-10. | `AuditLoggingTests` (extended) *(WP5)* | WP5 |
-| INV-47 | Opening and closing every terminal session is audited with principal, target and duration. Whether a transcript is kept follows decision PC-D2. | ❌ | Terminals log to ILogger only. TA-05. | `TerminalAuditTests` *(planned, WP2)* | WP2 |
-| INV-48 | An audit *intent* record is durably written before a mutation runs. If it cannot be written, the mutation does not run. | ❌ | `AuditLogService` writes after the fact and, on failure, logs to ILogger and lets the action stand. Needs decision PC-D5. | `AuditFailClosedTests` *(planned, WP5)* | WP5 |
+| INV-47 | Opening and closing every terminal session is audited with principal, target and duration. No keystroke transcript in 1.0 (PC-D2). | ❌ | Terminals log to ILogger only. TA-05. | `TerminalAuditTests` *(planned, WP2)* | WP2 |
+| INV-48 | An audit *intent* record is durably written before a mutation runs. If it cannot be written, the mutation does not run. | ❌ | `AuditLogService` writes after the fact and, on failure, logs to ILogger and lets the action stand. Fail-closed per PC-D5. | `AuditFailClosedTests` *(planned, WP5)* | WP5 |
 | INV-49 | The audit trail is tamper-evident: `eventHash = SHA256(prevHash ‖ canonicalEvent)`. A verification routine detects any modified, inserted or deleted event. | ❌ | Plain rows, no chain. TA-35. ADR required first. | `AuditHashChainTests` *(planned, WP5)* | WP5 |
 | INV-50 | Audit retention is configurable, deletion is itself audited, audit data can be exported, and only Admin (or a dedicated auditor role) can read it. | ❌ | Fixed 90-day hard delete, no export, visible to all Viewers. TA-35, B-20. | `AuditRetentionTests` *(planned, WP5)* | WP5 |
 

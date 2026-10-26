@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Draft for review** (WP11a). The decisions in §6 are proposals until the maintainer accepts them. |
+| Status | **Accepted** (WP11a). Decisions PC-D1…PC-D8 accepted by the maintainer on 2026-10-26. |
 | Baseline | `main` @ `498e70d` (0.15.0) + PR #41 (WP1) |
 | Date | 2026-10-26 |
 | Companion | [`SECURITY_INVARIANTS.md`](SECURITY_INVARIANTS.md) (INV-xx), [`TECHNICAL_AUDIT.md`](TECHNICAL_AUDIT.md) (TA-xx), [`audit/B-mutations.md`](audit/B-mutations.md) (path inventory) |
@@ -18,8 +18,8 @@ Whiskers, and Whiskers decides, executes, verifies and records.
 **The contract.** *No infrastructure mutation that Whiskers performs bypasses authentication, authorization,
 policy, a required approval, or audit.*
 
-The original wording limited this to mutations "through the agent/MCP control plane". This draft proposes to
-widen it to **every mutation Whiskers performs**, whatever the entry point (decision PC-D1). Reason: the audit
+The original wording limited this to mutations "through the agent/MCP control plane". Decision PC-D1 widens it
+to **every mutation Whiskers performs**, whatever the entry point. Reason: the audit
 shows that the UI, the scheduler, AutoUpdate, AutoPatch, webhooks and terminals reach the same executors. If they
 stay outside the contract, an agent that can create a scheduled task, a webhook or a log alert can launder a
 mutation through them (B-02, B-11e, B-06). A contract with that hole cannot be defended to a security team.
@@ -100,11 +100,12 @@ contract than it says.
 6. **Out-of-band changes are invisible.** Changes made directly on a host, in a cloud console or via another
    tool are not governed. Whiskers may observe their effects; it does not attribute them.
 
-## 6. Decisions needed
+## 6. Decisions
 
-The maintainer decides these before WP2 starts. The recommendation is the first option.
+All eight decisions were accepted on 2026-10-26 as recommended. The alternatives stay listed so the reasoning remains
+traceable.
 
-| ID | Question | Recommendation | Alternative | Affects |
+| ID | Question | Decision | Rejected alternative | Affects |
 |---|---|---|---|---|
 | PC-D1 | Does the contract cover every mutation, or only agent/MCP? | **Every mutation.** Human UI actions go through the gateway: authorization, kill switch, protected resources, audit. They need an approval only where policy says so for humans (default: never). | Agent/MCP only, documenting UI, automation and terminals as out of scope. Leaves the laundering paths open (§1). | INV-20, 21, 38; TA-26 |
 | PC-D2 | Terminals: what is recorded? | Session open/close audited (INV-47); host shell and container shell both Admin; kill switch blocks opening; **no keystroke transcript** in 1.0, stated as a limit. | Full transcript with redaction. Higher value for auditors, but stores secrets typed into shells. | INV-19, 47 |
