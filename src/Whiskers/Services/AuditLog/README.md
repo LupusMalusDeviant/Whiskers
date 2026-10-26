@@ -14,6 +14,8 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 - **Secret-safety:** entries store only key **names**, `SecretRedactor`-redacted commands, and never secret values, DB passwords, or issued credentials — e.g. `hetzner.rescue_enable` records that a root credential was issued, not the password.
 - **Coverage** includes config saves, vault `vault.set`/`vault.delete`, scheduler `scheduler.create`/`run`/`delete`, `command.execute`, and `hetzner.rescue_enable`.
 
+- **Gateway writes are different:** the Mutation Gateway writes through its own `AuditLogMutationSink` ([`../Mutations/`](../Mutations/)), which writes the intent *before* execution and **throws** on a failed write, so the mutation is refused (PC-D5).
+
 ## Related
 
 - Actor resolution mirrors [`../Mcp/`](../Mcp/) and the agent's synthetic context ([`../Agent/AgentToolInvoker.cs`](../Agent/AgentToolInvoker.cs))

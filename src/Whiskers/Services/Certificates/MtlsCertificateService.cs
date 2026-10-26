@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using System.Collections.Concurrent;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -11,10 +12,12 @@ namespace Whiskers.Services.Certificates;
 public interface IMtlsCertificateService
 {
     /// <summary>Onboarding: key + CSR on the host, signed by step-ca, installed before the proxy first starts.</summary>
+    [MutatingOperation("certificate.issue_mtls")]
     Task<X509Certificate2> IssueForNewHostAsync(string serverId, MtlsIdentity identity, CancellationToken ct);
 
     /// <summary>Renews the certificate of a running proxy, keeping its identity. The host rolls back on its own if
     /// Whiskers cannot confirm the new certificate within <see cref="MtlsCertificateCommands.GuardDelay"/>.</summary>
+    [MutatingOperation("certificate.renew_mtls")]
     Task<MtlsRenewalResult> RenewAsync(string serverId, CancellationToken ct);
 }
 

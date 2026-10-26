@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using Whiskers.Models;
 
 namespace Whiskers.Services.Docker;
@@ -13,12 +14,18 @@ public interface IDockerService
     Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true);
     Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null);
     Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null);
+    [MutatingOperation("container.start")]
     Task StartContainerAsync(string containerId, string? serverId = null);
+    [MutatingOperation("container.stop")]
     Task StopContainerAsync(string containerId, string? serverId = null);
+    [MutatingOperation("container.restart")]
     Task RestartContainerAsync(string containerId, string? serverId = null);
+    [MutatingOperation("container.remove")]
     Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null);
     Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default);
+    [MutatingOperation("container.create")]
     Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null);
+    [MutatingOperation("image.pull")]
     Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null);
     Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null);
     Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default);
@@ -32,6 +39,7 @@ public interface IDockerService
     /// <summary>What an image declares about how it runs — for measuring update risk before recreating
     /// anything (GAP-6). Null when the image cannot be inspected.</summary>
     Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null);
+    [MutatingOperation("container.update")]
     Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null);
     /// <summary>The container's log-driver configuration and log file path, or null when Docker reports
     /// none. Used by the log-hygiene inventory (Plan-0007 WP3).</summary>
@@ -42,13 +50,18 @@ public interface IDockerService
     // C12 update-rollback: capture the pre-update snapshot (old image ID + full container config as JSON) so a
     // failed update can be undone; RollbackContainerAsync recreates the container from that snapshot's old image.
     Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null);
+    [MutatingOperation("container.rollback")]
     Task<string> RollbackContainerAsync(string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null);
 
     // Networks
     Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null);
+    [MutatingOperation("network.create")]
     Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null);
+    [MutatingOperation("network.remove")]
     Task RemoveNetworkAsync(string networkId, string? serverId = null);
+    [MutatingOperation("network.connect")]
     Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null);
+    [MutatingOperation("network.disconnect")]
     Task DisconnectContainerFromNetworkAsync(string networkId, string containerId, string? serverId = null);
 
     // Run a shell command on the HOST via a short-lived privileged nsenter container over the Docker

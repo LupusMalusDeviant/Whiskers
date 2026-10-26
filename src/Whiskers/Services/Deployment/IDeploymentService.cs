@@ -1,10 +1,13 @@
+using Whiskers.Services.Mutations;
 using Whiskers.Models;
 
 namespace Whiskers.Services.Deployment;
 
 public interface IDeploymentService
 {
+    [MutatingOperation("app.deploy")]
     Task<string> DeployFromFormAsync(DeploymentRequest request, IProgress<string>? progress = null, string? serverId = null);
+    [MutatingOperation("compose.deploy")]
     Task<IList<string>> DeployFromComposeAsync(string yamlContent, IProgress<string>? progress = null, string? serverId = null);
     DeploymentValidationResult ValidateCompose(string yamlContent);
 }

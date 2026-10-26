@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using Whiskers.Models;
 
 namespace Whiskers.Services.AutoUpdate;
@@ -6,6 +7,7 @@ namespace Whiskers.Services.AutoUpdate;
 public interface IAutoUpdateService
 {
     Task<List<UpdatePolicyEntity>> GetPoliciesAsync();
+    [MutatingOperation("autoupdate.policy_set")]
     Task SetPolicyAsync(UpdatePolicyEntity policy);
     Task<List<UpdateHistoryEntity>> GetHistoryAsync(string? containerId = null, int limit = 20);
 
@@ -14,5 +16,6 @@ public interface IAutoUpdateService
     // back to its previous image from its snapshot.
     Task CaptureSnapshotAsync(ContainerInfo container);
     Task<List<UpdateRollbackEntity>> GetRollbacksAsync();
+    [MutatingOperation("container.rollback")]
     Task<string> RollbackAsync(long rollbackId);
 }
