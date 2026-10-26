@@ -35,6 +35,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   a digest now logs a warning.
 
 ### Added
+- **Mutation Gateway, step 2.0 (ADR-0005).** `IMutationGateway` with a capability catalog of every mutating action, a decide → audit intent → execute → verify → audit outcome pipeline that refuses on any doubt (unknown capability, missing level, policy error, audit not writable), and an architecture test that lists every call to a mutating service outside the gateway in `docs/v1/mutation-bypass-baseline.txt` (104 today; the list may only shrink). No entry point uses the gateway yet, so permissions and behaviour are unchanged.
+- **Scope guard in report mode.** Mutating service interfaces are wrapped at startup; a mutation that runs outside the gateway still runs, and the first one per capability is logged at Information (`ran outside the Mutation Gateway (report mode)`). Expect these lines until the surfaces are migrated.
 - `server.json` for the official MCP Registry (`io.github.LupusMalusDeviant/whiskers`, OCI image on ghcr.io,
   Streamable HTTP at `/mcp` with a Bearer key). The image carries the matching
   `io.modelcontextprotocol.server.name` label, which the registry checks before it accepts `mcp-publisher publish`.

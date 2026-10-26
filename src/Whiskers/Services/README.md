@@ -25,6 +25,7 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`LogMonitor/`](LogMonitor/) | Log search and pattern-based log alerts |
 | [`Cve/`](Cve/) | OS and container CVE scanning (Trivy) and findings storage |
 | [`AuditLog/`](AuditLog/) | Append-only audit trail of privileged actions |
+| [`Mutations/`](Mutations/) | The Mutation Gateway (ADR-0005): capability catalog, decide → execute → verify → audit pipeline, scope guard around mutating services |
 
 ## Deployment & updates
 

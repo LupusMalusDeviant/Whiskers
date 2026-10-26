@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using Whiskers.Models;
 
 namespace Whiskers.Services.LogMonitor;
@@ -22,7 +23,10 @@ public interface ILogMonitorService
     IReadOnlyList<SuspendedContainer> SuspendedContainers();
 
     Task<List<LogAlertRuleEntity>> GetRulesAsync();
+    [MutatingOperation("logalert.create")]
     Task<LogAlertRuleEntity> CreateRuleAsync(LogAlertRuleEntity rule);
+    [MutatingOperation("logalert.delete")]
     Task DeleteRuleAsync(string ruleId);
+    [MutatingOperation("logalert.toggle")]
     Task ToggleRuleAsync(string ruleId, bool enabled);
 }

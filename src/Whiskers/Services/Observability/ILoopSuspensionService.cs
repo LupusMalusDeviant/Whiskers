@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 namespace Whiskers.Services.Observability;
 
 /// <summary>Why a server's background loops are paused, and until when.</summary>
@@ -33,8 +34,10 @@ public interface ILoopSuspensionService
 
     /// <summary>Pauses one server's background loops. A null <paramref name="until"/> means "until revoked",
     /// which carries a recurring reminder — a pause nobody remembers is a blind spot nobody knows about.</summary>
+    [MutatingOperation("checks.pause")]
     void Suspend(string serverId, DateTime? until, string reason, bool automatic = false);
 
+    [MutatingOperation("checks.resume")]
     void Resume(string serverId);
 
     /// <summary>Everything currently paused, for the dashboard and the supervisory report.</summary>

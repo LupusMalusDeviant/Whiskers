@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 namespace Whiskers.Services.AutoPatch;
 
 public sealed record AutoPatchEntry(string ServerId, string ContainerName, AutoPatchResultKind Kind, string Detail);
@@ -21,5 +22,6 @@ public interface IAutoPatchService
     /// <summary>Runs one cycle now. <paramref name="forceDryRun"/> keeps it a dry run whatever the settings
     /// say; there is deliberately no way to force the opposite from here.</summary>
     /// <returns>False when a cycle is already running.</returns>
+    [MutatingOperation("autopatch.run")]
     Task<bool> RunCycleAsync(bool forceDryRun, CancellationToken ct = default);
 }

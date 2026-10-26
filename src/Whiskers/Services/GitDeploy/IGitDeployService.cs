@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using Whiskers.Models;
 
 namespace Whiskers.Services.GitDeploy;
@@ -14,12 +15,15 @@ public interface IGitDeployService
 
     /// <summary>Creates/updates the app. A non-null <paramref name="token"/> is stored in the vault;
     /// null keeps an existing token; an empty string removes it.</summary>
+    [MutatingOperation("gitdeploy.save")]
     Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token);
 
     /// <summary>Deletes the app, its vault token and its workspace on the target server.</summary>
+    [MutatingOperation("gitdeploy.delete")]
     Task DeleteAppAsync(string appId);
 
     /// <summary>Runs a full deploy (fetch → build → up), streaming human-readable progress lines.
     /// Returns success + the deployed commit sha (or the failing step's error).</summary>
+    [MutatingOperation("gitdeploy.deploy")]
     Task<(bool Success, string Output)> DeployAsync(string appId, IProgress<string>? progress = null, CancellationToken ct = default);
 }
