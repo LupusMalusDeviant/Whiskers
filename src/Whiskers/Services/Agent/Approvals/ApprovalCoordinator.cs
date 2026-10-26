@@ -1,7 +1,8 @@
-using System.Text.Json;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Guardrails;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Notifications;
 using Whiskers.Utils;
 
@@ -26,11 +27,13 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     private readonly INotificationService _notify;
     private readonly IGuardrailStore _guardrails;
     private readonly ILogger<ApprovalCoordinator>? _logger;
+    private readonly ICapabilityOverrides? _overrides;
 
     public ApprovalCoordinator(
         IApprovalStore store, INotificationService notify, IGuardrailStore guardrails,
-        ILogger<ApprovalCoordinator>? logger = null)
+        ILogger<ApprovalCoordinator>? logger = null, ICapabilityOverrides? overrides = null)
     {
+        _overrides = overrides;
         _store = store;
         _notify = notify;
         _guardrails = guardrails;
@@ -44,7 +47,10 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
         // Real required level of the tool (was hardcoded "write"), so the card and the resolver-level
         // check reflect what the tool actually needs.
         var level = McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(call.Name, "write");
-        var (targetServer, targetWorkload) = ExtractTarget(call.ArgumentsJson);
+        // A stricter level stored in Settings → MCP raises what the approver must hold.
+        if (_overrides is not null)
+            level = _overrides.ResolveTool(call.Name, level).RequiredLevel;
+        var (targetServer, targetWorkload) = ApprovalDisplay.ExtractTarget(call.ArgumentsJson);
         var rule = decision.MatchedRuleIds.Count > 0 ? string.Join(", ", decision.MatchedRuleIds) : null;
 
         var request = new ApprovalRequest(
@@ -57,11 +63,13 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             ParamsJson: paramsJson,
             Reason: reason,
             CorrelationId: call.CorrelationId,
-            RiskLevel: RiskOf(level),
+            RiskLevel: ApprovalDisplay.RiskOf(level),
             TargetServer: targetServer,
             TargetWorkload: targetWorkload,
             GuardrailPreset: _guardrails.Config.ActivePreset,
-            GuardrailRule: rule);
+            GuardrailRule: rule,
+            // Binds the approval to these exact arguments: the Mutation Gateway runs the call only if they match.
+            ArgumentsHash: ApprovalFingerprint.OfArguments(AgentArgumentBinder.ParseArguments(call.ArgumentsJson)));
 
         // The resolver reaches back to the still-running session that is awaiting the decision.
         var approval = _store.Create(request, approved => session.ResolveConfirmationAsync(call.Id, approved));
@@ -82,42 +90,6 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
         }
 
         return approval;
-    }
-
-    /// <summary>Coarse risk band from the tool's required permission level (display-only).</summary>
-    internal static string RiskOf(string level) => McpPermissionLevels.Normalize(level) switch
-    {
-        "admin" => "high",
-        "write" => "medium",
-        _ => "low",
-    };
-
-    // Well-known argument keys that name the target of an operation. Best-effort and display-only —
-    // it never changes what executes (the call is bound by its ToolCallId).
-    private static readonly string[] ServerKeys = { "serverId", "server", "serverName" };
-    private static readonly string[] WorkloadKeys = { "containerId", "container", "name", "pod", "workload", "service" };
-
-    internal static (string? server, string? workload) ExtractTarget(string? argsJson)
-    {
-        if (string.IsNullOrWhiteSpace(argsJson)) return (null, null);
-        try
-        {
-            using var doc = JsonDocument.Parse(argsJson);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return (null, null);
-            return (FirstString(doc.RootElement, ServerKeys), FirstString(doc.RootElement, WorkloadKeys));
-        }
-        catch (JsonException) { return (null, null); }
-    }
-
-    private static string? FirstString(JsonElement obj, string[] keys)
-    {
-        foreach (var k in keys)
-            if (obj.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String)
-            {
-                var s = v.GetString();
-                if (!string.IsNullOrWhiteSpace(s)) return s;
-            }
-        return null;
     }
 
     private static (string actor, string actorType) ActorOf(AgentContext ctx)

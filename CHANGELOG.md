@@ -18,8 +18,34 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **`AUTH_DISABLED=true` now only serves the trusted network.** Allowed are loopback, RFC1918, CGNAT/Tailscale
   and IPv6 ULA clients, with an IP or `localhost` as host name and no cross-site `Origin`. Behind a reverse
   proxy with a host name, add it via `Auth__DisabledAllowedHosts__0=…`.
+- **MCP and agent mutations run through the Mutation Gateway** (ADR-0005 step 2.1). What changes for callers:
+  - A tool switched off in Settings → MCP, or raised to a stricter level there, now applies to web users, the
+    agent and AI triggers too, not only to API keys.
+  - A key's `AllowedTools` list can no longer lift it above its level: a Read key listing `start_container` is
+    refused. Give such a key the level the tool needs.
+  - An unknown or ambiguous container is refused before the guardrails run, with the same "Container not found" /
+    "Ambiguous container id" text as before.
+  - Mutating tools have deadlines (2 to 30 minutes by capability; `execute_command` 11 minutes, above its own
+    600-second limit). A tool that runs longer is reported as failed.
+  - The agent runs a mutation that needed a human only with the approval registered for exactly that call. A
+    confirmation answered in the chat without a registered approval no longer executes; the agent is told to
+    repeat the call, which raises a regular approval.
+  - Each MCP or agent mutation now leaves **two** AuditLog rows: the gateway's row (decision, approval, intent,
+    outcome; `Details` is JSON with `operationId`) and the tool's own result row as before.
+- **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
+  direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
+  Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **The tool switch and stricter tool levels applied to API keys only** (TA-10, INV-15). They now apply to every
+  caller.
+- **`AllowedTools` could widen a key beyond its level** (TA-34, INV-16). The level is now checked first.
+- **Protected resources are also matched against the resolved container** for MCP and agent mutations: a unique
+  id prefix of a protected container no longer slips past the rule (part of TA-09; commands and SQL text are not
+  covered yet).
+- **Disabling the Agent module removed the guardrails from direct MCP calls** (TA-27, INV-26). The guardrail
+  engine, its store, the approval store and the direct-MCP guard are core now; the MCP filter refuses every call if
+  they are missing.
 - **Critical — Operator could gain host root through the UI deploy** (TA-01). UI deploys need Admin now. App-store
   template values may no longer contain line breaks or control characters, which could inject YAML.
 - **First-run setup could be claimed by whoever reached the port first** (TA-02). It now requires a one-time
@@ -35,6 +61,10 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   a digest now logs a warning.
 
 ### Added
+- **Mutation Gateway, step 2.1 (ADR-0005).** Every MCP tool and agent tool call that maps to a capability runs
+  through the gateway: tool switch and level, container target resolution, guardrail policy, approval, audit
+  intent, deadline, audit outcome. A shared approval gate binds an approval to the operation and the arguments
+  hash and uses it once. The bypass baseline shrinks from 104 to 75 entries.
 - **Mutation Gateway, step 2.0 (ADR-0005).** `IMutationGateway` with a capability catalog of every mutating action, a decide → audit intent → execute → verify → audit outcome pipeline that refuses on any doubt (unknown capability, missing level, policy error, audit not writable), and an architecture test that lists every call to a mutating service outside the gateway in `docs/v1/mutation-bypass-baseline.txt` (104 today; the list may only shrink). No entry point uses the gateway yet, so permissions and behaviour are unchanged.
 - **Scope guard in report mode.** Mutating service interfaces are wrapped at startup; a mutation that runs outside the gateway still runs, and the first one per capability is logged at Information (`ran outside the Mutation Gateway (report mode)`). Expect these lines until the surfaces are migrated.
 - `server.json` for the official MCP Registry (`io.github.LupusMalusDeviant/whiskers`, OCI image on ghcr.io,

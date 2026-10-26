@@ -1,28 +1,32 @@
 # Modules/Agent
 
 The **acting AI agent + AI chat** as a toggleable module (RoadToSAP Phase 1 §3.8) — the largest and most
-security-sensitive extraction: the multi-provider agent, its inescapable [guardrails](../../Services/Agent/Guardrails/),
-human [approvals](../../Services/Agent/Approvals/), the read-only AI-chat advisor widget, and the event-driven
-[AI triggers](../../Services/Agent/Triggers/). All registrations are moved **verbatim** from `Program.cs`
-(relocation, not a rewrite) — the guardrail/approval/tool-invoker boundary is unchanged, only *where* it is wired.
+security-sensitive extraction: the multi-provider agent, its approval bridge
+([`ApprovalCoordinator`](../../Services/Agent/Approvals/)), the read-only AI-chat advisor widget, and the event-driven
+[AI triggers](../../Services/Agent/Triggers/). The [guardrails](../../Services/Guardrails/) and the
+[approval store](../../Services/Approvals/) the agent obeys are **core** since ADR-0005 step 2.1 (PC-D8): they guard
+direct MCP calls too and must not switch off with this module.
 
 ## What it registers (`ConfigureServices`, moved verbatim)
 
 - **AI chat:** `AiChatSettings`, the `AiChatService` HTTP client + `IAiChatService`, `IChatHistoryStore`.
-- **Agent:** `AgentSettings`, `IAgentToolRegistry`, the `IAgentGuardrailEngine` default, `GuardrailStore`/
-  `IGuardrailStore`, `IGuardrailRuleCatalog`, `IAgentProviderFactory`, `IAgentToolCatalog`, `IAgentToolInvoker`,
-  `IAgentPrincipalResolver`, `IApprovalStore`, `IApprovalCoordinator`, `IChatWidgetParser`, `IAgentService`,
-  `IClaudeCodeRuntime`, `IAgentTranscriptStore`, `IAgentSettingsStore`.
+- **Agent:** `AgentSettings`, `IAgentProviderFactory`, `IAgentToolCatalog`, `IAgentToolInvoker`,
+  `IApprovalCoordinator`, `IChatWidgetParser`, `IAgentService`, `IClaudeCodeRuntime`, `IAgentTranscriptStore`,
+  `IAgentSettingsStore`.
+- **Not here (core):** the guardrail engine, `IGuardrailStore`, `IGuardrailRuleCatalog`, `IAgentToolRegistry` (tool
+  metadata for the guardrail editor), `IAgentPrincipalResolver`, `IApprovalStore`, `IApprovalGate`,
+  `IDirectMcpCallGuard` — see `AddGuardrailPolicy` in [`Startup/WhiskersMutationGatewayExtensions.cs`](../../Startup/WhiskersMutationGatewayExtensions.cs).
 - **AI triggers:** `AiTriggerStore`/`IAiTriggerStore`, `IAiTriggerDispatcher`.
-- **Warm-ups:** the two `IInitializable`s — `GuardrailStore` (order 80) and `AiTriggerStore` (order 90) — moved
-  from the Core init block; they run in order only when the module is enabled.
+- **Warm-up:** the `AiTriggerStore` `IInitializable` (order 90), run only when the module is enabled. The
+  `GuardrailStore` warm-up (order 80) is core.
 
 The service **implementation** classes stay in [`../../Services/Agent/`](../../Services/Agent/) and
 [`../../Services/AiChat/`](../../Services/AiChat/); only their DI wiring lives here.
 
 ## Nav + MCP
 
-- **Nav** (Automatisierung): `agent` (340), `guardrails` (350), `approvals` (360), `ai-triggers` (370).
+- **Nav** (Automatisierung): `agent` (340), `ai-operations` (345), `ai-triggers` (370). `guardrails` (350) and
+  `approvals` (360) are core entries.
 - **MCP:** [`AgentTools`](../../Mcp/Tools/AgentTools.cs) — the `instruct_agent` tool. Disabling the module
   drops it from both the external MCP surface and the in-process agent's own catalog.
 
@@ -31,13 +35,15 @@ The service **implementation** classes stay in [`../../Services/Agent/`](../../S
 The whole surface goes away at once, cleanly:
 
 - The agent/AI-chat services are never registered (no provider clients, no hosted work).
-- The `agent` / `guardrails` / `approvals` / `ai-triggers` pages are thin `ModuleGuard` wrappers over their
+- The `agent` / `ai-operations` / `ai-triggers` pages are thin `ModuleGuard` wrappers over their
   interactive `*View.razor` — the view (which `@inject`s the agent services) is only instantiated when enabled,
   so a disabled route shows the "module disabled" notice instead of a DI error.
 - The global `<AiChat/>` widget is gated in [`MainLayout.razor`](../../Components/Layout/MainLayout.razor) with
   `@if (ModuleRegistry.IsEnabled("agent"))`, so it disappears app-wide instead of throwing on every page.
 - The `AI-Chat (Berater)` panel in `Settings.razor` is gated the same way.
 - `instruct_agent` drops off the MCP surface.
+- Guardrails and approvals stay: direct MCP calls are still decided by the guardrail policy and the Mutation
+  Gateway, and the Guardrails and Approvals pages stay reachable (`GuardrailModuleIndependenceTests`, INV-26).
 
 ## Two soft dependencies (handled in Core, not via `DependsOn`)
 

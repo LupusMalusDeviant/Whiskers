@@ -69,6 +69,9 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         // approvals + ai-triggers → Modules/Agent — RoadToSAP Phase 1). "agent-history" stays Core: it reads
         // the Core IMcpCallLogStore (MCP-call observability), which is independent of the acting agent.
         new NavItem("agent-history", "Nav_AgentHistory",    Icons.Material.Filled.Policy,       "Automatisierung",  AppRole.Viewer, 330),
+        // Guardrails + approvals are core since ADR-0005 step 2.1: they govern direct MCP calls with the agent off.
+        new NavItem("guardrails",  "Nav_Guardrails", Icons.Material.Filled.Shield,    "Automatisierung", AppRole.Viewer, 350),
+        new NavItem("approvals",   "Nav_Approvals",  Icons.Material.Filled.Approval,  "Automatisierung", AppRole.Viewer, 360),
 
         // Top-level (no group)
         new NavItem("settings",    "Nav_Settings",      Icons.Material.Filled.Settings,     "",                 AppRole.Viewer, 900),

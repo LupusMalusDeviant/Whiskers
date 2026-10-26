@@ -1,6 +1,13 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Configuration;
+using Whiskers.Models.Agent;
 using Whiskers.Modules;
 using Whiskers.Services.Agent;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Guardrails;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Tests;
 
@@ -15,4 +22,57 @@ internal static class AgentToolTestHelpers
             .ToList();
 
     public static AgentToolRegistry DefaultRegistry() => new(DefaultModuleToolTypes());
+
+    /// <summary>A real Mutation Gateway (catalog, guardrail policy, approval gate) with an in-memory audit sink, for
+    /// tests that drive mutating tools through <see cref="AgentToolInvoker"/>.</summary>
+    public static MutationGateway Gateway(GuardrailPolicy policy, IApprovalStore? approvals = null,
+        IMutationAuditSink? audit = null)
+    {
+        var store = new FixedGuardrailStore(policy);
+        return new MutationGateway(new CapabilityCatalog(), Policy(store), audit ?? new NullMutationAudit(), [],
+            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals ?? new ApprovalStore(), store));
+    }
+
+    /// <summary>The production policy adapter over the default rule set and a fixed preset.</summary>
+    public static IMutationPolicy Policy(IGuardrailStore store) =>
+        new GuardrailMutationPolicy(new ServiceCollection()
+            .AddSingleton<IAgentGuardrailEngine>(GuardrailEngine.CreateDefault())
+            .AddSingleton(store)
+            .BuildServiceProvider());
+
+    internal sealed class FixedGuardrailStore(GuardrailPolicy policy) : IGuardrailStore
+    {
+        public GuardrailPolicy Current => policy;
+        public GuardrailConfig Config { get; } = new();
+        public Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SaveAsync(GuardrailPolicy p, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public event Action? Changed { add { } remove { } }
+    }
+
+    /// <summary>Accepts every write and remembers the capabilities it saw.</summary>
+    internal sealed class NullMutationAudit : IMutationAuditSink
+    {
+        public List<string> Events { get; } = [];
+
+        public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
+            ApprovalGateResult? approval, CancellationToken ct)
+        {
+            Events.Add($"begin:{capability.Id}:{approval?.ApprovalId}");
+            return Task.FromResult((long)Events.Count);
+        }
+
+        public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
+            string? reason, TimeSpan duration, CancellationToken ct)
+        {
+            Events.Add($"complete:{status}");
+            return Task.CompletedTask;
+        }
+
+        public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
+            MutationStatus status, string reason, CancellationToken ct)
+        {
+            Events.Add($"denied:{status}");
+            return Task.CompletedTask;
+        }
+    }
 }

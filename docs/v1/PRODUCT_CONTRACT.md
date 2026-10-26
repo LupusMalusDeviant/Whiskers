@@ -118,24 +118,29 @@ traceable.
 
 ## 7. Path matrix (current state)
 
-One row per mutation path from [`audit/B-mutations.md`](audit/B-mutations.md), updated for WP1. Each row shows
+One row per mutation path from [`audit/B-mutations.md`](audit/B-mutations.md), updated for WP1 and WP2 step 2.1. Each row shows
 the chain **Actor → AuthN → AuthZ → Policy → Approval → Execution → Verification → Audit** as it is today,
 and the invariants the path violates.
 
 **Every gap is a v1 blocker.** A row is done when its gap column is empty.
 
 Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR?** guardrails only when the Agent module is on
-(INV-26) · **AL** AuditLog row · **AH** Agent History row only.
+(INV-26; fixed for every path in WP2 step 2.1 — guardrails are core) · **AL** AuditLog row · **AH** Agent History row only.
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
-INV-22 (no decision record), INV-38 (no gateway), INV-39 (no operation id), INV-45 (no complete audit event),
+INV-22 (no decision record), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-39 (no operation id), INV-45 (no complete audit event),
 INV-48 (audit after the fact, fail-open), INV-49 (no tamper evidence). Rows below list only the path-specific gaps.
 
 ### 7.1 MCP tools (direct `/mcp` calls; the in-process agent invokes the same methods)
 
-Common to all M rows: Actor = API key or web user · AuthN ✅ (Bearer / cookie) · AuthZ ✅ scope check in tool, but
-the Enabled switch and stored levels apply to keys only (INV-15) · Policy GR? (INV-26) with targets not resolved
-(INV-24) · Approval ⚠️ approve-then-retry, in memory (INV-30–34) · Execution = direct service call.
+Common to all M rows since WP2 step 2.1: Actor = API key or web user · AuthN ✅ (Bearer / cookie) · AuthZ ✅ in the
+Mutation Gateway: catalog level, tool switch and stricter stored level for every principal (INV-15), `AllowedTools`
+cannot widen (INV-16); the scope check inside the tool still runs · Target: containers resolved before policy
+(INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26), but protected resources still match the
+raw argument (INV-24) · Approval ⚠️ approve-then-retry bound to caller, tool and arguments hash, single use, in memory
+(INV-30–34) · Execution = inside the gateway scope with a deadline · Audit: one gateway AuditLog row (decision,
+approval, intent, outcome) **plus** the tool's own row shown in the Audit column below (INV-45 ⚠️ two rows; a tool
+that reports failure as text is recorded `Executed` by the gateway).
 
 | ID | Tool | Level | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
@@ -185,9 +190,9 @@ the Enabled switch and stored levels apply to keys only (INV-15) · Policy GR? (
 
 | ID | Path | Actor | AuthN | AuthZ | Policy | Approval | Execution | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|---|---|---|
-| A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling; ⚠️ ignores Enabled (INV-15) | ✅ | ⚠️ self-confirm, in memory, orphan risk | invoker → tool | ❌ | per tool (AL/AH as in 7.1) | INV-15, 31, 32, 36 |
-| A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling | ✅ | Confirm → auto-deny ✅ | invoker → tool | ❌ | per tool | INV-08, 15 |
-| A-03 | AI trigger | Automation (`ai-trigger`) | n/a | ⚠️ `MaxLevel`, no owner | ❌ global preset, not pinned | Confirm → auto-deny ✅; Allow runs unattended | invoker → tool | ❌ | per tool + `agent.run` | INV-04, 06, 15, 23, 27, 40 |
+| A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling + tool switch (INV-15) | ✅ | ⚠️ self-confirm, in memory, orphan risk; gateway runs only an approval bound to the operation and arguments | invoker → gateway → tool | ❌ | gateway AL + per tool (as in 7.1) | INV-31, 32, 36 |
+| A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling + tool switch | ✅ | Confirm → auto-deny ✅ | invoker → gateway → tool | ❌ | gateway AL + per tool | INV-08 |
+| A-03 | AI trigger | Automation (`ai-trigger`) | n/a | ⚠️ `MaxLevel`, no owner; tool switch ✅ | ❌ global preset, not pinned | Confirm → auto-deny ✅; Allow runs unattended | invoker → gateway → tool | ❌ | gateway AL + per tool + `agent.run` | INV-04, 06, 23, 27, 40 |
 | A-04 | Claude Code CLI runtime (dead code) | fixed key | ✅ key | ⚠️ fail-open rights check | GR? | approve-then-retry | MCP | ❌ | per tool | remove or fix (C-20); INV-02 |
 
 ### 7.3 Background services, scheduler, webhooks

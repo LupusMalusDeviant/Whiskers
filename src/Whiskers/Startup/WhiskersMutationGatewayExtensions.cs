@@ -1,4 +1,8 @@
 using System.Reflection;
+using Whiskers.Configuration;
+using Whiskers.Services.Agent;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mutations;
 
 namespace Whiskers.Startup;
@@ -13,14 +17,39 @@ public static class WhiskersMutationGatewayExtensions
     public static void AddWhiskersMutationGateway(this WebApplicationBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
+        builder.Services.AddGuardrailPolicy();
         builder.Services.AddMutationGateway();
         builder.Services.AddMutationScopeGuard();
+    }
+
+    /// <summary>
+    /// Policy and approvals are core (PC-D8, WP2 step 2.1): the guardrail engine, its store and rule catalog, the
+    /// approval store and gate, the direct-MCP guard and the principal resolver it needs. They used to be registered
+    /// by the Agent module, so disabling the agent left direct MCP calls unguarded (TA-27).
+    /// </summary>
+    public static IServiceCollection AddGuardrailPolicy(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        // The guardrail engine is stateless → a shared default rule set is enough.
+        services.AddSingleton<IAgentGuardrailEngine>(GuardrailEngine.CreateDefault());
+        services.AddSingletonWithInterface<GuardrailStore, IGuardrailStore>();
+        services.AddSingleton<IGuardrailRuleCatalog, GuardrailRuleCatalog>();
+        services.AddSingleton<IApprovalStore, ApprovalStore>();
+        services.AddSingleton<IApprovalGate, ApprovalGate>();
+        services.AddSingleton<IDirectMcpCallGuard, DirectMcpCallGuard>();
+        services.AddSingleton<IAgentPrincipalResolver, AgentPrincipalResolver>();
+        // Tool metadata for the guardrail editor; executing tools stays with the Agent module's invoker.
+        services.AddSingleton<IAgentToolRegistry, AgentToolRegistry>();
+        services.AddInitializable<GuardrailStore>();
+        return services;
     }
 
     public static IServiceCollection AddMutationGateway(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddSingleton<ICapabilityCatalog, CapabilityCatalog>();
+        services.AddSingleton<ICapabilityOverrides, McpToolCapabilityOverrides>();
+        services.AddSingleton<IMutationTargetResolver, MutationTargetResolver>();
         services.AddSingleton<IMutationPolicy, GuardrailMutationPolicy>();
         services.AddSingleton<IMutationAuditSink, AuditLogMutationSink>();
         services.AddSingleton<IMutationScopeMonitor, MutationScopeMonitor>();

@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Whiskers.Models.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
 
 namespace Whiskers.Services.Agent;
 

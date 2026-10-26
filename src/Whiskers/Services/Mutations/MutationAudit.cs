@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Whiskers.Models;
+using Whiskers.Services.Approvals;
 using Whiskers.Services.Persistence;
 using Whiskers.Utils;
 
@@ -12,7 +13,9 @@ namespace Whiskers.Services.Mutations;
 /// </summary>
 public interface IMutationAuditSink
 {
-    Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability, CancellationToken ct);
+    /// <param name="approval">The human approval the mutation runs under, when policy asked for one.</param>
+    Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
+        ApprovalGateResult? approval, CancellationToken ct);
 
     Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
         string? reason, TimeSpan duration, CancellationToken ct);
@@ -39,12 +42,14 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         _time = time ?? TimeProvider.System;
     }
 
-    public async Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability, CancellationToken ct)
+    public async Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
+        ApprovalGateResult? approval, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(capability);
         var entity = NewEntity(request, capability.Id, success: false,
-            Details(operationId, request, phase: "intent", status: null, verification: null, reason: null, durationMs: null));
+            Details(operationId, request, phase: "intent", status: null, verification: null, reason: null, durationMs: null,
+                approval));
 
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -92,7 +97,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     {
         Timestamp = _time.GetUtcNow().UtcDateTime,
         Actor = request.Principal.DisplayName,
-        ActorType = request.Surface.ToString().ToLowerInvariant(),
+        // "web" / "mcp" match the rows AuditLogService writes, so the audit page filters keep working.
+        ActorType = request.Surface == MutationSurface.Ui ? "web" : request.Surface.ToString().ToLowerInvariant(),
         Action = action,
         TargetType = request.Target.Kind,
         TargetId = request.Target.Id,
@@ -103,7 +109,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     };
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,
-        string? verification, string? reason, long? durationMs) => Cap(JsonSerializer.Serialize(new
+        string? verification, string? reason, long? durationMs, ApprovalGateResult? approval = null) => Cap(JsonSerializer.Serialize(new
     {
         operationId,
         phase,
@@ -111,6 +117,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         verification,
         reason = Redact(reason),
         durationMs,
+        approval = approval is null ? null : new { id = approval.ApprovalId, approvedBy = approval.ApprovedBy },
         principal = new
         {
             kind = request.Principal.Kind.ToString(),

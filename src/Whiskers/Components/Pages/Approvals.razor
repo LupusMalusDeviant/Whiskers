@@ -1,8 +1,6 @@
 @page "/approvals"
 @attribute [Authorize]
 
-@* Route wrapper (DI-safe module gating). ApprovalsView injects the approval store, so it is rendered only while
-   the Agent module is enabled; otherwise ModuleGuard shows a "module disabled" notice. *@
-<ModuleGuard ModuleId="agent">
-    <ApprovalsView />
-</ModuleGuard>
+@* Core page since ADR-0005 step 2.1: guardrails and approvals govern direct MCP calls too, so they stay available
+   with the Agent module disabled. *@
+<ApprovalsView />

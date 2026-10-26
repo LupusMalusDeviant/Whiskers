@@ -99,6 +99,7 @@ public class MutationScopeGuardTests
         services.AddSingleton<ProbeService>();
         services.AddSingleton<IProbeService>(sp => sp.GetRequiredService<ProbeService>());
         services.AddSingleton<IReadOnlyProbe, PlainProbe>();
+        services.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, Whiskers.Services.Mcp.McpPermissionService>();
         services.AddMutationGateway();
         services.AddMutationScopeGuard();
 
@@ -116,6 +117,7 @@ public class MutationScopeGuardTests
         var typed = new ServiceCollection();
         typed.AddLogging();
         typed.AddSingleton<IProbeService, ProbeService>();
+        typed.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, Whiskers.Services.Mcp.McpPermissionService>();
         typed.AddMutationGateway();
         typed.AddMutationScopeGuard();
         IProbeService resolved;

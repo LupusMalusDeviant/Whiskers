@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 using Whiskers.Models.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
 using Whiskers.Services.Agent.Providers;
 
 namespace Whiskers.Services.Agent;

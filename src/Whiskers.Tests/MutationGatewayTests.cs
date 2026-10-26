@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Models;
+using Whiskers.Services.Approvals;
 using Whiskers.Services.Mutations;
 
 namespace Whiskers.Tests;
@@ -221,7 +222,8 @@ public class MutationGatewayTests
         public bool FailComplete { get; init; }
         public List<string> Events { get; } = [];
 
-        public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability, CancellationToken ct)
+        public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
+            ApprovalGateResult? approval, CancellationToken ct)
         {
             if (FailBegin) throw new InvalidOperationException("database is locked");
             Events.Add($"begin:{capability.Id}");

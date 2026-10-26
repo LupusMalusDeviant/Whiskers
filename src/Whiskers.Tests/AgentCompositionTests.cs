@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Whiskers.Configuration;
 using Whiskers.Services.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
 using Whiskers.Services.Agent.Providers;
 
 namespace Whiskers.Tests;

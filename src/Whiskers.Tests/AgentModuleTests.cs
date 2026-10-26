@@ -35,7 +35,7 @@ public class AgentModuleTests
     public void Contributes_the_automation_nav_entries()
     {
         var nav = new AgentModule().NavItems;
-        Assert.Equal(new[] { "agent", "ai-operations", "guardrails", "approvals", "ai-triggers" }, nav.Select(n => n.Href).ToArray());
+        Assert.Equal(new[] { "agent", "ai-operations", "ai-triggers" }, nav.Select(n => n.Href).ToArray());
         Assert.All(nav, n => Assert.Equal("Automatisierung", n.Group));
     }
 
@@ -49,9 +49,21 @@ public class AgentModuleTests
     public void Agent_nav_and_tool_moved_out_of_the_pseudo_module()
     {
         var pseudo = new AllInOnePseudoModule();
-        foreach (var href in new[] { "agent", "guardrails", "approvals", "ai-triggers" })
+        foreach (var href in new[] { "agent", "ai-triggers" })
             Assert.DoesNotContain(pseudo.NavItems, n => n.Href == href);
         Assert.DoesNotContain(typeof(AgentTools), pseudo.McpToolTypes);
+    }
+
+    [Fact]
+    public void Guardrails_and_approvals_are_core_pages()
+    {
+        // ADR-0005 step 2.1 (PC-D8): they govern direct MCP calls, so they must not disappear with the agent.
+        var pseudo = new AllInOnePseudoModule();
+        foreach (var href in new[] { "guardrails", "approvals" })
+        {
+            Assert.Contains(pseudo.NavItems, n => n.Href == href);
+            Assert.DoesNotContain(new AgentModule().NavItems, n => n.Href == href);
+        }
     }
 
     [Fact]
@@ -66,22 +78,25 @@ public class AgentModuleTests
     // --- Registration shape (no heavy resolve; the app boot-gate resolves the full graph) -----------------
 
     [Fact]
-    public void ConfigureServices_registers_the_agent_graph_and_both_warmups()
+    public void ConfigureServices_registers_the_agent_graph_but_not_the_core_policy()
     {
         var services = new ServiceCollection();
         new AgentModule().ConfigureServices(services, Config());
 
-        // A representative slice of the moved registrations: the agent, a guardrail service, an approval
-        // service, the AI-chat advisor, and the real trigger dispatcher (which wins over the Core no-op).
+        // A representative slice of the moved registrations: the agent, the approval coordinator, the AI-chat
+        // advisor, and the real trigger dispatcher (which wins over the Core no-op). Guardrails and the approval
+        // store are core since ADR-0005 step 2.1 and must NOT come from the module.
         Assert.Contains(services, d => d.ServiceType == typeof(Whiskers.Services.Agent.IAgentService));
-        Assert.Contains(services, d => d.ServiceType == typeof(Whiskers.Services.Agent.Guardrails.IGuardrailStore));
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(Whiskers.Services.Guardrails.IGuardrailStore));
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(Whiskers.Services.Approvals.IApprovalStore));
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(Whiskers.Services.Guardrails.IDirectMcpCallGuard));
         Assert.Contains(services, d => d.ServiceType == typeof(Whiskers.Services.Agent.Approvals.IApprovalCoordinator));
         Assert.Contains(services, d => d.ServiceType == typeof(Whiskers.Services.AiChat.IAiChatService));
         Assert.Contains(services, d => d.ServiceType == typeof(Whiskers.Services.Agent.Triggers.IAiTriggerDispatcher)
                                        && d.ImplementationType == typeof(Whiskers.Services.Agent.Triggers.AiTriggerDispatcher));
 
-        // Both startup warm-ups (GuardrailStore 80 + AiTriggerStore 90) moved into the module.
-        Assert.Equal(2, services.Count(d => d.ServiceType == typeof(Whiskers.Services.IInitializable)));
+        // Only the AiTriggerStore warm-up (90) is the module's; the GuardrailStore warm-up (80) is core.
+        Assert.Equal(1, services.Count(d => d.ServiceType == typeof(Whiskers.Services.IInitializable)));
     }
 
     // --- Enable/disable gate -----------------------------------------------------------------------------

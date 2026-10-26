@@ -2,13 +2,14 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
-using Whiskers.Services.Agent.Approvals;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Guardrails;
 
 namespace Whiskers.Tests;
 
@@ -26,7 +27,8 @@ public sealed class DirectMcpCallGuardTests
     private static (DirectMcpCallGuard Guard, ApprovalStore Approvals) Build(GuardrailPolicy policy)
     {
         var approvals = new ApprovalStore();
-        return (new DirectMcpCallGuard(GuardrailEngine.CreateDefault(), new FixedPolicy(policy), approvals), approvals);
+        var store = new FixedPolicy(policy);
+        return (new DirectMcpCallGuard(GuardrailEngine.CreateDefault(), store, new ApprovalGate(approvals, store)), approvals);
     }
 
     [Fact]
@@ -139,6 +141,10 @@ public class DirectMcpCallGuardWireTests
                     b.UseEnvironment("Development");
                     b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(
                         new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") }));
+                    // The gateway resolves the container before policy runs, so the containers must exist.
+                    b.ConfigureTestServices(s => s.AddSingleton<Whiskers.Services.Docker.IDockerService>(new FakeDocker(
+                        new ContainerInfo { Id = "c-whiskers", Name = "whiskers" },
+                        new ContainerInfo { Id = "c-web-1", Name = "web-1" })));
                 });
             using var client = factory.CreateClient();
             var session = await McpServedSurfaceTests.InitializeAsync(client);

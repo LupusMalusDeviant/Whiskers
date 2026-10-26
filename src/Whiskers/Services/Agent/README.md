@@ -1,6 +1,6 @@
 # Services/Agent
 
-The **acting agent**: you give it an operations task in natural language and it plans and executes using Whiskers's own MCP tools. It is provider-agnostic (OpenAI, OpenRouter, Ollama, Gemini, Anthropic, and Claude Code) and bounded by inescapable [guardrails](Guardrails/) enforced at the tool-execution boundary, never in the prompt.
+The **acting agent**: you give it an operations task in natural language and it plans and executes using Whiskers's own MCP tools. It is provider-agnostic (OpenAI, OpenRouter, Ollama, Gemini, Anthropic, and Claude Code) and bounded by inescapable [guardrails](../Guardrails/) enforced at the tool-execution boundary, never in the prompt. Its mutating tool calls run through the [Mutation Gateway](../Mutations/).
 
 Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razor`](../../Components/Pages/Agent.razor)) and the `instruct_agent` MCP tool ([`../../Mcp/Tools/AgentTools.cs`](../../Mcp/Tools/AgentTools.cs)). The agent inherits exactly the rights of whoever triggered it (web user or MCP key) and can never exceed them.
 
@@ -25,7 +25,8 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 
 ## Subfolders
 
-- [`Guardrails/`](Guardrails/): the code-enforced security policy, presets and rule engine.
+- [`../Guardrails/`](../Guardrails/): the code-enforced security policy, presets and rule engine (core since ADR-0005 step 2.1).
+- [`Approvals/`](Approvals/): the agent's bridge into the core [approvals](../Approvals/).
 - [`Providers/`](Providers/): one LLM wire-format implementation per provider.
 - [`Triggers/`](Triggers/): AI triggers: run the agent autonomously on events.
 

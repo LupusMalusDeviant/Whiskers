@@ -4,7 +4,7 @@ using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
 
 namespace Whiskers.Tests;
 
@@ -55,7 +55,8 @@ public class AgentToolInvokerTests
             AgentOrigin.WebUi, GuardrailPolicy.SafeDefault());
 
     private static AgentToolInvoker Invoker(TrackingScopeFactory factory) =>
-        new(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault(), factory);
+        new(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault(), factory,
+            gateway: AgentToolTestHelpers.Gateway(GuardrailPolicy.SafeDefault()));
 
     [Fact]
     public async Task Unknown_tool_returns_error_without_creating_scope()
@@ -94,6 +95,35 @@ public class AgentToolInvokerTests
         Assert.True(result.IsError);
         Assert.Equal(GuardrailVerdict.Deny, result.Decision.Verdict);
         Assert.Contains("forbidden-argument", result.Decision.MatchedRuleIds);
+        Assert.False(factory.Used);
+    }
+
+    [Fact]
+    public async Task A_mutating_tool_needing_a_human_does_not_run_without_its_approval()
+    {
+        // The session normally pauses before calling the invoker; if it did not (or the approval was never
+        // registered), the gateway still refuses: no approval for this operation, no execution.
+        var factory = new TrackingScopeFactory();
+        var result = await Invoker(factory).InvokeAsync(
+            new AgentToolCall("4", "restart_container", "{\"containerId\":\"web-1\"}"),
+            Context(McpPermissionLevels.Write));
+
+        Assert.True(result.IsError);
+        Assert.Equal(GuardrailVerdict.Confirm, result.Decision.Verdict);
+        Assert.False(factory.Used);
+    }
+
+    [Fact]
+    public async Task Without_a_gateway_a_mutating_tool_is_refused()
+    {
+        var factory = new TrackingScopeFactory();
+        var invoker = new AgentToolInvoker(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault(), factory);
+
+        var result = await invoker.InvokeAsync(
+            new AgentToolCall("5", "start_container", "{\"containerId\":\"web-1\"}"), Context(McpPermissionLevels.Admin));
+
+        Assert.True(result.IsError);
+        Assert.Equal(GuardrailVerdict.Deny, result.Decision.Verdict);
         Assert.False(factory.Used);
     }
 }

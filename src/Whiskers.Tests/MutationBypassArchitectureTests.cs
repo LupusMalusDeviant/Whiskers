@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using ModelContextProtocol.Server;
+using Whiskers.Services.Agent;
 using Whiskers.Services.Mutations;
 
 namespace Whiskers.Tests;
@@ -9,6 +11,12 @@ namespace Whiskers.Tests;
 /// INV-38 / ADR-0005: every call to a <see cref="MutatingOperationAttribute"/> method must come from the Mutation
 /// Gateway or a <see cref="MutationHandlerAttribute"/> class. The test reads the IL of every method in the Whiskers
 /// assembly, collects the callers that break that rule, and compares them with a checked-in baseline.
+///
+/// <para>Inside an MCP tool method whose tool maps to a capability, calls to <b>that</b> capability count as inside
+/// the gateway: both dispatchers (<c>McpGuardrailFilter</c> for direct calls, <c>AgentToolInvoker</c> for the agent)
+/// run such a tool only inside <see cref="IMutationGateway"/> (WP2 step 2.1). Calls to any other capability from a
+/// tool (deploy_app creating a container, a preview starting a background cycle) stay reported: the gateway decided
+/// on the tool's capability, not on theirs.</para>
 ///
 /// <para>The baseline (<c>docs/v1/mutation-bypass-baseline.txt</c>) lists today's bypasses. It may only shrink: a
 /// new bypass fails the test, and so does a baseline line that no longer occurs — remove it in the PR that migrates
@@ -94,15 +102,19 @@ internal static class MutationCallScanner
             var owner = OwnerOf(type);
             if (owner.IsDefined(typeof(MutationHandlerAttribute), false) || owner == typeof(MutationGateway)) continue;
             var ownOperations = OwnMutatingOperationNames(owner);
+            var gatewayTools = GatewayDispatchedToolCapabilities(owner);
 
             var members = type.GetMethods(All).Cast<MethodBase>().Concat(type.GetConstructors(All));
             foreach (var method in members)
             {
                 // A mutating service composing other operations inside one of its own mutating operations (update =
                 // stop + recreate) runs inside the outer operation's scope; that is not a bypass.
-                if (ownOperations.Contains(SourceMethodName(type, method))) continue;
+                var source = SourceMethodName(type, method);
+                if (ownOperations.Contains(source)) continue;
+                var toolCapability = gatewayTools.GetValueOrDefault(source);
                 foreach (var capability in CalledCapabilities(method))
-                    result.Add($"{owner.FullName} -> {capability}");
+                    if (capability != toolCapability)
+                        result.Add($"{owner.FullName} -> {capability}");
             }
         }
         return result;
@@ -113,6 +125,19 @@ internal static class MutationCallScanner
         owner.IsInterface
             ? []
             : owner.GetInterfaces().SelectMany(i => MutatingMethods.Of(i).Keys).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
+
+    private static readonly CapabilityCatalog Catalog = new();
+
+    /// <summary>Methods of <paramref name="owner"/> that are MCP tools mapped to a capability → that capability.</summary>
+    private static Dictionary<string, string> GatewayDispatchedToolCapabilities(Type owner)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var m in owner.GetMethods(All))
+            if (m.GetCustomAttribute<McpServerToolAttribute>() is { } tool
+                && Catalog.FindByMcpTool(tool.Name ?? AgentToolRegistry.ToSnakeCase(m.Name)) is { } capability)
+                map[m.Name] = capability.Id;
+        return map;
+    }
 
     /// <summary>The source-level method a compiled body belongs to: <c>&lt;RunAsync&gt;d__4.MoveNext</c> and
     /// <c>&lt;RunAsync&gt;b__0</c> both map to <c>RunAsync</c>.</summary>
