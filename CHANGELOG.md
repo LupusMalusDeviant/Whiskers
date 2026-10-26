@@ -34,6 +34,12 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **The Trivy image is pinned by digest in the code default too** (TA-14). An operator-configured image without
   a digest now logs a warning.
 
+### Added
+- `server.json` for the official MCP Registry (`io.github.lupusmalusdeviant/whiskers`, OCI image on ghcr.io,
+  Streamable HTTP at `/mcp` with a Bearer key). The image carries the matching
+  `io.modelcontextprotocol.server.name` label, so the first release built with it can be published with
+  `mcp-publisher publish`. A test keeps the version, image tag and label in step with the app version.
+
 ### Fixed
 - The installer no longer recommends `Auth__Disabled=true` for first sign-in. It prints the setup token and
   points to `VAULT_KEY`.

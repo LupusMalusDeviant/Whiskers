@@ -18,6 +18,9 @@ RUN dotnet publish -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
+# Ownership proof for the official MCP Registry: must equal "name" in server.json (ServerJsonManifestTests).
+LABEL io.modelcontextprotocol.server.name="io.github.lupusmalusdeviant/whiskers"
+
 # Install docker CLI, SSH client, and Tailscale
 # Detect base-image distro codename so Tailscale URLs work whether the
 # .NET runtime image is Debian or Ubuntu (currently mcr.../aspnet:10.0 is noble).
