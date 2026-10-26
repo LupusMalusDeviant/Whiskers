@@ -1,7 +1,7 @@
 {
   "identifier": "lupusmalusdeviant-whiskers",
   "name": "Whiskers",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "Governed infrastructure operations for AI agents: Docker hosts, Kubernetes workloads, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin), code-enforced guardrails and human approvals. Self-hosted, SSH-key-free (mesh + mTLS).",
   "author": "LupusMalusDeviant",
   "authorUrl": "https://github.com/LupusMalusDeviant",
