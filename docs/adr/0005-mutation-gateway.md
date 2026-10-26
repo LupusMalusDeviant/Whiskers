@@ -1,6 +1,6 @@
 # ADR-0005: Mutation Gateway — one enforcement point for every infrastructure mutation
 
-- **Status:** Proposed (2026-10-26), awaiting maintainer approval before WP2 starts
+- **Status:** Accepted (2026-10-26) — Option A, the rollout order, moving guardrails and approvals to core, and the naming approved by the maintainer
 - **Date:** 2026-10-26
 - **Author:** LupusMalusDeviant
 - **Consulted:** —
@@ -178,9 +178,11 @@ call sites.
 - `[McpToolLevel]` is replaced by `[Capability]`; `McpToolLevelTests` turns into a catalog consistency test.
 - An external policy engine (Option D) remains possible behind the gateway's policy step if a customer requires it.
 
-## Open points for the maintainer
+## Approval
 
-1. Approve Option A and the rollout order above.
-2. Confirm that WP2 may move the guardrail engine and approvals out of the Agent module (PC-D8 implies it; it changes
-   module boundaries from RoadToSAP §3).
-3. Confirm the naming (`IMutationGateway`, `ICapabilityCatalog`, capability ids `<area>.<verb>`).
+Approved by the maintainer on 2026-10-26:
+
+1. Option A and the rollout order 2.0–2.6.
+2. Moving the guardrail engine and approvals out of the Agent module into core (changes the module boundary from
+   RoadToSAP §3).
+3. The naming: `IMutationGateway`, `ICapabilityCatalog`, capability ids `<area>.<verb>`.
