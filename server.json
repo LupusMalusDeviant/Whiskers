@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.lupusmalusdeviant/whiskers",
+  "name": "io.github.LupusMalusDeviant/whiskers",
   "title": "Whiskers",
   "description": "Governed Docker and Kubernetes operations for AI agents: scoped keys, guardrails, human approvals.",
   "version": "0.15.0",
