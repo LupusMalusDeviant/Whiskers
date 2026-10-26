@@ -1,0 +1,67 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.lupusmalusdeviant/whiskers",
+  "title": "Whiskers",
+  "description": "Governed Docker and Kubernetes operations for AI agents: scoped keys, guardrails, human approvals.",
+  "version": "0.15.0",
+  "websiteUrl": "https://whiskers.app.lupusmalus.dev",
+  "repository": {
+    "url": "https://github.com/LupusMalusDeviant/Whiskers",
+    "source": "github",
+    "id": "1212799441"
+  },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/src/Whiskers/wwwroot/brand.png",
+      "mimeType": "image/png",
+      "sizes": ["256x256"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/lupusmalusdeviant/whiskers:0.15.0",
+      "runtimeHint": "docker",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-p",
+          "value": "127.0.0.1:5100:8080",
+          "description": "Publish the web UI and the MCP endpoint on localhost only."
+        },
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "whiskers-data:/app/data",
+          "description": "Persistent data: database, vault, keys and settings."
+        },
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "/var/run/docker.sock:/var/run/docker.sock",
+          "description": "Lets Whiskers manage the local Docker host. Omit it to manage remote hosts only."
+        }
+      ],
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:5100/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": "Bearer {whiskers_api_key}",
+            "description": "MCP API key, created by an Admin under Settings → MCP after the first-run setup wizard. The key's scope (Read, Write or Admin) limits what the client can do.",
+            "isRequired": true,
+            "isSecret": true,
+            "variables": {
+              "whiskers_api_key": {
+                "description": "The Whiskers MCP API key.",
+                "isRequired": true,
+                "isSecret": true
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
