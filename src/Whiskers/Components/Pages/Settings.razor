@@ -1156,7 +1156,19 @@ else
     {
         if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         // DefaultRole travels along: without it every role change reset a configured default to Viewer.
-        await RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData { Roles = _roleEntries, DefaultRole = _defaultRole });
+        try
+        {
+            await RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData { Roles = _roleEntries, DefaultRole = _defaultRole });
+        }
+        catch (InvalidOperationException)
+        {
+            // The service refuses to drop the last Admin; put the stored roles back on screen.
+            Snackbar.Add(L["Settings_Snackbar_LastAdmin"].Value, Severity.Error);
+            var stored = RoleService.GetRoleData();
+            _roleEntries = stored.Roles;
+            _defaultRole = stored.DefaultRole;
+            return;
+        }
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         await AuditLog.LogAsync(actor, "web", "config.save", "config", "roles", "Benutzerrollen");
         Snackbar.Add(L["Settings_Snackbar_RolesSaved"].Value, Severity.Success);

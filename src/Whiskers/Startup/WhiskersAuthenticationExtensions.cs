@@ -71,9 +71,17 @@ public static class WhiskersAuthenticationExtensions
                     {
                         try
                         {
-                            // Never touch the trusted-LAN auth-bypass principal.
-                            if (context.Principal?.Identity?.AuthenticationType == "AuthDisabled")
-                                return Task.CompletedTask;
+                            // Synthetic identities are minted in-process (Auth:Disabled middleware, agent tool
+                            // execution) and must never arrive in a cookie. With auth enabled, one that does was
+                            // forged by someone holding the DataProtection keys — it would otherwise be trusted
+                            // as Admin and skip the whitelist (audit TA-11). Reject it.
+                            var authType = context.Principal?.Identity?.AuthenticationType;
+                            if (authType is Whiskers.Services.Auth.AuthConstants.AuthDisabledScheme
+                                or Whiskers.Services.Auth.AuthConstants.AgentSyntheticScheme)
+                            {
+                                context.RejectPrincipal();
+                                return context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                            }
 
                             var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
                             // No email ⇒ leave as-is; the login flow already decided this principal was OK.
@@ -165,8 +173,26 @@ public static class WhiskersAuthenticationExtensions
             options.Password.RequiredLength = 12;
             options.User.RequireUniqueEmail = true;
             options.Lockout.MaxFailedAccessAttempts = 5;
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+            options.Lockout.AllowedForNewUsers = true;
         })
         .AddEntityFrameworkStores<Whiskers.Services.Persistence.WhiskersIdentityDbContext>();
+
+        // Brute-force brake in front of the per-account lockout: per client IP, a handful of login POSTs per
+        // minute. The account lockout alone would let an attacker cycle through many accounts (audit TA-03).
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy(LocalLoginTiming.RateLimitPolicy, ctx =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+        });
 
         // KRIT-3 step 2 (fail-closed by default; user approval 2026-07-11): every endpoint WITHOUT
         // explicit authorization metadata now requires an authenticated user. Anonymous surfaces are

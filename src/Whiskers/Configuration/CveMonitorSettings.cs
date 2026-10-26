@@ -19,8 +19,10 @@ public class CveMonitorSettings
     /// <summary>Resolve CVE-IDs per OS package (slower, parses changelogs).</summary>
     public bool EnableOsCveIds { get; set; } = true;
 
-    /// <summary>Trivy image reference used for container scans.</summary>
-    public string TrivyImage { get; set; } = "aquasec/trivy:latest";
+    /// <summary>Trivy image reference used for container scans. It runs with the Docker socket mounted on every
+    /// managed host, so it is pinned by digest — a moved tag must never decide what runs as root across the fleet
+    /// (audit TA-14). Keep in sync with <c>appsettings.json</c>, which normally supplies the value.</summary>
+    public string TrivyImage { get; set; } = "aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f";
 
     /// <summary>Send Mattermost notifications for new findings.</summary>
     public bool NotifyOnFinding { get; set; } = true;

@@ -4694,4 +4694,19 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Settings_Roles_ImplicitHint" xml:space="preserve">
     <value>Auf der Whitelist, aber ohne eigene Rolle — sie haben derzeit die Standardrolle {0}. Adresse anklicken, um bewusst eine Rolle zu vergeben.</value>
   </data>
+  <data name="Settings_Snackbar_LastAdmin" xml:space="preserve">
+    <value>Mindestens ein Benutzer muss die Admin-Rolle behalten — die Änderung wurde nicht gespeichert.</value>
+  </data>
+  <data name="Setup_Token_Label" xml:space="preserve">
+    <value>Setup-Token</value>
+  </data>
+  <data name="Setup_Token_Hint" xml:space="preserve">
+    <value>Wird bewusst nirgends angezeigt. Auf dem Server auslesen: docker exec whiskers cat /app/data/setup-token.txt (oder der Wert von WHISKERS_SETUP_TOKEN).</value>
+  </data>
+  <data name="Setup_Token_Wrong" xml:space="preserve">
+    <value>Dieser Token passt nicht.</value>
+  </data>
+  <data name="AppStore_Snackbar_InvalidVariable" xml:space="preserve">
+    <value>Template-Werte müssen einzeilig sein und dürfen keine Steuerzeichen enthalten.</value>
+  </data>
 </root>

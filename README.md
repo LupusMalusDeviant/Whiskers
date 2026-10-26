@@ -119,7 +119,7 @@ The app listens on `127.0.0.1:5100` by default (`HOST_BIND` / `HOST_PORT`) and n
 
 ### First sign-in
 
-On first launch a **guided setup wizard** in the browser creates the admin account — no `.env` and no config file required. From then on you sign in with that **local login** (email + password). Alternatives: seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`; use **Google** or **generic OIDC** (see [Configuration](#configuration)); or, for a localhost-only trial, `AUTH_DISABLED=true` (never on a public bind).
+On first launch a **guided setup wizard** in the browser creates the admin account — no `.env` and no config file required. Because whoever completes the wizard becomes Admin, it first asks for a **one-time setup token** that only someone with access to the server can read: `docker exec whiskers cat /app/data/setup-token.txt` (the installer prints it; Helm users `kubectl exec` the same path, or preset it with `WHISKERS_SETUP_TOKEN`). From then on you sign in with that **local login** (email + password; 5 wrong passwords lock the account for 15 minutes, and login attempts are rate-limited per client). Alternatives: seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`; use **Google** or **generic OIDC** (see [Configuration](#configuration)); or, for a trial on a trusted network, `AUTH_DISABLED=true` — every request is then an Admin, so Whiskers only answers clients from private networks, with an IP or `localhost` as host name and without a foreign `Origin` (see [Configuration](#configuration)).
 
 ### More install options
 
@@ -421,7 +421,7 @@ Whiskers is configured entirely through environment variables (`.env`); **everyt
 
 | Group | Keys | Notes |
 |---|---|---|
-| Authentication | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ADMIN_EMAIL`, `AUTH_DISABLED` | Set `AUTH_DISABLED=true` for trusted LAN-only deployments where Google rejects private redirect URIs |
+| Authentication | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ADMIN_EMAIL`, `AUTH_DISABLED`, `WHISKERS_SETUP_TOKEN` | `AUTH_DISABLED=true` makes every request an Admin; it is meant for trusted LAN-only trials. Requests are then only served from loopback/private networks (`Auth__DisabledAllowedNetworks__0=…` to narrow), with an IP or `localhost` as host name (`Auth__DisabledAllowedHosts__0=whiskers.lan` to add one) and no cross-site `Origin`. `WHISKERS_SETUP_TOKEN` presets the first-run setup token. |
 | Admin bootstrap | `WHISKERS_ADMIN_EMAIL` | Seeded as an **Admin** on first run (provider-neutral; `GOOGLE_ADMIN_EMAIL` does the same for Google) so a fresh instance is never admin-less. Also flips the email whitelist **fail-closed** once any role exists. Existing installs (with a `roles.json`) are untouched. |
 | Local login | `WHISKERS_ADMIN_PASSWORD_FILE`, `Auth__LocalLogin__Enabled` | Username/password login without an IdP (ASP.NET Identity, its own tables in the same DB). On by default; set `Auth__LocalLogin__Enabled=false` for federated-only. Password policy: min 12 chars. |
 | Secrets vault | `VAULT_KEY` | Passphrase that encrypts stored secrets at rest (AES-256-GCM). Empty = vault disabled. Keep it stable — losing it makes stored secrets undecryptable |
