@@ -55,7 +55,9 @@ public class ServerJsonManifestTests
     {
         var json = ServerJson();
 
-        Assert.Matches("^io\\.github\\.lupusmalusdeviant/[a-zA-Z0-9._-]+$", json.GetProperty("name").GetString()!);
+        // The namespace is case-sensitive and must match the GitHub account exactly; the registry refused the
+        // lower-case form with 403. The image path stays lower case because OCI references must be.
+        Assert.Matches("^io\\.github\\.LupusMalusDeviant/[a-zA-Z0-9._-]+$", json.GetProperty("name").GetString()!);
         Assert.InRange(json.GetProperty("description").GetString()!.Length, 1, 100);
 
         var transport = json.GetProperty("packages")[0].GetProperty("transport");

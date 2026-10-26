@@ -35,7 +35,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   a digest now logs a warning.
 
 ### Added
-- `server.json` for the official MCP Registry (`io.github.lupusmalusdeviant/whiskers`, OCI image on ghcr.io,
+- `server.json` for the official MCP Registry (`io.github.LupusMalusDeviant/whiskers`, OCI image on ghcr.io,
   Streamable HTTP at `/mcp` with a Bearer key). The image carries the matching
   `io.modelcontextprotocol.server.name` label, which the registry checks before it accepts `mcp-publisher publish`.
   The 0.15.0 image was rebuilt with the label from `release/0.15` (no application change), so 0.15.0 can
