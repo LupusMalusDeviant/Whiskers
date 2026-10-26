@@ -32,6 +32,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     repeat the call, which raises a regular approval.
   - Each MCP or agent mutation now leaves **two** AuditLog rows: the gateway's row (decision, approval, intent,
     outcome; `Details` is JSON with `operationId`) and the tool's own result row as before.
+  - A mutating tool that answers with an error text (container not found, command exit code ≠ 0, failed backup …)
+    now returns that text with `isError: true` over MCP, and the agent sees it as a failed call. The gateway row
+    records it as `Failed`.
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.
@@ -64,7 +67,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **Mutation Gateway, step 2.1 (ADR-0005).** Every MCP tool and agent tool call that maps to a capability runs
   through the gateway: tool switch and level, container target resolution, guardrail policy, approval, audit
   intent, deadline, audit outcome. A shared approval gate binds an approval to the operation and the arguments
-  hash and uses it once. The bypass baseline shrinks from 104 to 75 entries.
+  hash and uses it once — only after the audit intent is written, so a refused attempt does not spend it, and
+  concurrent identical calls share one approval. The agent session pauses on the same (stricter stored) level and
+  tool switch as the gateway. The bypass baseline shrinks from 104 to 75 entries.
 - **Mutation Gateway, step 2.0 (ADR-0005).** `IMutationGateway` with a capability catalog of every mutating action, a decide → audit intent → execute → verify → audit outcome pipeline that refuses on any doubt (unknown capability, missing level, policy error, audit not writable), and an architecture test that lists every call to a mutating service outside the gateway in `docs/v1/mutation-bypass-baseline.txt` (104 today; the list may only shrink). No entry point uses the gateway yet, so permissions and behaviour are unchanged.
 - **Scope guard in report mode.** Mutating service interfaces are wrapped at startup; a mutation that runs outside the gateway still runs, and the first one per capability is logged at Information (`ran outside the Mutation Gateway (report mode)`). Expect these lines until the surfaces are migrated.
 - `server.json` for the official MCP Registry (`io.github.LupusMalusDeviant/whiskers`, OCI image on ghcr.io,

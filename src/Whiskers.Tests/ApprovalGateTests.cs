@@ -31,12 +31,98 @@ public class ApprovalGateTests
         Assert.True(await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin));
 
         var first = await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", []);
+        var consumed = gate.TryConsume(first.ApprovalId!);
         var second = await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", []);
 
         Assert.True(first.Approved);
         Assert.Equal(approval.Id, first.ApprovalId);
         Assert.Equal("admin@example.com", first.ApprovedBy);
+        Assert.True(consumed);
+        Assert.False(gate.TryConsume(approval.Id));
         Assert.False(second.Approved);
+        Assert.Contains("already used", second.Message);
+    }
+
+    [Fact]
+    public async Task Checking_does_not_use_an_approval_up_only_consuming_does()
+    {
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store);
+        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
+
+        // A refusal between the check and the run (a failed audit intent) must leave the approval usable.
+        var first = await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", []);
+        var second = await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", []);
+
+        Assert.True(first.Approved);
+        Assert.True(second.Approved);
+        Assert.True(gate.TryConsume(approval.Id));
+    }
+
+    [Fact]
+    public void An_undecided_or_unknown_approval_cannot_be_consumed()
+    {
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store);
+        var pending = RaiseForSession(store, "s1", "op-1", "web-1");
+
+        Assert.False(gate.TryConsume(pending.Id));
+        Assert.False(gate.TryConsume("no-such-approval"));
+    }
+
+    [Fact]
+    public async Task Concurrent_identical_first_calls_raise_one_approval()
+    {
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store);
+        var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
+            "mcp-direct", Args("web-1"));
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 16)
+            .Select(_ => Task.Run(() => gate.CheckAsync(direct, "needs a human", []))));
+
+        Assert.All(results, r => Assert.False(r.Approved));
+        Assert.Single(results.Select(r => r.ApprovalId).Distinct());
+        Assert.Single(store.GetAll());
+    }
+
+    [Fact]
+    public async Task Approve_then_retry_runs_once_and_the_next_identical_call_needs_a_new_approval()
+    {
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store);
+        var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
+            "mcp-direct", Args("web-1"));
+
+        var raised = await gate.CheckAsync(direct, "needs a human", []);
+        await store.ResolveAsync(raised.ApprovalId!, true, "admin@example.com", McpPermissionLevels.Admin);
+        var retry = await gate.CheckAsync(direct, "needs a human", []);
+        var used = gate.TryConsume(retry.ApprovalId!);
+        var next = await gate.CheckAsync(direct, "needs a human", []);
+
+        Assert.True(retry.Approved);
+        Assert.Equal(raised.ApprovalId, retry.ApprovalId);
+        Assert.True(used);
+        Assert.False(next.Approved);
+        Assert.NotEqual(raised.ApprovalId, next.ApprovalId);
+        Assert.Equal(2, store.GetAll().Count);
+    }
+
+    [Fact]
+    public async Task A_rejected_retry_approval_is_forgotten_and_the_call_asks_again()
+    {
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store);
+        var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
+            "mcp-direct", Args("web-1"));
+
+        var raised = await gate.CheckAsync(direct, "needs a human", []);
+        await store.ResolveAsync(raised.ApprovalId!, false, "admin@example.com", McpPermissionLevels.Admin);
+        var again = await gate.CheckAsync(direct, "needs a human", []);
+
+        Assert.False(again.Approved);
+        Assert.NotEqual(raised.ApprovalId, again.ApprovalId);
     }
 
     [Fact]

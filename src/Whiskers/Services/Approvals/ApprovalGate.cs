@@ -34,8 +34,14 @@ public sealed record ApprovalGateResult(bool Approved, string Message, string? A
 /// </summary>
 public interface IApprovalGate
 {
+    /// <summary>Finds a usable approval for this call, or raises one. Does not use it up: the caller does that with
+    /// <see cref="TryConsume"/> right before it runs the call, so a refusal in between leaves the approval valid.</summary>
     Task<ApprovalGateResult> CheckAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
         CancellationToken ct = default);
+
+    /// <summary>Uses the approval once. <c>false</c> when it was used already, is no longer approved or has outlived
+    /// its lifetime — the caller must then not run the call.</summary>
+    bool TryConsume(string approvalId);
 }
 
 /// <summary>
@@ -63,6 +69,8 @@ public sealed class ApprovalGate : IApprovalGate
     // call fingerprint → approval raised for it; approval id → when it was used (single use).
     private readonly ConcurrentDictionary<string, string> _raised = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _consumed = new();
+    // Two concurrent first calls must raise one approval, not two (only one of which could ever be used).
+    private readonly object _raiseLock = new();
 
     public ApprovalGate(IApprovalStore approvals, IGuardrailStore? policy = null, INotificationService? notify = null,
         ILogger<ApprovalGate>? logger = null, TimeProvider? time = null)
@@ -80,7 +88,7 @@ public sealed class ApprovalGate : IApprovalGate
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(subject.Arguments);
         ArgumentNullException.ThrowIfNull(matchedRules);
-        SweepConsumed();
+        Sweep();
         var argumentsHash = ApprovalFingerprint.OfArguments(subject.Arguments);
 
         // 1. The approval an interactive caller raised for this very operation.
@@ -93,48 +101,68 @@ public sealed class ApprovalGate : IApprovalGate
                 if (own.ArgumentsHash != argumentsHash)
                     return new ApprovalGateResult(false,
                         $"Approval {own.Id} was given for different arguments; the call was not executed.", own.Id);
-                return TryConsume(own) ?? new ApprovalGateResult(false,
-                    $"Approval {own.Id} for '{subject.ToolName}' is {own.Status.ToString().ToLowerInvariant()}; the call was not executed.",
+                return Usable(own) ?? new ApprovalGateResult(false, _consumed.ContainsKey(own.Id)
+                        ? $"Approval {own.Id} for '{subject.ToolName}' was already used; the call was not executed."
+                        : $"Approval {own.Id} for '{subject.ToolName}' is {own.Status.ToString().ToLowerInvariant()}; the call was not executed.",
                     own.Id);
             }
         }
 
-        // 2. Approve-then-retry.
+        // 2–3. Approve-then-retry: use the approval raised for this call, or raise one. Checked and raised under one
+        // lock, so concurrent identical calls share a single approval.
         var fingerprint = ApprovalFingerprint.Of(subject.ActorKey, subject.ToolName, subject.Arguments);
-        if (_raised.TryGetValue(fingerprint, out var raisedId) && _approvals.Get(raisedId) is { } raised)
+        Approval approval;
+        lock (_raiseLock)
         {
-            if (raised.Status == ApprovalStatus.Pending && !raised.IsExpired)
-                return new ApprovalGateResult(false,
-                    $"Approval {raised.Id} for '{subject.ToolName}' is still pending. Repeat this exact call once a human has approved it.",
-                    raised.Id);
-            _raised.TryRemove(fingerprint, out _);
-            if (raised.ArgumentsHash == argumentsHash && TryConsume(raised) is { } granted)
-                return granted;
+            if (_raised.TryGetValue(fingerprint, out var raisedId) && _approvals.Get(raisedId) is { } raised)
+            {
+                if (raised.Status == ApprovalStatus.Pending && !raised.IsExpired)
+                    return new ApprovalGateResult(false,
+                        $"Approval {raised.Id} for '{subject.ToolName}' is still pending. Repeat this exact call once a human has approved it.",
+                        raised.Id);
+                if (raised.ArgumentsHash == argumentsHash && Usable(raised) is { } granted)
+                    return granted;
+                // Rejected, expired or used: this call needs a new decision.
+                _raised.TryRemove(fingerprint, out _);
+            }
+
+            approval = Raise(subject, reason, matchedRules, argumentsHash);
+            _raised[fingerprint] = approval.Id;
         }
 
-        // 3. Nothing approved yet: raise one.
-        var approval = await RaiseAsync(subject, reason, matchedRules, argumentsHash);
-        _raised[fingerprint] = approval.Id;
+        await NotifyAsync(subject);
         return new ApprovalGateResult(false,
             $"Human approval required: {reason} Approval {approval.Id} was raised (Whiskers → Approvals). " +
             $"After it is approved, repeat this exact call within {GrantLifetime.TotalMinutes:0} minutes; it then runs once.",
             approval.Id);
     }
 
-    /// <summary>Approved, within its lifetime and not used before → used now. Otherwise null.</summary>
-    private ApprovalGateResult? TryConsume(Approval approval)
+    public bool TryConsume(string approvalId)
     {
-        if (approval.Status != ApprovalStatus.Approved || approval.ResolvedAt is not { } decidedAt)
-            return null;
-        var now = _time.GetUtcNow();
-        if (DateTime.SpecifyKind(decidedAt, DateTimeKind.Utc) + GrantLifetime <= now.UtcDateTime)
-            return null;
-        if (!_consumed.TryAdd(approval.Id, now))
+        ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
+        if (_approvals.Get(approvalId) is not { } approval || Usable(approval) is null)
+            return false;
+        if (!_consumed.TryAdd(approvalId, _time.GetUtcNow()))
+            return false;
+        // A used approval answers no further retry; the next identical call raises a new one.
+        foreach (var (fingerprint, id) in _raised)
+            if (id == approvalId) _raised.TryRemove(fingerprint, out _);
+        return true;
+    }
+
+    /// <summary>Approved, within its lifetime and not used yet → a grant. Otherwise null. Uses nothing up.</summary>
+    private ApprovalGateResult? Usable(Approval approval)
+    {
+        if (!IsLive(approval) || _consumed.ContainsKey(approval.Id))
             return null;
         return new ApprovalGateResult(true, "Approved.", approval.Id, approval.ResolvedBy);
     }
 
-    private async Task<Approval> RaiseAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
+    private bool IsLive(Approval approval) =>
+        approval.Status == ApprovalStatus.Approved && approval.ResolvedAt is { } decidedAt
+        && DateTime.SpecifyKind(decidedAt, DateTimeKind.Utc) + GrantLifetime > _time.GetUtcNow().UtcDateTime;
+
+    private Approval Raise(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
         string argumentsHash)
     {
         var argsJson = JsonSerializer.Serialize(subject.Arguments);
@@ -157,7 +185,11 @@ public sealed class ApprovalGate : IApprovalGate
             ArgumentsHash: argumentsHash),
             // The decision is read back from the store on the retry; nothing waits on it here.
             _ => Task.CompletedTask);
+        return approval;
+    }
 
+    private async Task NotifyAsync(ApprovalSubject subject)
+    {
         try
         {
             if (_notify is not null)
@@ -172,14 +204,26 @@ public sealed class ApprovalGate : IApprovalGate
         {
             _logger?.LogWarning(ex, "Approval notification for {Tool} failed", subject.ToolName);
         }
-        return approval;
     }
 
-    private void SweepConsumed()
+    /// <summary>Forgets used approvals after <see cref="ConsumedRetention"/>, and retry entries whose approval can no
+    /// longer answer a retry (gone, rejected, expired, or approved longer ago than its lifetime).</summary>
+    private void Sweep()
     {
         var cutoff = _time.GetUtcNow() - ConsumedRetention;
         foreach (var (id, at) in _consumed)
             if (at < cutoff) _consumed.TryRemove(id, out _);
+
+        lock (_raiseLock)
+        {
+            foreach (var (fingerprint, id) in _raised)
+            {
+                var approval = _approvals.Get(id);
+                var open = approval is not null
+                           && (approval.Status == ApprovalStatus.Pending ? !approval.IsExpired : IsLive(approval));
+                if (!open) _raised.TryRemove(fingerprint, out _);
+            }
+        }
     }
 
     private static string? Cap(string? s, int max) =>

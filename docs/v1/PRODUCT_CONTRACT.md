@@ -139,8 +139,9 @@ cannot widen (INV-16); the scope check inside the tool still runs · Target: con
 (INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26), but protected resources still match the
 raw argument (INV-24) · Approval ⚠️ approve-then-retry bound to caller, tool and arguments hash, single use, in memory
 (INV-30–34) · Execution = inside the gateway scope with a deadline · Audit: one gateway AuditLog row (decision,
-approval, intent, outcome) **plus** the tool's own row shown in the Audit column below (INV-45 ⚠️ two rows; a tool
-that reports failure as text is recorded `Executed` by the gateway).
+approval, intent, outcome) **plus** the tool's own row shown in the Audit column below (INV-45 ⚠️ two rows). A
+tool's error answer is recorded `Failed` by the gateway when the tool marks it (`MutationScope.Fail`; all 25
+mutating tools do for their own error texts).
 
 | ID | Tool | Level | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|

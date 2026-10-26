@@ -8,6 +8,7 @@ using Whiskers.Services.Mcp;
 using Whiskers.Services.AuditLog;
 using Whiskers.Utils;
 using Microsoft.AspNetCore.Http;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -124,11 +125,11 @@ public class ServerTools
         [Description("Timeout in seconds (default 30, max 600)")] int timeoutSeconds = 30)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_command");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(serverId))
-            return "Server ID is required.";
+            return MutationScope.Fail("Server ID is required.");
         if (string.IsNullOrWhiteSpace(command))
-            return "Command is required.";
+            return MutationScope.Fail("Command is required.");
 
         if (timeoutSeconds <= 0 || timeoutSeconds > 600)
             timeoutSeconds = 30;
@@ -147,6 +148,8 @@ public class ServerTools
             sb.AppendLine($"Output:\n{ShellUtils.Truncate(result.Output, maxStreamChars)}");
         if (!string.IsNullOrEmpty(result.Error))
             sb.AppendLine($"Errors:\n{ShellUtils.Truncate(result.Error, maxStreamChars)}");
+        if (result.ExitCode != 0)
+            MutationScope.Fail($"Exit code: {result.ExitCode}");
         return sb.ToString();
     }
 
@@ -283,18 +286,18 @@ public class ServerTools
         [Description("New nginx config content")] string content)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "update_nginx_config");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(serverId))
-            return "Server ID is required.";
+            return MutationScope.Fail("Server ID is required.");
         if (string.IsNullOrWhiteSpace(siteName))
-            return "Site name is required.";
+            return MutationScope.Fail("Site name is required.");
         if (string.IsNullOrWhiteSpace(content))
-            return "Config content is required.";
+            return MutationScope.Fail("Config content is required.");
 
         var result = await nginx.UpdateSiteConfigAsync(serverId, siteName, content);
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         await auditLog.LogAsync(actor, actorType, "nginx.update", "nginx", siteName, siteName, serverId: serverId, success: result.Success);
-        return result.Success ? $"Nginx config for {siteName} updated and reloaded." : $"Failed: {result.Error}";
+        return result.Success ? $"Nginx config for {siteName} updated and reloaded." : MutationScope.Fail($"Failed: {result.Error}");
     }
 
     [McpToolLevel(McpPermissionLevels.Read)]
@@ -327,17 +330,17 @@ public class ServerTools
         [Description("Action: start, stop, restart, enable, disable")] string action)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "manage_systemd_service");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(serverId))
-            return "Server ID is required.";
+            return MutationScope.Fail("Server ID is required.");
         if (string.IsNullOrWhiteSpace(serviceName))
-            return "Service name is required.";
+            return MutationScope.Fail("Service name is required.");
         if (string.IsNullOrWhiteSpace(action))
-            return "Action is required.";
+            return MutationScope.Fail("Action is required.");
 
         var validActions = new[] { "start", "stop", "restart", "enable", "disable" };
         if (!validActions.Contains(action.ToLower()))
-            return $"Invalid action '{action}'. Must be one of: start, stop, restart, enable, disable.";
+            return MutationScope.Fail($"Invalid action '{action}'. Must be one of: start, stop, restart, enable, disable.");
 
         var result = action.ToLower() switch
         {
@@ -350,7 +353,7 @@ public class ServerTools
         };
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         await auditLog.LogAsync(actor, actorType, "systemd.manage", "systemd", serviceName, serviceName, details: action, serverId: serverId, success: result.Success);
-        return result.Success ? $"{serviceName}: {action} succeeded." : $"{serviceName}: {action} failed - {result.Error}";
+        return result.Success ? $"{serviceName}: {action} succeeded." : MutationScope.Fail($"{serviceName}: {action} failed - {result.Error}");
     }
 
     [McpToolLevel(McpPermissionLevels.Read)]
@@ -386,17 +389,17 @@ public class ServerTools
         [Description("Certificate name (from list). Use 'all' to renew all.")] string certName)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "renew_ssl_certificate");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(serverId))
-            return "Server ID is required.";
+            return MutationScope.Fail("Server ID is required.");
         if (string.IsNullOrWhiteSpace(certName))
-            return "Certificate name is required. Use 'all' to renew all certificates.";
+            return MutationScope.Fail("Certificate name is required. Use 'all' to renew all certificates.");
 
         var result = certName.ToLower() == "all"
             ? await ssl.RenewAllAsync(serverId)
             : await ssl.RenewAsync(serverId, certName);
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         await auditLog.LogAsync(actor, actorType, "ssl.renew", "ssl", certName, certName, serverId: serverId, success: result.Success);
-        return result.Success ? $"SSL renewal succeeded." : $"SSL renewal failed: {result.Error}";
+        return result.Success ? $"SSL renewal succeeded." : MutationScope.Fail($"SSL renewal failed: {result.Error}");
     }
 }

@@ -5,6 +5,7 @@ using Whiskers.Services.Docker;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.AuditLog;
 using Microsoft.AspNetCore.Http;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -48,10 +49,10 @@ public class NetworkTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "create_network");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         if (string.IsNullOrWhiteSpace(name))
-            return "Network name is required.";
+            return MutationScope.Fail("Network name is required.");
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         string id;
@@ -79,7 +80,7 @@ public class NetworkTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "remove_network");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
@@ -106,7 +107,7 @@ public class NetworkTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "connect_container_to_network");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         await docker.ConnectContainerToNetworkAsync(networkId, containerId, serverId);
         return $"Container '{containerId}' connected to network '{networkId}'.";
@@ -123,7 +124,7 @@ public class NetworkTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "disconnect_container_from_network");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         await docker.DisconnectContainerFromNetworkAsync(networkId, containerId, serverId);
         return $"Container '{containerId}' disconnected from network '{networkId}'.";

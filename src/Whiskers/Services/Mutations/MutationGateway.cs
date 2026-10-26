@@ -191,6 +191,26 @@ public sealed class MutationGateway : IMutationGateway
                 "The audit record could not be written; the mutation was refused.", VerificationStatus.NotRun, ex);
         }
 
+        // The approval is used only now, after the intent is on record: a refusal before this point leaves it valid.
+        // Losing the race against a concurrent identical call (or the approval lapsing meanwhile) turns this attempt's
+        // intent row into a refusal.
+        if (approval?.ApprovalId is { } approvalId && !_approvals!.TryConsume(approvalId))
+        {
+            var reason = $"Approval {approvalId} is no longer usable (used by another call, revoked or expired); the mutation was refused.";
+            try
+            {
+                await _audit.CompleteAsync(auditId, operationId, MutationStatus.Denied, VerificationStatus.NotRun, reason,
+                    TimeSpan.Zero, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Audit outcome for refused {Capability} (operation {OperationId}) could not be written",
+                    capability.Id, operationId);
+            }
+            return new MutationOutcome<T>(operationId, MutationStatus.Denied, default, reason, VerificationStatus.NotRun,
+                ApprovalId: approvalId) { MatchedRules = decision.MatchedRules };
+        }
+
         // 6–7: execute inside the scope and under the deadline, then verify.
         var context = new MutationContext(operationId, request, capability);
         var started = _time.GetTimestamp();
@@ -201,13 +221,27 @@ public sealed class MutationGateway : IMutationGateway
             try
             {
                 T value;
-                using (MutationScope.Begin(capability.Id, operationId))
+                string? reported;
+                using (var scope = MutationScope.Begin(capability.Id, operationId))
+                {
                     value = await execute(context, deadline.Token);
+                    reported = scope.FailureReason;
+                }
 
-                var verification = await VerifyAsync(context, value, deadline.Token);
-                outcome = new MutationOutcome<T>(operationId, MutationStatus.Executed, value,
-                    verification == VerificationStatus.Failed ? "Executed, but verification failed." : null, verification,
-                    ApprovalId: approval?.ApprovalId);
+                if (reported is not null)
+                {
+                    // The delegate returned but reported a failure (MutationScope.Fail): Failed, with its value kept so
+                    // the caller still gets the tool's own answer.
+                    outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, value, reported,
+                        VerificationStatus.NotRun, ApprovalId: approval?.ApprovalId);
+                }
+                else
+                {
+                    var verification = await VerifyAsync(context, value, deadline.Token);
+                    outcome = new MutationOutcome<T>(operationId, MutationStatus.Executed, value,
+                        verification == VerificationStatus.Failed ? "Executed, but verification failed." : null, verification,
+                        ApprovalId: approval?.ApprovalId);
+                }
             }
             catch (OperationCanceledException ex) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
             {

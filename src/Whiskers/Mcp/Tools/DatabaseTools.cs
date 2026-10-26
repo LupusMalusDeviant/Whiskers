@@ -6,6 +6,7 @@ using Whiskers.Services.Docker;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.AuditLog;
 using Microsoft.AspNetCore.Http;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -122,10 +123,10 @@ public class DatabaseTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_query");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (container, creds, error) = await ResolveContainer(docker, containerId, serverId);
-        if (error != null) return error;
+        if (error != null) return MutationScope.Fail(error);
 
         if (!string.IsNullOrEmpty(database))
             creds!.Database = database;
@@ -133,7 +134,7 @@ public class DatabaseTools
         var result = await dbService.ExecuteQueryAsync(container!.Id, query, container.DatabaseType, creds!, serverId);
 
         if (!result.Success)
-            return $"Query failed: {result.Error}";
+            return MutationScope.Fail($"Query failed: {result.Error}");
 
         if (!result.Columns.Any())
             return $"Query executed successfully ({result.DurationMs:F0}ms, {result.RowCount} rows).";
@@ -163,10 +164,10 @@ public class DatabaseTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "backup_database");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (container, creds, error) = await ResolveContainer(docker, containerId, serverId);
-        if (error != null) return error;
+        if (error != null) return MutationScope.Fail(error);
 
         var (success, filePath, sizeBytes, backupError) = await dbService.BackupDatabaseAsync(
             container!.Id, database, container.DatabaseType, creds!, serverId);
@@ -176,7 +177,7 @@ public class DatabaseTools
 
         return success
             ? $"Backup created:\n  File: {filePath}\n  Size: {sizeBytes / 1024}KB"
-            : $"Backup failed: {backupError}";
+            : MutationScope.Fail($"Backup failed: {backupError}");
     }
 
     private static async Task<(ContainerInfo? Container, DatabaseCredentials? Creds, string? Error)> ResolveContainer(

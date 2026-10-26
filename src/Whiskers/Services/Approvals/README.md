@@ -10,10 +10,16 @@ WP2 step 2.2 on) from the UI or a job.
    through [`ApprovalCoordinator`](../Agent/Approvals/ApprovalCoordinator.cs) with the call's correlation id and the
    hash of its arguments. Once a human approves, the session continues, and the Mutation Gateway asks
    `ApprovalGate` whether an approval exists for **this operation** (correlation id + session + tool) with **these
-   arguments**, and uses it once.
+   arguments**. The session pauses on the same level the gateway uses (the tool's stored level in Settings → MCP,
+   if stricter).
 2. **Direct MCP call** (cannot wait): `ApprovalGate` raises an approval and refuses the call; once a human approved
    it, the identical call (same caller, tool and arguments) runs once within ten minutes (approve-then-retry).
-3. The notification bell and the **Freigaben** page read `GetPending()` and call `ResolveAsync(id, approved, resolvedBy)`.
+   Concurrent identical first calls share one approval. Retry entries whose approval was rejected, expired or used
+   are dropped, so the next call asks again.
+3. **Checking is not using.** `CheckAsync` only finds (or raises) the approval. The caller uses it with
+   `TryConsume` right before the call runs: the gateway after its audit intent is written, `DirectMcpCallGuard`
+   immediately. A refusal in between leaves the approval valid; of two concurrent calls only one consumes it.
+4. The notification bell and the **Freigaben** page read `GetPending()` and call `ResolveAsync(id, approved, resolvedBy)`.
 
 There is no way to grant a call without an approval decided in `IApprovalStore`.
 
@@ -28,7 +34,7 @@ expiry checked at execution time follow in WP3 (INV-29…36).
 | File | Purpose |
 |---|---|
 | `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore`: create / list / resolve / cancel approvals, a `Changed` event for the bell + page, automatic expiry. A resolver may only approve what its own level could do. |
-| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject`, `ApprovalGateResult`: decides whether a `Confirm` may run now. Single use, bound to the arguments hash, valid ten minutes after the decision. |
+| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject`, `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsume`). Single use, bound to the arguments hash, valid ten minutes after the decision. |
 | `ApprovalFingerprint.cs` | The hashes that bind an approval: arguments (keys sorted, raw JSON values) and caller + tool + arguments. |
 | `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. |
 

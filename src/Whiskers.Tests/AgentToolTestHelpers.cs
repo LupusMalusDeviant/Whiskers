@@ -53,25 +53,35 @@ internal static class AgentToolTestHelpers
     internal sealed class NullMutationAudit : IMutationAuditSink
     {
         public List<string> Events { get; } = [];
+        public List<string?> Reasons { get; } = [];
+
+        /// <summary>Makes the next intent write fail, as a full disk or a lost database would.</summary>
+        public bool FailNextBegin { get; set; }
 
         public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
             ApprovalGateResult? approval, CancellationToken ct)
         {
-            Events.Add($"begin:{capability.Id}:{approval?.ApprovalId}");
+            if (FailNextBegin)
+            {
+                FailNextBegin = false;
+                throw new IOException("audit store unavailable");
+            }
+            lock (Events) Events.Add($"begin:{capability.Id}:{approval?.ApprovalId}");
             return Task.FromResult((long)Events.Count);
         }
 
         public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
             string? reason, TimeSpan duration, CancellationToken ct)
         {
-            Events.Add($"complete:{status}");
+            lock (Events) Events.Add($"complete:{status}");
+            lock (Events) Reasons.Add(reason);
             return Task.CompletedTask;
         }
 
         public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
             MutationStatus status, string reason, CancellationToken ct)
         {
-            Events.Add($"denied:{status}");
+            lock (Events) Events.Add($"denied:{status}");
             return Task.CompletedTask;
         }
     }

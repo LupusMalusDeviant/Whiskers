@@ -178,6 +178,109 @@ public class ToolAuthorizationTests
         Assert.Equal(1, runs);
     }
 
+    /// <summary>The session's own approval for operation <paramref name="operation"/>, decided by a human.</summary>
+    private static async Task<Approval> ApprovedSessionApproval(ApprovalStore approvals, string operation)
+    {
+        var approval = approvals.Create(new ApprovalRequest("s1", "call-1", "ops@example.com", "agent-web",
+            "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: operation,
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args("web-1"))), _ => Task.CompletedTask);
+        await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
+        return approval;
+    }
+
+    [Fact]
+    public async Task A_failed_audit_intent_leaves_the_approval_usable()
+    {
+        var approvals = new ApprovalStore();
+        var audit = new AgentToolTestHelpers.NullMutationAudit { FailNextBegin = true };
+        var gateway = Gateway(policy: GuardrailPolicy.SafeDefault(), approvals: approvals, audit: audit);
+        var approval = await ApprovedSessionApproval(approvals, "op-1");
+        var runs = 0;
+        Task<int> Run(MutationContext _, CancellationToken __) => Task.FromResult(++runs);
+
+        var refused = await gateway.ExecuteAsync(Request(Agent, MutationSurface.Agent, operationId: "op-1", sessionId: "s1"), Run);
+        var retried = await gateway.ExecuteAsync(Request(Agent, MutationSurface.Agent, operationId: "op-1", sessionId: "s1"), Run);
+
+        Assert.Equal(MutationStatus.Denied, refused.Status);
+        Assert.Equal(MutationStatus.Executed, retried.Status);
+        Assert.Equal(approval.Id, retried.ApprovalId);
+        Assert.Equal(1, runs);
+    }
+
+    [Fact]
+    public async Task Two_concurrent_runs_on_one_approval_execute_once_and_the_other_is_recorded_as_refused()
+    {
+        var approvals = new ApprovalStore();
+        var audit = new AgentToolTestHelpers.NullMutationAudit();
+        var gateway = Gateway(policy: GuardrailPolicy.SafeDefault(), approvals: approvals, audit: audit);
+        await ApprovedSessionApproval(approvals, "op-1");
+        var runs = 0;
+        Task<int> Run(MutationContext _, CancellationToken __) => Task.FromResult(Interlocked.Increment(ref runs));
+
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+            gateway.ExecuteAsync(Request(Agent, MutationSurface.Agent, operationId: "op-1", sessionId: "s1"), Run))));
+
+        Assert.Equal(1, runs);
+        Assert.Single(outcomes, o => o.Status == MutationStatus.Executed);
+        Assert.All(outcomes.Where(o => o.Status != MutationStatus.Executed),
+            o => Assert.True(o.Status is MutationStatus.Denied or MutationStatus.PendingApproval));
+        // Every attempt that wrote an intent row also completed it.
+        lock (audit.Events)
+            Assert.Equal(audit.Events.Count(e => e.StartsWith("begin:")), audit.Events.Count(e => e.StartsWith("complete:")));
+    }
+
+    [Fact]
+    public async Task A_tool_that_reports_a_failure_is_recorded_as_failed_and_its_answer_is_kept()
+    {
+        var audit = new AgentToolTestHelpers.NullMutationAudit();
+        var gateway = Gateway(audit: audit);
+
+        var outcome = await gateway.ExecuteAsync(Request(WebUser, MutationSurface.Mcp),
+            (_, _) => Task.FromResult(MutationScope.Fail("Container not found: web-1")));
+
+        Assert.Equal(MutationStatus.Failed, outcome.Status);
+        Assert.Equal("Container not found: web-1", outcome.Value);
+        Assert.Equal("Container not found: web-1", outcome.Reason);
+        Assert.Null(outcome.Error);
+        Assert.Contains("complete:Failed", audit.Events);
+        Assert.Contains("Container not found: web-1", audit.Reasons);
+    }
+
+    [Fact]
+    public async Task Fail_outside_a_gateway_scope_only_returns_the_text_and_a_long_reason_is_shortened()
+    {
+        Assert.Equal("plain", MutationScope.Fail("plain"));
+
+        var gateway = Gateway();
+        var longText = new string('x', 5000);
+        var outcome = await gateway.ExecuteAsync(Request(WebUser, MutationSurface.Mcp),
+            (_, _) => Task.FromResult(MutationScope.Fail(longText)));
+
+        Assert.Equal(longText, outcome.Value);
+        Assert.True(outcome.Reason!.Length < 600);
+    }
+
+    [Fact]
+    public async Task An_agent_tool_that_reports_a_failure_returns_an_error_to_the_agent()
+    {
+        var audit = new AgentToolTestHelpers.NullMutationAudit();
+        var services = new ServiceCollection().AddHttpContextAccessor().BuildServiceProvider();
+        var invoker = new Whiskers.Services.Agent.AgentToolInvoker(AgentToolTestHelpers.DefaultRegistry(),
+            Whiskers.Services.Guardrails.GuardrailEngine.CreateDefault(),
+            services.GetRequiredService<IServiceScopeFactory>(),
+            gateway: AgentToolTestHelpers.Gateway(AllowWrites(), audit: audit));
+        var context = new AgentContext("s1",
+            new AgentPrincipal(AgentPrincipalKind.WebUser, "ops", McpPermissionLevels.Admin, null, UserEmail: "ops@example.com"),
+            AgentOrigin.WebUi, AllowWrites());
+
+        // pause_server_checks without serverId: the tool answers with an error text instead of throwing.
+        var result = await invoker.InvokeAsync(new AgentToolCall("1", "pause_server_checks", "{}"), context);
+
+        Assert.True(result.IsError);
+        Assert.Contains("serverId is required", result.Content);
+        Assert.Contains("complete:Failed", audit.Events);
+    }
+
     [Fact]
     public async Task A_disabled_read_tool_is_refused_for_the_agent_too()
     {
@@ -243,6 +346,53 @@ public class ToolAuthorizationWireTests
 
             var text = System.Text.Json.JsonDocument.Parse(payload).RootElement.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
             Assert.Contains("requires 'write'", text);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", previousDataDir);
+            try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_tool_that_answers_with_an_error_text_is_failed_in_the_audit_and_an_error_for_the_client()
+    {
+        var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-toolfailure-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataDir);
+        var previousDataDir = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
+        Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
+        try
+        {
+            await using var factory = new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>()
+                .WithWebHostBuilder(b => b.UseEnvironment("Development"));
+            using var client = factory.CreateClient();
+
+            // Writes run without a human here, so the call reaches the tool.
+            var permissions = factory.Services.GetRequiredService<IMcpPermissionService>();
+            var key = await permissions.AddApiKeyAsync("ops", McpPermissionLevels.Write);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Key);
+            var guardrails = factory.Services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
+            var config = guardrails.Config;
+            var policy = config.ActivePolicy();
+            policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+            policy.RequireConfirmationForWrites = false;
+            await guardrails.SaveConfigAsync(config,
+                new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null, UserEmail: "admin@example.com"));
+
+            var session = await McpServedSurfaceTests.InitializeAsync(client);
+            using var response = await McpServedSurfaceTests.PostAsync(client, session,
+                """{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"pause_server_checks","arguments":{"serverId":"no-such-server","reason":"test"}}}""");
+            var payload = McpServedSurfaceTests.ExtractJsonRpcPayload(await response.Content.ReadAsStringAsync());
+
+            var result = System.Text.Json.JsonDocument.Parse(payload).RootElement.GetProperty("result");
+            Assert.True(result.GetProperty("isError").GetBoolean());
+            Assert.Contains("not found", result.GetProperty("content")[0].GetProperty("text").GetString());
+
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>();
+            var row = db.AuditLog.Single(r => r.Action == "checks.pause");
+            Assert.False(row.Success);
+            Assert.Contains("\"status\":\"Failed\"", row.Details);
         }
         finally
         {

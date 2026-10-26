@@ -156,6 +156,16 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             return new AgentToolResult(call.Id, output, false, decision);
         }
 
+        if (outcome.Status == MutationStatus.Failed && outcome.Error is null && outcome.Value is { } answer)
+        {
+            // The tool answered but reported a failure (MutationScope.Fail): the agent sees the tool's own text.
+            if (answer.Length > MaxOutputChars)
+                answer = answer[..MaxOutputChars] + $"\n… [truncated, {answer.Length - MaxOutputChars} more characters]";
+            await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, answer,
+                outcome.Reason, call.CorrelationId);
+            return Error(call.Id, answer, decision);
+        }
+
         var error = outcome.Error is TargetInvocationException { InnerException: { } inner } ? inner : outcome.Error;
         if (error is not null)
             _logger?.LogError(error, "Agent-Tool '{Tool}' fehlgeschlagen", entry.Name);
@@ -247,7 +257,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var arguments = BindArguments(entry.Method, args, sp, ct, out var missing);
             if (missing.Count > 0)
-                return $"Missing required arguments: {string.Join(", ", missing)}.";
+                return MutationScope.Fail($"Missing required arguments: {string.Join(", ", missing)}.");
 
             var target = entry.Method.IsStatic ? null : sp.GetService(entry.Method.DeclaringType!);
             var result = entry.Method.Invoke(target, arguments);

@@ -88,7 +88,14 @@ public static class McpGuardrailFilter
             capability.Id, PrincipalOf(principal), MutationSurface.Mcp,
             MutationTargets.FromArguments(capability, arguments), arguments);
 
-        var outcome = await gateway.ExecuteAsync(mutation, async (_, token) => await next(request, token), ct);
+        var outcome = await gateway.ExecuteAsync(mutation, async (_, token) =>
+        {
+            var result = await next(request, token);
+            // A tool result marked as an error is a failed mutation, not a successful one.
+            if (result.IsError == true)
+                MutationScope.Fail(ErrorText(result));
+            return result;
+        }, ct);
         http.Items[VerdictItemKey] = outcome.Status switch
         {
             MutationStatus.Denied => "deny",
@@ -99,6 +106,8 @@ public static class McpGuardrailFilter
         return outcome.Status switch
         {
             MutationStatus.Executed => outcome.Value!,
+            // The tool answered but reported a failure: the client gets the tool's own answer, marked as an error.
+            MutationStatus.Failed when outcome.Error is null && outcome.Value is { } answer => AsError(answer),
             // The tool threw: rethrow so the MCP server reports it exactly as before the gateway existed.
             MutationStatus.Failed when outcome.Error is { } error
                                        && (error is not OperationCanceledException || ct.IsCancellationRequested) =>
@@ -113,6 +122,18 @@ public static class McpGuardrailFilter
             CredentialId: keyId, AllowedTools: p.AllowedTools)
         : new MutationPrincipal(MutationPrincipalKind.Human, p.UserEmail ?? p.DisplayName, p.DisplayName,
             p.PermissionLevel, AllowedTools: p.AllowedTools);
+
+    private static string ErrorText(CallToolResult result)
+    {
+        var text = string.Join('\n', result.Content.OfType<TextContentBlock>().Select(c => c.Text));
+        return string.IsNullOrWhiteSpace(text) ? "The tool reported an error." : text;
+    }
+
+    private static CallToolResult AsError(CallToolResult result)
+    {
+        result.IsError = true;
+        return result;
+    }
 
     private static CallToolResult Rethrow(Exception error)
     {

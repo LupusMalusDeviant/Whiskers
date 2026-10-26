@@ -72,7 +72,13 @@ public sealed class DirectMcpCallGuard : IDirectMcpCallGuard
         var gate = await _approvals.CheckAsync(
             new ApprovalSubject(toolName, level, actor, actor, DirectSessionId, arguments),
             decision.Reason, decision.MatchedRuleIds, ct);
-        return new DirectCallVerdict(gate.Approved, GuardrailVerdict.Confirm, gate.Approved ? null : gate.Message);
+        if (!gate.Approved)
+            return new DirectCallVerdict(false, GuardrailVerdict.Confirm, gate.Message);
+        // A read has no audit intent to wait for: the approval is used now.
+        return _approvals.TryConsume(gate.ApprovalId!)
+            ? new DirectCallVerdict(true, GuardrailVerdict.Confirm, null)
+            : new DirectCallVerdict(false, GuardrailVerdict.Confirm,
+                $"Approval {gate.ApprovalId} is no longer usable (used by another call or expired); repeat the call to raise a new one.");
     }
 
     private const string DirectSessionId = "mcp-direct";

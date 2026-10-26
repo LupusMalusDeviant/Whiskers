@@ -8,6 +8,7 @@ namespace Whiskers.Services.Mutations;
 /// </summary>
 public sealed class MutationScope : IDisposable
 {
+    private const int MaxReasonChars = 500;
     private static readonly AsyncLocal<MutationScope?> CurrentScope = new();
 
     private readonly MutationScope? _parent;
@@ -25,6 +26,24 @@ public sealed class MutationScope : IDisposable
 
     public string CapabilityId { get; }
     public string OperationId { get; }
+
+    /// <summary>The failure the delegate reported with <see cref="Fail"/>, or <c>null</c>. The first report wins.</summary>
+    public string? FailureReason { get; private set; }
+
+    /// <summary>
+    /// Reports on the current scope that the mutation failed although the code returns normally — for tools that
+    /// answer with an error text instead of throwing. The gateway then records the operation as <c>Failed</c> and
+    /// still hands the text back to the caller. Returns <paramref name="reason"/>, so a tool writes
+    /// <c>return MutationScope.Fail("…");</c>. Outside a scope it only returns the text.
+    /// </summary>
+    public static string Fail(string reason)
+    {
+        ArgumentNullException.ThrowIfNull(reason);
+        // The text can be a whole command output; the audit row only needs its start.
+        if (Current is { } scope)
+            scope.FailureReason ??= reason.Length > MaxReasonChars ? reason[..MaxReasonChars] + "…" : reason;
+        return reason;
+    }
 
     /// <summary>Opened by the gateway only. Dispose restores the previous scope.</summary>
     internal static MutationScope Begin(string capabilityId, string operationId)

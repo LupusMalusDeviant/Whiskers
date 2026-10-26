@@ -4,6 +4,7 @@ using Whiskers.Models;
 using Whiskers.Services.LogMonitor;
 using Whiskers.Services.Mcp;
 using Microsoft.AspNetCore.Http;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -47,7 +48,7 @@ public class LogTools
         [Description("Cooldown in minutes between alerts")] int cooldownMinutes = 10)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "create_log_alert");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var rule = await monitorService.CreateRuleAsync(new LogAlertRuleEntity
         {

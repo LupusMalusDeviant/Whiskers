@@ -6,6 +6,7 @@ using Whiskers.Services.Scheduler;
 using Whiskers.Services.AuditLog;
 using Whiskers.Utils;
 using Microsoft.AspNetCore.Http;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -46,10 +47,10 @@ public class SchedulerTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "create_scheduled_task");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         if (!Enum.TryParse<ScheduledTaskType>(taskType, true, out var type))
-            return $"Invalid task type: {taskType}. Valid: ContainerRestart, DbBackup, VolumeBackup, CustomCommand, Cleanup";
+            return MutationScope.Fail($"Invalid task type: {taskType}. Valid: ContainerRestart, DbBackup, VolumeBackup, CustomCommand, Cleanup");
 
         // A CustomCommand task runs an arbitrary command through the same host executor as execute_command
         // (root on the host for serverId=local). Creating one must therefore require the same Admin level,
@@ -57,7 +58,7 @@ public class SchedulerTools
         if (type == ScheduledTaskType.CustomCommand)
         {
             var deniedCmd = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_command");
-            if (deniedCmd != null) return deniedCmd;
+            if (deniedCmd != null) return MutationScope.Fail(deniedCmd);
         }
 
         var config = new Dictionary<string, string>();
@@ -95,7 +96,7 @@ public class SchedulerTools
         [Description("Task ID to delete")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "delete_scheduled_task");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var target = (await scheduler.GetTasksAsync()).FirstOrDefault(t => t.TaskId == taskId);
         await scheduler.DeleteTaskAsync(taskId);
@@ -114,21 +115,24 @@ public class SchedulerTools
         [Description("Task ID to run")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "run_scheduled_task");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         // Running a CustomCommand task executes an arbitrary host command; gate it at the same Admin level
         // as execute_command so run_scheduled_task cannot be used to bypass that boundary.
         var target = (await scheduler.GetTasksAsync()).FirstOrDefault(t => t.TaskId == taskId);
-        if (target is null) return $"Task '{taskId}' not found.";
+        if (target is null) return MutationScope.Fail($"Task '{taskId}' not found.");
         if (target.TaskType == ScheduledTaskType.CustomCommand)
         {
             var deniedCmd = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_command");
-            if (deniedCmd != null) return deniedCmd;
+            if (deniedCmd != null) return MutationScope.Fail(deniedCmd);
         }
 
         var (success, output) = await scheduler.RunNowAsync(taskId);
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         await auditLog.LogAsync(actor, actorType, "scheduler.run", "scheduled-task", taskId, target.Name, $"success={success}", success: success);
-        return success ? $"Task completed successfully:\n{output}" : $"Task failed:\n{output}";
+        if (success)
+            return $"Task completed successfully:\n{output}";
+        MutationScope.Fail("Task failed.");
+        return $"Task failed:\n{output}";
     }
 }

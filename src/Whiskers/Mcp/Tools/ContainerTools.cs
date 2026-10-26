@@ -8,6 +8,7 @@ using Whiskers.Services.Mcp;
 using Whiskers.Services.AuditLog;
 using Whiskers.Utils;
 using Microsoft.AspNetCore.Http;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -111,13 +112,13 @@ public class ContainerTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "start_container");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(containerId))
-            return "Container ID or name is required.";
+            return MutationScope.Fail("Container ID or name is required.");
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
-        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        if (container is null) return MutationScope.Fail(resolveError ?? $"Container not found: {containerId}");
         var id = container.Id;
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
@@ -144,13 +145,13 @@ public class ContainerTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "stop_container");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(containerId))
-            return "Container ID or name is required.";
+            return MutationScope.Fail("Container ID or name is required.");
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
-        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        if (container is null) return MutationScope.Fail(resolveError ?? $"Container not found: {containerId}");
         var id = container.Id;
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
@@ -177,13 +178,13 @@ public class ContainerTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "restart_container");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(containerId))
-            return "Container ID or name is required.";
+            return MutationScope.Fail("Container ID or name is required.");
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
-        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        if (container is null) return MutationScope.Fail(resolveError ?? $"Container not found: {containerId}");
         var id = container.Id;
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         try
@@ -212,13 +213,13 @@ public class ContainerTools
         [Description("Server ID")] string? serverId = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "update_container");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(containerId))
-            return "Container ID or name is required.";
+            return MutationScope.Fail("Container ID or name is required.");
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
-        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        if (container is null) return MutationScope.Fail(resolveError ?? $"Container not found: {containerId}");
         var id = container.Id;
 
         var messages = new List<string>();
@@ -292,13 +293,13 @@ public class ContainerTools
         [Description("Docker network to connect to (default: 'bridge')")] string? network = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "deploy_app");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         // Validate app name
         if (string.IsNullOrWhiteSpace(appName) || !System.Text.RegularExpressions.Regex.IsMatch(appName, @"^[a-zA-Z0-9._-]+$"))
-            return "Error: Invalid app name. Use only letters, numbers, dots, hyphens, and underscores.";
+            return MutationScope.Fail("Error: Invalid app name. Use only letters, numbers, dots, hyphens, and underscores.");
 
         if (string.IsNullOrWhiteSpace(image))
-            return "Error: Image is required.";
+            return MutationScope.Fail("Error: Image is required.");
 
         var request = new DeploymentRequest
         {
@@ -355,7 +356,7 @@ public class ContainerTools
         catch (Exception ex)
         {
             await auditLog.LogAsync(actor, actorType, "deploy.app", "container", appName, appName, details: $"Image: {image}; {ex.Message}", serverId: serverId, success: false);
-            return $"Deployment failed: {ex.Message}";
+            return MutationScope.Fail($"Deployment failed: {ex.Message}");
         }
     }
 
@@ -499,12 +500,12 @@ public class ContainerTools
         [Description("Full docker-compose.yml content")] string composeContent)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "deploy_compose");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (!McpInputValidation.IsSafeProjectName(projectName))
-            return "Error: Invalid project name.";
+            return MutationScope.Fail("Error: Invalid project name.");
 
         if (string.IsNullOrWhiteSpace(composeContent))
-            return "Error: Compose content is required.";
+            return MutationScope.Fail("Error: Compose content is required.");
 
         // Create directory and write compose file
         var dir = $"/opt/deployments/{projectName}";
@@ -518,7 +519,7 @@ public class ContainerTools
         if (!setupResult.Success)
         {
             await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, details: setupResult.Error, serverId: serverId, success: false);
-            return $"Failed to write compose file: {setupResult.Error}";
+            return MutationScope.Fail($"Failed to write compose file: {setupResult.Error}");
         }
 
         // Run docker compose up
@@ -527,8 +528,9 @@ public class ContainerTools
             TimeSpan.FromMinutes(5));
 
         await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, serverId: serverId, success: deployResult.Success);
-        return deployResult.Success
-            ? $"Compose deployment '{projectName}' succeeded:\n{deployResult.Output}"
-            : $"Compose deployment failed:\n{deployResult.Output}\n{deployResult.Error}";
+        if (deployResult.Success)
+            return $"Compose deployment '{projectName}' succeeded:\n{deployResult.Output}";
+        MutationScope.Fail("Compose deployment failed.");
+        return $"Compose deployment failed:\n{deployResult.Output}\n{deployResult.Error}";
     }
 }

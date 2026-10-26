@@ -177,6 +177,52 @@ public class AgentSessionTests
         Assert.Contains(h, m => m.Role == AgentRole.Assistant && m.Text == "neue antwort");
     }
 
+    private sealed class RecordingEngine : IAgentGuardrailEngine
+    {
+        public readonly List<string> Levels = [];
+        public GuardrailDecision Evaluate(GuardrailRequest request)
+        {
+            Levels.Add(request.RequiredLevel);
+            return new(GuardrailVerdict.Allow, "ok", Array.Empty<string>());
+        }
+    }
+
+    private sealed class FixedOverrides(Whiskers.Services.Mutations.CapabilityAvailability availability)
+        : Whiskers.Services.Mutations.ICapabilityOverrides
+    {
+        public Whiskers.Services.Mutations.CapabilityAvailability Resolve(Whiskers.Services.Mutations.Capability capability) => availability;
+        public Whiskers.Services.Mutations.CapabilityAvailability ResolveTool(string toolName, string codeLevel) => availability;
+    }
+
+    [Fact] // The session decides on the stored level, so it pauses exactly when the gateway will ask for an approval
+    public async Task The_session_evaluates_the_stricter_stored_level()
+    {
+        var engine = new RecordingEngine();
+        var session = new AgentSession(Context(), new FakeProvider(ToolTurn("stop_container"), TextTurn("done")),
+            new FakeCatalog(), new FakeInvoker(), engine, Registry,
+            new AgentSettings { Model = "x", MaxToolIterations = 2 }, "system",
+            overrides: new FixedOverrides(new(true, McpPermissionLevels.Admin)));
+
+        await Collect(session, "go");
+
+        Assert.Equal([McpPermissionLevels.Admin], engine.Levels);
+    }
+
+    [Fact]
+    public async Task A_tool_switched_off_in_settings_never_reaches_the_invoker_from_the_session()
+    {
+        var invoker = new FakeInvoker();
+        var session = new AgentSession(Context(), new FakeProvider(ToolTurn("stop_container"), TextTurn("done")),
+            new FakeCatalog(), invoker, new FakeEngine(), Registry,
+            new AgentSettings { Model = "x", MaxToolIterations = 2 }, "system",
+            overrides: new FixedOverrides(new(false, McpPermissionLevels.Write)));
+
+        var events = await Collect(session, "go");
+
+        Assert.Equal(0, invoker.Calls);
+        Assert.Contains(events, e => e is AgentEvent.ToolExecuted t && t.Result.IsError);
+    }
+
     [Fact] // MIT-33: the LIVE guardrail policy (store) reaches an open session, not the frozen context policy
     public async Task Live_store_policy_action_limit_is_enforced()
     {
