@@ -1,5 +1,5 @@
 using Whiskers.Configuration;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
 
 namespace Whiskers.Models.Agent;
 

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Whiskers.Models.Agent;
 
-namespace Whiskers.Services.Agent.Guardrails;
+namespace Whiskers.Services.Guardrails;
 
 /// <summary>Evaluates a planned tool call BEFORE execution. Fully LLM-independent.
 /// Aggregates all IGuardrailRule with "most-restrictive wins": a Deny beats everything,

@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 
-namespace Whiskers.Services.Agent.Approvals;
+namespace Whiskers.Services.Approvals;
 
 /// <summary>Central registry of Human-in-the-Loop approvals. When an agent tool call needs a human
 /// decision (guardrail <c>Confirm</c>), the flow creates an approval here with a <paramref name="resolver"/>
@@ -81,6 +81,7 @@ public sealed class ApprovalStore : IApprovalStore
             TargetWorkload = request.TargetWorkload,
             GuardrailPreset = request.GuardrailPreset,
             GuardrailRule = request.GuardrailRule,
+            ArgumentsHash = request.ArgumentsHash,
         };
         _entries[approval.Id] = new Entry(approval, resolver);
         TrimResolved();

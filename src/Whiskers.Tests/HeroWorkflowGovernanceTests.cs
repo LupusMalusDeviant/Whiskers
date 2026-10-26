@@ -4,7 +4,8 @@ using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
 using Whiskers.Services.Agent.Approvals;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Guardrails;
 using Whiskers.Services.Agent.Providers;
 using Whiskers.Services.Notifications;
 using Whiskers.Services.Observability;
@@ -237,7 +238,8 @@ public class HeroWorkflowGovernanceTests
     {
         // Deny path: the invoker records the call (with correlation id + redacted args) WITHOUT executing.
         var callLog = new CapturingCallLog();
-        var invoker = new AgentToolInvoker(Registry, GuardrailEngine.CreateDefault(), new NoExecScopeFactory(), callLog);
+        var invoker = new AgentToolInvoker(Registry, GuardrailEngine.CreateDefault(), new NoExecScopeFactory(), callLog,
+            gateway: AgentToolTestHelpers.Gateway(GuardrailPolicy.SafeDefault()));
         var call = new AgentToolCall("x", "execute_command", "{\"command\":\"echo token=SUPERSECRET\"}");
 
         var ctx = new AgentContext("s1",

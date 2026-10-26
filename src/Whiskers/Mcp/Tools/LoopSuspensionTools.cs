@@ -5,6 +5,7 @@ using Whiskers.Models;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.Observability;
 using Whiskers.Services.ServerConfig;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -64,14 +65,14 @@ public class LoopSuspensionTools
         [Description($"Minutes to pause, 1 to 120 (default 30). Longer pauses are an operator decision, not an agent's.")] int minutes = 30)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "pause_server_checks");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
-        if (string.IsNullOrWhiteSpace(serverId)) return "Error: serverId is required.";
+        if (string.IsNullOrWhiteSpace(serverId)) return MutationScope.Fail("Error: serverId is required.");
         if (string.IsNullOrWhiteSpace(reason))
-            return "Error: a reason is required. A pause with no stated cause is indistinguishable from a bug.";
+            return MutationScope.Fail("Error: a reason is required. A pause with no stated cause is indistinguishable from a bug.");
 
         var server = servers.GetServer(serverId);
-        if (server == null) return $"Error: server '{serverId}' not found.";
+        if (server == null) return MutationScope.Fail($"Error: server '{serverId}' not found.");
 
         // Clamped, not rejected: an agent asking for a day gets two hours and is told so, rather than getting
         // an error while the host it is trying to protect stays under load.
@@ -96,12 +97,12 @@ public class LoopSuspensionTools
         [Description("Server ID whose background checks should resume")] string serverId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "resume_server_checks");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
-        if (string.IsNullOrWhiteSpace(serverId)) return "Error: serverId is required.";
+        if (string.IsNullOrWhiteSpace(serverId)) return MutationScope.Fail("Error: serverId is required.");
 
         var server = servers.GetServer(serverId);
-        if (server == null) return $"Error: server '{serverId}' not found.";
+        if (server == null) return MutationScope.Fail($"Error: server '{serverId}' not found.");
 
         var wasPaused = suspension.IsSuspended(server.Id);
         suspension.Resume(server.Id);

@@ -93,7 +93,7 @@ For each call: timestamp, actor + actor type, tool name, required permission lev
 
 - Dashboard: [`../../Components/Pages/AgentHistory.razor`](../../Components/Pages/AgentHistory.razor)
 - Secret redaction: [`../../Utils/SecretRedactor.cs`](../../Utils/)
-- Guardrail verdicts: [`../Agent/Guardrails/`](../Agent/Guardrails/)
+- Guardrail verdicts: [`../Guardrails/`](../Guardrails/)
 
 ## Decisions worth keeping
 

@@ -3,7 +3,8 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using Whiskers.Configuration;
 using Whiskers.Models.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Agent.Providers;
 
 namespace Whiskers.Services.Agent;
@@ -19,6 +20,7 @@ public sealed class AgentSession : IAgentSession
     private readonly IAgentToolCatalog _catalog;
     private readonly IAgentToolInvoker _invoker;
     private readonly IAgentGuardrailEngine _guardrails;
+    private readonly ICapabilityOverrides? _overrides;
     private readonly IGuardrailStore? _guardrailStore;
     private readonly IAgentToolRegistry _registry;
     private readonly AgentSettings _settings;
@@ -37,9 +39,10 @@ public sealed class AgentSession : IAgentSession
         AgentContext context, IAgentLlmProvider provider, IAgentToolCatalog catalog,
         IAgentToolInvoker invoker, IAgentGuardrailEngine guardrails, IAgentToolRegistry registry,
         AgentSettings settings, string systemPrompt, IReadOnlyList<AgentMessage>? seedHistory = null,
-        IGuardrailStore? guardrailStore = null)
+        IGuardrailStore? guardrailStore = null, ICapabilityOverrides? overrides = null)
     {
         _context = context;
+        _overrides = overrides;
         _provider = provider;
         _catalog = catalog;
         _invoker = invoker;
@@ -200,7 +203,28 @@ public sealed class AgentSession : IAgentSession
             return new GuardrailDecision(GuardrailVerdict.Allow,
                 "Unbekanntes Tool — der Invoker meldet den Fehler.", Array.Empty<string>());
 
+        // The tool switch and a stricter stored level (Settings → MCP), as the invoker and the gateway apply them, so
+        // the session pauses for an approval exactly when the gateway will ask for one.
+        var level = entry.RequiredLevel;
+        if (_overrides is not null)
+        {
+            CapabilityAvailability availability;
+            try
+            {
+                availability = _overrides.ResolveTool(entry.Name, entry.RequiredLevel);
+            }
+            catch (Exception)
+            {
+                return new GuardrailDecision(GuardrailVerdict.Deny,
+                    "Tool settings could not be read; the call was not executed.", Array.Empty<string>());
+            }
+            if (!availability.Enabled)
+                return new GuardrailDecision(GuardrailVerdict.Deny,
+                    $"'{entry.Name}' is disabled in Settings → MCP.", Array.Empty<string>());
+            level = availability.RequiredLevel;
+        }
+
         var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
-        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, entry.RequiredLevel, args, LiveContext));
+        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, level, args, LiveContext));
     }
 }

@@ -1,29 +1,24 @@
 # Agent / Approvals
 
-**Human-in-the-Loop**: the central registry of pending approvals. When an agent tool call hits a guardrail `Confirm` verdict, the agent flow pauses and a human must approve or reject it before the tool runs.
+The agent's bridge into the core [approvals](../../Approvals/): when an agent tool call hits a guardrail `Confirm`,
+the session pauses and a human must approve or reject the call before it runs.
 
 ## How it fits together
 
 1. [`AgentSession`](../AgentSession.cs) evaluates a tool call > `Confirm` > emits `ConfirmationRequired` and awaits a `TaskCompletionSource<bool>` (via `ResolveConfirmationAsync`).
-2. The flow registers an [`Approval`](../../../Models/Agent/Approval.cs) here with a **resolver** callback that bridges back to that waiting session.
-3. The notification bell and the **Freigaben** page read `GetPending()` and call `ResolveAsync(id, approved, resolvedBy)`; the resolver unblocks the session.
-
-`ResolveAsync` > resolver(true/false) > the session continues or records "rejected".
-
-## In-memory by design
-
-Approvals are **not** persisted: the resolver targets a live in-process `AgentSession`, which itself does not survive a restart. A process restart cancels pending agent runs, so there is nothing meaningful to resume. Overdue approvals (default 15 min) are swept to `Expired` and resolved as *deny* so a waiting session never hangs; `CancelForSessionAsync` does the same when a session aborts.
+2. The page calls `ApprovalCoordinator.RaiseAsync`, which registers an [`Approval`](../../../Models/Agent/Approval.cs) in the core `IApprovalStore` with the call's correlation id, the hash of its arguments, and a **resolver** callback that bridges back to the waiting session.
+3. The notification bell and the **Freigaben** page call `ResolveAsync(id, approved, resolvedBy)`; the resolver unblocks the session.
+4. For a mutating tool, the Mutation Gateway then checks that this approval exists, was approved, matches the arguments and is used only once (`ApprovalGate`). A session that continues without a registered approval does not execute the mutation.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore`, create / list / resolve / cancel pending approvals, with a `Changed` event for the bell + page and automatic expiry. Registered interface-first as a singleton. |
-| `ApprovalCoordinator.cs` | `IApprovalCoordinator` + `ApprovalCoordinator`, bridges a `Confirm` verdict into an approval: registers it in the store (resolver wired to the waiting session) and pushes a notification (in-app bell + Mattermost/Matrix if active). Used by [`Agent.razor`](../../../Components/Pages/Agent.razor) on `ConfirmationRequired`. |
+| `ApprovalCoordinator.cs` | `IApprovalCoordinator` + `ApprovalCoordinator`: registers the approval (resolver wired to the waiting session, arguments hash for the gateway) and pushes a notification (in-app bell + Mattermost/Matrix if active). Used by [`AgentView.razor`](../../../Components/Pages/AgentView.razor) and the chat widget on `ConfirmationRequired`. |
 
 ## Related
 
-- Model: [`../../../Models/Agent/Approval.cs`](../../../Models/Agent/Approval.cs)
+- Core approvals (store, gate): [`../../Approvals/`](../../Approvals/)
 - Session + confirmation flow: [`../AgentSession.cs`](../AgentSession.cs), [`../IAgentService.cs`](../IAgentService.cs)
-- Guardrail verdicts: [`../Guardrails/`](../Guardrails/)
+- Guardrail verdicts: [`../../Guardrails/`](../../Guardrails/)
 - Notifications: [`../../Notifications/`](../../Notifications/)

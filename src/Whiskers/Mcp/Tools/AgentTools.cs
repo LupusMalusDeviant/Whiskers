@@ -5,7 +5,7 @@ using ModelContextProtocol.Server;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mcp;
 
 namespace Whiskers.Mcp.Tools;

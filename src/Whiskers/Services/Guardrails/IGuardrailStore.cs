@@ -2,7 +2,7 @@ using System.Text.Json;
 using Whiskers.Configuration;
 using Whiskers.Models.Agent;
 
-namespace Whiskers.Services.Agent.Guardrails;
+namespace Whiskers.Services.Guardrails;
 
 /// <summary>Persists the guardrail policy in its OWN file (guardrails.json), separate from the
 /// agent settings path. Writing is admin-only — a compromised settings editor cannot

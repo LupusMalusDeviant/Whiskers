@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Whiskers.Services.Agent.Guardrails;
+namespace Whiskers.Services.Guardrails;
 
 /// <summary>Describes the built-in rule types for the UI, without the settings form having to
 /// hard-know every rule type. Extensible: new rules only add a descriptor here.</summary>

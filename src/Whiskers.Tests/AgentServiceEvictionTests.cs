@@ -4,7 +4,7 @@ using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
-using Whiskers.Services.Agent.Guardrails;
+using Whiskers.Services.Guardrails;
 using Whiskers.Services.Agent.Providers;
 
 namespace Whiskers.Tests;

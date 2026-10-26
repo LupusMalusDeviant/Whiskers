@@ -1,5 +1,5 @@
 using Whiskers.Models.Agent;
-using Whiskers.Services.Agent.Approvals;
+using Whiskers.Services.Approvals;
 
 namespace Whiskers.Tests;
 

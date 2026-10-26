@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Whiskers.Models;
 
-namespace Whiskers.Services.Agent.Guardrails;
+namespace Whiskers.Services.Guardrails;
 
 /// <summary>Shared helpers for the built-in rules. Rules are STATELESS and read the
 /// policy from request.Context.Policy — so they are unit-testable without setup and do not need

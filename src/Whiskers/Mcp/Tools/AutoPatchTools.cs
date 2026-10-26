@@ -7,6 +7,7 @@ using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.AutoPatch;
 using Whiskers.Services.Mcp;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -41,8 +42,8 @@ public class AutoPatchTools
         IAutoPatchService autoPatch)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "preview_auto_patch");
-        if (denied != null) return denied;
-        if (autoPatch.IsRunning) return "An auto-patch cycle is already running — read get_auto_patch_status.";
+        if (denied != null) return MutationScope.Fail(denied);
+        if (autoPatch.IsRunning) return MutationScope.Fail("An auto-patch cycle is already running — read get_auto_patch_status.");
 
         // Detached on purpose: a cycle pulls one image per candidate and outlives any tool call.
         _ = Task.Run(() => autoPatch.RunCycleAsync(forceDryRun: true));

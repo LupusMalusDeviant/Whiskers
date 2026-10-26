@@ -51,4 +51,4 @@ The schema is managed by **EF Core migrations**, one assembly per provider, appl
 
 - Data layer (context + entities + converter): [`../../../Whiskers.Data/`](../../../Whiskers.Data/)
 - Time-series writers/readers: [`../Metrics/`](../Metrics/)
-- JSON-backed stores: [`../ServerConfig/`](../ServerConfig/), [`../Agent/`](../Agent/), [`../Agent/Guardrails/`](../Agent/Guardrails/), [`../Vault/`](../Vault/)
+- JSON-backed stores: [`../ServerConfig/`](../ServerConfig/), [`../Agent/`](../Agent/), [`../Guardrails/`](../Guardrails/), [`../Vault/`](../Vault/)

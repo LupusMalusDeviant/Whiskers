@@ -55,7 +55,7 @@ public class MutationGatewayBootTests
             var sink = services.GetRequiredService<IMutationAuditSink>();
             var capability = services.GetRequiredService<ICapabilityCatalog>().Find("container.start")!;
             var startRequest = request with { CapabilityId = "container.start", OperationId = "op-boot-2" };
-            var auditId = await sink.BeginAsync("op-boot-2", startRequest, capability, CancellationToken.None);
+            var auditId = await sink.BeginAsync("op-boot-2", startRequest, capability, null, CancellationToken.None);
             await sink.CompleteAsync(auditId, "op-boot-2", MutationStatus.Executed, VerificationStatus.NotVerifiable,
                 null, TimeSpan.FromMilliseconds(12), CancellationToken.None);
 

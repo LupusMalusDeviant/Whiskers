@@ -26,6 +26,8 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`Cve/`](Cve/) | OS and container CVE scanning (Trivy) and findings storage |
 | [`AuditLog/`](AuditLog/) | Append-only audit trail of privileged actions |
 | [`Mutations/`](Mutations/) | The Mutation Gateway (ADR-0005): capability catalog, decide → execute → verify → audit pipeline, scope guard around mutating services |
+| [`Guardrails/`](Guardrails/) | The guardrail policy engine, its store and the direct-MCP guard (core since ADR-0005 step 2.1) |
+| [`Approvals/`](Approvals/) | Human-in-the-Loop approvals: store and the gate that binds an approval to exactly one call |
 
 ## Deployment & updates
 

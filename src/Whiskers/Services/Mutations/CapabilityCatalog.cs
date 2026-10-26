@@ -82,7 +82,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("network.disconnect", "disconnect_container_from_network", "network", Dis, Short);
 
         // Hosts
-        yield return Tool("host.exec", "execute_command", "host", Root, Normal);
+        // execute_command accepts up to 600 s of its own timeout; the deadline must not cut that short.
+        yield return Tool("host.exec", "execute_command", "host", Root, TimeSpan.FromMinutes(11));
         yield return Tool("firewall.rule_add", "add_firewall_rule", "host", Dis, Short);
         yield return Tool("firewall.rule_remove", "remove_firewall_rule", "host", Dis, Short);
         yield return Ui("firewall.set_status", A, "host", Dis, Short);

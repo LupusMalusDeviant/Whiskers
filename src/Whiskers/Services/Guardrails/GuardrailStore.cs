@@ -4,7 +4,7 @@ using Whiskers.Models.Agent;
 using Whiskers.Services;
 using Whiskers.Services.Persistence;
 
-namespace Whiskers.Services.Agent.Guardrails;
+namespace Whiskers.Services.Guardrails;
 
 /// <summary>Persists the guardrail presets in their OWN file (guardrails.json), separate from the
 /// agent settings path. Writing is admin-only — a compromised settings editor cannot relax the

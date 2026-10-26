@@ -6,6 +6,8 @@ using Whiskers.Services.Cloud;
 using Whiskers.Services.Mcp;
 using Microsoft.AspNetCore.Http;
 
+using Whiskers.Services.Mutations;
+
 namespace Whiskers.Mcp.Tools;
 
 /// <summary>
@@ -123,6 +125,7 @@ public class CloudTools
         var denied = McpPermissionCheck.CheckAccess(http, perm, toolName);
         if (denied != null) return denied;
         try { return await action(); }
-        catch (Exception ex) { return $"Fehler: {ex.Message}"; }
+        // Inside a cloud_shutdown / cloud_reboot call this marks the gateway's operation as failed.
+        catch (Exception ex) { return MutationScope.Fail($"Fehler: {ex.Message}"); }
     }
 }

@@ -1,4 +1,4 @@
-namespace Whiskers.Services.Agent.Guardrails;
+namespace Whiskers.Services.Guardrails;
 
 /// <summary>Aggregates all IGuardrailRule with "most-restrictive wins": a Deny beats everything,
 /// otherwise a Confirm wins, otherwise Allow. Fully LLM-independent and stateless —

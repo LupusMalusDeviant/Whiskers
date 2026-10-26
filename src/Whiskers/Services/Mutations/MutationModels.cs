@@ -37,23 +37,27 @@ public enum MutationPrincipalKind { Human, ApiKey, Agent, Automation, Webhook, S
 /// <param name="PermissionLevel">The principal's effective level (<c>read</c> / <c>write</c> / <c>admin</c>).</param>
 /// <param name="CredentialId">The MCP key id when a key authenticated the call.</param>
 /// <param name="OnBehalfOf">The principal an agent or automation acts for; its rights are the ceiling.</param>
+/// <param name="AllowedTools">The MCP key's tool list, if it has one; the policy treats it as a ceiling.</param>
 public sealed record MutationPrincipal(
     MutationPrincipalKind Kind,
     string Id,
     string DisplayName,
     string PermissionLevel,
     string? CredentialId = null,
-    MutationPrincipal? OnBehalfOf = null);
+    MutationPrincipal? OnBehalfOf = null,
+    IReadOnlyList<string>? AllowedTools = null);
 
 /// <summary>The entry point a mutation came in through.</summary>
 public enum MutationSurface { Mcp, Agent, Ui, Automation, Webhook, Terminal }
 
-/// <summary>The resolved target of a mutation (INV-57). Resolution itself moves into the gateway in WP2 step 2.1.</summary>
+/// <summary>The target of a mutation (INV-57). Entry points pass what the caller named; the gateway resolves it
+/// (<see cref="IMutationTargetResolver"/>) before policy runs and records the resolved form.</summary>
 public sealed record MutationTarget(string Kind, string Id, string? Name = null, string? ServerId = null);
 
 /// <summary>Everything the gateway needs to decide on and record one mutation.</summary>
 /// <param name="OperationId">Idempotency and correlation key (INV-39); the gateway generates one when null.</param>
-/// <param name="SessionId">Agent session or UI circuit the call belongs to, if any.</param>
+/// <param name="SessionId">Agent session or UI circuit the call belongs to, if any. Together with
+/// <paramref name="OperationId"/> it identifies an approval the caller raised for this operation itself.</param>
 public sealed record MutationRequest(
     string CapabilityId,
     MutationPrincipal Principal,
@@ -84,10 +88,14 @@ public sealed record MutationOutcome<T>(
     T? Value,
     string? Reason,
     VerificationStatus Verification,
-    Exception? Error = null)
+    Exception? Error = null,
+    string? ApprovalId = null)
 {
     public bool Succeeded => Status == MutationStatus.Executed;
+
+    /// <summary>The policy rules that produced a refusal or an approval request, if the policy step decided it.</summary>
+    public IReadOnlyList<string> MatchedRules { get; init; } = [];
 }
 
-/// <summary>Handed to the execution delegate: the decided request and its capability.</summary>
+/// <summary>Handed to the execution delegate: the decided request (with its resolved target) and its capability.</summary>
 public sealed record MutationContext(string OperationId, MutationRequest Request, Capability Capability);

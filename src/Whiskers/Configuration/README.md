@@ -30,4 +30,4 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 
 - Env-var reference: [`../../../.env.example`](../../../.env.example)
 - Agent settings store: [`../Services/Agent/AgentSettingsStore.cs`](../Services/Agent/AgentSettingsStore.cs)
-- Guardrail store: [`../Services/Agent/Guardrails/`](../Services/Agent/Guardrails/)
+- Guardrail store: [`../Services/Guardrails/`](../Services/Guardrails/)
