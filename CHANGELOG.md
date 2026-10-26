@@ -44,6 +44,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 ### Fixed
 - The installer no longer recommends `Auth__Disabled=true` for first sign-in. It prints the setup token and
   points to `VAULT_KEY`.
+- The README renders completely on catalogues that drop raw HTML and relative paths (LobeHub): the header is
+  Markdown, images and links are absolute, and the quick start shows the MCP client config for a self-hosted
+  instance (`http://localhost:5100/mcp` with a Bearer key).
 
 ## [0.15.0] — 2026-10-26
 
