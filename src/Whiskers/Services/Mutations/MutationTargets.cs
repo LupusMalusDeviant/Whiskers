@@ -26,7 +26,7 @@ public static class MutationTargets
         var name = capability.TargetKind switch
         {
             "host" => String(args, "projectName") ?? String(args, "appName") ?? String(args, "serviceName") ?? String(args, "siteName"),
-            "dns-zone" or "workload" => String(args, "name"),
+            "dns-zone" or "workload" or "git-deploy-app" => String(args, "name"),
             _ => null,
         };
         // A host or server named by nobody is the default server; the resolver decides which one that is (R1-06).
@@ -72,6 +72,7 @@ public static class MutationTargets
         "log-alert" => "name",
         "volume" => Has(args, "volumeName") ? "volumeName" : "name",
         "workload" => "workloadId",
+        "git-deploy-app" => "appId",
         "host" or "server" => "serverId",
         _ => null,
     };
@@ -139,6 +140,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             "scheduled-task" => Creates.Contains(capability.Id) ? Pass(target) : await TaskAsync(target),
             "dns-zone" => DnsZone(target),
             "workload" => await WorkloadAsync(target, ct),
+            "git-deploy-app" => await GitAppAsync(request, capability, target, ct),
             _ => Pass(target),
         };
     }
@@ -339,6 +341,56 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = pod.Id, Name = controller, ServerId = server.Id,
             Related = new[] { pod.Id, pod.Name }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
+        });
+    }
+
+    /// <summary>
+    /// A Git deployment app (R1-08): the stored app by its id, with its own name and server — never the ones the page
+    /// rendered. A call that names a <c>revision</c> must meet the stored one, so a decision is never made on inputs
+    /// that were edited meanwhile. Saving a new app resolves only the chosen server. A per-container decision inside a
+    /// Git deployment (the plan's containers, R1-07) resolves that container.
+    /// </summary>
+    private async Task<TargetResolution> GitAppAsync(MutationRequest request, Capability capability, MutationTarget target,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(target.Id))
+        {
+            if (MutationTargets.String(request.Arguments, "containerId") is { } containerArg)
+            {
+                var resolved = await ContainerAsync(request, capability,
+                    new MutationTarget("container", containerArg, null, target.ServerId), ct);
+                return resolved.Target is { } c
+                    ? Done(target with { Id = c.Id, Name = c.Name, ServerId = c.ServerId, Related = [c.Id, c.Name!] })
+                    : resolved;
+            }
+            if (capability.Id != "gitdeploy.save")
+                return Refuse("The Git deployment app is required.");
+            var (newServer, newError) = ResolveServer(target.ServerId);
+            return newServer is null ? Refuse(newError!, target.ServerId) : Pass(target with { ServerId = newServer.Id });
+        }
+
+        var apps = _services.GetService<Whiskers.Services.GitDeploy.IGitDeployService>();
+        if (apps is null)
+            return Refuse("Git deployments are not available.");
+        var app = await apps.GetAppAsync(target.Id);
+        if (app is null)
+            return Refuse($"Git deployment app not found: {target.Id}", target.Id);
+        if (request.Arguments.TryGetValue("revision", out var revision)
+            && (revision.ValueKind != System.Text.Json.JsonValueKind.Number || revision.GetInt32() != app.Revision))
+            return Refuse($"'{app.Name}' was changed after it was loaded; reload and try again.");
+
+        // Saving may move the app to another server: decide on the server it will deploy to. Everything else acts
+        // on the stored app, and a caller naming another server than the app's is refused.
+        var serverId = capability.Id == "gitdeploy.save" ? target.ServerId ?? app.ServerId : app.ServerId;
+        var (server, error) = ResolveServer(serverId);
+        if (server is null) return Refuse(error!, serverId);
+        if (capability.Id != "gitdeploy.save" && !string.IsNullOrWhiteSpace(target.ServerId)
+            && ResolveServer(target.ServerId).Server?.Id != server.Id)
+            return Refuse($"'{app.Name}' deploys to '{server.Id}', not to '{target.ServerId}'.");
+        return Done(target with
+        {
+            Id = app.Id, Name = capability.Id == "gitdeploy.save" ? target.Name ?? app.Name : app.Name,
+            ServerId = server.Id, Related = [app.Name, app.RepoUrl],
         });
     }
 

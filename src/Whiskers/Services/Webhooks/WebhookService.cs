@@ -173,11 +173,18 @@ public class WebhookService : IWebhookService
         return (true, $"Container {container.Name} rebuilt (new ID: {newId[..12]}).");
     }
 
+    /// <summary>
+    /// A Git deployment fired by a webhook (R1-08) runs on the app owner's authority, re-checked now: the deployment
+    /// and every container of its plan are decided as the owner through the automation runner — an app without an
+    /// owner, or whose owner lost the authority, is refused before anything is fetched. It runs the stored snapshot
+    /// the decision was made on.
+    /// </summary>
     private async Task<(bool, string)> GitDeploy(WebhookEntity webhook)
     {
         using var scope = _scopeFactory.CreateScope();
         var gitDeploy = scope.ServiceProvider.GetRequiredService<Whiskers.Services.GitDeploy.IGitDeployService>();
-        return await gitDeploy.DeployAsync(webhook.TargetId);
+        var automation = scope.ServiceProvider.GetService<IAutomationMutationRunner>();
+        return await Whiskers.Services.GitDeploy.GitDeployOwners.DeployAsOwnerAsync(gitDeploy, automation, webhook.TargetId);
     }
 
     private async Task<(bool, string)> DeployCompose(WebhookEntity webhook)

@@ -50,6 +50,37 @@ public static class ComposeImpact
             return true;
         });
 
+    /// <summary>
+    /// A <see cref="ComposePlanGate"/> for a deployment without a person at the keyboard (R1-08): each container of
+    /// the plan is decided under <paramref name="capabilityId"/> on the authority of <paramref name="actor"/>'s owner
+    /// (nested), then the deployment runs. A refusal stops it with <see cref="MutationRefusedException"/>.
+    /// </summary>
+    public static ComposePlanGate GateFor(this IAutomationMutationRunner runner, AutomationActor actor, string capabilityId)
+    {
+        ArgumentNullException.ThrowIfNull(runner);
+        ArgumentNullException.ThrowIfNull(actor);
+        return (plan, proceed) => NextAutomated(runner, actor, capabilityId, plan, proceed, 0);
+    }
+
+    private static async Task NextAutomated(IAutomationMutationRunner runner, AutomationActor actor, string capabilityId,
+        ComposePlan plan, Func<Task> proceed, int index)
+    {
+        if (index >= plan.Containers.Count)
+        {
+            await proceed();
+            return;
+        }
+        var container = plan.Containers[index];
+        var outcome = await runner.RunAsync(actor, capabilityId,
+            new { containerId = container.Id, name = container.Name, serverId = plan.ServerId },
+            _ => NextAutomated(runner, actor, capabilityId, plan, proceed, index + 1));
+        if (outcome.Error is { } error)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+        if (outcome.Status != MutationStatus.Executed)
+            throw new MutationRefusedException(outcome.Reason ?? $"'{container.Name}' was not allowed.", outcome.Status,
+                outcome.OperationId);
+    }
+
     private static Task<T> Next<T>(IUiMutationRunner runner, string capabilityId, IReadOnlyList<ContainerInfo> containers,
         string serverId, Func<Task<T>> action, int index) =>
         index >= containers.Count

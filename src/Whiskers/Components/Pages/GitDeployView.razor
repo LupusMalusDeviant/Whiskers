@@ -6,6 +6,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
+@inject IAutomationOwnerResolver OwnerResolver
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
 
@@ -43,6 +44,7 @@ else
             <MudTh>@L["GitDeployView_Table_Repository"]</MudTh>
             <MudTh>@L["GitDeployView_Table_Branch"]</MudTh>
             <MudTh>@L["GitDeployView_Table_Server"]</MudTh>
+            <MudTh>@L["GitDeployView_Table_Owner"]</MudTh>
             <MudTh>@L["GitDeployView_Table_LastDeploy"]</MudTh>
             <MudTh>@L["GitDeployView_Table_Actions"]</MudTh>
         </HeaderContent>
@@ -59,6 +61,27 @@ else
             </MudTd>
             <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Branch</MudChip></MudTd>
             <MudTd>@(ServerConfigService.GetServer(context.ServerId)?.Name ?? context.ServerId)</MudTd>
+            <MudTd>
+                @* Whose authority a webhook deploy runs on (R1-08): an app without one, or whose owner lost it, needs an admin. *@
+                @if (string.IsNullOrWhiteSpace(context.Owner))
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">@L["GitDeployView_Chip_NoOwner"]</MudChip>
+                }
+                else
+                {
+                    var owner = OwnerResolver.Describe(context.Owner);
+                    <MudText Typo="Typo.body2">@owner.Name</MudText>
+                    @if (owner.State != OwnerState.Active)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.State}"]</MudText>
+                    }
+                }
+                @if (_role >= AppRole.Admin && context.Owner != _me)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.PersonAddAlt" Size="Size.Small"
+                                   OnClick="@(() => AdoptApp(context))" title="@L["GitDeployView_Tooltip_Adopt"]" />
+                }
+            </MudTd>
             <MudTd>
                 @if (context.LastDeployedAt is { } t)
                 {
@@ -150,6 +173,7 @@ else
     private List<Whiskers.Models.GitDeployApp> _apps = new();
     private List<Whiskers.Models.ServerConfig> _servers = new();
     private AppRole _role = AppRole.Viewer;
+    private string? _me;
 
     private bool _showDialog;
     private Whiskers.Models.GitDeployApp? _editing;
@@ -174,6 +198,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _me = await CurrentUser.GetEmailAsync() is { Length: > 0 } email ? PrincipalIds.User(email) : null;
         _servers = ServerConfigService.GetEnabledServers()
             .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes) // compose = Docker hosts only
             .ToList();
@@ -183,15 +208,10 @@ else
     private void ShowEditDialog(Whiskers.Models.GitDeployApp? app)
     {
         _editing = app;
+        // A copy, including the revision it was loaded at: a save over a newer revision is refused (R1-08).
         _form = app is null
             ? new Whiskers.Models.GitDeployApp { ServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local" }
-            : new Whiskers.Models.GitDeployApp
-            {
-                Id = app.Id, Name = app.Name, RepoUrl = app.RepoUrl, Branch = app.Branch,
-                ComposePath = app.ComposePath, ServerId = app.ServerId, HasToken = app.HasToken,
-                CreatedAt = app.CreatedAt, LastDeployedAt = app.LastDeployedAt,
-                LastDeployedSha = app.LastDeployedSha, LastDeploySucceeded = app.LastDeploySucceeded,
-            };
+            : app.Clone();
         _formToken = "";
         _showDialog = true;
     }
@@ -204,10 +224,12 @@ else
             // Empty field = keep the existing token (null); a value = set it.
             var token = string.IsNullOrWhiteSpace(_formToken) ? null : _formToken;
             var form = _form;
-            var appId = string.IsNullOrWhiteSpace(form.Id) ? null : form.Id;
+            var appId = _editing is null ? null : form.Id;
+            // Whoever saves the inputs owns the app: a webhook deploys them on that person's authority (R1-08).
+            var owner = _me ?? throw new InvalidOperationException("No signed-in user.");
             await Mutations.RunAsync("gitdeploy.save",
-                new { appId, name = form.Name, serverId = form.ServerId, branch = form.Branch },
-                _ => GitDeploy.SaveAppAsync(form, token));
+                new { appId, name = form.Name, serverId = form.ServerId, branch = form.Branch, revision = form.Revision },
+                _ => GitDeploy.SaveAppAsync(form, token, owner));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 _editing == null ? "gitdeploy.create" : "gitdeploy.update", "git-deploy", _form.Id, _form.Name, serverId: _form.ServerId);
             Snackbar.Add(L["GitDeployView_Snackbar_Saved", _form.Name].Value, Severity.Success);
@@ -217,6 +239,11 @@ else
         catch (MutationRefusedException ex)
         {
             Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Whiskers.Services.GitDeploy.GitDeployConflictException)
+        {
+            Snackbar.Add(L["GitDeployView_Snackbar_Conflict", _form.Name].Value, Severity.Warning);
+            _apps = await GitDeploy.GetAppsAsync();
         }
         catch (Exception ex) { Snackbar.Add(L["GitDeployView_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
@@ -232,7 +259,7 @@ else
         try
         {
             await Mutations.RunAsync("gitdeploy.delete",
-                new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch },
+                new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision },
                 _ => GitDeploy.DeleteAppAsync(app.Id));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "gitdeploy.delete", "git-deploy", app.Id, app.Name, serverId: app.ServerId);
@@ -260,10 +287,13 @@ else
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
+            // The decision and the deployment use the same snapshot of the app (R1-08): an edit in between is refused.
+            var snapshot = app.Clone();
             var (success, output) = await Mutations.RunAsync("gitdeploy.deploy",
-                new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch },
+                new { appId = snapshot.Id, name = snapshot.Name, serverId = snapshot.ServerId, branch = snapshot.Branch,
+                      revision = snapshot.Revision },
                 // Each existing container of the deployment's plan is decided too, before the first build (R1-07).
-                _ => GitDeploy.DeployAsync(app.Id, progress, gate: Mutations.GateFor("gitdeploy.deploy")));
+                _ => GitDeploy.DeployAsync(snapshot, Mutations.GateFor("gitdeploy.deploy"), progress));
             await AuditLog.LogAsync(actor, "web", "gitdeploy.deploy", "git-deploy", app.Id, app.Name,
                 details: output, serverId: app.ServerId, success: success);
         }
@@ -284,5 +314,37 @@ else
             _apps = await GitDeploy.GetAppsAsync();
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    // Taking an app over (R1-08): the admin's authority replaces the owner's for webhook deploys, only if nobody
+    // changed the owner meanwhile.
+    private async Task AdoptApp(Whiskers.Models.GitDeployApp app)
+    {
+        if (!Require(AppRole.Admin) || _me is null) return;
+        try
+        {
+            var me = _me;
+            var previous = app.Owner;
+            var adopted = await Mutations.RunAsync("gitdeploy.save",
+                new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch,
+                      revision = app.Revision, owner = me },
+                _ => GitDeploy.SetOwnerAsync(app.Id, me, previous));
+            if (!adopted)
+            {
+                Snackbar.Add(L["GitDeployView_Snackbar_Conflict", app.Name].Value, Severity.Warning);
+            }
+            else
+            {
+                await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "gitdeploy.adopt",
+                    "git-deploy", app.Id, app.Name, details: $"previous={previous ?? "none"}; new={me}", serverId: app.ServerId);
+                Snackbar.Add(L["GitDeployView_Snackbar_Adopted", app.Name].Value, Severity.Success);
+            }
+            _apps = await GitDeploy.GetAppsAsync();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex) { Snackbar.Add(L["GitDeployView_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 }

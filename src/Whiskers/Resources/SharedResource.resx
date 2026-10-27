@@ -4844,4 +4844,19 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Mutation_Refused_TargetNotResolved" xml:space="preserve">
     <value>The target could not be resolved: {0}</value>
   </data>
+  <data name="GitDeployView_Table_Owner" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="GitDeployView_Chip_NoOwner" xml:space="preserve">
+    <value>No owner</value>
+  </data>
+  <data name="GitDeployView_Tooltip_Adopt" xml:space="preserve">
+    <value>Take over: webhook deploys then run on your authority</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Conflict" xml:space="preserve">
+    <value>'{0}' was changed meanwhile. The list is reloaded; try again.</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Adopted" xml:space="preserve">
+    <value>You now own '{0}'.</value>
+  </data>
 </root>

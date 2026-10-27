@@ -325,7 +325,14 @@ else
                     _ => Mutations.RunForEachAsync("compose.deploy", plan.Containers, serverId, Fire));
             }
             case "git-deploy":
-                return await Mutations.RunAsync("gitdeploy.deploy", new { appId = wh.TargetId, serverId }, _ => Fire());
+            {
+                // Decided as the clicking person on the stored app (its own server and revision); the trigger then
+                // deploys it on the app owner's authority, deciding every planned container as that owner (R1-08).
+                var app = await GitDeploy.GetAppAsync(wh.TargetId);
+                if (app is null) return (false, "Git deploy app not found.");
+                return await Mutations.RunAsync("gitdeploy.deploy",
+                    new { appId = app.Id, name = app.Name, serverId = app.ServerId, revision = app.Revision }, _ => Fire());
+            }
             default:
                 return await Fire();
         }

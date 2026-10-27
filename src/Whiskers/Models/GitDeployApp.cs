@@ -19,6 +19,19 @@ public class GitDeployApp
     public DateTime? LastDeployedAt { get; set; }
     public string? LastDeployedSha { get; set; }
     public bool? LastDeploySucceeded { get; set; }
+
+    /// <summary>Whose authority a deployment without a person at the keyboard (a webhook) runs on (R1-08): a principal
+    /// id (<c>user:&lt;email&gt;</c> / <c>key:&lt;id&gt;</c>), re-checked on every run. Set by whoever saves the app, or by an
+    /// admin taking it over. <c>null</c> for an app saved before owners were recorded: it cannot be deployed by a
+    /// webhook until an admin takes it over.</summary>
+    public string? Owner { get; set; }
+
+    /// <summary>Counts the saves of the app's inputs (R1-08). A deployment runs on the revision it was decided on; an
+    /// edit in between bumps it and the deployment is refused instead of running with other inputs.</summary>
+    public int Revision { get; set; }
+
+    /// <summary>An independent copy: the service never hands out the instance it stores.</summary>
+    public GitDeployApp Clone() => (GitDeployApp)MemberwiseClone();
 }
 
 public class GitDeployData

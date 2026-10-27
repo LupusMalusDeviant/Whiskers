@@ -12,9 +12,10 @@ public sealed class NoopGitDeployService : IGitDeployService
 
     public Task<List<GitDeployApp>> GetAppsAsync() => Task.FromResult(new List<GitDeployApp>());
     public Task<GitDeployApp?> GetAppAsync(string appId) => Task.FromResult<GitDeployApp?>(null);
-    public Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token) => throw new InvalidOperationException(Disabled);
+    public Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId) => throw new InvalidOperationException(Disabled);
+    public Task<bool> SetOwnerAsync(string appId, string ownerId, string? expectedOwnerId) => throw new InvalidOperationException(Disabled);
     public Task DeleteAppAsync(string appId) => Task.CompletedTask;
-    public Task<(bool Success, string Output)> DeployAsync(string appId, IProgress<string>? progress = null,
-        CancellationToken ct = default, Whiskers.Services.Mutations.ComposePlanGate? gate = null)
+    public Task<(bool Success, string Output)> DeployAsync(GitDeployApp app, Whiskers.Services.Mutations.ComposePlanGate gate,
+        IProgress<string>? progress = null, CancellationToken ct = default)
         => Task.FromResult((false, "Git deployments are disabled."));
 }
