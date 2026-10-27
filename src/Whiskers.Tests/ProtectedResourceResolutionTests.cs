@@ -343,12 +343,12 @@ public sealed class ProtectedResourceResolutionTests
             var app = await git.SaveAppAsync(new GitDeployApp
             {
                 Id = "0123456789ab", Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
-            }, token: null);
+            }, token: null, ownerId: "user:admin@example.com");
             _host.Files[$"/opt/whiskers-git/{app.Id}/repo/docker-compose.yml"] =
                 "name: payments\nservices:\n  web:\n    image: nginx\n";
             ComposePlan? gated = null;
 
-            await Assert.ThrowsAsync<MutationRefusedException>(() => git.DeployAsync(app.Id, gate: (plan, _) =>
+            await Assert.ThrowsAsync<MutationRefusedException>(() => git.DeployAsync(app, (plan, _) =>
             {
                 gated = plan;
                 throw new MutationRefusedException("refused", MutationStatus.Denied, "op");
@@ -425,32 +425,10 @@ public sealed class ProtectedResourceResolutionTests
             var runner = UiRunner(GuardrailPolicy.SafeDefault());
 
             var (success, _) = await runner.RunAsync("gitdeploy.deploy", new { appId = app.Id, serverId = "local" },
-                _ => git.DeployAsync(app.Id, gate: runner.GateFor("gitdeploy.deploy")));
+                _ => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy")));
 
             Assert.True(success);
             Assert.Contains(_host.Executed, c => c.Contains("-p 'payments'") && c.EndsWith("up -d --remove-orphans"));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task A_git_deployment_inside_a_decision_without_a_gate_refuses_undecided_containers()
-    {
-        // The webhook Test button: decided on the app only, then fired without a per-container gate.
-        var (git, app, root) = await GitAppAsync();
-        try
-        {
-            var runner = UiRunner(GuardrailPolicy.SafeDefault());
-
-            var (success, output) = await runner.RunAsync("gitdeploy.deploy", new { appId = app.Id, serverId = "local" },
-                _ => git.DeployAsync(app.Id));
-
-            Assert.False(success);
-            Assert.Contains("not decided", output);
-            Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
         }
         finally
         {
@@ -467,7 +445,7 @@ public sealed class ProtectedResourceResolutionTests
         var app = await git.SaveAppAsync(new GitDeployApp
         {
             Id = "0123456789ab", Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
-        }, token: null);
+        }, token: null, ownerId: "user:admin@example.com");
         _host.Files[$"/opt/whiskers-git/{app.Id}/repo/docker-compose.yml"] =
             "name: payments\nservices:\n  web:\n    image: nginx\n";
         return (git, app, root);
@@ -494,7 +472,7 @@ public sealed class ProtectedResourceResolutionTests
             Func<string?, string> newEnv, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    private sealed class NoVault : Whiskers.Services.Vault.IVaultService
+    internal sealed class NoVault : Whiskers.Services.Vault.IVaultService
     {
         public bool IsEnabled => false;
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -561,7 +539,7 @@ public sealed class ProtectedResourceResolutionTests
             .ToDictionary(p => p.Name, p => p.Value.Clone(), StringComparer.Ordinal);
 
     /// <summary>A host with a file system in memory: answers the planner's reads and records every other command.</summary>
-    private sealed class FakeHost : IHostCommandExecutor
+    internal sealed class FakeHost : IHostCommandExecutor
     {
         public Dictionary<string, string> Files { get; } = new(StringComparer.Ordinal);
         public HashSet<string> Failing { get; } = new(StringComparer.Ordinal);

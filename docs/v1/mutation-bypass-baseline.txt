@@ -19,7 +19,6 @@ Whiskers.Services.Observability.LoopSuspensionService -> checks.resume
 Whiskers.Services.Onboarding.OnboardingService -> certificate.issue_mtls
 Whiskers.Services.Webhooks.WebhookService -> container.restart
 Whiskers.Services.Webhooks.WebhookService -> container.update
-Whiskers.Services.Webhooks.WebhookService -> gitdeploy.deploy
 Whiskers.Services.Workloads.DockerWorkloadProvider -> container.restart
 Whiskers.Services.Workloads.DockerWorkloadProvider -> container.start
 Whiskers.Services.Workloads.DockerWorkloadProvider -> container.stop
