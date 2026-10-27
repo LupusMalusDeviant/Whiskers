@@ -17,7 +17,8 @@ public interface IEffectiveRequirementResolver
 /// <summary>
 /// Scheduler tasks carry the level of what they run: a CustomCommand is <c>host.exec</c>, retention deletes old dumps
 /// (<c>db.backup_delete</c>, <c>volume.backup_delete</c>), a self-backup creates and prunes recovery points
-/// (<c>selfbackup.create</c>, <c>selfbackup.prune</c>). Unknown task types and unreadable arguments fall back to Admin.
+/// (<c>selfbackup.create</c>, <c>selfbackup.prune</c>). Retention is read with <see cref="TaskExecutor.RetentionOf"/>, the
+/// rule the executor and the Scheduled tasks page use. Unknown task types fall back to Admin.
 /// </summary>
 public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
 {
@@ -51,7 +52,7 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
                 var scheduler = _services.GetService<ISchedulerService>()
                     ?? throw new InvalidOperationException("The scheduler is not available.");
                 var task = (await scheduler.GetTasksAsync()).FirstOrDefault(x => x.TaskId == id.GetString());
-                return task is null ? capability.RequiredLevel : LevelFor(task.TaskType, HasRetention(task.Config));
+                return task is null ? capability.RequiredLevel : LevelFor(task.TaskType, TaskExecutor.RetentionOf(task) > 0);
 
             default:
                 return capability.RequiredLevel;
@@ -76,20 +77,4 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
 
     private string LevelOf(string capabilityId) =>
         _catalog.Find(capabilityId)?.RequiredLevel ?? McpPermissionLevels.Admin;
-
-    private static bool HasRetention(string? config)
-    {
-        if (string.IsNullOrWhiteSpace(config)) return false;
-        try
-        {
-            using var doc = JsonDocument.Parse(config);
-            return doc.RootElement.TryGetProperty("maxBackups", out var m)
-                && (m.ValueKind != JsonValueKind.Number || !m.TryGetInt32(out var n) || n > 0);
-        }
-        catch (JsonException)
-        {
-            // An unreadable config may hold a retention setting: assume it does.
-            return true;
-        }
-    }
 }

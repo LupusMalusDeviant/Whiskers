@@ -59,4 +59,11 @@ public class CapabilityTableConsistencyTests
     [Fact]
     public void Every_mcp_tool_of_a_capability_is_a_known_tool() =>
         Assert.All(CapabilityCatalog.McpToolLevels.Keys, t => Assert.True(McpPermissionLevels.DefaultToolLevels.ContainsKey(t), t));
+
+    /// <summary>Only reads bypass the gateway: the guardrail filter sends every tool with a capability to the gateway
+    /// and only the rest to <c>DirectMcpCallGuard</c>, so a non-read tool without a capability would skip the table.</summary>
+    [Fact]
+    public void Every_non_read_mcp_tool_has_a_capability() =>
+        Assert.All(McpPermissionLevels.DefaultToolLevels.Where(kv => kv.Value != McpPermissionLevels.Read),
+            kv => Assert.NotNull(Catalog.FindByMcpTool(kv.Key)));
 }

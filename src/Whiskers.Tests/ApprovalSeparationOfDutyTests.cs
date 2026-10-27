@@ -43,13 +43,14 @@ public class ApprovalSeparationOfDutyTests
         Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "DbBackup", maxBackups = 0 }));
         Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "SelfBackup" }));
         Assert.Equal(McpPermissionLevels.Admin,
-            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.DbBackup, Config = "{\"maxBackups\":7}" }));
+            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.DbBackup, Config = "{\"maxBackups\":\"7\"}" }));
         Assert.Equal(McpPermissionLevels.Write,
-            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.DbBackup, Config = "{\"maxBackups\":0}" }));
+            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.DbBackup, Config = "{\"maxBackups\":\"0\"}" }));
         Assert.Equal(McpPermissionLevels.Admin, await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.SelfBackup }));
-        // An unreadable config may hold retention: fail closed.
+        // Retention is read the way the executor reads it: the MCP tool and the page store maxBackups as a string.
         Assert.Equal(McpPermissionLevels.Admin,
-            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.VolumeBackup, Config = "{not json" }));
+            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.VolumeBackup, Config = "{\"maxBackups\":\"3\"}" }));
+        Assert.Equal(McpPermissionLevels.Write, await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.VolumeBackup }));
     }
 
     [Fact]

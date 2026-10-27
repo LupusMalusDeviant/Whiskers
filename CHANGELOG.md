@@ -22,12 +22,14 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     Hetzner `hetzner_disable_rescue`, `hetzner_enable_backups`, `hetzner_disable_backups`,
     `hetzner_change_server_type`, `hetzner_delete_snapshot` — Write → Admin (Cloud page requires Admin;
     `hetzner_enable_rescue` was already Admin).
-  - `gitdeploy.deploy` (UI) — Write → Admin: it is root-equivalent.
+  - `gitdeploy.deploy` (UI) — Write → Admin: it is root-equivalent. The Git deploy page now shows the deploy button
+    to Admins only (it was shown to Operators).
   - `create_scheduled_task` / `run_scheduled_task` stay Write, but the requirement — and therefore the approver's
     level — is now resolved per task before the caller check and the approval: CustomCommand (`host.exec`),
     SelfBackup (`selfbackup.create`/`selfbackup.prune`) and DB/volume backups with retention (`maxBackups` > 0,
     the default 7; `db.backup_delete`/`volume.backup_delete`) require Admin. Pass `maxBackups=0` to keep a backup
-    task at Write. An unreadable task config counts as having retention.
+    task at Write. Retention is read with the executor's own rule (`TaskExecutor.RetentionOf`), the one the
+    Scheduled tasks page already uses for "Run now".
 - **Deploying from the UI now requires Admin** (was Operator): the deploy form, the compose editor and the app store.
   A compose file can mount `/` or run privileged, which is root on the host. The MCP deploy tools already
   required Admin.
