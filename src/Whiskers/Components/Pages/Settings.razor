@@ -68,6 +68,11 @@ else
         <SelfBackupPanel />
     </MudExpansionPanel>
 
+    @* PC-D6: owners of AutoPatch and AutoUpdate. CORE — the gateway re-checks them on every run. *@
+    <MudExpansionPanel Text="@L["Settings_Panel_Automation"]" Icon="@Icons.Material.Filled.ManageAccounts">
+        <AutomationOwnersPanel />
+    </MudExpansionPanel>
+
     @* F8: UI-managed registries (credentials in the vault, used for authenticated pulls). CORE. *@
     <MudExpansionPanel Text="Registries" Icon="@Icons.Material.Filled.Widgets">
         <RegistriesPanel />

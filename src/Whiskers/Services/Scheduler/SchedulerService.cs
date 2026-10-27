@@ -225,6 +225,18 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         await db.SaveChangesAsync();
     }
 
+    public async Task<bool> SetOwnerAsync(string taskId, string ownerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var existing = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
+        if (existing == null) return false;
+        existing.CreatedBy = ownerId;
+        await db.SaveChangesAsync();
+        return true;
+    }
+
     public async Task DeleteTaskAsync(string taskId)
     {
         using var scope = _scopeFactory.CreateScope();

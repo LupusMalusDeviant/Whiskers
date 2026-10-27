@@ -89,6 +89,8 @@ public sealed class DataPathOptions
     public string CveFindingsJson => P("cve-findings.json");
     public string CertificateAlertsJson => P("certificate-alerts.json");
     public string AiTriggersJson => P("ai-triggers.json");
+    /// <summary>Owners an admin confirmed for AutoPatch and AutoUpdate (PC-D6).</summary>
+    public string AutomationOwnersJson => P("automation-owners.json");
 
     // --- Directories ---
     public string SshKeysDir => P("ssh-keys");

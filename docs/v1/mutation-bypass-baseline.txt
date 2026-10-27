@@ -3,8 +3,6 @@
 Whiskers.Mcp.Tools.AutoPatchTools -> autopatch.run
 Whiskers.Mcp.Tools.ContainerTools -> container.create
 Whiskers.Mcp.Tools.ContainerTools -> image.pull
-Whiskers.Services.AutoPatch.AutoPatchService -> autopatch.run
-Whiskers.Services.AutoUpdate.AutoUpdateService -> container.update
 Whiskers.Services.Cloud.Providers.HetznerCloudProvider -> cloud.hard_reset
 Whiskers.Services.Cloud.Providers.HetznerCloudProvider -> cloud.power_on
 Whiskers.Services.Cloud.Providers.HetznerCloudProvider -> cloud.reboot
@@ -19,10 +17,6 @@ Whiskers.Services.Cloud.Providers.HetznerCloudProvider -> hetzner.snapshot_delet
 Whiskers.Services.ImageUpdate.UpdateRiskService -> image.pull
 Whiskers.Services.Observability.LoopSuspensionService -> checks.resume
 Whiskers.Services.Onboarding.OnboardingService -> certificate.issue_mtls
-Whiskers.Services.Scheduler.TaskExecutor -> container.restart
-Whiskers.Services.Scheduler.TaskExecutor -> db.backup
-Whiskers.Services.Scheduler.TaskExecutor -> volume.backup
-Whiskers.Services.Scheduler.TaskExecutor -> volume.backup_delete
 Whiskers.Services.Webhooks.WebhookService -> container.restart
 Whiskers.Services.Webhooks.WebhookService -> container.update
 Whiskers.Services.Webhooks.WebhookService -> gitdeploy.deploy

@@ -2,7 +2,7 @@
 
 The routable Blazor pages. Each `.razor` here is a screen in the app; some have a co-located dialog component. Pages depend on the [`Services/`](../../Services/) interfaces and are protected by role/auth where appropriate.
 
-**Mutations go through the gateway.** A page never calls a mutating service method (one with `[MutatingOperation]`) directly; it wraps the call in `IUiMutationRunner.RunAsync("<capability>", new { … }, _ => Service.Call(…))` and catches `MutationRefusedException` to show the reason (ADR-0005 step 2.2, see [`Services/Mutations`](../../Services/Mutations/)). The page keeps its own role check; `MutationBypassArchitectureTests` fails on a new direct call. Container shells and the database query need Admin (PC-D2, PC-D3).
+**Mutations go through the gateway.** A page never calls a mutating service method (one with `[MutatingOperation]`) directly; it wraps the call in `IUiMutationRunner.RunAsync("<capability>", new { … }, _ => Service.Call(…))` and catches `MutationRefusedException` to show the reason (ADR-0005 step 2.2, see [`Services/Mutations`](../../Services/Mutations/)). The page keeps its own role check; `MutationBypassArchitectureTests` fails on a new direct call. Container shells and the database query need Admin (PC-D2, PC-D3). Scheduled Tasks records the creator as the task's owner and lets an Admin take over tasks without one (PC-D6).
 
 ## Overview & containers
 

@@ -91,6 +91,15 @@ public class MutationScopeGuardTests
         Assert.Null(MutationScope.Current);
     }
 
+        /// <summary>What the automation runner needs to resolve owners: roles, whitelist, data paths.</summary>
+    private static void AddOwnerDependencies(IServiceCollection services)
+    {
+        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        services.AddSingleton(new Whiskers.Configuration.DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-di-" + Guid.NewGuid().ToString("N"))));
+        services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
+        services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, Whiskers.Services.Auth.WhitelistService>();
+    }
+
     [Fact]
     public void The_di_guard_wraps_marked_services_keeps_singletons_single_and_disposes_owned_instances()
     {
@@ -101,6 +110,7 @@ public class MutationScopeGuardTests
         services.AddSingleton<IReadOnlyProbe, PlainProbe>();
         services.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, Whiskers.Services.Mcp.McpPermissionService>();
         services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, NoUser>();   // the UI runner reads it
+        AddOwnerDependencies(services);
         services.AddMutationGateway();
         services.AddMutationScopeGuard();
 
@@ -120,6 +130,7 @@ public class MutationScopeGuardTests
         typed.AddSingleton<IProbeService, ProbeService>();
         typed.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, Whiskers.Services.Mcp.McpPermissionService>();
         typed.AddScoped<Whiskers.Services.Auth.ICurrentUserService, NoUser>();
+        AddOwnerDependencies(typed);
         typed.AddMutationGateway();
         typed.AddMutationScopeGuard();
         IProbeService resolved;

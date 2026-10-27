@@ -266,7 +266,7 @@ public class UiMutationRunnerTests
         var docker = new FakeDocker(
             new ContainerInfo { Id = "a1", Name = "production-db", State = "exited", ServerId = "local" },
             new ContainerInfo { Id = "b2", Name = "web", State = "running", ServerId = "local" });
-        var executor = new Whiskers.Services.Scheduler.TaskExecutor(docker, null!, null!, null!, null!,
+        var executor = new Whiskers.Services.Scheduler.TaskExecutor(docker, null!, null!, null!, null!, null!,
             NullLogger<Whiskers.Services.Scheduler.TaskExecutor>.Instance,
             guardrails: new AgentToolTestHelpers.FixedGuardrailStore(policy));
 

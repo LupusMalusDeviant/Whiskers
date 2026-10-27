@@ -4,6 +4,7 @@ using Whiskers.Models;
 using Whiskers.Services.Cve;
 using Whiskers.Services.Docker;
 using Whiskers.Services.ImageUpdate;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Notifications;
 using Whiskers.Services.Persistence;
 
@@ -15,7 +16,10 @@ namespace Whiskers.Services.AutoPatch;
 /// by <see cref="AutoPatchPlanner"/>; how a single container is patched, guarded and rolled back by the host
 /// script behind <see cref="IAutoPatchRunner"/>.
 ///
-/// <para>Off unless switched on, and a dry run until switched over — see <see cref="AutoPatchSettings"/>.</para>
+/// <para>Off unless switched on, and a dry run until switched over — see <see cref="AutoPatchSettings"/>. Switching
+/// it on in the configuration is not enough: an admin also has to take AutoPatch over in Settings
+/// (<see cref="IAutomationOwnerStore"/>). Every nightly cycle then runs through the Mutation Gateway on that admin's
+/// authority, re-checked per cycle (PC-D6).</para>
 /// </summary>
 public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 {
@@ -30,6 +34,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<AutoPatchService> _logger;
     private readonly Func<DateTime> _utcNow;
+    private readonly IAutomationMutationRunner _automation;
+    private readonly IAutomationOwnerStore _owners;
 
     private int _running;
     private DateOnly? _lastNightlyRun;
@@ -42,8 +48,11 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         IAutoPatchRunner runner,
         INotificationService notifications,
         IServiceScopeFactory scopeFactory,
+        IAutomationMutationRunner automation,
+        IAutomationOwnerStore owners,
         ILogger<AutoPatchService> logger)
-        : this(settings, docker, cves, updates, runner, notifications, scopeFactory, logger, () => DateTime.UtcNow) { }
+        : this(settings, docker, cves, updates, runner, notifications, scopeFactory, automation, owners, logger,
+            () => DateTime.UtcNow) { }
 
     internal AutoPatchService(
         IOptionsMonitor<AutoPatchSettings> settings,
@@ -53,9 +62,13 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         IAutoPatchRunner runner,
         INotificationService notifications,
         IServiceScopeFactory scopeFactory,
+        IAutomationMutationRunner automation,
+        IAutomationOwnerStore owners,
         ILogger<AutoPatchService> logger,
         Func<DateTime> utcNow)
     {
+        _automation = automation;
+        _owners = owners;
         _settings = settings;
         _docker = docker;
         _cves = cves;
@@ -80,7 +93,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
                 if (IsDue(_settings.CurrentValue, _utcNow(), _lastNightlyRun))
                 {
                     _lastNightlyRun = DateOnly.FromDateTime(_utcNow());
-                    await RunCycleAsync(forceDryRun: false, ct);
+                    await RunNightlyAsync(ct);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -89,6 +102,27 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             try { await Task.Delay(Tick, ct); }
             catch (OperationCanceledException) { break; }
         }
+    }
+
+    /// <summary>The nightly cycle, on the authority of the admin who took AutoPatch over. Without one it does not run:
+    /// the configuration switch alone is not an owner. Internal for tests.</summary>
+    internal async Task RunNightlyAsync(CancellationToken ct)
+    {
+        var owner = _owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId;
+        if (owner is null)
+        {
+            _logger.LogWarning("Auto-patch is switched on but no admin has taken it over (Settings → Automation); " +
+                               "tonight's cycle did not run");
+            return;
+        }
+
+        var dryRun = _settings.CurrentValue.DryRun;
+        var outcome = await _automation.RunAsync(new AutomationActor("autopatch", "AutoPatch", owner), "autopatch.run",
+            new { dryRun }, token => RunCycleAsync(forceDryRun: false, token), ct);
+        if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
+            _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
+        else if (outcome.Status == MutationStatus.Failed)
+            _logger.LogError(outcome.Error, "Auto-patch cycle failed: {Reason}", outcome.Reason);
     }
 
     /// <summary>Once per day, inside the window hour. Internal for tests.</summary>

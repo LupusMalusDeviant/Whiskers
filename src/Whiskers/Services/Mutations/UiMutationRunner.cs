@@ -20,10 +20,12 @@ public interface IUiMutationRunner
     /// <exception cref="MutationFailedException">The call ran past its deadline.</exception>
     /// <remarks>An exception thrown by <paramref name="action"/> itself is rethrown unchanged, so a page's existing
     /// error handling keeps working.</remarks>
+    [MutationEntryPoint]
     Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,
         CancellationToken ct = default);
 
     /// <inheritdoc cref="RunAsync{T}"/>
+    [MutationEntryPoint]
     Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,
         CancellationToken ct = default);
 }

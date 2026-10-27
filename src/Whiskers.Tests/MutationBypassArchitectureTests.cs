@@ -172,7 +172,7 @@ internal static class MutationCallScanner
     }
 
     /// <summary>
-    /// Lambdas handed to <see cref="IUiMutationRunner"/>: in every method body, a capability id loaded with
+    /// Lambdas handed to a <see cref="MutationEntryPointAttribute"/> runner: in every method body, a capability id loaded with
     /// <c>ldstr</c>, then a lambda loaded with <c>ldftn</c>, then the call to <c>RunAsync</c>. Keyed by the lambda's
     /// body and, for an async lambda, by its state machine type.
     /// </summary>
@@ -214,8 +214,7 @@ internal static class MutationCallScanner
                     {
                         MethodBase? called = null;
                         try { called = module.ResolveMethod(BitConverter.ToInt32(il, pos), typeArgs, methodArgs); } catch { }
-                        if (called is not null && called.DeclaringType == typeof(IUiMutationRunner)
-                            && called.Name == nameof(IUiMutationRunner.RunAsync) && capability is not null && lambda is not null)
+                        if (called is not null && IsEntryPoint(called) && capability is not null && lambda is not null)
                         {
                             map[Key(lambda)] = capability;
                             if (lambda.GetCustomAttribute<AsyncStateMachineAttribute>()?.StateMachineType is { } machine)
@@ -231,6 +230,12 @@ internal static class MutationCallScanner
     }
 
     private static object Key(MethodBase method) => (method.Module, method.MetadataToken);
+
+    private static bool IsEntryPoint(MethodBase called)
+    {
+        var definition = called is MethodInfo { IsGenericMethod: true } generic ? generic.GetGenericMethodDefinition() : called;
+        return definition.IsDefined(typeof(MutationEntryPointAttribute), false);
+    }
 
     private static string? UiGatedCapability(Dictionary<object, string> gated, MethodBase method) =>
         gated.GetValueOrDefault(Key(method))

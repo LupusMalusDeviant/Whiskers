@@ -4709,4 +4709,58 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AppStore_Snackbar_InvalidVariable" xml:space="preserve">
     <value>Template values must be a single line without control characters.</value>
   </data>
+  <data name="ScheduledTasksView_Table_Owner" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="ScheduledTasksView_Chip_NoOwner" xml:space="preserve">
+    <value>No owner</value>
+  </data>
+  <data name="ScheduledTasksView_Tooltip_Adopt" xml:space="preserve">
+    <value>Take ownership: runs then use your authority</value>
+  </data>
+  <data name="ScheduledTasksView_Alert_Unowned" xml:space="preserve">
+    <value>{0} task(s) were created before owners were recorded. They keep running for now; take them over so every run is checked against an owner's authority.</value>
+  </data>
+  <data name="ScheduledTasksView_Button_AdoptAll" xml:space="preserve">
+    <value>Take over all</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_Adopted" xml:space="preserve">
+    <value>Task "{0}" now runs on your authority.</value>
+  </data>
+  <data name="Settings_Panel_Automation" xml:space="preserve">
+    <value>Automation owners</value>
+  </data>
+  <data name="AutomationOwners_Intro" xml:space="preserve">
+    <value>Unattended automation runs on the authority of an owner, re-checked on every run. AutoPatch does not run until an admin has taken it over; AutoUpdate keeps running without an owner during the grace period.</value>
+  </data>
+  <data name="AutomationOwners_AutoPatch" xml:space="preserve">
+    <value>AutoPatch (nightly security patches)</value>
+  </data>
+  <data name="AutomationOwners_AutoUpdate" xml:space="preserve">
+    <value>AutoUpdate (per-container update policies)</value>
+  </data>
+  <data name="AutomationOwners_Owner" xml:space="preserve">
+    <value>Owner: {0} (since {1})</value>
+  </data>
+  <data name="AutomationOwners_NoOwner_AutoPatch" xml:space="preserve">
+    <value>No owner: the nightly cycle does not run.</value>
+  </data>
+  <data name="AutomationOwners_NoOwner_AutoUpdate" xml:space="preserve">
+    <value>No owner: updates run during the grace period as "no owner".</value>
+  </data>
+  <data name="AutomationOwners_AutoPatchConfigOff" xml:space="preserve">
+    <value>Switched off in the configuration (AutoPatch:Enabled).</value>
+  </data>
+  <data name="AutomationOwners_Button_TakeOver" xml:space="preserve">
+    <value>Take over</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_Done" xml:space="preserve">
+    <value>{0} now runs on your authority.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_Error" xml:space="preserve">
+    <value>Could not save the owner: {0}</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
+    <value>A scheduled task needs an owner: sign in with an account that has an email address.</value>
+  </data>
 </root>

@@ -14,10 +14,11 @@ public sealed class MutationScope : IDisposable
     private readonly MutationScope? _parent;
     private bool _disposed;
 
-    private MutationScope(string capabilityId, string operationId, MutationScope? parent)
+    private MutationScope(string capabilityId, string operationId, MutationPrincipal? principal, MutationScope? parent)
     {
         CapabilityId = capabilityId;
         OperationId = operationId;
+        Principal = principal;
         _parent = parent;
     }
 
@@ -26,6 +27,9 @@ public sealed class MutationScope : IDisposable
 
     public string CapabilityId { get; }
     public string OperationId { get; }
+
+    /// <summary>Who the gateway let this mutation run for (an agent with its <c>OnBehalfOf</c>), when known.</summary>
+    public MutationPrincipal? Principal { get; }
 
     /// <summary>The failure the delegate reported with <see cref="Fail"/>, or <c>null</c>. The first report wins.</summary>
     public string? FailureReason { get; private set; }
@@ -46,11 +50,11 @@ public sealed class MutationScope : IDisposable
     }
 
     /// <summary>Opened by the gateway only. Dispose restores the previous scope.</summary>
-    internal static MutationScope Begin(string capabilityId, string operationId)
+    internal static MutationScope Begin(string capabilityId, string operationId, MutationPrincipal? principal = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
-        var scope = new MutationScope(capabilityId, operationId, CurrentScope.Value);
+        var scope = new MutationScope(capabilityId, operationId, principal, CurrentScope.Value);
         CurrentScope.Value = scope;
         return scope;
     }
