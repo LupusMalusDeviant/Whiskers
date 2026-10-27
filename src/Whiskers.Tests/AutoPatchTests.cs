@@ -59,7 +59,7 @@ public class AutoPatchTests
 
     // ---------------------------------------------------------------- planner
 
-    private static ContainerInfo Compose(string name, string image = "caddy:2-alpine", string server = "local",
+    internal static ContainerInfo Compose(string name, string image = "caddy:2-alpine", string server = "local",
         string state = "running", Dictionary<string, string>? extra = null)
     {
         var labels = new Dictionary<string, string>
@@ -72,7 +72,7 @@ public class AutoPatchTests
         return new ContainerInfo { Id = name + "-id", Name = name, Image = image, ServerId = server, State = state, Labels = labels };
     }
 
-    private static CveScanResult Scan(string name, string server = "local", params (CveSeverity Sev, string? Fix)[] findings)
+    internal static CveScanResult Scan(string name, string server = "local", params (CveSeverity Sev, string? Fix)[] findings)
         => new()
         {
             ServerId = server,
@@ -542,7 +542,7 @@ public class AutoPatchTests
         IAutomationMutationRunner automation, IAutomationOwnerStore owners)
         => NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true });
 
-    private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
+    internal static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
         IAutomationMutationRunner automation, IAutomationOwnerStore owners, AutoPatchSettings settings,
         params ContainerInfo[] containers)
         => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
@@ -577,7 +577,7 @@ public class AutoPatchTests
             RunAsync<bool>(actor, capabilityId, arguments, _ => Task.FromResult(true), ct);
     }
 
-    private static string TempPath() => Path.Combine(Path.GetTempPath(), $"cve-{Guid.NewGuid():N}.json");
+    internal static string TempPath() => Path.Combine(Path.GetTempPath(), $"cve-{Guid.NewGuid():N}.json");
 
     private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store, params ContainerInfo[] containers)
         => NewService(runner, store, new FakeNotifications(), new AutoPatchSettings(), containers);
@@ -593,7 +593,7 @@ public class AutoPatchTests
             notifications, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             new RecordingAutomation(), new MemoryAutomationOwners(), NullLogger<AutoPatchService>.Instance);
 
-    private sealed class RecordingRunner : IAutoPatchRunner
+    internal sealed class RecordingRunner : IAutoPatchRunner
     {
         public List<(string Server, string Name, bool DryRun)> Calls { get; } = new();
         public Dictionary<string, AutoPatchResultKind> Verdicts { get; } = new();

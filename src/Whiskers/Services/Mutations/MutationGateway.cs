@@ -156,6 +156,13 @@ public sealed class MutationGateway : IMutationGateway
 
         // 4: Confirm runs only with a human approval for exactly this call.
         ApprovalGateResult? approval = null;
+        // An unattended run (scheduler, AutoUpdate, AutoPatch) has nobody who could confirm it, and the next occurrence
+        // of the same task is a new run, not a retry: it must never reach the approval gate, which would raise an
+        // approval and later match an identical occurrence against the grant. Terminal refusal, audited.
+        if (decision.Verdict == MutationVerdict.Confirm && request.Surface == MutationSurface.Automation)
+            return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
+                $"Unattended run refused: it needs a confirmation nobody can give ({decision.Reason}).", ct)
+                with { MatchedRules = decision.MatchedRules };
         if (decision.Verdict == MutationVerdict.Confirm)
         {
             if (_approvals is null)

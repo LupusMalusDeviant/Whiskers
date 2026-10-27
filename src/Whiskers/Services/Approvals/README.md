@@ -2,7 +2,8 @@
 
 **Human-in-the-Loop approvals**, core since ADR-0005 step 2.1 (PC-D8). When the guardrail policy answers `Confirm`,
 a human must approve the call before it runs, whether it came from the agent, from a direct MCP client, or (from
-WP2 step 2.2 on) from the UI or a job.
+WP2 step 2.2 on) from the UI. Unattended jobs (scheduler, AutoUpdate, AutoPatch) never come here: the gateway refuses
+their `Confirm` outright, since nobody could approve it and a later run of the same job is not a retry (R1-01).
 
 ## How it fits together
 

@@ -87,7 +87,9 @@ registrations are wrapped too.
 3. Principal level below the capability level → **Denied**.
 4. Target cannot be resolved (unknown or ambiguous container) → **Denied**.
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**.
-6. Policy `Confirm` → [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
+6. Policy `Confirm` on the `Automation` surface (scheduler, AutoUpdate, AutoPatch) → **Denied**, before the approval
+   gate: nobody can confirm an unattended run, and no approval is raised (R1-01).
+   Policy `Confirm` otherwise → [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
    (the agent session's own approval for this operation, or approve-then-retry for a direct MCP call); otherwise
    **PendingApproval**.
 7. Audit intent written; if that fails → **Denied** (PC-D5). Only now is the approval used up
@@ -111,8 +113,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   architecture test would not catch a new direct call. `UpdateRiskService` (`image.pull`) and
   `LoopSuspensionService` (`checks.resume`) stay in the baseline.
 - **Key-owned items** are evaluated with the full rule set of the key (tool lists, forbidden arguments,
-  confirmation); a `Confirm` is refused, since no one can approve an unattended run. Items owned by a person, and
-  ownerless items in the grace period, use the PC-D1 rules.
+  confirmation). A `Confirm` on the `Automation` surface is a terminal `Denied` in the gateway, before the approval
+  gate (R1-01): no one can approve an unattended run, and no approval is raised that a later occurrence of the same
+  task could match. Items owned by a person, and ownerless items in the grace period, use the PC-D1 rules.
 - **Owner file** (`automation-owners.json`): unreadable, invalid, a directory or not openable → every feature
   `IsBlocked`, AutoPatch and AutoUpdate do not run (fail closed). Taking one feature over clears only its block; the
   others are written to the file as blocked entries, so they stay blocked after a restart. Only a file that is not
