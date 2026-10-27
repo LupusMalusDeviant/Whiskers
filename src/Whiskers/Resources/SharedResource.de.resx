@@ -4799,4 +4799,16 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_Problem_InvalidPattern" xml:space="preserve">
     <value>Preset „{0}“: „{1}“ ist kein gültiger regulärer Ausdruck. Nichts wurde gespeichert.</value>
   </data>
+  <data name="AutomationOwners_State_NotAllowedToSignIn" xml:space="preserve">
+    <value>Darf sich nicht mehr anmelden – Läufe werden abgelehnt.</value>
+  </data>
+  <data name="AutomationOwners_State_KeyDeleted" xml:space="preserve">
+    <value>API-Schlüssel gelöscht – Läufe werden abgelehnt.</value>
+  </data>
+  <data name="AutomationOwners_State_KeyDisabled" xml:space="preserve">
+    <value>API-Schlüssel deaktiviert – Läufe werden abgelehnt.</value>
+  </data>
+  <data name="AutomationOwners_State_Unrecognised" xml:space="preserve">
+    <value>Unbekannter Besitzer aus einer älteren Version – Läufe werden abgelehnt, bis ein Admin übernimmt.</value>
+  </data>
 </root>

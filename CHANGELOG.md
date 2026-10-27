@@ -110,7 +110,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
 - **Principals have stable ids** (R1-03, INV-01/06):
   - Owners of scheduled tasks, AutoPatch and AutoUpdate are now recorded as `user:<email>` or `key:<key id>`. The
-    database migration `MigrateLegacyTaskOwnerIds` and the owner file (on load) rewrite bare emails to `user:<email>`;
+    database migration `PrincipalIdsForTaskOwners` (which also adds `ScheduledTasks.CreatedVia`: who created the task,
+    e.g. `agent:<session>`) and the owner file (on load) rewrite plain ASCII emails to `user:<email>`;
     any other value is left as it is and its runs are refused until an Admin takes the item over.
   - Each AI trigger acts as its own principal `trigger:<id>` instead of the shared pseudo key `ai-trigger`; its audit
     rows now name `trigger:<id>` as actor. Renaming a key or a trigger keeps its identity.

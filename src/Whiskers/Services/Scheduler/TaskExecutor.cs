@@ -287,9 +287,9 @@ public class TaskExecutor : ITaskExecutor
     // A box, not the value: the run's methods fill it, and the caller reads it after they returned.
     private static readonly AsyncLocal<System.Runtime.CompilerServices.StrongBox<string?>?> RefusalOfRun = new();
 
-    private static AutomationActor ActorOf(ScheduledTaskEntity task) =>
+    internal static AutomationActor ActorOf(ScheduledTaskEntity task) =>
         new("task:" + task.TaskId, $"Scheduled task '{task.Name}'",
-            string.IsNullOrWhiteSpace(task.CreatedBy) ? null : task.CreatedBy);
+            string.IsNullOrWhiteSpace(task.CreatedBy) ? null : task.CreatedBy, task.CreatedVia);
 
     /// <summary>Null when the gateway executed the call; otherwise the message for the task result.</summary>
     private string? Problem<T>(MutationOutcome<T> outcome)

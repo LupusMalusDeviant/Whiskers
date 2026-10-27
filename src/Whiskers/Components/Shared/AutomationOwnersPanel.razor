@@ -25,7 +25,12 @@
                 }
                 else if (entry is not null)
                 {
-                    <MudText Typo="Typo.body2">@L["AutomationOwners_Owner", OwnerResolver.Resolve(entry.OwnerId).DisplayName, entry.ConfirmedAt.ToLocalTime().ToString("g")]</MudText>
+                    var owner = OwnerResolver.Describe(entry.OwnerId);
+                    <MudText Typo="Typo.body2">@L["AutomationOwners_Owner", owner.Name, entry.ConfirmedAt.ToLocalTime().ToString("g")]</MudText>
+                    @if (owner.State != OwnerState.Active)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.State}"]</MudText>
+                    }
                 }
                 else
                 {

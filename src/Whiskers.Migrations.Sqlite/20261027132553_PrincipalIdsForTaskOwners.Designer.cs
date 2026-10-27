@@ -11,8 +11,8 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Migrations
 {
     [DbContext(typeof(MetricsDbContext))]
-    [Migration("20261027131504_MigrateLegacyTaskOwnerIds")]
-    partial class MigrateLegacyTaskOwnerIds
+    [Migration("20261027132553_PrincipalIdsForTaskOwners")]
+    partial class PrincipalIdsForTaskOwners
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -293,6 +293,9 @@ namespace Whiskers.Migrations
 
                     b.Property<string>("CreatedBy")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedVia")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CronExpression")

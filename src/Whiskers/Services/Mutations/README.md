@@ -67,14 +67,16 @@ R1-03 (INV-01, INV-06). Every principal carries a stable id built from typed fie
 | API key | `key:<key id>` (a rename keeps it) | key id | — |
 | AI trigger | `trigger:<trigger id>` (each trigger its own) | — | — |
 | Agent | `agent:<session id>`, `SessionId` set | the source's key id | the user, key or trigger it acts for (same session id) |
-| Automation | `task:<id>`, `autoupdate`, `autopatch` | — | the owner (`user:` / `key:`), re-resolved per run |
+| Automation | `task:<id>`, `autoupdate`, `autopatch` | — | the owner (`user:` / `key:`), re-resolved per run; `DelegatedBy` = the id of the call that created the task (e.g. `agent:<session>`, stored as `ScheduledTasks.CreatedVia`), provenance only |
 
 `MutationPrincipals.Of` / `.Agent` build them for the MCP filter and the agent; `MutationPrincipals.ToAgent` maps back
 for the guardrail engine. A principal without an email or key id is `anonymous`: it can be checked, never own
-anything. Owners recorded before the scheme were bare emails: the `MigrateLegacyTaskOwnerIds` database migration and
+anything. Owners recorded before the scheme were bare emails: the `PrincipalIdsForTaskOwners` database migration and
 `AutomationOwnerStore` (on load) rewrite exactly those to `user:<email>` (`AutomationOwners.MigrateLegacy`). Any other
-value is ambiguous, stays as it is and resolves as suspended (`read`) until an Admin takes the item over. The MCP call
-log records the same ids; the audit log keeps display names in `Actor` and the ids in `Details.principal`.
+value (anything but one ASCII email, the same rule in SQL and in C#) is ambiguous, stays as it is and resolves as suspended (`read`) until an Admin takes the item over. The MCP call
+log records the same ids; the audit log keeps display names in `Actor` and the ids in `Details.principal` (incl.
+`session`, `onBehalfOf` and `delegatedBy`). The UI shows an owner through `IAutomationOwnerResolver.Describe` (name +
+`OwnerState`, localized as `AutomationOwners_State_*`).
 
 ## Files
 

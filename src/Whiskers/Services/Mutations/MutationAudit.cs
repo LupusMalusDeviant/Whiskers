@@ -127,6 +127,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             session = request.Principal.SessionId,
             onBehalfOf = request.Principal.OnBehalfOf?.Id,
             onBehalfOfKind = request.Principal.OnBehalfOf?.Kind.ToString(),
+            delegatedBy = request.Principal.DelegatedBy,
         },
         sessionId = request.SessionId,
         arguments = Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),

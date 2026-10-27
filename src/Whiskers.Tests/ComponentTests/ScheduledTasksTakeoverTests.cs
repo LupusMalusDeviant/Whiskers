@@ -79,7 +79,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
         public Task UpdateTaskAsync(ScheduledTaskEntity task) => throw new NotSupportedException();
         public Task DeleteTaskAsync(string taskId) => throw new NotSupportedException();
         public Task<(bool Success, string Output)> RunNowAsync(string taskId) => throw new NotSupportedException();
-        public Task<bool> SetOwnerAsync(string taskId, string ownerId)
+        public Task<bool> SetOwnerAsync(string taskId, string ownerId, string? createdVia = null)
         {
             OwnerChanges.Add((taskId, ownerId));
             Tasks.First(t => t.TaskId == taskId).CreatedBy = ownerId;

@@ -117,7 +117,12 @@ else
                 }
                 else
                 {
-                    <MudText Typo="Typo.body2">@OwnerResolver.Resolve(context.CreatedBy).DisplayName</MudText>
+                    var owner = OwnerResolver.Describe(context.CreatedBy);
+                    <MudText Typo="Typo.body2">@owner.Name</MudText>
+                    @if (owner.State != OwnerState.Active)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.State}"]</MudText>
+                    }
                     @if (OwnerRevoked(context))
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">@L["ScheduledTasksView_Chip_OwnerRevoked"]</MudChip>
@@ -408,6 +413,7 @@ else
                 ServerId = _formServerId,
                 Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null,
                 CreatedBy = PrincipalIds.User(owner),
+                CreatedVia = PrincipalIds.User(owner),
             };
             // The command goes to the policy; the audit row keeps only its length (it may carry credentials).
             await Mutations.RunAsync("scheduler.create",

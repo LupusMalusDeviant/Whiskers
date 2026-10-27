@@ -17,7 +17,7 @@ namespace Whiskers.Migrations.Postgres.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -307,6 +307,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
 
                     b.Property<string>("CreatedBy")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("CreatedVia")
                         .HasColumnType("text");
 
                     b.Property<string>("CronExpression")

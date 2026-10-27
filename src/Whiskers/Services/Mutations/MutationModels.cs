@@ -40,6 +40,8 @@ public enum MutationPrincipalKind { Human, ApiKey, Agent, Automation, Webhook, S
 /// <param name="OnBehalfOf">The principal an agent or automation acts for; its rights are the ceiling.</param>
 /// <param name="AllowedTools">The MCP key's tool list, if it has one; the policy treats it as a ceiling.</param>
 /// <param name="SessionId">The agent session the principal acts in, if any.</param>
+/// <param name="DelegatedBy">For an automation: the principal id of the call that set the delegation up (e.g.
+/// <c>agent:&lt;session&gt;</c> when an agent created a task for its user). Provenance only, never authority.</param>
 public sealed record MutationPrincipal(
     MutationPrincipalKind Kind,
     string Id,
@@ -48,7 +50,8 @@ public sealed record MutationPrincipal(
     string? CredentialId = null,
     MutationPrincipal? OnBehalfOf = null,
     IReadOnlyList<string>? AllowedTools = null,
-    string? SessionId = null);
+    string? SessionId = null,
+    string? DelegatedBy = null);
 
 /// <summary>The entry point a mutation came in through.</summary>
 public enum MutationSurface { Mcp, Agent, Ui, Automation, Webhook, Terminal }

@@ -66,6 +66,53 @@ public sealed class PrincipalPropagationTests : IDisposable
     }
 
     [Fact]
+    public async Task The_creating_agent_session_survives_persistence_into_every_run()
+    {
+        var human = User("ops@example.com", "Olivia");
+        var first = AgentToolInvoker.PrincipalOf(Context(human, "sess-1", AgentOrigin.WebUi));
+        var second = AgentToolInvoker.PrincipalOf(Context(human, "sess-2", AgentOrigin.WebUi));
+
+        // Two tasks for the same user, created by two agent sessions, stored and read back.
+        var path = Path.Combine(NewDir(), "metrics.db");
+        await using (var db = Ctx(path))
+        {
+            await db.Database.MigrateAsync();
+            foreach (var (id, caller) in new[] { ("t1", first), ("t2", second) })
+            {
+                db.ScheduledTasks.Add(new ScheduledTaskEntity
+                {
+                    TaskId = id, Name = id, CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+                    TargetId = "web", CreatedBy = AutomationOwners.OfCaller(caller)!,
+                    CreatedVia = AutomationOwners.ViaOf(caller),
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var f = AutomationMutationRunnerTests.Build();
+        f.Whitelist.Allowed.Add("ops@example.com");
+        f.Roles.Map["ops@example.com"] = AppRole.Operator;
+        await using (var check = Ctx(path))
+        {
+            foreach (var task in await check.ScheduledTasks.OrderBy(t => t.TaskId).ToListAsync())
+                await f.Runner.RunAsync(Whiskers.Services.Scheduler.TaskExecutor.ActorOf(task), "container.restart",
+                    new { containerId = "web-1" }, _ => Task.CompletedTask);
+        }
+
+        Assert.Collection(f.Audit.Principals,
+            run =>
+            {
+                Assert.Equal("user:ops@example.com", run.OnBehalfOf!.Id);
+                Assert.Equal("agent:sess-1", run.DelegatedBy);
+            },
+            run =>
+            {
+                Assert.Equal("user:ops@example.com", run.OnBehalfOf!.Id);
+                Assert.Equal("agent:sess-2", run.DelegatedBy);
+            });
+    }
+
+    [Fact]
     public void A_display_name_never_changes_an_identity()
     {
         var before = AgentToolInvoker.PrincipalOf(Context(User("ops@example.com", "Olivia"), "s", AgentOrigin.WebUi));
@@ -149,6 +196,8 @@ public sealed class PrincipalPropagationTests : IDisposable
     [InlineData("a@b@c.example", "a@b@c.example")]      // not one email
     [InlineData("trigger:t-1", "trigger:t-1")]          // not an owner: unchanged, suspended
     [InlineData("ops @example.com", "ops @example.com")]
+    [InlineData("ops	@example.com", "ops	@example.com")]   // control character: ambiguous
+    [InlineData("Änne@Example.com", "Änne@Example.com")]     // non-ASCII: providers lower-case it differently
     public void Legacy_owner_ids_are_migrated_only_when_unambiguous(string stored, string expected)
     {
         Assert.Equal(expected, AutomationOwners.MigrateLegacy(stored));
@@ -196,22 +245,23 @@ public sealed class PrincipalPropagationTests : IDisposable
         {
             var migrator = db.GetInfrastructure().GetRequiredService<IMigrator>();
             var all = db.Database.GetMigrations().ToList();
-            var ours = all.Single(m => m.EndsWith("_MigrateLegacyTaskOwnerIds", StringComparison.Ordinal));
+            var ours = all.Single(m => m.EndsWith("_PrincipalIdsForTaskOwners", StringComparison.Ordinal));
             await migrator.MigrateAsync(all[all.IndexOf(ours) - 1]);
 
             foreach (var (id, owner) in new[]
                      {
                          ("t1", "Ops@Example.com"), ("t2", "key:k1"), ("t3", ""), ("t4", "Claude Code"),
-                         ("t5", "a@b@c.example"), ("t6", "user:x@example.com"),
+                         ("t5", "a@b@c.example"), ("t6", "user:x@example.com"), ("t7", "ops	@example.com"),
+                         ("t8", "Änne@Example.com"), ("t9", "Ops+Ci@Example.com"),
                      })
             {
-                db.ScheduledTasks.Add(new ScheduledTaskEntity
-                {
-                    TaskId = id, Name = id, CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
-                    TargetId = "web", CreatedBy = owner,
-                });
+                // Raw SQL: the table has the schema of the previous migration, not the current model.
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "ScheduledTasks" ("TaskId","Name","CronExpression","TaskType","TargetId","Enabled",
+                        "LastSuccess","CreatedBy","CreatedAt")
+                    VALUES ({id}, {id}, '0 2 * * *', 0, 'web', 1, 0, {owner}, '2026-10-01T00:00:00')
+                    """);
             }
-            await db.SaveChangesAsync();
             await db.Database.MigrateAsync();
         }
 
@@ -223,6 +273,13 @@ public sealed class PrincipalPropagationTests : IDisposable
         Assert.Equal("Claude Code", owners["t4"]);
         Assert.Equal("a@b@c.example", owners["t5"]);
         Assert.Equal("user:x@example.com", owners["t6"]);
+        Assert.Equal("ops	@example.com", owners["t7"]);
+        Assert.Equal("Änne@Example.com", owners["t8"]);
+        Assert.Equal("user:ops+ci@example.com", owners["t9"]);
+        // The database and the owner file migrate alike.
+        foreach (var (stored, migrated) in new[] { ("Ops@Example.com", owners["t1"]), ("ops	@example.com", owners["t7"]),
+                     ("Änne@Example.com", owners["t8"]), ("Ops+Ci@Example.com", owners["t9"]) })
+            Assert.Equal(migrated, AutomationOwners.MigrateLegacy(stored));
     }
 
     // ----------------------------------------------------------------------------------------------------------
