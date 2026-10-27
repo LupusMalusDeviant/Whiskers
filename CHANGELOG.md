@@ -43,7 +43,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   does not exist, or a name that fits more than one (two servers called "web", a network id prefix shared by two
   networks, two tasks with the same name), is refused before anything runs; use the id. A server id that differs
   from the stored one only in case is resolved to the stored id.
-- **R1-06: an MCP or agent call without `serverId` acts on the default server, for every tool.** Some tools
+- **R1-06: an MCP or agent call without `serverId` acts on the default server, for every tool that takes a
+  server.** Some tools
   (`set_container_env`, database backups, …) used to read a missing server as `local` while the gateway decided on
   the default server; they now receive the default server's id. Pass `serverId` where you mean `local`.
 - **R1-06: a scheduled task saved without a server acts on the server with the id `local`**, for its gates as well

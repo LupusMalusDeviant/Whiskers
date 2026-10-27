@@ -103,7 +103,8 @@ public interface IMutationTargetResolver
 /// the operation also touches (<see cref="MutationTarget.Related"/>: the containers attached to a network, the
 /// container a network is connected to, a workload's live controller) so a protected resource is matched on what
 /// really changes.
-/// <para>Operations that create their target (a new network, task or server) resolve only the server. Volumes,
+/// <para>Operations that create their target (a new network or task) resolve only the server; adding or saving a
+/// server matches only that server by its own id (never the default server or a name) and passes a new one through. Volumes,
 /// log alerts and the Whiskers-wide kinds pass through: their services identify them by a name they own.</para>
 /// </summary>
 public sealed class MutationTargetResolver : IMutationTargetResolver
@@ -165,9 +166,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             // Adding or saving a server: only the very server by its id, never the default server or a name match —
             // the operation writes this id, so a decision on another server would record the wrong one.
-            var existing = string.IsNullOrWhiteSpace(idOrName) ? null
-                : _services.GetService<IServerConfigService>()?.GetServers()
-                    .FirstOrDefault(s => string.Equals(s.Id, idOrName, StringComparison.OrdinalIgnoreCase));
+            var servers = string.IsNullOrWhiteSpace(idOrName) ? null
+                : _services.GetService<IServerConfigService>()?.GetServers();
+            var existing = servers?.FirstOrDefault(s => s.Id == idOrName)
+                           ?? servers?.FirstOrDefault(s => string.Equals(s.Id, idOrName, StringComparison.OrdinalIgnoreCase));
             return existing is null
                 ? Pass(target)
                 : Done(target with { Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id });

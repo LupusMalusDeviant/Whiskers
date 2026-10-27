@@ -164,6 +164,19 @@ public sealed class TargetResolutionTests : IDisposable
         Assert.NotEqual("edge01", seen.Id);
     }
 
+    [Theory]
+    [InlineData("server.save", "edge01")]
+    [InlineData("server.save", "EDGE01")]
+    [InlineData("server.onboard", "edge01")]
+    public async Task Saving_or_onboarding_an_existing_server_is_decided_on_that_server(string capability, string serverId)
+    {
+        var (outcome, seen) = await RunAsync(capability, new { serverId, name = "Edge" });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.True(seen!.Resolved);
+        Assert.Equal("edge01", seen.Id);
+    }
+
     [Fact]
     public async Task A_new_server_does_not_have_to_exist_yet()
     {
