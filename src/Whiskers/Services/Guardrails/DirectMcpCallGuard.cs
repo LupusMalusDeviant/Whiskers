@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using System.Text.Json;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
@@ -83,6 +84,5 @@ public sealed class DirectMcpCallGuard : IDirectMcpCallGuard
 
     private const string DirectSessionId = "mcp-direct";
 
-    internal static string ActorOf(AgentPrincipal p) =>
-        p.McpKeyId is { } id ? $"key:{id}" : p.UserEmail ?? p.DisplayName;
+    internal static string ActorOf(AgentPrincipal p) => PrincipalIds.Of(p);
 }

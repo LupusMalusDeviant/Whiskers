@@ -4,17 +4,19 @@ using Whiskers.Services.Guardrails;
 namespace Whiskers.Models.Agent;
 
 /// <summary>Who triggered the agent. The agent inherits this principal's rights and
-/// can NEVER exceed them (PrincipalCeilingRule). Either a logged-in web user
-/// or the MCP key of a triggering agent (e.g. external Claude Code).</summary>
+/// can NEVER exceed them (PrincipalCeilingRule): a logged-in web user, the MCP key of a triggering agent
+/// (e.g. external Claude Code) or an AI trigger. Its identity comes from the typed id fields
+/// (<c>PrincipalIds.Of</c>); <paramref name="DisplayName"/> is for people only.</summary>
 public sealed record AgentPrincipal(
     AgentPrincipalKind Kind,
-    string DisplayName,                       // email or key name (audit/UI)
+    string DisplayName,                       // email, key name or trigger name (audit/UI only)
     string PermissionLevel,                   // resolved: McpPermissionLevels.Read|Write|Admin
     IReadOnlyList<string>? AllowedTools,      // from McpApiKeyConfig; null = level defaults
     string? UserEmail = null,                 // set for WebUser
-    string? McpKeyId = null);                 // set for McpKey
+    string? McpKeyId = null,                  // set for McpKey
+    string? TriggerId = null);                // set for Trigger
 
-public enum AgentPrincipalKind { WebUser, McpKey }
+public enum AgentPrincipalKind { WebUser, McpKey, Trigger }
 
 /// <summary>Which surface the request came in through.</summary>
 public enum AgentOrigin

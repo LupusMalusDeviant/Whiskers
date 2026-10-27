@@ -116,8 +116,9 @@ public sealed class UiMutationRunner : IUiMutationRunner
             AppRole.Operator => McpPermissionLevels.Write,
             _ => McpPermissionLevels.Read,
         };
-        var id = string.IsNullOrWhiteSpace(email) ? "unknown" : email;
-        return new MutationPrincipal(MutationPrincipalKind.Human, id, id, level);
+        return string.IsNullOrWhiteSpace(email)
+            ? new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.Anonymous, "unknown", level)
+            : new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.User(email), email, level);
     }
 
     /// <summary>An anonymous object (<c>new { containerId, serverId }</c>) → tool-style arguments. Null values are

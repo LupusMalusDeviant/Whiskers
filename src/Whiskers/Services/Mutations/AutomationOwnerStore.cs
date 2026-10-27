@@ -103,7 +103,17 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
             var loaded = JsonSerializer.Deserialize<Dictionary<string, AutomationOwnerEntry>>(text);
             if (loaded is null || loaded.Values.Any(e => e is null || (!e.Blocked && string.IsNullOrWhiteSpace(e.OwnerId))))
                 throw new JsonException("The owner file holds an empty or invalid entry.");
-            return new Dictionary<string, AutomationOwnerEntry>(loaded, StringComparer.Ordinal);
+            // Owners recorded before the principal id scheme: a bare email is migrated explicitly (logged); an
+            // ambiguous value is kept as it is and stays suspended.
+            var entries = new Dictionary<string, AutomationOwnerEntry>(StringComparer.Ordinal);
+            foreach (var (feature, entry) in loaded)
+            {
+                var migrated = AutomationOwners.MigrateLegacy(entry.OwnerId) ?? entry.OwnerId;
+                if (!string.Equals(migrated, entry.OwnerId, StringComparison.Ordinal))
+                    _logger.LogInformation("Automation owner of {Feature} migrated to the principal id scheme", feature);
+                entries[feature] = entry with { OwnerId = migrated };
+            }
+            return entries;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException)
         {

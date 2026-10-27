@@ -17,6 +17,7 @@ namespace Whiskers.Tests;
 public class AutomationMutationRunnerTests
 {
     private const string Ops = "ops@example.com";
+    private static readonly string OpsId = PrincipalIds.User(Ops);
 
     internal sealed class Roles : IRoleService
     {
@@ -108,7 +109,7 @@ public class AutomationMutationRunnerTests
         return f;
     }
 
-    private static readonly AutomationActor Task1 = new("task:t1", "Scheduled task 'nightly'", Ops);
+    private static readonly AutomationActor Task1 = new("task:t1", "Scheduled task 'nightly'", OpsId);
 
     [Fact]
     public async Task An_owned_run_acts_on_behalf_of_its_owner_without_asking_for_approval()
@@ -124,7 +125,7 @@ public class AutomationMutationRunnerTests
         var principal = Assert.Single(f.Audit.Principals);
         Assert.Equal(MutationPrincipalKind.Automation, principal.Kind);
         Assert.Equal("task:t1", principal.Id);
-        Assert.Equal(Ops, principal.OnBehalfOf?.Id);
+        Assert.Equal(OpsId, principal.OnBehalfOf?.Id);
         Assert.Equal(McpPermissionLevels.Write, principal.PermissionLevel);
     }
 
@@ -263,7 +264,7 @@ public class AutomationMutationRunnerTests
 
         var (success, _) = await executor.ExecuteAsync(new ScheduledTaskEntity
         {
-            TaskId = "t3", Name = "self", TaskType = ScheduledTaskType.SelfBackup, CreatedBy = Ops,
+            TaskId = "t3", Name = "self", TaskType = ScheduledTaskType.SelfBackup, CreatedBy = OpsId,
         });
 
         Assert.False(success);   // refused before the (null) self-backup service is reached
@@ -339,7 +340,7 @@ public class AutomationMutationRunnerTests
 
     [Theory]
     [InlineData("k1", "a@example.com", "key:k1")]
-    [InlineData(null, "a@example.com", "a@example.com")]
+    [InlineData(null, "a@example.com", "user:a@example.com")]
     [InlineData("", " ", null)]
     public void The_recorded_owner_is_the_key_when_there_is_one(string? keyId, string? email, string? expected) =>
         Assert.Equal(expected, AutomationOwners.IdOf(keyId, email));
@@ -347,15 +348,15 @@ public class AutomationMutationRunnerTests
     [Fact]
     public void A_task_created_by_the_agent_belongs_to_whoever_the_agent_acts_for()
     {
-        var user = new MutationPrincipal(MutationPrincipalKind.Human, Ops, Ops, McpPermissionLevels.Write);
+        var user = new MutationPrincipal(MutationPrincipalKind.Human, OpsId, Ops, McpPermissionLevels.Write);
         var key = new MutationPrincipal(MutationPrincipalKind.ApiKey, "key:k1", "ci", McpPermissionLevels.Write, "k1");
         var trigger = new MutationPrincipal(MutationPrincipalKind.Automation, "ai-trigger:x", "x", McpPermissionLevels.Admin, "ai-trigger");
         MutationPrincipal Agent(MutationPrincipal source) =>
             new(MutationPrincipalKind.Agent, "agent:x", "agent:x", source.PermissionLevel, OnBehalfOf: source);
 
-        Assert.Equal(Ops, AutomationOwners.OfCaller(user));
+        Assert.Equal(OpsId, AutomationOwners.OfCaller(user));
         Assert.Equal("key:k1", AutomationOwners.OfCaller(key));
-        Assert.Equal(Ops, AutomationOwners.OfCaller(Agent(user)));
+        Assert.Equal(OpsId, AutomationOwners.OfCaller(Agent(user)));
         Assert.Equal("key:k1", AutomationOwners.OfCaller(Agent(key)));
         // An AI trigger has no human or key behind it; its task would otherwise run unowned.
         Assert.Null(AutomationOwners.OfCaller(Agent(trigger)));
@@ -386,7 +387,7 @@ public class AutomationMutationRunnerTests
         var (success, output) = await executor.ExecuteAsync(new ScheduledTaskEntity
         {
             TaskId = "t1", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart,
-            TargetId = "web-1", CreatedBy = Ops,
+            TargetId = "web-1", CreatedBy = OpsId,
         });
 
         Assert.False(success);
@@ -470,17 +471,17 @@ public class AutomationMutationRunnerTests
             Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoPatch));
             Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
 
-            await store.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+            await store.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
             Assert.False(store.IsBlocked(IAutomationOwnerStore.AutoPatch));
             Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
 
             var restarted = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
-            Assert.Equal("admin@example.com", restarted.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
+            Assert.Equal("user:admin@example.com", restarted.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
             Assert.True(restarted.IsBlocked(IAutomationOwnerStore.AutoUpdate));   // not "no owner": no grace period
             Assert.Null(restarted.Get(IAutomationOwnerStore.AutoUpdate));
             Assert.NotEmpty(Directory.GetFiles(dir, "automation-owners.json.unreadable-*"));
 
-            await restarted.SetAsync(IAutomationOwnerStore.AutoUpdate, "admin@example.com");
+            await restarted.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com");
             Assert.False(new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance)
                 .IsBlocked(IAutomationOwnerStore.AutoUpdate));
         }
@@ -540,10 +541,10 @@ public class AutomationMutationRunnerTests
         try
         {
             var first = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
-            await first.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+            await first.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
 
             var second = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
-            Assert.Equal("admin@example.com", second.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
+            Assert.Equal("user:admin@example.com", second.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
             Assert.Null(second.Get(IAutomationOwnerStore.AutoUpdate));
 
             Assert.False(second.IsBlocked(IAutomationOwnerStore.AutoUpdate));   // a missing file is no failure
@@ -557,7 +558,7 @@ public class AutomationMutationRunnerTests
             Assert.True(new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance)
                 .IsBlocked(IAutomationOwnerStore.AutoUpdate));
 
-            await third.SetAsync(IAutomationOwnerStore.AutoUpdate, "admin@example.com");
+            await third.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com");
             Assert.False(third.IsBlocked(IAutomationOwnerStore.AutoUpdate));
         }
         finally

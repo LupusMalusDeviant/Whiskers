@@ -117,7 +117,7 @@ else
                 }
                 else
                 {
-                    <MudText Typo="Typo.body2">@context.CreatedBy</MudText>
+                    <MudText Typo="Typo.body2">@OwnerResolver.Resolve(context.CreatedBy).DisplayName</MudText>
                     @if (OwnerRevoked(context))
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">@L["ScheduledTasksView_Chip_OwnerRevoked"]</MudChip>
@@ -161,7 +161,7 @@ else
                     }
                     @if (_role >= AppRole.Admin)
                     {
-                        @if (!string.Equals(context.CreatedBy, _email, StringComparison.OrdinalIgnoreCase))
+                        @if (!IsMine(context.CreatedBy))
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.PersonAdd" Color="Color.Warning" Size="Size.Small"
                                            OnClick="@(() => AdoptTask(context))" title="@L["ScheduledTasksView_Tooltip_Adopt"]" />
@@ -296,6 +296,9 @@ else
     private AppRole _role = AppRole.Viewer;
     private string? _email;
 
+    private bool IsMine(string? ownerId) =>
+        !string.IsNullOrWhiteSpace(_email) && string.Equals(ownerId, PrincipalIds.User(_email), StringComparison.Ordinal);
+
     /// <summary>The task has an owner, but that owner may no longer change anything (removed or demoted user, a
     /// deleted or disabled key): its runs are refused until an admin takes it over.</summary>
     private bool OwnerRevoked(Whiskers.Models.ScheduledTaskEntity task) =>
@@ -404,7 +407,7 @@ else
                 TargetName = _formTargetId,
                 ServerId = _formServerId,
                 Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null,
-                CreatedBy = owner,
+                CreatedBy = PrincipalIds.User(owner),
             };
             // The command goes to the policy; the audit row keeps only its length (it may carry credentials).
             await Mutations.RunAsync("scheduler.create",
@@ -558,11 +561,12 @@ else
         var taskId = task.TaskId;
         try
         {
+            var owner = PrincipalIds.User(email);
             await Mutations.RunAsync("scheduler.update",
-                new { taskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, owner = email },
-                _ => Scheduler.SetOwnerAsync(taskId, email));
+                new { taskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, owner },
+                _ => Scheduler.SetOwnerAsync(taskId, owner));
             await AuditLog.LogAsync(email, "web", "task.adopt", "scheduled-task", taskId, task.Name,
-                details: $"owner={email}; previous={(string.IsNullOrWhiteSpace(task.CreatedBy) ? "-" : task.CreatedBy)}",
+                details: $"owner={owner}; previous={(string.IsNullOrWhiteSpace(task.CreatedBy) ? "-" : task.CreatedBy)}",
                 serverId: task.ServerId);
             return true;
         }

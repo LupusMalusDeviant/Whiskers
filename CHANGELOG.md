@@ -108,6 +108,15 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **"Run now" needs Admin for a custom-command task, a self-backup task and any backup task with retention**
   (`maxBackups`): retention deletes old backups, which is decided as `volume.backup_delete` / `db.backup_delete` /
   `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
+- **Principals have stable ids** (R1-03, INV-01/06):
+  - Owners of scheduled tasks, AutoPatch and AutoUpdate are now recorded as `user:<email>` or `key:<key id>`. The
+    database migration `MigrateLegacyTaskOwnerIds` and the owner file (on load) rewrite bare emails to `user:<email>`;
+    any other value is left as it is and its runs are refused until an Admin takes the item over.
+  - Each AI trigger acts as its own principal `trigger:<id>` instead of the shared pseudo key `ai-trigger`; its audit
+    rows now name `trigger:<id>` as actor. Renaming a key or a trigger keeps its identity.
+  - The MCP call log (Agent History) records callers as `key:<key id>` / `user:<email>` / `anonymous` (was the key
+    name); audit rows of API-key calls name `key:<key id>`. The gateway audit `Details.principal` adds the session and
+    the kind of the principal acted for.
 - **The guardrail policy fails closed** (R1-02, INV-25):
   - A forbidden-argument pattern that is not a valid regex now **refuses every call** (it was ignored). Fix or
     remove the pattern in Guardrails; saving a configuration with an invalid pattern is refused.
@@ -123,6 +132,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **Identities were rebuilt from display names** (TA-31, C-12, INV-01/06): every AI trigger shared one identity, and
+  renaming an API key split it into two in the logs. Principals now carry typed ids end to end.
 - **Guardrail policy errors allowed the call, and the live policy could be changed without saving** (TA-32/33,
   C-09/15, INV-25/28). See the upgrade note. The store now hands out copies only, and a save becomes live only
   after it was written: a failed write leaves the previous policy active.

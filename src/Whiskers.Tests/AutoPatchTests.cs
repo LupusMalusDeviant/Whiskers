@@ -437,12 +437,12 @@ public class AutoPatchTests
         await service.RunNightlyAsync(CancellationToken.None);
         Assert.Empty(automation.Actors);
 
-        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
         await service.RunNightlyAsync(CancellationToken.None);
 
         var (actor, capability) = Assert.Single(automation.Actors);
         Assert.Equal("autopatch.run", capability);
-        Assert.Equal("admin@example.com", actor.OwnerId);
+        Assert.Equal("user:admin@example.com", actor.OwnerId);
     }
 
     [Fact]
@@ -450,7 +450,7 @@ public class AutoPatchTests
     {
         var automation = new RecordingAutomation();
         var owners = new MemoryAutomationOwners();
-        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
         owners.Blocked.Add(IAutomationOwnerStore.AutoPatch);
         var service = NewService(new RecordingRunner(), new CveFindingsStore(persistPath: TempPath()), automation, owners);
 
@@ -467,7 +467,7 @@ public class AutoPatchTests
         store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
         var automation = new RecordingAutomation { Refuse = { "b" } };
         var owners = new MemoryAutomationOwners();
-        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
         var runner = new RecordingRunner();
         var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = false },
             Compose("a"), Compose("b"));
@@ -487,7 +487,7 @@ public class AutoPatchTests
         store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
         var automation = new RecordingAutomation { Refuse = { "b" } };
         var owners = new MemoryAutomationOwners();
-        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
         var runner = new RecordingRunner();
         var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = true },
             Compose("a"), Compose("b"));
@@ -506,7 +506,7 @@ public class AutoPatchTests
         store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
         var automation = new RecordingAutomation();
         var owners = new MemoryAutomationOwners();
-        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
         var runner = new RecordingRunner { Verdicts = { ["a"] = AutoPatchResultKind.RolledBack } };
         var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = false },
             Compose("a"));

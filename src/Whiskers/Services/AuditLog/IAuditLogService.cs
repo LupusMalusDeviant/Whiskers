@@ -36,8 +36,9 @@ public interface IAuditLogService
         {
             var key = authHeader["Bearer ".Length..];
             var keyConfig = permissionService.ValidateKey(key);
+            // The key's id, not its renameable name (INV-01).
             if (keyConfig != null)
-                return (keyConfig.Name, "mcp");
+                return (Mutations.PrincipalIds.Key(keyConfig.Id), "mcp");
         }
 
         // Check for MCP bearer identity

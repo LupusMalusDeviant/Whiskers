@@ -181,27 +181,12 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     }
 
     /// <summary>The agent acts for the user, key or trigger that started it; their rights are its ceiling.</summary>
-    internal static MutationPrincipal PrincipalOf(AgentContext ctx)
-    {
-        var p = ctx.Principal;
-        var source = ctx.Origin == AgentOrigin.Trigger
-            // "ai-trigger:<name>": every trigger shares the pseudo key id, so the name identifies it.
-            ? new MutationPrincipal(MutationPrincipalKind.Automation, p.DisplayName, p.DisplayName, p.PermissionLevel,
-                p.McpKeyId, AllowedTools: p.AllowedTools)
-            : p.McpKeyId is { } keyId
-                ? new MutationPrincipal(MutationPrincipalKind.ApiKey, $"key:{keyId}", p.DisplayName, p.PermissionLevel,
-                    keyId, AllowedTools: p.AllowedTools)
-                : new MutationPrincipal(MutationPrincipalKind.Human, p.UserEmail ?? p.DisplayName, p.DisplayName,
-                    p.PermissionLevel, AllowedTools: p.AllowedTools);
-        var name = "agent:" + (p.UserEmail ?? p.McpKeyId ?? p.DisplayName);
-        return new MutationPrincipal(MutationPrincipalKind.Agent, name, name, p.PermissionLevel, p.McpKeyId,
-            OnBehalfOf: source, AllowedTools: p.AllowedTools);
-    }
+    internal static MutationPrincipal PrincipalOf(AgentContext ctx) =>
+        MutationPrincipals.Agent(ctx.Principal, ctx.SessionId);
 
     private static (string actor, string actorType) ActorOf(AgentContext ctx)
     {
-        var p = ctx.Principal;
-        var actor = p.UserEmail ?? p.McpKeyId ?? p.DisplayName;
+        var actor = PrincipalIds.Of(ctx.Principal);
         var type = ctx.Origin switch
         {
             AgentOrigin.WebUi => "agent-web",
@@ -335,7 +320,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     /// engine). The email claim makes the agent visible in the audit log.</summary>
     private static DefaultHttpContext BuildSyntheticContext(IServiceProvider sp, AgentPrincipal principal)
     {
-        var actor = "agent:" + (principal.UserEmail ?? principal.McpKeyId ?? principal.DisplayName);
+        var actor = "agent for " + PrincipalIds.Of(principal);
         var identity = new ClaimsIdentity(new[]
         {
             new Claim(ClaimTypes.Email, actor),

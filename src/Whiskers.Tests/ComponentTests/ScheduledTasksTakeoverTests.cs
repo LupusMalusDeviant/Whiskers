@@ -52,7 +52,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
 
         cut.FindAll("button").First(b => b.TextContent.Contains("ScheduledTasksView_Button_AdoptAll")).Click();
 
-        Assert.Equal([("t1", Admin)], _scheduler.OwnerChanges);
+        Assert.Equal([("t1", PrincipalIds.User(Admin))], _scheduler.OwnerChanges);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
         _scheduler.Tasks.Add(new ScheduledTaskEntity
         {
             TaskId = "t2", Name = "backup", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
-            TargetId = "web", CreatedBy = "ops@example.com",
+            TargetId = "web", CreatedBy = "user:ops@example.com",
         });
 
         var cut = Render<ScheduledTasksView>();

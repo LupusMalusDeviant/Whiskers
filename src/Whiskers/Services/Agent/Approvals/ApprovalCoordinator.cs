@@ -94,8 +94,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
 
     private static (string actor, string actorType) ActorOf(AgentContext ctx)
     {
-        var p = ctx.Principal;
-        var actor = p.UserEmail ?? p.McpKeyId ?? p.DisplayName;
+        var actor = PrincipalIds.Of(ctx.Principal);
         var type = ctx.Origin switch
         {
             AgentOrigin.WebUi => "agent-web",

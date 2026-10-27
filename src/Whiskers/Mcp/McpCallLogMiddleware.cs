@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
@@ -146,9 +147,8 @@ public sealed class McpCallLogMiddleware
         {
             var key = authHeader["Bearer ".Length..];
             var cfg = perm?.ValidateKey(key);
-            var actor = cfg is not null
-                ? $"key:{(string.IsNullOrWhiteSpace(cfg.Name) ? cfg.Id : cfg.Name)}"
-                : "key:unbekannt";
+            // The key's id, not its name: a rename must not split one caller into two (INV-01).
+            var actor = cfg is not null ? PrincipalIds.Key(cfg.Id) : PrincipalIds.Anonymous;
             var allowed = perm?.IsToolAllowed(key, tool) ?? false;
             return (actor, allowed ? GuardrailVerdictOf(context) : "deny");
         }
@@ -156,13 +156,12 @@ public sealed class McpCallLogMiddleware
         // Cookie-authenticated web user POSTing directly to /mcp.
         if (context.User.Identity?.IsAuthenticated == true)
         {
-            var email = context.User.FindFirst(ClaimTypes.Email)?.Value
-                        ?? context.User.Identity.Name
-                        ?? "web";
-            return (email, GuardrailVerdictOf(context));
+            var email = context.User.FindFirst(ClaimTypes.Email)?.Value;
+            return (string.IsNullOrWhiteSpace(email) ? PrincipalIds.Anonymous : PrincipalIds.User(email),
+                GuardrailVerdictOf(context));
         }
 
-        return ("anonym", "deny");
+        return (PrincipalIds.Anonymous, "deny");
     }
 
     /// <summary>The guardrail filter's verdict for this request ("allow", "confirm", "deny"); "allow" when it did
