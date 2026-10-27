@@ -21,6 +21,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
 {
     private const string Admin = "admin@example.com";
     private readonly Scheduler _scheduler = new();
+    private readonly NullAudit _audit = new();
 
     public ScheduledTasksTakeoverTests()
     {
@@ -32,7 +33,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
         Services.AddSingleton<IDockerService>(new FakeDocker());
         Services.AddSingleton<IServerConfigService>(new FakeServerConfig());
         Services.AddSingleton<ICurrentUserService>(new AdminUser());
-        Services.AddSingleton<IAuditLogService>(new NullAudit());
+        Services.AddSingleton<IAuditLogService>(_audit);
         Services.AddSingleton<IUiMutationRunner>(new PassThrough());
         Services.AddSingleton<IAutomationOwnerResolver>(new Owners());
         JSInterop.Mode = JSRuntimeMode.Loose;
@@ -53,6 +54,72 @@ public class ScheduledTasksTakeoverTests : BunitContext
         cut.FindAll("button").First(b => b.TextContent.Contains("ScheduledTasksView_Button_AdoptAll")).Click();
 
         Assert.Equal([("t1", PrincipalIds.User(Admin))], _scheduler.OwnerChanges);
+    }
+
+    [Theory]
+    [InlineData(null)]                 // created before provenance was recorded
+    [InlineData("agent:session-1")]    // created by an agent
+    public void An_admin_can_take_over_their_own_task_that_runs_with_agent_rules(string? createdVia)
+    {
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t3", Name = "mine", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web", CreatedBy = PrincipalIds.User(Admin), CreatedVia = createdVia,
+        });
+
+        var cut = Render<ScheduledTasksView>();
+        cut.Find("button[title='ScheduledTasksView_Tooltip_Adopt']").Click();
+
+        Assert.Equal([("t3", PrincipalIds.User(Admin))], _scheduler.OwnerChanges);
+    }
+
+    [Fact]
+    public void An_admins_own_task_created_by_hand_offers_no_takeover()
+    {
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t4", Name = "mine", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web", CreatedBy = PrincipalIds.User(Admin), CreatedVia = PrincipalIds.User(Admin),
+        });
+
+        var cut = Render<ScheduledTasksView>();
+
+        Assert.Empty(cut.FindAll("button[title='ScheduledTasksView_Tooltip_Adopt']"));
+    }
+
+    [Theory]
+    [InlineData(true, "ScheduledTasksView_Alert_UnownedRefused")]
+    [InlineData(false, "ScheduledTasksView_Alert_Unowned")]
+    public void The_unowned_banner_says_what_the_owner_rule_does(bool requireOwner, string expected)
+    {
+        Services.Configure<AutomationOptions>(o => o.RequireOwner = requireOwner);
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t5", Name = "old", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web",
+        });
+
+        var cut = Render<ScheduledTasksView>();
+
+        Assert.Contains(expected, cut.Markup);
+        if (!requireOwner) Assert.DoesNotContain("ScheduledTasksView_Alert_UnownedRefused", cut.Markup);
+    }
+
+    [Fact]
+    public void A_takeover_from_a_stale_page_changes_nothing_and_audits_nothing()
+    {
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t6", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web", CreatedBy = "key:gone",
+        });
+        var cut = Render<ScheduledTasksView>();
+        _scheduler.ChangedMeanwhile["t6"] = "user:bea@example.com";   // another admin took it over first
+
+        cut.Find("button[title='ScheduledTasksView_Tooltip_Adopt']").Click();
+
+        Assert.Empty(_scheduler.OwnerChanges);
+        Assert.DoesNotContain(_audit.Entries, e => e.Action == "task.adopt");
     }
 
     [Fact]
@@ -79,10 +146,18 @@ public class ScheduledTasksTakeoverTests : BunitContext
         public Task UpdateTaskAsync(ScheduledTaskEntity task) => throw new NotSupportedException();
         public Task DeleteTaskAsync(string taskId) => throw new NotSupportedException();
         public Task<(bool Success, string Output)> RunNowAsync(string taskId) => throw new NotSupportedException();
-        public Task<bool> SetOwnerAsync(string taskId, string ownerId, string? createdVia = null)
+        /// <summary>The owner as it is "in the database" now, when another admin changed it after the page rendered.</summary>
+        public Dictionary<string, string> ChangedMeanwhile { get; } = new(StringComparer.Ordinal);
+
+        public Task<bool> SetOwnerAsync(string taskId, string ownerId, string? expectedOwnerId, string? createdVia = null)
         {
+            var task = Tasks.First(t => t.TaskId == taskId);
+            var current = ChangedMeanwhile.GetValueOrDefault(taskId) ?? task.CreatedBy;
+            if (!string.Equals(string.IsNullOrWhiteSpace(current) ? null : current,
+                    string.IsNullOrWhiteSpace(expectedOwnerId) ? null : expectedOwnerId, StringComparison.Ordinal))
+                return Task.FromResult(false);
             OwnerChanges.Add((taskId, ownerId));
-            Tasks.First(t => t.TaskId == taskId).CreatedBy = ownerId;
+            task.CreatedBy = ownerId;
             return Task.FromResult(true);
         }
         public Task<List<TaskRunHistoryEntity>> GetHistoryAsync(string? taskId = null, int limit = 50) =>
@@ -105,8 +180,13 @@ public class ScheduledTasksTakeoverTests : BunitContext
 
     private sealed class NullAudit : IAuditLogService
     {
+        public List<(string Action, string? Details)> Entries { get; } = [];
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
-            string targetName, string? details = null, string? serverId = null, bool success = true) => Task.CompletedTask;
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            Entries.Add((action, details));
+            return Task.CompletedTask;
+        }
         public Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0, string? actionFilter = null,
             string? targetTypeFilter = null) => Task.FromResult(new List<AuditLogEntity>());
         public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);

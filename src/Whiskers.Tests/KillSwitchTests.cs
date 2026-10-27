@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
@@ -105,6 +106,419 @@ public sealed class KillSwitchTests : IDisposable
             Assert.Empty(f.Approvals.GetAll());
             Assert.Contains(f.Audit.Events, e => e == $"denied:{MutationStatus.Denied}");
             Assert.DoesNotContain(f.Audit.Events, e => e.StartsWith("complete:", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task AutoUpdate_and_AutoPatch_are_suspended_when_their_owner_lost_authority()
+    {
+        // The owner's local account was deleted; whitelist and role entries were left behind (R1-04).
+        const string owner = "user:ops@example.com";
+        AutomationMutationRunnerTests.Fixture Lost()
+        {
+            var f = AutomationMutationRunnerTests.Build();
+            f.Whitelist.Allowed.Add("ops@example.com");
+            f.Roles.Map["ops@example.com"] = AppRole.Admin;
+            f.Accounts.Deleted.Add("ops@example.com");
+            return f;
+        }
+
+        var updated = Lost();
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.UpdatePolicies.Add(new UpdatePolicyEntity
+            {
+                ContainerId = "web-1", ContainerName = "web", ServerId = "local", AutoUpdate = true, NotifyBeforeUpdate = false,
+            });
+            await db.SaveChangesAsync();
+        }
+        var updates = new UpdatesAvailable();
+        updates.Set(new ImageUpdateInfo { ContainerId = "web-1", ContainerName = "web", ServerId = "local", UpdateAvailable = true });
+        var updateOwners = new MemoryAutomationOwners { FailToPersist = true };
+        await updateOwners.SetAsync(IAutomationOwnerStore.AutoUpdate, owner);
+        var updateNotes = new FakeNotifications();
+        var autoUpdate = new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(),
+            new FakeDocker(new ContainerInfo { Id = "web-1", Name = "web", ServerId = "local", State = "running", Image = "web:1" }),
+            updates, updateNotes, null!, updated.Runner, updateOwners, NullLogger<AutoUpdateService>.Instance);
+        await autoUpdate.CheckAndUpdateAsync(CancellationToken.None);
+
+        var patched = Lost();
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        var patchOwners = new MemoryAutomationOwners();
+        await patchOwners.SetAsync(IAutomationOwnerStore.AutoPatch, owner);
+        var script = new AutoPatchTests.RecordingRunner();
+        var autoPatch = AutoPatchTests.NewService(script, cves, patched.Runner, patchOwners,
+            new AutoPatchSettings { Enabled = true, DryRun = false }, AutoPatchTests.Compose("a"));
+        await autoPatch.RunNightlyAsync(CancellationToken.None);
+
+        Assert.True(updateOwners.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+        Assert.Contains("account deleted", updateOwners.Suspended[IAutomationOwnerStore.AutoUpdate]);
+        // The admins are told it was suspended, with the reason and how to take it over — not just "update failed".
+        var suspended = Assert.Single(updateNotes.Events, e => e.EventType == "automation_suspended");
+        Assert.Contains("account deleted", suspended.ImageInfo);
+        Assert.Contains("Automation owners", suspended.ImageInfo);
+        Assert.Contains("could not be saved", suspended.ImageInfo);   // a store that failed to write says so
+        Assert.True(patchOwners.IsBlocked(IAutomationOwnerStore.AutoPatch));
+        Assert.Empty(script.Calls);
+    }
+
+    [Fact]
+    public async Task AutoPatch_is_suspended_when_its_owner_loses_authority_half_way_through_a_cycle()
+    {
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);
+        f.Whitelist.Allowed.Add("ops@example.com");
+        f.Roles.Map["ops@example.com"] = AppRole.Admin;
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        cves.Set(AutoPatchTests.Scan("b", "local", (CveSeverity.Critical, "1")));
+        cves.Set(AutoPatchTests.Scan("c", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners { FailToPersist = true };
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:ops@example.com");
+        // The owner is demoted right after the first container was patched.
+        var script = new AutoPatchTests.RecordingRunner
+        {
+            AfterPatch = _ => f.Roles.Map["ops@example.com"] = AppRole.Viewer,
+        };
+        var notes = new FakeNotifications();
+        var autoPatch = AutoPatchTests.NewService(script, cves, f.Runner, owners,
+            new AutoPatchSettings { Enabled = true, DryRun = false }, notes,
+            AutoPatchTests.Compose("a"), AutoPatchTests.Compose("b"), AutoPatchTests.Compose("c"));
+
+        await autoPatch.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Single(script.Calls);                                    // stopped, not refused container by container
+        Assert.True(owners.IsBlocked(IAutomationOwnerStore.AutoPatch));
+        Assert.Contains(notes.Events, e => e.EventType == "automation_suspended" && e.ContainerName == "AutoPatch"
+                                           && e.ImageInfo!.Contains("could not be saved"));
+        Assert.Contains("suspended", autoPatch.LastCycle!.Error);
+    }
+
+    [Fact]
+    public async Task A_stale_scheduler_run_never_switches_off_a_task_an_admin_took_over_meanwhile()
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.ScheduledTasks.Add(new ScheduledTaskEntity
+            {
+                TaskId = "t1", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+                TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+            });
+            await db.SaveChangesAsync();
+        }
+        var suspender = new ScheduledTaskSuspender(_sp.GetRequiredService<IServiceScopeFactory>());
+        // The run loaded the task under ops@; its owner is removed from the whitelist (authority lost).
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);
+        var stale = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart, TargetId = "web-1",
+            Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+        };
+        // Meanwhile an admin takes the task over.
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var task = db.ScheduledTasks.Single(t => t.TaskId == "t1");
+            task.CreatedBy = task.CreatedVia = "user:lea@example.com";
+            await db.SaveChangesAsync();
+        }
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify, suspender: suspender);
+
+        var (success, _) = await executor.ExecuteAsync(stale);
+
+        Assert.False(success);
+        Assert.True(stale.Enabled);
+        Assert.DoesNotContain(notify.Events, e => e.EventType == "automation_suspended");
+        using (var scope = _sp.CreateScope())
+            Assert.True(scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ScheduledTasks.Single().Enabled);
+        // The assignment the run belongs to is still suspended when nobody took it over.
+        Assert.True(await suspender.SuspendAsync("t1", "user:lea@example.com"));
+        Assert.False(await suspender.SuspendAsync("t1", "user:lea@example.com"));   // already off
+    }
+
+    [Theory]
+    [InlineData("user:ops@example.com", true)]
+    [InlineData("user:bea@example.com", false)]   // another admin took it over after the page rendered
+    [InlineData(null, false)]                     // it has an owner, so "unowned" is stale too
+    public async Task A_takeover_only_replaces_the_owner_the_page_showed(string? expected, bool replaced)
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.ScheduledTasks.Add(new ScheduledTaskEntity
+            {
+                TaskId = "t7", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+                TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "agent:s1",
+            });
+            await db.SaveChangesAsync();
+        }
+        var scheduler = new SchedulerService(_sp.GetRequiredService<IServiceScopeFactory>(), null!, null!,
+            NullLogger<SchedulerService>.Instance);
+
+        Assert.Equal(replaced, await scheduler.SetOwnerAsync("t7", "user:lea@example.com", expected));
+
+        using (var scope = _sp.CreateScope())
+        {
+            var task = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ScheduledTasks.Single(t => t.TaskId == "t7");
+            Assert.Equal(replaced ? "user:lea@example.com" : "user:ops@example.com", task.CreatedBy);
+            Assert.Equal(replaced ? "user:lea@example.com" : "agent:s1", task.CreatedVia);
+        }
+    }
+
+    [Fact]
+    public async Task A_failed_suspension_still_tells_an_admin_and_leaves_the_task_refused()
+    {
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);   // ops@ is not on the whitelist: lost
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify, suspender: new ThrowingSuspender());
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t8", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+            TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+        };
+
+        var (success, output) = await executor.ExecuteAsync(task);
+
+        Assert.False(success);
+        Assert.StartsWith("Refused:", output);
+        var evt = Assert.Single(notify.Events);
+        Assert.Equal("automation_refused", evt.EventType);
+        Assert.Contains("switching the task off failed", evt.ImageInfo, StringComparison.OrdinalIgnoreCase);
+        Assert.True(task.Enabled);   // nothing claims it was switched off
+    }
+
+    private sealed class ThrowingSuspender : IScheduledTaskSuspender
+    {
+        public Task<bool> SuspendAsync(string taskId, string? expectedOwnerId, CancellationToken ct = default) =>
+            throw new InvalidOperationException("database is locked");
+    }
+
+    [Fact]
+    public async Task The_runs_result_save_never_overwrites_a_takeover_that_switched_the_task_on_again()
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.ScheduledTasks.Add(new ScheduledTaskEntity
+            {
+                TaskId = "t9", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+                TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+            });
+            await db.SaveChangesAsync();
+        }
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);   // ops@ is not on the whitelist: lost
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: new FakeNotifications(),
+            suspender: new ScheduledTaskSuspender(_sp.GetRequiredService<IServiceScopeFactory>()));
+
+        // The scheduler's own context: it loads the task, runs it, and saves the result afterwards.
+        using var runScope = _sp.CreateScope();
+        var runDb = runScope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var tracked = runDb.ScheduledTasks.Single(t => t.TaskId == "t9");
+        var (success, output) = await executor.ExecuteAsync(tracked);
+        Assert.False(success);
+        Assert.StartsWith("Suspended:", output);
+
+        // Before that save, an admin takes the task over and switches it on again.
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var task = db.ScheduledTasks.Single(t => t.TaskId == "t9");
+            Assert.False(task.Enabled);                                    // the conditional suspension happened
+            task.CreatedBy = task.CreatedVia = "user:lea@example.com";
+            task.Enabled = true;
+            await db.SaveChangesAsync();
+        }
+        tracked.LastResult = output;
+        await runDb.SaveChangesAsync();
+
+        using (var scope = _sp.CreateScope())
+        {
+            var task = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ScheduledTasks.Single(t => t.TaskId == "t9");
+            Assert.True(task.Enabled);
+            Assert.Equal("user:lea@example.com", task.CreatedBy);
+        }
+    }
+
+    [Fact]
+    public async Task An_ownerless_AutoUpdate_is_suspended_with_the_real_owner_store_and_the_admins_are_told()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        try
+        {
+            var owners = new AutomationOwnerStore(new DataPathOptions(dir), NullLogger<AutomationOwnerStore>.Instance);
+            var f = AutomationMutationRunnerTests.Build(requireOwner: true);   // the 1.0 default
+            using (var scope = _sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+                db.UpdatePolicies.Add(new UpdatePolicyEntity
+                {
+                    ContainerId = "web-1", ContainerName = "web", ServerId = "local", AutoUpdate = true, NotifyBeforeUpdate = false,
+                });
+                await db.SaveChangesAsync();
+            }
+            var updates = new UpdatesAvailable();
+            updates.Set(new ImageUpdateInfo { ContainerId = "web-1", ContainerName = "web", ServerId = "local", UpdateAvailable = true });
+            var notes = new FakeNotifications();
+            var autoUpdate = new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(),
+                new FakeDocker(new ContainerInfo { Id = "web-1", Name = "web", ServerId = "local", State = "running", Image = "web:1" }),
+                updates, notes, null!, f.Runner, owners, NullLogger<AutoUpdateService>.Instance);
+
+            await autoUpdate.CheckAndUpdateAsync(CancellationToken.None);
+
+            Assert.True(owners.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+            Assert.Contains(notes.Events, e => e.EventType == "automation_suspended" && e.ContainerName == "AutoUpdate");
+            Assert.True(new AutomationOwnerStore(new DataPathOptions(dir), NullLogger<AutomationOwnerStore>.Instance)
+                .IsBlocked(IAutomationOwnerStore.AutoUpdate));   // kept across a restart
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_stale_cycle_never_suspends_the_admin_who_took_AutoPatch_over_meanwhile()
+    {
+        // A runs the cycle; between two containers Admin B takes AutoPatch over and A is demoted. The stale cycle
+        // stops, but B's assignment stays active.
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);
+        f.Whitelist.Allowed.Add("ops@example.com");
+        f.Whitelist.Allowed.Add("lea@example.com");
+        f.Roles.Map["ops@example.com"] = AppRole.Admin;
+        f.Roles.Map["lea@example.com"] = AppRole.Admin;
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        cves.Set(AutoPatchTests.Scan("b", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:ops@example.com");
+        var script = new AutoPatchTests.RecordingRunner
+        {
+            AfterPatch = _ =>
+            {
+                owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:lea@example.com").GetAwaiter().GetResult();
+                f.Roles.Map["ops@example.com"] = AppRole.Viewer;
+            },
+        };
+        var notes = new FakeNotifications();
+        var autoPatch = AutoPatchTests.NewService(script, cves, f.Runner, owners,
+            new AutoPatchSettings { Enabled = true, DryRun = false }, notes,
+            AutoPatchTests.Compose("a"), AutoPatchTests.Compose("b"));
+
+        await autoPatch.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Single(script.Calls);
+        Assert.False(owners.IsBlocked(IAutomationOwnerStore.AutoPatch));
+        Assert.Equal("user:lea@example.com", owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
+        Assert.DoesNotContain(notes.Events, e => e.EventType == "automation_suspended");
+    }
+
+    [Fact]
+    public void A_deleted_local_account_ends_authority_with_local_and_with_mixed_sign_in()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"identity-{Guid.NewGuid():N}.db");
+        var dataDir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddDbContext<WhiskersIdentityDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
+            using var sp = services.BuildServiceProvider();
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Database.EnsureCreated();
+                db.Users.Add(new AppUser
+                {
+                    Id = "u1", UserName = "ops@example.com", NormalizedUserName = "OPS@EXAMPLE.COM",
+                    Email = "ops@example.com", NormalizedEmail = "OPS@EXAMPLE.COM",
+                });
+                db.SaveChanges();
+            }
+            IConfiguration Config(params (string, string)[] values) =>
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                    .AddInMemoryCollection(values.ToDictionary(v => v.Item1, v => (string?)v.Item2)).Build();
+            var scopes = sp.GetRequiredService<IServiceScopeFactory>();
+
+            var local = new OwnerAccounts(scopes, Config());
+            Assert.True(local.Exists("Ops@Example.com"));
+            Assert.False(local.Exists("gone@example.com"));
+
+            // Mixed sign-in: local login stays available next to OIDC. A user without a local row is unverified
+            // (refused) until seen signed in federated; a user who had a local account and lost it is deleted.
+            var paths = new DataPathOptions(dataDir);
+            var mixed = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.Equal(OwnerAccountState.Unverified, mixed.StateOf("federated@example.com"));
+            mixed.RememberFederated("Federated@Example.com");
+            Assert.True(mixed.Exists("federated@example.com"));
+            Assert.True(mixed.Exists("ops@example.com"));
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Users.Remove(db.Users.Single(u => u.Id == "u1"));
+                db.SaveChanges();
+            }
+            Assert.Equal(OwnerAccountState.Deleted, mixed.StateOf("ops@example.com"));
+            Assert.True(mixed.Exists("federated@example.com"));
+            // Deleted before the record began (missing history): never seen at all → unverified, not federated.
+            Assert.Equal(OwnerAccountState.Unverified, mixed.StateOf("deleted-before-upgrade@example.com"));
+            // Remembered across restarts.
+            var restarted = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.False(restarted.Exists("ops@example.com"));
+
+            // Startup records the accounts before anything is looked up: an account deleted after startup but
+            // before its owner's first run is still known, and the owner resolver reports it as deleted.
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Users.Add(new AppUser
+                {
+                    Id = "u2", UserName = "lea@example.com", NormalizedUserName = "LEA@EXAMPLE.COM",
+                    Email = "lea@example.com", NormalizedEmail = "LEA@EXAMPLE.COM",
+                });
+                db.SaveChanges();
+            }
+            var booted = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            booted.RememberLocalAccounts();
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Users.Remove(db.Users.Single(u => u.Id == "u2"));
+                db.SaveChanges();
+            }
+            var f = AutomationMutationRunnerTests.Build();
+            f.Whitelist.Allowed.Add("lea@example.com");
+            f.Roles.Map["lea@example.com"] = AppRole.Admin;
+            var resolver = new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, booted);
+            Assert.Equal(OwnerState.AccountDeleted, resolver.Describe("user:lea@example.com").State);
+
+            // A lost record starts over: owners without a local row are unverified again, not federated.
+            File.Delete(paths.KnownLocalAccountsJson);
+            var lost = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.Equal(OwnerAccountState.Unverified, lost.StateOf("federated@example.com"));
+            Assert.Equal(OwnerState.Unverified, new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, lost)
+                .Describe("user:federated@example.com").State);
+            lost.RememberFederated("federated@example.com");
+
+            // An unreadable record of local accounts fails closed for owners without a local row.
+            File.WriteAllText(paths.KnownLocalAccountsJson, "{ not json");
+            var broken = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.False(broken.Exists("federated@example.com"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { File.Delete(dbPath); } catch (IOException) { }
+            try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { }
         }
     }
 

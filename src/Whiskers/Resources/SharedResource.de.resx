@@ -4737,7 +4737,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Besitzer der Automatisierung</value>
   </data>
   <data name="AutomationOwners_Intro" xml:space="preserve">
-    <value>Unbeaufsichtigte Automatisierung läuft mit der Berechtigung eines Besitzers, die bei jedem Lauf neu geprüft wird. AutoPatch läuft erst, wenn ein Admin es übernommen hat; AutoUpdate läuft während der Übergangszeit auch ohne Besitzer weiter.</value>
+    <value>Unbeaufsichtigte Automatisierung läuft mit der Befugnis eines Besitzers, die bei jedem Lauf neu geprüft wird. AutoPatch läuft erst, wenn ein Admin es übernommen hat. AutoUpdate und geplante Aufgaben ohne Besitzer werden ebenfalls abgelehnt – außer die Übergangszeit wurde mit Automation:RequireOwner=false eingeschaltet (sie gilt nicht für AutoPatch).</value>
   </data>
   <data name="AutomationOwners_AutoPatch" xml:space="preserve">
     <value>AutoPatch (nächtliche Sicherheits-Patches)</value>
@@ -4810,5 +4810,26 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="AutomationOwners_State_Unrecognised" xml:space="preserve">
     <value>Unbekannter Besitzer aus einer älteren Version – Läufe werden abgelehnt, bis ein Admin übernimmt.</value>
+  </data>
+  <data name="AutomationOwners_Suspended" xml:space="preserve">
+    <value>Ausgesetzt: Besitzer {0} hat keine Befugnis mehr. Es läuft erst wieder, wenn ein Admin übernimmt.</value>
+  </data>
+  <data name="AutomationOwners_State_AccountDeleted" xml:space="preserve">
+    <value>Konto gelöscht – Läufe werden abgelehnt.</value>
+  </data>
+  <data name="AutomationOwners_NoOwner_AutoUpdate_Refused" xml:space="preserve">
+    <value>Kein Besitzer: Updates werden abgelehnt, bis ein Admin AutoUpdate übernimmt.</value>
+  </data>
+  <data name="AutomationOwners_State_Unverified" xml:space="preserve">
+    <value>Anmeldung noch nicht bestätigt – Läufe werden abgelehnt, bis sich der Besitzer einmal anmeldet oder ein Admin übernimmt.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_AdoptedStillOff" xml:space="preserve">
+    <value>„{0}“ ist noch ausgeschaltet. Schalte die Aufgabe ein, damit sie wieder läuft.</value>
+  </data>
+  <data name="ScheduledTasksView_Alert_UnownedRefused" xml:space="preserve">
+    <value>{0} Aufgabe(n) stammen aus der Zeit, bevor Besitzer gespeichert wurden. Sie werden beim nächsten Lauf abgelehnt und ausgeschaltet; übernimm sie (und schalte sie wieder ein), damit sie mit der Berechtigung eines Besitzers laufen.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_OwnerChanged" xml:space="preserve">
+    <value>Der Besitzer von „{0}“ hat sich inzwischen geändert, die Aufgabe wurde deshalb nicht übernommen. Die Liste wird neu geladen; prüfe den neuen Besitzer und versuche es erneut.</value>
   </data>
 </root>

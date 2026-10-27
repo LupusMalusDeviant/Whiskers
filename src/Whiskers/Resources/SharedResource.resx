@@ -4737,7 +4737,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Automation owners</value>
   </data>
   <data name="AutomationOwners_Intro" xml:space="preserve">
-    <value>Unattended automation runs on the authority of an owner, re-checked on every run. AutoPatch does not run until an admin has taken it over; AutoUpdate keeps running without an owner during the grace period.</value>
+    <value>Unattended automation runs on the authority of an owner, re-checked on every run. AutoPatch never runs until an admin has taken it over. AutoUpdate and scheduled tasks without an owner are refused as well, unless the grace period was switched on with Automation:RequireOwner=false (it does not apply to AutoPatch).</value>
   </data>
   <data name="AutomationOwners_AutoPatch" xml:space="preserve">
     <value>AutoPatch (nightly security patches)</value>
@@ -4810,5 +4810,26 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="AutomationOwners_State_Unrecognised" xml:space="preserve">
     <value>Unrecognised owner from an older version — runs are refused until an admin takes it over.</value>
+  </data>
+  <data name="AutomationOwners_Suspended" xml:space="preserve">
+    <value>Suspended: its owner {0} lost their authority. It does not run until an admin takes it over.</value>
+  </data>
+  <data name="AutomationOwners_State_AccountDeleted" xml:space="preserve">
+    <value>Account deleted — runs are refused.</value>
+  </data>
+  <data name="AutomationOwners_NoOwner_AutoUpdate_Refused" xml:space="preserve">
+    <value>No owner: updates are refused until an admin takes AutoUpdate over.</value>
+  </data>
+  <data name="AutomationOwners_State_Unverified" xml:space="preserve">
+    <value>Sign-in not verified yet — runs are refused until the owner signs in once or an admin takes over.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_AdoptedStillOff" xml:space="preserve">
+    <value>"{0}" is still switched off. Switch it on to let it run again.</value>
+  </data>
+  <data name="ScheduledTasksView_Alert_UnownedRefused" xml:space="preserve">
+    <value>{0} task(s) were created before owners were recorded. They are refused and switched off on their next run; take them over (and switch them on again) so they run with an owner's authority.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_OwnerChanged" xml:space="preserve">
+    <value>The owner of "{0}" changed in the meantime, so it was not taken over. The list is reloaded; check the new owner and try again.</value>
   </data>
 </root>

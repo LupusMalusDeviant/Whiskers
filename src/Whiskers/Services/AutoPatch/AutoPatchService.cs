@@ -104,6 +104,11 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
     }
 
+    private const string NightlyRunner = "autopatch";
+
+    internal const string SuspensionNotSaved =
+        " The suspension could not be saved: it holds only until Whiskers restarts — take it over or switch it off now.";
+
     /// <summary>The nightly cycle, on the authority of the admin who took AutoPatch over. Without one it does not run:
     /// the configuration switch alone is not an owner. Internal for tests.</summary>
     internal async Task RunNightlyAsync(CancellationToken ct)
@@ -123,13 +128,49 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
 
         var dryRun = _settings.CurrentValue.DryRun;
-        var actor = new AutomationActor("autopatch", "AutoPatch", owner);
+        // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
+        var actor = new AutomationActor(NightlyRunner, "AutoPatch", owner, owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
             new { dryRun }, async token => MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
+        {
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
+            await SuspendIfOwnerLostAsync(actor, "autopatch.run", ct);
+        }
         else if (outcome.Status == MutationStatus.Failed)
             _logger.LogError(outcome.Error, "Auto-patch cycle failed: {Reason}", outcome.Reason);
+    }
+
+    /// <summary>The owner lost their authority (PC-D6): AutoPatch is suspended until an admin takes it over, and the
+    /// admins are told. A refusal by policy leaves it on.</summary>
+    private async Task<bool> SuspendIfOwnerLostAsync(AutomationActor actor, string capabilityId, CancellationToken ct)
+    {
+        if (_automation.LostAuthority(actor, capabilityId) is not { } lost) return false;
+        var result = await _owners.SuspendAsync(IAutomationOwnerStore.AutoPatch, actor.OwnerId!, lost, ct);
+        if (result == SuspendResult.Superseded)
+        {
+            // An admin took AutoPatch over while this cycle ran on the old owner: stop the stale cycle, keep the new one.
+            _logger.LogWarning("AutoPatch cycle stopped: its owner lost authority ({Reason}), and AutoPatch has a new " +
+                               "owner since the cycle started", lost);
+            return true;
+        }
+        var saved = result == SuspendResult.Suspended;
+        _logger.LogError("AutoPatch was suspended: {Reason}. Take it over again in Settings → Automation owners", lost);
+        try
+        {
+            await _notifications.SendAsync(new NotificationEvent
+            {
+                EventType = "automation_suspended",
+                ContainerName = "AutoPatch",
+                ImageInfo = $"AutoPatch was suspended: {lost}. It stays off until an admin takes it over in Settings."
+                            + (saved ? "" : SuspensionNotSaved),
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Notification for the suspended AutoPatch failed");
+        }
+        return true;
     }
 
     /// <summary>One container of an owned cycle, decided as <c>container.update</c> of exactly that container: the
@@ -234,6 +275,16 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
             if (outcome.Attempted) await RecordHistoryAsync(c, outcome, startedAt);
             if (outcome.NeedsAttention) await NotifyAsync(c, outcome);
+
+            // The owner lost their authority half-way (a key revoked, a demotion between two containers): the nightly
+            // cycle is suspended and stops here, it does not carry on refusing container after container (R1-04).
+            // A preview runs on the authority of the person who started it and suspends nothing.
+            if (outcome.Kind == AutoPatchResultKind.Aborted && actor.RunnerId == NightlyRunner
+                && await SuspendIfOwnerLostAsync(actor, "container.update", ct))
+            {
+                LastCycle = LastCycle! with { Error = $"Stopped at {c.Name}: AutoPatch was suspended." };
+                break;
+            }
 
             // A rollback that could not be verified means a host is in a state nobody has looked at.
             // Carrying on would stack a second unknown on top of the first.

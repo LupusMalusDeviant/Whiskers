@@ -83,7 +83,19 @@ public class AutomationMutationRunnerTests
     }
 
     internal sealed record Fixture(AutomationMutationRunner Runner, PrincipalAudit Audit, Roles Roles,
-        Whitelist Whitelist, Keys Keys, AutomationOptions Options, ApprovalStore Approvals);
+        Whitelist Whitelist, Keys Keys, AutomationOptions Options, ApprovalStore Approvals, Accounts Accounts);
+
+    /// <summary>Local accounts: every email exists unless it was deleted.</summary>
+    internal sealed class Accounts : IOwnerAccounts
+    {
+        public HashSet<string> Deleted { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> Unverified { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool Exists(string email) => StateOf(email) == OwnerAccountState.Present;
+        public OwnerAccountState StateOf(string email) =>
+            Deleted.Contains(email) ? OwnerAccountState.Deleted
+            : Unverified.Contains(email) ? OwnerAccountState.Unverified
+            : OwnerAccountState.Present;
+    }
 
     internal static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null)
     {
@@ -91,14 +103,15 @@ public class AutomationMutationRunnerTests
         var whitelist = new Whitelist();
         var keys = new Keys();
         var options = new AutomationOptions { RequireOwner = requireOwner };
+        var accounts = new Accounts();
         var audit = new PrincipalAudit();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var approvals = new ApprovalStore();
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
             NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store));
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
-            new AutomationOwnerResolver(roles, whitelist, keys), new StaticOptionsMonitor<AutomationOptions>(options));
-        return new Fixture(runner, audit, roles, whitelist, keys, options, approvals);
+            new AutomationOwnerResolver(roles, whitelist, keys, accounts), new StaticOptionsMonitor<AutomationOptions>(options));
+        return new Fixture(runner, audit, roles, whitelist, keys, options, approvals, accounts);
     }
 
     private static Fixture WithOperator(bool requireOwner = false)
@@ -109,7 +122,7 @@ public class AutomationMutationRunnerTests
         return f;
     }
 
-    private static readonly AutomationActor Task1 = new("task:t1", "Scheduled task 'nightly'", OpsId);
+    private static readonly AutomationActor Task1 = new("task:t1", "Scheduled task 'nightly'", OpsId, OpsId);
 
     [Fact]
     public async Task An_owned_run_acts_on_behalf_of_its_owner_without_asking_for_approval()
@@ -377,23 +390,394 @@ public class AutomationMutationRunnerTests
     }
 
     [Fact]
-    public async Task A_refused_scheduled_task_reports_the_refusal_and_notifies()
+    public async Task A_task_whose_owner_lost_authority_is_suspended_and_an_admin_is_told()
     {
         var f = Build();   // ops@example.com is not on the whitelist → read
         var notify = new FakeNotifications();
         var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
             NullLogger<TaskExecutor>.Instance, notify: notify);
-
-        var (success, output) = await executor.ExecuteAsync(new ScheduledTaskEntity
+        var task = new ScheduledTaskEntity
         {
             TaskId = "t1", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart,
             TargetId = "web-1", CreatedBy = OpsId,
-        });
+        };
+
+        var (success, output) = await executor.ExecuteAsync(task);
 
         Assert.False(success);
-        Assert.False(string.IsNullOrWhiteSpace(output));
-        var evt = Assert.Single(notify.Events);
-        Assert.Equal("automation_refused", evt.EventType);
+        Assert.StartsWith("Suspended:", output);
+        Assert.False(task.Enabled);
+        Assert.Equal("automation_suspended", Assert.Single(notify.Events).EventType);
+        Assert.Equal(MutationStatus.Denied.ToString(), f.Audit.Events.Single(e => e.StartsWith("denied:")).Split(':')[1]);
+    }
+
+    /// <summary>Takes backups; holds three old ones, so retention wants to delete.</summary>
+    private sealed class Backups : Whiskers.Services.Backup.IVolumeBackupService
+    {
+        public List<string> Deleted { get; } = [];
+        public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null,
+            string? notes = null) => Task.FromResult(new VolumeBackupEntity { VolumeName = volumeName, FileName = "new.tar.gz" });
+        public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
+        public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) =>
+            Task.FromResult(Enumerable.Range(0, 3).Select(i => new VolumeBackupEntity
+            {
+                BackupId = $"b{i}", VolumeName = volumeName ?? "", CreatedAt = DateTime.UtcNow.AddDays(-i),
+            }).ToList());
+        public Task DeleteBackupAsync(string backupId) { Deleted.Add(backupId); return Task.CompletedTask; }
+        public Task<List<string>> ListVolumesAsync(string? serverId = null) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task A_backup_task_whose_owner_can_no_longer_delete_its_old_backups_is_suspended()
+    {
+        // An Admin set up a backup with retention, then was demoted to Operator: the backup itself (Write) still
+        // runs, but retention deletes (Admin) are refused every night. That is a lost authority for the task.
+        var f = WithOperator(requireOwner: true);
+        var notify = new FakeNotifications();
+        var backups = new Backups();
+        var executor = new TaskExecutor(new FakeDocker(), null!, backups, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify);
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "volumes", TaskType = ScheduledTaskType.VolumeBackup,
+            TargetId = "data", CreatedBy = OpsId, CreatedVia = OpsId, Config = """{"maxBackups":"1"}""",
+        };
+
+        var (success, output) = await executor.ExecuteAsync(task);
+
+        Assert.False(success);
+        Assert.StartsWith("Suspended:", output);
+        Assert.False(task.Enabled);
+        Assert.Empty(backups.Deleted);
+        Assert.Equal("automation_suspended", Assert.Single(notify.Events).EventType);
+    }
+
+    [Fact]
+    public async Task An_unverified_owner_is_refused_but_the_task_is_not_suspended()
+    {
+        // Mixed sign-in, owner not yet seen signed in federated (R1-04): fail closed, but the task runs again as soon
+        // as the owner signs in once — it is not switched off.
+        var f = WithOperator(requireOwner: true);
+        f.Accounts.Unverified.Add(Ops);
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify);
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart,
+            TargetId = "web-1", CreatedBy = OpsId, CreatedVia = OpsId,
+        };
+
+        var (success, _) = await executor.ExecuteAsync(task);
+
+        Assert.False(success);
+        Assert.True(task.Enabled);
+        Assert.Equal("automation_refused", Assert.Single(notify.Events).EventType);
+        Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
+    }
+
+    [Theory]
+    [InlineData("OpenIdConnect", "ops@example.com")]
+    [InlineData("Google", "ops@example.com")]
+    [InlineData("LocalPassword", null)]
+    [InlineData("AuthDisabled", null)]
+    [InlineData("AgentSynthetic", null)]
+    [InlineData("McpBearer", null)]
+    public void Only_a_federated_sign_in_is_recorded_as_one(string authenticationType, string? expected)
+    {
+        var user = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Email, Ops)], authenticationType));
+        Assert.Equal(expected, FederatedSignInRecorder.FederatedEmailOf(user));
+        Assert.Null(FederatedSignInRecorder.FederatedEmailOf(new System.Security.Claims.ClaimsPrincipal()));
+    }
+
+    [Fact]
+    public async Task A_task_refused_by_policy_stays_enabled_and_reports_the_refusal()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ReadOnlyMode = true;   // kill switch: a policy refusal, not a lost authority
+        var f = Build(policy: policy);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Operator;
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify);
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart,
+            TargetId = "web-1", CreatedBy = OpsId,
+        };
+
+        var (success, _) = await executor.ExecuteAsync(task);
+
+        Assert.False(success);
+        Assert.True(task.Enabled);
+        Assert.Equal("automation_refused", Assert.Single(notify.Events).EventType);
+    }
+
+    // --- R1-04: authority loss and delegation ----------------------------------------------------------------
+
+    public static TheoryData<string, string> LostAuthorityCases => new()
+    {
+        { "account-deleted", "container.restart" },
+        { "whitelist-removed", "container.restart" },
+        { "demoted-to-viewer", "container.restart" },
+        { "demoted-below-capability", "host.exec" },
+        { "key-deleted", "container.restart" },
+        { "key-disabled", "container.restart" },
+        { "key-lowered", "host.exec" },
+        { "unrecognised-owner", "container.restart" },
+        { "no-owner", "container.restart" },
+    };
+
+    [Theory]
+    [MemberData(nameof(LostAuthorityCases))]
+    public async Task An_owner_who_lost_authority_is_refused_and_reported_as_lost(string change, string capability)
+    {
+        var f = Build(requireOwner: true);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Admin;
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = "admin" });
+        var owner = change.StartsWith("key", StringComparison.Ordinal) ? "key:k1" : OpsId;
+        var key = f.Keys.Data.ApiKeys[0];
+        switch (change)
+        {
+            case "account-deleted": f.Accounts.Deleted.Add(Ops); break;   // whitelist and role entries remain
+            case "whitelist-removed": f.Whitelist.Allowed.Clear(); break;
+            case "demoted-to-viewer": f.Roles.Map[Ops] = AppRole.Viewer; break;
+            case "demoted-below-capability": f.Roles.Map[Ops] = AppRole.Operator; break;
+            case "key-deleted": f.Keys.Data.ApiKeys.Clear(); break;
+            case "key-disabled": key.Enabled = false; break;
+            case "key-lowered": key.PermissionLevel = "write"; break;
+            case "unrecognised-owner": owner = "Claude Code"; break;
+            case "no-owner": owner = null; break;
+        }
+        var actor = new AutomationActor("task:t1", "Scheduled task 'nightly'", owner);
+        var ran = false;
+
+        var outcome = await f.Runner.RunAsync(actor, capability,
+            new { containerId = "web-1", serverId = "local", hasCommand = true }, _ => { ran = true; return Task.CompletedTask; });
+
+        Assert.False(ran);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.NotNull(f.Runner.LostAuthority(actor, capability));
+    }
+
+    [Fact]
+    public void An_owner_who_holds_the_capability_has_not_lost_authority()
+    {
+        var f = WithOperator();
+
+        Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
+        Assert.NotNull(f.Runner.LostAuthority(Task1, "host.exec"));   // Operator, but the capability needs Admin
+    }
+
+    [Fact]
+    public void Owners_are_required_by_default_and_the_grace_period_stays_available_explicitly()
+    {
+        Assert.True(new AutomationOptions().RequireOwner);
+        var f = Build(requireOwner: false);
+        Assert.Null(f.Runner.LostAuthority(new AutomationActor("task:t9", "legacy", null), "container.restart"));
+    }
+
+    private static AutomationActor AgentCreated(string capabilityTask = "t1") =>
+        new("task:" + capabilityTask, "Scheduled task 'nightly'", OpsId, CreatedVia: "agent:sess-1");
+
+    [Fact]
+    public async Task An_agent_created_task_keeps_the_agents_confirmation_rule()
+    {
+        var f = WithOperator();   // SafeDefault: the agent may act autonomously only up to read
+
+        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var agent = await f.Runner.RunAsync(AgentCreated(), "container.restart", new { containerId = "web-1" },
+            _ => Task.CompletedTask);
+
+        Assert.Equal(MutationStatus.Executed, human.Status);   // the user scheduled it by hand
+        Assert.Equal(MutationStatus.Denied, agent.Status);     // the agent's Confirm, unattended → refused
+        Assert.Empty(f.Approvals.GetAll());
+        Assert.Equal("agent:sess-1", f.Audit.Principals[1].DelegatedBy);
+    }
+
+    [Fact]
+    public async Task An_agent_created_task_keeps_the_agents_tool_list()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+        policy.RequireConfirmationForWrites = false;
+        policy.ToolMode = "allow";
+        policy.ToolAllowList = ["list_containers"];
+        var f = Build(policy: policy);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Operator;
+
+        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var agent = await f.Runner.RunAsync(AgentCreated(), "container.restart", new { containerId = "web-1" },
+            _ => Task.CompletedTask);
+
+        Assert.Equal(MutationStatus.Executed, human.Status);
+        Assert.Equal(MutationStatus.Denied, agent.Status);
+    }
+
+    [Fact]
+    public async Task An_owned_task_of_unknown_provenance_keeps_the_agents_rules_until_an_admin_takes_it_over()
+    {
+        // Created before provenance was recorded (R1-03): it may have come from an agent, so it does not get the
+        // rules for a person; taking it over records the admin as its provenance.
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+        policy.RequireConfirmationForWrites = false;
+        policy.ToolMode = "allow";
+        policy.ToolAllowList = ["list_containers"];
+        var f = Build(policy: policy);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Operator;
+
+        var legacy = await f.Runner.RunAsync(Task1 with { CreatedVia = null }, "container.restart",
+            new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var adopted = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
+            _ => Task.CompletedTask);
+        var ownerless = await Build(policy: policy).Runner.RunAsync(new AutomationActor("task:t2", "old", null),
+            "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+
+        Assert.Equal(MutationStatus.Denied, legacy.Status);
+        Assert.Equal(MutationStatus.Executed, adopted.Status);
+        Assert.Equal(MutationStatus.Executed, ownerless.Status);   // the grace period keeps its own rules
+    }
+
+    [Fact]
+    public void A_raised_level_and_a_key_tool_list_count_as_lost_authority()
+    {
+        // The same requirement the gateway enforces: a level raised in Settings, a key limited to other tools.
+        var f = WithOperator();
+        var raised = new AutomationMutationRunner(new MutationGateway(new CapabilityCatalog(),
+                AgentToolTestHelpers.Policy(new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault())),
+                new PrincipalAudit(), [], NullLogger<MutationGateway>.Instance),
+            new CapabilityCatalog(), new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts),
+            new StaticOptionsMonitor<AutomationOptions>(f.Options), new RaisedTo(McpPermissionLevels.Admin));
+        Assert.NotNull(raised.LostAuthority(Task1, "container.restart"));
+        Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
+
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig
+        {
+            Id = "k1", Name = "ci", PermissionLevel = McpPermissionLevels.Admin, Enabled = true,
+            AllowedTools = ["list_containers"],
+        });
+        var keyTask = new AutomationActor("task:t3", "ci", PrincipalIds.Key("k1"), PrincipalIds.Key("k1"));
+        Assert.Contains("may no longer use", f.Runner.LostAuthority(keyTask, "container.restart"));
+    }
+
+    private sealed class RaisedTo(string level) : ICapabilityOverrides
+    {
+        public CapabilityAvailability Resolve(Capability capability) => new(true, level);
+        public CapabilityAvailability ResolveTool(string toolName, string codeLevel) => new(true, level);
+    }
+
+    [Fact]
+    public async Task An_agent_created_task_keeps_the_agents_forbidden_arguments()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+        policy.RequireConfirmationForWrites = false;
+        policy.ForbiddenArgPatterns = [@"^web-1$"];
+        var f = Build(policy: policy);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Operator;
+
+        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var agent = await f.Runner.RunAsync(AgentCreated(), "container.restart", new { containerId = "web-1" },
+            _ => Task.CompletedTask);
+
+        Assert.Equal(MutationStatus.Executed, human.Status);
+        Assert.Equal(MutationStatus.Denied, agent.Status);
+        Assert.Null(f.Runner.LostAuthority(AgentCreated(), "container.restart"));   // a policy refusal: not suspended
+    }
+
+    [Fact]
+    public async Task A_takeover_returns_the_owner_it_actually_replaced()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new AutomationOwnerStore(new DataPathOptions(dir), NullLogger<AutomationOwnerStore>.Instance);
+            Assert.Null(await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId));
+            // Another admin took it over after this admin's page rendered OpsId.
+            Assert.Equal(OpsId, await store.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:bea@example.com"));
+            await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, "user:bea@example.com", "lost");
+
+            // Suspended: the replaced owner is still the one it kept for the record.
+            Assert.Equal("user:bea@example.com",
+                await store.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com"));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_suspension_that_cannot_be_saved_still_blocks_the_feature()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        var paths = new DataPathOptions(dir);
+        try
+        {
+            var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+            await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId);
+            Directory.CreateDirectory(paths.AutomationOwnersJson + ".tmp");   // the next write fails
+
+            var saved = await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, OpsId, "its owner has no authority left");
+
+            Assert.Equal(SuspendResult.NotSaved, saved);
+            Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+            Assert.Null(store.Get(IAutomationOwnerStore.AutoUpdate));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_suspended_feature_stays_blocked_across_restarts_until_taken_over()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        var paths = new DataPathOptions(dir);
+        try
+        {
+            var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+            await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId);
+            Assert.Equal(SuspendResult.Superseded,
+                await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, "user:someone-else@example.com", "stale run"));
+            Assert.Equal(SuspendResult.Suspended,
+                await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, OpsId, "its owner has no authority left"));
+
+            var restarted = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+            Assert.True(restarted.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+            Assert.Null(restarted.Get(IAutomationOwnerStore.AutoUpdate));
+            Assert.Equal(OpsId, restarted.GetBlocked(IAutomationOwnerStore.AutoUpdate)?.OwnerId);
+            Assert.False(restarted.IsBlocked(IAutomationOwnerStore.AutoPatch));
+
+            await restarted.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com");
+            Assert.False(restarted.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void A_takeover_records_the_old_and_the_new_authority()
+    {
+        var f = WithOperator();
+        f.Whitelist.Allowed.Add("admin@example.com");
+        f.Roles.Map["admin@example.com"] = AppRole.Admin;
+        f.Accounts.Deleted.Add(Ops);
+        var resolver = new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts);
+
+        Assert.Equal($"{OpsId} (AccountDeleted, read)", AutomationOwners.AuthorityOf(resolver, OpsId));
+        Assert.Equal("user:admin@example.com (Active, admin)", AutomationOwners.AuthorityOf(resolver, "user:admin@example.com"));
+        Assert.Equal("-", AutomationOwners.AuthorityOf(resolver, null));
     }
 
     /// <summary>Records every command it is asked to run.</summary>

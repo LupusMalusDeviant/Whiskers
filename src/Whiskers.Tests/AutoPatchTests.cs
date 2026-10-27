@@ -545,9 +545,14 @@ public class AutoPatchTests
     internal static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
         IAutomationMutationRunner automation, IAutomationOwnerStore owners, AutoPatchSettings settings,
         params ContainerInfo[] containers)
+        => NewService(runner, store, automation, owners, settings, new FakeNotifications(), containers);
+
+    internal static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
+        IAutomationMutationRunner automation, IAutomationOwnerStore owners, AutoPatchSettings settings,
+        FakeNotifications notifications, params ContainerInfo[] containers)
         => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
             new NoopImageUpdateStore(), runner,
-            new FakeNotifications(), new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            notifications, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             automation, owners, NullLogger<AutoPatchService>.Instance);
 
     /// <summary>Records who each decision runs as and runs the action in a scope like the gateway's, except for a
@@ -597,12 +602,15 @@ public class AutoPatchTests
     {
         public List<(string Server, string Name, bool DryRun)> Calls { get; } = new();
         public Dictionary<string, AutoPatchResultKind> Verdicts { get; } = new();
+        /// <summary>Runs after each patch, e.g. to revoke the owner half-way through a cycle.</summary>
+        public Action<string>? AfterPatch { get; set; }
 
         public Task<(AutoPatchOutcome Outcome, string LogTail)> PatchAsync(string serverId, string containerName,
             bool dryRun, CancellationToken ct = default)
         {
             Calls.Add((serverId, containerName, dryRun));
             var kind = Verdicts.GetValueOrDefault(containerName, dryRun ? AutoPatchResultKind.WouldUpdate : AutoPatchResultKind.Updated);
+            AfterPatch?.Invoke(containerName);
             return Task.FromResult((new AutoPatchOutcome(kind, ""), ""));
         }
     }

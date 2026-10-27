@@ -13,11 +13,27 @@ internal sealed class MemoryAutomationOwners : IAutomationOwnerStore
 
     public bool IsBlocked(string feature) => Blocked.Contains(feature);
 
-    public Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
+    public Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default)
     {
+        var previous = _entries.GetValueOrDefault(feature)?.OwnerId;
         Blocked.Remove(feature);
         _entries[feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow);
-        return Task.CompletedTask;
+        return Task.FromResult(previous);
+    }
+
+    public Dictionary<string, string> Suspended { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>When set, the suspension "cannot be saved": still blocked, but reported as not persisted.</summary>
+    public bool FailToPersist { get; set; }
+
+    public Task<SuspendResult> SuspendAsync(string feature, string? expectedOwnerId, string reason,
+        CancellationToken ct = default)
+    {
+        if (Blocked.Contains(feature) || Get(feature)?.OwnerId != expectedOwnerId)
+            return Task.FromResult(SuspendResult.Superseded);
+        Blocked.Add(feature);
+        Suspended[feature] = reason;
+        return Task.FromResult(FailToPersist ? SuspendResult.NotSaved : SuspendResult.Suspended);
     }
 }
 

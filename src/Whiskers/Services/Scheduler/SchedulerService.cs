@@ -225,17 +225,20 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         await db.SaveChangesAsync();
     }
 
-    public async Task<bool> SetOwnerAsync(string taskId, string ownerId, string? createdVia = null)
+    public async Task<bool> SetOwnerAsync(string taskId, string ownerId, string? expectedOwnerId,
+        string? createdVia = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var existing = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
-        if (existing == null) return false;
-        existing.CreatedBy = ownerId;
-        existing.CreatedVia = createdVia ?? ownerId;
-        await db.SaveChangesAsync();
-        return true;
+        var via = createdVia ?? ownerId;
+        var tasks = db.ScheduledTasks.Where(t => t.TaskId == taskId);
+        tasks = string.IsNullOrWhiteSpace(expectedOwnerId)
+            ? tasks.Where(t => t.CreatedBy == null || t.CreatedBy == "")
+            : tasks.Where(t => t.CreatedBy == expectedOwnerId);
+        return await tasks.ExecuteUpdateAsync(s => s
+            .SetProperty(t => t.CreatedBy, ownerId)
+            .SetProperty(t => t.CreatedVia, via)) == 1;
     }
 
     public async Task DeleteTaskAsync(string taskId)

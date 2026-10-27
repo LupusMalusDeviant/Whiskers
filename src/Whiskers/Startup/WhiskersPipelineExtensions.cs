@@ -490,6 +490,10 @@ public static class WhiskersPipelineExtensions
                 var seedLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("LocalAdminSeeder");
                 await Whiskers.Services.Auth.LocalAdminSeeder.SeedAsync(users, app.Configuration, seedLogger);
             }
+
+            // Record the local accounts that exist now, so one deleted later is noticed by automation ownership
+            // with federated sign-in configured too (R1-04).
+            app.Services.GetRequiredService<Whiskers.Services.Mutations.IOwnerAccounts>().RememberLocalAccounts();
         }
 
         // Module warm-ups (IWhiskersModule.InitializeAsync). Declared since RoadToSAP Phase 0 but never

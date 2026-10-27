@@ -54,8 +54,26 @@ Where the owner is kept: scheduled tasks in `ScheduledTaskEntity.CreatedBy` (set
 taken over in Scheduled Tasks), AutoPatch and AutoUpdate in [`IAutomationOwnerStore`](AutomationOwnerStore.cs)
 (`automation-owners.json`, taken over in Settings → Automation owners). AutoPatch skips its night without an owner.
 
-**Grace period.** An item without an owner (created before 2.3) runs as `unowned:<runner>` with exactly the level
-of the capability it runs, audited as "(no owner)". `Automation:RequireOwner=true` refuses it instead.
+**Owners are required (R1-04).** `Automation:RequireOwner` defaults to `true`: an item without an owner is refused.
+The grace period stays available when set explicitly to `false`: an item without an owner (created before 2.3) then
+runs as `unowned:<runner>` with exactly the level of the capability it runs, audited as "(no owner)".
+
+**Authority loss suspends (PC-D6, R1-04).** `IAutomationMutationRunner.LostAuthority` says whether an item can no
+longer run on its owner's authority at all: no owner while owners are required, an owner whose local account was
+deleted (`IOwnerAccounts`, with local-only and with mixed sign-in), who was removed from the whitelist, whose
+key was deleted or disabled, or whose level no longer covers the capability. A run refused for that reason
+**suspends** the item — a scheduled task is disabled, AutoPatch / AutoUpdate are blocked in the owner store
+(`SuspendAsync`, kept across restarts) — and sends an `automation_suspended` notification. A scheduled task is checked for every
+capability its run was refused (a backup whose retention deletes need more than the backup itself), and AutoPatch
+stops and suspends when its owner loses authority half-way through a cycle. `automation_suspended` and
+`automation_refused` are administrative events: no container mute hides them. A refusal by policy
+(kill switch, protected resource, forbidden argument) only reports `automation_refused` and leaves the item on.
+Taking an item over records the old and the new authority (`AutomationOwners.AuthorityOf`) in the audit row.
+
+**Agent-created items keep the agent's rules (R1-04).** A task whose `CreatedVia` / `DelegatedBy` is an agent
+session is evaluated with the agent rule set (autonomy level and confirmation, tool lists, forbidden arguments), not
+the PC-D1 rules for a person: scheduling never turns an agent's action into one the user authorised by hand. An
+unattended `Confirm` is refused (R1-01).
 
 ## Principal identity
 
@@ -90,6 +108,8 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `MutationGateway.cs` | `IMutationGateway` + `MutationGateway` (the pipeline) and `IMutationVerifier`. |
 | `AutomationMutationRunner.cs` | `IAutomationMutationRunner` + `AutomationMutationRunner`, `AutomationActor`, `AutomationOptions` (`RequireOwner`), `IAutomationOwnerResolver` + `AutomationOwnerResolver`, `AutomationOwners.IdOf`: the automation entry to the gateway. |
 | `PrincipalIdentity.cs` | `PrincipalIds` (the stable id scheme `user:` / `key:` / `trigger:` / `agent:<session>`) and `MutationPrincipals` (gateway principal from an `AgentPrincipal` and back; the agent principal is the session acting on behalf of its user, key or trigger). |
+| `OwnerAccounts.cs` | `IOwnerAccounts` + `OwnerAccounts`: whether a user owner still has a way in (R1-04). Local-only sign-in needs the Identity row. With Google/OIDC as well, `known-local-accounts.json` records every email seen with a local account (at startup and when the wizard creates one) and every email seen signed in federated: no local row → *Deleted* if it had one, *Present* if seen federated, otherwise *Unverified* (refused, not suspended, until the owner signs in or an admin takes over). Missing or unreadable record → unverified (fail closed). |
+| `FederatedSignInRecorder.cs` | Blazor `CircuitHandler` that records a federated sign-in (`IOwnerAccounts.RememberFederated`) from the circuit's authentication state; only observes, never touches the sign-in itself (R1-04). |
 | `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file blocks every feature until each is taken over. |
 | `ComposeImpact.cs` | Existing containers a `docker compose up` would touch (project label or working directory) and `RunForEachAsync`, one nested UI decision per container. |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. |
@@ -128,8 +148,8 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 
 ## Known gaps after step 2.3
 
-- **Grace period.** Ownerless tasks and an ownerless AutoUpdate run with the level of the capability they run until
-  an Admin takes them over or `Automation:RequireOwner` is set (INV-04 stays ⚠️ until 1.0 makes that the default).
+- **Grace period (opt-in).** With `Automation:RequireOwner=false`, ownerless tasks and an ownerless AutoUpdate run
+  with the level of the capability they run until an Admin takes them over. The default is `true` since R1-04.
 - **Gated by convention only:** self-backup tasks (`selfbackup.create` / `selfbackup.prune`) and the DB-backup
   retention (`db.backup_delete`, a host `rm`) run through the gateway, but their services are not marked, so the
   architecture test would not catch a new direct call. `UpdateRiskService` (`image.pull`) and
@@ -137,7 +157,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 - **Key-owned items** are evaluated with the full rule set of the key (tool lists, forbidden arguments,
   confirmation). A `Confirm` on the `Automation` surface is a terminal `Denied` in the gateway, before the approval
   gate (R1-01): no one can approve an unattended run, and no approval is raised that a later occurrence of the same
-  task could match. Items owned by a person, and ownerless items in the grace period, use the PC-D1 rules.
+  task could match. Items a person created or took over, and ownerless items in the grace period, use the PC-D1
+  rules. Items an agent created — and owned items whose provenance was never recorded (created before R1-03), until
+  an admin takes them over — keep the agent's rules (R1-04).
 - **Owner file** (`automation-owners.json`): unreadable, invalid, a directory or not openable → every feature
   `IsBlocked`, AutoPatch and AutoUpdate do not run (fail closed). Taking one feature over clears only its block; the
   others are written to the file as blocked entries, so they stay blocked after a restart. Only a file that is not
@@ -150,7 +172,7 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   quotes the matched argument (protected resource) cannot carry a command or SQL text into a log line, a
   notification, the task history or a UI message.
 - **Taking a task over**: an Admin can take over any task in Scheduled Tasks; a task whose owner lost its authority
-  (resolved as `read`) is flagged and included in "take over all". The previous owner goes into the audit row.
+  (resolved as `read`) is flagged and included in "take over all". The previous owner goes into the audit row: the takeover is conditional on the owner the page showed (another admin's takeover meanwhile makes it a no-op with a warning), and AutoPatch / AutoUpdate return the owner they replaced from the store's locked write.
 - **AutoUpdate policies** have no UI yet (`SetPolicyAsync` has no caller); the owner is per feature, not per policy.
 - **An AutoPatch night** is one `autopatch.run` operation (4-hour deadline) and, inside it, one `container.update`
   decision per container it patches or tries in a dry run (protected resources, kill switch, the owner's authority
