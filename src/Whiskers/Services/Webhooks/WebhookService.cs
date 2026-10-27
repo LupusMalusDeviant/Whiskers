@@ -201,13 +201,13 @@ public class WebhookService : IWebhookService
             {
                 capability = "container.restart";
                 // An unresolved container is decided by its stored name: the resolver refuses it (audited).
-                var (container, error) = await WebhookTargets.ContainerAsync(_docker, webhook);
+                var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook));
                 outcome = await automation.RunAsync(actor, "container.restart",
                     new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
                     async _ =>
                     {
                         EnsureOwned(webhook);
-                        if (container is null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
+                        if (container is null) throw Unresolved(error ?? $"Container '{webhook.TargetId}' not found");
                         await _docker.RestartContainerAsync(container.Id, sid);
                         return (true, $"Container {container.Name} restarted.");
                     });
@@ -216,13 +216,13 @@ public class WebhookService : IWebhookService
             case "rebuild":
             {
                 capability = "container.update";
-                var (container, error) = await WebhookTargets.ContainerAsync(_docker, webhook);
+                var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook));
                 outcome = await automation.RunAsync(actor, "container.update",
                     new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
                     async _ =>
                     {
                         EnsureOwned(webhook);
-                        if (container is null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
+                        if (container is null) throw Unresolved(error ?? $"Container '{webhook.TargetId}' not found");
                         var newId = await _docker.RecreateContainerAsync(container.Id, sid);
                         return (true, $"Container {container.Name} rebuilt (new ID: {newId[..Math.Min(12, newId.Length)]}).");
                     });
@@ -232,14 +232,14 @@ public class WebhookService : IWebhookService
             {
                 capability = "compose.deploy";
                 // A plan that cannot be made is still decided on the project directory; then nothing runs.
-                var (plan, error) = await WebhookTargets.ComposePlanAsync(_planner, webhook);
+                var (plan, error) = await LookupAsync(webhook, () => WebhookTargets.ComposePlanAsync(_planner, webhook));
                 var gate = automation.GateFor(actor, "compose.deploy");
                 outcome = await automation.RunAsync(actor, "compose.deploy",
                     new { projectName = plan?.ProjectName, projectDir = webhook.TargetId, serverId = sid },
                     async _ =>
                     {
                         EnsureOwned(webhook);
-                        if (plan is null) return (false, error!);
+                        if (plan is null) throw Unresolved(error!);
                         (bool, string) result = (false, "The deployment did not run.");
                         await gate(plan, async () => result = await DeployCompose(webhook));
                         return result;
@@ -253,13 +253,14 @@ public class WebhookService : IWebhookService
                 // of the app's owner is a refusal of this delivery too.
                 capability = "gitdeploy.deploy";
                 var gitDeploy = scope.ServiceProvider.GetRequiredService<IGitDeployService>();
-                var app = await gitDeploy.GetAppAsync(webhook.TargetId);
+                var (app, error) = await LookupAsync(webhook, async () =>
+                    (await gitDeploy.GetAppAsync(webhook.TargetId), (string?)"Git deploy app not found."));
                 outcome = await automation.RunAsync(actor, "gitdeploy.deploy",
                     new { appId = app?.Id ?? webhook.TargetId, name = app?.Name, serverId = app?.ServerId, revision = app?.Revision },
                     async _ =>
                     {
                         EnsureOwned(webhook);
-                        if (app is null) return (false, "Git deploy app not found.");
+                        if (app is null) throw Unresolved(error!);
                         var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(gitDeploy, automation, app.Id);
                         if (refused)
                             throw new MutationRefusedException($"Git deployment '{app.Name}': {output}", MutationStatus.Denied, "");
@@ -278,8 +279,12 @@ public class WebhookService : IWebhookService
                 : (false, outcome.Error?.Message ?? outcome.Reason ?? "The action failed.");
 
         var reason = refused?.Message ?? outcome.Reason ?? $"The action was {outcome.Status}.";
-        if (automation.LostAuthority(actor, capability) is { } lost
-            && await SuspendAsync(webhook.WebhookId, webhook.Owner))
+        // A webhook without an owner never runs (EnsureOwned), also during the grace period other automation may
+        // have: it is switched off like one whose owner lost the authority.
+        var lost = string.IsNullOrWhiteSpace(webhook.Owner)
+            ? "it has no owner"
+            : automation.LostAuthority(actor, capability);
+        if (lost is not null && await SuspendAsync(webhook.WebhookId, webhook.Owner))
         {
             await NotifyAsync(scope, "automation_suspended", webhook,
                 $"Webhook \"{webhook.Name}\" was switched off: {lost}. It stays off until an admin takes it over on " +
@@ -290,6 +295,27 @@ public class WebhookService : IWebhookService
             $"Webhook \"{webhook.Name}\" was called, but its action did not run. {reason}");
         return (false, $"Refused: {reason}");
     }
+
+    /// <summary>What the action acts on, looked up before the decision. A lookup that throws (a removed server, an
+    /// unreachable host) leaves it unresolved — the delivery is still decided, refused and reported — and its detail
+    /// stays in the log.</summary>
+    private async Task<(T? Value, string? Error)> LookupAsync<T>(WebhookEntity webhook, Func<Task<(T? Value, string? Error)>> lookup)
+        where T : class
+    {
+        try
+        {
+            var (value, error) = await lookup();
+            return (value, value is null ? error : null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Webhook {Name}: its target could not be looked up", webhook.Name);
+            return (null, $"The target of '{webhook.Name}' could not be looked up.");
+        }
+    }
+
+    /// <summary>An action whose target or plan cannot be resolved is refused, not a failed run: an admin hears of it.</summary>
+    private static MutationRefusedException Unresolved(string reason) => new(reason, MutationStatus.Denied, "");
 
     /// <summary>A webhook without an owner never runs its action — also not when owners are optional for other
     /// automation (<see cref="AutomationOptions.RequireOwner"/> off): only an admin taking it over enables it.</summary>

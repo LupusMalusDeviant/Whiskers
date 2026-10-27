@@ -74,6 +74,12 @@ public static class ComposeImpact
         var outcome = await runner.RunAsync(actor, capabilityId,
             new { containerId = container.Id, name = container.Name, serverId = plan.ServerId },
             _ => NextAutomated(runner, actor, capabilityId, plan, proceed, index + 1));
+        // A container that was not allowed — by policy, by its owner's authority, or because its audit intent could not
+        // be written — is a refusal, whatever error the gateway kept; only an error of the deployment itself (thrown
+        // further in) is passed on as it is.
+        if (outcome.Status is not (MutationStatus.Executed or MutationStatus.Failed))
+            throw new MutationRefusedException(outcome.Reason ?? $"'{container.Name}' was not allowed.", outcome.Status,
+                outcome.OperationId);
         if (outcome.Error is { } error)
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
         if (outcome.Status != MutationStatus.Executed)

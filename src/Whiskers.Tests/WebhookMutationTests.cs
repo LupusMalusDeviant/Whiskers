@@ -50,6 +50,8 @@ public sealed class WebhookMutationTests : IDisposable
     private readonly GitDeployService _git;
     private bool _readOnly;
     private string? _protect;
+    private bool _requireOwner = true;
+    private bool _dockerThrows;
 
     public WebhookMutationTests()
     {
@@ -214,6 +216,56 @@ public sealed class WebhookMutationTests : IDisposable
         Assert.False(Ran(action));
         Assert.NotEmpty(_audit.Requests);
         Assert.True(Stored(webhook.WebhookId).Enabled);
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
+    }
+
+    [Theory]
+    [InlineData("admin")]   // an owner who still holds the authority: refused and reported, left on
+    [InlineData("revoked")]
+    [InlineData(null)]
+    public async Task A_lookup_that_throws_is_still_decided_and_handled(string? owner)
+    {
+        var webhook = Seed("restart", "web-1", owner: owner == "revoked" ? "user:gone@example.com" : owner);
+        _dockerThrows = true;   // e.g. the webhook's server was removed from the registry
+
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.DoesNotContain("socket", output);   // the lookup's detail stays in the log
+        Assert.Empty(_docker.Actions);
+        Assert.NotEmpty(_audit.Requests);
+        Assert.Equal(owner == "admin", Stored(webhook.WebhookId).Enabled);
+        Assert.Contains(_notify.Events, e => e.EventType == (owner == "admin" ? "automation_refused" : "automation_suspended"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Actions))]
+    public async Task A_webhook_without_an_owner_is_switched_off_also_when_owners_are_optional(string action, string target)
+    {
+        var webhook = Seed(action, target, owner: null);
+        _requireOwner = false;   // the grace period for other automation
+
+        var (success, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.False(Ran(action));
+        Assert.False(Stored(webhook.WebhookId).Enabled);
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended");
+    }
+
+    [Fact]
+    public async Task An_unwritable_audit_at_a_container_of_a_git_deploy_is_a_reported_refusal()
+    {
+        var webhook = Seed("git-deploy", AppId);
+        // Only the per-container decisions inside the Git deployment cannot be audited.
+        _audit.FailWhen = r => r.CapabilityId == "gitdeploy.deploy" && r.Arguments.ContainsKey("containerId");
+
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.StartsWith("Refused", output);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
     }
 
     [Fact]
@@ -395,8 +447,27 @@ public sealed class WebhookMutationTests : IDisposable
 
     // ---------------------------------------------------------------- helpers
 
-    private WebhookService Service() => new(_sp.GetRequiredService<IServiceScopeFactory>(), _docker, _host,
+    private WebhookService Service() => new(_sp.GetRequiredService<IServiceScopeFactory>(),
+        _dockerThrows ? ThrowingDocker.Wrap(_docker) : _docker, _host,
         new ComposePlanner(_docker, _host), NullLogger<WebhookService>.Instance);
+
+    /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>
+    public class ThrowingDocker : System.Reflection.DispatchProxy
+    {
+        private Whiskers.Services.Docker.IDockerService _inner = null!;
+
+        public static Whiskers.Services.Docker.IDockerService Wrap(Whiskers.Services.Docker.IDockerService inner)
+        {
+            var proxy = Create<Whiskers.Services.Docker.IDockerService, ThrowingDocker>();
+            ((ThrowingDocker)(object)proxy)._inner = inner;
+            return proxy;
+        }
+
+        protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args) =>
+            method!.Name == nameof(Whiskers.Services.Docker.IDockerService.ListContainersAsync)
+                ? throw new InvalidOperationException("Cannot connect to the docker socket of 'edge-removed'")
+                : method.Invoke(_inner, args);
+    }
 
     private bool Ran(string action) => action switch
     {
@@ -474,7 +545,7 @@ public sealed class WebhookMutationTests : IDisposable
     // Built per call so the kill switch and protected names set by a test apply.
     private IAutomationMutationRunner Automation() => new LateRunner(() => new AutomationMutationRunner(Gateway(),
         new CapabilityCatalog(), new AutomationOwnerResolver(_roles, _whitelist, new Keys(), new Accounts()),
-        new StaticOptionsMonitor<AutomationOptions>(new AutomationOptions { RequireOwner = true })));
+        new StaticOptionsMonitor<AutomationOptions>(new AutomationOptions { RequireOwner = _requireOwner })));
 
     private UiMutationRunner UiRunner(AppRole role) => new(Gateway(), new CapabilityCatalog(), new Person(role));
 
@@ -508,12 +579,13 @@ public sealed class WebhookMutationTests : IDisposable
     private sealed class RecordingAudit : IMutationAuditSink
     {
         public bool Fail { get; set; }
+        public Func<MutationRequest, bool>? FailWhen { get; set; }
         public List<MutationRequest> Requests { get; } = [];
 
         public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
             ApprovalGateResult? approval, CancellationToken ct)
         {
-            if (Fail) throw new InvalidOperationException("database is locked");
+            if (Fail || FailWhen?.Invoke(request) == true) throw new InvalidOperationException("database is locked");
             Requests.Add(request);
             return Task.FromResult(1L);
         }
