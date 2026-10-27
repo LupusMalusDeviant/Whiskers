@@ -13,7 +13,7 @@ The storage primitives every other service builds on. Whiskers persists two ways
 | `MetricsDbContextFactory.cs` | Design-time `IDesignTimeDbContextFactory` used only by `dotnet ef`; branches on `WHISKERS_DB_PROVIDER` so scaffolding targets the right migration assembly without booting the app host. |
 | `SqliteToPostgresMigrator.cs` | The one-time `--migrate-to-postgres` data copy (SQLite → a fresh PostgreSQL). Read-only on the source, aborts on a non-empty target; the provider-agnostic core is unit-tested. See below. |
 | `JsonFileStore.cs` | A small generic helper for atomic load/save of a typed object to a JSON file (used by the config/settings/policy stores). |
-| `AppSettingsStore.cs` | `IAppSettingsStore`, writes a config section into the data dir's `app-settings.json` (the last config layer, reload-on-change) so UI-edited settings apply live without a restart. `SaveSectionAsync` is `config.save` (Admin, through the Mutation Gateway since R1-11). |
+| `AppSettingsStore.cs` | `IAppSettingsStore`, writes a config section into the data dir's `app-settings.json` (the last config layer, reload-on-change) so UI-edited settings apply live without a restart. `SaveSectionAsync` / `SaveSectionsAsync` are `config.save` (Admin, through the Mutation Gateway since R1-11); `SaveSectionsAsync` writes several sections in one file replacement. |
 
 ## Provider selection
 

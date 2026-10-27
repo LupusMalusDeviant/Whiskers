@@ -134,6 +134,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.AiOperationsView), "ActivatePreset", "guardrails.save"),
         (typeof(Whiskers.Components.Pages.Servers), "PersistServerCoreAsync", "vault.secret_set"),
         (typeof(Whiskers.Components.Pages.Servers), "DeleteServer", "vault.secret_delete"),
+        (typeof(Whiskers.Components.Pages.Servers), "DeleteServer", "vault.secret_set"),   // puts the kubeconfig back
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Save", "registry.save"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
     ];
@@ -404,7 +405,83 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var live = Assert.Single(await registries.GetRegistriesAsync());
         Assert.Equal(("ghcr", "ghcr.io", "me"), (live.Name, live.Host, live.Username));
         Assert.Equal(("me", "old", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
-        Assert.Equal(["registry-cred:" + saved.Id], vault.ListSecrets().Select(s => s.Key));
+        // The new credential went to a key no registry names, so it never took effect; at most an orphan is left.
+        Assert.Equal("old", vault.GetSecret(Assert.Single(await registries.GetRegistriesAsync()).CredentialRef!));
+    }
+
+    [Fact]
+    public async Task A_new_credential_takes_effect_only_with_the_entry_that_names_it_and_the_old_key_goes()
+    {
+        var (vault, registries, _) = await RegistriesAsync();
+        var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "one");
+        var firstRef = Assert.Single(await registries.GetRegistriesAsync()).CredentialRef;
+
+        await registries.SaveRegistryAsync(new RegistryConfig { Id = saved.Id, Name = "ghcr", Host = "ghcr.io", Username = "me" }, "two");
+
+        var secondRef = Assert.Single(await registries.GetRegistriesAsync()).CredentialRef;
+        Assert.NotEqual(firstRef, secondRef);
+        Assert.Equal(("me", "two", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
+        Assert.Equal([secondRef], vault.ListSecrets().Select(e => e.Key));
+    }
+
+    [Fact]
+    public async Task Saving_without_a_credential_keeps_the_stored_one()
+    {
+        var (_, registries, _) = await RegistriesAsync();
+        var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "pw");
+
+        // The page's form does not carry the reference; the stored entry decides.
+        await registries.SaveRegistryAsync(new RegistryConfig { Id = saved.Id, Name = "renamed", Host = "ghcr.io", Username = "me" }, null);
+
+        Assert.Equal(("me", "pw", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
+    }
+
+    [Fact]
+    public async Task A_registry_from_before_versioned_keys_still_resolves_and_is_cleaned_up()
+    {
+        var (vault, registries, path) = await RegistriesAsync();
+        await vault.SetSecretAsync("registry-cred:legacy1", "pw");
+        await File.WriteAllTextAsync(path,
+            """{"Registries":[{"Id":"legacy1","Name":"old","Host":"ghcr.io","Username":"me","HasCredential":true}]}""");
+        var reloaded = new RegistryConfigService(vault, path);
+
+        Assert.Equal(("me", "pw", "ghcr.io"), reloaded.GetCredentialForImage("ghcr.io/x/y:1"));
+        await reloaded.SaveRegistryAsync(new RegistryConfig { Id = "legacy1", Name = "old", Host = "ghcr.io", Username = "me" }, "new");
+
+        Assert.Equal(("me", "new", "ghcr.io"), reloaded.GetCredentialForImage("ghcr.io/x/y:1"));
+        Assert.DoesNotContain(vault.ListSecrets(), e => e.Key == "registry-cred:legacy1");
+    }
+
+    [Fact]
+    public async Task A_delete_never_removes_the_credential_of_a_later_save_of_the_same_registry()
+    {
+        var (_, registries, _) = await RegistriesAsync();
+        var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "one");
+
+        // Another dialog deletes while a third saves the same registry again.
+        await Task.WhenAll(
+            registries.DeleteRegistryAsync(saved.Id),
+            registries.SaveRegistryAsync(new RegistryConfig { Id = saved.Id, Name = "ghcr", Host = "ghcr.io", Username = "me" }, "two"));
+
+        if ((await registries.GetRegistriesAsync()).Count == 1)
+            Assert.Equal(("me", "two", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
+        else
+            Assert.Null(registries.GetCredentialForImage("ghcr.io/x/y:1"));
+    }
+
+    [Fact]
+    public async Task A_failed_settings_save_of_several_sections_changes_none_of_them()
+    {
+        var path = Path.Combine(_dir, "app-settings.json");
+        var store = new AppSettingsStore(path);
+        await store.SaveSectionsAsync(new Dictionary<string, object> { ["A"] = new { V = 1 }, ["B"] = new { V = 1 } });
+        var before = await File.ReadAllTextAsync(path);
+
+        Directory.CreateDirectory(path + ".tmp");
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            store.SaveSectionsAsync(new Dictionary<string, object> { ["A"] = new { V = 2 }, ["B"] = new { V = 2 } }));
+
+        Assert.Equal(before, await File.ReadAllTextAsync(path));
     }
 
     [Fact]

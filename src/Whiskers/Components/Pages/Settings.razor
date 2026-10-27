@@ -785,16 +785,20 @@ else
         {
             await Mutations.RunAsync("config.save", new { section = "notifications" }, async _ =>
             {
-                await AppSettings.SaveSectionAsync("Mattermost", new MattermostSettings
+                // One file replacement for both sections: a failed write changes neither.
+                await AppSettings.SaveSectionsAsync(new Dictionary<string, object>
+                {
+                    ["Mattermost"] = new MattermostSettings
                 {
                     Enabled = _mmEnabled, WebhookUrl = _mmWebhook?.Trim() ?? "", Channel = _mmChannel?.Trim() ?? "",
                     BotUsername = string.IsNullOrWhiteSpace(_mmBot) ? "Whiskers" : _mmBot.Trim(),
                     BotIconUrl = mmCur.BotIconUrl, ThrottleMinutes = _mmThrottle,
-                });
-                await AppSettings.SaveSectionAsync("Matrix", new MatrixSettings
+                },
+                    ["Matrix"] = new MatrixSettings
                 {
                     Enabled = _mxEnabled, HomeserverUrl = _mxHomeserver?.Trim() ?? "", RoomId = _mxRoom?.Trim() ?? "",
                     AccessToken = _mxToken ?? "", ThrottleMinutes = _mxThrottle,
+                },
                 });
             });
             await Audit("notifications");
@@ -990,33 +994,37 @@ else
         {
             await Mutations.RunAsync("config.save", new { section = "notification-channels" }, async _ =>
             {
-                await AppSettings.SaveSectionAsync("Telegram", new TelegramSettings
+                // One file replacement for all six sections: a failed write changes none.
+                await AppSettings.SaveSectionsAsync(new Dictionary<string, object>
+                {
+                    ["Telegram"] = new TelegramSettings
                 {
                     Enabled = _tgEnabled, BotToken = _tgToken?.Trim() ?? "", ChatId = _tgChat?.Trim() ?? "",
                     ThrottleMinutes = TelegramOptions.CurrentValue.ThrottleMinutes,
-                });
-                await AppSettings.SaveSectionAsync("Ntfy", new NtfySettings
+                },
+                    ["Ntfy"] = new NtfySettings
                 {
                     Enabled = _ntfyEnabled, ServerUrl = string.IsNullOrWhiteSpace(_ntfyServer) ? "https://ntfy.sh" : _ntfyServer.Trim(),
                     Topic = _ntfyTopic?.Trim() ?? "", Token = _ntfyToken?.Trim() ?? "", ThrottleMinutes = NtfyOptions.CurrentValue.ThrottleMinutes,
-                });
-                await AppSettings.SaveSectionAsync("Discord", new DiscordSettings
+                },
+                    ["Discord"] = new DiscordSettings
                 {
                     Enabled = _dcEnabled, WebhookUrl = _dcWebhook?.Trim() ?? "", ThrottleMinutes = DiscordOptions.CurrentValue.ThrottleMinutes,
-                });
-                await AppSettings.SaveSectionAsync("Slack", new SlackSettings
+                },
+                    ["Slack"] = new SlackSettings
                 {
                     Enabled = _slEnabled, WebhookUrl = _slWebhook?.Trim() ?? "", ThrottleMinutes = SlackOptions.CurrentValue.ThrottleMinutes,
-                });
-                await AppSettings.SaveSectionAsync("Email", new EmailSettings
+                },
+                    ["Email"] = new EmailSettings
                 {
                     Enabled = _mailEnabled, Host = _mailHost?.Trim() ?? "", Port = _mailPort, UseSsl = _mailSsl,
                     Username = _mailUser?.Trim() ?? "", Password = _mailPass ?? "", From = _mailFrom?.Trim() ?? "",
                     To = _mailTo?.Trim() ?? "", ThrottleMinutes = EmailOptions.CurrentValue.ThrottleMinutes,
-                });
-                await AppSettings.SaveSectionAsync("WebhookNotification", new WebhookNotificationSettings
+                },
+                    ["WebhookNotification"] = new WebhookNotificationSettings
                 {
                     Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", Secret = _whSecret ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
+                },
                 });
             });
             await Audit("notification-channels");

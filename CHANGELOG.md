@@ -17,8 +17,10 @@ All notable changes to Whiskers are documented here. The format follows
   (`guardrails.kill_switch_off`: Admin, a person in the UI only, audited, changes nothing but `ReadOnlyMode` of the
   active preset). A fail-closed guardrail store (unreadable `guardrails.json`) refuses every save too, also of the
   guardrails. MCP
-  permissions and the vault now publish a change only after it is written, so a failed write leaves the live
-  configuration as it was (`UiMutationGatewayCoverageTests`). The first-run setup wizard writes the whitelist outside
+  permissions, the vault and registries now publish a change only after it is written, a Settings save of several
+  sections (notifications, channels) is one file replacement, and a registry credential is stored under a new vault
+  key per change that only takes effect with the registry entry naming it; removing a Kubernetes server is decided for
+  its kubeconfig before anything is removed — so a failed write leaves the live configuration as it was (`UiMutationGatewayCoverageTests`). The first-run setup wizard writes the whitelist outside
   the gateway, before any admin exists (documented baseline entry).
 
 - R1-09: webhooks have an **owner** — whoever creates the webhook, or an admin taking it over on the Webhooks page

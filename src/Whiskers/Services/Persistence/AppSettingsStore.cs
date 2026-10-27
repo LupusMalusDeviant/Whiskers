@@ -11,6 +11,11 @@ public interface IAppSettingsStore
 {
     [Whiskers.Services.Mutations.MutatingOperation("config.save")]
     Task SaveSectionAsync<T>(string section, T value);
+
+    /// <summary>Writes several sections in one file replacement (R1-11): either all of them take effect or, when
+    /// the write fails, none.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("config.save")]
+    Task SaveSectionsAsync(IReadOnlyDictionary<string, object> sections);
 }
 
 public sealed class AppSettingsStore : IAppSettingsStore
@@ -21,8 +26,12 @@ public sealed class AppSettingsStore : IAppSettingsStore
     public AppSettingsStore(string? path = null, DataPathOptions? dataPaths = null)
         => _path = path ?? (dataPaths ?? DataPathOptions.Default).AppSettingsJson;
 
-    public async Task SaveSectionAsync<T>(string section, T value)
+    public Task SaveSectionAsync<T>(string section, T value) =>
+        SaveSectionsAsync(new Dictionary<string, object> { [section] = JsonSerializer.SerializeToNode(value)! });
+
+    public async Task SaveSectionsAsync(IReadOnlyDictionary<string, object> sections)
     {
+        ArgumentNullException.ThrowIfNull(sections);
         await _lock.WaitAsync();
         try
         {
@@ -35,7 +44,8 @@ public sealed class AppSettingsStore : IAppSettingsStore
             else
                 root = new JsonObject();
 
-            root[section] = JsonSerializer.SerializeToNode(value);
+            foreach (var (section, value) in sections)
+                root[section] = value as JsonNode ?? JsonSerializer.SerializeToNode(value, value.GetType());
 
             var tmp = _path + ".tmp";
             await File.WriteAllTextAsync(tmp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
