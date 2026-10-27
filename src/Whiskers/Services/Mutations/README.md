@@ -172,7 +172,7 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   quotes the matched argument (protected resource) cannot carry a command or SQL text into a log line, a
   notification, the task history or a UI message.
 - **Taking a task over**: an Admin can take over any task in Scheduled Tasks; a task whose owner lost its authority
-  (resolved as `read`) is flagged and included in "take over all". The previous owner goes into the audit row.
+  (resolved as `read`) is flagged and included in "take over all". The previous owner goes into the audit row: the takeover is conditional on the owner the page showed (another admin's takeover meanwhile makes it a no-op with a warning), and AutoPatch / AutoUpdate return the owner they replaced from the store's locked write.
 - **AutoUpdate policies** have no UI yet (`SetPolicyAsync` has no caller); the owner is per feature, not per policy.
 - **An AutoPatch night** is one `autopatch.run` operation (4-hour deadline) and, inside it, one `container.update`
   decision per container it patches or tries in a dry run (protected resources, kill switch, the owner's authority

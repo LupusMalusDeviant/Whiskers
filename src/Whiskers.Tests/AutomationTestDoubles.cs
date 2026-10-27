@@ -13,11 +13,12 @@ internal sealed class MemoryAutomationOwners : IAutomationOwnerStore
 
     public bool IsBlocked(string feature) => Blocked.Contains(feature);
 
-    public Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
+    public Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default)
     {
+        var previous = _entries.GetValueOrDefault(feature)?.OwnerId;
         Blocked.Remove(feature);
         _entries[feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow);
-        return Task.CompletedTask;
+        return Task.FromResult(previous);
     }
 
     public Dictionary<string, string> Suspended { get; } = new(StringComparer.Ordinal);

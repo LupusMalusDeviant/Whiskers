@@ -89,15 +89,16 @@
         if (_role < AppRole.Admin || string.IsNullOrWhiteSpace(_email)) return;
         var owner = PrincipalIds.User(_email);
         var featureId = feature.Id;
-        var previous = Owners.Get(featureId)?.OwnerId ?? Owners.GetBlocked(featureId)?.OwnerId;
-        var previousAuthority = AutomationOwners.AuthorityOf(OwnerResolver, previous);
         _busy = true;
         try
         {
-            await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
+            // The replaced owner comes from the store's locked write, not from this page: another admin may have
+            // taken the feature over since it was rendered.
+            var previous = await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
                 _ => Owners.SetAsync(featureId, owner));
             await AuditLog.LogAsync(owner, "web", "automation.owner_set", "automation", featureId, featureId,
-                details: $"previous={previousAuthority}; new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
+                details: $"previous={AutomationOwners.AuthorityOf(OwnerResolver, previous)}; " +
+                         $"new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
             Snackbar.Add(L["AutomationOwners_Snackbar_Done", L[feature.TitleKey].Value].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)

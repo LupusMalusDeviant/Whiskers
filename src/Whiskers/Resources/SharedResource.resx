@@ -4829,4 +4829,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ScheduledTasksView_Alert_UnownedRefused" xml:space="preserve">
     <value>{0} task(s) were created before owners were recorded. They are refused and switched off on their next run; take them over (and switch them on again) so they run with an owner's authority.</value>
   </data>
+  <data name="ScheduledTasksView_Snackbar_OwnerChanged" xml:space="preserve">
+    <value>The owner of "{0}" changed in the meantime, so it was not taken over. The list is reloaded; check the new owner and try again.</value>
+  </data>
 </root>

@@ -240,6 +240,35 @@ public sealed class KillSwitchTests : IDisposable
         Assert.False(await suspender.SuspendAsync("t1", "user:lea@example.com"));   // already off
     }
 
+    [Theory]
+    [InlineData("user:ops@example.com", true)]
+    [InlineData("user:bea@example.com", false)]   // another admin took it over after the page rendered
+    [InlineData(null, false)]                     // it has an owner, so "unowned" is stale too
+    public async Task A_takeover_only_replaces_the_owner_the_page_showed(string? expected, bool replaced)
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.ScheduledTasks.Add(new ScheduledTaskEntity
+            {
+                TaskId = "t7", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+                TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "agent:s1",
+            });
+            await db.SaveChangesAsync();
+        }
+        var scheduler = new SchedulerService(_sp.GetRequiredService<IServiceScopeFactory>(), null!, null!,
+            NullLogger<SchedulerService>.Instance);
+
+        Assert.Equal(replaced, await scheduler.SetOwnerAsync("t7", "user:lea@example.com", expected));
+
+        using (var scope = _sp.CreateScope())
+        {
+            var task = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ScheduledTasks.Single(t => t.TaskId == "t7");
+            Assert.Equal(replaced ? "user:lea@example.com" : "user:ops@example.com", task.CreatedBy);
+            Assert.Equal(replaced ? "user:lea@example.com" : "agent:s1", task.CreatedVia);
+        }
+    }
+
     [Fact]
     public async Task A_failed_suspension_still_tells_an_admin_and_leaves_the_task_refused()
     {

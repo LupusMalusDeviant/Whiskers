@@ -4829,4 +4829,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Alert_UnownedRefused" xml:space="preserve">
     <value>{0} Aufgabe(n) stammen aus der Zeit, bevor Besitzer gespeichert wurden. Sie werden beim nächsten Lauf abgelehnt und ausgeschaltet; übernimm sie (und schalte sie wieder ein), damit sie mit der Berechtigung eines Besitzers laufen.</value>
   </data>
+  <data name="ScheduledTasksView_Snackbar_OwnerChanged" xml:space="preserve">
+    <value>Der Besitzer von „{0}“ hat sich inzwischen geändert, die Aufgabe wurde deshalb nicht übernommen. Die Liste wird neu geladen; prüfe den neuen Besitzer und versuche es erneut.</value>
+  </data>
 </root>

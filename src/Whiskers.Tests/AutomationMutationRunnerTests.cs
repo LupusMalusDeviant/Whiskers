@@ -693,6 +693,28 @@ public class AutomationMutationRunnerTests
     }
 
     [Fact]
+    public async Task A_takeover_returns_the_owner_it_actually_replaced()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new AutomationOwnerStore(new DataPathOptions(dir), NullLogger<AutomationOwnerStore>.Instance);
+            Assert.Null(await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId));
+            // Another admin took it over after this admin's page rendered OpsId.
+            Assert.Equal(OpsId, await store.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:bea@example.com"));
+            await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, "user:bea@example.com", "lost");
+
+            // Suspended: the replaced owner is still the one it kept for the record.
+            Assert.Equal("user:bea@example.com",
+                await store.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com"));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task A_suspension_that_cannot_be_saved_still_blocks_the_feature()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");

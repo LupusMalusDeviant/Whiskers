@@ -42,10 +42,11 @@ public interface IAutomationOwnerStore
     /// its authority. Only taking that feature over clears it; taking over another feature does not.</summary>
     bool IsBlocked(string feature);
 
-    /// <summary>Records <paramref name="ownerId"/> as the feature's owner and clears its block. Throws when the file
-    /// cannot be written.</summary>
+    /// <summary>Records <paramref name="ownerId"/> as the feature's owner and clears its block. Returns the owner it
+    /// replaced (also a suspended one; <c>null</c>: none), read under the same lock as the write, so a takeover is
+    /// audited with the assignment it actually replaced. Throws when the file cannot be written.</summary>
     [MutatingOperation("automation.owner_set")]
-    Task SetAsync(string feature, string ownerId, CancellationToken ct = default);
+    Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default);
 
     /// <summary>Suspends the feature because its owner lost their authority (PC-D6): it is blocked, keeps the owner
     /// for the record and stays refused across restarts until an admin takes it over. Only ever lowers authority, so
@@ -88,10 +89,11 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
     public AutomationOwnerEntry? GetBlocked(string feature) =>
         Volatile.Read(ref _entries).GetValueOrDefault(feature) is { Blocked: true } entry ? entry : null;
 
-    public Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
+    public async Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
-        return WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
+        var replaced = await WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
+        return replaced?.OwnerId is { Length: > 0 } previous ? previous : null;
     }
 
     public async Task<SuspendResult> SuspendAsync(string feature, string? expectedOwnerId, string reason,
@@ -147,16 +149,18 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         File.Move(temp, _path, overwrite: true);
     }
 
-    private async Task WriteAsync(string feature, Func<AutomationOwnerEntry?, AutomationOwnerEntry> entryOf,
-        CancellationToken ct)
+    /// <summary>Replaces the feature's entry and returns the one it replaced.</summary>
+    private async Task<AutomationOwnerEntry?> WriteAsync(string feature,
+        Func<AutomationOwnerEntry?, AutomationOwnerEntry> entryOf, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(feature);
         await _write.WaitAsync(ct);
         try
         {
+            var replaced = _entries.GetValueOrDefault(feature);
             var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
             {
-                [feature] = entryOf(_entries.GetValueOrDefault(feature)),
+                [feature] = entryOf(replaced),
             };
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             if (_loadFailed) KeepUnreadableFile();
@@ -166,6 +170,7 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
             File.Move(temp, _path, overwrite: true);
             Volatile.Write(ref _entries, next);
             _loadFailed = false;
+            return replaced;
         }
         finally
         {

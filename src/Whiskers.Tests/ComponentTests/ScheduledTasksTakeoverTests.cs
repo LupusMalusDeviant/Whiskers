@@ -21,6 +21,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
 {
     private const string Admin = "admin@example.com";
     private readonly Scheduler _scheduler = new();
+    private readonly NullAudit _audit = new();
 
     public ScheduledTasksTakeoverTests()
     {
@@ -32,7 +33,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
         Services.AddSingleton<IDockerService>(new FakeDocker());
         Services.AddSingleton<IServerConfigService>(new FakeServerConfig());
         Services.AddSingleton<ICurrentUserService>(new AdminUser());
-        Services.AddSingleton<IAuditLogService>(new NullAudit());
+        Services.AddSingleton<IAuditLogService>(_audit);
         Services.AddSingleton<IUiMutationRunner>(new PassThrough());
         Services.AddSingleton<IAutomationOwnerResolver>(new Owners());
         JSInterop.Mode = JSRuntimeMode.Loose;
@@ -105,6 +106,23 @@ public class ScheduledTasksTakeoverTests : BunitContext
     }
 
     [Fact]
+    public void A_takeover_from_a_stale_page_changes_nothing_and_audits_nothing()
+    {
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t6", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web", CreatedBy = "key:gone",
+        });
+        var cut = Render<ScheduledTasksView>();
+        _scheduler.ChangedMeanwhile["t6"] = "user:bea@example.com";   // another admin took it over first
+
+        cut.Find("button[title='ScheduledTasksView_Tooltip_Adopt']").Click();
+
+        Assert.Empty(_scheduler.OwnerChanges);
+        Assert.DoesNotContain(_audit.Entries, e => e.Action == "task.adopt");
+    }
+
+    [Fact]
     public void A_task_whose_owner_still_holds_authority_is_not_flagged()
     {
         _scheduler.Tasks.Add(new ScheduledTaskEntity
@@ -128,10 +146,18 @@ public class ScheduledTasksTakeoverTests : BunitContext
         public Task UpdateTaskAsync(ScheduledTaskEntity task) => throw new NotSupportedException();
         public Task DeleteTaskAsync(string taskId) => throw new NotSupportedException();
         public Task<(bool Success, string Output)> RunNowAsync(string taskId) => throw new NotSupportedException();
-        public Task<bool> SetOwnerAsync(string taskId, string ownerId, string? createdVia = null)
+        /// <summary>The owner as it is "in the database" now, when another admin changed it after the page rendered.</summary>
+        public Dictionary<string, string> ChangedMeanwhile { get; } = new(StringComparer.Ordinal);
+
+        public Task<bool> SetOwnerAsync(string taskId, string ownerId, string? expectedOwnerId, string? createdVia = null)
         {
+            var task = Tasks.First(t => t.TaskId == taskId);
+            var current = ChangedMeanwhile.GetValueOrDefault(taskId) ?? task.CreatedBy;
+            if (!string.Equals(string.IsNullOrWhiteSpace(current) ? null : current,
+                    string.IsNullOrWhiteSpace(expectedOwnerId) ? null : expectedOwnerId, StringComparison.Ordinal))
+                return Task.FromResult(false);
             OwnerChanges.Add((taskId, ownerId));
-            Tasks.First(t => t.TaskId == taskId).CreatedBy = ownerId;
+            task.CreatedBy = ownerId;
             return Task.FromResult(true);
         }
         public Task<List<TaskRunHistoryEntity>> GetHistoryAsync(string? taskId = null, int limit = 50) =>
@@ -154,8 +180,13 @@ public class ScheduledTasksTakeoverTests : BunitContext
 
     private sealed class NullAudit : IAuditLogService
     {
+        public List<(string Action, string? Details)> Entries { get; } = [];
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
-            string targetName, string? details = null, string? serverId = null, bool success = true) => Task.CompletedTask;
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            Entries.Add((action, details));
+            return Task.CompletedTask;
+        }
         public Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0, string? actionFilter = null,
             string? targetTypeFilter = null) => Task.FromResult(new List<AuditLogEntity>());
         public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
