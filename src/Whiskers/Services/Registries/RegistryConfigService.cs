@@ -49,45 +49,78 @@ public class RegistryConfigService : IRegistryConfigService
             .Replace("https://", "", StringComparison.OrdinalIgnoreCase)
             .Replace("http://", "", StringComparison.OrdinalIgnoreCase);
 
-        if (credential is not null)
-        {
-            if (credential.Length == 0)
-            {
-                if (_vault.IsEnabled) await _vault.DeleteSecretAsync(CredVaultKey(registry.Id));
-                registry.HasCredential = false;
-            }
-            else
-            {
-                if (!_vault.IsEnabled)
-                    throw new InvalidOperationException("Registry-Credentials benötigen den Vault — VAULT_KEY setzen und neu starten.");
-                await _vault.SetSecretAsync(CredVaultKey(registry.Id), credential.Trim());
-                registry.HasCredential = true;
-            }
-        }
+        if (credential is { Length: > 0 } && !_vault.IsEnabled)
+            throw new InvalidOperationException("Registry-Credentials benötigen den Vault — VAULT_KEY setzen und neu starten.");
 
+        // R1-11: a failed write leaves the live configuration as it was. The registry list is changed on a copy and
+        // published only after registries.json is written; a credential changed before that write is put back when
+        // the write fails. The caller's object is never stored (the page keeps editing it).
+        var stored = Copy(registry);
         await _lock.WaitAsync();
         try
         {
-            var idx = _cached.Registries.FindIndex(r => r.Id == registry.Id);
-            if (idx >= 0) _cached.Registries[idx] = registry; else _cached.Registries.Add(registry);
-            await _store.SaveAsync(_cached);
+            var key = CredVaultKey(stored.Id);
+            var credentialChanged = credential is not null && _vault.IsEnabled;
+            var previousSecret = credentialChanged ? _vault.GetSecret(key) : null;
+            if (credential is not null)
+            {
+                if (credential.Length == 0)
+                {
+                    if (_vault.IsEnabled) await _vault.DeleteSecretAsync(key);
+                    stored.HasCredential = false;
+                }
+                else
+                {
+                    await _vault.SetSecretAsync(key, credential.Trim());
+                    stored.HasCredential = true;
+                }
+            }
+
+            var next = new RegistryConfigData { Registries = _cached.Registries.Select(Copy).ToList() };
+            var idx = next.Registries.FindIndex(r => r.Id == stored.Id);
+            if (idx >= 0) next.Registries[idx] = stored; else next.Registries.Add(stored);
+            try
+            {
+                await _store.SaveAsync(next);
+            }
+            catch
+            {
+                if (credentialChanged)
+                {
+                    if (previousSecret is null) await _vault.DeleteSecretAsync(key);
+                    else await _vault.SetSecretAsync(key, previousSecret);
+                }
+                throw;
+            }
+            _cached = next;
         }
         finally { _lock.Release(); }
-        return registry;
+        registry.HasCredential = stored.HasCredential;
+        registry.Host = stored.Host;
+        return Copy(stored);
     }
 
     public async Task DeleteRegistryAsync(string registryId)
     {
-        if (_vault.IsEnabled)
-            try { await _vault.DeleteSecretAsync(CredVaultKey(registryId)); } catch { /* best effort */ }
+        // The registry goes first and is published only once written (R1-11): a failed write leaves it and its
+        // credential in place. The credential is removed afterwards; if that fails, an orphaned secret is all
+        // that remains — no registry uses it any more.
         await _lock.WaitAsync();
         try
         {
-            _cached.Registries.RemoveAll(r => r.Id == registryId);
-            await _store.SaveAsync(_cached);
+            var next = new RegistryConfigData { Registries = _cached.Registries.Where(r => r.Id != registryId).Select(Copy).ToList() };
+            await _store.SaveAsync(next);
+            _cached = next;
         }
         finally { _lock.Release(); }
+        if (_vault.IsEnabled)
+            try { await _vault.DeleteSecretAsync(CredVaultKey(registryId)); } catch { /* best effort */ }
     }
+
+    private static RegistryConfig Copy(RegistryConfig r) => new()
+    {
+        Id = r.Id, Name = r.Name, Host = r.Host, Username = r.Username, HasCredential = r.HasCredential, CreatedAt = r.CreatedAt,
+    };
 
     public (string Username, string Password, string ServerAddress)? GetCredentialForImage(string imageRef)
     {

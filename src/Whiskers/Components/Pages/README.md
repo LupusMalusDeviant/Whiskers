@@ -18,7 +18,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Servers.razor` | The fleet: configured servers, add/edit, onboarding. |
+| `Servers.razor` | The fleet: configured servers, add/edit, onboarding. A Kubernetes server's kubeconfig is written and removed as its own gateway decision (`vault.secret_set` / `vault.secret_delete`, R1-11). |
 | `Terminal.razor` / `ServerTerminal.razor` | Web terminal (container / host). |
 | `Firewall.razor` (+ `AddFirewallRuleDialog.razor`) | ufw firewall management. |
 | `NginxManager.razor` | Nginx site configuration editor. |
@@ -56,7 +56,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Settings.razor` | All configuration, auth, whitelist, MCP keys, notifications, integrations, agent, guardrails, vault. |
+| `Settings.razor` | All configuration, auth, whitelist, MCP keys, notifications, integrations, agent, guardrails, vault. Every save runs through the Mutation Gateway as an Admin-only capability (`config.*`, `mcp.key_*`, `vault.secret_*`, R1-11); `GuardrailsView`/`AiOperationsView` use `guardrails.save`, `guardrails.kill_switch_off` and `mcp.key_create`. |
 | `Login.razor` | Sign-in page. |
 | `Error.razor` | Error page. |
 

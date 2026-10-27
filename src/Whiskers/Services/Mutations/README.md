@@ -38,10 +38,9 @@ the agent or a key; a person's click is not sent for approval.
 Security configuration (R1-11) is Admin-only with target kind `config` (the `section` argument names it):
 `config.save`, `config.whitelist`, `config.roles`, `config.mcp_permissions`, `mcp.key_create`, `mcp.key_delete`,
 `guardrails.save`, `guardrails.kill_switch_off`, `vault.secret_set`, `vault.secret_delete`, `registry.save`,
-`registry.delete`. `GuardrailMutationPolicy` makes two narrow exceptions, both for a person in the UI only and both
-after authorization: `guardrails.kill_switch_off` is evaluated with `ReadOnlyMode` off (every other rule applies), and
-`guardrails.save` is allowed while the store is fail-closed (`LoadError`), so a broken `guardrails.json` can be
-repaired in the UI. `UiMutationGatewayCoverageTests` lists every configuration write.
+`registry.delete`. `GuardrailMutationPolicy` makes one narrow exception, for a person in the UI only and after
+authorization: `guardrails.kill_switch_off` is evaluated with `ReadOnlyMode` off (every other rule applies). A
+fail-closed store (`LoadError`) has none: it is repaired on the host (fix or remove `guardrails.json`, restart). `UiMutationGatewayCoverageTests` lists every configuration write.
 
 ### Unattended automation (PC-D6)
 

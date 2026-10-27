@@ -15,7 +15,8 @@ All notable changes to Whiskers are documented here. The format follows
   decided and audited before the store is written; secret values and keys are never arguments. While the kill switch
   is on it refuses all of them; the one exception is the new **Switch kill switch off** button on the Guardrails page
   (`guardrails.kill_switch_off`: Admin, a person in the UI only, audited, changes nothing but `ReadOnlyMode` of the
-  active preset). A fail-closed guardrail store can still be repaired by an admin saving a valid configuration. MCP
+  active preset). A fail-closed guardrail store (unreadable `guardrails.json`) refuses every save too, also of the
+  guardrails. MCP
   permissions and the vault now publish a change only after it is written, so a failed write leaves the live
   configuration as it was (`UiMutationGatewayCoverageTests`). The first-run setup wizard writes the whitelist outside
   the gateway, before any admin exists (documented baseline entry).
@@ -101,7 +102,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 
 - **R1-11: while the kill switch is on, configuration can no longer be saved** — Settings, roles, whitelist, keys,
   vault, registries and guardrails included. Switch it off with the button on the Guardrails page first. Registry
-  changes now need Admin (they had no role check).
+  changes now need Admin (they had no role check). An unreadable `guardrails.json` can no longer be fixed by saving
+  on the Guardrails page: repair or remove it on the host and restart Whiskers (without the file the safe default is
+  created).
 
 - **R1-09: webhooks created before this release have no owner and stop working.** An external call (and the Test
   button) is refused and switches the webhook off (an admin is notified) until an admin takes it over on the Webhooks

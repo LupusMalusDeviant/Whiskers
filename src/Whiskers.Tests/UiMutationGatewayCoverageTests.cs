@@ -108,6 +108,54 @@ public class UiMutationGatewayCoverageTests : IDisposable
         Assert.Equal(["Whiskers.Services.Setup.SetupStateService -> config.whitelist"], bypasses);
     }
 
+    /// <summary>Every UI handler that writes security configuration, with the capability it runs as.</summary>
+    public static readonly (Type Component, string Handler, string Capability)[] Handlers =
+    [
+        (typeof(Whiskers.Components.Pages.Settings), "SaveNotifications", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveHealth", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveMetricAlert", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveCve", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveImageUpdate", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveTerminal", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveDns", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "ClearDnsToken", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveAiChat", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveChannels", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "AddApiKey", "mcp.key_create"),
+        (typeof(Whiskers.Components.Pages.Settings), "RemoveApiKey", "mcp.key_delete"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveMcpPermissions", "config.mcp_permissions"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveWhitelist", "config.whitelist"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveRoles", "config.roles"),
+        (typeof(Whiskers.Components.Pages.Settings), "AddVaultSecret", "vault.secret_set"),
+        (typeof(Whiskers.Components.Pages.Settings), "DeleteVaultSecret", "vault.secret_delete"),
+        (typeof(Whiskers.Components.Pages.GuardrailsView), "SaveAll", "guardrails.save"),
+        (typeof(Whiskers.Components.Pages.GuardrailsView), "DisableKillSwitch", "guardrails.kill_switch_off"),
+        (typeof(Whiskers.Components.Pages.AiOperationsView), "CreateKey", "mcp.key_create"),
+        (typeof(Whiskers.Components.Pages.AiOperationsView), "ActivatePreset", "guardrails.save"),
+        (typeof(Whiskers.Components.Pages.Servers), "PersistServerCoreAsync", "vault.secret_set"),
+        (typeof(Whiskers.Components.Pages.Servers), "DeleteServer", "vault.secret_delete"),
+        (typeof(Whiskers.Components.Shared.RegistriesPanel), "Save", "registry.save"),
+        (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
+    ];
+
+    [Fact]
+    public void Every_configuration_handler_runs_its_write_inside_the_gateway_as_its_own_capability()
+    {
+        var capabilities = Writes.Select(w => w.Capability).ToHashSet();
+        foreach (var component in Handlers.Select(h => h.Component).Distinct())
+        {
+            var calls = MutationCallScanner.CallsIn(component).Where(c => capabilities.Contains(c.Capability)).ToList();
+
+            // Exactly the listed handlers write configuration — a new one must be added here …
+            Assert.Equal(
+                Handlers.Where(h => h.Component == component).Select(h => $"{h.Handler} -> {h.Capability}").Order(),
+                calls.Select(c => $"{c.Handler} -> {c.Capability}").Distinct().Order());
+            // … and every such call sits in a runner lambda for that very capability, so the gateway authorizes,
+            // decides and audits it before the store is touched.
+            Assert.All(calls, c => Assert.Equal(c.Capability, c.GatedAs));
+        }
+    }
+
     // ---------------------------------------------------------------- authorization and audit order
 
     [Theory]
@@ -231,20 +279,19 @@ public class UiMutationGatewayCoverageTests : IDisposable
     // ---------------------------------------------------------------- fail-closed repair
 
     [Fact]
-    public async Task A_fail_closed_store_can_be_repaired_by_an_admin_and_by_nothing_else()
+    public async Task A_fail_closed_store_refuses_every_configuration_write_its_own_repair_included()
     {
+        // User decision (R1-11): an unreadable guardrails.json is repaired on the host, not through the UI.
         var broken = new Store(GuardrailPolicy.FailClosed()) { Error = "guardrails.json is invalid" };
         var (admin, _) = Runner(AppRole.Admin, store: broken);
-        var (operatorRunner, _) = Runner(AppRole.Operator, store: broken);
 
-        await admin.RunAsync("guardrails.save", new { section = "guardrails" }, _ => Task.CompletedTask);
-        await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            operatorRunner.RunAsync("guardrails.save", new { section = "guardrails" }, _ => Task.CompletedTask));
-        // Every other write stays refused until the configuration is valid again.
-        await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            admin.RunAsync("config.save", new { section = "terminal" }, _ => Task.CompletedTask));
-        await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            admin.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask));
+        foreach (var capability in Writes.Select(w => w.Capability).Distinct())
+        {
+            var ran = false;
+            await Assert.ThrowsAsync<MutationRefusedException>(() =>
+                admin.RunAsync(capability, new { section = "guardrails" }, _ => { ran = true; return Task.CompletedTask; }));
+            Assert.False(ran);
+        }
     }
 
     // ---------------------------------------------------------------- the stores
@@ -340,6 +387,59 @@ public class UiMutationGatewayCoverageTests : IDisposable
         Assert.Equal("one", vault.GetSecret("kept"));
         Assert.Null(vault.GetSecret("new"));
         Assert.Equal(["kept"], vault.ListSecrets().Select(e => e.Key));
+    }
+
+    [Fact]
+    public async Task A_failed_registry_save_leaves_the_registry_and_its_credential_as_they_were()
+    {
+        var (vault, registries, path) = await RegistriesAsync();
+        var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "old");
+
+        Directory.CreateDirectory(path + ".tmp");
+        var edit = new RegistryConfig { Id = saved.Id, Name = "renamed", Host = "other.io", Username = "you" };
+        await Assert.ThrowsAnyAsync<Exception>(() => registries.SaveRegistryAsync(edit, "new"));
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            registries.SaveRegistryAsync(new RegistryConfig { Name = "new", Host = "new.io" }, "secret"));
+
+        var live = Assert.Single(await registries.GetRegistriesAsync());
+        Assert.Equal(("ghcr", "ghcr.io", "me"), (live.Name, live.Host, live.Username));
+        Assert.Equal(("me", "old", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
+        Assert.Equal(["registry-cred:" + saved.Id], vault.ListSecrets().Select(s => s.Key));
+    }
+
+    [Fact]
+    public async Task A_failed_registry_delete_keeps_the_registry_and_its_credential()
+    {
+        var (_, registries, path) = await RegistriesAsync();
+        var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "pw");
+
+        Directory.CreateDirectory(path + ".tmp");
+        await Assert.ThrowsAnyAsync<Exception>(() => registries.DeleteRegistryAsync(saved.Id));
+
+        Assert.Single(await registries.GetRegistriesAsync());
+        Assert.Equal(("me", "pw", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
+    }
+
+    [Fact]
+    public async Task The_stored_registry_does_not_alias_the_pages_form()
+    {
+        var (_, registries, _) = await RegistriesAsync();
+        var form = new RegistryConfig { Name = "ghcr", Host = "ghcr.io" };
+        await registries.SaveRegistryAsync(form, null);
+
+        form.Host = "evil.io";   // the dialog is still open
+
+        Assert.Equal("ghcr.io", Assert.Single(await registries.GetRegistriesAsync()).Host);
+    }
+
+    private async Task<(VaultService Vault, RegistryConfigService Registries, string Path)> RegistriesAsync()
+    {
+        var vault = new VaultService(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["VAULT_KEY"] = "test-passphrase" }).Build(),
+            NullLogger<VaultService>.Instance, Path.Combine(_dir, "vault.json"));
+        await vault.InitializeAsync();
+        var path = Path.Combine(_dir, "registries.json");
+        return (vault, new RegistryConfigService(vault, path), path);
     }
 
     // ---------------------------------------------------------------- helpers

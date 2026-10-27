@@ -14,7 +14,7 @@ namespace Whiskers.Services.Guardrails;
 /// <para>R1-02: callers only ever get copies (<see cref="Current"/>, <see cref="Config"/>) and a save is copied in,
 /// validated, persisted and only then made live — a failed write leaves the previous policy active. A file that
 /// cannot be read or holds an invalid configuration puts the store into <see cref="GuardrailPolicy.FailClosed"/>
-/// until an admin saves a valid one (INV-25, INV-28). Configuration and load status are published together as one
+/// until the file is repaired on the host and Whiskers restarted (INV-25, INV-28; no save gets past it since R1-11). Configuration and load status are published together as one
 /// immutable state, so a reader never pairs a configuration with the wrong status.</para></summary>
 public sealed class GuardrailStore : IGuardrailStore, IInitializable
 {
@@ -232,12 +232,12 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         Changed?.Invoke();
     }
 
-    /// <summary>Enforces <see cref="GuardrailPolicy.FailClosed"/> until an admin saves a valid configuration. The
-    /// unreadable file is kept next to it; the first save replaces it.</summary>
+    /// <summary>Enforces <see cref="GuardrailPolicy.FailClosed"/> until <c>guardrails.json</c> is repaired (or removed,
+    /// which recreates the SafeDefault) on the host and Whiskers restarted. The unreadable file is kept next to it.</summary>
     private void FailClosed(string reason, Exception? ex)
     {
         _state = new State(new GuardrailConfig(), reason);
-        _logger?.LogError(ex, "Guardrails: {Reason} Every mutation is refused until an admin saves a valid configuration",
+        _logger?.LogError(ex, "Guardrails: {Reason} Every mutation is refused until guardrails.json is repaired or removed on the host and Whiskers is restarted",
             reason);
         try
         {

@@ -30,9 +30,6 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     /// configuration capability, from a person in the UI only, decided and audited like any other mutation.</summary>
     public const string KillSwitchOff = "guardrails.kill_switch_off";
 
-    /// <summary>Saving the guardrail configuration, which is how an admin repairs a store that is fail-closed.</summary>
-    public const string GuardrailsSave = "guardrails.save";
-
     private readonly IAgentGuardrailEngine? _engine;
     private readonly IGuardrailStore? _store;
 
@@ -54,13 +51,9 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
 
         var policy = _store.Current;
         var person = request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human;
-        if (person && capability.Id == GuardrailsSave && _store.LoadError is not null)
-            // The fail-closed policy refuses every write, its own repair included; without this an unreadable
-            // guardrails.json could only be fixed on disk. Authorization (Admin) already ran, the audit follows, and
-            // the store validates what is saved.
-            return new MutationPolicyDecision(MutationVerdict.Allow,
-                "The guardrail configuration is fail-closed; an admin may save a valid one.", ["fail-closed-repair"]);
-        if (person && capability.Id == KillSwitchOff)
+        // A fail-closed store (unreadable guardrails.json) has no exception: its policy has the kill switch on and
+        // refuses every write, a save of the guardrails included. It is repaired on the host (user decision, R1-11).
+        if (person && capability.Id == KillSwitchOff && _store.LoadError is null)
         {
             // Every other rule still applies; only the kill switch itself does not stop the action that ends it.
             policy = policy.Clone();
