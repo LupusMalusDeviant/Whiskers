@@ -37,7 +37,7 @@ public class NetworkTools
         return $"Found {networks.Count} networks on {networks.FirstOrDefault()?.ServerName ?? "local"}:\n{string.Join('\n', lines)}";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Create a new Docker network.")]
     public static async Task<string> CreateNetwork(
         IHttpContextAccessor httpContextAccessor,
@@ -69,7 +69,7 @@ public class NetworkTools
         return $"Network '{name}' created (ID: {id[..12]}, Driver: {driver}).";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Remove a Docker network by name or ID.")]
     public static async Task<string> RemoveNetwork(
         IHttpContextAccessor httpContextAccessor,
@@ -96,7 +96,7 @@ public class NetworkTools
         return $"Network '{networkId}' removed.";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Connect a container to a Docker network.")]
     public static async Task<string> ConnectContainerToNetwork(
         IHttpContextAccessor httpContextAccessor,
@@ -113,7 +113,7 @@ public class NetworkTools
         return $"Container '{containerId}' connected to network '{networkId}'.";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Disconnect a container from a Docker network.")]
     public static async Task<string> DisconnectContainerFromNetwork(
         IHttpContextAccessor httpContextAccessor,

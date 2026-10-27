@@ -210,3 +210,13 @@ module off) and `MutationBypassArchitectureTests`, which reads method IL and com
 outside the gateway with [`docs/v1/mutation-bypass-baseline.txt`](../../../../docs/v1/mutation-bypass-baseline.txt).
 An MCP tool mapped to a capability counts as inside the gateway, because both dispatchers run it there. The baseline
 may only shrink: 104 lines after step 2.0, 75 after step 2.1, 29 after step 2.2, 23 after step 2.3.
+
+## Levels and effective requirements (R1-05)
+
+`CapabilityCatalog` is the one level table: every capability states its level, and
+`McpPermissionLevels.DefaultToolLevels` takes the level of every mutating tool from
+`CapabilityCatalog.McpToolLevels`. Root-equivalent capabilities are Admin. `EffectiveRequirements.cs` holds
+`IEffectiveRequirementResolver`; the gateway raises (never lowers) a capability's level with it before the caller
+check and before an approval is requested. `SchedulerRequirementResolver` gives a scheduled task the level of what it
+runs (CustomCommand → `host.exec`, retention → `*.backup_delete`, SelfBackup → `selfbackup.*`) and fails closed when
+the scheduler is unavailable. `CapabilityTableConsistencyTests` and `ApprovalSeparationOfDutyTests` guard both.

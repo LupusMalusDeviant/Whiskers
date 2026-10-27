@@ -9,6 +9,25 @@ All notable changes to Whiskers are documented here. The format follows
 v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
 
 ### ⚠️ Upgrade notes
+
+- **R1-05: one capability level table; several MCP tools now require Admin.** The capability catalog
+  (`CapabilityCatalog`) is now the single source of the level of every mutating capability; MCP's
+  `DefaultToolLevels` takes its mutating entries from it. Where the UI and MCP disagreed, the stricter level
+  won (no level was lowered). API keys and agents at Write lose these tools:
+  - Firewall `add_firewall_rule`, `remove_firewall_rule`; nginx `update_nginx_config`; systemd
+    `manage_systemd_service` — Write → Admin (their UI pages already required Admin).
+  - Networks `create_network`, `remove_network`, `connect_container_to_network`,
+    `disconnect_container_from_network` — Write → Admin (Networks page requires Admin).
+  - Cloud `cloud_power_on`, `cloud_shutdown`, `cloud_reboot`, `cloud_hard_reset`, `cloud_create_snapshot` and
+    Hetzner `hetzner_disable_rescue`, `hetzner_enable_backups`, `hetzner_disable_backups`,
+    `hetzner_change_server_type`, `hetzner_delete_snapshot` — Write → Admin (Cloud page requires Admin;
+    `hetzner_enable_rescue` was already Admin).
+  - `gitdeploy.deploy` (UI) — Write → Admin: it is root-equivalent.
+  - `create_scheduled_task` / `run_scheduled_task` stay Write, but the requirement — and therefore the approver's
+    level — is now resolved per task before the caller check and the approval: CustomCommand (`host.exec`),
+    SelfBackup (`selfbackup.create`/`selfbackup.prune`) and DB/volume backups with retention (`maxBackups` > 0,
+    the default 7; `db.backup_delete`/`volume.backup_delete`) require Admin. Pass `maxBackups=0` to keep a backup
+    task at Write. An unreadable task config counts as having retention.
 - **Deploying from the UI now requires Admin** (was Operator): the deploy form, the compose editor and the app store.
   A compose file can mount `/` or run privileged, which is root on the host. The MCP deploy tools already
   required Admin.

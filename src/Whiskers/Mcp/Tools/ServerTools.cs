@@ -176,7 +176,7 @@ public class ServerTools
         return sb.ToString();
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Add a firewall rule (UFW) to allow or deny traffic on a port.")]
     public static async Task<string> AddFirewallRule(
         IHttpContextAccessor httpContextAccessor,
@@ -213,7 +213,7 @@ public class ServerTools
             : $"Failed: {result.Error}";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Remove a firewall rule by its number.")]
     public static async Task<string> RemoveFirewallRule(
         IHttpContextAccessor httpContextAccessor,
@@ -274,7 +274,7 @@ public class ServerTools
         return $"Nginx config for {siteName}:\n```nginx\n{config}\n```";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Update an Nginx site configuration. Validates with nginx -t before applying.")]
     public static async Task<string> UpdateNginxConfig(
         IHttpContextAccessor httpContextAccessor,
@@ -318,7 +318,7 @@ public class ServerTools
         return $"systemd services ({services.Count} total, showing first 50):\n{string.Join('\n', lines)}";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Manage a systemd service (start, stop, restart, enable, disable).")]
     public static async Task<string> ManageSystemdService(
         IHttpContextAccessor httpContextAccessor,

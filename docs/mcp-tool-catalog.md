@@ -21,14 +21,14 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 
 | Tool | Level | Description |
 |---|---|---|
-| `add_firewall_rule` | write | Add a firewall rule (UFW) to allow or deny traffic on a port. |
+| `add_firewall_rule` | admin | Add a firewall rule (UFW) to allow or deny traffic on a port. |
 | `backup_database` | write | Create a database backup (dump) for a database container. |
-| `connect_container_to_network` | write | Connect a container to a Docker network. |
-| `create_network` | write | Create a new Docker network. |
+| `connect_container_to_network` | admin | Connect a container to a Docker network. |
+| `create_network` | admin | Create a new Docker network. |
 | `deploy_app` | admin | Deploy a new application on a server using a standardized template. Supports common app types like web apps, databases, and custom Docker images. Creates the container with sensible defaults and starts it. |
 | `deploy_compose` | admin | Deploy an application using a docker-compose.yml content string. Creates and starts all services defined in the compose file. |
 | `detect_database` | read | Detect the database type of a container. Returns the database engine (PostgreSQL, MySQL, MongoDB, Redis, Neo4j) or 'None'. |
-| `disconnect_container_from_network` | write | Disconnect a container from a Docker network. |
+| `disconnect_container_from_network` | admin | Disconnect a container from a Docker network. |
 | `execute_command` | admin | Execute a shell command on a server. Use with caution. |
 | `execute_query` | admin | Execute a SQL query or database command and return the results. |
 | `get_action_outcomes` | read | Report whether Whiskers' automatic actions actually worked: per action kind, how many were effective, how many changed nothing, and how many could not be measured at all. Read this before repeating an action — a kind with a poor hit rate is one where the cause probably lies elsewhere. A high 'not measurable' count means the checking itself has broken down, which is NOT the same as things being fine. Read-only. |
@@ -55,10 +55,10 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `list_ssl_certificates` | read | List SSL/TLS certificates managed by certbot on a server. |
 | `list_systemd_services` | read | List systemd services on a server. |
 | `list_tables` | read | List tables in a database with row counts and sizes. |
-| `manage_systemd_service` | write | Manage a systemd service (start, stop, restart, enable, disable). |
+| `manage_systemd_service` | admin | Manage a systemd service (start, stop, restart, enable, disable). |
 | `pause_server_checks` | write | Pause Whiskers' own background checks (health, logs, metrics, CVE, image updates) for one server, for a bounded number of minutes. Use this when Whiskers itself is the load on a host. Interactive access keeps working, so the server can still be inspected. The pause is announced, expires by itself, and is reminded about if it outlives its reason. This does NOT stop the containers on that server and does NOT block anything running there. |
-| `remove_firewall_rule` | write | Remove a firewall rule by its number. |
-| `remove_network` | write | Remove a Docker network by name or ID. |
+| `remove_firewall_rule` | admin | Remove a firewall rule by its number. |
+| `remove_network` | admin | Remove a Docker network by name or ID. |
 | `renew_mtls_certificate` | admin | Renew the mTLS certificate of a server's Docker proxy (ghostunnel). A new key is generated on the host, step-ca signs it, and the proxy restarts with it. If Whiskers cannot reach the host with the new certificate, the host restores the previous one by itself after 3 minutes. Admin only. |
 | `renew_ssl_certificate` | write | Renew an SSL certificate using certbot. |
 | `restart_container` | write | Restart a Docker container. |
@@ -67,24 +67,24 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `start_container` | write | Start a stopped Docker container. |
 | `stop_container` | write | Stop a running Docker container. |
 | `update_container` | write | Pull latest image and recreate a Docker container (update). |
-| `update_nginx_config` | write | Update an Nginx site configuration. Validates with nginx -t before applying. |
+| `update_nginx_config` | admin | Update an Nginx site configuration. Validates with nginx -t before applying. |
 
 ## Module `cloud-control`
 
 | Tool | Level | Description |
 |---|---|---|
-| `cloud_create_snapshot` | write | Create a snapshot of a server (by Whiskers name or id) via its cloud provider. Useful before risky changes. Note: Hostinger keeps only ONE snapshot per VM (replaces the previous). |
-| `cloud_hard_reset` | write | HARD reset (power-cycle) a server via its cloud provider — forceful, use only when a graceful reboot is impossible (e.g. SSH unresponsive). Hetzner: true power-cycle; Hostinger: falls back to a restart (no hard reset available). |
+| `cloud_create_snapshot` | admin | Create a snapshot of a server (by Whiskers name or id) via its cloud provider. Useful before risky changes. Note: Hostinger keeps only ONE snapshot per VM (replaces the previous). |
+| `cloud_hard_reset` | admin | HARD reset (power-cycle) a server via its cloud provider — forceful, use only when a graceful reboot is impossible (e.g. SSH unresponsive). Hetzner: true power-cycle; Hostinger: falls back to a restart (no hard reset available). |
 | `cloud_metrics` | read | Get recent cloud metrics for a server (by Whiskers name or id). Hetzner type: cpu, disk, network. Hostinger returns raw metric data. |
-| `cloud_power_on` | write | Power on a server (by Whiskers name or id) via its cloud provider. |
-| `cloud_reboot` | write | Gracefully reboot a server (by Whiskers name or id) via its cloud provider. |
-| `cloud_shutdown` | write | Gracefully shut down a server (by Whiskers name or id) via its cloud provider. |
+| `cloud_power_on` | admin | Power on a server (by Whiskers name or id) via its cloud provider. |
+| `cloud_reboot` | admin | Gracefully reboot a server (by Whiskers name or id) via its cloud provider. |
+| `cloud_shutdown` | admin | Gracefully shut down a server (by Whiskers name or id) via its cloud provider. |
 | `cloud_status` | read | Get the live cloud status of a Whiskers server (by name or id): provider, power state, type, location, IP, and (Hetzner) traffic usage and backups. |
-| `hetzner_change_server_type` | write | Change (resize) a Hetzner server's type, e.g. 'cx32' (by Whiskers name or id). The server must be powered off first. upgradeDisk=true also grows the disk (then a downgrade is no longer possible). |
-| `hetzner_delete_snapshot` | write | Delete a Hetzner snapshot/image by its numeric ID, in the account of a given Whiskers server. Irreversible. |
-| `hetzner_disable_backups` | write | Disable Hetzner automated backups for a server (by Whiskers name or id). Existing backups are deleted. |
-| `hetzner_disable_rescue` | write | Disable Hetzner rescue mode on a server (by Whiskers name or id). |
-| `hetzner_enable_backups` | write | Enable Hetzner automated daily backups for a server (by Whiskers name or id). Adds ~20% to the server price. |
+| `hetzner_change_server_type` | admin | Change (resize) a Hetzner server's type, e.g. 'cx32' (by Whiskers name or id). The server must be powered off first. upgradeDisk=true also grows the disk (then a downgrade is no longer possible). |
+| `hetzner_delete_snapshot` | admin | Delete a Hetzner snapshot/image by its numeric ID, in the account of a given Whiskers server. Irreversible. |
+| `hetzner_disable_backups` | admin | Disable Hetzner automated backups for a server (by Whiskers name or id). Existing backups are deleted. |
+| `hetzner_disable_rescue` | admin | Disable Hetzner rescue mode on a server (by Whiskers name or id). |
+| `hetzner_enable_backups` | admin | Enable Hetzner automated daily backups for a server (by Whiskers name or id). Adds ~20% to the server price. |
 | `hetzner_enable_rescue` | admin | Enable Hetzner rescue mode on a server (by Whiskers name or id), then it must be reset to boot into rescue. Returns the temporary root password. Recovery when the OS won't boot. |
 | `hetzner_list_snapshots` | read | List Hetzner snapshots in the account of a given Whiskers server (by name or id). |
 | `list_cloud_servers` | read | List all Whiskers servers that have a cloud provider (Hetzner/Hostinger) configured, with their live power status, type, location, IP, and (Hetzner) traffic usage. |
@@ -157,6 +157,6 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | Level | Tools |
 |---|---|
 | read | 46 |
-| write | 34 |
-| admin | 6 |
+| write | 16 |
+| admin | 24 |
 | **total** | **86** |

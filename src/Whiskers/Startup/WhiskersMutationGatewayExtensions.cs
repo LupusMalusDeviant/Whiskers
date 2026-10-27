@@ -53,6 +53,7 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IMutationPolicy, GuardrailMutationPolicy>();
         services.AddSingleton<IMutationAuditSink, AuditLogMutationSink>();
         services.AddSingleton<IMutationScopeMonitor, MutationScopeMonitor>();
+        services.AddSingleton<IEffectiveRequirementResolver, SchedulerRequirementResolver>();
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.
         services.AddScoped<IUiMutationRunner, UiMutationRunner>();

@@ -67,7 +67,7 @@ public static class McpPermissionLevels
     /// <c>[McpToolLevel]</c>; this dictionary must mirror those declarations exactly. <c>McpToolLevelTests</c>
     /// compares the two in both directions and fails the build on any drift — including an entry here for a tool
     /// that no longer exists. Change the attribute, then bring this entry along.</para></summary>
-    public static readonly Dictionary<string, string> DefaultToolLevels = new()
+    public static readonly Dictionary<string, string> DefaultToolLevels = WithCatalogLevels(new()
     {
         // Read tools
         ["list_containers"] = Read,
@@ -110,10 +110,10 @@ public static class McpPermissionLevels
         ["deploy_app"] = Admin,
         ["deploy_compose"] = Admin,
         ["renew_mtls_certificate"] = Admin,  // swaps the key of a proxy every command to that host passes through
-        ["add_firewall_rule"] = Write,
-        ["remove_firewall_rule"] = Write,
-        ["update_nginx_config"] = Write,
-        ["manage_systemd_service"] = Write,
+        ["add_firewall_rule"] = Admin,
+        ["remove_firewall_rule"] = Admin,
+        ["update_nginx_config"] = Admin,
+        ["manage_systemd_service"] = Admin,
         ["renew_ssl_certificate"] = Write,
 
         // Database tools
@@ -156,10 +156,10 @@ public static class McpPermissionLevels
 
         // Network tools
         ["list_networks"] = Read,
-        ["create_network"] = Write,
-        ["remove_network"] = Write,
-        ["connect_container_to_network"] = Write,
-        ["disconnect_container_from_network"] = Write,
+        ["create_network"] = Admin,
+        ["remove_network"] = Admin,
+        ["connect_container_to_network"] = Admin,
+        ["disconnect_container_from_network"] = Admin,
 
         // Admin tools
         ["execute_command"] = Admin,
@@ -175,27 +175,36 @@ public static class McpPermissionLevels
         ["cloud_metrics"] = Read,
 
         // Cloud (provider-agnostic) write tools
-        ["cloud_power_on"] = Write,
-        ["cloud_shutdown"] = Write,
-        ["cloud_reboot"] = Write,
-        ["cloud_hard_reset"] = Write,
-        ["cloud_create_snapshot"] = Write,
+        ["cloud_power_on"] = Admin,
+        ["cloud_shutdown"] = Admin,
+        ["cloud_reboot"] = Admin,
+        ["cloud_hard_reset"] = Admin,
+        ["cloud_create_snapshot"] = Admin,
 
         // Hetzner-only extras
         ["hetzner_list_snapshots"] = Read,
         ["hetzner_enable_rescue"] = Admin,   // issues a root password for the server
-        ["hetzner_disable_rescue"] = Write,
-        ["hetzner_enable_backups"] = Write,
-        ["hetzner_disable_backups"] = Write,
-        ["hetzner_change_server_type"] = Write,
-        ["hetzner_delete_snapshot"] = Write,
+        ["hetzner_disable_rescue"] = Admin,
+        ["hetzner_enable_backups"] = Admin,
+        ["hetzner_disable_backups"] = Admin,
+        ["hetzner_change_server_type"] = Admin,
+        ["hetzner_delete_snapshot"] = Admin,
 
         // DNS (Modules/Dns): one global provider token, zone-fenced. delete is Write, not Admin — it is the
         // undo of set_dns_record and limited to the same four record types (never NS/SOA/MX).
         ["list_dns_records"] = Read,
         ["set_dns_record"] = Write,
         ["delete_dns_record"] = Write,
-    };
+    });
+
+    /// <summary>R1-05: the capability catalog owns the level of every mutating tool. An entry above that disagrees is
+    /// replaced, so the MCP gate, the approval card and the UI can never require different levels.</summary>
+    private static Dictionary<string, string> WithCatalogLevels(Dictionary<string, string> levels)
+    {
+        foreach (var (tool, level) in Whiskers.Services.Mutations.CapabilityCatalog.McpToolLevels)
+            levels[tool] = level;
+        return levels;
+    }
 
     public static readonly Dictionary<string, string> ToolCategories = new()
     {
