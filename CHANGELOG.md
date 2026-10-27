@@ -6,6 +6,23 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-06: every mutation's target is resolved against the inventory before policy — servers (an empty server id is
+  the configured default server, decided by the gateway), containers, networks with the containers attached to them,
+  cloud servers (Whiskers id or name), scheduled tasks (id or unique name), DNS zones (normalised, within
+  `Dns:AllowedZones`) and Kubernetes workloads (their **live** controller). An unknown or ambiguous target is refused
+  before policy. MCP and agent tools then run on the resolved identity (canonical id and server id), not on a second
+  lookup of what the caller typed. A protected container attached to a network that is removed, or connected to /
+  disconnected from one, and a workload's current controller are matched against protected patterns
+  (`TargetResolutionTests`).
+- R1-06: AutoUpdate no longer turns the server id `local` into "the default server": a container listed on `local` is
+  decided and recreated on `local`, also when another server is the default. Webhooks decide (Test button) and run
+  on the same server and container (`WebhookTargets`).
+- R1-06: a tool that takes a `serverId` always receives the server the gateway decided on, also when the caller left
+  it out (a missing server is the default server to the gateway, but some tools read it as `local`). AutoPatch, the
+  Docker workload provider and the Networks, Scheduled tasks, Volume backups, App Store and Webhooks pages no longer
+  turn `local` into "the default server" either. Refused targets carry a reason code (unknown, ambiguous, not
+  resolvable) and are shown in the user's language.
+
 - R1-05 review: the two refusals the effective requirement adds (underlying capability switched off, requirement
   not determinable) are shown in the user's language on the pages; covered end to end through the real gateway,
   approval gate and store (`SchedulerApprovalEndToEndTests`).
@@ -22,6 +39,22 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 
 ### ⚠️ Upgrade notes
 
+- **R1-06: unknown or ambiguous targets are refused.** A call naming a server, network, cloud server or task that
+  does not exist, or a name that fits more than one (two servers called "web", a network id prefix shared by two
+  networks, two tasks with the same name), is refused before anything runs; use the id. A server id that differs
+  from the stored one only in case is resolved to the stored id.
+- **R1-06: an MCP or agent call without `serverId` acts on the default server, for every tool that takes a
+  server.** Some tools
+  (`set_container_env`, database backups, …) used to read a missing server as `local` while the gateway decided on
+  the default server; they now receive the default server's id. Pass `serverId` where you mean `local`.
+- **R1-06: a scheduled task saved without a server acts on the server with the id `local`**, for its gates as well
+  as for its execution (the execution always did; the decision used the default server). Set the server explicitly
+  where `local` is not the intended machine.
+- **R1-06: a webhook saved without a server acts on the server with the id `local`.** Restart and rebuild webhooks
+  used the default server before, compose-deploy webhooks used `local`; now all four actions use `local`. If your
+  `local` server is not the machine such a webhook should act on (or you have no server with that id), set the
+  webhook's server explicitly. A webhook whose container id prefix matches more than one container no longer acts
+  on the first match; it fails with "Ambiguous".
 - **R1-05: one capability level table; several MCP tools now require Admin.** The capability catalog
   (`CapabilityCatalog`) is now the single source of the level of every mutating capability; MCP's
   `DefaultToolLevels` takes its mutating entries from it. Where the UI and MCP disagreed, the stricter level

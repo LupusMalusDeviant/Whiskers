@@ -473,7 +473,7 @@
         _usedPorts.Clear();
         try
         {
-            var containers = await DockerService.ListContainersAsync(all: false, serverId: _deployServerId == "local" ? null : _deployServerId);
+            var containers = await DockerService.ListContainersAsync(all: false, serverId: _deployServerId);
             foreach (var c in containers)
             {
                 foreach (var p in c.Ports.Where(p => p.PublicPort > 0))

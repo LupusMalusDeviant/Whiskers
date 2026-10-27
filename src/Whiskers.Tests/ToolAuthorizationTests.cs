@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
@@ -116,7 +117,8 @@ public class ToolAuthorizationTests
     {
         var docker = new FakeDocker(new ContainerInfo { Id = "abc123def456", Name = "web-1" });
         var audit = new AgentToolTestHelpers.NullMutationAudit();
-        var gateway = Gateway(targets: new MutationTargetResolver(new SingleService<IDockerService>(docker)), audit: audit);
+        var gateway = Gateway(targets: new MutationTargetResolver(new TestServices(docker,
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }))), audit: audit);
 
         var unknown = await gateway.ExecuteAsync(Request(WebUser, MutationSurface.Ui, "nope"), (_, _) => Task.FromResult(0));
         MutationTarget? seen = null;
@@ -137,7 +139,8 @@ public class ToolAuthorizationTests
         var docker = new FakeDocker(new ContainerInfo { Id = "c0ffee123456", Name = "whiskers" });
         var policy = AllowWrites();
         policy.ProtectedResources = ["whiskers*"];
-        var gateway = Gateway(targets: new MutationTargetResolver(new SingleService<IDockerService>(docker)), policy: policy);
+        var gateway = Gateway(targets: new MutationTargetResolver(new TestServices(docker,
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }))), policy: policy);
         var ran = false;
 
         var outcome = await gateway.ExecuteAsync(Request(WebUser, MutationSurface.Ui, "c0ffee"),
@@ -355,6 +358,61 @@ public class ToolAuthorizationWireTests
     }
 
     [Fact]
+    public async Task A_tool_called_without_a_server_receives_the_server_the_gateway_decided_on()
+    {
+        var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-serverid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataDir);
+        var previousDataDir = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
+        Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
+        // "local" and a remote default server, each with a container called "web" (R1-06).
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "aaa111local", Name = "web", ServerId = "local" },
+            new ContainerInfo { Id = "bbb222edge", Name = "web", ServerId = "edge01" })
+        {
+            DefaultServerId = "edge01", AllowMutations = true,
+        };
+        try
+        {
+            await using var factory = new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>()
+                .WithWebHostBuilder(b =>
+                {
+                    b.UseEnvironment("Development");
+                    b.ConfigureTestServices(s =>
+                    {
+                        s.AddSingleton<IDockerService>(docker);
+                        s.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+                            new ServerConfig { Id = "local", Name = "Local" },
+                            new ServerConfig { Id = "edge01", Name = "Edge", IsDefault = true }));
+                    });
+                });
+            using var client = factory.CreateClient();
+            var permissions = factory.Services.GetRequiredService<IMcpPermissionService>();
+            var key = await permissions.AddApiKeyAsync("ops", McpPermissionLevels.Write);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Key);
+            var guardrails = factory.Services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
+            var config = guardrails.Config;
+            var policy = config.ActivePolicy();
+            policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+            policy.RequireConfirmationForWrites = false;
+            await guardrails.SaveConfigAsync(config,
+                new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null, UserEmail: "admin@example.com"));
+
+            var session = await McpServedSurfaceTests.InitializeAsync(client);
+            using var response = await McpServedSurfaceTests.PostAsync(client, session,
+                """{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"restart_container","arguments":{"containerId":"web"}}}""");
+            await response.Content.ReadAsStringAsync();
+
+            // Decided on the default server's "web" — and the tool ran there, by its full id, with the server named.
+            Assert.Equal(("restart", "bbb222edge", (string?)"edge01"), Assert.Single(docker.Actions));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", previousDataDir);
+            try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
     public async Task A_tool_that_answers_with_an_error_text_is_failed_in_the_audit_and_an_error_for_the_client()
     {
         var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-toolfailure-" + Guid.NewGuid().ToString("N"));
@@ -369,7 +427,7 @@ public class ToolAuthorizationWireTests
 
             // Writes run without a human here, so the call reaches the tool.
             var permissions = factory.Services.GetRequiredService<IMcpPermissionService>();
-            var key = await permissions.AddApiKeyAsync("ops", McpPermissionLevels.Write);
+            var key = await permissions.AddApiKeyAsync("ops", McpPermissionLevels.Admin);
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Key);
             var guardrails = factory.Services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
             var config = guardrails.Config;
@@ -381,16 +439,16 @@ public class ToolAuthorizationWireTests
 
             var session = await McpServedSurfaceTests.InitializeAsync(client);
             using var response = await McpServedSurfaceTests.PostAsync(client, session,
-                """{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"pause_server_checks","arguments":{"serverId":"no-such-server","reason":"test"}}}""");
+                """{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"create_scheduled_task","arguments":{"name":"x","cronExpression":"0 2 * * *","taskType":"Bogus"}}}""");
             var payload = McpServedSurfaceTests.ExtractJsonRpcPayload(await response.Content.ReadAsStringAsync());
 
             var result = System.Text.Json.JsonDocument.Parse(payload).RootElement.GetProperty("result");
             Assert.True(result.GetProperty("isError").GetBoolean());
-            Assert.Contains("not found", result.GetProperty("content")[0].GetProperty("text").GetString());
+            Assert.Contains("Invalid task type", result.GetProperty("content")[0].GetProperty("text").GetString());
 
             using var scope = factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>();
-            var row = db.AuditLog.Single(r => r.Action == "checks.pause");
+            var row = db.AuditLog.Single(r => r.Action == "scheduler.create");
             Assert.False(row.Success);
             Assert.Contains("\"status\":\"Failed\"", row.Details);
         }

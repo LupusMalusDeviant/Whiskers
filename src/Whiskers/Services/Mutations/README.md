@@ -104,7 +104,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `MutationModels.cs` | `Capability`, `CapabilityRisk`, `MutationPrincipal` (incl. `OnBehalfOf`, `AllowedTools`), `MutationSurface`, `MutationTarget`, `MutationRequest`, `MutationOutcome<T>` (incl. `ApprovalId`, `MatchedRules`), `MutationContext`. |
 | `CapabilityCatalog.cs` | `ICapabilityCatalog` — the single table of mutating capabilities and their levels (INV-13, R1-05). `McpPermissionLevels.DefaultToolLevels` takes its mutating entries from it; `RoleFor` maps a level to the UI role pages check (`CapabilityTableConsistencyTests` holds hard-coded page roles to it). |
 | `CapabilityOverrides.cs` | `ICapabilityOverrides` + `McpToolCapabilityOverrides`: the MCP tool's Enabled switch and a stricter stored level (Settings → MCP), applied for **every** principal kind (INV-15). The catalog level is the floor. |
-| `MutationTargets.cs` | `MutationTargets.FromArguments` (target from tool arguments) and `IMutationTargetResolver` + `MutationTargetResolver`: containers resolve by id, name or unique prefix to their full id and name; an unknown or ambiguous container is refused before policy (INV-57). Other kinds pass through for now. |
+| `MutationTargets.cs` | `MutationTargets.FromArguments` (target from tool arguments), `MutationTargets.CanonicalArguments` (the arguments a tool runs with: the target's key and `serverId` replaced by the resolved identity, keys the caller did not pass stay absent) and `IMutationTargetResolver` + `MutationTargetResolver` (R1-06, INV-24/57): the server first (empty = the default server; exact id, else one id / name ignoring case), then containers (id, name or unique prefix), networks (id, name or unique prefix; `Related` = the attached containers for a removal, the named container for connect / disconnect), cloud servers (Whiskers id or name), scheduled tasks (id or unique name), DNS zones (normalised, within `Dns:AllowedZones`) and Kubernetes workloads (the pod's **live** controller as `Name`). Unknown or ambiguous targets are refused before policy. Creating capabilities (`network.create`, `scheduler.create`) resolve only the server; `server.onboard` / `server.save` match only that server by its own id (exact, else ignoring case — never the default server or a name) and pass a new one through; volumes, log alerts and the Whiskers-wide kinds pass through. |
 | `MutationGateway.cs` | `IMutationGateway` + `MutationGateway` (the pipeline) and `IMutationVerifier`. |
 | `AutomationMutationRunner.cs` | `IAutomationMutationRunner` + `AutomationMutationRunner`, `AutomationActor`, `AutomationOptions` (`RequireOwner`), `IAutomationOwnerResolver` + `AutomationOwnerResolver`, `AutomationOwners.IdOf`: the automation entry to the gateway. |
 | `PrincipalIdentity.cs` | `PrincipalIds` (the stable id scheme `user:` / `key:` / `trigger:` / `agent:<session>`) and `MutationPrincipals` (gateway principal from an `AgentPrincipal` and back; the agent principal is the session acting on behalf of its user, key or trigger). |
@@ -113,7 +113,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file blocks every feature until each is taken over. |
 | `ComposeImpact.cs` | Existing containers a `docker compose up` would touch (project label or working directory) and `RunForEachAsync`, one nested UI decision per container. |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. A refusal with a `ReasonCode` (`MutationReasonCodes`, R1-05) is shown in the user's language (`Mutation_Refused_<code>`); the audit keeps the English `Reason`. |
-| `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`), so a protected container is caught by id prefix too. Without engine or store it refuses everything. |
+| `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`, `__resolvedRelated<n>`), so a protected container is caught by id prefix, as a container attached to a removed network, and a workload by its live controller. Without engine or store it refuses everything. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
 | `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. |
 | `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Report mode:** a call outside a scope still runs; the first sighting per capability is logged at Information. |
@@ -127,7 +127,7 @@ registrations are wrapped too.
 1. Unknown capability → **Denied**.
 2. Tool switched off in Settings → MCP → **Denied**. A stricter stored level raises the requirement.
 3. Principal level below the capability level → **Denied**.
-4. Target cannot be resolved (unknown or ambiguous container) → **Denied**.
+4. Target cannot be resolved (unknown or ambiguous server, container, network, cloud server, task, zone or workload) → **Denied**. From here on `MutationContext.Request.Target` is canonical; the MCP and agent adapters run the tool with `MutationTargets.CanonicalArguments`, which also passes the resolved `serverId` to every tool that takes one (`McpToolParameters.TakesServerId`, the agent entry's parameters). The refusal carries `MutationReasonCodes.TargetUnknown` / `TargetAmbiguous` / `TargetNotResolved`.
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**.
 6. Policy `Confirm` on the `Automation` surface (scheduler, AutoUpdate, AutoPatch) → **Denied**, before the approval
    gate: nobody can confirm an unattended run, and no approval is raised (R1-01).
@@ -208,9 +208,10 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   `container_name` in the file would collide with.
 - **External webhook calls** (`/api/webhooks/...`) still run without the gateway; they move in step 2.4. Only the
   UI's **Test** button is decided, as the clicking person.
-- **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the controller name the
-  provider reports for the pod (and the pod name as an extra argument); there is no Kubernetes target resolver that
-  reads the live owner yet.
+- **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the pod's **live**
+  controller: the resolver re-reads the pod (`IWorkloadProvider.GetWorkloadAsync`) instead of trusting the name the
+  page rendered (R1-06). The provider resolves the controller again when it acts; a controller change in between is
+  not detected.
 - **Bulk prune** (`host.prune`) is refused while a stopped protected container exists on the server; images and
   networks it removes are not checked against protected patterns.
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row

@@ -154,21 +154,19 @@ public class WebhookService : IWebhookService
 
     private async Task<(bool, string)> RestartContainer(WebhookEntity webhook)
     {
-        var containers = await _docker.ListContainersAsync(serverId: webhook.ServerId);
-        var container = containers.FirstOrDefault(c => c.Name == webhook.TargetId || c.Id.StartsWith(webhook.TargetId));
-        if (container == null) return (false, $"Container '{webhook.TargetId}' not found");
+        var (container, error) = await WebhookTargets.ContainerAsync(_docker, webhook);
+        if (container == null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
 
-        await _docker.RestartContainerAsync(container.Id, webhook.ServerId);
+        await _docker.RestartContainerAsync(container.Id, WebhookTargets.ServerOf(webhook));
         return (true, $"Container {container.Name} restarted.");
     }
 
     private async Task<(bool, string)> RebuildContainer(WebhookEntity webhook)
     {
-        var containers = await _docker.ListContainersAsync(serverId: webhook.ServerId);
-        var container = containers.FirstOrDefault(c => c.Name == webhook.TargetId || c.Id.StartsWith(webhook.TargetId));
-        if (container == null) return (false, $"Container '{webhook.TargetId}' not found");
+        var (container, error) = await WebhookTargets.ContainerAsync(_docker, webhook);
+        if (container == null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
 
-        var newId = await _docker.RecreateContainerAsync(container.Id, webhook.ServerId);
+        var newId = await _docker.RecreateContainerAsync(container.Id, WebhookTargets.ServerOf(webhook));
         return (true, $"Container {container.Name} rebuilt (new ID: {newId[..12]}).");
     }
 
@@ -181,7 +179,7 @@ public class WebhookService : IWebhookService
 
     private async Task<(bool, string)> DeployCompose(WebhookEntity webhook)
     {
-        var sid = webhook.ServerId ?? "local";
+        var sid = WebhookTargets.ServerOf(webhook);
         // TargetId is the compose project directory. Require an absolute path and single-quote it for the
         // host shell — otherwise a crafted value would be executed as an arbitrary root command (and paths
         // with spaces would break). Every other host-command site in the codebase quotes; this one must too.

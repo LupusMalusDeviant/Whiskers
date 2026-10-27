@@ -163,11 +163,18 @@ public sealed class MutationGateway : IMutationGateway
             {
                 _logger.LogWarning(ex, "Target of {Capability} could not be resolved (operation {OperationId})",
                     capability.Id, operationId);
-                resolution = new TargetResolution(null, $"The target could not be resolved: {ex.Message}");
+                // The detail (possibly a runtime's endpoint or path) stays in the log, not in the refusal or audit.
+                resolution = new TargetResolution(null, "The target could not be resolved (see the log).",
+                    MutationReasonCodes.TargetNotResolved, ["see the log"]);
             }
             if (resolution.Target is null)
                 return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
-                    resolution.Error ?? "The target could not be resolved.", ct);
+                    resolution.Error ?? "The target could not be resolved.", ct)
+                    with
+                    {
+                        ReasonCode = resolution.Code ?? MutationReasonCodes.TargetNotResolved,
+                        ReasonArgs = resolution.Args ?? [resolution.Error ?? ""],
+                    };
             request = request with { Target = resolution.Target };
         }
 

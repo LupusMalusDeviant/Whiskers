@@ -116,8 +116,8 @@ public class TaskExecutor : ITaskExecutor
 
         var containerId = task.TargetId;
         var outcome = await _automation.RunAsync(ActorOf(task), "container.restart",
-            new { containerId, name = task.TargetName, serverId = task.ServerId },
-            _ => _docker.RestartContainerAsync(containerId, task.ServerId));
+            new { containerId, name = task.TargetName, serverId = ScheduledTaskServer.Of(task) },
+            _ => _docker.RestartContainerAsync(containerId, ScheduledTaskServer.Of(task)));
         return Problem(outcome, "container.restart") is { } problem
             ? (false, problem)
             : (true, $"Container {task.TargetName ?? task.TargetId} restarted.");
@@ -132,18 +132,18 @@ public class TaskExecutor : ITaskExecutor
         var database = config.GetValueOrDefault("database", "");
 
         // Detect DB type and credentials
-        var containers = await _docker.ListContainersAsync(serverId: task.ServerId);
+        var containers = await _docker.ListContainersAsync(serverId: ScheduledTaskServer.Of(task));
         var container = containers.FirstOrDefault(c => c.Id == task.TargetId || c.Name == task.TargetId);
         if (container == null) return (false, $"Container not found: {task.TargetId}");
         if (!container.IsDatabase) return (false, $"Container {container.Name} is not a database.");
 
-        var env = await _docker.GetContainerEnvAsync(container.Id, task.ServerId);
+        var env = await _docker.GetContainerEnvAsync(container.Id, ScheduledTaskServer.Of(task));
         var creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
         if (string.IsNullOrEmpty(database)) database = creds.Database;
 
         var outcome = await _automation.RunAsync(ActorOf(task), "db.backup",
-            new { containerId = container.Id, name = container.Name, serverId = task.ServerId, database },
-            _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, task.ServerId));
+            new { containerId = container.Id, name = container.Name, serverId = ScheduledTaskServer.Of(task), database },
+            _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, ScheduledTaskServer.Of(task)));
         if (Problem(outcome, "db.backup") is { } problem) return (false, problem);
         var (success, filePath, sizeBytes, error) = outcome.Value;
 
@@ -162,8 +162,8 @@ public class TaskExecutor : ITaskExecutor
 
         var volumeName = task.TargetId;
         var outcome = await _automation.RunAsync(ActorOf(task), "volume.backup",
-            new { volumeName, containerName = task.TargetName, serverId = task.ServerId },
-            _ => _backupService.BackupVolumeAsync(volumeName, task.TargetName ?? "", task.ServerId, $"Scheduled: {task.Name}"));
+            new { volumeName, containerName = task.TargetName, serverId = ScheduledTaskServer.Of(task) },
+            _ => _backupService.BackupVolumeAsync(volumeName, task.TargetName ?? "", ScheduledTaskServer.Of(task), $"Scheduled: {task.Name}"));
         if (Problem(outcome, "volume.backup") is { } problem) return (false, problem);
         var backup = outcome.Value!;
 
@@ -195,7 +195,7 @@ public class TaskExecutor : ITaskExecutor
         if (string.IsNullOrEmpty(command))
             return (false, "No command specified");
 
-        var sid = task.ServerId ?? "local";
+        var sid = ScheduledTaskServer.Of(task);
         // The executor is not marked yet (it is a primitive); gating the call still re-checks the owner, who must
         // hold host.exec (Admin), and applies the kill switch. The command goes to the policy (forbidden arguments as
         // they are today, not when the task was created); the audit row keeps only its length.
@@ -210,7 +210,7 @@ public class TaskExecutor : ITaskExecutor
 
     private async Task<(bool, string)> ExecuteCleanup(ScheduledTaskEntity task)
     {
-        var sid = task.ServerId ?? "local";
+        var sid = ScheduledTaskServer.Of(task);
 
         // `docker system prune` removes every stopped container. The gateway decided on the host only, so a stopped
         // protected container would go with it: refuse the cleanup while one exists (fail closed without policy).
@@ -260,13 +260,13 @@ public class TaskExecutor : ITaskExecutor
             if (task.TaskType == ScheduledTaskType.VolumeBackup && !string.IsNullOrEmpty(task.TargetId))
             {
                 // Scope to this server so retention never touches another host's backups of a same-named volume.
-                var backups = await _backupService.ListBackupsAsync(task.ServerId ?? "local", task.TargetId);
+                var backups = await _backupService.ListBackupsAsync(ScheduledTaskServer.Of(task), task.TargetId);
                 var toDelete = backups.OrderByDescending(b => b.CreatedAt).Skip(maxBackups);
                 foreach (var b in toDelete)
                 {
                     var backupId = b.BackupId;
                     var outcome = await _automation.RunAsync(ActorOf(task), "volume.backup_delete",
-                        new { volumeName = task.TargetId, backupId, fileName = b.FileName, serverId = task.ServerId },
+                        new { volumeName = task.TargetId, backupId, fileName = b.FileName, serverId = ScheduledTaskServer.Of(task) },
                         _ => _backupService.DeleteBackupAsync(backupId));
                     if (Problem(outcome, "volume.backup_delete") is { } problem)
                     {
@@ -293,12 +293,12 @@ public class TaskExecutor : ITaskExecutor
                     _logger.LogWarning("DB-backup retention skipped for task {Name}: unsafe database name '{Db}'", task.Name, dbName);
                     return;
                 }
-                var sid = task.ServerId ?? "local";
+                var sid = ScheduledTaskServer.Of(task);
                 var glob = $"{_hostBackupDir}/{dbName}_*.sql*";
                 var script = $"ls -1t {glob} 2>/dev/null | tail -n +{maxBackups + 1} | xargs -r rm -f";
                 // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
                 var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
-                    new { containerId = task.TargetId, database = dbName, keep = maxBackups, serverId = task.ServerId },
+                    new { containerId = task.TargetId, database = dbName, keep = maxBackups, serverId = ScheduledTaskServer.Of(task) },
                     _ => _executor.ExecuteAsync(sid, script, TimeSpan.FromSeconds(15)));
                 if (Problem(outcome, "db.backup_delete") is { } problem)
                     _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);

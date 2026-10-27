@@ -147,7 +147,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 var progress = new Progress<string>(msg => _logger.LogDebug("Update {Container}: {Msg}", container.Name, msg));
                 // Through the gateway on the authority of the admin who took AutoUpdate over (PC-D6), re-checked
                 // per update; without one, the grace rule of AutomationOptions.RequireOwner applies.
-                var sid = container.ServerId == "local" ? null : container.ServerId;
+                // The server the container was listed on, by its id: "local" is a server id like any other, and null
+                // would be the default server, which need not be the same machine (R1-06).
+                var sid = container.ServerId;
                 // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
                 var updateOwner = _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId;
                 var actor = new AutomationActor("autoupdate", "AutoUpdate", updateOwner, updateOwner);
@@ -183,7 +185,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 await Task.Delay(TimeSpan.FromSeconds(15), ct);
 
                 // Check health
-                var (state, _, oomKilled) = await _docker.InspectContainerStateAsync(newId, container.ServerId == "local" ? null : container.ServerId);
+                var (state, _, oomKilled) = await _docker.InspectContainerStateAsync(newId, container.ServerId);
 
                 if (state != "running" || oomKilled)
                 {
@@ -303,7 +305,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var (oldImageId, cfg) = await _docker.CaptureRollbackSnapshotAsync(
-            container.Id, container.ServerId == "local" ? null : container.ServerId);
+            container.Id, container.ServerId);
         await UpsertRollbackAsync(db, container, oldImageId, cfg, CancellationToken.None);
         await db.SaveChangesAsync();
     }
@@ -354,7 +356,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         var progress = new Progress<string>(msg => _logger.LogDebug("Rollback {Container}: {Msg}", snap.ContainerName, msg));
         await _docker.RollbackContainerAsync(
             snap.ContainerName, snap.OldImageRef, snap.ConfigJson,
-            snap.ServerId == "local" ? null : snap.ServerId, progress);
+            snap.ServerId, progress);
 
         // Mark the latest update-history row for this container as rolled back.
         var hist = await db.UpdateHistory

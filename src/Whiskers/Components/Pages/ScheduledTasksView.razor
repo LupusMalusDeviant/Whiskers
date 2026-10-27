@@ -412,7 +412,7 @@ else
 
     private async Task LoadContainersForServer()
     {
-        var sid = _formServerId == "local" ? null : _formServerId;
+        var sid = _formServerId;
         _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
     }
 
@@ -471,7 +471,8 @@ else
     /// Checking only <c>scheduler.run</c> would let anyone who may run tasks trigger what the task does.</summary>
     private Task<(bool Success, string Output)> RunNowGatedAsync(Whiskers.Models.ScheduledTaskEntity task)
     {
-        var serverId = task.ServerId;
+        // The server the task runs on (R1-06): the same rule as the scheduler's execution.
+        var serverId = Whiskers.Services.Scheduler.ScheduledTaskServer.Of(task);
         var target = task.TargetId;
         return task.TaskType switch
         {
@@ -505,9 +506,9 @@ else
         return task.TaskType switch
         {
             ScheduledTaskType.VolumeBackup => ("volume.backup_delete",
-                new { volumeName = task.TargetId, serverId = task.ServerId, retention = true }),
+                new { volumeName = task.TargetId, serverId = Whiskers.Services.Scheduler.ScheduledTaskServer.Of(task), retention = true }),
             ScheduledTaskType.DbBackup => ("db.backup_delete",
-                new { containerId = task.TargetId, name = task.TargetName, serverId = task.ServerId, retention = true }),
+                new { containerId = task.TargetId, name = task.TargetName, serverId = Whiskers.Services.Scheduler.ScheduledTaskServer.Of(task), retention = true }),
             ScheduledTaskType.SelfBackup => ("selfbackup.delete", new { retention = true }),
             _ => null,
         };

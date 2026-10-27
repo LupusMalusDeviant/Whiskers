@@ -181,7 +181,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         CancellationToken ct)
     {
         var gated = await _automation.RunAsync(actor, "container.update",
-            new { containerId = c.Id, name = c.Name, serverId = c.ServerId == "local" ? null : c.ServerId, dryRun },
+            new { containerId = c.Id, name = c.Name, serverId = c.ServerId, dryRun },
             async token =>
             {
                 var result = (await _runner.PatchAsync(c.ServerId, c.Name, dryRun, token)).Outcome;

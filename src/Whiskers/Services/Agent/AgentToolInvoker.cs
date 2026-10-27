@@ -137,7 +137,10 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             // The session's approval for this call carries the same correlation id (ApprovalCoordinator).
             OperationId: call.CorrelationId, SessionId: context.SessionId);
         // The gateway's token carries the capability deadline and the session's cancellation into the tool.
-        var outcome = await _gateway.ExecuteAsync(request, (_, token) => ExecuteAsync(entry, args, context, token), ct);
+        // The tool runs on the identity the gateway resolved and decided on (R1-06), not on the raw arguments.
+        var outcome = await _gateway.ExecuteAsync(request, (decided, token) =>
+            ExecuteAsync(entry, MutationTargets.CanonicalArguments(capability, args, decided.Request.Target,
+                takesServerId: entry.Method.GetParameters().Any(p => p.Name == "serverId")), context, token), ct);
 
         var decision = outcome.Status switch
         {

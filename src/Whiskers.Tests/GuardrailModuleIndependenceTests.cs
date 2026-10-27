@@ -37,9 +37,15 @@ public class GuardrailModuleIndependenceTests
                     b.UseEnvironment("Development");
                     b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(
                         new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") }));
-                    b.ConfigureTestServices(s => s.AddSingleton<IDockerService>(new FakeDocker(
-                        new ContainerInfo { Id = "c-whiskers", Name = "whiskers" },
-                        new ContainerInfo { Id = "c-web-1", Name = "web-1" })));
+                    b.ConfigureTestServices(s =>
+                    {
+                        s.AddSingleton<Whiskers.Services.Docker.IDockerService>(new FakeDocker(
+                            new ContainerInfo { Id = "c-whiskers", Name = "whiskers" },
+                            new ContainerInfo { Id = "c-web-1", Name = "web-1" }));
+                        // The target resolver decides the server first (R1-06): a call without one acts on the default server.
+                        s.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+                            new ServerConfig { Id = "local", Name = "Local", IsDefault = true }));
+                    });
                 });
             using var client = factory.CreateClient();
 

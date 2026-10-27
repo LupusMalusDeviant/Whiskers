@@ -170,7 +170,7 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-        var sid = _newNetworkServerId == "local" ? null : _newNetworkServerId;
+        var sid = _newNetworkServerId;
         try
         {
             var name = _newNetworkName;
@@ -202,7 +202,7 @@ else
             yesText: L["Networks_Dialog_DeleteYes"].Value, cancelText: L["Networks_Button_Cancel"].Value);
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-        var sid = network.ServerId == "local" ? null : network.ServerId;
+        var sid = network.ServerId;
         try
         {
             await Mutations.RunAsync("network.remove", new { networkId = network.Id, name = network.Name, serverId = sid },

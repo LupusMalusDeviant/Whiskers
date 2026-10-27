@@ -82,17 +82,20 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         && (string.IsNullOrWhiteSpace(principal.DelegatedBy)
             || principal.DelegatedBy.StartsWith(PrincipalIds.AgentPrefix, StringComparison.Ordinal));
 
-    /// <summary>The rules match argument values, so the resolved target (full container id and name) is added for
-    /// evaluation only: a unique id prefix of a protected container is then caught as well. The approval hash and
-    /// the audit keep the caller's original arguments.</summary>
+    /// <summary>The rules match argument values, so the resolved target (full id and name, and what the
+    /// operation also touches, R1-06) is added for evaluation only: a unique id prefix of a protected container, a
+    /// protected container attached to a network that is removed, or a workload's live controller is then caught as
+    /// well. The approval hash and the audit keep the caller's original arguments.</summary>
     internal static IReadOnlyDictionary<string, JsonElement> WithResolvedTarget(MutationRequest request)
     {
         var t = request.Target;
-        if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name))
+        if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && t.Related.Count == 0)
             return request.Arguments;
         var args = new Dictionary<string, JsonElement>(request.Arguments);
         if (!string.IsNullOrEmpty(t.Id)) args["__resolvedTargetId"] = JsonSerializer.SerializeToElement(t.Id);
         if (!string.IsNullOrEmpty(t.Name)) args["__resolvedTargetName"] = JsonSerializer.SerializeToElement(t.Name);
+        for (var i = 0; i < t.Related.Count; i++)
+            args[$"__resolvedRelated{i}"] = JsonSerializer.SerializeToElement(t.Related[i]);
         return args;
     }
 
