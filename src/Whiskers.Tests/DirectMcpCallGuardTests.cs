@@ -142,9 +142,15 @@ public class DirectMcpCallGuardWireTests
                     b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(
                         new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") }));
                     // The gateway resolves the container before policy runs, so the containers must exist.
-                    b.ConfigureTestServices(s => s.AddSingleton<Whiskers.Services.Docker.IDockerService>(new FakeDocker(
-                        new ContainerInfo { Id = "c-whiskers", Name = "whiskers" },
-                        new ContainerInfo { Id = "c-web-1", Name = "web-1" })));
+                    b.ConfigureTestServices(s =>
+                    {
+                        s.AddSingleton<Whiskers.Services.Docker.IDockerService>(new FakeDocker(
+                            new ContainerInfo { Id = "c-whiskers", Name = "whiskers" },
+                            new ContainerInfo { Id = "c-web-1", Name = "web-1" }));
+                        // The target resolver decides the server first (R1-06): a call without one acts on the default server.
+                        s.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+                            new ServerConfig { Id = "local", Name = "Local", IsDefault = true }));
+                    });
                 });
             using var client = factory.CreateClient();
             var session = await McpServedSurfaceTests.InitializeAsync(client);

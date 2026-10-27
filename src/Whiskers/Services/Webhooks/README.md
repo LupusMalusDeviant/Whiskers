@@ -7,6 +7,7 @@ CI/CD **webhook** handling, registers webhook endpoints and processes incoming t
 | File | Purpose |
 |---|---|
 | `IWebhookService.cs` / `WebhookService.cs` | Manages CI/CD webhooks and processes incoming webhook triggers. Generates the mandatory HMAC secret on create, regenerates on demand (one-time display), and runs the signed self-test. |
+| `WebhookTargets.cs` | What a webhook acts on, shared by the Webhooks page's gate and the trigger (R1-06): `ServerOf` (a webhook without a server acts on the server with the id `local`, never on "the default server") and `ContainerAsync` (exact id or name, else a unique id prefix; an ambiguous prefix is an error). |
 | `NoopWebhookService.cs` | Core default `IWebhookService` for when the **Webhooks module** is off. Keeps the Core `POST /api/webhooks/{id}` endpoint's per-request resolution working; `TriggerAsync` fails gracefully (endpoint → 400, not 500), reads return empty, create throws. Real service wins by last-registration when the module is on (RoadToSAP Phase 1). |
 
 ## Wiring

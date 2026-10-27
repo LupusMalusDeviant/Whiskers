@@ -88,8 +88,14 @@ public static class McpGuardrailFilter
             capability.Id, PrincipalOf(principal), MutationSurface.Mcp,
             MutationTargets.FromArguments(capability, arguments), arguments);
 
-        var outcome = await gateway.ExecuteAsync(mutation, async (_, token) =>
+        var outcome = await gateway.ExecuteAsync(mutation, async (decided, token) =>
         {
+            // The tool runs on the identity the gateway resolved and decided on (R1-06), not on a second lookup of
+            // what the client typed: the target's key and serverId are replaced by their canonical values.
+            if (request.Params.Arguments is { } wire)
+                foreach (var (key, value) in MutationTargets.CanonicalArguments(capability, arguments, decided.Request.Target))
+                    if (!wire.TryGetValue(key, out var old) || old.GetRawText() != value.GetRawText())
+                        wire[key] = value;
             var result = await next(request, token);
             // A tool result marked as an error is a failed mutation, not a successful one.
             if (result.IsError == true)

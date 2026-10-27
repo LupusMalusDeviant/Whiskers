@@ -6,6 +6,18 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-06: every mutation's target is resolved against the inventory before policy — servers (an empty server id is
+  the configured default server, decided by the gateway), containers, networks with the containers attached to them,
+  cloud servers (Whiskers id or name), scheduled tasks (id or unique name), DNS zones (normalised, within
+  `Dns:AllowedZones`) and Kubernetes workloads (their **live** controller). An unknown or ambiguous target is refused
+  before policy. MCP and agent tools then run on the resolved identity (canonical id and server id), not on a second
+  lookup of what the caller typed. A protected container attached to a network that is removed, or connected to /
+  disconnected from one, and a workload's current controller are matched against protected patterns
+  (`TargetResolutionTests`).
+- R1-06: AutoUpdate no longer turns the server id `local` into "the default server": a container listed on `local` is
+  decided and recreated on `local`, also when another server is the default. Webhooks decide (Test button) and run
+  on the same server and container (`WebhookTargets`).
+
 - R1-05 review: the two refusals the effective requirement adds (underlying capability switched off, requirement
   not determinable) are shown in the user's language on the pages; covered end to end through the real gateway,
   approval gate and store (`SchedulerApprovalEndToEndTests`).
@@ -22,6 +34,15 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 
 ### ⚠️ Upgrade notes
 
+- **R1-06: unknown or ambiguous targets are refused.** A call naming a server, network, cloud server or task that
+  does not exist, or a name that fits more than one (two servers called "web", a network id prefix shared by two
+  networks, two tasks with the same name), is refused before anything runs; use the id. A server id that differs
+  from the stored one only in case is resolved to the stored id.
+- **R1-06: a webhook saved without a server acts on the server with the id `local`.** Restart and rebuild webhooks
+  used the default server before, compose-deploy webhooks used `local`; now all four actions use `local`. If your
+  `local` server is not the machine such a webhook should act on (or you have no server with that id), set the
+  webhook's server explicitly. A webhook whose container id prefix matches more than one container no longer acts
+  on the first match; it fails with "Ambiguous".
 - **R1-05: one capability level table; several MCP tools now require Admin.** The capability catalog
   (`CapabilityCatalog`) is now the single source of the level of every mutating capability; MCP's
   `DefaultToolLevels` takes its mutating entries from it. Where the UI and MCP disagreed, the stricter level

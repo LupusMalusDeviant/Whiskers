@@ -293,15 +293,15 @@ else
     /// the project directory. An unknown action is decided as nothing and refused by the service itself.</summary>
     private async Task<(bool Success, string Output)> TestGatedAsync(Whiskers.Models.WebhookEntity wh)
     {
-        var serverId = wh.ServerId ?? "local";
+        // The same server and container the trigger resolves when it runs (R1-06).
+        var serverId = Whiskers.Services.Webhooks.WebhookTargets.ServerOf(wh);
         Task<(bool, string)> Fire() => WebhookService.TriggerSignedTestAsync(wh.WebhookId);
         switch (wh.Action)
         {
             case "restart":
             case "rebuild":
             {
-                var container = (await DockerService.ListContainersAsync(all: true, serverId: serverId))
-                    .FirstOrDefault(c => c.Name == wh.TargetId || c.Id.StartsWith(wh.TargetId ?? " ", StringComparison.Ordinal));
+                var (container, _) = await Whiskers.Services.Webhooks.WebhookTargets.ContainerAsync(DockerService, wh);
                 return await Mutations.RunAsync(wh.Action == "restart" ? "container.restart" : "container.update",
                     new { containerId = container?.Id ?? wh.TargetId, name = container?.Name ?? wh.TargetId, serverId },
                     _ => Fire());

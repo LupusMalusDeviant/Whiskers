@@ -41,8 +41,10 @@ internal sealed class StaticOptionsMonitor<T>(T value) : Microsoft.Extensions.Op
 }
 
 /// <summary>A fixed server registry.</summary>
-internal sealed class FakeServerConfig : IServerConfigService
+internal sealed class FakeServerConfig : IServerConfigService, Whiskers.Services.IInitializable
 {
+    public int Order => 50;
+
     private readonly List<Whiskers.Models.ServerConfig> _servers;
     public FakeServerConfig(params Whiskers.Models.ServerConfig[] servers) => _servers = servers.ToList();
 
@@ -213,11 +215,13 @@ internal sealed class FakeDocker : IDockerService
     public Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task StartContainerAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task StopContainerAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
-    public Task RestartContainerAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
+    public Task RestartContainerAsync(string containerId, string? serverId = null) =>
+        Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();
     public Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null) => throw new NotSupportedException();
     public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null) => throw new NotSupportedException();
-    public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
+    public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null) =>
+        AllowMutations ? Task.FromResult(("running", 0, false)) : throw new NotSupportedException();
     public Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync() => throw new NotSupportedException();
     public Task<Whiskers.Services.ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null)
@@ -225,11 +229,30 @@ internal sealed class FakeDocker : IDockerService
 
     public Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null) => throw new NotSupportedException();
     public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
-    public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null) => throw new NotSupportedException();
+    public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null) =>
+        Act("recreate", containerId, serverId, Task.FromResult("recreated-" + containerId));
     public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<string> RollbackContainerAsync(string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null) => throw new NotSupportedException();
-    public Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null) => throw new NotSupportedException();
+    /// <summary>Networks served by <see cref="ListNetworksAsync"/>, per their <c>ServerId</c>.</summary>
+    public List<NetworkInfo> Networks { get; } = new();
+
+    public Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null) =>
+        Task.FromResult<IList<NetworkInfo>>(Networks.Where(n => n.ServerId == (serverId ?? DefaultServerId)).ToList());
+
+    /// <summary>When true, restart / recreate succeed and are recorded in <see cref="Actions"/>; otherwise they
+    /// throw, so a test that must never reach them fails loudly.</summary>
+    public bool AllowMutations { get; set; }
+
+    /// <summary>Every restart / recreate, with the container id and server id it was called with.</summary>
+    public List<(string Op, string ContainerId, string? ServerId)> Actions { get; } = new();
+
+    private T Act<T>(string op, string containerId, string? serverId, T result)
+    {
+        if (!AllowMutations) throw new NotSupportedException();
+        Actions.Add((op, containerId, serverId));
+        return result;
+    }
     public Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null) => throw new NotSupportedException();
     public Task RemoveNetworkAsync(string networkId, string? serverId = null) => throw new NotSupportedException();
     public Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();

@@ -58,7 +58,19 @@ public enum MutationSurface { Mcp, Agent, Ui, Automation, Webhook, Terminal }
 
 /// <summary>The target of a mutation (INV-57). Entry points pass what the caller named; the gateway resolves it
 /// (<see cref="IMutationTargetResolver"/>) before policy runs and records the resolved form.</summary>
-public sealed record MutationTarget(string Kind, string Id, string? Name = null, string? ServerId = null);
+public sealed record MutationTarget(string Kind, string Id, string? Name = null, string? ServerId = null)
+{
+    /// <summary>What the operation also touches (R1-06): the containers attached to a network, the container a
+    /// network is connected to, a workload's pod. Policy matches protected resources on these as well.</summary>
+    public IReadOnlyList<string> Related { get; init; } = Array.Empty<string>();
+
+    /// <summary>For a network connect / disconnect: the resolved id of the container named in the call.</summary>
+    public string? RelatedContainerId { get; init; }
+
+    /// <summary>The resolver found the target in the inventory and <see cref="Id"/> is canonical. False for a
+    /// target that is created by the operation or whose kind is resolved by its own service.</summary>
+    public bool Resolved { get; init; }
+}
 
 /// <summary>Everything the gateway needs to decide on and record one mutation.</summary>
 /// <param name="OperationId">Idempotency and correlation key (INV-39); the gateway generates one when null.</param>
