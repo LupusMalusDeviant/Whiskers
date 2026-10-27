@@ -4811,4 +4811,10 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AutomationOwners_State_Unrecognised" xml:space="preserve">
     <value>Unbekannter Besitzer aus einer älteren Version – Läufe werden abgelehnt, bis ein Admin übernimmt.</value>
   </data>
+  <data name="AutomationOwners_Suspended" xml:space="preserve">
+    <value>Ausgesetzt: Besitzer {0} hat keine Befugnis mehr. Es läuft erst wieder, wenn ein Admin übernimmt.</value>
+  </data>
+  <data name="AutomationOwners_State_AccountDeleted" xml:space="preserve">
+    <value>Konto gelöscht – Läufe werden abgelehnt.</value>
+  </data>
 </root>

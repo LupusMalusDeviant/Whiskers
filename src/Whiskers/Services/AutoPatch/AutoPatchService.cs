@@ -127,9 +127,34 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
             new { dryRun }, async token => MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
+        {
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
+            await SuspendIfOwnerLostAsync(actor, "autopatch.run", ct);
+        }
         else if (outcome.Status == MutationStatus.Failed)
             _logger.LogError(outcome.Error, "Auto-patch cycle failed: {Reason}", outcome.Reason);
+    }
+
+    /// <summary>The owner lost their authority (PC-D6): AutoPatch is suspended until an admin takes it over, and the
+    /// admins are told. A refusal by policy leaves it on.</summary>
+    private async Task SuspendIfOwnerLostAsync(AutomationActor actor, string capabilityId, CancellationToken ct)
+    {
+        if (_automation.LostAuthority(actor, capabilityId) is not { } lost) return;
+        await _owners.SuspendAsync(IAutomationOwnerStore.AutoPatch, lost, ct);
+        _logger.LogError("AutoPatch was suspended: {Reason}. Take it over again in Settings → Automation owners", lost);
+        try
+        {
+            await _notifications.SendAsync(new NotificationEvent
+            {
+                EventType = "automation_suspended",
+                ContainerName = "AutoPatch",
+                ImageInfo = $"AutoPatch was suspended: {lost}. It stays off until an admin takes it over in Settings.",
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Notification for the suspended AutoPatch failed");
+        }
     }
 
     /// <summary>One container of an owned cycle, decided as <c>container.update</c> of exactly that container: the

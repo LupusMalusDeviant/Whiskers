@@ -11,10 +11,11 @@ public sealed class AutomationOptions
     public const string Section = "Automation";
 
     /// <summary>
-    /// <c>false</c> (default until 1.0): an item created before owners were recorded keeps running, audited as
-    /// "no owner", until an admin takes it over. <c>true</c>: an item without an owner is refused on every run.
+    /// <c>true</c> (the 1.0 default, R1-04): an item without an owner is refused on every run and suspended.
+    /// <c>false</c>, set explicitly (<c>Automation__RequireOwner=false</c>): the grace period — an item created before
+    /// owners were recorded keeps running, audited as "no owner", until an admin takes it over.
     /// </summary>
-    public bool RequireOwner { get; set; }
+    public bool RequireOwner { get; set; } = true;
 }
 
 /// <summary>
@@ -36,7 +37,7 @@ public interface IAutomationOwnerResolver
 }
 
 /// <summary>Why an owner may or may not act; the UI shows it through <c>AutomationOwners_State_&lt;state&gt;</c>.</summary>
-public enum OwnerState { Active, NotAllowedToSignIn, KeyDeleted, KeyDisabled, Unrecognised }
+public enum OwnerState { Active, NotAllowedToSignIn, AccountDeleted, KeyDeleted, KeyDisabled, Unrecognised }
 
 /// <summary>An owner as the UI shows it: an email, a key name or the raw stored value.</summary>
 public sealed record OwnerDescription(string Name, OwnerState State);
@@ -67,6 +68,15 @@ public static class AutomationOwners
         return plainEmail ? PrincipalIds.User(stored) : stored;
     }
 
+    /// <summary>One owner's authority for the audit row of a takeover: <c>&lt;id&gt; (&lt;state&gt;, &lt;level&gt;)</c>, or
+    /// <c>-</c> for none. Records what the item ran on before and what it runs on after.</summary>
+    public static string AuthorityOf(IAutomationOwnerResolver resolver, string? ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+        if (string.IsNullOrWhiteSpace(ownerId)) return "-";
+        return $"{ownerId} ({resolver.Describe(ownerId).State}, {resolver.Resolve(ownerId).PermissionLevel})";
+    }
+
     /// <summary>What to record as <see cref="AutomationActor.CreatedVia"/> for an item created by
     /// <paramref name="caller"/>: the caller's own id (for an agent, its session).</summary>
     public static string? ViaOf(MutationPrincipal? caller) =>
@@ -93,12 +103,22 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
     private readonly IWhitelistService _whitelist;
     private readonly IMcpPermissionService _keys;
 
-    public AutomationOwnerResolver(IRoleService roles, IWhitelistService whitelist, IMcpPermissionService keys)
+    private readonly IOwnerAccounts? _accounts;
+
+    public AutomationOwnerResolver(IRoleService roles, IWhitelistService whitelist, IMcpPermissionService keys,
+        IOwnerAccounts? accounts = null)
     {
         _roles = roles ?? throw new ArgumentNullException(nameof(roles));
         _whitelist = whitelist ?? throw new ArgumentNullException(nameof(whitelist));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
+        _accounts = accounts;
     }
+
+    /// <summary>The state of a user owner: an account that is gone outranks a whitelist entry left behind.</summary>
+    private OwnerState UserState(string email) =>
+        _accounts is not null && !_accounts.Exists(email) ? OwnerState.AccountDeleted
+        : _whitelist.IsEmailAllowed(email) ? OwnerState.Active
+        : OwnerState.NotAllowedToSignIn;
 
     public OwnerDescription Describe(string ownerId)
     {
@@ -110,7 +130,7 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
                 : new(key.Name, key.Enabled ? OwnerState.Active : OwnerState.KeyDisabled);
         }
         if (PrincipalIds.EmailOf(ownerId) is not { } email) return new(ownerId, OwnerState.Unrecognised);
-        return new(email, _whitelist.IsEmailAllowed(email) ? OwnerState.Active : OwnerState.NotAllowedToSignIn);
+        return new(email, UserState(email));
     }
 
     public MutationPrincipal Resolve(string ownerId)
@@ -131,16 +151,21 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
             return new MutationPrincipal(MutationPrincipalKind.Human, ownerId,
                 $"{ownerId} (unrecognised owner, suspended)", McpPermissionLevels.Read);
 
-        // A user who can no longer sign in has no authority left, whatever role entry remains.
-        var allowed = _whitelist.IsEmailAllowed(email);
-        var userLevel = !allowed ? McpPermissionLevels.Read : _roles.GetRole(email) switch
+        // A user who can no longer sign in — removed from the whitelist, or whose local account was deleted — has no
+        // authority left, whatever role entry remains.
+        var state = UserState(email);
+        var userLevel = state != OwnerState.Active ? McpPermissionLevels.Read : _roles.GetRole(email) switch
         {
             AppRole.Admin => McpPermissionLevels.Admin,
             AppRole.Operator => McpPermissionLevels.Write,
             _ => McpPermissionLevels.Read,
         };
-        return new MutationPrincipal(MutationPrincipalKind.Human, ownerId,
-            allowed ? email : $"{email} (no longer allowed to sign in)", userLevel);
+        return new MutationPrincipal(MutationPrincipalKind.Human, ownerId, state switch
+        {
+            OwnerState.AccountDeleted => $"{email} (account deleted)",
+            OwnerState.NotAllowedToSignIn => $"{email} (no longer allowed to sign in)",
+            _ => email,
+        }, userLevel);
     }
 }
 
@@ -160,6 +185,12 @@ public interface IAutomationMutationRunner
     [MutationEntryPoint]
     Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
         Func<CancellationToken, Task> action, CancellationToken ct = default);
+
+    /// <summary>Why the item can no longer run on its owner's authority at all — no owner while
+    /// <see cref="AutomationOptions.RequireOwner"/> is set, an owner who lost their account, sign-in or key, or a
+    /// level below <paramref name="capabilityId"/> — or <c>null</c> when the owner still holds it. A refusal for
+    /// this reason suspends the item (PC-D6); a refusal by policy (kill switch, protected resource) does not.</summary>
+    string? LostAuthority(AutomationActor actor, string capabilityId) => null;
 }
 
 public sealed class AutomationMutationRunner : IAutomationMutationRunner
@@ -206,6 +237,21 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             await action(token);
             return true;
         }, ct);
+    }
+
+    public string? LostAuthority(AutomationActor actor, string capabilityId)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        var capability = _catalog.Find(capabilityId);
+        if (capability is null) return null;
+        if (string.IsNullOrWhiteSpace(actor.OwnerId))
+            return _options.CurrentValue.RequireOwner ? "it has no owner, and owners are required" : null;
+        var owner = _owners.Resolve(actor.OwnerId);
+        if (_owners.Describe(actor.OwnerId).State != OwnerState.Active)
+            return $"its owner {owner.DisplayName} has no authority left";
+        return McpPermissionLevels.HasAccess(owner.PermissionLevel, capability.RequiredLevel)
+            ? null
+            : $"its owner {owner.DisplayName} no longer holds '{capability.RequiredLevel}' for {capability.Id}";
     }
 
     private MutationPrincipal PrincipalOf(AutomationActor actor, Capability? capability)

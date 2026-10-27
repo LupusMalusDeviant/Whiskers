@@ -69,7 +69,17 @@ public class TaskExecutor : ITaskExecutor
                 _ => (false, $"Unknown task type: {task.TaskType}")
             };
             if (refusal.Value is { } reason)
+            {
+                // The owner lost their authority for this task (PC-D6): suspend it, so it stops failing every night
+                // and an admin sees it. A refusal by policy (kill switch, protected resource) leaves it enabled.
+                if (_automation.LostAuthority(ActorOf(task), CapabilityOf(task.TaskType)) is { } lost)
+                {
+                    task.Enabled = false;
+                    await NotifySuspendedAsync(task, lost);
+                    return (false, $"Suspended: {lost}. An admin can take the task over in Scheduled tasks. {reason}");
+                }
                 await NotifyRefusedAsync(task, reason);
+            }
             return result;
         }
         catch (Exception ex)
@@ -304,6 +314,37 @@ public class TaskExecutor : ITaskExecutor
                 var message = $"Refused: {outcome.Reason}";
                 if (RefusalOfRun.Value is { } box) box.Value ??= message;
                 return message;
+        }
+    }
+
+    /// <summary>The capability a task type runs; its owner must hold it for the task to run at all.</summary>
+    internal static string CapabilityOf(ScheduledTaskType type) => type switch
+    {
+        ScheduledTaskType.ContainerRestart => "container.restart",
+        ScheduledTaskType.DbBackup => "db.backup",
+        ScheduledTaskType.VolumeBackup => "volume.backup",
+        ScheduledTaskType.SelfBackup => "selfbackup.create",
+        ScheduledTaskType.CustomCommand => "host.exec",
+        ScheduledTaskType.Cleanup => "host.prune",
+        _ => "",
+    };
+
+    private async Task NotifySuspendedAsync(ScheduledTaskEntity task, string lost)
+    {
+        _logger.LogWarning("Scheduled task {Name} was suspended: {Reason}", task.Name, lost);
+        if (_notify is null) return;
+        try
+        {
+            await _notify.SendAsync(new NotificationEvent
+            {
+                EventType = "automation_suspended",
+                ContainerName = task.TargetName ?? task.Name,
+                ImageInfo = $"Scheduled task \"{task.Name}\" was suspended: {lost}. It stays off until an admin takes it over in Scheduled tasks.",
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Notification for suspended task {Name} failed", task.Name);
         }
     }
 

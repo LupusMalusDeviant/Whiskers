@@ -4,8 +4,10 @@ using Whiskers.Configuration;
 namespace Whiskers.Services.Mutations;
 
 /// <summary>The owner an admin confirmed for a fleet-wide automation feature. <see cref="Blocked"/> marks a
-/// feature whose owner was lost with an unreadable file: it stays refused until an admin takes it over.</summary>
-public sealed record AutomationOwnerEntry(string OwnerId, DateTime ConfirmedAt, bool Blocked = false);
+/// feature that must not run until an admin takes it over: its owner was lost with an unreadable file, or the owner
+/// lost their authority and the feature was suspended (<see cref="SuspendedReason"/>, PC-D6).</summary>
+public sealed record AutomationOwnerEntry(string OwnerId, DateTime ConfirmedAt, bool Blocked = false,
+    string? SuspendedReason = null);
 
 /// <summary>
 /// Owners of the fleet-wide automation features that have no item of their own to store one on (PC-D6):
@@ -33,6 +35,14 @@ public interface IAutomationOwnerStore
     /// cannot be written.</summary>
     [MutatingOperation("automation.owner_set")]
     Task SetAsync(string feature, string ownerId, CancellationToken ct = default);
+
+    /// <summary>Suspends the feature because its owner lost their authority (PC-D6): it is blocked, keeps the owner
+    /// for the record and stays refused across restarts until an admin takes it over. Only ever lowers authority, so
+    /// it needs no gateway decision.</summary>
+    Task SuspendAsync(string feature, string reason, CancellationToken ct = default);
+
+    /// <summary>The entry of a blocked feature (owner and reason), for the UI; <c>null</c> otherwise.</summary>
+    AutomationOwnerEntry? GetBlocked(string feature) => null;
 }
 
 /// <summary>A small JSON file in the data directory (<c>automation-owners.json</c>), written atomically.</summary>
@@ -60,16 +70,32 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
     public AutomationOwnerEntry? Get(string feature) =>
         Volatile.Read(ref _entries).GetValueOrDefault(feature) is { Blocked: false } entry ? entry : null;
 
-    public async Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
+    public AutomationOwnerEntry? GetBlocked(string feature) =>
+        Volatile.Read(ref _entries).GetValueOrDefault(feature) is { Blocked: true } entry ? entry : null;
+
+    public Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        return WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
+    }
+
+    public Task SuspendAsync(string feature, string reason, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        return WriteAsync(feature, previous => new AutomationOwnerEntry(previous?.OwnerId ?? "", DateTime.UtcNow,
+            Blocked: true, SuspendedReason: reason), ct);
+    }
+
+    private async Task WriteAsync(string feature, Func<AutomationOwnerEntry?, AutomationOwnerEntry> entryOf,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(feature);
-        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         await _write.WaitAsync(ct);
         try
         {
             var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
             {
-                [feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow),
+                [feature] = entryOf(_entries.GetValueOrDefault(feature)),
             };
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             if (_loadFailed) KeepUnreadableFile();

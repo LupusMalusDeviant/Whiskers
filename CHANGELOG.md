@@ -108,6 +108,18 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **"Run now" needs Admin for a custom-command task, a self-backup task and any backup task with retention**
   (`maxBackups`): retention deletes old backups, which is decided as `volume.backup_delete` / `db.backup_delete` /
   `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
+- **Unattended items need an owner and are suspended when it loses its authority** (R1-04, PC-D6, INV-04):
+  - `Automation:RequireOwner` now defaults to `true`: a scheduled task or AutoUpdate without an owner is refused.
+    Take such items over in Scheduled Tasks, or keep the grace period with `Automation__RequireOwner=false`.
+  - A run refused because its owner lost their authority — local account deleted (when local accounts are the only
+    sign-in), removed from the whitelist, demoted below what the item does, API key deleted or disabled — now
+    **suspends** the item: a scheduled task is switched off, AutoPatch / AutoUpdate are blocked until an Admin takes
+    them over in Settings → Automation owners. Admins get an `automation_suspended` notification. Policy refusals
+    (kill switch, protected resources) still only report `automation_refused`.
+  - A task an agent created keeps the agent's guardrail rules when it runs (autonomy level and confirmation, tool
+    lists, forbidden arguments). With the default preset such a task's writes are refused; an Admin who takes it
+    over makes it a task of their own.
+  - Taking an item over records the previous and the new owner's authority in the audit row.
 - **Principals have stable ids** (R1-03, INV-01/06):
   - Owners of scheduled tasks, AutoPatch and AutoUpdate are now recorded as `user:<email>` or `key:<key id>`. The
     database migration `PrincipalIdsForTaskOwners` (which also adds `ScheduledTasks.CreatedVia`: who created the task,
@@ -133,6 +145,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **Agent-created tasks ran with a person's authority, and a deleted local account kept its tasks running**
+  (known items 6/7, PC-D6). See the upgrade note.
 - **Identities were rebuilt from display names** (TA-31, C-12, INV-01/06): every AI trigger shared one identity, and
   renaming an API key split it into two in the logs. Principals now carry typed ids end to end.
 - **Guardrail policy errors allowed the call, and the live policy could be changed without saving** (TA-32/33,

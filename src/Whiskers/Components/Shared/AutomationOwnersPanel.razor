@@ -21,7 +21,15 @@
                 <MudText Typo="Typo.subtitle2">@L[feature.TitleKey]</MudText>
                 @if (Owners.IsBlocked(feature.Id))
                 {
-                    <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Blocked"]</MudText>
+                    var blocked = Owners.GetBlocked(feature.Id);
+                    @if (blocked?.SuspendedReason is not null && !string.IsNullOrWhiteSpace(blocked.OwnerId))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Suspended", OwnerResolver.Describe(blocked.OwnerId).Name]</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Blocked"]</MudText>
+                    }
                 }
                 else if (entry is not null)
                 {
@@ -74,13 +82,15 @@
         if (_role < AppRole.Admin || string.IsNullOrWhiteSpace(_email)) return;
         var owner = PrincipalIds.User(_email);
         var featureId = feature.Id;
+        var previous = Owners.Get(featureId)?.OwnerId ?? Owners.GetBlocked(featureId)?.OwnerId;
+        var previousAuthority = AutomationOwners.AuthorityOf(OwnerResolver, previous);
         _busy = true;
         try
         {
             await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
                 _ => Owners.SetAsync(featureId, owner));
             await AuditLog.LogAsync(owner, "web", "automation.owner_set", "automation", featureId, featureId,
-                details: $"owner={owner}");
+                details: $"previous={previousAuthority}; new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
             Snackbar.Add(L["AutomationOwners_Snackbar_Done", L[feature.TitleKey].Value].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)

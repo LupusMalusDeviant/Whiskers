@@ -19,6 +19,15 @@ internal sealed class MemoryAutomationOwners : IAutomationOwnerStore
         _entries[feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow);
         return Task.CompletedTask;
     }
+
+    public Dictionary<string, string> Suspended { get; } = new(StringComparer.Ordinal);
+
+    public Task SuspendAsync(string feature, string reason, CancellationToken ct = default)
+    {
+        Blocked.Add(feature);
+        Suspended[feature] = reason;
+        return Task.CompletedTask;
+    }
 }
 
 /// <summary>For tests that drive a service past the point where it would hand work to the gateway.</summary>

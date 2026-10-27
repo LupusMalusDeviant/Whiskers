@@ -568,11 +568,12 @@ else
         try
         {
             var owner = PrincipalIds.User(email);
+            var previousAuthority = AutomationOwners.AuthorityOf(OwnerResolver, task.CreatedBy);
             await Mutations.RunAsync("scheduler.update",
                 new { taskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, owner },
                 _ => Scheduler.SetOwnerAsync(taskId, owner));
             await AuditLog.LogAsync(email, "web", "task.adopt", "scheduled-task", taskId, task.Name,
-                details: $"owner={owner}; previous={(string.IsNullOrWhiteSpace(task.CreatedBy) ? "-" : task.CreatedBy)}",
+                details: $"previous={previousAuthority}; new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}",
                 serverId: task.ServerId);
             return true;
         }

@@ -4811,4 +4811,10 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AutomationOwners_State_Unrecognised" xml:space="preserve">
     <value>Unrecognised owner from an older version — runs are refused until an admin takes it over.</value>
   </data>
+  <data name="AutomationOwners_Suspended" xml:space="preserve">
+    <value>Suspended: its owner {0} lost their authority. It does not run until an admin takes it over.</value>
+  </data>
+  <data name="AutomationOwners_State_AccountDeleted" xml:space="preserve">
+    <value>Account deleted — runs are refused.</value>
+  </data>
 </root>

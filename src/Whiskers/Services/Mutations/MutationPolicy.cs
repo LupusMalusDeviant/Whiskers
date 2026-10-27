@@ -55,9 +55,12 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         // the key (tool lists, forbidden arguments, confirmation) — scheduling is not a way around them; a run that
         // needs an approval is refused, since nobody is there to give it. An item from before owners were recorded
         // runs in the grace period with the PC-D1 rules (user decision).
+        // An item an agent created for its user keeps the agent's rules (R1-04): scheduling must not turn an agent's
+        // action into one the user authorised by hand.
         var engine = (request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
                      || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation
-                         && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human)
+                         && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human
+                         && !CreatedByAgent(request.Principal))
             ? HumanEngine
             : _engine;
         var decision = engine.Evaluate(new GuardrailRequest(
@@ -71,6 +74,9 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         };
         return new MutationPolicyDecision(verdict, decision.Reason, decision.MatchedRuleIds);
     }
+
+    private static bool CreatedByAgent(MutationPrincipal principal) =>
+        principal.DelegatedBy?.StartsWith(PrincipalIds.AgentPrefix, StringComparison.Ordinal) == true;
 
     /// <summary>The rules match argument values, so the resolved target (full container id and name) is added for
     /// evaluation only: a unique id prefix of a protected container is then caught as well. The approval hash and

@@ -142,14 +142,14 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 // A broken owner file must not read as "no owner" (that would be the grace period): fail closed.
                 if (_owners.IsBlocked(IAutomationOwnerStore.AutoUpdate))
                     throw new InvalidOperationException(
-                        "The AutoUpdate owner could not be read; take AutoUpdate over again in Settings → Automation owners.");
+                        "AutoUpdate is blocked (its owner could not be read or lost their authority); take it over again in Settings → Automation owners.");
 
                 var progress = new Progress<string>(msg => _logger.LogDebug("Update {Container}: {Msg}", container.Name, msg));
                 // Through the gateway on the authority of the admin who took AutoUpdate over (PC-D6), re-checked
                 // per update; without one, the grace rule of AutomationOptions.RequireOwner applies.
                 var sid = container.ServerId == "local" ? null : container.ServerId;
-                var outcome = await _automation.RunAsync(
-                    new AutomationActor("autoupdate", "AutoUpdate", _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId),
+                var actor = new AutomationActor("autoupdate", "AutoUpdate", _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId);
+                var outcome = await _automation.RunAsync(actor,
                     "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
                     async _ =>
                     {
@@ -161,6 +161,14 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         catch (Exception cex) { _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
                         return await _docker.RecreateContainerAsync(container.Id, sid, progress);
                     }, ct);
+                if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval
+                    && _automation.LostAuthority(actor, "container.update") is { } lost)
+                {
+                    // The owner lost their authority (PC-D6): suspend AutoUpdate until an admin takes it over.
+                    await _owners.SuspendAsync(IAutomationOwnerStore.AutoUpdate, lost, ct);
+                    throw new InvalidOperationException(
+                        $"AutoUpdate was suspended: {lost}. Take it over again in Settings → Automation owners.");
+                }
                 if (outcome.Status != MutationStatus.Executed)
                     throw outcome.Error ?? new InvalidOperationException(outcome.Reason ?? "The update was refused.");
                 var newId = outcome.Value!;

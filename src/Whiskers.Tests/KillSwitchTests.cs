@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
@@ -105,6 +106,94 @@ public sealed class KillSwitchTests : IDisposable
             Assert.Empty(f.Approvals.GetAll());
             Assert.Contains(f.Audit.Events, e => e == $"denied:{MutationStatus.Denied}");
             Assert.DoesNotContain(f.Audit.Events, e => e.StartsWith("complete:", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task AutoUpdate_and_AutoPatch_are_suspended_when_their_owner_lost_authority()
+    {
+        // The owner's local account was deleted; whitelist and role entries were left behind (R1-04).
+        const string owner = "user:ops@example.com";
+        AutomationMutationRunnerTests.Fixture Lost()
+        {
+            var f = AutomationMutationRunnerTests.Build();
+            f.Whitelist.Allowed.Add("ops@example.com");
+            f.Roles.Map["ops@example.com"] = AppRole.Admin;
+            f.Accounts.Deleted.Add("ops@example.com");
+            return f;
+        }
+
+        var updated = Lost();
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.UpdatePolicies.Add(new UpdatePolicyEntity
+            {
+                ContainerId = "web-1", ContainerName = "web", ServerId = "local", AutoUpdate = true, NotifyBeforeUpdate = false,
+            });
+            await db.SaveChangesAsync();
+        }
+        var updates = new UpdatesAvailable();
+        updates.Set(new ImageUpdateInfo { ContainerId = "web-1", ContainerName = "web", ServerId = "local", UpdateAvailable = true });
+        var updateOwners = new MemoryAutomationOwners();
+        await updateOwners.SetAsync(IAutomationOwnerStore.AutoUpdate, owner);
+        var autoUpdate = new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(),
+            new FakeDocker(new ContainerInfo { Id = "web-1", Name = "web", ServerId = "local", State = "running", Image = "web:1" }),
+            updates, new FakeNotifications(), null!, updated.Runner, updateOwners, NullLogger<AutoUpdateService>.Instance);
+        await autoUpdate.CheckAndUpdateAsync(CancellationToken.None);
+
+        var patched = Lost();
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        var patchOwners = new MemoryAutomationOwners();
+        await patchOwners.SetAsync(IAutomationOwnerStore.AutoPatch, owner);
+        var script = new AutoPatchTests.RecordingRunner();
+        var autoPatch = AutoPatchTests.NewService(script, cves, patched.Runner, patchOwners,
+            new AutoPatchSettings { Enabled = true, DryRun = false }, AutoPatchTests.Compose("a"));
+        await autoPatch.RunNightlyAsync(CancellationToken.None);
+
+        Assert.True(updateOwners.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+        Assert.Contains("account deleted", updateOwners.Suspended[IAutomationOwnerStore.AutoUpdate]);
+        Assert.True(patchOwners.IsBlocked(IAutomationOwnerStore.AutoPatch));
+        Assert.Empty(script.Calls);
+    }
+
+    [Fact]
+    public void Local_only_sign_in_needs_the_local_account_and_federated_sign_in_does_not()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"identity-{Guid.NewGuid():N}.db");
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddDbContext<WhiskersIdentityDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
+            using var sp = services.BuildServiceProvider();
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Database.EnsureCreated();
+                db.Users.Add(new AppUser
+                {
+                    Id = "u1", UserName = "ops@example.com", NormalizedUserName = "OPS@EXAMPLE.COM",
+                    Email = "ops@example.com", NormalizedEmail = "OPS@EXAMPLE.COM",
+                });
+                db.SaveChanges();
+            }
+            IConfiguration Config(params (string, string)[] values) =>
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                    .AddInMemoryCollection(values.ToDictionary(v => v.Item1, v => (string?)v.Item2)).Build();
+            var scopes = sp.GetRequiredService<IServiceScopeFactory>();
+
+            var local = new OwnerAccounts(scopes, Config());
+            Assert.True(local.Exists("Ops@Example.com"));
+            Assert.False(local.Exists("gone@example.com"));
+
+            var oidc = new OwnerAccounts(scopes, Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")));
+            Assert.True(oidc.Exists("gone@example.com"));   // the whitelist decides for federated sign-in
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { File.Delete(dbPath); } catch (IOException) { }
         }
     }
 
