@@ -17,31 +17,35 @@ public static class ComposeImpact
         Next(runner, capabilityId, containers, serverId, action, 0);
 
     /// <summary>
-    /// Decides <paramref name="capabilityId"/> with <paramref name="arguments"/>, then each container of
-    /// <paramref name="plan"/>, and runs the plan (<see cref="ComposePlan.DeployScript"/>) on its server. A failed
-    /// <c>docker compose</c> is reported as a failed mutation.
+    /// Plans <paramref name="deployment"/>, decides <paramref name="capabilityId"/> with <paramref name="arguments"/>,
+    /// then each container of the plan, and runs the deployment (<see cref="ComposePlan.DeployScript"/>) on its
+    /// server — planned once more right before it runs, so a container that turned up in between and was not decided
+    /// stops it. A failed <c>docker compose</c> is reported as a failed mutation.
     /// </summary>
-    public static Task<CommandResult> DeployAsync(this IUiMutationRunner runner, IHostCommandExecutor executor,
-        string capabilityId, object arguments, ComposePlan plan, bool pull = true)
+    public static async Task<CommandResult> DeployAsync(this IUiMutationRunner runner, IHostCommandExecutor executor,
+        IComposePlanner planner, string capabilityId, object arguments, ComposeDeployment deployment, bool pull = true)
     {
         ArgumentNullException.ThrowIfNull(executor);
-        ArgumentNullException.ThrowIfNull(plan);
-        return runner.RunAsync(capabilityId, arguments,
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(deployment);
+        var plan = await planner.PlanAsync(deployment);
+        return await runner.RunAsync(capabilityId, arguments,
             _ => runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
             {
-                plan.EnsureDecided(MutationScope.Current);
-                var r = await executor.ExecuteAsync(plan.ServerId, plan.DeployScript(pull), TimeSpan.FromMinutes(5));
+                var current = await planner.PlanAsync(deployment);
+                current.EnsureDecided(MutationScope.Current);
+                var r = await executor.ExecuteAsync(current.ServerId, current.DeployScript(pull), TimeSpan.FromMinutes(5));
                 if (!r.Success) MutationScope.Fail("docker compose failed.");
                 return r;
             }));
     }
 
     /// <summary>A <see cref="ComposePlanGate"/> that decides each container of the plan under
-    /// <paramref name="capabilityId"/> (nested), then runs the deployment.</summary>
+    /// <paramref name="capabilityId"/> (nested), then runs the deployment, which plans again and checks the result
+    /// against these decisions (<see cref="ComposePlan.EnsureDecided"/>).</summary>
     public static ComposePlanGate GateFor(this IUiMutationRunner runner, string capabilityId) =>
         (plan, proceed) => runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
         {
-            plan.EnsureDecided(MutationScope.Current);
             await proceed();
             return true;
         });

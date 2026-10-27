@@ -45,7 +45,7 @@ public sealed record ComposeDeployment(string ServerId, IReadOnlyList<ComposeFil
 }
 
 /// <summary>Decides the containers of <paramref name="plan"/> and, when every one is allowed, runs
-/// <paramref name="proceed"/> (the planned deployment). Used where the plan can only be made inside the operation,
+/// <paramref name="proceed"/> (the deployment, which plans again and refuses containers the gate did not decide). Used where the plan can only be made inside the operation,
 /// e.g. a Git deployment after fetching the repository (R1-07).</summary>
 public delegate Task ComposePlanGate(ComposePlan plan, Func<Task> proceed);
 
@@ -224,6 +224,44 @@ public static class ComposeModel
             ? name
             : throw new ComposePlanException($"Invalid project name '{name}' from {source}.");
 
+    /// <summary>The compose switches read from the <c>.env</c> that change what a deployment does. A value Whiskers
+    /// cannot work out (it refers to a variable that is not in the file) refuses the plan.</summary>
+    private static readonly string[] Switches =
+        ["COMPOSE_PROJECT_NAME", "COMPOSE_FILE", "COMPOSE_PATH_SEPARATOR", "COMPOSE_REMOVE_ORPHANS", "COMPOSE_IGNORE_ORPHANS"];
+
+    public static void EnsureSwitchesKnown(IReadOnlyDictionary<string, string?> env)
+    {
+        foreach (var key in Switches)
+            if (env.TryGetValue(key, out var value) && value is null)
+                throw new ComposePlanException($"{key} in the .env uses a variable that is not set in the .env file.");
+    }
+
+    /// <summary><c>COMPOSE_REMOVE_ORPHANS</c> as compose reads it (a Go boolean); anything else refuses the plan.</summary>
+    public static bool RemovesOrphans(IReadOnlyDictionary<string, string?> env)
+    {
+        if (!env.TryGetValue("COMPOSE_REMOVE_ORPHANS", out var value) || string.IsNullOrEmpty(value)) return false;
+        return value switch
+        {
+            "1" or "t" or "T" or "true" or "TRUE" or "True" => true,
+            "0" or "f" or "F" or "false" or "FALSE" or "False" => false,
+            _ => throw new ComposePlanException($"COMPOSE_REMOVE_ORPHANS has a value compose does not read: '{value}'."),
+        };
+    }
+
+    /// <summary>The files <c>COMPOSE_FILE</c> in the <c>.env</c> names for a deployment of a directory (compose uses
+    /// them instead of the default files), relative to the directory; <c>null</c> when it is not set.</summary>
+    public static IReadOnlyList<ComposeFileInput>? FilesFromEnv(IReadOnlyDictionary<string, string?> env, string directory)
+    {
+        if (!env.TryGetValue("COMPOSE_FILE", out var value) || string.IsNullOrWhiteSpace(value)) return null;
+        var separator = env.TryGetValue("COMPOSE_PATH_SEPARATOR", out var sep) && !string.IsNullOrEmpty(sep) ? sep : ":";
+        var files = value!.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(f => new ComposeFileInput(ComposePaths.Join(directory, f.StartsWith("./", StringComparison.Ordinal) ? f[2..] : f)))
+            .ToList();
+        if (files.Count == 0 || files.Any(f => f.Path.Contains("/../", StringComparison.Ordinal)))
+            throw new ComposePlanException($"COMPOSE_FILE '{value}' cannot be planned.");
+        return files;
+    }
+
     /// <summary>Parses a <c>.env</c> file: <c>KEY=VALUE</c> lines, optional <c>export</c>, quotes, comments, and
     /// references to keys defined above. A value that refers to an unknown variable is <c>null</c> (unknown).</summary>
     public static Dictionary<string, string?> ParseEnv(string? content)
@@ -244,6 +282,8 @@ public static class ComposeModel
                 env[key] = value[1..end];
                 continue;
             }
+            if (value.Length >= 1 && value[0] is '"' or '\'' && (value.Length < 2 || value.IndexOf(value[0], 1) < 0))
+                throw new ComposePlanException($"The .env value of {key} spans several lines, which is not supported.");
             if (value.Length >= 2 && value[0] == '"' && value.IndexOf('"', 1) is var close and > 0)
                 value = value[1..close].Replace("\\n", "\n").Replace("\\\"", "\"").Replace("\\\\", "\\");
             else if (value.IndexOf(" #", StringComparison.Ordinal) is var hash and >= 0)

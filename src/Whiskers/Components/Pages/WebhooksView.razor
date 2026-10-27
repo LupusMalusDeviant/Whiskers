@@ -311,7 +311,15 @@ else
             case "deploy":
             {
                 // The same plan the trigger computes again before it runs, and checks against these decisions.
-                var plan = await ComposePlanner.PlanAsync(ComposeDeployment.FromDirectory(serverId, wh.TargetId));
+                ComposePlan plan;
+                try
+                {
+                    plan = await ComposePlanner.PlanAsync(ComposeDeployment.FromDirectory(serverId, wh.TargetId));
+                }
+                catch (ComposePlanException ex)
+                {
+                    return (false, ex.Message);   // nothing can be decided, so nothing runs
+                }
                 return await Mutations.RunAsync("compose.deploy",
                     new { projectName = plan.ProjectName, projectDir = wh.TargetId, serverId },
                     _ => Mutations.RunForEachAsync("compose.deploy", plan.Containers, serverId, Fire));

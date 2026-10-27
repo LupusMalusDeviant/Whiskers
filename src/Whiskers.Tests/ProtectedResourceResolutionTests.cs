@@ -233,11 +233,9 @@ public sealed class ProtectedResourceResolutionTests
         var policy = GuardrailPolicy.SafeDefault();
         policy.ProtectedResources.Add("payments-db");
         var runner = UiRunner(policy);
-        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local",
-            "/opt/deployments/invoice", "name: payments\nservices:\n  db:\n    image: postgres\n"));
 
         await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.DeployAsync(_host, "compose.deploy", new { projectName = "invoice", serverId = "local" }, plan));
+            runner.DeployAsync(_host, Planner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments));
 
         Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
     }
@@ -246,10 +244,8 @@ public sealed class ProtectedResourceResolutionTests
     public async Task The_ui_runs_the_plan_once_every_container_is_allowed()
     {
         var runner = UiRunner(GuardrailPolicy.SafeDefault());
-        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local",
-            "/opt/deployments/invoice", "name: payments\nservices:\n  db:\n    image: postgres\n"));
 
-        var result = await runner.DeployAsync(_host, "compose.deploy", new { projectName = "invoice", serverId = "local" }, plan);
+        var result = await runner.DeployAsync(_host, Planner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments);
 
         Assert.True(result.Success);
         Assert.Contains(_host.Executed, c => c.EndsWith("-p 'payments' --project-directory '/opt/deployments/invoice' -f '/opt/deployments/invoice/docker-compose.yml' up -d 2>&1"));
@@ -321,7 +317,127 @@ public sealed class ProtectedResourceResolutionTests
             Assert.Throws<ComposePlanException>(() => plan.EnsureDecided(MutationScope.Current));
     }
 
+    [Fact]
+    public async Task The_ui_plans_again_before_writing_and_stops_on_a_container_nobody_decided()
+    {
+        var runner = UiRunner(GuardrailPolicy.SafeDefault());
+        var planner = new ChangingPlanner(Planner(), new ContainerInfo { Id = "late-id", Name = "late-arrival", ServerId = "local" });
+
+        await Assert.ThrowsAsync<ComposePlanException>(() =>
+            runner.DeployAsync(_host, planner, "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments));
+
+        Assert.Equal(2, planner.Calls);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
+    }
+
+    [Fact]
+    public async Task A_git_deployment_is_decided_on_its_plan_before_the_first_build()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"gitdeploy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var git = new Whiskers.Services.GitDeploy.GitDeployService(_host, new NoVault(), Planner(),
+                NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(root, "apps.json"));
+            var app = await git.SaveAppAsync(new GitDeployApp
+            {
+                Id = "0123456789ab", Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
+            }, token: null);
+            _host.Files[$"/opt/whiskers-git/{app.Id}/repo/docker-compose.yml"] =
+                "name: payments\nservices:\n  web:\n    image: nginx\n";
+            ComposePlan? gated = null;
+
+            await Assert.ThrowsAsync<MutationRefusedException>(() => git.DeployAsync(app.Id, gate: (plan, _) =>
+            {
+                gated = plan;
+                throw new MutationRefusedException("refused", MutationStatus.Denied, "op");
+            }));
+
+            // Orphans are removed by this deploy: the protected database the file no longer defines is in the plan.
+            Assert.Contains(gated!.Impact, i => i.Container.Name == "payments-db" && i.Kind == ComposeImpactKind.RemoveOrphan);
+            Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Compose_switches_in_the_env_file_are_planned()
+    {
+        _host.Files["/srv/payments/compose.yml"] = "services:\n  web:\n    image: nginx\n";
+        _host.Files["/srv/payments/compose.prod.yml"] = "services:\n  web:\n    container_name: legacy-proxy\n";
+        _host.Files["/srv/payments/.env"] =
+            "COMPOSE_PROJECT_NAME=payments\nCOMPOSE_FILE=compose.yml:compose.prod.yml\nCOMPOSE_REMOVE_ORPHANS=true\n";
+
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromDirectory("local", "/srv/payments"));
+
+        Assert.Equal(["/srv/payments/compose.yml", "/srv/payments/compose.prod.yml"], plan.Files);
+        Assert.True(plan.RemoveOrphans);
+        Assert.EndsWith("up -d --remove-orphans", plan.UpCommand);
+        Assert.Contains(plan.Impact, i => i.Container.Name == "payments-db" && i.Kind == ComposeImpactKind.RemoveOrphan);
+        Assert.Contains(plan.Impact, i => i.Container.Name == "legacy-proxy" && i.Kind == ComposeImpactKind.NameCollision);
+    }
+
+    [Fact]
+    public async Task An_env_change_that_switches_on_orphan_removal_plans_the_orphans()
+    {
+        var web = (await _docker.ListContainersAsync(all: true, serverId: "local")).Single(c => c.Name == "payments-web-1");
+        _host.Files["/srv/payments/docker-compose.yml"] = "services:\n  web:\n    image: nginx\n";
+
+        var plan = await Planner().PlanEnvChangeAsync(web, "local",
+            current => DotEnvMerge.Merge(current, "COMPOSE_REMOVE_ORPHANS=1").Content);
+
+        Assert.Contains(plan.Impact, i => i.Container.Name == "payments-db" && i.Kind == ComposeImpactKind.RemoveOrphan);
+    }
+
+    [Theory]
+    [InlineData("COMPOSE_PROJECT_NAME=${STACK}\n")]
+    [InlineData("COMPOSE_REMOVE_ORPHANS=maybe\n")]
+    [InlineData("COMPOSE_FILE=${FILES}\n")]
+    [InlineData("CERT=\"-----BEGIN\nMIIB\n-----END\"\n")]
+    public async Task Env_file_settings_whiskers_cannot_read_refuse_the_plan(string env)
+    {
+        _host.Files["/srv/app/compose.yaml"] = "services:\n  a:\n    image: x\n";
+        _host.Files["/srv/app/.env"] = env;
+
+        await Assert.ThrowsAsync<ComposePlanException>(() =>
+            Planner().PlanAsync(ComposeDeployment.FromDirectory("local", "/srv/app")));
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private static readonly ComposeDeployment Payments = ComposeDeployment.FromContent("local",
+        "/opt/deployments/invoice", "name: payments\nservices:\n  db:\n    image: postgres\n");
+
+    /// <summary>Plans like the real planner, but from the second plan on a new container shows up in the impact.</summary>
+    private sealed class ChangingPlanner(IComposePlanner inner, ContainerInfo late) : IComposePlanner
+    {
+        public int Calls { get; private set; }
+
+        public async Task<ComposePlan> PlanAsync(ComposeDeployment deployment, CancellationToken ct = default)
+        {
+            var plan = await inner.PlanAsync(deployment, ct);
+            return ++Calls == 1 ? plan
+                : plan with { Impact = [.. plan.Impact, new ComposeImpactEntry(late, ComposeImpactKind.NameCollision)] };
+        }
+
+        public Task<ComposePlan> PlanEnvChangeAsync(ContainerInfo container, string serverId,
+            Func<string?, string> newEnv, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class NoVault : Whiskers.Services.Vault.IVaultService
+    {
+        public bool IsEnabled => false;
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public List<Whiskers.Models.VaultEntry> ListSecrets() => [];
+        public Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null,
+            int? rotateAfterDays = null) => Task.CompletedTask;
+        public string? GetSecret(string key) => null;
+        public Task DeleteSecretAsync(string key) => Task.CompletedTask;
+        public List<Whiskers.Models.VaultEntry> GetExpiringSecrets() => [];
+    }
 
     private static ContainerInfo Compose(string name, string project, string service, string dir) => new()
     {

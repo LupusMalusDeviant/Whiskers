@@ -672,10 +672,9 @@
     // plus one decision per existing container the plan touches (R1-07), then exactly the planned deployment.
     private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string yaml, string appName)
     {
-        var plan = await ComposePlanner.PlanAsync(ComposeDeployment.FromContent(serverId,
-            ComposeDeployment.DeploymentDirectory(_deployProjectName), yaml));
-        return await Mutations.DeployAsync(Executor, "app.deploy",
-            new { projectName = _deployProjectName, appName, serverId }, plan);
+        return await Mutations.DeployAsync(Executor, ComposePlanner, "app.deploy",
+            new { projectName = _deployProjectName, appName, serverId },
+            ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_deployProjectName), yaml));
     }
 
     private static List<string> ParsePorts(string raw)

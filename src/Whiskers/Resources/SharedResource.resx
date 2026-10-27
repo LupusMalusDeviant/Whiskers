@@ -990,9 +990,6 @@
   <data name="ContainerDetail_Env_Search" xml:space="preserve">
     <value>Search...</value>
   </data>
-  <data name="ContainerDetail_Env_WriteError" xml:space="preserve">
-    <value>Error writing: {0}</value>
-  </data>
   <data name="ContainerDetail_Health_ColExitCode" xml:space="preserve">
     <value>Exit code</value>
   </data>

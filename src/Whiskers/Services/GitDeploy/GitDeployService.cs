@@ -164,12 +164,19 @@ public class GitDeployService : IGitDeployService
 
             // 3) Plan (R1-07): the project compose will use and every existing container `up --remove-orphans`
             //    recreates, removes or collides with — decided before the first build; build and up run as planned.
-            var plan = await _planner.PlanAsync(new ComposeDeployment(app.ServerId,
-                [new ComposeFileInput(GitDeployCommands.ComposeFile(appId, app.ComposePath))]) { RemoveOrphans = true }, ct);
+            var deployment = new ComposeDeployment(app.ServerId,
+                [new ComposeFileInput(GitDeployCommands.ComposeFile(appId, app.ComposePath))]) { RemoveOrphans = true };
+            var plan = await _planner.PlanAsync(deployment, ct);
             Report($"Project '{plan.ProjectName}': {plan.Impact.Count} existing container(s) affected.");
 
             async Task BuildAndUp()
             {
+                // Decided by a gate: planned again right before the first write, and nothing undecided may run.
+                if (gate is not null)
+                {
+                    plan = await _planner.PlanAsync(deployment, ct);
+                    plan.EnsureDecided(MutationScope.Current);
+                }
                 // 4) Build
                 Report("③ docker compose build…");
                 var build = await Sh(app.ServerId, plan.BuildCommand, 600, ct);

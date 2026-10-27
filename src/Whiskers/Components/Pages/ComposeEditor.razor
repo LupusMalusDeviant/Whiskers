@@ -263,10 +263,9 @@
             var serverId = _serverId;
             // The plan (R1-07): the project compose will really use and every existing container `up` recreates or
             // collides with — each is decided too, and the deploy runs exactly what was planned.
-            var plan = await ComposePlanner.PlanAsync(ComposeDeployment.FromContent(serverId,
-                ComposeDeployment.DeploymentDirectory(_projectName), GenerateYaml()));
-            var result = await Mutations.DeployAsync(Executor, "compose.deploy",
-                new { projectName = _projectName, serverId }, plan);
+            var result = await Mutations.DeployAsync(Executor, ComposePlanner, "compose.deploy",
+                new { projectName = _projectName, serverId },
+                ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_projectName), GenerateYaml()));
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _projectName, _projectName, serverId: _serverId, success: result.Success);

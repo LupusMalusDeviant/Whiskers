@@ -1456,8 +1456,10 @@ else
             var restartResult = await ForEachServiceAsync(affected, sid, 0,
                 async () =>
                 {
-                    plan.EnsureDecided(MutationScope.Current);
-                    var restart = await HostCommandExecutor.ExecuteAsync(sid, plan.DeployScript(pull: false),
+                    // Planned again right before writing: a container that turned up meanwhile was not decided.
+                    var current = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
+                    current.EnsureDecided(MutationScope.Current);
+                    var restart = await HostCommandExecutor.ExecuteAsync(sid, current.DeployScript(pull: false),
                         TimeSpan.FromMinutes(2));
                     if (!restart.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
                     return restart;

@@ -50,33 +50,43 @@ public sealed class ComposePlanner : IComposePlanner
             throw new ComposePlanException("A compose deployment needs an explicit server.");
         var serverId = deployment.ServerId;
 
+        var directory = (deployment.ProjectDirectory
+                         ?? (deployment.Files.Count > 0 ? ComposePaths.DirectoryOf(deployment.Files[0].Path) : null)
+                         ?? throw new ComposePlanException("No compose file or directory given.")).TrimEnd('/');
+        if (!directory.StartsWith('/'))
+            throw new ComposePlanException($"Project directory '{directory}' is not absolute.");
+
+        // The project's .env first: besides values for interpolation it carries compose's own switches
+        // (COMPOSE_FILE, COMPOSE_PROJECT_NAME, COMPOSE_REMOVE_ORPHANS), which change what `up` does.
+        var envContent = deployment.EnvFileContent
+                         ?? await ReadAsync(serverId, ComposePaths.Join(directory, ".env"), ct);
+        var env = ComposeModel.ParseEnv(envContent);
+        ComposeModel.EnsureSwitchesKnown(env);
+
         var inputs = deployment.Files.Count > 0
             ? deployment.Files
-            : await DiscoverAsync(serverId, deployment.ProjectDirectory
-                                            ?? throw new ComposePlanException("No compose file or directory given."), ct);
+            : ComposeModel.FilesFromEnv(env, directory) is { } configured
+                ? configured
+                : await DiscoverAsync(serverId, directory, ct);
         foreach (var file in inputs)
             if (!file.Path.StartsWith('/'))
                 throw new ComposePlanException($"Compose file path '{file.Path}' is not absolute.");
-        var directory = (deployment.ProjectDirectory ?? ComposePaths.DirectoryOf(inputs[0].Path)).TrimEnd('/');
-        if (!directory.StartsWith('/'))
-            throw new ComposePlanException($"Project directory '{directory}' is not absolute.");
 
         var files = new List<(string Path, string Content)>();
         foreach (var file in inputs)
             files.Add((file.Path, file.Content ?? await ReadAsync(serverId, file.Path, ct)
                 ?? throw new ComposePlanException($"Compose file '{file.Path}' does not exist.")));
 
-        var envContent = deployment.EnvFileContent
-                         ?? await ReadAsync(serverId, ComposePaths.Join(directory, ".env"), ct);
-        var env = ComposeModel.ParseEnv(envContent);
         var (declared, services) = ComposeModel.Merge(files, env);
         var project = ComposeModel.EffectiveProjectName(deployment.ProjectName, env, declared, directory);
+        // COMPOSE_REMOVE_ORPHANS in the .env makes a plain `up` remove orphans: planned (and passed explicitly) too.
+        var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);
 
         var existing = await _docker.ListContainersAsync(all: true, serverId: serverId, ct);
-        var impact = ComposeModel.Impact(project, services, deployment.RemoveOrphans, existing);
+        var impact = ComposeModel.Impact(project, services, removeOrphans, existing);
         return new ComposePlan(serverId, project, directory, files.Select(f => f.Path).ToList(),
             inputs.Where(f => f.Content is not null).ToList(), deployment.EnvFileContent,
-            HasEnvFile: envContent is not null, deployment.RemoveOrphans, services, impact);
+            HasEnvFile: envContent is not null, removeOrphans, services, impact);
     }
 
     public async Task<ComposePlan> PlanEnvChangeAsync(ContainerInfo container, string serverId,
