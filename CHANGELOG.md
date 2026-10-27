@@ -112,10 +112,11 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - A forbidden-argument pattern that is not a valid regex now **refuses every call** (it was ignored). Fix or
     remove the pattern in Guardrails; saving a configuration with an invalid pattern is refused.
   - A pattern or protected-resource glob that takes longer than 100 ms counts as a match and refuses the call.
-  - An unreadable or invalid `guardrails.json` (broken JSON, no presets, duplicate names, an active preset that does
-    not exist) no longer falls back to another preset: every mutation is refused, agents and MCP clients get no
+  - An unreadable or invalid `guardrails.json` (broken JSON, no presets, duplicate names, a missing field or list
+    entry, an active preset that does not exist) no longer falls back to another preset or to the default: every mutation is refused, agents and MCP clients get no
     tool, and the Guardrails page shows a single "Fail-closed" preset until an Admin saves a valid configuration.
-    The file is kept as `guardrails.json.unreadable-<timestamp>`.
+    The file is not overwritten and a copy is kept as `guardrails.json.unreadable-<timestamp>`. An old
+    single-policy file (from before presets) is still migrated into a "Standard" preset.
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.
