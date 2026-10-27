@@ -28,6 +28,11 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   won (no level was lowered). API keys and agents at Write lose these tools:
   - Firewall `add_firewall_rule`, `remove_firewall_rule`; nginx `update_nginx_config`; systemd
     `manage_systemd_service` — Write → Admin (their UI pages already required Admin).
+  - Database dump `backup_database` and certificate renewal `renew_ssl_certificate` — Write → Admin (their UI
+    pages already required Admin). A scheduled **DB backup task** now needs an Admin owner, with or without
+    retention.
+  - Scheduled tasks: creating and deleting a task follow the catalog on the page as well (Operator); the gateway
+    then holds each task type to what it runs (a custom command, retention, a DB dump or a self-backup needs Admin).
   - Networks `create_network`, `remove_network`, `connect_container_to_network`,
     `disconnect_container_from_network` — Write → Admin (Networks page requires Admin).
   - Cloud `cloud_power_on`, `cloud_shutdown`, `cloud_reboot`, `cloud_hard_reset`, `cloud_create_snapshot` and

@@ -37,6 +37,8 @@ public class SchedulerApprovalEndToEndTests
         new() { TaskId = "t-ret", TaskType = ScheduledTaskType.VolumeBackup, Config = "{\"maxBackups\":\"3\"}" };
     private static readonly ScheduledTaskEntity SelfBackupTask =
         new() { TaskId = "t-self", TaskType = ScheduledTaskType.SelfBackup };
+    private static readonly ScheduledTaskEntity NumberedCommandTask =
+        new() { TaskId = "123456789012", TaskType = ScheduledTaskType.CustomCommand, Config = "{\"command\":\"id\"}" };
 
     private static (MutationGateway Gateway, ApprovalStore Approvals, AgentToolTestHelpers.NullMutationAudit Audit) Build()
     {
@@ -44,7 +46,7 @@ public class SchedulerApprovalEndToEndTests
         var guardrails = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());   // writes need a human
         var audit = new AgentToolTestHelpers.NullMutationAudit();
         var resolver = new SchedulerRequirementResolver(Catalog, new Services(
-            ApprovalSeparationOfDutyTests.SchedulerProxy.Create([CommandTask, RetentionTask, SelfBackupTask])));
+            ApprovalSeparationOfDutyTests.SchedulerProxy.Create([CommandTask, RetentionTask, SelfBackupTask, NumberedCommandTask])));
         var gateway = new MutationGateway(Catalog, AgentToolTestHelpers.Policy(guardrails), audit, [],
             NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, guardrails), requirements: resolver);
         return (gateway, approvals, audit);
@@ -65,6 +67,7 @@ public class SchedulerApprovalEndToEndTests
         yield return ["scheduler.run", new { taskId = "t-ret" }];
         yield return ["scheduler.create", new { name = "n", cronExpression = "0 2 * * *", taskType = "5" }];   // SelfBackup by number
         yield return ["scheduler.run", new { taskId = "t-self" }];
+        yield return ["scheduler.run", new { taskId = 123456789012L }];   // a JSON number, as the agent may send it
     }
 
     [Theory]

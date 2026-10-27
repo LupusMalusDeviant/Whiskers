@@ -115,13 +115,15 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("nginx.site_enable", A, "host", Dis, Short);
         yield return Ui("nginx.site_disable", A, "host", Dis, Short);
         yield return Tool("systemd.manage", "manage_systemd_service", A, "host", Dis, Normal);
-        yield return Tool("ssl.renew", "renew_ssl_certificate", W, "host", Rev, Normal);
+        // R1-05: the page always required Admin (certbot runs as root on the host); the table takes the stricter level.
+        yield return Tool("ssl.renew", "renew_ssl_certificate", A, "host", Rev, Normal);
         yield return Tool("certificate.renew_mtls", "renew_mtls_certificate", A, "host", Root, Normal);
         yield return Ui("certificate.issue_mtls", A, "host", Root, Normal);
 
         // Databases
         yield return Tool("db.query", "execute_query", A, "container", Root, Normal);
-        yield return Tool("db.backup", "backup_database", W, "container", Rev, Long);
+        // R1-05: a dump holds every row of the database; the page always required Admin, the table takes it too.
+        yield return Tool("db.backup", "backup_database", A, "container", Rev, Long);
         // Retention of a DB-backup task: deletes old dumps with a host `rm`.
         yield return Ui("db.backup_delete", A, "container", Des, Short);
         // Retention of a scheduled self-backup (the newest N are kept).

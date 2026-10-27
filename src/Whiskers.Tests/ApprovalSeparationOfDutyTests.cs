@@ -40,12 +40,14 @@ public class ApprovalSeparationOfDutyTests
     {
         Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup", targetId = "db" }));
         Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "VolumeBackup", maxBackups = 3 }));
-        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "DbBackup", maxBackups = 0 }));
+        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "VolumeBackup", maxBackups = 0 }));
+        // A database dump holds every row: Admin even without retention.
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup", maxBackups = 0 }));
         Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "SelfBackup" }));
         Assert.Equal(McpPermissionLevels.Admin,
             await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.DbBackup, Config = "{\"maxBackups\":\"7\"}" }));
         Assert.Equal(McpPermissionLevels.Write,
-            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.DbBackup, Config = "{\"maxBackups\":\"0\"}" }));
+            await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.VolumeBackup, Config = "{\"maxBackups\":\"0\"}" }));
         Assert.Equal(McpPermissionLevels.Admin, await Run(new ScheduledTaskEntity { TaskType = ScheduledTaskType.SelfBackup }));
         // Retention is read the way the executor reads it: the MCP tool and the page store maxBackups as a string.
         Assert.Equal(McpPermissionLevels.Admin,
@@ -109,10 +111,27 @@ public class ApprovalSeparationOfDutyTests
     }
 
     [Fact]
+    public async Task A_task_id_is_read_like_the_agent_binder_hands_it_to_the_tool()
+    {
+        // A JSON number reaches the tool as its text (AgentArgumentBinder); the requirement must find the same task.
+        var task = new ScheduledTaskEntity { TaskId = "123456789012", TaskType = ScheduledTaskType.CustomCommand };
+        var args = Args(new { taskId = 123456789012L });
+        Assert.Equal("123456789012",
+            Whiskers.Services.Agent.AgentArgumentBinder.ConvertJson(args["taskId"], typeof(string)));
+        Assert.Equal(McpPermissionLevels.Admin,
+            await Resolver(task).ResolveAsync(Catalog.Find("scheduler.run")!, args, CancellationToken.None));
+        // No id, or an id of no task: fail closed.
+        Assert.Equal(McpPermissionLevels.Admin,
+            await Resolver(task).ResolveAsync(Catalog.Find("scheduler.run")!, Args(new { }), CancellationToken.None));
+        Assert.Equal(McpPermissionLevels.Admin,
+            await Resolver(task).ResolveAsync(Catalog.Find("scheduler.run")!, Args(new { taskId = "nope" }), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Retention_is_read_like_the_tool_reads_maxBackups()
     {
-        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "DbBackup", maxBackups = "0" }));
-        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "DbBackup", maxBackups = -1 }));
+        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "VolumeBackup", maxBackups = "0" }));
+        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "VolumeBackup", maxBackups = -1 }));
         Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup", maxBackups = "5" }));
         Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup", maxBackups = (int?)null }));
         Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup" }));

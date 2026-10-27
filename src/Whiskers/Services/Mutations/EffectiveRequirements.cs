@@ -43,13 +43,15 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
                 return LevelFor(type, RetentionRequested(arguments));
 
             case "scheduler.run":
-                if (!arguments.TryGetValue("taskId", out var id) || id.ValueKind != JsonValueKind.String)
-                    return capability.RequiredLevel;
+                // The id exactly as the tool receives it after the agent binder (a JSON number becomes its text).
+                // No id, or no task with it, is held to Admin: fail closed.
+                if (TaskIdOf(arguments) is not { } taskId)
+                    return McpPermissionLevels.Admin;
                 // Fail closed: without the scheduler the task's requirement cannot be known.
                 var scheduler = _services.GetService<ISchedulerService>()
                     ?? throw new InvalidOperationException("The scheduler is not available.");
-                var task = (await scheduler.GetTasksAsync()).FirstOrDefault(x => x.TaskId == id.GetString());
-                return task is null ? capability.RequiredLevel : LevelFor(task.TaskType, TaskExecutor.RetentionOf(task) > 0);
+                var task = (await scheduler.GetTasksAsync()).FirstOrDefault(x => x.TaskId == taskId);
+                return task is null ? McpPermissionLevels.Admin : LevelFor(task.TaskType, TaskExecutor.RetentionOf(task) > 0);
 
             default:
                 return capability.RequiredLevel;
@@ -89,6 +91,13 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
             throw new CapabilityDisabledException(capability);
         return Stricter(capability.RequiredLevel, availability.RequiredLevel);
     }
+
+    /// <summary>Reads <c>taskId</c> the way the agent binder hands it to the tool: a string as it is, any other JSON
+    /// value as its raw text. <c>null</c> when absent.</summary>
+    public static string? TaskIdOf(IReadOnlyDictionary<string, JsonElement> arguments) =>
+        !arguments.TryGetValue("taskId", out var id) || id.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+            ? null
+            : Whiskers.Services.Agent.AgentArgumentBinder.ConvertJson(id, typeof(string)) as string;
 
     /// <summary>Reads <c>taskType</c> the way <c>create_scheduled_task</c> does; only defined enum values count.</summary>
     public static bool TryTaskType(IReadOnlyDictionary<string, JsonElement> arguments, out ScheduledTaskType type)

@@ -22,7 +22,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | Tool | Level | Description |
 |---|---|---|
 | `add_firewall_rule` | admin | Add a firewall rule (UFW) to allow or deny traffic on a port. |
-| `backup_database` | write | Create a database backup (dump) for a database container. |
+| `backup_database` | admin | Create a database backup (dump) for a database container. |
 | `connect_container_to_network` | admin | Connect a container to a Docker network. |
 | `create_network` | admin | Create a new Docker network. |
 | `deploy_app` | admin | Deploy a new application on a server using a standardized template. Supports common app types like web apps, databases, and custom Docker images. Creates the container with sensible defaults and starts it. |
@@ -60,7 +60,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `remove_firewall_rule` | admin | Remove a firewall rule by its number. |
 | `remove_network` | admin | Remove a Docker network by name or ID. |
 | `renew_mtls_certificate` | admin | Renew the mTLS certificate of a server's Docker proxy (ghostunnel). A new key is generated on the host, step-ca signs it, and the proxy restarts with it. If Whiskers cannot reach the host with the new certificate, the host restores the previous one by itself after 3 minutes. Admin only. |
-| `renew_ssl_certificate` | write | Renew an SSL certificate using certbot. |
+| `renew_ssl_certificate` | admin | Renew an SSL certificate using certbot. |
 | `restart_container` | write | Restart a Docker container. |
 | `resume_server_checks` | write | Resume Whiskers' background checks for a server that was paused. Safe to call even if it is not paused. Turning monitoring back on is never the dangerous direction, so this has no time limit. |
 | `set_container_env` | write | Set environment variables in a container's .env file and restart via docker compose. Only works for containers managed by docker-compose. Provide variables as 'KEY=VALUE' pairs separated by newlines or commas. Existing variables not included are kept unchanged. |
@@ -157,6 +157,6 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | Level | Tools |
 |---|---|
 | read | 46 |
-| write | 16 |
-| admin | 24 |
+| write | 14 |
+| admin | 26 |
 | **total** | **86** |

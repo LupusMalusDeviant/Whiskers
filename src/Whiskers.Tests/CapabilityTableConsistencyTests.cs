@@ -104,6 +104,52 @@ public class CapabilityTableConsistencyTests
         Assert.Contains("Require(RoleOf(\"scheduler.delete\"))", page);
     }
 
+    /// <summary>
+    /// Where a page handler guards a gateway call with a hard-coded role, that role is exactly the catalog's role
+    /// for what it runs (the strictest, when it runs several). Handlers that ask the catalog (<c>RoleOf</c>) or leave
+    /// the check to the gateway — which enforces the catalog level for the signed-in user in any case — pass.
+    /// </summary>
+    [Fact]
+    public void A_hard_coded_page_role_matches_the_catalog_for_what_the_handler_runs()
+    {
+        var components = Path.Combine(SourceRoot(), "src", "Whiskers", "Components");
+        var mismatches = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories))
+        {
+            var source = File.ReadAllText(file);
+            foreach (var (method, body) in Methods(source))
+            {
+                var ids = System.Text.RegularExpressions.Regex.Matches(body, @"Mutations\.RunAsync(?:<[^>]*>)?\(\s*""([a-z_]+\.[a-z_.]+)""")
+                    .Select(m => m.Groups[1].Value).Distinct().ToList();
+                var guards = System.Text.RegularExpressions.Regex.Matches(body, @"AppRole\.(Admin|Operator|Viewer)")
+                    .Select(m => Enum.Parse<AppRole>(m.Groups[1].Value)).ToList();
+                if (ids.Count == 0 || guards.Count == 0) continue;
+                var expected = ids.Select(id => CapabilityCatalog.RoleFor(Catalog.Find(id)!.RequiredLevel)).Max();
+                if (guards.Max() != expected)
+                    mismatches.Add($"{Path.GetFileName(file)}:{method} guards {guards.Max()} but runs {string.Join(",", ids)} ({expected})");
+            }
+        }
+        Assert.Empty(mismatches);
+    }
+
+    /// <summary>The C# methods of a component (name and body), found by brace matching.</summary>
+    private static IEnumerable<(string Name, string Body)> Methods(string source)
+    {
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source,
+                     @"\n\s+(?:private|protected|public|internal)[^\n;=]*?\b(\w+)\s*\([^)]*\)\s*\n\s*\{"))
+        {
+            var depth = 1;
+            var i = m.Index + m.Length;
+            while (depth > 0 && i < source.Length)
+            {
+                if (source[i] == '{') depth++;
+                else if (source[i] == '}') depth--;
+                i++;
+            }
+            yield return (m.Groups[1].Value, source[(m.Index + m.Length)..i]);
+        }
+    }
+
     private static string SourceRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)

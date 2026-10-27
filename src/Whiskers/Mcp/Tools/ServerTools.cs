@@ -378,7 +378,7 @@ public class ServerTools
         return $"SSL certificates:\n{string.Join('\n', lines)}";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Renew an SSL certificate using certbot.")]
     public static async Task<string> RenewSslCertificate(
         IHttpContextAccessor httpContextAccessor,
