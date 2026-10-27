@@ -60,7 +60,8 @@ public sealed class ComposePlanner : IComposePlanner
         // (COMPOSE_FILE, COMPOSE_PROJECT_NAME, COMPOSE_REMOVE_ORPHANS), which change what `up` does.
         var envContent = deployment.EnvFileContent
                          ?? await ReadAsync(serverId, ComposePaths.Join(directory, ".env"), ct);
-        var env = ComposeModel.ParseEnv(envContent);
+        var envTemplates = new Dictionary<string, string>(StringComparer.Ordinal);
+        var env = ComposeModel.ParseEnv(envContent, envTemplates);
         ComposeModel.EnsureSwitchesKnown(env);
 
         var inputs = deployment.Files.Count > 0
@@ -77,7 +78,7 @@ public sealed class ComposePlanner : IComposePlanner
             files.Add((file.Path, file.Content ?? await ReadAsync(serverId, file.Path, ct)
                 ?? throw new ComposePlanException($"Compose file '{file.Path}' does not exist.")));
 
-        var (declared, services) = ComposeModel.Merge(files, env);
+        var (declared, declaredSource, services) = ComposeModel.MergeWithSource(files, env);
         var project = ComposeModel.EffectiveProjectName(deployment.ProjectName, env, declared, directory);
         // COMPOSE_REMOVE_ORPHANS in the .env makes a plain `up` remove orphans: planned (and passed explicitly) too.
         var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);
@@ -86,7 +87,11 @@ public sealed class ComposePlanner : IComposePlanner
         var impact = ComposeModel.Impact(project, services, removeOrphans, existing);
         return new ComposePlan(serverId, project, directory, files.Select(f => f.Path).ToList(),
             inputs.Where(f => f.Content is not null).ToList(), deployment.EnvFileContent,
-            HasEnvFile: envContent is not null, removeOrphans, services, impact);
+            HasEnvFile: envContent is not null, removeOrphans, services, impact)
+        {
+            ProjectNameSource = ComposeModel.ProjectNameSource(deployment.ProjectName, env, envTemplates, declared,
+                declaredSource),
+        };
     }
 
     public async Task<ComposePlan> PlanEnvChangeAsync(ContainerInfo container, string serverId,

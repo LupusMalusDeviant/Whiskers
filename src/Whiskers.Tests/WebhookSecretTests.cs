@@ -109,13 +109,13 @@ public sealed class WebhookSecretTests : IDisposable
     [Fact]
     public async Task Signed_test_passes_signature_validation_end_to_end()
     {
-        // The seeded webhook uses a RELATIVE deploy path: a correctly signed request must get PAST the
-        // HMAC check and fail at the absolute-path guard instead — proving the signature was accepted
-        // without needing a Docker host.
+        // A correctly signed request must get PAST the HMAC check and stop at the next step instead — the action
+        // runs through the automation runner (R1-09), which this bare provider does not have — proving the
+        // signature was accepted without needing a Docker host.
         var wh = Seed(secret: "s3cret");
         var (success, output) = await Service().TriggerSignedTestAsync(wh.WebhookId);
         Assert.False(success);
-        Assert.Equal("Deploy target must be an absolute path.", output);
+        Assert.Equal("Automated actions are not available.", output);
     }
 
     // --- Regenerate + enable guard -------------------------------------------------------------------------

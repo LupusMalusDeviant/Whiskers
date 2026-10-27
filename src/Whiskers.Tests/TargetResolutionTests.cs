@@ -337,7 +337,10 @@ public sealed class TargetResolutionTests : IDisposable
     public async Task A_webhook_without_a_server_is_decided_and_run_on_local_even_when_another_server_is_default()
     {
         var hooks = WebhookService();
-        var hook = await hooks.CreateWebhookAsync(new WebhookEntity { Name = "redeploy", TargetId = "web", Action = "restart" });
+        var hook = await hooks.CreateWebhookAsync(new WebhookEntity
+        {
+            Name = "redeploy", TargetId = "web", Action = "restart", Owner = "user:admin@example.com",
+        });
 
         // The Webhooks page's gate decides on this container …
         var (decided, _) = await WebhookTargets.ContainerAsync(_docker, hook);
@@ -355,7 +358,7 @@ public sealed class TargetResolutionTests : IDisposable
         var hooks = WebhookService();
         var hook = await hooks.CreateWebhookAsync(new WebhookEntity
         {
-            Name = "redeploy", TargetId = "b", Action = "restart", ServerId = "edge01",
+            Name = "redeploy", TargetId = "b", Action = "restart", ServerId = "edge01", Owner = "user:admin@example.com",
         });
 
         var (ok, output) = await hooks.TriggerSignedTestAsync(hook.WebhookId);
@@ -479,6 +482,8 @@ public sealed class TargetResolutionTests : IDisposable
         if (_db is not null) return _db;
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        // A webhook's external call runs on its owner through the automation runner (R1-09).
+        services.AddSingleton<IAutomationMutationRunner>(_ => AdminRunner().Runner);
         _db = services.BuildServiceProvider();
         using var scope = _db.CreateScope();
         scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();

@@ -90,6 +90,15 @@ public sealed record ComposePlan(
     IReadOnlyList<ComposeServicePlan> Services,
     IReadOnlyList<ComposeImpactEntry> Impact)
 {
+    /// <summary>The expression the project name was interpolated from (<c>${DB_PASSWORD}</c>, <c>app-${STAGE}</c>), or
+    /// <c>null</c> when it was written literally (or is the directory's name).</summary>
+    public string? ProjectNameSource { get; init; }
+
+    /// <summary>The project name for a decision's arguments, and so for the audit: the name itself when it is written
+    /// literally, else the expression it was interpolated from — a value of the <c>.env</c> (possibly a secret) is
+    /// never recorded. The decision covers the real project through the plan's containers, decided one by one.</summary>
+    public string ProjectNameForAudit => ProjectNameSource ?? ProjectName;
+
     /// <summary>The existing containers the plan touches, each once.</summary>
     public IReadOnlyList<ContainerInfo> Containers => Impact.Select(i => i.Container).ToList();
 
@@ -221,6 +230,19 @@ public static class ComposeModel
             : throw new ComposePlanException($"No project name can be derived from '{projectDirectory}'.");
     }
 
+    /// <summary>The expression <see cref="EffectiveProjectName"/>'s result was interpolated from, or <c>null</c> when it
+    /// is literal: the same order (<c>-p</c>, <c>COMPOSE_PROJECT_NAME</c>, top-level <c>name:</c>, directory).</summary>
+    public static string? ProjectNameSource(string? explicitName, IReadOnlyDictionary<string, string?> env,
+        IReadOnlyDictionary<string, string> envTemplates, string? declaredName, string? declaredSource)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitName)) return null;
+        if (env.TryGetValue("COMPOSE_PROJECT_NAME", out var fromEnv) && !string.IsNullOrEmpty(fromEnv))
+            return envTemplates.GetValueOrDefault("COMPOSE_PROJECT_NAME");
+        if (!string.IsNullOrWhiteSpace(declaredName))
+            return declaredSource is not null && declaredSource.Contains('$') ? declaredSource : null;
+        return null;
+    }
+
     private static string Valid(string name, string source) =>
         ValidProjectName.IsMatch(name)
             ? name
@@ -266,7 +288,12 @@ public static class ComposeModel
 
     /// <summary>Parses a <c>.env</c> file: <c>KEY=VALUE</c> lines, optional <c>export</c>, quotes, comments, and
     /// references to keys defined above. A value that refers to an unknown variable is <c>null</c> (unknown).</summary>
-    public static Dictionary<string, string?> ParseEnv(string? content)
+    public static Dictionary<string, string?> ParseEnv(string? content) => ParseEnv(content, templates: null);
+
+    /// <inheritdoc cref="ParseEnv(string?)"/>
+    /// <param name="templates">Filled with the value as written, before interpolation, of every key whose value was
+    /// interpolated (it contains a <c>$</c> and is not single-quoted).</param>
+    public static Dictionary<string, string?> ParseEnv(string? content, IDictionary<string, string>? templates)
     {
         var env = new Dictionary<string, string?>(StringComparer.Ordinal);
         if (string.IsNullOrEmpty(content)) return env;
@@ -279,6 +306,7 @@ public static class ComposeModel
             if (eq <= 0) continue;
             var key = line[..eq].Trim();
             var value = line[(eq + 1)..].Trim();
+            templates?.Remove(key);
             if (value.Length >= 2 && value[0] == '\'' && value.IndexOf('\'', 1) is var end and > 0)
             {
                 env[key] = value[1..end];
@@ -299,6 +327,7 @@ public static class ComposeModel
                 throw new ComposePlanException($"The .env value of {key} spans several lines, which is not supported.");
             else if (value.IndexOf(" #", StringComparison.Ordinal) is var hash and >= 0)
                 value = value[..hash].TrimEnd();
+            if (templates is not null && value.Contains('$')) templates[key] = value;
             env[key] = TryInterpolate(value, env, out var result) ? result : null;
         }
         return env;
@@ -377,7 +406,16 @@ public static class ComposeModel
     public static (string? Name, IReadOnlyList<ComposeServicePlan> Services) Merge(
         IReadOnlyList<(string Path, string Content)> files, IReadOnlyDictionary<string, string?> env)
     {
-        string? name = null;
+        var (name, _, services) = MergeWithSource(files, env);
+        return (name, services);
+    }
+
+    /// <inheritdoc cref="Merge"/>
+    /// <returns>Also the top-level name as written, before interpolation.</returns>
+    public static (string? Name, string? NameSource, IReadOnlyList<ComposeServicePlan> Services) MergeWithSource(
+        IReadOnlyList<(string Path, string Content)> files, IReadOnlyDictionary<string, string?> env)
+    {
+        string? name = null, nameSource = null;
         var services = new Dictionary<string, string?>(StringComparer.Ordinal);
         var order = new List<string>();
         foreach (var (path, content) in files)
@@ -387,7 +425,7 @@ public static class ComposeModel
             if (root.Children.ContainsKey(new YamlScalarNode("include")))
                 throw new ComposePlanException($"{path}: 'include' is not supported in a planned deployment.");
             if (Scalar(root, "name") is { } declared)
-                name = Interpolate(declared, env, "The top-level name");
+                (name, nameSource) = (Interpolate(declared, env, "The top-level name"), declared);
             if (!root.Children.TryGetValue(new YamlScalarNode("services"), out var node)) continue;
             if (node is not YamlMappingNode serviceMap)
                 throw new ComposePlanException($"{path}: 'services' is not a mapping.");
@@ -409,7 +447,7 @@ public static class ComposeModel
         }
         if (order.Count == 0)
             throw new ComposePlanException("The compose files define no services.");
-        return (name, order.Select(s => new ComposeServicePlan(s, services[s])).ToList());
+        return (name, nameSource, order.Select(s => new ComposeServicePlan(s, services[s])).ToList());
     }
 
     private static YamlMappingNode? Root(string path, string content)

@@ -631,6 +631,9 @@ namespace Whiskers.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Owner")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Secret")
                         .IsRequired()
                         .HasColumnType("TEXT");

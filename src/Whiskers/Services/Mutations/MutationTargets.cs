@@ -26,7 +26,7 @@ public static class MutationTargets
         var name = capability.TargetKind switch
         {
             "host" => String(args, "projectName") ?? String(args, "appName") ?? String(args, "serviceName") ?? String(args, "siteName"),
-            "dns-zone" or "workload" or "git-deploy-app" => String(args, "name"),
+            "dns-zone" or "workload" or "git-deploy-app" or "webhook" => String(args, "name"),
             _ => null,
         };
         // A host or server named by nobody is the default server; the resolver decides which one that is (R1-06).
@@ -73,6 +73,7 @@ public static class MutationTargets
         "volume" => Has(args, "volumeName") ? "volumeName" : "name",
         "workload" => "workloadId",
         "git-deploy-app" => "appId",
+        "webhook" => "webhookId",
         "host" or "server" => "serverId",
         _ => null,
     };
@@ -141,6 +142,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             "dns-zone" => DnsZone(target),
             "workload" => await WorkloadAsync(target, ct),
             "git-deploy-app" => await GitAppAsync(request, capability, target, ct),
+            "webhook" => await WebhookAsync(capability, target),
             _ => Pass(target),
         };
     }
@@ -391,6 +393,37 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = app.Id, Name = capability.Id == "gitdeploy.save" ? target.Name ?? app.Name : app.Name,
             ServerId = server.Id, Related = [app.Name, app.RepoUrl],
+        });
+    }
+
+    /// <summary>
+    /// A webhook (R1-09): the stored webhook by its id, with its own name and the server its action runs on — never
+    /// the ones the page rendered. Creating a new one resolves only the chosen server. A webhook whose server was
+    /// removed meanwhile can still be managed (switched off, deleted, taken over): only its record changes; its
+    /// action is decided on the server again when it runs, and refused there.
+    /// </summary>
+    private async Task<TargetResolution> WebhookAsync(Capability capability, MutationTarget target)
+    {
+        if (string.IsNullOrWhiteSpace(target.Id))
+        {
+            if (capability.Id != "webhook.save")
+                return Refuse("The webhook is required.");
+            var (newServer, newError) = ResolveServer(target.ServerId);
+            return newServer is null ? Refuse(newError!, target.ServerId) : Pass(target with { ServerId = newServer.Id });
+        }
+
+        var webhooks = _services.GetService<Whiskers.Services.Webhooks.IWebhookService>();
+        if (webhooks is null)
+            return Refuse("Webhooks are not available.");
+        var webhook = await webhooks.GetWebhookAsync(target.Id);
+        if (webhook is null)
+            return Refuse($"Webhook not found: {target.Id}", target.Id);
+        var serverId = Whiskers.Services.Webhooks.WebhookTargets.ServerOf(webhook);
+        var server = ResolveServer(serverId).Server;
+        return Done(target with
+        {
+            Id = webhook.WebhookId, Name = webhook.Name, ServerId = server?.Id ?? serverId,
+            Related = new[] { webhook.Name, webhook.TargetId }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
         });
     }
 

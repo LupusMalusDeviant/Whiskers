@@ -238,7 +238,9 @@ else
         }
         catch (MutationRefusedException ex)
         {
+            // Among others, an app edited meanwhile (its revision moved): show the stored state.
             Snackbar.Add(ex.Message, Severity.Warning);
+            _apps = await GitDeploy.GetAppsAsync();
         }
         catch (Whiskers.Services.GitDeploy.GitDeployConflictException)
         {

@@ -97,6 +97,13 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("gitdeploy.save", A, "git-deploy-app", Root, Short);
         yield return Ui("gitdeploy.delete", A, "git-deploy-app", Rev, Short);
         yield return Ui("gitdeploy.deploy", A, "git-deploy-app", Root, Long);
+        // Webhooks (R1-09): creating one, or taking it over, lets an external caller fire restart / recreate / compose
+        // up / Git deploy as root on its owner's authority.
+        yield return Ui("webhook.save", A, "webhook", Root, Short);
+        // A new secret breaks every caller that still signs with the old one.
+        yield return Ui("webhook.rotate_secret", A, "webhook", Dis, Short);
+        yield return Ui("webhook.set_enabled", A, "webhook", Dis, Short);
+        yield return Ui("webhook.delete", A, "webhook", Des, Short);
 
         // Networks
         yield return Tool("network.create", "create_network", A, "network", Rev, Short);

@@ -248,7 +248,7 @@ public class GitDeployService : IGitDeployService
             var deployment = new ComposeDeployment(app.ServerId,
                 [new ComposeFileInput(GitDeployCommands.ComposeFile(appId, app.ComposePath))]) { RemoveOrphans = true };
             var plan = await _planner.PlanAsync(deployment, ct);
-            Report($"Project '{plan.ProjectName}': {plan.Impact.Count} existing container(s) affected.");
+            Report($"Project '{plan.ProjectNameForAudit}': {plan.Impact.Count} existing container(s) affected.");
 
             async Task BuildAndUp()
             {

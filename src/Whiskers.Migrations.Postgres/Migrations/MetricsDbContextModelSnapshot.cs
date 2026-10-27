@@ -662,6 +662,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Owner")
+                        .HasColumnType("text");
+
                     b.Property<string>("Secret")
                         .IsRequired()
                         .HasColumnType("text");
