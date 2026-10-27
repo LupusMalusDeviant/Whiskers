@@ -16,6 +16,7 @@
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
+@inject IComposePlanner ComposePlanner
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Models.Cve
 @implements IAsyncDisposable
@@ -1444,35 +1445,25 @@ else
                     sb.AppendLine($"{entry.Key}={entry.EffectiveValue}");
             }
 
-            // Write .env file via base64 to avoid escaping issues, then restart via docker compose — one gated
-            // mutation (it runs compose as root on the host). The file content stays inside the delegate.
-            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
-            var workDir = _composeWorkingDir!;
-            // `compose up -d` recreates every service of the project whose config changed, not only this one: each of
-            // them is decided (protected resources, kill switch) before anything is written.
-            var siblings = await ComposeSiblingsAsync();
-            if (siblings.Count == 0) return;   // container not loaded: nothing to decide on, so nothing is written
-            var (writeResult, restartResult) = await ForEachServiceAsync(siblings, 0,
+            if (_container is null) return;   // container not loaded: nothing to decide on, so nothing is written
+            // The plan (R1-07): the new .env for this container's project and every existing container `compose up`
+            // then recreates or collides with — each is decided (protected resources, kill switch) before anything is
+            // written, and exactly the planned .env and files are used. The content stays inside the delegate.
+            var envContent = sb.ToString();
+            var plan = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
+            var affected = new List<ContainerInfo> { _container };
+            affected.AddRange(plan.Containers.Where(c => c.Id != _container.Id));
+            var restartResult = await ForEachServiceAsync(affected, sid, 0,
                 async () =>
                 {
-                    var write = await HostCommandExecutor.ExecuteAsync(sid,
-                        $"echo '{b64}' | base64 -d > {Quote(workDir + "/.env")}", TimeSpan.FromSeconds(10));
-                    if (!write.Success)
-                    {
-                        MutationScope.Fail("Writing .env failed.");
-                        return (write, (Whiskers.Services.Server.CommandResult?)null);
-                    }
-                    var restart = await HostCommandExecutor.ExecuteAsync(sid,
-                        $"cd {Quote(workDir)} && docker compose up -d 2>&1", TimeSpan.FromMinutes(2));
-                    if (!restart.Success) MutationScope.Fail("docker compose up failed.");
-                    return (write, (Whiskers.Services.Server.CommandResult?)restart);
+                    // Planned again right before writing: a container that turned up meanwhile was not decided.
+                    var current = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
+                    current.EnsureDecided(MutationScope.Current);
+                    var restart = await HostCommandExecutor.ExecuteAsync(sid, current.DeployScript(pull: false),
+                        TimeSpan.FromMinutes(2));
+                    if (!restart.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
+                    return restart;
                 });
-
-            if (!writeResult.Success || restartResult is null)
-            {
-                Snackbar.Add(L["ContainerDetail_Env_WriteError", writeResult.Error].Value, Severity.Error);
-                return;
-            }
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             var name = _container?.Name ?? ContainerId;
@@ -1675,27 +1666,15 @@ else
     // Run a command in the container via `docker exec` on the HOST shell plane (nsenter/SSH) instead of
     // the Docker API exec endpoint: the mTLS socket-proxy blocks container exec (EXEC=0), but the host's
     // own docker.sock has full access, so this works uniformly on Local, SSH and TCP+mTLS servers.
-    /// <summary>This container plus every other container of its compose project on the same server.</summary>
-    private async Task<IReadOnlyList<ContainerInfo>> ComposeSiblingsAsync()
-    {
-        var self = _container;
-        if (self is null) return [];
-        var all = await DockerService.ListContainersAsync(all: true, serverId: _resolvedServerId);
-        var project = self.ComposeProject;
-        var others = project == "Standalone"
-            ? []
-            : all.Where(c => c.Id != self.Id && c.ComposeProject == project).ToList();
-        return [self, .. others];
-    }
-
     /// <summary>Runs <paramref name="action"/> inside one <c>container.env_file_save</c> decision per affected
     /// container (nested), so a single refusal stops the whole save.</summary>
-    private Task<T> ForEachServiceAsync<T>(IReadOnlyList<ContainerInfo> services, int index, Func<Task<T>> action) =>
+    private Task<T> ForEachServiceAsync<T>(IReadOnlyList<ContainerInfo> services, string serverId, int index,
+        Func<Task<T>> action) =>
         index >= services.Count
             ? action()
             : Mutations.RunAsync("container.env_file_save",
-                new { containerId = services[index].Id, name = services[index].Name, serverId = _resolvedServerId },
-                _ => ForEachServiceAsync(services, index + 1, action));
+                new { containerId = services[index].Id, name = services[index].Name, serverId },
+                _ => ForEachServiceAsync(services, serverId, index + 1, action));
 
     // A changing command runs through the gateway under <paramref name="capability"/> (container target; the
     // command text, which can carry credentials, stays in the delegate); a read-only one passes null.

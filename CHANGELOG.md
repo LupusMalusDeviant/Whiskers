@@ -6,6 +6,25 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-07: every compose deployment is planned before anything is written (`ComposePlan`, `IComposePlanner`): the
+  project `docker compose` really uses (`-p`, else `COMPOSE_PROJECT_NAME` from the `.env`, else the top-level
+  `name:` with `.env` interpolation, else the directory name, normalised as compose does), the compose files (a
+  directory's `COMPOSE_FILE` or default file plus override, or the container's recorded `config_files` for a `.env`
+  change), and every existing container the deployment recreates, removes as an orphan (`--remove-orphans` or
+  `COMPOSE_REMOVE_ORPHANS` in the `.env`) or collides with by `container_name` / default name. Each of those containers is decided — the compose editor, App Store, Deploy page,
+  container `.env` save, Webhooks **Test** and Git deploy once per container, MCP / agent `deploy_compose` and
+  `set_container_env` as related resources of the one decision — before the first write. Execution then runs the
+  plan with an explicit `-p`, `--project-directory`, `-f` (and `--env-file` when there is one); right before writing
+  it plans again and refuses if that plan touches a container that was not decided. What cannot be planned (a
+  variable without default in a name or a compose switch that is not in the `.env`, a multi-line `.env` value,
+  `include`, `extends` from another file, invalid YAML, an unreadable file) refuses the deployment
+  (`ProtectedResourceResolutionTests`). A `${VAR:-default}` whose variable is not in the `.env` is planned with the
+  default; compose gives a value from the host's environment precedence over the `.env`, which the plan does not
+  see. The host environment's `COMPOSE_REMOVE_ORPHANS` / `COMPOSE_IGNORE_ORPHANS` are cleared for the command.
+  A compose file with several YAML documents is refused. A Git deploy fired by the webhook **Test** button checks
+  its plan against the Test decision, which covers no containers yet: until R1-08 it is refused when the deployment
+  touches an existing container.
+
 - R1-06: every mutation's target is resolved against the inventory before policy — servers (an empty server id is
   the configured default server, decided by the gateway), containers, networks with the containers attached to them,
   cloud servers (Whiskers id or name), scheduled tasks (id or unique name), DNS zones (normalised, within
@@ -39,6 +58,18 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 
 ### ⚠️ Upgrade notes
 
+- **R1-07: compose deployments name their project and files explicitly.** Whiskers now runs
+  `docker compose -p <project> --project-directory <dir> -f <file>…` with the project and files it planned, instead of
+  `cd <dir> && docker compose up`. The project is the one compose itself would have picked, so existing projects keep
+  their name. Differences: a deploy from the compose editor, App Store or MCP `deploy_compose` uses exactly the file
+  it writes — a `compose.yaml` or `docker-compose.override.yml` left in `/opt/deployments/<project>` is no longer
+  picked up; a webhook deploy directory must contain a compose file itself (compose no longer searches parent
+  directories); a `.env` change keeps the container's project even if the new `.env` sets another
+  `COMPOSE_PROJECT_NAME`. A compose file whose `name:` or `container_name` uses a variable without default that is
+  not in the `.env` (only in the host's environment), a `.env` whose compose switches do the same or that holds a
+  multi-line value, and a file using `include` / `extends` from another file can no longer be deployed through
+  Whiskers. `COMPOSE_FILE` in a webhook directory's `.env` is honoured as before; in `/opt/deployments/<project>`
+  (editor, App Store, MCP) the written file is used instead.
 - **R1-06: unknown or ambiguous targets are refused.** A call naming a server, network, cloud server or task that
   does not exist, or a name that fits more than one (two servers called "web", a network id prefix shared by two
   networks, two tasks with the same name), is refused before anything runs; use the id. A server id that differs

@@ -465,7 +465,8 @@ public sealed class TargetResolutionTests : IDisposable
     }
 
     private WebhookService WebhookService() =>
-        new(Db().GetRequiredService<IServiceScopeFactory>(), Docker(), new NoHost(), NullLogger<WebhookService>.Instance);
+        new(Db().GetRequiredService<IServiceScopeFactory>(), Docker(), new NoHost(), new ComposePlanner(Docker(), new NoHost()),
+            NullLogger<WebhookService>.Instance);
 
     private FakeDocker Docker()
     {

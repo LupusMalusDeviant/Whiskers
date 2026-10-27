@@ -22,8 +22,12 @@ public interface IGitDeployService
     [MutatingOperation("gitdeploy.delete")]
     Task DeleteAppAsync(string appId);
 
-    /// <summary>Runs a full deploy (fetch → build → up), streaming human-readable progress lines.
-    /// Returns success + the deployed commit sha (or the failing step's error).</summary>
+    /// <summary>Runs a full deploy (fetch → plan → build → up), streaming human-readable progress lines.
+    /// Returns success + the deployed commit sha (or the failing step's error). After fetching, the deployment is
+    /// planned (<see cref="ComposePlan"/>, R1-07) and build and up run exactly as planned; <paramref name="gate"/>
+    /// decides the plan's containers first. Without a gate (the webhook path, which moves into the gateway with
+    /// R1-08 / R1-09) the plan runs undecided.</summary>
     [MutatingOperation("gitdeploy.deploy")]
-    Task<(bool Success, string Output)> DeployAsync(string appId, IProgress<string>? progress = null, CancellationToken ct = default);
+    Task<(bool Success, string Output)> DeployAsync(string appId, IProgress<string>? progress = null,
+        CancellationToken ct = default, ComposePlanGate? gate = null);
 }

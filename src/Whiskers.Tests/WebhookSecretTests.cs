@@ -38,7 +38,7 @@ public sealed class WebhookSecretTests : IDisposable
     /// <summary>Service under test. Docker/executor stay null — every covered path returns before
     /// touching them (validation failures) or is routed to the deploy-path guard (relative path).</summary>
     private WebhookService Service() => new(
-        _sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+        _sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!, planner: null!,
         NullLogger<WebhookService>.Instance);
 
     private WebhookEntity Seed(string secret, bool enabled = true)

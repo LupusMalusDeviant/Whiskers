@@ -59,10 +59,14 @@ public class GitDeployCommandsTests
     [Fact]
     public void Compose_commands_quote_the_compose_path()
     {
-        var build = GitDeployCommands.ComposeBuildCommand(AppId, "deploy/docker compose.yml; reboot");
-        Assert.Contains("-f 'deploy/docker compose.yml; reboot' build --pull", build);
-        var up = GitDeployCommands.ComposeUpCommand(AppId, "docker-compose.yml");
-        Assert.Contains("-f 'docker-compose.yml' up -d --remove-orphans", up);
+        var file = GitDeployCommands.ComposeFile(AppId, "deploy/docker compose.yml; reboot");
+        Assert.Equal($"/opt/whiskers-git/{AppId}/repo/deploy/docker compose.yml; reboot", file);
+        var plan = new Whiskers.Services.Mutations.ComposePlan("local", "deploy", $"/opt/whiskers-git/{AppId}/repo/deploy",
+            [file], [], null, HasEnvFile: false, RemoveOrphans: true, [], []);
+        Assert.Contains($"-f '/opt/whiskers-git/{AppId}/repo/deploy/docker compose.yml; reboot' build --pull", plan.BuildCommand);
+        Assert.EndsWith("up -d --remove-orphans", plan.UpCommand);
+        Assert.StartsWith("env -u COMPOSE_REMOVE_ORPHANS -u COMPOSE_IGNORE_ORPHANS docker compose -p 'deploy' --project-directory ",
+            plan.UpCommand);
     }
 
     [Fact]

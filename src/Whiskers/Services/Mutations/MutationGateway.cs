@@ -269,7 +269,7 @@ public sealed class MutationGateway : IMutationGateway
             {
                 T value;
                 string? reported;
-                using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal))
+                using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal, context.Request))
                 {
                     value = await execute(context, deadline.Token);
                     reported = scope.FailureReason;

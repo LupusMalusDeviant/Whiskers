@@ -38,6 +38,7 @@ Every tool declares its permission level via `[McpToolLevel]` and appears in
 
 ## Behaviour notes
 
+- **Compose plans** (R1-07): `deploy_compose` and `set_container_env` are planned by the gateway's resolver before policy — every existing container the deployment recreates, removes or collides with is a related resource of the decision — and the tool plans again, refuses if a container was not decided, and runs the plan with explicit `-p` / `-f`. `DotEnvMerge` (in `ContainerTools.cs`) is the one merge both use.
 - **Input validation** at the boundary (`McpInputValidation.cs`): `deploy_compose` rejects unsafe project names (`..` / leading-non-alphanumeric) and quotes the target directory; container ids resolve to a **unique** match (exact id/name, else a single id-prefix) — an ambiguous prefix or no match returns a clear error instead of acting on the wrong container.
 
 ## Related

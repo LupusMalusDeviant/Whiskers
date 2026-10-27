@@ -262,7 +262,8 @@ else
         {
             var (success, output) = await Mutations.RunAsync("gitdeploy.deploy",
                 new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch },
-                _ => GitDeploy.DeployAsync(app.Id, progress));
+                // Each existing container of the deployment's plan is decided too, before the first build (R1-07).
+                _ => GitDeploy.DeployAsync(app.Id, progress, gate: Mutations.GateFor("gitdeploy.deploy")));
             await AuditLog.LogAsync(actor, "web", "gitdeploy.deploy", "git-deploy", app.Id, app.Name,
                 details: output, serverId: app.ServerId, success: success);
         }

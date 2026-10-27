@@ -4,6 +4,7 @@
 @inject Whiskers.Services.ImageSearch.IImageSearchService ImageSearch
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
 @inject IUiMutationRunner Mutations
+@inject IComposePlanner ComposePlanner
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
@@ -539,10 +540,7 @@
             foreach (var (key, value) in _deployVars)
                 yaml = yaml.Replace($"{{{key}}}", value);
 
-            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(yaml));
-            var dir = $"/opt/deployments/{_deployProjectName}";
-
-            var result = await DeployGatedAsync(_deployServerId, dir, b64, _selectedTemplate.Name);
+            var result = await DeployGatedAsync(_deployServerId, yaml, _selectedTemplate.Name);
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, _selectedTemplate.Name, details: $"Template: {_selectedTemplate.Id}", serverId: _deployServerId, success: result.Success);
@@ -649,10 +647,7 @@
         _deploying = true;
         try
         {
-            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
-            var dir = $"/opt/deployments/{_deployProjectName}";
-
-            var result = await DeployGatedAsync(_deployServerId, dir, b64, imageRef);
+            var result = await DeployGatedAsync(_deployServerId, sb.ToString(), imageRef);
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, imageRef,
@@ -674,19 +669,12 @@
     }
 
     // Both store deploys write a compose file and run `docker compose up` as root on the host: one gated mutation,
-    // plus one decision per existing container of the project, since `up` recreates them.
-    private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string dir, string b64, string appName)
+    // plus one decision per existing container the plan touches (R1-07), then exactly the planned deployment.
+    private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string yaml, string appName)
     {
-        var affected = await ComposeImpact.ContainersAsync(DockerService, serverId, _deployProjectName, dir);
-        return await Mutations.RunAsync("app.deploy", new { projectName = _deployProjectName, appName, serverId },
-            _ => Mutations.RunForEachAsync("app.deploy", affected, serverId, async () =>
-            {
-                var r = await Executor.ExecuteAsync(serverId,
-                    $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
-                    TimeSpan.FromMinutes(5));
-                if (!r.Success) MutationScope.Fail("docker compose failed.");
-                return r;
-            }));
+        return await Mutations.DeployAsync(Executor, ComposePlanner, "app.deploy",
+            new { projectName = _deployProjectName, appName, serverId },
+            ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_deployProjectName), yaml));
     }
 
     private static List<string> ParsePorts(string raw)

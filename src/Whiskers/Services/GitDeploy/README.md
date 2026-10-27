@@ -9,7 +9,7 @@ compose file and brought up with `docker compose up -d`.
 | File | Purpose |
 |---|---|
 | `IGitDeployService.cs` / `GitDeployService.cs` | App CRUD (JSON store `git-deploys.json`) + the deploy pipeline (credentials → fetch/clone → sha → build → up) with step-wise progress lines. App ids are validated hex-only (they flow into remote paths). |
-| `GitDeployCommands.cs` | Pure, unit-tested command builders (`GitDeployCommandsTests`): repo URL/branch/compose path single-quoted; the access token travels base64 into a 0600 file and is served via `GIT_ASKPASS` — never in a command line or process list. |
+| `GitDeployCommands.cs` | Pure, unit-tested command builders (`GitDeployCommandsTests`): repo URL/branch single-quoted; the access token travels base64 into a 0600 file and is served via `GIT_ASKPASS` — never in a command line or process list. `ComposeFile` is the absolute compose path in the checkout; build and up come from the deployment's `ComposePlan` (R1-07): after fetching, the deploy is planned (`--remove-orphans`), the caller's `ComposePlanGate` decides every planned container (the Git deploy page does), and build and up run with the plan's explicit `-p` / `-f`. |
 | `NoopGitDeployService.cs` | Core default when the module is off — the webhook "git-deploy" action fails gracefully instead of 500ing. |
 
 ## Security notes

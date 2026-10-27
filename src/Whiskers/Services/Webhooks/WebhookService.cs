@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Whiskers.Models;
 using Whiskers.Services.Docker;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Server;
 using Whiskers.Utils;
@@ -14,14 +15,16 @@ public class WebhookService : IWebhookService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDockerService _docker;
     private readonly IHostCommandExecutor _executor;
+    private readonly IComposePlanner _planner;
     private readonly ILogger<WebhookService> _logger;
 
     public WebhookService(IServiceScopeFactory scopeFactory, IDockerService docker,
-        IHostCommandExecutor executor, ILogger<WebhookService> logger)
+        IHostCommandExecutor executor, IComposePlanner planner, ILogger<WebhookService> logger)
     {
         _scopeFactory = scopeFactory;
         _docker = docker;
         _executor = executor;
+        _planner = planner;
         _logger = logger;
     }
 
@@ -186,9 +189,21 @@ public class WebhookService : IWebhookService
         var dir = webhook.TargetId ?? "";
         if (!dir.StartsWith('/'))
             return (false, "Deploy target must be an absolute path.");
-        var result = await _executor.ExecuteAsync(sid,
-            $"cd {ShellUtils.Quote(dir)} && docker compose pull 2>&1 && docker compose up -d 2>&1",
-            TimeSpan.FromMinutes(5));
+        // The plan (R1-07): the compose files of the directory as compose finds them, the project and every
+        // existing container `up` touches — then exactly that runs (explicit -p / -f). Fired from the Webhooks page
+        // (Test), the page decided on the same plan and a container that turns up only now stops it. An external
+        // call has no decision yet: webhooks move into the gateway with R1-09.
+        ComposePlan plan;
+        try
+        {
+            plan = await _planner.PlanAsync(ComposeDeployment.FromDirectory(sid, dir));
+            if (MutationScope.Current is { } scope) plan.EnsureDecided(scope);
+        }
+        catch (ComposePlanException ex)
+        {
+            return (false, ex.Message);
+        }
+        var result = await _executor.ExecuteAsync(sid, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5));
         return (result.Success, result.Success ? result.Output : result.Error);
     }
 

@@ -302,13 +302,13 @@ public class UiMutationRunnerTests
         Assert.Contains("production-db", output);
     }
 
-    private static ContainerInfo ComposeService(string name, string project, string dir) => new()
+    private static ContainerInfo ComposeService(string name, string project, string service) => new()
     {
         Id = name + "-id", Name = name, ServerId = "local", State = "running",
         Labels = new()
         {
             ["com.docker.compose.project"] = project,
-            ["com.docker.compose.project.working_dir"] = dir,
+            ["com.docker.compose.service"] = service,
         },
     };
 
@@ -318,32 +318,23 @@ public class UiMutationRunnerTests
         var policy = GuardrailPolicy.SafeDefault();
         policy.ProtectedResources.Add("payments-db");   // differs from the project name "payments"
         var (runner, _) = Runner(AppRole.Admin, policy);
-        var docker = new FakeDocker(
-            ComposeService("payments-web", "payments", "/opt/deployments/payments"),
-            ComposeService("payments-db", "payments", "/opt/deployments/payments"),
-            ComposeService("other", "other", "/opt/other"));
+        var existing = new[]
+        {
+            ComposeService("payments-web", "payments", "web"),
+            ComposeService("payments-db", "payments", "db"),
+            ComposeService("other", "other", "web"),
+        };
         var ran = false;
 
-        var affected = await ComposeImpact.ContainersAsync(docker, "local", "payments", "/opt/deployments/payments");
+        var affected = ComposeModel.Impact("payments",
+            [new ComposeServicePlan("web", null), new ComposeServicePlan("db", null)], false, existing)
+            .Select(i => i.Container).ToList();
         await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("compose.deploy",
             new { projectName = "payments", serverId = "local" },
             _ => runner.RunForEachAsync("compose.deploy", affected, "local", () => { ran = true; return Task.FromResult(0); })));
 
         Assert.Equal(["payments-web", "payments-db"], affected.Select(c => c.Name));
         Assert.False(ran);
-    }
-
-    [Fact]
-    public async Task A_compose_directory_finds_its_containers_by_working_dir()
-    {
-        var docker = new FakeDocker(
-            ComposeService("api", "shop", "/srv/shop"),
-            ComposeService("worker", "shop", "/srv/shop/"),
-            ComposeService("cache", "cache", "/srv/cache"));
-
-        var affected = await ComposeImpact.ContainersAsync(docker, "local", project: null, workingDir: "/srv/shop");
-
-        Assert.Equal(["api", "worker"], affected.Select(c => c.Name));
     }
 
     [Theory]
