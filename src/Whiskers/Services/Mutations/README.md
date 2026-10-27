@@ -68,7 +68,7 @@ of the capability it runs, audited as "(no owner)". `Automation:RequireOwner=tru
 | `MutationTargets.cs` | `MutationTargets.FromArguments` (target from tool arguments) and `IMutationTargetResolver` + `MutationTargetResolver`: containers resolve by id, name or unique prefix to their full id and name; an unknown or ambiguous container is refused before policy (INV-57). Other kinds pass through for now. |
 | `MutationGateway.cs` | `IMutationGateway` + `MutationGateway` (the pipeline) and `IMutationVerifier`. |
 | `AutomationMutationRunner.cs` | `IAutomationMutationRunner` + `AutomationMutationRunner`, `AutomationActor`, `AutomationOptions` (`RequireOwner`), `IAutomationOwnerResolver` + `AutomationOwnerResolver`, `AutomationOwners.IdOf`: the automation entry to the gateway. |
-| `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file means "no owner". |
+| `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file blocks every feature until each is taken over. |
 | `ComposeImpact.cs` | Existing containers a `docker compose up` would touch (project label or working directory) and `RunForEachAsync`, one nested UI decision per container. |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. |
 | `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`), so a protected container is caught by id prefix too. Without engine or store it refuses everything. |
@@ -113,15 +113,21 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 - **Key-owned items** are evaluated with the full rule set of the key (tool lists, forbidden arguments,
   confirmation); a `Confirm` is refused, since no one can approve an unattended run. Items owned by a person, and
   ownerless items in the grace period, use the PC-D1 rules.
-- **Owner file** (`automation-owners.json`): unreadable or invalid → `IsReadable == false`, AutoPatch and AutoUpdate
-  do not run (fail closed) until an Admin takes them over again.
+- **Owner file** (`automation-owners.json`): unreadable, invalid, a directory or not openable → every feature
+  `IsBlocked`, AutoPatch and AutoUpdate do not run (fail closed). Taking one feature over clears only its block; the
+  others are written to the file as blocked entries, so they stay blocked after a restart. Only a file that is not
+  there counts as "no owners yet".
+- **Scheduled commands** carry the command itself into the decision (`host.exec`, `scheduler.create`, "Run now"),
+  so forbidden-argument patterns apply on every run; the audit row keeps only its length.
 - **"Run now"** runs the task on its owner's authority; the person clicking needs `scheduler.run` (Write; a
   custom command Admin) but not the owner's level for what the task does (e.g. retention deletes). The task's
   content is what the owner scheduled, only the timing changes.
 - **AutoUpdate policies** have no UI yet (`SetPolicyAsync` has no caller); the owner is per feature, not per policy.
 - **An AutoPatch night** is one `autopatch.run` operation (4-hour deadline) and, inside it, one `container.update`
-  decision per container it patches (protected resources, kill switch, the owner's authority at that moment). A dry
-  run decides nothing per container.
+  decision per container it patches or tries in a dry run (protected resources, kill switch, the owner's authority
+  at that moment). `Unknown`, `RolledBack` and `RollbackNotVerified` mark that decision and the night as failed.
+- **The MCP preview of AutoPatch** (`preview_auto_patch`, a dry run) is decided once, as the tool call; its
+  candidates are not decided one by one, although the script re-tags and pulls for them.
 
 - **Two audit rows per MCP or agent mutation.** The gateway row carries decision, approval, intent and outcome; the
   tool still writes its own row with the domain details (new container id, exit code, backup file). One event per

@@ -4745,6 +4745,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AutomationOwners_NoOwner_AutoPatch" xml:space="preserve">
     <value>No owner: the nightly cycle does not run.</value>
   </data>
+  <data name="AutomationOwners_Blocked" xml:space="preserve">
+    <value>Blocked: the owner file could not be read. It does not run until an admin takes it over.</value>
+  </data>
   <data name="AutomationOwners_NoOwner_AutoUpdate" xml:space="preserve">
     <value>No owner: updates run during the grace period as "no owner".</value>
   </data>

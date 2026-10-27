@@ -108,7 +108,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// the configuration switch alone is not an owner. Internal for tests.</summary>
     internal async Task RunNightlyAsync(CancellationToken ct)
     {
-        if (!_owners.IsReadable)
+        if (_owners.IsBlocked(IAutomationOwnerStore.AutoPatch))
         {
             _logger.LogError("Auto-patch owner could not be read; tonight's cycle did not run. Take AutoPatch over " +
                              "again in Settings → Automation owners");
@@ -125,7 +125,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         var dryRun = _settings.CurrentValue.DryRun;
         var actor = new AutomationActor("autopatch", "AutoPatch", owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
-            new { dryRun }, token => RunGuardedAsync(forceDryRun: false, actor, token), ct);
+            new { dryRun }, async token => MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
         else if (outcome.Status == MutationStatus.Failed)
@@ -133,12 +133,20 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     }
 
     /// <summary>One container of an owned cycle, decided as <c>container.update</c> of exactly that container: the
-    /// one-off <c>autopatch.run</c> decision for the night does not cover a protected container.</summary>
-    private async Task<AutoPatchOutcome> PatchGatedAsync(AutomationActor actor, ContainerInfo c, CancellationToken ct)
+    /// one-off <c>autopatch.run</c> decision for the night does not cover a protected container. A dry run is decided
+    /// too: the host script still re-tags and pulls before it stops. An outcome that is not a success marks the
+    /// operation failed, so the gateway's audit row does not read "executed".</summary>
+    private async Task<AutoPatchOutcome> PatchGatedAsync(AutomationActor actor, ContainerInfo c, bool dryRun,
+        CancellationToken ct)
     {
         var gated = await _automation.RunAsync(actor, "container.update",
-            new { containerId = c.Id, name = c.Name, serverId = c.ServerId == "local" ? null : c.ServerId },
-            async token => (await _runner.PatchAsync(c.ServerId, c.Name, dryRun: false, token)).Outcome, ct);
+            new { containerId = c.Id, name = c.Name, serverId = c.ServerId == "local" ? null : c.ServerId, dryRun },
+            async token =>
+            {
+                var result = (await _runner.PatchAsync(c.ServerId, c.Name, dryRun, token)).Outcome;
+                if (result.Failed) MutationScope.Fail($"Auto-patch ended as {result.Kind}.");
+                return result;
+            }, ct);
         return gated.Status switch
         {
             MutationStatus.Executed => gated.Value!,
@@ -157,16 +165,16 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     public Task<bool> RunCycleAsync(bool forceDryRun, CancellationToken ct = default) =>
         RunGuardedAsync(forceDryRun, actor: null, ct);
 
-    /// <summary><paramref name="actor"/> is the nightly owner; each container it would patch is then decided on its
-    /// own (protected resources, kill switch, the owner's authority right now). Without one (a dry run started from
-    /// the MCP preview) nothing is applied unless the settings say so, as before.</summary>
+    /// <summary><paramref name="actor"/> is the nightly owner; each container it would patch, or try in a dry run,
+    /// is then decided on its own (protected resources, kill switch, the owner's authority right now). Without one (a
+    /// dry run started from the MCP preview) nothing is applied unless the settings say so, as before. <c>false</c>
+    /// when a cycle was already running or a container's patch failed.</summary>
     private async Task<bool> RunGuardedAsync(bool forceDryRun, AutomationActor? actor, CancellationToken ct)
     {
         if (Interlocked.CompareExchange(ref _running, 1, 0) != 0) return false;
         try
         {
-            await RunCycleCoreAsync(forceDryRun || _settings.CurrentValue.DryRun, actor, ct);
-            return true;
+            return await RunCycleCoreAsync(forceDryRun || _settings.CurrentValue.DryRun, actor, ct);
         }
         finally
         {
@@ -174,7 +182,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
     }
 
-    private async Task RunCycleCoreAsync(bool dryRun, AutomationActor? actor, CancellationToken ct)
+    private async Task<bool> RunCycleCoreAsync(bool dryRun, AutomationActor? actor, CancellationToken ct)
     {
         var settings = _settings.CurrentValue;
         var started = _utcNow();
@@ -186,7 +194,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             LastCycle = new(started, _utcNow(), dryRun, [], [], "No CVE scan has completed yet.");
             _logger.LogWarning("Auto-patch skipped: no CVE scan has completed yet");
-            return;
+            return true;
         }
 
         var containers = await _docker.ListAllContainersAsync(all: false);
@@ -208,9 +216,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             AutoPatchOutcome outcome;
             try
             {
-                outcome = actor is null || dryRun
+                outcome = actor is null
                     ? (await _runner.PatchAsync(c.ServerId, c.Name, dryRun, ct)).Outcome
-                    : await PatchGatedAsync(actor, c, ct);
+                    : await PatchGatedAsync(actor, c, dryRun, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -238,6 +246,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         LastCycle = LastCycle! with { CompletedAt = _utcNow() };
         _logger.LogInformation("Auto-patch cycle done: {Summary}",
             string.Join(", ", entries.GroupBy(e => e.Kind).Select(g => $"{g.Count()} {g.Key}")));
+        return !entries.Any(e => AutoPatchOutcome.IsFailure(e.Kind));
     }
 
     /// <summary>Which containers with findings run an image compose built on the host. One image inspect per

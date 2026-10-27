@@ -18,7 +18,11 @@
         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
             <div>
                 <MudText Typo="Typo.subtitle2">@L[feature.TitleKey]</MudText>
-                @if (entry is not null)
+                @if (Owners.IsBlocked(feature.Id))
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Blocked"]</MudText>
+                }
+                else if (entry is not null)
                 {
                     <MudText Typo="Typo.body2">@L["AutomationOwners_Owner", entry.OwnerId, entry.ConfirmedAt.ToLocalTime().ToString("g")]</MudText>
                 }

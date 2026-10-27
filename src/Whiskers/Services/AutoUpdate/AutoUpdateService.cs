@@ -139,7 +139,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             try
             {
                 // A broken owner file must not read as "no owner" (that would be the grace period): fail closed.
-                if (!_owners.IsReadable)
+                if (_owners.IsBlocked(IAutomationOwnerStore.AutoUpdate))
                     throw new InvalidOperationException(
                         "The AutoUpdate owner could not be read; take AutoUpdate over again in Settings → Automation owners.");
 

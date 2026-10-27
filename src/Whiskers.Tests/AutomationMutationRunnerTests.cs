@@ -366,8 +366,119 @@ public class AutomationMutationRunnerTests
         Assert.Equal("automation_refused", evt.EventType);
     }
 
+    /// <summary>Records every command it is asked to run.</summary>
+    private sealed class CapturingHost : Whiskers.Services.Server.IHostCommandExecutor
+    {
+        public List<string> Commands { get; } = [];
+        public Task<Whiskers.Services.Server.CommandResult> ExecuteAsync(string serverId, string command,
+            TimeSpan? timeout = null, CancellationToken ct = default, int? maxOutputChars = null)
+        {
+            Commands.Add(command);
+            return Task.FromResult(new Whiskers.Services.Server.CommandResult { ExitCode = 0, Output = "", Error = "" });
+        }
+    }
+
     [Fact]
-    public async Task The_owner_store_survives_a_restart_and_reads_a_corrupt_file_as_no_owner()
+    public async Task A_scheduled_command_meets_the_forbidden_arguments_of_today_not_of_its_creation()
+    {
+        var policy = Unattended();
+        var f = Build(policy: policy);
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = "admin" });
+        var host = new CapturingHost();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, host, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: new FakeNotifications());
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t4", Name = "wipe", TaskType = ScheduledTaskType.CustomCommand, CreatedBy = "key:k1",
+            Config = "{\"command\":\"docker image prune -af\"}",
+        };
+
+        var (before, output) = await executor.ExecuteAsync(task);
+        policy.ForbiddenArgPatterns.Add(@"\bprune\s+-af\b");   // an admin tightens the policy after the task was created
+        var (after, _) = await executor.ExecuteAsync(task);
+
+        Assert.True(before, output);
+        Assert.False(after);
+        Assert.Single(host.Commands);
+    }
+
+    [Fact]
+    public async Task Taking_over_one_feature_after_a_broken_owner_file_leaves_the_other_blocked_across_restarts()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        var paths = new DataPathOptions(dir);
+        try
+        {
+            Directory.CreateDirectory(dir);
+            await File.WriteAllTextAsync(paths.AutomationOwnersJson, "{ not json");
+            var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+            Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoPatch));
+            Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+
+            await store.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+            Assert.False(store.IsBlocked(IAutomationOwnerStore.AutoPatch));
+            Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+
+            var restarted = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+            Assert.Equal("admin@example.com", restarted.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
+            Assert.True(restarted.IsBlocked(IAutomationOwnerStore.AutoUpdate));   // not "no owner": no grace period
+            Assert.Null(restarted.Get(IAutomationOwnerStore.AutoUpdate));
+            Assert.NotEmpty(Directory.GetFiles(dir, "automation-owners.json.unreadable-*"));
+
+            await restarted.SetAsync(IAutomationOwnerStore.AutoUpdate, "admin@example.com");
+            Assert.False(new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance)
+                .IsBlocked(IAutomationOwnerStore.AutoUpdate));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_directory_at_the_owner_file_path_blocks_instead_of_reading_as_missing()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        var paths = new DataPathOptions(dir);
+        try
+        {
+            Directory.CreateDirectory(paths.AutomationOwnersJson);
+            var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+            Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+            Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoPatch));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task An_owner_file_that_cannot_be_opened_blocks_instead_of_reading_as_missing()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        var paths = new DataPathOptions(dir);
+        try
+        {
+            Directory.CreateDirectory(dir);
+            await File.WriteAllTextAsync(paths.AutomationOwnersJson,
+                "{ \"autoupdate\": { \"OwnerId\": \"admin@example.com\", \"ConfirmedAt\": \"2026-10-01T00:00:00Z\" } }");
+            using (new FileStream(paths.AutomationOwnersJson, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+                Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+            }
+            Assert.False(new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance)
+                .IsBlocked(IAutomationOwnerStore.AutoUpdate));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task The_owner_store_survives_a_restart_and_reads_a_corrupt_file_as_blocked()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
         var paths = new DataPathOptions(dir);
@@ -380,18 +491,19 @@ public class AutomationMutationRunnerTests
             Assert.Equal("admin@example.com", second.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
             Assert.Null(second.Get(IAutomationOwnerStore.AutoUpdate));
 
-            Assert.True(second.IsReadable);
+            Assert.False(second.IsBlocked(IAutomationOwnerStore.AutoUpdate));   // a missing file is no failure
 
             await File.WriteAllTextAsync(paths.AutomationOwnersJson, "{ not json");
             var third = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
             Assert.Null(third.Get(IAutomationOwnerStore.AutoPatch));
-            Assert.False(third.IsReadable);   // fail closed: not "unowned", which would be the grace period
+            Assert.True(third.IsBlocked(IAutomationOwnerStore.AutoUpdate));   // fail closed: not "unowned" (grace period)
 
             await File.WriteAllTextAsync(paths.AutomationOwnersJson, "{ \"autoupdate\": { \"OwnerId\": \"\" } }");
-            Assert.False(new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance).IsReadable);
+            Assert.True(new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance)
+                .IsBlocked(IAutomationOwnerStore.AutoUpdate));
 
             await third.SetAsync(IAutomationOwnerStore.AutoUpdate, "admin@example.com");
-            Assert.True(third.IsReadable);
+            Assert.False(third.IsBlocked(IAutomationOwnerStore.AutoUpdate));
         }
         finally
         {

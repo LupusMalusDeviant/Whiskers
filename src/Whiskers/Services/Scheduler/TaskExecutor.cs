@@ -167,9 +167,10 @@ public class TaskExecutor : ITaskExecutor
 
         var sid = task.ServerId ?? "local";
         // The executor is not marked yet (it is a primitive); gating the call still re-checks the owner, who must
-        // hold host.exec (Admin), and applies the kill switch. The command text stays out of the arguments.
+        // hold host.exec (Admin), and applies the kill switch. The command goes to the policy (forbidden arguments as
+        // they are today, not when the task was created); the audit row keeps only its length.
         var outcome = await _automation.RunAsync(ActorOf(task), "host.exec",
-            new { serverId = sid, taskId = task.TaskId, hasCommand = true },
+            new { serverId = sid, taskId = task.TaskId, command },
             _ => _executor.ExecuteAsync(sid, command, TimeSpan.FromMinutes(5)));
         if (Problem(outcome) is { } problem) return (false, problem);
         var result = outcome.Value!;
@@ -329,6 +330,10 @@ public class TaskExecutor : ITaskExecutor
     // alphanumerics plus _ . - only. Anything else is rejected (no pruning) rather than risking injection.
     private static readonly System.Text.RegularExpressions.Regex SafeDbName =
         new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>The command of a custom-command task, or <c>null</c>.</summary>
+    public static string? CommandOf(ScheduledTaskEntity task) =>
+        ParseConfig(task.Config).GetValueOrDefault("command");
 
     private static Dictionary<string, string> ParseConfig(string? json)
     {

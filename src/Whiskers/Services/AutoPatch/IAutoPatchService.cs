@@ -21,7 +21,7 @@ public interface IAutoPatchService
 
     /// <summary>Runs one cycle now. <paramref name="forceDryRun"/> keeps it a dry run whatever the settings
     /// say; there is deliberately no way to force the opposite from here.</summary>
-    /// <returns>False when a cycle is already running.</returns>
+    /// <returns>False when a cycle is already running, or a container's patch failed (unknown, rolled back).</returns>
     [MutatingOperation("autopatch.run")]
     Task<bool> RunCycleAsync(bool forceDryRun, CancellationToken ct = default);
 }

@@ -81,10 +81,16 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     and confirmation. Where the policy would ask for a confirmation (the default preset does for every write by a
     key), the run is refused — nobody is there to confirm it. Have a person take the task over, or adjust the
     preset for that key.
-  - **AutoPatch decides every container on its own** (`container.update` of that container): a protected
-    container, or one the owner may no longer update, is skipped as `Aborted (refused: …)` instead of patched.
-  - **An unreadable or invalid `automation-owners.json`** stops AutoPatch and AutoUpdate (logged as an error;
-    AutoUpdate records a failed update) until an Admin takes them over again; it no longer counts as "no owner".
+  - **A custom-command task is checked against the forbidden-argument patterns of today**, on every run, not only
+    when it was created (key-owned tasks). A command that a pattern added later matches is refused.
+  - **AutoPatch decides every container on its own** (`container.update` of that container), in a dry run too: a
+    protected container, or one the owner may no longer update, is skipped as `Aborted (refused: …)` instead of
+    patched or tried. A patch that ends as `Unknown`, `RolledBack` or `RollbackNotVerified` is audited as failed,
+    and so is the night it belongs to.
+  - **An unreadable or invalid `automation-owners.json`** (also a directory at that path, or a file that cannot be
+    opened) blocks AutoPatch and AutoUpdate (logged as an error; AutoUpdate records a failed update) until an Admin
+    takes **each** of them over again; it no longer counts as "no owner". Taking one over keeps the other blocked,
+    across restarts; the unreadable file is kept as `automation-owners.json.unreadable-<timestamp>`.
   - The kill switch and protected resources apply to scheduled runs, AutoUpdate and AutoPatch. With the default
     preset a scheduled backup of a `whiskers*` / `serverwatch*` volume or a restart of the Whiskers container is
     refused; remove the pattern from the active preset if you rely on it.

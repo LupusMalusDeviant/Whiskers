@@ -451,7 +451,7 @@ public class AutoPatchTests
         var automation = new RecordingAutomation();
         var owners = new MemoryAutomationOwners();
         await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
-        owners.IsReadable = false;
+        owners.Blocked.Add(IAutomationOwnerStore.AutoPatch);
         var service = NewService(new RecordingRunner(), new CveFindingsStore(persistPath: TempPath()), automation, owners);
 
         await service.RunNightlyAsync(CancellationToken.None);
@@ -479,6 +479,45 @@ public class AutoPatchTests
         Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "b" && e.Kind == AutoPatchResultKind.Aborted);
     }
 
+    [Fact]
+    public async Task A_nightly_dry_run_decides_every_container_too()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
+        var automation = new RecordingAutomation { Refuse = { "b" } };
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        var runner = new RecordingRunner();
+        var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = true },
+            Compose("a"), Compose("b"));
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        // The script re-tags and pulls even in a dry run: a protected container is never handed to it.
+        Assert.Equal(["autopatch.run", "container.update", "container.update"], automation.Actors.Select(a => a.Capability));
+        Assert.Equal([("local", "a", true)], runner.Calls);
+    }
+
+    [Fact]
+    public async Task A_patch_that_rolled_back_is_recorded_as_failed()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        var automation = new RecordingAutomation();
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        var runner = new RecordingRunner { Verdicts = { ["a"] = AutoPatchResultKind.RolledBack } };
+        var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = false },
+            Compose("a"));
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        // Both the container's decision and the night's: neither may read "executed" in the audit.
+        Assert.Equal([MutationStatus.Failed, MutationStatus.Failed], automation.Statuses);
+        Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "a" && e.Kind == AutoPatchResultKind.RolledBack);
+    }
+
     private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
         IAutomationMutationRunner automation, IAutomationOwnerStore owners)
         => NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true });
@@ -491,12 +530,13 @@ public class AutoPatchTests
             new FakeNotifications(), new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             automation, owners, NullLogger<AutoPatchService>.Instance);
 
-    /// <summary>Records who each decision runs as and runs the action, except for a container whose name is in
-    /// <see cref="Refuse"/>.</summary>
+    /// <summary>Records who each decision runs as and runs the action in a scope like the gateway's, except for a
+    /// container whose name is in <see cref="Refuse"/>. <see cref="Statuses"/> holds what the gateway would audit.</summary>
     private sealed class RecordingAutomation : IAutomationMutationRunner
     {
         public List<(AutomationActor Actor, string Capability)> Actors { get; } = new();
         public HashSet<string> Refuse { get; } = new();
+        public List<MutationStatus> Statuses { get; } = new();
 
         public async Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
@@ -505,7 +545,11 @@ public class AutoPatchTests
             var name = arguments.GetType().GetProperty("name")?.GetValue(arguments) as string;
             if (name is not null && Refuse.Contains(name))
                 return new MutationOutcome<T>("op", MutationStatus.Denied, default, "protected", VerificationStatus.NotRun);
-            return new MutationOutcome<T>("op", MutationStatus.Executed, await action(ct), null, VerificationStatus.NotRun);
+            using var scope = MutationScope.Begin(capabilityId, "op");
+            var value = await action(ct);
+            var status = scope.FailureReason is null ? MutationStatus.Executed : MutationStatus.Failed;
+            Statuses.Add(status);
+            return new MutationOutcome<T>("op", status, value, scope.FailureReason, VerificationStatus.NotRun);
         }
 
         public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,

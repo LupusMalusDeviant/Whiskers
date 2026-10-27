@@ -3,8 +3,9 @@ using Whiskers.Configuration;
 
 namespace Whiskers.Services.Mutations;
 
-/// <summary>The owner an admin confirmed for a fleet-wide automation feature.</summary>
-public sealed record AutomationOwnerEntry(string OwnerId, DateTime ConfirmedAt);
+/// <summary>The owner an admin confirmed for a fleet-wide automation feature. <see cref="Blocked"/> marks a
+/// feature whose owner was lost with an unreadable file: it stays refused until an admin takes it over.</summary>
+public sealed record AutomationOwnerEntry(string OwnerId, DateTime ConfirmedAt, bool Blocked = false);
 
 /// <summary>
 /// Owners of the fleet-wide automation features that have no item of their own to store one on (PC-D6):
@@ -16,14 +17,20 @@ public interface IAutomationOwnerStore
     public const string AutoPatch = "autopatch";
     public const string AutoUpdate = "autoupdate";
 
+    /// <summary>The features this store keeps an owner for.</summary>
+    public static readonly IReadOnlyList<string> Features = [AutoPatch, AutoUpdate];
+
+    /// <summary>The feature's owner; <c>null</c> when it has none or is <see cref="IsBlocked">blocked</see>.</summary>
     AutomationOwnerEntry? Get(string feature);
 
-    /// <summary><c>false</c> while the owner file exists but could not be read or holds an invalid entry. The
-    /// features then must not run at all: "no owner" would put AutoUpdate into the grace period, i.e. a broken file
-    /// would raise its authority. Taking a feature over in Settings writes a fresh file.</summary>
-    bool IsReadable { get; }
+    /// <summary><c>true</c> while the feature must not run at all: the owner file could not be read (missing is
+    /// fine; a directory, an access error or invalid content is not), or a previous such failure was not yet
+    /// resolved for this feature. "No owner" would put AutoUpdate into the grace period, so a broken file would raise
+    /// its authority. Only taking that feature over clears it; taking over another feature does not.</summary>
+    bool IsBlocked(string feature);
 
-    /// <summary>Records <paramref name="ownerId"/> as the feature's owner. Throws when the file cannot be written.</summary>
+    /// <summary>Records <paramref name="ownerId"/> as the feature's owner and clears its block. Throws when the file
+    /// cannot be written.</summary>
     [MutatingOperation("automation.owner_set")]
     Task SetAsync(string feature, string ownerId, CancellationToken ct = default);
 }
@@ -37,20 +44,21 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
     private readonly ILogger<AutomationOwnerStore> _logger;
     private readonly SemaphoreSlim _write = new(1, 1);
     private Dictionary<string, AutomationOwnerEntry> _entries;
-    private volatile bool _readable;
+    private bool _loadFailed;
 
     public AutomationOwnerStore(DataPathOptions paths, ILogger<AutomationOwnerStore> logger)
     {
         ArgumentNullException.ThrowIfNull(paths);
         _path = paths.AutomationOwnersJson;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        (_entries, _readable) = Load();
+        _entries = Load();
     }
 
-    public bool IsReadable => _readable;
+    public bool IsBlocked(string feature) =>
+        Volatile.Read(ref _entries).GetValueOrDefault(feature)?.Blocked == true;
 
     public AutomationOwnerEntry? Get(string feature) =>
-        Volatile.Read(ref _entries).GetValueOrDefault(feature);
+        Volatile.Read(ref _entries).GetValueOrDefault(feature) is { Blocked: false } entry ? entry : null;
 
     public async Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
     {
@@ -64,11 +72,13 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
                 [feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow),
             };
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            if (_loadFailed) KeepUnreadableFile();
             var temp = _path + ".tmp";
+            // The other features' blocks are written too, so they survive a restart until each is taken over.
             await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(next, Json), ct);
             File.Move(temp, _path, overwrite: true);
             Volatile.Write(ref _entries, next);
-            _readable = true;
+            _loadFailed = false;
         }
         finally
         {
@@ -76,22 +86,47 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         }
     }
 
-    private (Dictionary<string, AutomationOwnerEntry> Entries, bool Readable) Load()
+    private Dictionary<string, AutomationOwnerEntry> Load()
     {
         try
         {
-            if (!File.Exists(_path)) return (new(StringComparer.Ordinal), true);
-            var loaded = JsonSerializer.Deserialize<Dictionary<string, AutomationOwnerEntry>>(File.ReadAllText(_path));
-            if (loaded is null || loaded.Values.Any(e => e is null || string.IsNullOrWhiteSpace(e.OwnerId)))
+            // Only a file that is really not there means "no owners yet". A directory at the path, an access error or
+            // invalid content blocks every feature.
+            if (Directory.Exists(_path))
+                throw new IOException("The owner file path is a directory.");
+            string text;
+            try { text = File.ReadAllText(_path); }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return new(StringComparer.Ordinal);
+            }
+            var loaded = JsonSerializer.Deserialize<Dictionary<string, AutomationOwnerEntry>>(text);
+            if (loaded is null || loaded.Values.Any(e => e is null || (!e.Blocked && string.IsNullOrWhiteSpace(e.OwnerId))))
                 throw new JsonException("The owner file holds an empty or invalid entry.");
-            return (new Dictionary<string, AutomationOwnerEntry>(loaded, StringComparer.Ordinal), true);
+            return new Dictionary<string, AutomationOwnerEntry>(loaded, StringComparer.Ordinal);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException)
         {
-            // Fail closed: AutoPatch and AutoUpdate do not run until an admin takes them over again.
+            // Fail closed: AutoPatch and AutoUpdate stay blocked until an admin takes each of them over again.
             _logger.LogError(ex, "Automation owners could not be read from {Path}; AutoPatch and AutoUpdate will not run " +
-                                 "until an admin takes them over in Settings", _path);
-            return (new(StringComparer.Ordinal), false);
+                                 "until an admin takes each of them over in Settings", _path);
+            _loadFailed = true;
+            return IAutomationOwnerStore.Features.ToDictionary(f => f,
+                _ => new AutomationOwnerEntry("", DateTime.UtcNow, Blocked: true), StringComparer.Ordinal);
+        }
+    }
+
+    /// <summary>Keeps a copy of the file that could not be read before the first write replaces it (best effort).</summary>
+    private void KeepUnreadableFile()
+    {
+        try
+        {
+            if (File.Exists(_path))
+                File.Copy(_path, $"{_path}.unreadable-{DateTime.UtcNow:yyyyMMddHHmmss}", overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "The unreadable owner file {Path} could not be kept", _path);
         }
     }
 }

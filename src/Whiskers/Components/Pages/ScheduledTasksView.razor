@@ -381,12 +381,12 @@ else
                 Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null,
                 CreatedBy = owner,
             };
-            // Never the command text itself: it may carry credentials.
+            // The command goes to the policy; the audit row keeps only its length (it may carry credentials).
             await Mutations.RunAsync("scheduler.create",
                 new
                 {
                     name = newTask.Name, taskType = newTask.TaskType.ToString(), serverId = newTask.ServerId,
-                    hasCommand = config.ContainsKey("command"),
+                    command = config.GetValueOrDefault("command"),
                 },
                 _ => Scheduler.CreateTaskAsync(newTask));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
@@ -423,7 +423,8 @@ else
             ScheduledTaskType.SelfBackup => Mutations.RunAsync("selfbackup.create",
                 new { trigger = "run-now", taskId = task.TaskId }, _ => RunWithRetentionAsync(task)),
             ScheduledTaskType.CustomCommand => Mutations.RunAsync("host.exec",
-                new { serverId, hasCommand = true }, _ => RunScheduledAsync(task)),
+                new { serverId, command = Whiskers.Services.Scheduler.TaskExecutor.CommandOf(task) },
+                _ => RunScheduledAsync(task)),
             ScheduledTaskType.Cleanup => Mutations.RunAsync("host.prune",
                 new { serverId }, _ => RunScheduledAsync(task)),
             _ => RunScheduledAsync(task),

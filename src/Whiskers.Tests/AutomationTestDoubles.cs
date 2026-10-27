@@ -7,12 +7,15 @@ internal sealed class MemoryAutomationOwners : IAutomationOwnerStore
 {
     private readonly Dictionary<string, AutomationOwnerEntry> _entries = new(StringComparer.Ordinal);
 
-    public AutomationOwnerEntry? Get(string feature) => _entries.GetValueOrDefault(feature);
+    public HashSet<string> Blocked { get; } = new(StringComparer.Ordinal);
 
-    public bool IsReadable { get; set; } = true;
+    public AutomationOwnerEntry? Get(string feature) => Blocked.Contains(feature) ? null : _entries.GetValueOrDefault(feature);
+
+    public bool IsBlocked(string feature) => Blocked.Contains(feature);
 
     public Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
     {
+        Blocked.Remove(feature);
         _entries[feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow);
         return Task.CompletedTask;
     }

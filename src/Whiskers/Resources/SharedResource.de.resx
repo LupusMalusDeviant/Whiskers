@@ -4745,6 +4745,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AutomationOwners_NoOwner_AutoPatch" xml:space="preserve">
     <value>Kein Besitzer: Der nächtliche Lauf findet nicht statt.</value>
   </data>
+  <data name="AutomationOwners_Blocked" xml:space="preserve">
+    <value>Gesperrt: Die Besitzer-Datei war nicht lesbar. Läuft erst wieder, wenn ein Admin übernimmt.</value>
+  </data>
   <data name="AutomationOwners_NoOwner_AutoUpdate" xml:space="preserve">
     <value>Kein Besitzer: Updates laufen während der Übergangszeit als „kein Besitzer“.</value>
   </data>
