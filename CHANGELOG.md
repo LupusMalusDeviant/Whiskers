@@ -25,7 +25,10 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **R1-05: one capability level table; several MCP tools now require Admin.** The capability catalog
   (`CapabilityCatalog`) is now the single source of the level of every mutating capability; MCP's
   `DefaultToolLevels` takes its mutating entries from it. Where the UI and MCP disagreed, the stricter level
-  won (no level was lowered). API keys and agents at Write lose these tools:
+  won: no MCP level was lowered. One UI level was: creating and deleting a scheduled task on the
+  Scheduled tasks page now needs Operator (was Admin), and the gateway then raises it to Admin per task type
+  (custom command, self-backup, DB backup, retention) — Operators can now manage restart, cleanup and volume
+  backup tasks without retention there. API keys and agents at Write lose these tools:
   - Firewall `add_firewall_rule`, `remove_firewall_rule`; nginx `update_nginx_config`; systemd
     `manage_systemd_service` — Write → Admin (their UI pages already required Admin).
   - `set_container_env` — Write → Admin: it writes the compose `.env` (any key) and runs `docker compose up -d`,
