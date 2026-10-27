@@ -139,10 +139,10 @@ public class GuardrailEngineTests
     public void Invalid_policy_regex_does_not_throw()
     {
         var policy = Permissive();
-        policy.ForbiddenArgPatterns.Add("[unclosed");   // ungültige Regex
+        policy.ForbiddenArgPatterns.Add("[unclosed");   // invalid regex: INV-25, refused, never ignored
         var d = Engine.Evaluate(Request("list_containers", McpPermissionLevels.Read,
             policy, Principal(McpPermissionLevels.Read), ("q", "anything")));
-        Assert.Equal(GuardrailVerdict.Allow, d.Verdict);
+        Assert.Equal(GuardrailVerdict.Deny, d.Verdict);
     }
 
     // ---- ConfirmationRule --------------------------------------------------

@@ -4772,4 +4772,31 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
     <value>A scheduled task needs an owner: sign in with an account that has an email address.</value>
   </data>
+  <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
+    <value>guardrails.json could not be read or is invalid. Every mutation is refused and agents and MCP clients get no tool until you save a valid configuration here. The previous file was kept next to it as guardrails.json.unreadable-&lt;timestamp&gt;.</value>
+  </data>
+  <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
+    <value>Fail-closed (configuration unreadable)</value>
+  </data>
+  <data name="GuardrailsView_Problem_NoPresets" xml:space="preserve">
+    <value>At least one preset is required.</value>
+  </data>
+  <data name="GuardrailsView_Problem_PresetWithoutName" xml:space="preserve">
+    <value>Every preset needs a name.</value>
+  </data>
+  <data name="GuardrailsView_Problem_DuplicatePresetName" xml:space="preserve">
+    <value>Preset names must be unique ('{0}').</value>
+  </data>
+  <data name="GuardrailsView_Problem_PresetWithoutPolicy" xml:space="preserve">
+    <value>Preset '{0}' has no policy.</value>
+  </data>
+  <data name="GuardrailsView_Problem_MissingValue" xml:space="preserve">
+    <value>Preset '{0}': '{1}' is missing or holds an empty entry.</value>
+  </data>
+  <data name="GuardrailsView_Problem_ActivePresetMissing" xml:space="preserve">
+    <value>The active preset '{0}' does not exist.</value>
+  </data>
+  <data name="GuardrailsView_Problem_InvalidPattern" xml:space="preserve">
+    <value>Preset '{0}': '{1}' is not a valid regex. Nothing was saved.</value>
+  </data>
 </root>

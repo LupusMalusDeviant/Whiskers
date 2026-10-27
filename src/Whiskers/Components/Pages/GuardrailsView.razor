@@ -30,6 +30,10 @@
     }
     else if (_edit is not null)
     {
+        @if (GuardrailStore.LoadError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@L["GuardrailsView_FailClosed_Alert"]</MudAlert>
+        }
         @* Preset bar *@
         <MudPaper Class="pa-4 mb-4">
             <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
@@ -39,7 +43,7 @@
                     {
                         var idx = i;
                         <MudSelectItem T="int" Value="idx">
-                            @_config.Presets[idx].Name @(_config.Presets[idx].Name == _config.ActivePreset ? L["GuardrailsView_Preset_ActiveSuffix"].Value : "")
+                            @PresetLabel(_config.Presets[idx].Name) @(_config.Presets[idx].Name == _config.ActivePreset ? L["GuardrailsView_Preset_ActiveSuffix"].Value : "")
                         </MudSelectItem>
                     }
                 </MudSelect>
@@ -319,11 +323,22 @@
             await GuardrailStore.SaveConfigAsync(_config, await BuildPrincipalAsync());
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
         }
+        catch (GuardrailConfigException ex)
+        {
+            Snackbar.Add(L[$"GuardrailsView_Problem_{ex.Problem.Kind}", ex.Problem.Preset ?? "", ex.Problem.Value ?? ""].Value,
+                Severity.Error);
+        }
         catch (Exception ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }
     }
+
+    /// <summary>The fail-closed placeholder preset gets a localized name; every other preset shows its own.</summary>
+    private string PresetLabel(string name) =>
+        GuardrailStore.LoadError is not null && name == Whiskers.Services.Guardrails.GuardrailStore.FailClosedPreset
+            ? L["GuardrailsView_FailClosedPreset_Name"].Value
+            : name;
 
     private async Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync()
     {

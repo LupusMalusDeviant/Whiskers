@@ -4772,4 +4772,31 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
     <value>Eine geplante Aufgabe braucht einen Besitzer: Melde dich mit einem Konto an, das eine E-Mail-Adresse hat.</value>
   </data>
+  <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
+    <value>guardrails.json konnte nicht gelesen werden oder ist ungültig. Jede Änderung wird abgelehnt, Agenten und MCP-Clients bekommen kein Werkzeug, bis Sie hier eine gültige Konfiguration speichern. Die bisherige Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;.</value>
+  </data>
+  <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
+    <value>Gesperrt (Konfiguration unlesbar)</value>
+  </data>
+  <data name="GuardrailsView_Problem_NoPresets" xml:space="preserve">
+    <value>Mindestens ein Preset ist nötig.</value>
+  </data>
+  <data name="GuardrailsView_Problem_PresetWithoutName" xml:space="preserve">
+    <value>Jedes Preset braucht einen Namen.</value>
+  </data>
+  <data name="GuardrailsView_Problem_DuplicatePresetName" xml:space="preserve">
+    <value>Preset-Namen müssen eindeutig sein („{0}“).</value>
+  </data>
+  <data name="GuardrailsView_Problem_PresetWithoutPolicy" xml:space="preserve">
+    <value>Preset „{0}“ hat keine Richtlinie.</value>
+  </data>
+  <data name="GuardrailsView_Problem_MissingValue" xml:space="preserve">
+    <value>Preset „{0}“: „{1}“ fehlt oder enthält einen leeren Eintrag.</value>
+  </data>
+  <data name="GuardrailsView_Problem_ActivePresetMissing" xml:space="preserve">
+    <value>Das aktive Preset „{0}“ existiert nicht.</value>
+  </data>
+  <data name="GuardrailsView_Problem_InvalidPattern" xml:space="preserve">
+    <value>Preset „{0}“: „{1}“ ist kein gültiger regulärer Ausdruck. Nichts wurde gespeichert.</value>
+  </data>
 </root>
