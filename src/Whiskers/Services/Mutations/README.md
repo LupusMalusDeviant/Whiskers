@@ -210,6 +210,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   `.env` save, webhook **Test**, Git deploy) decides once per planned container; MCP and agent (`deploy_compose`,
   `set_container_env`) get the planned containers as related resources of their one decision, made by the resolver.
   The `.env`'s compose switches are planned too (`COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `COMPOSE_REMOVE_ORPHANS`).
+  A project name interpolated from the `.env` or the top-level `name:` is passed into a decision (and so the audit) as
+  the expression it came from (`ComposePlan.ProjectNameForAudit`, e.g. `${DB_PASSWORD}`), never as the value; a
+  literal name as it is. Existing containers are recorded by their names on the host.
   Execution uses the plan's explicit `-p` / `--project-directory` / `-f` and refuses (`EnsureDecided`) when a plan made
   again right before writing touches a container no enclosing decision covered (UI, MCP, agent, webhooks, Git
   deploy). Not covered: values in the host's own environment, which compose prefers to

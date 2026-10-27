@@ -376,7 +376,7 @@ else
                 var (plan, error) = await Whiskers.Services.Webhooks.WebhookTargets.ComposePlanAsync(ComposePlanner, wh);
                 if (plan is null) return (false, error!);   // nothing can be decided, so nothing runs
                 return await Mutations.RunAsync("compose.deploy",
-                    new { projectName = plan.ProjectName, projectDir = plan.ProjectDirectory, serverId },
+                    new { projectName = plan.ProjectNameForAudit, projectDir = plan.ProjectDirectory, serverId },
                     _ => Mutations.RunForEachAsync("compose.deploy", plan.Containers, serverId, Fire));
             }
             case "git-deploy":

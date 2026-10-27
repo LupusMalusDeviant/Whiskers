@@ -292,6 +292,43 @@ public sealed class WebhookMutationTests : IDisposable
         Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
     }
 
+    [Fact]
+    public async Task A_project_name_interpolated_from_the_env_is_decided_and_audited_as_its_source()
+    {
+        const string Password = "a9c42de780fb";   // a valid project name: the plan succeeds and the deploy runs
+        _host.Files["/opt/secretname/docker-compose.yml"] = "services:\n  web:\n    image: nginx\n";
+        _host.Files["/opt/secretname/.env"] = $"DB_PASSWORD='{Password}'\nCOMPOSE_PROJECT_NAME=${{DB_PASSWORD}}\n";
+        var webhook = Seed("deploy", "/opt/secretname");
+
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.True(success, output);
+        Assert.Contains(_host.Executed, c => c.Contains($"-p '{Password}'"));   // compose still gets the real name
+        var decision = Assert.Single(_audit.Requests, r => r.CapabilityId == "compose.deploy");
+        Assert.Equal("${DB_PASSWORD}", decision.Arguments["projectName"].GetString());
+        var recorded = string.Join("\n", _audit.Requests.Select(r => JsonSerializer.Serialize(r.Arguments) + r.Target))
+                       + string.Join("\n", _audit.Reasons);
+        Assert.DoesNotContain(Password, recorded);
+    }
+
+    [Theory]
+    [InlineData(null, "COMPOSE_PROJECT_NAME=shop\n", null, null)]                      // literal in the .env
+    [InlineData(null, "STAGE=prod\nCOMPOSE_PROJECT_NAME=app-${STAGE}\n", null, "app-${STAGE}")]
+    [InlineData(null, "COMPOSE_PROJECT_NAME='${NOT_INTERPOLATED}'\n", null, null)]   // single quotes: literal
+    [InlineData(null, "", "shop", null)]                                              // literal top-level name
+    [InlineData(null, "STAGE=prod\n", "app-${STAGE}", "app-${STAGE}")]
+    [InlineData("explicit", "STAGE=prod\nCOMPOSE_PROJECT_NAME=${STAGE}\n", "app-${STAGE}", null)]     // -p wins and is literal
+    [InlineData(null, "", null, null)]                                                // the directory's name
+    public void The_project_name_source_follows_the_order_compose_uses(string? explicitName, string env,
+        string? declaredSource, string? expected)
+    {
+        var templates = new Dictionary<string, string>(StringComparer.Ordinal);
+        var parsed = ComposeModel.ParseEnv(env, templates);
+        var declared = declaredSource is null ? null : ComposeModel.Interpolate(declaredSource, parsed, "name");
+
+        Assert.Equal(expected, ComposeModel.ProjectNameSource(explicitName, parsed, templates, declared, declaredSource));
+    }
+
     [Theory]
     [InlineData("gone")]      // the compose file disappears after the decision
     [InlineData("changed")]   // it now names another project, whose containers were not decided
@@ -311,6 +348,48 @@ public sealed class WebhookMutationTests : IDisposable
         Assert.StartsWith("Refused", output);
         Assert.False(Ran("deploy"));
         Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
+    }
+
+    [Fact]
+    public async Task A_plan_pass_that_times_out_right_before_compose_up_is_a_reported_refusal()
+    {
+        var webhook = Seed("deploy", "/opt/shop");
+        _audit.OnBegin = r =>
+        {
+            // The first plan was made; Docker times out from the per-container decisions on.
+            if (r.CapabilityId == "compose.deploy" && r.Arguments.ContainsKey("containerId"))
+                (_dockerThrows, _dockerTimesOut) = (true, true);
+        };
+
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.StartsWith("Refused", output);
+        Assert.False(Ran("deploy"));
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("take-over")]
+    [InlineData("webhook.rotate_secret")]
+    [InlineData("webhook.set_enabled")]
+    [InlineData("webhook.delete")]
+    public async Task A_revoked_owner_neither_blocks_an_admin_nor_keeps_management_authority(string capability)
+    {
+        // The owner lost Admin: the webhook stays manageable by an admin who holds it now …
+        var webhook = Seed("restart", "web-1", owner: AdminId);
+        const string Current = "current@example.com";
+        _whitelist.Allowed.Add(Current);
+        _roles.Map[Current] = AppRole.Admin;
+        _roles.Map[Admin] = AppRole.Viewer;
+
+        // … while the revoked owner, signed in with the role they hold now, can no longer manage anything.
+        await Assert.ThrowsAsync<MutationRefusedException>(() => Manage(UiRunner(AppRole.Viewer), capability, webhook));
+        Assert.Equal(Snapshot(webhook), Snapshot(Stored(webhook.WebhookId)));
+        Assert.Equal(1, Count());
+
+        await Manage(UiRunner(AppRole.Admin, Current), capability, webhook);
     }
 
     [Fact]
@@ -507,29 +586,34 @@ public sealed class WebhookMutationTests : IDisposable
 
     // ---------------------------------------------------------------- helpers
 
-    private WebhookService Service() => new(_sp.GetRequiredService<IServiceScopeFactory>(),
-        _dockerThrows ? ThrowingDocker.Wrap(_docker, _dockerTimesOut) : _docker, _host,
-        new ComposePlanner(_docker, _host), NullLogger<WebhookService>.Instance);
+    private WebhookService Service()
+    {
+        // The Docker service of the webhook (lookup and planning) starts failing whenever a test says so.
+        var docker = ThrowingDocker.Wrap(_docker, () => _dockerThrows, () => _dockerTimesOut);
+        return new(_sp.GetRequiredService<IServiceScopeFactory>(), docker, _host, new ComposePlanner(docker, _host),
+            NullLogger<WebhookService>.Instance);
+    }
 
     /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>
     public class ThrowingDocker : System.Reflection.DispatchProxy
     {
         private Whiskers.Services.Docker.IDockerService _inner = null!;
-        private bool _timeout;
+        private Func<bool> _throws = () => false;
+        private Func<bool> _timeout = () => false;
 
         public static Whiskers.Services.Docker.IDockerService Wrap(Whiskers.Services.Docker.IDockerService inner,
-            bool timeout = false)
+            Func<bool> throws, Func<bool> timeout)
         {
             var proxy = Create<Whiskers.Services.Docker.IDockerService, ThrowingDocker>();
-            ((ThrowingDocker)(object)proxy)._inner = inner;
-            ((ThrowingDocker)(object)proxy)._timeout = timeout;
+            var self = (ThrowingDocker)(object)proxy;
+            (self._inner, self._throws, self._timeout) = (inner, throws, timeout);
             return proxy;
         }
 
         protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args) =>
-            method!.Name != nameof(Whiskers.Services.Docker.IDockerService.ListContainersAsync)
+            method!.Name != nameof(Whiskers.Services.Docker.IDockerService.ListContainersAsync) || !_throws()
                 ? method.Invoke(_inner, args)
-                : _timeout
+                : _timeout()
                     ? throw new TaskCanceledException("The host deadline expired.")
                     : throw new InvalidOperationException("Cannot connect to the docker socket of 'edge-removed'");
     }
@@ -612,7 +696,8 @@ public sealed class WebhookMutationTests : IDisposable
         new CapabilityCatalog(), new AutomationOwnerResolver(_roles, _whitelist, new Keys(), new Accounts()),
         new StaticOptionsMonitor<AutomationOptions>(new AutomationOptions { RequireOwner = _requireOwner })));
 
-    private UiMutationRunner UiRunner(AppRole role) => new(Gateway(), new CapabilityCatalog(), new Person(role));
+    private UiMutationRunner UiRunner(AppRole role, string email = Admin) =>
+        new(Gateway(), new CapabilityCatalog(), new Person(role, email));
 
     private static ContainerInfo Container(string name, string id, string state) => new()
     {
@@ -674,9 +759,9 @@ public sealed class WebhookMutationTests : IDisposable
         }
     }
 
-    private sealed class Person(AppRole role) : ICurrentUserService
+    private sealed class Person(AppRole role, string email = Admin) : ICurrentUserService
     {
-        public Task<string?> GetEmailAsync() => Task.FromResult<string?>(Admin);
+        public Task<string?> GetEmailAsync() => Task.FromResult<string?>(email);
         public Task<AppRole> GetRoleAsync() => Task.FromResult(role);
         public Task<bool> HasRoleAsync(AppRole required) => Task.FromResult(role >= required);
     }

@@ -235,7 +235,7 @@ public class WebhookService : IWebhookService
                 var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook));
                 var gate = automation.GateFor(actor, "compose.deploy");
                 outcome = await automation.RunAsync(actor, "compose.deploy",
-                    new { projectName = plan?.ProjectName, projectDir = webhook.TargetId, serverId = sid },
+                    new { projectName = plan?.ProjectNameForAudit, projectDir = webhook.TargetId, serverId = sid },
                     async _ =>
                     {
                         EnsureOwned(webhook);
@@ -383,8 +383,9 @@ public class WebhookService : IWebhookService
         // The plan (R1-07) made again right before writing: the compose files of the directory as compose finds them,
         // the project and every existing container `up` touches — then exactly that runs (explicit -p / -f). The owner
         // decided every container of the plan made before (R1-09); one that turns up only now stops it.
-        // Either failing is a refusal (nothing ran), reported to an admin like the first plan's.
-        var (plan, error) = await PlanAsync(webhook);
+        // Either failing is a refusal (nothing ran), reported to an admin like the first plan's — also a planning
+        // pass that throws (a Docker timeout), whose detail stays in the log.
+        var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook));
         if (plan is null) throw Unresolved(error!);
         try
         {
