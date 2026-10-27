@@ -4737,7 +4737,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Besitzer der Automatisierung</value>
   </data>
   <data name="AutomationOwners_Intro" xml:space="preserve">
-    <value>Unbeaufsichtigte Automatisierung läuft mit der Befugnis eines Besitzers, die bei jedem Lauf neu geprüft wird. AutoPatch und AutoUpdate laufen erst, wenn ein Admin sie übernommen hat – außer die Übergangszeit wurde mit Automation:RequireOwner=false eingeschaltet.</value>
+    <value>Unbeaufsichtigte Automatisierung läuft mit der Befugnis eines Besitzers, die bei jedem Lauf neu geprüft wird. AutoPatch läuft erst, wenn ein Admin es übernommen hat. AutoUpdate und geplante Aufgaben ohne Besitzer werden ebenfalls abgelehnt – außer die Übergangszeit wurde mit Automation:RequireOwner=false eingeschaltet (sie gilt nicht für AutoPatch).</value>
   </data>
   <data name="AutomationOwners_AutoPatch" xml:space="preserve">
     <value>AutoPatch (nächtliche Sicherheits-Patches)</value>

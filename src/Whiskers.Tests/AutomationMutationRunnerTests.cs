@@ -703,9 +703,9 @@ public class AutomationMutationRunnerTests
             await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId);
             Directory.CreateDirectory(paths.AutomationOwnersJson + ".tmp");   // the next write fails
 
-            var saved = await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, "its owner has no authority left");
+            var saved = await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, OpsId, "its owner has no authority left");
 
-            Assert.False(saved);
+            Assert.Equal(SuspendResult.NotSaved, saved);
             Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
             Assert.Null(store.Get(IAutomationOwnerStore.AutoUpdate));
         }
@@ -724,7 +724,10 @@ public class AutomationMutationRunnerTests
         {
             var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
             await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId);
-            await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, "its owner has no authority left");
+            Assert.Equal(SuspendResult.Superseded,
+                await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, "user:someone-else@example.com", "stale run"));
+            Assert.Equal(SuspendResult.Suspended,
+                await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, OpsId, "its owner has no authority left"));
 
             var restarted = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
             Assert.True(restarted.IsBlocked(IAutomationOwnerStore.AutoUpdate));

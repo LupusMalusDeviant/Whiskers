@@ -196,6 +196,42 @@ public sealed class KillSwitchTests : IDisposable
     }
 
     [Fact]
+    public async Task A_stale_cycle_never_suspends_the_admin_who_took_AutoPatch_over_meanwhile()
+    {
+        // A runs the cycle; between two containers Admin B takes AutoPatch over and A is demoted. The stale cycle
+        // stops, but B's assignment stays active.
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);
+        f.Whitelist.Allowed.Add("ops@example.com");
+        f.Whitelist.Allowed.Add("lea@example.com");
+        f.Roles.Map["ops@example.com"] = AppRole.Admin;
+        f.Roles.Map["lea@example.com"] = AppRole.Admin;
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        cves.Set(AutoPatchTests.Scan("b", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:ops@example.com");
+        var script = new AutoPatchTests.RecordingRunner
+        {
+            AfterPatch = _ =>
+            {
+                owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:lea@example.com").GetAwaiter().GetResult();
+                f.Roles.Map["ops@example.com"] = AppRole.Viewer;
+            },
+        };
+        var notes = new FakeNotifications();
+        var autoPatch = AutoPatchTests.NewService(script, cves, f.Runner, owners,
+            new AutoPatchSettings { Enabled = true, DryRun = false }, notes,
+            AutoPatchTests.Compose("a"), AutoPatchTests.Compose("b"));
+
+        await autoPatch.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Single(script.Calls);
+        Assert.False(owners.IsBlocked(IAutomationOwnerStore.AutoPatch));
+        Assert.Equal("user:lea@example.com", owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
+        Assert.DoesNotContain(notes.Events, e => e.EventType == "automation_suspended");
+    }
+
+    [Fact]
     public void A_deleted_local_account_ends_authority_with_local_and_with_mixed_sign_in()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"identity-{Guid.NewGuid():N}.db");

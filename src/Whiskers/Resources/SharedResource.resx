@@ -4737,7 +4737,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Automation owners</value>
   </data>
   <data name="AutomationOwners_Intro" xml:space="preserve">
-    <value>Unattended automation runs on the authority of an owner, re-checked on every run. AutoPatch and AutoUpdate do not run until an admin has taken them over, unless the grace period was switched on with Automation:RequireOwner=false.</value>
+    <value>Unattended automation runs on the authority of an owner, re-checked on every run. AutoPatch never runs until an admin has taken it over. AutoUpdate and scheduled tasks without an owner are refused as well, unless the grace period was switched on with Automation:RequireOwner=false (it does not apply to AutoPatch).</value>
   </data>
   <data name="AutomationOwners_AutoPatch" xml:space="preserve">
     <value>AutoPatch (nightly security patches)</value>

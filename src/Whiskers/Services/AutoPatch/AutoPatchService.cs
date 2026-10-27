@@ -146,7 +146,15 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     private async Task<bool> SuspendIfOwnerLostAsync(AutomationActor actor, string capabilityId, CancellationToken ct)
     {
         if (_automation.LostAuthority(actor, capabilityId) is not { } lost) return false;
-        var saved = await _owners.SuspendAsync(IAutomationOwnerStore.AutoPatch, lost, ct);
+        var result = await _owners.SuspendAsync(IAutomationOwnerStore.AutoPatch, actor.OwnerId!, lost, ct);
+        if (result == SuspendResult.Superseded)
+        {
+            // An admin took AutoPatch over while this cycle ran on the old owner: stop the stale cycle, keep the new one.
+            _logger.LogWarning("AutoPatch cycle stopped: its owner lost authority ({Reason}), and AutoPatch has a new " +
+                               "owner since the cycle started", lost);
+            return true;
+        }
+        var saved = result == SuspendResult.Suspended;
         _logger.LogError("AutoPatch was suspended: {Reason}. Take it over again in Settings → Automation owners", lost);
         try
         {

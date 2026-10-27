@@ -3,6 +3,17 @@ using Whiskers.Configuration;
 
 namespace Whiskers.Services.Mutations;
 
+/// <summary>What <see cref="IAutomationOwnerStore.SuspendAsync"/> did.</summary>
+public enum SuspendResult
+{
+    /// <summary>Suspended and saved.</summary>
+    Suspended,
+    /// <summary>Suspended in memory only: the file could not be written (holds until a restart).</summary>
+    NotSaved,
+    /// <summary>Not suspended: the feature has another owner now (taken over meanwhile) or is already blocked.</summary>
+    Superseded,
+}
+
 /// <summary>The owner an admin confirmed for a fleet-wide automation feature. <see cref="Blocked"/> marks a
 /// feature that must not run until an admin takes it over: its owner was lost with an unreadable file, or the owner
 /// lost their authority and the feature was suspended (<see cref="SuspendedReason"/>, PC-D6).</summary>
@@ -40,8 +51,9 @@ public interface IAutomationOwnerStore
     /// for the record and stays refused across restarts until an admin takes it over. Only ever lowers authority, so
     /// it needs no gateway decision. Never fails open: when the file cannot be written the feature is still blocked
     /// in memory (until the next successful write keeps it, or a restart) and <c>false</c> is returned, so the caller
-    /// can tell the admins.</summary>
-    Task<bool> SuspendAsync(string feature, string reason, CancellationToken ct = default);
+    /// can tell the admins. Only the assignment of <paramref name="expectedOwnerId"/> is suspended: when an admin took
+    /// the feature over in the meantime, nothing changes and <see cref="SuspendResult.Superseded"/> is returned.</summary>
+    Task<SuspendResult> SuspendAsync(string feature, string expectedOwnerId, string reason, CancellationToken ct = default);
 
     /// <summary>The entry of a blocked feature (owner and reason), for the UI; <c>null</c> otherwise.</summary>
     AutomationOwnerEntry? GetBlocked(string feature) => null;
@@ -81,36 +93,56 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         return WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
     }
 
-    public async Task<bool> SuspendAsync(string feature, string reason, CancellationToken ct = default)
+    public async Task<SuspendResult> SuspendAsync(string feature, string expectedOwnerId, string reason,
+        CancellationToken ct = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(feature);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedOwnerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        AutomationOwnerEntry Suspended(AutomationOwnerEntry? previous) =>
-            new(previous?.OwnerId ?? "", DateTime.UtcNow, Blocked: true, SuspendedReason: reason);
+        await _write.WaitAsync(ct);
         try
         {
-            await WriteAsync(feature, Suspended, ct);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
-        {
-            // Fail closed: block it in memory anyway. The next write of any feature carries the block to disk.
-            await _write.WaitAsync(ct);
+            // Checked under the write lock: a takeover that completed after the run read its owner wins.
+            var current = _entries.GetValueOrDefault(feature);
+            if (current is null || current.Blocked
+                || !string.Equals(current.OwnerId, expectedOwnerId, StringComparison.Ordinal))
+                return SuspendResult.Superseded;
+            var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
+            {
+                [feature] = new(current.OwnerId, DateTime.UtcNow, Blocked: true, SuspendedReason: reason),
+            };
             try
             {
-                var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
-                {
-                    [feature] = Suspended(_entries.GetValueOrDefault(feature)),
-                };
-                Volatile.Write(ref _entries, next);
+                Persist(next, ct);
             }
-            finally
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
-                _write.Release();
+                // Fail closed: block it in memory anyway. The next write of any feature carries the block to disk.
+                Volatile.Write(ref _entries, next);
+                _logger.LogError(ex, "The suspension of {Feature} could not be saved to {Path}; it is blocked until " +
+                                     "Whiskers restarts", feature, _path);
+                return SuspendResult.NotSaved;
             }
-            _logger.LogError(ex, "The suspension of {Feature} could not be saved to {Path}; it is blocked until " +
-                                 "Whiskers restarts", feature, _path);
-            return false;
+            Volatile.Write(ref _entries, next);
+            _loadFailed = false;
+            return SuspendResult.Suspended;
         }
+        finally
+        {
+            _write.Release();
+        }
+    }
+
+    /// <summary>Writes <paramref name="next"/> atomically. Call under <see cref="_write"/>.</summary>
+    private void Persist(Dictionary<string, AutomationOwnerEntry> next, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        if (_loadFailed) KeepUnreadableFile();
+        var temp = _path + ".tmp";
+        // The other features' blocks are written too, so they survive a restart until each is taken over.
+        File.WriteAllText(temp, JsonSerializer.Serialize(next, Json));
+        File.Move(temp, _path, overwrite: true);
     }
 
     private async Task WriteAsync(string feature, Func<AutomationOwnerEntry?, AutomationOwnerEntry> entryOf,
