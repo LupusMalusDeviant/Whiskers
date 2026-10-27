@@ -111,11 +111,16 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **Unattended items need an owner and are suspended when it loses its authority** (R1-04, PC-D6, INV-04):
   - `Automation:RequireOwner` now defaults to `true`: a scheduled task or AutoUpdate without an owner is refused.
     Take such items over in Scheduled Tasks, or keep the grace period with `Automation__RequireOwner=false`.
-  - A run refused because its owner lost their authority — local account deleted (when local accounts are the only
-    sign-in), removed from the whitelist, demoted below what the item does, API key deleted or disabled — now
-    **suspends** the item: a scheduled task is switched off, AutoPatch / AutoUpdate are blocked until an Admin takes
-    them over in Settings → Automation owners. Admins get an `automation_suspended` notification. Policy refusals
-    (kill switch, protected resources) still only report `automation_refused`.
+  - A run refused because its owner lost their authority — local account deleted, removed from the whitelist,
+    demoted below what the item does (including retention deletes of a backup task), API key deleted or disabled —
+    now **suspends** the item: a scheduled task is switched off, AutoPatch / AutoUpdate are blocked until an Admin
+    takes them over in Settings → Automation owners (AutoPatch also stops mid-cycle). Admins get an
+    `automation_suspended` notification that no container mute hides. Policy refusals (kill switch, protected
+    resources) still only report `automation_refused`.
+  - With Google/OIDC sign-in next to local accounts, Whiskers now remembers which emails had a local account
+    (`known-local-accounts.json` in the data directory, starting with the accounts present at upgrade): an owner
+    whose local account is deleted loses their authority there too. Accounts deleted before the upgrade are not
+    known.
   - A task an agent created keeps the agent's guardrail rules when it runs (autonomy level and confirmation, tool
     lists, forbidden arguments). With the default preset such a task's writes are refused; an Admin who takes it
     over makes it a task of their own.

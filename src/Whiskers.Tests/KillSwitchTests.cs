@@ -137,9 +137,10 @@ public sealed class KillSwitchTests : IDisposable
         updates.Set(new ImageUpdateInfo { ContainerId = "web-1", ContainerName = "web", ServerId = "local", UpdateAvailable = true });
         var updateOwners = new MemoryAutomationOwners();
         await updateOwners.SetAsync(IAutomationOwnerStore.AutoUpdate, owner);
+        var updateNotes = new FakeNotifications();
         var autoUpdate = new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(),
             new FakeDocker(new ContainerInfo { Id = "web-1", Name = "web", ServerId = "local", State = "running", Image = "web:1" }),
-            updates, new FakeNotifications(), null!, updated.Runner, updateOwners, NullLogger<AutoUpdateService>.Instance);
+            updates, updateNotes, null!, updated.Runner, updateOwners, NullLogger<AutoUpdateService>.Instance);
         await autoUpdate.CheckAndUpdateAsync(CancellationToken.None);
 
         var patched = Lost();
@@ -154,14 +155,49 @@ public sealed class KillSwitchTests : IDisposable
 
         Assert.True(updateOwners.IsBlocked(IAutomationOwnerStore.AutoUpdate));
         Assert.Contains("account deleted", updateOwners.Suspended[IAutomationOwnerStore.AutoUpdate]);
+        // The admins are told it was suspended, with the reason and how to take it over — not just "update failed".
+        var suspended = Assert.Single(updateNotes.Events, e => e.EventType == "automation_suspended");
+        Assert.Contains("account deleted", suspended.ImageInfo);
+        Assert.Contains("Automation owners", suspended.ImageInfo);
         Assert.True(patchOwners.IsBlocked(IAutomationOwnerStore.AutoPatch));
         Assert.Empty(script.Calls);
     }
 
     [Fact]
-    public void Local_only_sign_in_needs_the_local_account_and_federated_sign_in_does_not()
+    public async Task AutoPatch_is_suspended_when_its_owner_loses_authority_half_way_through_a_cycle()
+    {
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);
+        f.Whitelist.Allowed.Add("ops@example.com");
+        f.Roles.Map["ops@example.com"] = AppRole.Admin;
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        cves.Set(AutoPatchTests.Scan("b", "local", (CveSeverity.Critical, "1")));
+        cves.Set(AutoPatchTests.Scan("c", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:ops@example.com");
+        // The owner is demoted right after the first container was patched.
+        var script = new AutoPatchTests.RecordingRunner
+        {
+            AfterPatch = _ => f.Roles.Map["ops@example.com"] = AppRole.Viewer,
+        };
+        var notes = new FakeNotifications();
+        var autoPatch = AutoPatchTests.NewService(script, cves, f.Runner, owners,
+            new AutoPatchSettings { Enabled = true, DryRun = false }, notes,
+            AutoPatchTests.Compose("a"), AutoPatchTests.Compose("b"), AutoPatchTests.Compose("c"));
+
+        await autoPatch.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Single(script.Calls);                                    // stopped, not refused container by container
+        Assert.True(owners.IsBlocked(IAutomationOwnerStore.AutoPatch));
+        Assert.Contains(notes.Events, e => e.EventType == "automation_suspended" && e.ContainerName == "AutoPatch");
+        Assert.Contains("suspended", autoPatch.LastCycle!.Error);
+    }
+
+    [Fact]
+    public void A_deleted_local_account_ends_authority_with_local_and_with_mixed_sign_in()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"identity-{Guid.NewGuid():N}.db");
+        var dataDir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
         try
         {
             var services = new ServiceCollection();
@@ -187,13 +223,37 @@ public sealed class KillSwitchTests : IDisposable
             Assert.True(local.Exists("Ops@Example.com"));
             Assert.False(local.Exists("gone@example.com"));
 
-            var oidc = new OwnerAccounts(scopes, Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")));
-            Assert.True(oidc.Exists("gone@example.com"));   // the whitelist decides for federated sign-in
+            // Mixed sign-in: local login stays available next to OIDC. A federated user has no local row (the
+            // whitelist decides), but a user who had a local account and lost it has lost their way in.
+            var paths = new DataPathOptions(dataDir);
+            var mixed = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.True(mixed.Exists("federated@example.com"));
+            Assert.True(mixed.Exists("ops@example.com"));
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Users.Remove(db.Users.Single(u => u.Id == "u1"));
+                db.SaveChanges();
+            }
+            Assert.False(mixed.Exists("ops@example.com"));
+            Assert.True(mixed.Exists("federated@example.com"));
+            // Remembered across restarts.
+            var restarted = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.False(restarted.Exists("ops@example.com"));
+
+            // An unreadable record of local accounts fails closed for owners without a local row.
+            File.WriteAllText(paths.KnownLocalAccountsJson, "{ not json");
+            var broken = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.False(broken.Exists("federated@example.com"));
         }
         finally
         {
             SqliteConnection.ClearAllPools();
             try { File.Delete(dbPath); } catch (IOException) { }
+            try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { }
         }
     }
 

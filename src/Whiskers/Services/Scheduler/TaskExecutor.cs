@@ -54,7 +54,7 @@ public class TaskExecutor : ITaskExecutor
     {
         _logger.LogInformation("Executing scheduled task: {Name} ({Type})", task.Name, task.TaskType);
 
-        var refusal = new System.Runtime.CompilerServices.StrongBox<string?>();
+        var refusal = new RunRefusal();
         RefusalOfRun.Value = refusal;
         try
         {
@@ -68,11 +68,14 @@ public class TaskExecutor : ITaskExecutor
                 ScheduledTaskType.Cleanup => await ExecuteCleanup(task),
                 _ => (false, $"Unknown task type: {task.TaskType}")
             };
-            if (refusal.Value is { } reason)
+            if (refusal.Reason is { } reason)
             {
                 // The owner lost their authority for this task (PC-D6): suspend it, so it stops failing every night
-                // and an admin sees it. A refusal by policy (kill switch, protected resource) leaves it enabled.
-                if (_automation.LostAuthority(ActorOf(task), CapabilityOf(task.TaskType)) is { } lost)
+                // and an admin sees it. Checked for the task's own capability and for every capability the run was
+                // refused (retention deletes need more than the backup). A refusal by policy (kill switch, protected
+                // resource) leaves it enabled.
+                if (refusal.Capabilities.Prepend(CapabilityOf(task.TaskType)).Distinct(StringComparer.Ordinal)
+                        .Select(c => _automation.LostAuthority(ActorOf(task), c)).FirstOrDefault(l => l is not null) is { } lost)
                 {
                     task.Enabled = false;
                     await NotifySuspendedAsync(task, lost);
@@ -98,7 +101,7 @@ public class TaskExecutor : ITaskExecutor
         var outcome = await _automation.RunAsync(ActorOf(task), "container.restart",
             new { containerId, name = task.TargetName, serverId = task.ServerId },
             _ => _docker.RestartContainerAsync(containerId, task.ServerId));
-        return Problem(outcome) is { } problem
+        return Problem(outcome, "container.restart") is { } problem
             ? (false, problem)
             : (true, $"Container {task.TargetName ?? task.TargetId} restarted.");
     }
@@ -124,7 +127,7 @@ public class TaskExecutor : ITaskExecutor
         var outcome = await _automation.RunAsync(ActorOf(task), "db.backup",
             new { containerId = container.Id, name = container.Name, serverId = task.ServerId, database },
             _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, task.ServerId));
-        if (Problem(outcome) is { } problem) return (false, problem);
+        if (Problem(outcome, "db.backup") is { } problem) return (false, problem);
         var (success, filePath, sizeBytes, error) = outcome.Value;
 
         if (!success) return (false, error);
@@ -144,7 +147,7 @@ public class TaskExecutor : ITaskExecutor
         var outcome = await _automation.RunAsync(ActorOf(task), "volume.backup",
             new { volumeName, containerName = task.TargetName, serverId = task.ServerId },
             _ => _backupService.BackupVolumeAsync(volumeName, task.TargetName ?? "", task.ServerId, $"Scheduled: {task.Name}"));
-        if (Problem(outcome) is { } problem) return (false, problem);
+        if (Problem(outcome, "volume.backup") is { } problem) return (false, problem);
         var backup = outcome.Value!;
 
         var config = ParseConfig(task.Config);
@@ -159,7 +162,7 @@ public class TaskExecutor : ITaskExecutor
         var label = $"scheduled-{task.Name}";
         var outcome = await _automation.RunAsync(ActorOf(task), "selfbackup.create", new { label },
             _ => _selfBackupService.CreateBackupAsync(label));
-        if (Problem(outcome) is { } problem) return (false, problem);
+        if (Problem(outcome, "selfbackup.create") is { } problem) return (false, problem);
         var info = outcome.Value!;
 
         var config = ParseConfig(task.Config);
@@ -182,7 +185,7 @@ public class TaskExecutor : ITaskExecutor
         var outcome = await _automation.RunAsync(ActorOf(task), "host.exec",
             new { serverId = sid, taskId = task.TaskId, command },
             _ => _executor.ExecuteAsync(sid, command, TimeSpan.FromMinutes(5)));
-        if (Problem(outcome) is { } problem) return (false, problem);
+        if (Problem(outcome, "host.exec") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
         return (result.Success, result.Success ? result.Output : result.Error);
@@ -201,7 +204,7 @@ public class TaskExecutor : ITaskExecutor
         var outcome = await _automation.RunAsync(ActorOf(task), "host.prune",
             new { serverId = sid, taskId = task.TaskId },
             _ => _executor.ExecuteAsync(sid, "docker system prune -f --volumes=false 2>&1", TimeSpan.FromMinutes(2)));
-        if (Problem(outcome) is { } problem) return (false, problem);
+        if (Problem(outcome, "host.prune") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
         return (result.Success, result.Success ? $"Cleanup done:\n{result.Output}" : result.Error);
@@ -248,7 +251,7 @@ public class TaskExecutor : ITaskExecutor
                     var outcome = await _automation.RunAsync(ActorOf(task), "volume.backup_delete",
                         new { volumeName = task.TargetId, backupId, fileName = b.FileName, serverId = task.ServerId },
                         _ => _backupService.DeleteBackupAsync(backupId));
-                    if (Problem(outcome) is { } problem)
+                    if (Problem(outcome, "volume.backup_delete") is { } problem)
                     {
                         // The backup itself succeeded; retention waits until the owner may delete again.
                         _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
@@ -261,7 +264,7 @@ public class TaskExecutor : ITaskExecutor
                 // Self-backups are tracked by the self-backup service (files + sidecars); keep the newest N.
                 var outcome = await _automation.RunAsync(ActorOf(task), "selfbackup.prune", new { keep = maxBackups },
                     _ => _selfBackupService.PruneAsync(maxBackups));
-                if (Problem(outcome) is { } problem)
+                if (Problem(outcome, "selfbackup.prune") is { } problem)
                     _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
             }
             else if (task.TaskType == ScheduledTaskType.DbBackup && !string.IsNullOrWhiteSpace(dbName))
@@ -280,7 +283,7 @@ public class TaskExecutor : ITaskExecutor
                 var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
                     new { containerId = task.TargetId, database = dbName, keep = maxBackups, serverId = task.ServerId },
                     _ => _executor.ExecuteAsync(sid, script, TimeSpan.FromSeconds(15)));
-                if (Problem(outcome) is { } problem)
+                if (Problem(outcome, "db.backup_delete") is { } problem)
                     _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
             }
         }
@@ -295,14 +298,21 @@ public class TaskExecutor : ITaskExecutor
     // The first gateway refusal of the current run, so the run can tell an admin (PC-D6). One executor instance
     // runs tasks concurrently, so it lives on the async flow, not on the instance.
     // A box, not the value: the run's methods fill it, and the caller reads it after they returned.
-    private static readonly AsyncLocal<System.Runtime.CompilerServices.StrongBox<string?>?> RefusalOfRun = new();
+    private static readonly AsyncLocal<RunRefusal?> RefusalOfRun = new();
+
+    /// <summary>The first refusal of a run and every capability that was refused in it.</summary>
+    private sealed class RunRefusal
+    {
+        public string? Reason { get; set; }
+        public List<string> Capabilities { get; } = [];
+    }
 
     internal static AutomationActor ActorOf(ScheduledTaskEntity task) =>
         new("task:" + task.TaskId, $"Scheduled task '{task.Name}'",
             string.IsNullOrWhiteSpace(task.CreatedBy) ? null : task.CreatedBy, task.CreatedVia);
 
     /// <summary>Null when the gateway executed the call; otherwise the message for the task result.</summary>
-    private string? Problem<T>(MutationOutcome<T> outcome)
+    private string? Problem<T>(MutationOutcome<T> outcome, string capabilityId)
     {
         switch (outcome.Status)
         {
@@ -312,7 +322,11 @@ public class TaskExecutor : ITaskExecutor
                 return outcome.Error?.Message ?? outcome.Reason ?? "The action failed.";
             default:
                 var message = $"Refused: {outcome.Reason}";
-                if (RefusalOfRun.Value is { } box) box.Value ??= message;
+                if (RefusalOfRun.Value is { } box)
+                {
+                    box.Reason ??= message;
+                    box.Capabilities.Add(capabilityId);
+                }
                 return message;
         }
     }

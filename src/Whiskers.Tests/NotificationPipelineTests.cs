@@ -64,6 +64,19 @@ public sealed class NotificationPipelineTests : IDisposable
         Assert.Empty(History());
     }
 
+    [Theory]
+    [InlineData("automation_suspended")]
+    [InlineData("automation_refused")]
+    public async Task A_muted_target_never_hides_that_its_automation_was_suspended_or_refused(string eventType)
+    {
+        // R1-04: the admin must hear that a task stopped, even when its container's own alerts are muted.
+        _prefs.MuteEverything = true;
+
+        await Service().SendAsync(new NotificationEvent { ContainerName = "noisy", EventType = eventType });
+
+        Assert.Single(_channel.Sent);
+    }
+
     [Fact]
     public async Task An_unmuted_container_still_gets_through()
     {

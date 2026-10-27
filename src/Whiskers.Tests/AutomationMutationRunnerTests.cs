@@ -406,6 +406,47 @@ public class AutomationMutationRunnerTests
         Assert.Equal(MutationStatus.Denied.ToString(), f.Audit.Events.Single(e => e.StartsWith("denied:")).Split(':')[1]);
     }
 
+    /// <summary>Takes backups; holds three old ones, so retention wants to delete.</summary>
+    private sealed class Backups : Whiskers.Services.Backup.IVolumeBackupService
+    {
+        public List<string> Deleted { get; } = [];
+        public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null,
+            string? notes = null) => Task.FromResult(new VolumeBackupEntity { VolumeName = volumeName, FileName = "new.tar.gz" });
+        public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
+        public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) =>
+            Task.FromResult(Enumerable.Range(0, 3).Select(i => new VolumeBackupEntity
+            {
+                BackupId = $"b{i}", VolumeName = volumeName ?? "", CreatedAt = DateTime.UtcNow.AddDays(-i),
+            }).ToList());
+        public Task DeleteBackupAsync(string backupId) { Deleted.Add(backupId); return Task.CompletedTask; }
+        public Task<List<string>> ListVolumesAsync(string? serverId = null) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task A_backup_task_whose_owner_can_no_longer_delete_its_old_backups_is_suspended()
+    {
+        // An Admin set up a backup with retention, then was demoted to Operator: the backup itself (Write) still
+        // runs, but retention deletes (Admin) are refused every night. That is a lost authority for the task.
+        var f = WithOperator(requireOwner: true);
+        var notify = new FakeNotifications();
+        var backups = new Backups();
+        var executor = new TaskExecutor(new FakeDocker(), null!, backups, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify);
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "volumes", TaskType = ScheduledTaskType.VolumeBackup,
+            TargetId = "data", CreatedBy = OpsId, Config = """{"maxBackups":"1"}""",
+        };
+
+        var (success, output) = await executor.ExecuteAsync(task);
+
+        Assert.False(success);
+        Assert.StartsWith("Suspended:", output);
+        Assert.False(task.Enabled);
+        Assert.Empty(backups.Deleted);
+        Assert.Equal("automation_suspended", Assert.Single(notify.Events).EventType);
+    }
+
     [Fact]
     public async Task A_task_refused_by_policy_stays_enabled_and_reports_the_refusal()
     {

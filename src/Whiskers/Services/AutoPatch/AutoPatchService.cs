@@ -104,6 +104,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
     }
 
+    private const string NightlyRunner = "autopatch";
+
     /// <summary>The nightly cycle, on the authority of the admin who took AutoPatch over. Without one it does not run:
     /// the configuration switch alone is not an owner. Internal for tests.</summary>
     internal async Task RunNightlyAsync(CancellationToken ct)
@@ -123,7 +125,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
 
         var dryRun = _settings.CurrentValue.DryRun;
-        var actor = new AutomationActor("autopatch", "AutoPatch", owner);
+        var actor = new AutomationActor(NightlyRunner, "AutoPatch", owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
             new { dryRun }, async token => MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
@@ -137,9 +139,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
     /// <summary>The owner lost their authority (PC-D6): AutoPatch is suspended until an admin takes it over, and the
     /// admins are told. A refusal by policy leaves it on.</summary>
-    private async Task SuspendIfOwnerLostAsync(AutomationActor actor, string capabilityId, CancellationToken ct)
+    private async Task<bool> SuspendIfOwnerLostAsync(AutomationActor actor, string capabilityId, CancellationToken ct)
     {
-        if (_automation.LostAuthority(actor, capabilityId) is not { } lost) return;
+        if (_automation.LostAuthority(actor, capabilityId) is not { } lost) return false;
         await _owners.SuspendAsync(IAutomationOwnerStore.AutoPatch, lost, ct);
         _logger.LogError("AutoPatch was suspended: {Reason}. Take it over again in Settings → Automation owners", lost);
         try
@@ -155,6 +157,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             _logger.LogWarning(ex, "Notification for the suspended AutoPatch failed");
         }
+        return true;
     }
 
     /// <summary>One container of an owned cycle, decided as <c>container.update</c> of exactly that container: the
@@ -259,6 +262,16 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
             if (outcome.Attempted) await RecordHistoryAsync(c, outcome, startedAt);
             if (outcome.NeedsAttention) await NotifyAsync(c, outcome);
+
+            // The owner lost their authority half-way (a key revoked, a demotion between two containers): the nightly
+            // cycle is suspended and stops here, it does not carry on refusing container after container (R1-04).
+            // A preview runs on the authority of the person who started it and suspends nothing.
+            if (outcome.Kind == AutoPatchResultKind.Aborted && actor.RunnerId == NightlyRunner
+                && await SuspendIfOwnerLostAsync(actor, "container.update", ct))
+            {
+                LastCycle = LastCycle! with { Error = $"Stopped at {c.Name}: AutoPatch was suspended." };
+                break;
+            }
 
             // A rollback that could not be verified means a host is in a state nobody has looked at.
             // Carrying on would stack a second unknown on top of the first.

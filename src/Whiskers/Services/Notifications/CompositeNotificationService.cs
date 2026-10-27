@@ -20,6 +20,10 @@ public class CompositeNotificationService : INotificationService
     private readonly IServiceProvider _sp;
     private readonly ILogger<CompositeNotificationService> _logger;
 
+    /// <summary>Events an admin must see whatever the target's mute or preferences say.</summary>
+    internal static readonly IReadOnlySet<string> AdministrativeEvents =
+        new HashSet<string>(StringComparer.Ordinal) { "automation_suspended", "automation_refused" };
+
     public CompositeNotificationService(
         IEnumerable<INotificationChannel> channels,
         IInAppNotificationStore inApp,
@@ -39,8 +43,10 @@ public class CompositeNotificationService : INotificationService
         // Per-container mute/prefs are enforced HERE, for every producer. They used to be checked only by
         // the container health monitor, so a muted container still sent log alerts, CVE findings, image
         // updates and metric alarms — the mute switch silenced barely a third of what it promised.
-        // Server-level events carry no container name and are never suppressed.
-        if (!string.IsNullOrWhiteSpace(evt.ContainerName) && !_prefs.ShouldNotify(evt.ContainerName, evt.EventType))
+        // Server-level events carry no container name and are never suppressed, and neither are administrative
+        // events about unattended automation (R1-04): a muted target must not hide that its task was suspended.
+        if (!string.IsNullOrWhiteSpace(evt.ContainerName) && !AdministrativeEvents.Contains(evt.EventType)
+            && !_prefs.ShouldNotify(evt.ContainerName, evt.EventType))
         {
             _logger.LogDebug("Notification suppressed for {Container} ({EventType}) — muted by prefs",
                 evt.ContainerName, evt.EventType);

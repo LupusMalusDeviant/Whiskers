@@ -166,6 +166,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 {
                     // The owner lost their authority (PC-D6): suspend AutoUpdate until an admin takes it over.
                     await _owners.SuspendAsync(IAutomationOwnerStore.AutoUpdate, lost, ct);
+                    await NotifySuspendedAsync(lost);
                     throw new InvalidOperationException(
                         $"AutoUpdate was suspended: {lost}. Take it over again in Settings → Automation owners.");
                 }
@@ -218,6 +219,25 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
             db.UpdateHistory.Add(history);
             await db.SaveChangesAsync(ct);
+        }
+    }
+
+    /// <summary>Tells the admins that AutoUpdate was suspended and how to take it over (R1-04). An administrative
+    /// event: no container mute or update preference hides it.</summary>
+    private async Task NotifySuspendedAsync(string lost)
+    {
+        try
+        {
+            await _notifications.SendAsync(new NotificationEvent
+            {
+                EventType = "automation_suspended",
+                ContainerName = "AutoUpdate",
+                ImageInfo = $"AutoUpdate was suspended: {lost}. It stays off until an admin takes it over in Settings → Automation owners.",
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Notification for the suspended AutoUpdate failed");
         }
     }
 
