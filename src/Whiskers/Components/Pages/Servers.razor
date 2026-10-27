@@ -532,13 +532,17 @@
             throw;
         }
         // The record names the new kubeconfig now; the old one is unused, removing it is tidying up.
-        if (_oldKubeconfigKey is not null && _oldKubeconfigKey != _newKubeconfigKey)
+        if (_oldKubeconfigKey is not null)
             await RemoveUnusedKubeconfigAsync(_oldKubeconfigKey);
         return saved;
     }
 
+    /// <summary>Removes a kubeconfig key from the vault — only when no stored server names it any more.</summary>
     private async Task RemoveUnusedKubeconfigAsync(string vaultKey)
     {
+        if (ServerConfigService.GetServers().Any(s => s.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes
+                && Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(s) == vaultKey))
+            return;
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
@@ -561,7 +565,6 @@
             _form.KubeNamespaces = _kubeNamespacesCsv
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList();
-            _form.KubeconfigRef = _editingServer?.KubeconfigRef;
             if (!string.IsNullOrWhiteSpace(_kubeconfigYaml))
             {
                 // A vault write of its own (R1-11): decided and audited by name, the kubeconfig never in the arguments.
@@ -573,9 +576,6 @@
                 await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
                     _ => Vault.SetSecretAsync(vaultKey, kubeconfig));
                 _newKubeconfigKey = vaultKey;
-                if (_editingServer is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
-                    _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(_editingServer);
-                _form.KubeconfigRef = vaultKey;
             }
         }
 
@@ -608,14 +608,14 @@
             if (_sshKeyData != null && _sshKeyFileName != null)
                 await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
 
-            await ServerConfigService.UpdateServerAsync(_form);
+            await ServerConfigService.UpdateServerAsync(Record());
             ConnectionManager.InvalidateClient(_form.Id);
             KubeClients.Invalidate(_form.Id); // rebuild on next use if kubeconfig/context changed
             await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
         }
         else
         {
-            await ServerConfigService.AddServerAsync(_form);
+            await ServerConfigService.AddServerAsync(Record());
 
             if (_sshKeyData != null && _sshKeyFileName != null)
                 await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
@@ -629,6 +629,19 @@
 
         _servers = ServerConfigService.GetServers();
         return ServerConfigService.GetServer(_form.Id) ?? _form;
+
+        // What is stored: a copy, so the dialog buffer never becomes the live record (a retry after a failed probe
+        // edits the buffer, not the server). The kubeconfig reference comes from the server as stored NOW, not as it
+        // was when the dialog opened — another save may have rotated it meanwhile (R1-11).
+        Whiskers.Models.ServerConfig Record()
+        {
+            var record = _form.Clone();
+            var stored = ServerConfigService.GetServer(record.Id);
+            record.KubeconfigRef = _newKubeconfigKey ?? stored?.KubeconfigRef;
+            if (_newKubeconfigKey is not null && stored is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
+                _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(stored);
+            return record;
+        }
     }
 
     private async Task SaveServer()
