@@ -18,7 +18,7 @@ public class AutomationMutationRunnerTests
 {
     private const string Ops = "ops@example.com";
 
-    private sealed class Roles : IRoleService
+    internal sealed class Roles : IRoleService
     {
         public Dictionary<string, AppRole> Map { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -32,7 +32,7 @@ public class AutomationMutationRunnerTests
         public Task RemoveRoleAsync(string email) { Map.Remove(email); return Task.CompletedTask; }
     }
 
-    private sealed class Whitelist : IWhitelistService
+    internal sealed class Whitelist : IWhitelistService
     {
         public HashSet<string> Allowed { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -41,7 +41,7 @@ public class AutomationMutationRunnerTests
         public Task SaveWhitelistAsync(WhitelistData data) => throw new NotSupportedException();
     }
 
-    private sealed class Keys : IMcpPermissionService
+    internal sealed class Keys : IMcpPermissionService
     {
         public McpPermissionData Data { get; } = new();
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -56,7 +56,7 @@ public class AutomationMutationRunnerTests
     }
 
     /// <summary>Remembers the principal of every request the gateway audits.</summary>
-    private sealed class PrincipalAudit : IMutationAuditSink
+    internal sealed class PrincipalAudit : IMutationAuditSink
     {
         private readonly AgentToolTestHelpers.NullMutationAudit _inner = new();
         public List<string> Events => _inner.Events;
@@ -81,10 +81,10 @@ public class AutomationMutationRunnerTests
         }
     }
 
-    private sealed record Fixture(AutomationMutationRunner Runner, PrincipalAudit Audit, Roles Roles,
-        Whitelist Whitelist, Keys Keys, AutomationOptions Options);
+    internal sealed record Fixture(AutomationMutationRunner Runner, PrincipalAudit Audit, Roles Roles,
+        Whitelist Whitelist, Keys Keys, AutomationOptions Options, ApprovalStore Approvals);
 
-    private static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null)
+    internal static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null)
     {
         var roles = new Roles();
         var whitelist = new Whitelist();
@@ -92,11 +92,12 @@ public class AutomationMutationRunnerTests
         var options = new AutomationOptions { RequireOwner = requireOwner };
         var audit = new PrincipalAudit();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
+        var approvals = new ApprovalStore();
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store));
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
             new AutomationOwnerResolver(roles, whitelist, keys), new StaticOptionsMonitor<AutomationOptions>(options));
-        return new Fixture(runner, audit, roles, whitelist, keys, options);
+        return new Fixture(runner, audit, roles, whitelist, keys, options, approvals);
     }
 
     private static Fixture WithOperator(bool requireOwner = false)
@@ -222,7 +223,32 @@ public class AutomationMutationRunnerTests
             "container.restart", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; });
 
         Assert.False(ran);
-        Assert.NotEqual(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);   // terminal, not PendingApproval
+        Assert.Empty(f.Approvals.GetAll());                    // no approval was raised for anyone to grant
+    }
+
+    [Fact]
+    public async Task Approving_a_refused_occurrence_cannot_release_the_next_occurrence()
+    {
+        var f = Build();   // SafeDefault: keys confirm every write
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = "admin" });
+        var actor = new AutomationActor("task:t9", "Scheduled task 'every 5 min'", "key:k1");
+        var runs = 0;
+        Task Restart(CancellationToken _) { runs++; return Task.CompletedTask; }
+
+        var first = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, Restart);
+        // Someone approves whatever is pending in between — there must be nothing an approval could attach to.
+        foreach (var pending in f.Approvals.GetPending())
+            await f.Approvals.ResolveAsync(pending.Id, approved: true, resolvedBy: "admin@example.com", resolverLevel: "admin");
+        var second = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, Restart);
+
+        Assert.Equal(MutationStatus.Denied, first.Status);
+        Assert.Equal(MutationStatus.Denied, second.Status);
+        Assert.Null(first.ApprovalId);
+        Assert.Null(second.ApprovalId);
+        Assert.Equal(0, runs);
+        Assert.Empty(f.Approvals.GetAll());
+        Assert.Equal(2, f.Audit.Events.Count(e => e.StartsWith("denied", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -367,7 +393,7 @@ public class AutomationMutationRunnerTests
     }
 
     /// <summary>Records every command it is asked to run.</summary>
-    private sealed class CapturingHost : Whiskers.Services.Server.IHostCommandExecutor
+    internal sealed class CapturingHost : Whiskers.Services.Server.IHostCommandExecutor
     {
         public List<string> Commands { get; } = [];
         public Task<Whiskers.Services.Server.CommandResult> ExecuteAsync(string serverId, string command,

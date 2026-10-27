@@ -80,7 +80,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - **A task owned by an API key keeps every rule that binds the key**: tool deny/allow lists, forbidden arguments
     and confirmation. Where the policy would ask for a confirmation (the default preset does for every write by a
     key), the run is refused — nobody is there to confirm it. Have a person take the task over, or adjust the
-    preset for that key.
+    preset for that key. The refusal is final: it raises no approval in the Approvals page, so approving something
+    there can no longer let the next scheduled occurrence through.
   - **A custom-command task is checked against the forbidden-argument patterns of today**, on every run, not only
     when it was created (key-owned tasks). A command that a pattern added later matches is refused.
   - **A task whose owner lost its authority** (removed or demoted user, deleted or disabled key) is flagged in

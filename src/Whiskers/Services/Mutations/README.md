@@ -111,8 +111,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   architecture test would not catch a new direct call. `UpdateRiskService` (`image.pull`) and
   `LoopSuspensionService` (`checks.resume`) stay in the baseline.
 - **Key-owned items** are evaluated with the full rule set of the key (tool lists, forbidden arguments,
-  confirmation); a `Confirm` is refused, since no one can approve an unattended run. Items owned by a person, and
-  ownerless items in the grace period, use the PC-D1 rules.
+  confirmation). A `Confirm` on the `Automation` surface is a terminal `Denied` in the gateway, before the approval
+  gate (R1-01): no one can approve an unattended run, and no approval is raised that a later occurrence of the same
+  task could match. Items owned by a person, and ownerless items in the grace period, use the PC-D1 rules.
 - **Owner file** (`automation-owners.json`): unreadable, invalid, a directory or not openable → every feature
   `IsBlocked`, AutoPatch and AutoUpdate do not run (fail closed). Taking one feature over clears only its block; the
   others are written to the file as blocked entries, so they stay blocked after a restart. Only a file that is not
