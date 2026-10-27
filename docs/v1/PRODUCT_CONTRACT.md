@@ -159,7 +159,7 @@ mutating tools do for their own error texts).
 | M-12 | `manage_systemd_service` | write (UI: Admin) | ❌ | AL ✅ | INV-13, 43 |
 | M-13 | `renew_ssl_certificate` | write | ❌ | AL ✅ | INV-43 |
 | M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service | AL ✅ | INV-58 |
-| M-15 | `execute_query` | write | ❌ | ❌ AH only | INV-19 (PC-D3), 24, 43, 45 |
+| M-15 | `execute_query` | **admin** (PC-D3) | ❌ | ❌ AH only | INV-19 (PC-D3), 24, 43, 45 |
 | M-16 | `backup_database` | write | ❌ | AL ✅ | INV-43 |
 | M-17 | `set_dns_record` | write | ❌ | AL ✅ | INV-43, 52 (DNS token) |
 | M-18 | `delete_dns_record` | write | ❌ | AL ✅ | INV-43, 52 |
@@ -213,15 +213,19 @@ mutating tools do for their own error texts).
 
 | ID | Path | AuthZ | Policy | Approval | Execution | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|
-| T-01 | Container terminal `/terminal/{srv}/{ctr}` | Operator | ❌ | n/a | `docker exec` (remote: SSH as root first) | ❌ | INV-19 (PC-D2: Admin), 21, 47, 59 |
-| T-02 | Embedded terminal in container detail | Operator | ❌ | n/a | same | ❌ | INV-19, 21, 47, 59 |
+| T-01 | Container terminal `/terminal/{srv}/{ctr}` | **Admin** (PC-D2, WP2) | ❌ | n/a | `docker exec` (remote: SSH as root first) | ❌ | INV-19 (PC-D2: Admin), 21, 47, 59 |
+| T-02 | Embedded terminal in container detail | **Admin** (PC-D2, WP2) | ❌ | n/a | same | ❌ | INV-19, 21, 47, 59 |
 | T-03 | Host shell `/server-terminal/{srv}` | Admin | ❌ | n/a | `nsenter` / SSH root | ❌ | INV-09 (session outlives demotion), 21, 47 |
 
 ### 7.5 Web UI handlers
 
 Common to all U rows: Actor = Human (cookie) · AuthN ✅ · AuthZ = `Require(role)` in the handler, role cached per
-circuit (INV-09) · Policy ❌ and kill switch ❌ (INV-20, 21; PC-D1) · Approval n/a for humans under PC-D1 ·
-Execution = direct service call.
+circuit (INV-09), **and** since WP2 step 2.2 the Mutation Gateway for every marked capability (`IUiMutationRunner`):
+catalog level, tool switch and stricter stored level (INV-15), container target resolved (INV-57) · Policy ✅ for
+humans under PC-D1: kill switch and protected resources (INV-21, 24) — tool lists, argument patterns and
+confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1 · Execution = inside the gateway
+scope with a deadline · Audit: the gateway row plus the page's own row. **Not through the gateway yet:** the
+Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW status is), U-20, U-21, U-25, U-34.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
@@ -231,7 +235,7 @@ Execution = direct service call.
 | U-04 | Dashboard rollback | Operator | ❌ | AL ✅ | INV-43, 53 |
 | U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | AL ✅ | INV-43, 59 |
 | U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | AL ✅ | INV-51 |
-| U-07 | Container detail DB query (arbitrary SQL) | Operator | ❌ | ❌ | INV-19 (PC-D3), 45 |
+| U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | ❌ | gateway row | INV-45 |
 | U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | ❌ | INV-45 |
 | U-09 | Container detail DB backup | Admin | ❌ | ❌ | INV-45 |
 | U-10 | Deploy form / raw compose | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
@@ -251,7 +255,7 @@ Execution = direct service call.
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | AL ✅ | INV-43 |
 | U-25 | Self-backup create / delete / restore | Admin | ⚠️ archive validation | AL ✅ | INV-55 |
 | U-26 | Scheduled tasks create / toggle / delete | Admin | — | AL ✅ | INV-04 |
-| U-27 | Scheduled task "Run now" (incl. custom command) | **Operator** | ❌ | AL ✅ | INV-19 (B-10), 43 |
+| U-27 | Scheduled task "Run now" | Operator; custom command **Admin** (WP2) | ❌ | AL ✅ | INV-43 |
 | U-28 | Webhooks create / regenerate / toggle / delete / test | Admin; test = Operator | — | AL ✅ | INV-04, 19 (test fires the real action at Operator) |
 | U-29 | Git-deploy app save / delete; deploy | Admin; deploy = Operator | ❌ | save/delete ❌, deploy ✅ | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |

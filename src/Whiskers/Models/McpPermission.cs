@@ -121,7 +121,8 @@ public static class McpPermissionLevels
         ["list_databases"] = Read,
         ["list_tables"] = Read,
         ["get_schema"] = Read,
-        ["execute_query"] = Write,
+        // PC-D3: arbitrary SQL as the database superuser (COPY … TO PROGRAM) is root on the DB host.
+        ["execute_query"] = Admin,
         ["backup_database"] = Write,
 
         // Log tools

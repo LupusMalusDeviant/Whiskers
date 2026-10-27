@@ -7,6 +7,7 @@
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>Firewall - Whiskers</PageTitle>
@@ -141,7 +142,9 @@ else
 
         try
         {
-            var result = await FirewallService.SetStatusAsync(ServerId, enable);
+            var serverId = ServerId;
+            var result = await Mutations.RunAsync("firewall.set_status", new { serverId, enable },
+                _ => FirewallService.SetStatusAsync(serverId, enable));
             if (result.Success)
             {
                 _firewallActive = enable;
@@ -151,6 +154,7 @@ else
             else
                 Snackbar.Add(L["Firewall_Snackbar_Error", result.Error ?? ""].Value, Severity.Error);
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
 
@@ -164,7 +168,9 @@ else
 
         try
         {
-            var result = await FirewallService.RemoveRuleAsync(ServerId, ruleNumber);
+            var serverId = ServerId;
+            var result = await Mutations.RunAsync("firewall.rule_remove", new { serverId, ruleNumber },
+                _ => FirewallService.RemoveRuleAsync(serverId, ruleNumber));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "firewall.remove", "firewall", ruleNumber.ToString(), $"Rule #{ruleNumber}", serverId: ServerId, success: result.Success);
             if (result.Success)
@@ -175,6 +181,7 @@ else
             else
                 Snackbar.Add(L["Firewall_Snackbar_Error", result.Error ?? ""].Value, Severity.Error);
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
 

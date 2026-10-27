@@ -1123,7 +1123,7 @@
     <value>The container terminal is not available on mTLS servers (the Docker proxy does not forward an interactive stream).</value>
   </data>
   <data name="ContainerDetail_Terminal_NoPermission" xml:space="preserve">
-    <value>No permission — Operator required.</value>
+    <value>No permission — Admin required.</value>
   </data>
   <data name="ContainerDetail_Terminal_OnlyRunning" xml:space="preserve">
     <value>The terminal is only available for running containers.</value>
@@ -4106,8 +4106,8 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="TerminalView_Error_NoContainerId" xml:space="preserve">
     <value>No container ID specified.</value>
   </data>
-  <data name="TerminalView_Error_OperatorRequired" xml:space="preserve">
-    <value>Permission denied — Operator role required.</value>
+  <data name="TerminalView_Error_AdminRequired" xml:space="preserve">
+    <value>Permission denied — Admin role required.</value>
   </data>
   <data name="TerminalView_Terminal_SessionEnded" xml:space="preserve">
     <value>Session ended</value>

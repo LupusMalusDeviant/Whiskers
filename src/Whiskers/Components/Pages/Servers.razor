@@ -13,6 +13,7 @@
 @inject Whiskers.Services.Vault.IVaultService Vault
 @inject Whiskers.Services.Observability.ILoopSuspensionService Suspension
 @inject Whiskers.Services.Docker.Budget.IServerCircuitBreaker Circuit
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Services.Observability
 
@@ -359,7 +360,19 @@
     private async Task PauseServer(Whiskers.Models.ServerConfig server, PauseOption option)
     {
         var until = option.Duration is { } d ? DateTime.UtcNow + d : (DateTime?)null;
-        Suspension.Suspend(server.Id, until, $"paused from the server list ({option.Label})");
+        var serverId = server.Id;
+        var reason = $"paused from the server list ({option.Label})";
+        var minutes = option.Duration is { } m ? (int?)m.TotalMinutes : null;
+        try
+        {
+            await Mutations.RunAsync("checks.pause", new { serverId, reason, minutes },
+                _ => { Suspension.Suspend(serverId, until, reason); return Task.CompletedTask; });
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
 
         await AuditLog.LogAsync(
             (await CurrentUser.GetEmailAsync()) ?? "unknown", "web", "server.pause-checks",
@@ -372,7 +385,17 @@
 
     private async Task ResumeServer(Whiskers.Models.ServerConfig server)
     {
-        Suspension.Resume(server.Id);
+        var serverId = server.Id;
+        try
+        {
+            await Mutations.RunAsync("checks.resume", new { serverId },
+                _ => { Suspension.Resume(serverId); return Task.CompletedTask; });
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
 
         await AuditLog.LogAsync(
             (await CurrentUser.GetEmailAsync()) ?? "unknown", "web", "server.resume-checks",
@@ -389,14 +412,30 @@
         var until = option.Duration is { } d ? DateTime.UtcNow + d : (DateTime?)null;
         var servers = ServerConfigService.GetEnabledServers();
 
+        var reason = $"fleet-wide pause ({option.Label})";
+        var minutes = option.Duration is { } m ? (int?)m.TotalMinutes : null;
+        var paused = 0;
+
         foreach (var server in servers)
-            Suspension.Suspend(server.Id, until, $"fleet-wide pause ({option.Label})");
+        {
+            var serverId = server.Id;
+            try
+            {
+                await Mutations.RunAsync("checks.pause", new { serverId, reason, minutes },
+                    _ => { Suspension.Suspend(serverId, until, reason); return Task.CompletedTask; });
+                paused++;
+            }
+            catch (MutationRefusedException ex)
+            {
+                Snackbar.Add($"{server.Name}: {ex.Message}", Severity.Warning);
+            }
+        }
 
         await AuditLog.LogAsync(
             (await CurrentUser.GetEmailAsync()) ?? "unknown", "web", "server.pause-checks-all",
-            "config", "fleet", "all servers", $"{servers.Count} server(s) for {option.Label}");
+            "config", "fleet", "all servers", $"{paused} server(s) for {option.Label}");
 
-        Snackbar.Add($"Background checks paused on all {servers.Count} servers — {option.Label.ToLowerInvariant()}. " +
+        Snackbar.Add($"Background checks paused on {paused} of {servers.Count} servers — {option.Label.ToLowerInvariant()}. " +
                      "Nothing in the fleet is being checked meanwhile.", Severity.Warning);
         StateHasChanged();
     }

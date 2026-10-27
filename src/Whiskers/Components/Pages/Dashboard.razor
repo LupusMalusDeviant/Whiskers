@@ -11,6 +11,7 @@
 @inject IMetricsQueryService MetricsQuery
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject Whiskers.Services.Workloads.IWorkloadProviderFactory WorkloadFactory
 @inject Whiskers.Services.Observability.ILoopSuspensionService Suspension
 @inject Whiskers.Services.Observability.IFleetSnapshotCache Snapshots
@@ -798,10 +799,15 @@
             if (_k8sServerIds.Contains(container.ServerId))
                 await WorkloadFactory.GetForServer(container.ServerId).StartAsync(container.Id);
             else
-                await DockerService.StartContainerAsync(container.Id, container.ServerId);
+                await Mutations.RunAsync("container.start", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
+                    _ => DockerService.StartContainerAsync(container.Id, container.ServerId));
             await AuditLog.LogAsync(actor, "web", "container.start", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Started", container.Name].Value, Severity.Success);
             await RefreshAll();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -820,10 +826,15 @@
             if (_k8sServerIds.Contains(container.ServerId))
                 await WorkloadFactory.GetForServer(container.ServerId).StopAsync(container.Id);
             else
-                await DockerService.StopContainerAsync(container.Id, container.ServerId);
+                await Mutations.RunAsync("container.stop", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
+                    _ => DockerService.StopContainerAsync(container.Id, container.ServerId));
             await AuditLog.LogAsync(actor, "web", "container.stop", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Stopped", container.Name].Value, Severity.Success);
             await RefreshAll();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -842,10 +853,15 @@
             if (_k8sServerIds.Contains(container.ServerId))
                 await WorkloadFactory.GetForServer(container.ServerId).RestartAsync(container.Id);
             else
-                await DockerService.RestartContainerAsync(container.Id, container.ServerId);
+                await Mutations.RunAsync("container.restart", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
+                    _ => DockerService.RestartContainerAsync(container.Id, container.ServerId));
             await AuditLog.LogAsync(actor, "web", "container.restart", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Restarted", container.Name].Value, Severity.Success);
             await RefreshAll();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -865,10 +881,15 @@
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            await DockerService.RemoveContainerAsync(container.Id, force: true, serverId: container.ServerId);
+            await Mutations.RunAsync("container.remove", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
+                _ => DockerService.RemoveContainerAsync(container.Id, force: true, serverId: container.ServerId));
             await AuditLog.LogAsync(actor, "web", "container.remove", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Removed", container.Name].Value, Severity.Success);
             await RefreshAll();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -901,11 +922,16 @@
             // Best-effort — a snapshot failure must not block the update itself.
             try { await AutoUpdate.CaptureSnapshotAsync(container); }
             catch (Exception cex) { _logger?.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
-            await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
+            await Mutations.RunAsync("container.update", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
+                _ => DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress));
             ImageUpdateStore.Remove(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Updated", container.Name].Value, Severity.Success);
             await RefreshAll();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -932,10 +958,16 @@
         try
         {
             Snackbar.Add(L["Dashboard_Snackbar_RollingBack", container.Name].Value, Severity.Info);
-            var msg = await AutoUpdate.RollbackAsync(snap.Id);
+            var rollbackId = snap.Id;
+            var msg = await Mutations.RunAsync("container.rollback", new { containerId = container.Id, name = container.Name, serverId = container.ServerId, rollbackId },
+                _ => AutoUpdate.RollbackAsync(rollbackId));
             await AuditLog.LogAsync(actor, "web", "container.rollback", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(msg, Severity.Success);
             await RefreshAll();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

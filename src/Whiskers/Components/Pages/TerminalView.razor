@@ -48,9 +48,10 @@
             return;
         }
 
-        if (await CurrentUser.GetRoleAsync() < AppRole.Operator)
+        // PC-D2: a shell inside a container is Admin, like the host shell.
+        if (await CurrentUser.GetRoleAsync() < AppRole.Admin)
         {
-            _error = L["TerminalView_Error_OperatorRequired"].Value;
+            _error = L["TerminalView_Error_AdminRequired"].Value;
             await InvokeAsync(StateHasChanged);
             return;
         }

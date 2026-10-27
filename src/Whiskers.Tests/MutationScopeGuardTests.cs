@@ -100,6 +100,7 @@ public class MutationScopeGuardTests
         services.AddSingleton<IProbeService>(sp => sp.GetRequiredService<ProbeService>());
         services.AddSingleton<IReadOnlyProbe, PlainProbe>();
         services.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, Whiskers.Services.Mcp.McpPermissionService>();
+        services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, NoUser>();   // the UI runner reads it
         services.AddMutationGateway();
         services.AddMutationScopeGuard();
 
@@ -118,6 +119,7 @@ public class MutationScopeGuardTests
         typed.AddLogging();
         typed.AddSingleton<IProbeService, ProbeService>();
         typed.AddSingleton<Whiskers.Services.Mcp.IMcpPermissionService, Whiskers.Services.Mcp.McpPermissionService>();
+        typed.AddScoped<Whiskers.Services.Auth.ICurrentUserService, NoUser>();
         typed.AddMutationGateway();
         typed.AddMutationScopeGuard();
         IProbeService resolved;
@@ -130,4 +132,11 @@ public class MutationScopeGuardTests
     {
         public string Read() => "plain";
     }
+}
+
+internal sealed class NoUser : Whiskers.Services.Auth.ICurrentUserService
+{
+    public Task<string?> GetEmailAsync() => Task.FromResult<string?>(null);
+    public Task<Whiskers.Models.AppRole> GetRoleAsync() => Task.FromResult(Whiskers.Models.AppRole.Viewer);
+    public Task<bool> HasRoleAsync(Whiskers.Models.AppRole required) => Task.FromResult(false);
 }

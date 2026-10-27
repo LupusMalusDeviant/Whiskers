@@ -1,0 +1,156 @@
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Configuration;
+using Whiskers.Models;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Auth;
+using Whiskers.Services.Mutations;
+
+namespace Whiskers.Tests;
+
+/// <summary>
+/// WP2 step 2.2: UI handlers run through the Mutation Gateway as the signed-in human (PC-D1). A human is bound by
+/// authorization, the kill switch, protected resources and the tool settings, but is not asked to approve their own
+/// click; PC-D3 makes arbitrary SQL Admin.
+/// </summary>
+public class UiMutationRunnerTests
+{
+    private sealed class FixedUser(AppRole role, string? email = "ops@example.com") : ICurrentUserService
+    {
+        public Task<string?> GetEmailAsync() => Task.FromResult(email);
+        public Task<AppRole> GetRoleAsync() => Task.FromResult(role);
+        public Task<bool> HasRoleAsync(AppRole required) => Task.FromResult(role >= required);
+    }
+
+    private static (UiMutationRunner Runner, AgentToolTestHelpers.NullMutationAudit Audit) Runner(
+        AppRole role, GuardrailPolicy? policy = null, ICapabilityOverrides? overrides = null)
+    {
+        var audit = new AgentToolTestHelpers.NullMutationAudit();
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
+            NullLogger<MutationGateway>.Instance, overrides: overrides,
+            approvals: new ApprovalGate(new ApprovalStore(), store));
+        return (new UiMutationRunner(gateway, new CapabilityCatalog(), new FixedUser(role)), audit);
+    }
+
+    [Fact]
+    public async Task A_human_click_runs_without_an_approval_even_where_the_agent_would_need_one()
+    {
+        // SafeDefault asks for confirmation on every write — for the agent and keys, not for a person in the UI.
+        var (runner, audit) = Runner(AppRole.Operator);
+
+        var result = await runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.FromResult(42));
+
+        Assert.Equal(42, result);
+        Assert.Contains("begin:container.restart:", audit.Events);
+        Assert.Contains("complete:Executed", audit.Events);
+    }
+
+    [Fact]
+    public async Task The_kill_switch_stops_a_human_too()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ReadOnlyMode = true;
+        var (runner, audit) = Runner(AppRole.Admin, policy);
+        var ran = false;
+
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
+            runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; }));
+
+        Assert.False(ran);
+        Assert.Contains("Read-only", refused.Message);
+        Assert.Equal(MutationStatus.Denied, refused.Status);
+        Assert.Contains("denied:Denied", audit.Events);
+    }
+
+    [Fact]
+    public async Task A_protected_container_is_protected_from_a_human_too()
+    {
+        var (runner, _) = Runner(AppRole.Admin);   // SafeDefault protects whiskers*
+        var ran = false;
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() =>
+            runner.RunAsync("container.stop", new { containerId = "whiskers" }, _ => { ran = true; return Task.CompletedTask; }));
+
+        Assert.False(ran);
+    }
+
+    [Fact]
+    public async Task Tool_lists_and_argument_patterns_are_agent_rules_and_do_not_bind_a_human()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ToolMode = "allow";                       // nothing on the allow list
+        policy.ToolDenyList = ["restart_container"];
+        var (runner, _) = Runner(AppRole.Operator, policy);
+
+        var result = await runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.FromResult("ok"));
+
+        Assert.Equal("ok", result);
+    }
+
+    [Fact]
+    public async Task A_viewer_cannot_mutate_through_the_runner()
+    {
+        var (runner, _) = Runner(AppRole.Viewer);
+
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
+            runner.RunAsync("container.start", new { containerId = "web-1" }, _ => Task.CompletedTask));
+
+        Assert.Contains("requires 'write'", refused.Message);
+    }
+
+    [Fact]
+    public async Task Arbitrary_sql_needs_admin_on_the_ui_too()
+    {
+        var (operatorRunner, _) = Runner(AppRole.Operator);
+        var (adminRunner, _) = Runner(AppRole.Admin);
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() =>
+            operatorRunner.RunAsync("db.query", new { containerId = "db-1", query = "select 1" }, _ => Task.FromResult("rows")));
+        Assert.Equal("rows",
+            await adminRunner.RunAsync("db.query", new { containerId = "db-1", query = "select 1" }, _ => Task.FromResult("rows")));
+        Assert.Equal(McpPermissionLevels.Admin, McpPermissionLevels.DefaultToolLevels["execute_query"]);
+    }
+
+    [Fact]
+    public async Task A_tool_switched_off_in_settings_is_off_for_the_ui_too()
+    {
+        var (runner, _) = Runner(AppRole.Admin,
+            overrides: new ToolAuthorizationTests.FixedOverrides(new CapabilityAvailability(false, McpPermissionLevels.Write)));
+
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
+            runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask));
+
+        Assert.Contains("disabled", refused.Message);
+    }
+
+    [Fact]
+    public async Task The_actions_own_exception_reaches_the_page_unchanged()
+    {
+        var (runner, audit) = Runner(AppRole.Admin);
+
+        var thrown = await Assert.ThrowsAsync<IOException>(() =>
+            runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => throw new IOException("docker down")));
+
+        Assert.Equal("docker down", thrown.Message);
+        Assert.Contains("complete:Failed", audit.Events);
+    }
+
+    [Fact]
+    public async Task An_unknown_capability_is_refused()
+    {
+        var (runner, _) = Runner(AppRole.Admin);
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() =>
+            runner.RunAsync("no.such.capability", new { }, _ => Task.CompletedTask));
+    }
+
+    [Fact]
+    public void Arguments_are_taken_from_the_named_properties_and_nulls_are_left_out()
+    {
+        var args = UiMutationRunner.ToArguments(new { containerId = "web-1", serverId = (string?)null, minutes = 30 });
+
+        Assert.Equal(["containerId", "minutes"], args.Keys.Order());
+        Assert.Equal(JsonValueKind.Number, args["minutes"].ValueKind);
+    }
+}

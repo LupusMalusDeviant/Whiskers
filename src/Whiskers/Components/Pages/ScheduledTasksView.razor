@@ -5,6 +5,7 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
@@ -113,7 +114,7 @@ else
             </MudTd>
             <MudTd>
                 <MudStack Row="true" Spacing="0">
-                    @if (_role >= AppRole.Operator)
+                    @if (_role >= RunNowRole(context))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small"
                                        OnClick="@(() => RunNow(context))" title="@L["ScheduledTasksView_Tooltip_RunNow"]" />
@@ -249,6 +250,11 @@ else
     private string _formServerId = "local";
     private AppRole _role = AppRole.Viewer;
 
+    // "Run now" of a custom command runs arbitrary shell text on a host, so it needs Admin (ADR-0005, PC-D2);
+    // every other task type keeps Operator.
+    private static AppRole RunNowRole(Whiskers.Models.ScheduledTaskEntity task) =>
+        task.TaskType == ScheduledTaskType.CustomCommand ? AppRole.Admin : AppRole.Operator;
+
     private bool Require(AppRole required)
     {
         if (_role < required)
@@ -325,7 +331,7 @@ else
             if (_formMaxBackups > 0) config["maxBackups"] = _formMaxBackups.ToString();
             if (!string.IsNullOrEmpty(_formCommand)) config["command"] = _formCommand;
 
-            await Scheduler.CreateTaskAsync(new Whiskers.Models.ScheduledTaskEntity
+            var newTask = new Whiskers.Models.ScheduledTaskEntity
             {
                 Name = _formName,
                 CronExpression = _formCron.Trim(),
@@ -334,12 +340,24 @@ else
                 TargetName = _formTargetId,
                 ServerId = _formServerId,
                 Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null
-            });
+            };
+            // Never the command text itself: it may carry credentials.
+            await Mutations.RunAsync("scheduler.create",
+                new
+                {
+                    name = newTask.Name, taskType = newTask.TaskType.ToString(), serverId = newTask.ServerId,
+                    hasCommand = config.ContainsKey("command"),
+                },
+                _ => Scheduler.CreateTaskAsync(newTask));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "task.create", "scheduled-task", _formName, _formName, serverId: _formServerId);
             Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskCreated", _formName].Value, Severity.Success);
             _showDialog = false;
             await LoadData();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -349,13 +367,21 @@ else
 
     private async Task RunNow(Whiskers.Models.ScheduledTaskEntity task)
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(RunNowRole(task))) return;
         Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskRunning", task.Name].Value, Severity.Info);
         bool success;
         string output;
         try
         {
-            (success, output) = await Scheduler.RunNowAsync(task.TaskId);
+            (success, output) = await Mutations.RunAsync("scheduler.run",
+                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId },
+                _ => Scheduler.RunNowAsync(task.TaskId));
+        }
+        catch (MutationRefusedException ex)
+        {
+            // Refused by the gateway: nothing ran, so no run-now audit row of our own.
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
         }
         catch (Exception ex)
         {
@@ -372,9 +398,23 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         task.Enabled = enabled;
-        await Scheduler.UpdateTaskAsync(task);
-        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-            enabled ? "task.enable" : "task.disable", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
+        try
+        {
+            await Mutations.RunAsync("scheduler.update",
+                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, enabled },
+                _ => Scheduler.UpdateTaskAsync(task));
+            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
+                enabled ? "task.enable" : "task.disable", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_Error", ex.Message].Value, Severity.Error);
+        }
+        // Reload either way so the switch reflects the persisted state.
         await LoadData();
     }
 
@@ -388,11 +428,17 @@ else
         if (confirmed != true) return;
         try
         {
-            await Scheduler.DeleteTaskAsync(task.TaskId);
+            await Mutations.RunAsync("scheduler.delete",
+                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId },
+                _ => Scheduler.DeleteTaskAsync(task.TaskId));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "task.delete", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
             Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskDeleted", task.Name].Value, Severity.Success);
             await LoadData();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

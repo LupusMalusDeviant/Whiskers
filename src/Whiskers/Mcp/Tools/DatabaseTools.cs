@@ -110,7 +110,7 @@ public class DatabaseTools
         return $"Schema for {table} in {database}:\n{string.Join('\n', lines)}";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Execute a SQL query or database command and return the results.")]
     public static async Task<string> ExecuteQuery(
         IHttpContextAccessor httpContextAccessor,

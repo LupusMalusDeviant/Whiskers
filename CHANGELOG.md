@@ -35,11 +35,28 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - A mutating tool that answers with an error text (container not found, command exit code ≠ 0, failed backup …)
     now returns that text with `isError: true` over MCP, and the agent sees it as a failed call. The gateway row
     records it as `Failed`.
+- **UI actions run through the Mutation Gateway** (ADR-0005 step 2.2, PC-D1). What changes for people using the web UI:
+  - The **read-only kill switch** and **protected resources** now apply to UI actions too. With the default preset
+    the Whiskers container itself (`whiskers*`) can no longer be stopped, restarted, updated or removed from the
+    Dashboard or the container page; remove the pattern from the active guardrail preset if you need that.
+  - A tool **switched off** in Settings → MCP, or raised to a stricter level there, also switches off or raises the
+    matching UI action (e.g. `restart_container` → the restart buttons).
+  - A refused action shows the reason as a warning; the gateway's AuditLog row records it.
+  - No approval is asked for a person's own click; tool allow/deny lists and argument patterns stay agent rules.
+- **Arbitrary SQL needs Admin everywhere** (PC-D3): the database query in the container page and the
+  `execute_query` MCP tool were Operator / write.
+- **Container shells need Admin** (PC-D2): `/terminal/{server}/{container}` and the terminal tab in the container
+  page were Operator.
+- **"Run now" of a custom-command task needs Admin**; other task types stay Operator.
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **UI actions bypassed the kill switch and protected resources** (TA-26, INV-20/21, PC-D1). Every UI call to a
+  mutating capability now goes through the Mutation Gateway.
+- **Root-equivalent actions at Operator** (INV-19): container shells, arbitrary SQL and running custom commands now
+  need Admin (TA-43, B-10).
 - **The tool switch and stricter tool levels applied to API keys only** (TA-10, INV-15). They now apply to every
   caller.
 - **`AllowedTools` could widen a key beyond its level** (TA-34, INV-16). The level is now checked first.
@@ -64,6 +81,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   a digest now logs a warning.
 
 ### Added
+- **Mutation Gateway, step 2.2 (ADR-0005).** `IUiMutationRunner` runs a page's action through the gateway as the
+  signed-in user. Sixteen pages use it; the bypass baseline shrinks from 75 to 29 entries.
 - **Mutation Gateway, step 2.1 (ADR-0005).** Every MCP tool and agent tool call that maps to a capability runs
   through the gateway: tool switch and level, container target resolution, guardrail policy, approval, audit
   intent, deadline, audit outcome. A shared approval gate binds an approval to the operation and the arguments

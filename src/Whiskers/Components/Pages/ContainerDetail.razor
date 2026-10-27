@@ -15,6 +15,7 @@
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Models.Cve
 @implements IAsyncDisposable
@@ -807,7 +808,7 @@ else
                             <MudStack Row="true" Spacing="2">
                                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQuery"
                                            StartIcon="@Icons.Material.Filled.PlayArrow"
-                                           Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting || _role < AppRole.Operator)">
+                                           Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting || _role < AppRole.Admin)">
                                     @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
                                     @L["ContainerDetail_Db_Execute"]
                                 </MudButton>
@@ -1109,7 +1110,7 @@ else
     private async Task InitTerminal()
     {
         if (!ServerConfigService.SupportsTerminal(_resolvedServerId)) return;
-        if (_role < AppRole.Operator) { _termError = L["ContainerDetail_Terminal_NoPermission"].Value; return; }
+        if (_role < AppRole.Admin) { _termError = L["ContainerDetail_Terminal_NoPermission"].Value; return; }   // PC-D2: a shell in the container is Admin
         try
         {
             _dotNetRef = DotNetObjectReference.Create(this);
@@ -1220,7 +1221,10 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
+        try { await Mutations.RunAsync("container.start", new { containerId, name, serverId = sid }, _ => DockerService.StartContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1230,7 +1234,10 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
+        try { await Mutations.RunAsync("container.stop", new { containerId, name, serverId = sid }, _ => DockerService.StopContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1240,7 +1247,10 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
+        try { await Mutations.RunAsync("container.restart", new { containerId, name, serverId = sid }, _ => DockerService.RestartContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1255,13 +1265,17 @@ else
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
         try
         {
-            await DockerService.RemoveContainerAsync(ContainerId, force: true, serverId: _resolvedServerId);
+            await Mutations.RunAsync("container.remove", new { containerId, name, serverId = sid },
+                _ => DockerService.RemoveContainerAsync(containerId, force: true, serverId: sid));
             await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, serverId: _resolvedServerId);
             Snackbar.Add(L["ContainerDetail_Snackbar_Removed"].Value, Severity.Success);
             Nav.NavigateTo("/");
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
     }
 
@@ -1795,7 +1809,7 @@ else
 
     private async Task ExecuteQuery()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(AppRole.Admin)) return;   // PC-D3: a free-form query can write, so Admin like the other DB writes
         if (_dbCreds == null)
         {
             Snackbar.Add(L["ContainerDetail_Db_NoCredentials"].Value, Severity.Warning);
@@ -1813,7 +1827,16 @@ else
                 Password = _dbCreds.Password,
                 Database = _dbSelectedDatabase ?? _dbCreds.Database
             };
-            _dbResult = await DatabaseService.ExecuteQueryAsync(ContainerId, _dbQuery, _container.DatabaseType, creds, _resolvedServerId);
+            var containerId = ContainerId;
+            var query = _dbQuery;
+            var dbType = _container.DatabaseType;
+            var sid = _resolvedServerId;
+            _dbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, query },
+                _ => DatabaseService.ExecuteQueryAsync(containerId, query, dbType, creds, sid));
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -1834,13 +1857,21 @@ else
         try
         {
             var db = _dbSelectedDatabase ?? _dbCreds.Database;
-            var (success, filePath, size, error) = await DatabaseService.BackupDatabaseAsync(
-                ContainerId, db, _container.DatabaseType, _dbCreds, _resolvedServerId);
+            var containerId = ContainerId;
+            var dbType = _container.DatabaseType;
+            var creds = _dbCreds;
+            var sid = _resolvedServerId;
+            var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
+                _ => DatabaseService.BackupDatabaseAsync(containerId, db, dbType, creds, sid));
 
             if (success)
                 Snackbar.Add(L["ContainerDetail_Db_BackupSuccess", filePath, size / 1024].Value, Severity.Success);
             else
                 Snackbar.Add(L["ContainerDetail_Db_BackupError", error].Value, Severity.Error);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

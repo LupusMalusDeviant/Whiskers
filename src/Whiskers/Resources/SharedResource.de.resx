@@ -1123,7 +1123,7 @@
     <value>Das Container-Terminal ist auf mTLS-Servern nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Stream weiter).</value>
   </data>
   <data name="ContainerDetail_Terminal_NoPermission" xml:space="preserve">
-    <value>Keine Berechtigung — Operator erforderlich.</value>
+    <value>Keine Berechtigung — Admin erforderlich.</value>
   </data>
   <data name="ContainerDetail_Terminal_OnlyRunning" xml:space="preserve">
     <value>Terminal ist nur für laufende Container verfügbar.</value>
@@ -4106,8 +4106,8 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="TerminalView_Error_NoContainerId" xml:space="preserve">
     <value>Keine Container-ID angegeben.</value>
   </data>
-  <data name="TerminalView_Error_OperatorRequired" xml:space="preserve">
-    <value>Keine Berechtigung — Operator erforderlich.</value>
+  <data name="TerminalView_Error_AdminRequired" xml:space="preserve">
+    <value>Keine Berechtigung — Admin erforderlich.</value>
   </data>
   <data name="TerminalView_Terminal_SessionEnded" xml:space="preserve">
     <value>Sitzung beendet</value>

@@ -18,6 +18,11 @@ namespace Whiskers.Tests;
 /// tool (deploy_app creating a container, a preview starting a background cycle) stay reported: the gateway decided
 /// on the tool's capability, not on theirs.</para>
 ///
+/// <para>A lambda passed directly to <see cref="IUiMutationRunner"/> together with a capability id literal
+/// (<c>Mutations.RunAsync("network.create", args, ct =&gt; docker.CreateNetworkAsync(…))</c>) runs inside the gateway
+/// as well (WP2 step 2.2); calls to that capability inside the lambda are not reported. Calls to another capability
+/// in the same lambda are.</para>
+///
 /// <para>The baseline (<c>docs/v1/mutation-bypass-baseline.txt</c>) lists today's bypasses. It may only shrink: a
 /// new bypass fails the test, and so does a baseline line that no longer occurs — remove it in the PR that migrates
 /// the path. WP2 step 2.6 ends with an empty baseline. Regenerate with <c>WHISKERS_WRITE_MUTATION_BASELINE=1</c>
@@ -63,6 +68,17 @@ public class MutationBypassArchitectureTests
         Assert.DoesNotContain(bypasses, b => b.StartsWith(typeof(ScannerHandlerProbe).FullName!, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void A_lambda_handed_to_the_ui_runner_counts_as_gated_for_its_own_capability_only()
+    {
+        var bypasses = MutationCallScanner.FindBypasses(typeof(MutationBypassArchitectureTests).Assembly);
+
+        Assert.DoesNotContain($"{typeof(UiRunnerProbe).FullName} -> container.start", bypasses);
+        Assert.DoesNotContain($"{typeof(UiRunnerProbe).FullName} -> container.restart", bypasses);
+        Assert.Contains($"{typeof(UiRunnerProbe).FullName} -> container.stop", bypasses);      // other capability
+        Assert.Contains($"{typeof(UiRunnerProbe).FullName} -> container.remove", bypasses);    // outside the lambda
+    }
+
     private static string Render(IReadOnlyCollection<string> lines) =>
         "# Calls to [MutatingOperation] methods that do not go through the Mutation Gateway (ADR-0005, INV-38).\n" +
         "# Format: <calling type> -> <capability>. This list may only shrink; see MutationBypassArchitectureTests.\n" +
@@ -81,6 +97,21 @@ public class MutationBypassArchitectureTests
     {
         public Task RestartAsync() => docker.RestartContainerAsync("x");
     }
+
+    // A page-like caller: lambdas handed to the UI runner, sync and async, capturing and not.
+    private sealed class UiRunnerProbe(IUiMutationRunner mutations, Whiskers.Services.Docker.IDockerService docker)
+    {
+        public async Task StartAsync(string id)
+        {
+            await mutations.RunAsync("container.start", new { containerId = id }, _ => docker.StartContainerAsync(id));
+            await mutations.RunAsync("container.restart", new { containerId = id }, async _ =>
+            {
+                await docker.RestartContainerAsync(id);
+                await docker.StopContainerAsync(id);   // not the gated capability → still a bypass
+            });
+            await docker.RemoveContainerAsync(id);     // outside any lambda → still a bypass
+        }
+    }
 }
 
 /// <summary>Reads method IL and reports <c>caller -> capability</c> pairs for calls outside the gateway.</summary>
@@ -97,6 +128,7 @@ internal static class MutationCallScanner
     public static IReadOnlyCollection<string> FindBypasses(Assembly assembly)
     {
         var result = new SortedSet<string>(StringComparer.Ordinal);
+        var uiGated = UiRunnerLambdas(assembly);
         foreach (var type in SafeTypes(assembly))
         {
             var owner = OwnerOf(type);
@@ -111,9 +143,9 @@ internal static class MutationCallScanner
                 // stop + recreate) runs inside the outer operation's scope; that is not a bypass.
                 var source = SourceMethodName(type, method);
                 if (ownOperations.Contains(source)) continue;
-                var toolCapability = gatewayTools.GetValueOrDefault(source);
+                var gated = gatewayTools.GetValueOrDefault(source) ?? UiGatedCapability(uiGated, method);
                 foreach (var capability in CalledCapabilities(method))
-                    if (capability != toolCapability)
+                    if (capability != gated)
                         result.Add($"{owner.FullName} -> {capability}");
             }
         }
@@ -138,6 +170,71 @@ internal static class MutationCallScanner
                 map[m.Name] = capability.Id;
         return map;
     }
+
+    /// <summary>
+    /// Lambdas handed to <see cref="IUiMutationRunner"/>: in every method body, a capability id loaded with
+    /// <c>ldstr</c>, then a lambda loaded with <c>ldftn</c>, then the call to <c>RunAsync</c>. Keyed by the lambda's
+    /// body and, for an async lambda, by its state machine type.
+    /// </summary>
+    private static Dictionary<object, string> UiRunnerLambdas(Assembly assembly)
+    {
+        var map = new Dictionary<object, string>();
+        foreach (var type in SafeTypes(assembly))
+            foreach (var method in type.GetMethods(All).Cast<MethodBase>().Concat(type.GetConstructors(All)))
+            {
+                byte[]? il;
+                try { il = method.GetMethodBody()?.GetILAsByteArray(); }
+                catch { continue; }
+                if (il is null) continue;
+
+                var module = method.Module;
+                var typeArgs = method.DeclaringType is { IsGenericType: true } dt ? dt.GetGenericArguments() : null;
+                var methodArgs = method is MethodInfo { IsGenericMethod: true } gm ? gm.GetGenericArguments() : null;
+                string? capability = null;
+                MethodBase? lambda = null;
+                var pos = 0;
+                while (pos < il.Length)
+                {
+                    short value = il[pos++];
+                    if (value == 0xFE && pos < il.Length) value = (short)(0xFE00 | il[pos++]);
+                    if (!OpCodesByValue.TryGetValue(value, out var op)) break;
+
+                    if (op.OperandType == OperandType.InlineString)
+                    {
+                        string? text = null;
+                        try { text = module.ResolveString(BitConverter.ToInt32(il, pos)); } catch { }
+                        if (text is not null && Catalog.Find(text) is not null) capability = text;
+                    }
+                    else if (op == OpCodes.Ldftn)
+                    {
+                        try { lambda = module.ResolveMethod(BitConverter.ToInt32(il, pos), typeArgs, methodArgs); }
+                        catch { lambda = null; }
+                    }
+                    else if (op.OperandType == OperandType.InlineMethod)
+                    {
+                        MethodBase? called = null;
+                        try { called = module.ResolveMethod(BitConverter.ToInt32(il, pos), typeArgs, methodArgs); } catch { }
+                        if (called is not null && called.DeclaringType == typeof(IUiMutationRunner)
+                            && called.Name == nameof(IUiMutationRunner.RunAsync) && capability is not null && lambda is not null)
+                        {
+                            map[Key(lambda)] = capability;
+                            if (lambda.GetCustomAttribute<AsyncStateMachineAttribute>()?.StateMachineType is { } machine)
+                                map[machine] = capability;
+                            capability = null;
+                            lambda = null;
+                        }
+                    }
+                    pos += OperandSize(op, il, pos);
+                }
+            }
+        return map;
+    }
+
+    private static object Key(MethodBase method) => (method.Module, method.MetadataToken);
+
+    private static string? UiGatedCapability(Dictionary<object, string> gated, MethodBase method) =>
+        gated.GetValueOrDefault(Key(method))
+        ?? (method.DeclaringType is { } t && gated.TryGetValue(t, out var viaMachine) ? viaMachine : null);
 
     /// <summary>The source-level method a compiled body belongs to: <c>&lt;RunAsync&gt;d__4.MoveNext</c> and
     /// <c>&lt;RunAsync&gt;b__0</c> both map to <c>RunAsync</c>.</summary>

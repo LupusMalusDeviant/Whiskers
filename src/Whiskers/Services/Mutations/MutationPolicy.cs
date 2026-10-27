@@ -23,6 +23,9 @@ public interface IMutationPolicy
 /// </summary>
 public sealed class GuardrailMutationPolicy : IMutationPolicy
 {
+    // PC-D1: a human in the UI is bound by authorization, the kill switch and protected resources only.
+    private static readonly IAgentGuardrailEngine HumanEngine = GuardrailEngine.CreateForHumans();
+
     private readonly IAgentGuardrailEngine? _engine;
     private readonly IGuardrailStore? _store;
 
@@ -47,7 +50,10 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             ToAgentPrincipal(request.Principal),
             ToOrigin(request),
             _store.Current);
-        var decision = _engine.Evaluate(new GuardrailRequest(
+        var engine = request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human
+            ? HumanEngine
+            : _engine;
+        var decision = engine.Evaluate(new GuardrailRequest(
             capability.McpTool ?? capability.Id, capability.RequiredLevel, WithResolvedTarget(request), context));
 
         var verdict = decision.Verdict switch

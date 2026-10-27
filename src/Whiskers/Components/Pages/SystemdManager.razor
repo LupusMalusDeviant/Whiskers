@@ -7,6 +7,7 @@
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["SystemdManager_PageTitle"]</PageTitle>
@@ -165,11 +166,15 @@ else
 
         try
         {
+            var serverId = ServerId;
             var result = action switch
             {
-                "start" => await SystemdService.StartAsync(ServerId, name),
-                "stop" => await SystemdService.StopAsync(ServerId, name),
-                "restart" => await SystemdService.RestartAsync(ServerId, name),
+                "start" => await Mutations.RunAsync("systemd.manage", new { serverId, serviceName = name, action = "start" },
+                    _ => SystemdService.StartAsync(serverId, name)),
+                "stop" => await Mutations.RunAsync("systemd.manage", new { serverId, serviceName = name, action = "stop" },
+                    _ => SystemdService.StopAsync(serverId, name)),
+                "restart" => await Mutations.RunAsync("systemd.manage", new { serverId, serviceName = name, action = "restart" },
+                    _ => SystemdService.RestartAsync(serverId, name)),
                 _ => throw new ArgumentException($"Unknown action: {action}")
             };
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
@@ -178,6 +183,7 @@ else
                 result.Success ? Severity.Success : Severity.Error);
             await LoadServices();
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(L["SystemdManager_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
