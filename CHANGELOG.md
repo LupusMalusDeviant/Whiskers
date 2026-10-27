@@ -6,9 +6,53 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-05 review: the two refusals the effective requirement adds (underlying capability switched off, requirement
+  not determinable) are shown in the user's language on the pages; covered end to end through the real gateway,
+  approval gate and store (`SchedulerApprovalEndToEndTests`).
+- R1-05 review: interactive approvals (agent sessions) are raised at the operation's effective requirement, and the
+  approval gate refuses to reuse an approval raised below it, so an Operator can no longer approve a scheduled custom
+  command, retention or self-backup. The scheduler requirement resolver reads `taskType` in every form the tool
+  accepts (name or number) and fails closed to Admin otherwise, reads `maxBackups` like the tool (`"0"` is no
+  retention), and applies stricter or disabled settings of the underlying capability from Settings → MCP.
+- `scheduler.delete` is Write on every surface: the Scheduled tasks page now takes the level from the capability
+  catalog (it required Admin). Deleting a task is not root-equivalent; creating, updating and running stay gated by
+  the task's effective requirement.
+
 v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
 
 ### ⚠️ Upgrade notes
+
+- **R1-05: one capability level table; several MCP tools now require Admin.** The capability catalog
+  (`CapabilityCatalog`) is now the single source of the level of every mutating capability; MCP's
+  `DefaultToolLevels` takes its mutating entries from it. Where the UI and MCP disagreed, the stricter level
+  won: no MCP level was lowered. One UI level was: creating and deleting a scheduled task on the
+  Scheduled tasks page now needs Operator (was Admin), and the gateway then raises it to Admin per task type
+  (custom command, self-backup, DB backup, retention) — Operators can now manage restart, cleanup and volume
+  backup tasks without retention there. API keys and agents at Write lose these tools:
+  - Firewall `add_firewall_rule`, `remove_firewall_rule`; nginx `update_nginx_config`; systemd
+    `manage_systemd_service` — Write → Admin (their UI pages already required Admin).
+  - `set_container_env` — Write → Admin: it writes the compose `.env` (any key) and runs `docker compose up -d`,
+    the same root-equivalent operation as saving the `.env` on the container page (already Admin).
+  - Database dump `backup_database` and certificate renewal `renew_ssl_certificate` — Write → Admin (their UI
+    pages already required Admin). A scheduled **DB backup task** now needs an Admin owner, with or without
+    retention.
+  - Scheduled tasks: creating and deleting a task follow the catalog on the page as well (Operator); the gateway
+    then holds each task type to what it runs (a custom command, retention, a DB dump or a self-backup needs Admin).
+  - Networks `create_network`, `remove_network`, `connect_container_to_network`,
+    `disconnect_container_from_network` — Write → Admin (Networks page requires Admin).
+  - Cloud `cloud_power_on`, `cloud_shutdown`, `cloud_reboot`, `cloud_hard_reset`, `cloud_create_snapshot` and
+    Hetzner `hetzner_disable_rescue`, `hetzner_enable_backups`, `hetzner_disable_backups`,
+    `hetzner_change_server_type`, `hetzner_delete_snapshot` — Write → Admin (Cloud page requires Admin;
+    `hetzner_enable_rescue` was already Admin).
+  - `gitdeploy.deploy` (UI) — Write → Admin: it is root-equivalent. The Git deploy page now shows the deploy button
+    to Admins only (it was shown to Operators).
+  - `create_scheduled_task` / `run_scheduled_task` stay Write, but the requirement — and therefore the approver's
+    level — is now resolved per task before the caller check and the approval: CustomCommand (`host.exec`),
+    SelfBackup (`selfbackup.create`/`selfbackup.prune`) and DB/volume backups with retention (`maxBackups` > 0,
+    the default 7; `db.backup_delete`/`volume.backup_delete`) require Admin, and so does every DB backup (a dump
+    holds every row). Pass `maxBackups=0` to keep a **volume** backup task at Write. The Scheduled tasks page sends
+    the same arguments and asks the same resolver for "Run now". Retention is read with the executor's own rule (`TaskExecutor.RetentionOf`), the one the
+    Scheduled tasks page already uses for "Run now".
 - **Deploying from the UI now requires Admin** (was Operator): the deploy form, the compose editor and the app store.
   A compose file can mount `/` or run privileged, which is root on the host. The MCP deploy tools already
   required Admin.
@@ -77,7 +121,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - What a task needs from its owner: a **custom-command** task needs an Admin owner (it runs as root on the host);
     a backup task whose **retention** deletes old backups (volume and DB backups) needs an Admin owner for the
     deletion; a **self-backup** task needs an Admin owner; the **cleanup** task (`docker system prune`) needs
-    Operator. Restart and backup tasks need Operator.
+    Operator. Restart tasks and volume backup tasks without retention need Operator; **every DB backup task needs
+    an Admin owner** (R1-05: a dump holds every row) — take an existing DB backup task owned by an Operator over as
+    an Admin, or it is refused.
   - **A task owned by an API key keeps every rule that binds the key**: tool deny/allow lists, forbidden arguments
     and confirmation. Where the policy would ask for a confirmation (the default preset does for every write by a
     key), the run is refused — nobody is there to confirm it. Have a person take the task over, or adjust the

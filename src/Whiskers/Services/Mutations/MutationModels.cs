@@ -101,6 +101,28 @@ public sealed record MutationOutcome<T>(
 
     /// <summary>The policy rules that produced a refusal or an approval request, if the policy step decided it.</summary>
     public IReadOnlyList<string> MatchedRules { get; init; } = [];
+
+    /// <summary>A stable code for a refusal the UI shows in the user's language (<see cref="MutationReasonCodes"/>);
+    /// <see cref="Reason"/> stays the English text for logs and the audit.</summary>
+    public string? ReasonCode { get; init; }
+
+    /// <summary>The values the localized text of <see cref="ReasonCode"/> fills in, in order.</summary>
+    public IReadOnlyList<string> ReasonArgs { get; init; } = [];
+}
+
+/// <summary>Refusal codes with a localized text (<c>Mutation_Refused_&lt;code&gt;</c> in the shared resources).</summary>
+public static class MutationReasonCodes
+{
+    /// <summary>{0} needs {1}, which is switched off in Settings → MCP.</summary>
+    public const string UnderlyingCapabilityDisabled = "UnderlyingCapabilityDisabled";
+
+    /// <summary>The operation's requirement could not be determined.</summary>
+    public const string RequirementUnresolved = "RequirementUnresolved";
+
+    public static readonly IReadOnlyList<string> All = [UnderlyingCapabilityDisabled, RequirementUnresolved];
+
+    /// <summary>The resource key of <paramref name="code"/>.</summary>
+    public static string KeyOf(string code) => "Mutation_Refused_" + code;
 }
 
 /// <summary>Handed to the execution delegate: the decided request (with its resolved target) and its capability.</summary>

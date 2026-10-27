@@ -9,6 +9,8 @@
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<AutomationOptions> AutomationOptions
 @inject IStringLocalizer<SharedResource> L
+@inject Whiskers.Services.Mutations.ICapabilityCatalog Capabilities
+@inject Whiskers.Services.Mutations.IEffectiveRequirementResolver Requirements
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
    enabled (via ModuleGuard), so a disabled module never reaches the ISchedulerService injection. *@
@@ -23,7 +25,8 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ScheduledTasksView_Header_Subtitle"]</MudText>
         </div>
         <MudSpacer />
-        @if (_role >= AppRole.Admin)
+        @* The catalog level of scheduler.create; the gateway then holds each task type to what it runs (R1-05). *@
+        @if (_role >= RoleOf("scheduler.create"))
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                        OnClick="ShowCreateDialog">@L["ScheduledTasksView_Button_CreateTask"]</MudButton>
@@ -176,6 +179,10 @@ else
                         }
                         <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
                                    ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
+                    }
+                    @* Deleting takes its level from the capability catalog, like its handler (R1-05). *@
+                    @if (_role >= RoleOf("scheduler.delete"))
+                    {
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => DeleteTask(context))" title="@L["ScheduledTasksView_Tooltip_Delete"]" />
                     }
@@ -313,13 +320,34 @@ else
         !string.IsNullOrWhiteSpace(task.CreatedBy)
         && OwnerResolver.Resolve(task.CreatedBy).PermissionLevel == McpPermissionLevels.Read;
 
-    // "Run now" of a custom command runs arbitrary shell text on a host, so it needs Admin (ADR-0005, PC-D2);
-    // every other task type keeps Operator.
-    // A custom command runs as root; a self-backup and any retention delete recovery points: Admin.
-    private static AppRole RunNowRole(Whiskers.Models.ScheduledTaskEntity task) =>
-        task.TaskType is ScheduledTaskType.CustomCommand or ScheduledTaskType.SelfBackup || RetentionDecision(task) is not null
-            ? AppRole.Admin
-            : AppRole.Operator;
+    // "Run now" asks the same resolver the gateway asks for scheduler.run (R1-05): a custom command runs as root, a
+    // DB dump holds every row, a self-backup and any retention delete recovery points. Anything it cannot answer
+    // (a switched-off capability, another resolver) is held to Admin: fail closed.
+    private AppRole RunNowRole(Whiskers.Models.ScheduledTaskEntity task)
+    {
+        try
+        {
+            return Requirements is Whiskers.Services.Mutations.SchedulerRequirementResolver scheduler
+                ? Whiskers.Services.Mutations.CapabilityCatalog.RoleFor(scheduler.LevelToRun(task))
+                : AppRole.Admin;
+        }
+        catch (Exception)
+        {
+            return AppRole.Admin;
+        }
+    }
+
+    /// <summary>The arguments the gateway decides <c>scheduler.create</c> on: everything that changes what the task
+    /// needs — its type and its retention (0 = none) — as the MCP tool sends them.</summary>
+    internal static object CreateArgumentsOf(Whiskers.Models.ScheduledTaskEntity task, int maxBackups, string? command) => new
+    {
+        name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, targetId = task.TargetId,
+        maxBackups, command,
+    };
+
+    private AppRole RoleOf(string capabilityId) =>
+        Whiskers.Services.Mutations.CapabilityCatalog.RoleFor(
+            Capabilities.Find(capabilityId)?.RequiredLevel ?? McpPermissionLevels.Admin);
 
     private bool Require(AppRole required)
     {
@@ -390,7 +418,7 @@ else
 
     private async Task CreateTask()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!Require(RoleOf("scheduler.create"))) return;
         if (!CanCreate) return;
         // The creator owns the task: every run re-checks their authority (PC-D6). Without an email the task would
         // fall into the grace period meant for tasks from before owners were recorded.
@@ -420,11 +448,7 @@ else
             };
             // The command goes to the policy; the audit row keeps only its length (it may carry credentials).
             await Mutations.RunAsync("scheduler.create",
-                new
-                {
-                    name = newTask.Name, taskType = newTask.TaskType.ToString(), serverId = newTask.ServerId,
-                    command = config.GetValueOrDefault("command"),
-                },
+                CreateArgumentsOf(newTask, Math.Max(_formMaxBackups, 0), config.GetValueOrDefault("command")),
                 _ => Scheduler.CreateTaskAsync(newTask));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "task.create", "scheduled-task", _formName, _formName, serverId: _formServerId);
@@ -614,7 +638,8 @@ else
 
     private async Task DeleteTask(Whiskers.Models.ScheduledTaskEntity task)
     {
-        if (!Require(AppRole.Admin)) return;
+        // The level comes from the capability catalog, the one table the MCP tool uses too (R1-05).
+        if (!Require(RoleOf("scheduler.delete"))) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ScheduledTasksView_Dialog_DeleteTitle"].Value,
             L["ScheduledTasksView_Dialog_DeleteMessage", task.Name].Value,

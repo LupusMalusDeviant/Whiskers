@@ -43,6 +43,7 @@ public sealed class MutationGateway : IMutationGateway
     private readonly ICapabilityOverrides? _overrides;
     private readonly IMutationTargetResolver? _targets;
     private readonly IApprovalGate? _approvals;
+    private readonly IEffectiveRequirementResolver? _requirements;
 
     /// <param name="overrides">Tool switches and stricter stored levels (INV-15); none = catalog levels only.</param>
     /// <param name="targets">Target resolution (INV-57); none = targets are taken as given.</param>
@@ -56,7 +57,8 @@ public sealed class MutationGateway : IMutationGateway
         TimeProvider? time = null,
         ICapabilityOverrides? overrides = null,
         IMutationTargetResolver? targets = null,
-        IApprovalGate? approvals = null)
+        IApprovalGate? approvals = null,
+        IEffectiveRequirementResolver? requirements = null)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
@@ -68,6 +70,7 @@ public sealed class MutationGateway : IMutationGateway
         _overrides = overrides;
         _targets = targets;
         _approvals = approvals;
+        _requirements = requirements;
     }
 
     public async Task<MutationOutcome<T>> ExecuteAsync<T>(
@@ -111,6 +114,36 @@ public sealed class MutationGateway : IMutationGateway
                 return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
                     $"'{capability.McpTool ?? capability.Id}' is disabled in Settings → MCP.", ct);
             capability = capability with { RequiredLevel = availability.RequiredLevel };
+        }
+
+        // R1-05: what the arguments make of the operation (a scheduled CustomCommand is host.exec). Only ever stricter,
+        // and set before the caller check and the approval, so neither is held to the outer tool's level.
+        if (_requirements is not null)
+        {
+            try
+            {
+                var effective = await _requirements.ResolveAsync(capability, request.Arguments, ct);
+                capability = capability with
+                {
+                    RequiredLevel = SchedulerRequirementResolver.Stricter(capability.RequiredLevel, effective),
+                };
+            }
+            catch (CapabilityDisabledException disabled)
+            {
+                var outer = capability.McpTool ?? capability.Id;
+                var underlying = disabled.Capability.McpTool ?? disabled.Capability.Id;
+                return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
+                    $"'{outer}' needs '{underlying}', which is disabled in Settings → MCP.", ct)
+                    with { ReasonCode = MutationReasonCodes.UnderlyingCapabilityDisabled, ReasonArgs = [outer, underlying] };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "The requirement of {Capability} could not be resolved (operation {OperationId})",
+                    capability.Id, operationId);
+                return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
+                    "The operation's requirement could not be determined; the mutation was refused.", ct)
+                    with { ReasonCode = MutationReasonCodes.RequirementUnresolved };
+            }
         }
 
         if (!McpPermissionLevels.HasAccess(McpPermissionLevels.Normalize(request.Principal.PermissionLevel), capability.RequiredLevel))

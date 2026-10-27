@@ -150,37 +150,37 @@ mutating tools do for their own error texts).
 | M-03 | `restart_container` | write | ❌ | AL ✅ | INV-43, 59 |
 | M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | AL ✅ | INV-43, 44, 53 |
 | M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43, 24 (YAML free text) |
-| M-06 | `set_container_env` | write | ❌ | AL ✅ | INV-43, 51 |
+| M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | AL ✅ | INV-43, 51 |
 | M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43, 24 |
 | M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text), 43 |
-| M-09 | `add_firewall_rule` | write (UI: Admin) | ❌ | AL ✅ | INV-13, 43 |
-| M-10 | `remove_firewall_rule` | write (UI: Admin) | ❌ | AL ✅ | INV-13, 43 |
-| M-11 | `update_nginx_config` | write (UI: Admin) | ⚠️ `nginx -t` pre-check | AL ✅ | INV-13, 41 (E-03) |
-| M-12 | `manage_systemd_service` | write (UI: Admin) | ❌ | AL ✅ | INV-13, 43 |
-| M-13 | `renew_ssl_certificate` | write | ❌ | AL ✅ | INV-43 |
+| M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
+| M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
+| M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ⚠️ `nginx -t` pre-check | AL ✅ | 41 (E-03) |
+| M-12 | `manage_systemd_service` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
+| M-13 | `renew_ssl_certificate` | admin (R1-05) | ❌ | AL ✅ | INV-43 |
 | M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service | AL ✅ | INV-58 |
 | M-15 | `execute_query` | **admin** (PC-D3) | ❌ | ❌ AH only | INV-19 (PC-D3), 24, 43, 45 |
-| M-16 | `backup_database` | write | ❌ | AL ✅ | INV-43 |
+| M-16 | `backup_database` | admin (R1-05) | ❌ | AL ✅ | INV-43 |
 | M-17 | `set_dns_record` | write | ❌ | AL ✅ | INV-43, 52 (DNS token) |
 | M-18 | `delete_dns_record` | write | ❌ | AL ✅ | INV-43, 52 |
-| M-19 | `create_network` | write (UI: Admin) | ❌ | AL ✅ | INV-13 |
-| M-20 | `remove_network` | write (UI: Admin) | ❌ | AL ✅ | INV-13 |
-| M-21 | `connect_container_to_network` | write | ❌ | ❌ AH only | INV-45 |
-| M-22 | `disconnect_container_from_network` | write | ❌ | ❌ AH only | INV-45 |
-| M-23 | `create_scheduled_task` | write (+admin for custom command) | n/a | AL ✅ | INV-04, 34 (approval at write level) |
+| M-19 | `create_network` | **admin** (R1-05; was write) | ❌ | AL ✅ | — |
+| M-20 | `remove_network` | **admin** (R1-05; was write) | ❌ | AL ✅ | — |
+| M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45 |
+| M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45 |
+| M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | n/a | AL ✅ | INV-04 |
 | M-24 | `delete_scheduled_task` | write | n/a | AL ✅ | — |
-| M-25 | `run_scheduled_task` | write (+admin for custom command) | ❌ | AL ✅ | INV-24 (policy sees only `taskId`), 30, 43 |
-| M-26 | `cloud_power_on` | write | ❌ | ❌ AH only | INV-43, 45, 52 |
-| M-27 | `cloud_shutdown` | write (UI: Admin) | ❌ | ❌ AH only | INV-13, 43, 45, 52 |
-| M-28 | `cloud_reboot` | write | ❌ | ❌ AH only | INV-43, 45, 52 |
-| M-29 | `cloud_hard_reset` | write (UI: Admin) | ❌ | ❌ AH only | INV-13, 43, 45, 52 |
-| M-30 | `cloud_create_snapshot` | write | ❌ | ❌ AH only | INV-43, 45, 52 |
+| M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup, DB backup or retention, resolved before the caller check and the approval (R1-05) | ❌ | AL ✅ | INV-24 (policy sees only `taskId`), 30, 43 |
+| M-26 | `cloud_power_on` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
+| M-27 | `cloud_shutdown` | **admin** (R1-05; was write) | ❌ | ❌ AH only | 43, 45, 52 |
+| M-28 | `cloud_reboot` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
+| M-29 | `cloud_hard_reset` | **admin** (R1-05; was write) | ❌ | ❌ AH only | 43, 45, 52 |
+| M-30 | `cloud_create_snapshot` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
 | M-31 | `hetzner_enable_rescue` | admin | ❌ | AL ✅ | INV-51 (returns root password), 52 |
-| M-32 | `hetzner_disable_rescue` | write | ❌ | ❌ AH only | INV-45, 52 |
-| M-33 | `hetzner_enable_backups` | write | ❌ | ❌ AH only | INV-45, 52 |
-| M-34 | `hetzner_disable_backups` (deletes backups) | write (UI: Admin) | ❌ | ❌ AH only | INV-13, 45, 52 |
-| M-35 | `hetzner_change_server_type` | write | ❌ | ❌ AH only | INV-13, 43, 45, 52 |
-| M-36 | `hetzner_delete_snapshot` (irreversible) | write | ❌ | ❌ AH only | INV-13, 45, 52 |
+| M-32 | `hetzner_disable_rescue` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45, 52 |
+| M-33 | `hetzner_enable_backups` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45, 52 |
+| M-34 | `hetzner_disable_backups` (deletes backups) | **admin** (R1-05; was write) | ❌ | ❌ AH only | 45, 52 |
+| M-35 | `hetzner_change_server_type` | **admin** (R1-05; was write) | ❌ | ❌ AH only | 43, 45, 52 |
+| M-36 | `hetzner_delete_snapshot` (irreversible) | **admin** (R1-05; was write) | ❌ | ❌ AH only | 45, 52 |
 | M-37 | `create_log_alert` (feeds AI triggers) | write | n/a | ❌ AH only | INV-27, 45, 46 |
 | M-38 | `pause_server_checks` | write | n/a | ❌ AH only | INV-45 |
 | M-39 | `resume_server_checks` | write | n/a | ❌ AH only | INV-45 |
@@ -241,9 +241,9 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-10 | Deploy form / raw compose | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
 | U-11 | App store template / registry image | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
 | U-12 | Compose editor | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
-| U-13 | Networks create/remove | Admin | ❌ | AL ✅ | INV-13 (MCP: write) |
+| U-13 | Networks create/remove | Admin | ❌ | AL ✅ | — (MCP admin since R1-05) |
 | U-14 | Firewall enable/disable UFW | Admin | ❌ | ❌ | INV-45 |
-| U-15 | Firewall rule add/remove (dialog submit unchecked) | Admin | ❌ | AL ✅ | INV-17 |
+| U-15 | Firewall rule add/remove (dialog submit has no page check; the gateway requires Admin for `firewall.rule_add` since R1-05) | Admin | ❌ | AL ✅ | INV-17 |
 | U-16 | Nginx save/enable/disable site | Admin | ⚠️ `nginx -t` | AL ✅ | INV-41 (E-03) |
 | U-17 | Nginx reload | Admin | ❌ | ❌ | INV-45 |
 | U-18 | Systemd start/stop/restart | Admin | ❌ | AL ✅ | INV-43 |
@@ -254,14 +254,14 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-23 | Cloud power / snapshot | Admin | ❌ | AL ✅ | INV-43, 52 |
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | AL ✅ | INV-43 |
 | U-25 | Self-backup create / delete / restore | Admin | ⚠️ archive validation | AL ✅ | INV-55 |
-| U-26 | Scheduled tasks create / toggle / delete | Admin | — | AL ✅ | INV-04 |
-| U-27 | Scheduled task "Run now" | Operator; custom command **Admin** (WP2) | ❌ | AL ✅ | INV-43 |
+| U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | AL ✅ | INV-04 |
+| U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | AL ✅ | INV-43 |
 | U-28 | Webhooks create / regenerate / toggle / delete / test | Admin; test = Operator | — | AL ✅ | INV-04, 19 (test fires the real action at Operator) |
-| U-29 | Git-deploy app save / delete; deploy | Admin; deploy = Operator | ❌ | save/delete ❌, deploy ✅ | INV-41 (branch), 46 |
+| U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | save/delete ❌, deploy ✅ | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |
 | U-31 | AI triggers save (prompt, preset, MaxLevel) | Admin | — | ❌ ILogger only | INV-23, 27, 28, 46 |
 | U-32 | Guardrail policy edit / preset switch / kill switch | Admin | — | ❌ ILogger only | INV-28, 46 |
-| U-33 | Approvals approve / reject | approve: level ≥ tool level; reject: anyone | — | ❌ | INV-31, 32, 33, 34, 37 |
+| U-33 | Approvals approve / reject | approve: level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); reject: anyone | — | ❌ | INV-31, 32, 33, 34, 37 |
 | U-34 | Settings: keys, tool levels, roles, whitelist, vault, terminal | Admin | — | AL ✅ | INV-15, 16, 17 (C-24) |
 
 ### 7.6 Totals

@@ -151,7 +151,7 @@ public class DatabaseTools
         return sb.ToString();
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Create a database backup (dump) for a database container.")]
     public static async Task<string> BackupDatabase(
         IHttpContextAccessor httpContextAccessor,

@@ -11,8 +11,10 @@ their `Confirm` outright, since nobody could approve it and a later run of the s
    through [`ApprovalCoordinator`](../Agent/Approvals/ApprovalCoordinator.cs) with the call's correlation id and the
    hash of its arguments. Once a human approves, the session continues, and the Mutation Gateway asks
    `ApprovalGate` whether an approval exists for **this operation** (correlation id + session + tool) with **these
-   arguments**. The session pauses on the same level the gateway uses (the tool's stored level in Settings → MCP,
-   if stricter).
+   arguments**. The session pauses on the same level the gateway uses: the tool's level (stricter if stored in Settings → MCP)
+   raised to the operation's **effective** level (`IEffectiveRequirementResolver`, R1-05 — e.g. Admin for a
+   scheduled custom command). An approval below the current effective level is never used (`ApprovalGate`), and
+   the approver must hold that level.
 2. **Direct MCP call** (cannot wait): `ApprovalGate` raises an approval and refuses the call; once a human approved
    it, the identical call (same caller, tool and arguments) runs once within ten minutes (approve-then-retry).
    Concurrent identical first calls share one approval. Retry entries whose approval was rejected, expired or used

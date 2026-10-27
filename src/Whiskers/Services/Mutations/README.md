@@ -102,7 +102,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 |---|---|
 | `MutationAttributes.cs` | `[MutatingOperation("<area>.<verb>")]` on service-interface methods that change infrastructure; `[MutationHandler]` on classes allowed to call them; `[MutationEntryPoint]` on the runner methods whose lambda argument the architecture test counts as gated. |
 | `MutationModels.cs` | `Capability`, `CapabilityRisk`, `MutationPrincipal` (incl. `OnBehalfOf`, `AllowedTools`), `MutationSurface`, `MutationTarget`, `MutationRequest`, `MutationOutcome<T>` (incl. `ApprovalId`, `MatchedRules`), `MutationContext`. |
-| `CapabilityCatalog.cs` | `ICapabilityCatalog` — the single table of mutating capabilities (INV-13). An MCP-exposed capability takes its tool's level from `McpPermissionLevels.DefaultToolLevels`, a UI-only one the role its handler checks. |
+| `CapabilityCatalog.cs` | `ICapabilityCatalog` — the single table of mutating capabilities and their levels (INV-13, R1-05). `McpPermissionLevels.DefaultToolLevels` takes its mutating entries from it; `RoleFor` maps a level to the UI role pages check (`CapabilityTableConsistencyTests` holds hard-coded page roles to it). |
 | `CapabilityOverrides.cs` | `ICapabilityOverrides` + `McpToolCapabilityOverrides`: the MCP tool's Enabled switch and a stricter stored level (Settings → MCP), applied for **every** principal kind (INV-15). The catalog level is the floor. |
 | `MutationTargets.cs` | `MutationTargets.FromArguments` (target from tool arguments) and `IMutationTargetResolver` + `MutationTargetResolver`: containers resolve by id, name or unique prefix to their full id and name; an unknown or ambiguous container is refused before policy (INV-57). Other kinds pass through for now. |
 | `MutationGateway.cs` | `IMutationGateway` + `MutationGateway` (the pipeline) and `IMutationVerifier`. |
@@ -112,7 +112,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `FederatedSignInRecorder.cs` | Blazor `CircuitHandler` that records a federated sign-in (`IOwnerAccounts.RememberFederated`) from the circuit's authentication state; only observes, never touches the sign-in itself (R1-04). |
 | `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file blocks every feature until each is taken over. |
 | `ComposeImpact.cs` | Existing containers a `docker compose up` would touch (project label or working directory) and `RunForEachAsync`, one nested UI decision per container. |
-| `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. |
+| `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. A refusal with a `ReasonCode` (`MutationReasonCodes`, R1-05) is shown in the user's language (`Mutation_Refused_<code>`); the audit keeps the English `Reason`. |
 | `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`), so a protected container is caught by id prefix too. Without engine or store it refuses everything. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
 | `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. |
@@ -232,3 +232,13 @@ module off) and `MutationBypassArchitectureTests`, which reads method IL and com
 outside the gateway with [`docs/v1/mutation-bypass-baseline.txt`](../../../../docs/v1/mutation-bypass-baseline.txt).
 An MCP tool mapped to a capability counts as inside the gateway, because both dispatchers run it there. The baseline
 may only shrink: 104 lines after step 2.0, 75 after step 2.1, 29 after step 2.2, 23 after step 2.3.
+
+## Levels and effective requirements (R1-05)
+
+`CapabilityCatalog` is the one level table: every capability states its level, and
+`McpPermissionLevels.DefaultToolLevels` takes the level of every mutating tool from
+`CapabilityCatalog.McpToolLevels`. Root-equivalent capabilities are Admin. `EffectiveRequirements.cs` holds
+`IEffectiveRequirementResolver`; the gateway raises (never lowers) a capability's level with it before the caller
+check and before an approval is requested. `SchedulerRequirementResolver` gives a scheduled task the level of what it
+runs (CustomCommand → `host.exec`, retention → `*.backup_delete`, SelfBackup → `selfbackup.*`) and fails closed when
+the scheduler is unavailable. `CapabilityTableConsistencyTests` and `ApprovalSeparationOfDutyTests` guard both.

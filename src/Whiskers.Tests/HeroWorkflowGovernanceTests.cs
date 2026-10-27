@@ -1,3 +1,5 @@
+using Whiskers.Services.Scheduler;
+using Whiskers.Services.Mutations;
 using System.Runtime.CompilerServices;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -122,13 +124,15 @@ public class HeroWorkflowGovernanceTests
     /// the test asserts on. <paramref name="decide"/> resolves the approval (true=approve) — or leave it
     /// null to never resolve.</summary>
     private static async Task<(CapturingInvoker invoker, Approval approval, ApprovalStore store, CapturingNotify notify)>
-        RunToConfirm(Func<ApprovalStore, Approval, Task>? decide, TimeSpan? ttl = null)
+        RunToConfirm(Func<ApprovalStore, Approval, Task>? decide, TimeSpan? ttl = null,
+            string tool = "restart_container", string args = RestartArgs, IEffectiveRequirementResolver? requirements = null)
     {
         var invoker = new CapturingInvoker();
-        var session = Session(new FakeProvider(ToolTurn("restart_container", RestartArgs)), invoker, new ConfirmEngine());
+        var session = Session(new FakeProvider(ToolTurn(tool, args)), invoker, new ConfirmEngine());
         var store = new ApprovalStore(approvalTtl: ttl);
         var notify = new CapturingNotify();
-        var coord = new ApprovalCoordinator(store, notify, new FakeGuardrailStore());
+        var coord = new ApprovalCoordinator(store, notify, new FakeGuardrailStore(),
+            catalog: requirements is null ? null : Catalog, requirements: requirements);
 
         // Safety backstop: a governance test must never hang. If a path deliberately leaves the
         // approval unresolved (e.g. rejected-by-level, or "card only"), we cancel to end the session's
@@ -150,6 +154,58 @@ public class HeroWorkflowGovernanceTests
         }
         Assert.NotNull(approval);
         return (invoker, approval!, store, notify);
+    }
+
+    // ---- R1-05: scheduler approvals at the effective requirement ------------
+
+    private static readonly CapabilityCatalog Catalog = new();
+
+    private const string CustomCommandCreate =
+        "{\"name\":\"n\",\"cronExpression\":\"0 2 * * *\",\"taskType\":\"CustomCommand\",\"command\":\"id\"}";
+
+    private static SchedulerRequirementResolver Requirements(params ScheduledTaskEntity[] tasks) =>
+        new(Catalog, new SchedulerOnly(ApprovalSeparationOfDutyTests.SchedulerProxy.Create(tasks.ToList())));
+
+    private sealed class SchedulerOnly(object scheduler) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) => serviceType == typeof(ISchedulerService) ? scheduler : null;
+    }
+
+    public static IEnumerable<object[]> AdminSchedulerCalls()
+    {
+        yield return ["create_scheduled_task", CustomCommandCreate];
+        yield return ["run_scheduled_task", "{\"taskId\":\"t-cmd\"}"];
+    }
+
+    private static readonly ScheduledTaskEntity CommandTask =
+        new() { TaskId = "t-cmd", TaskType = ScheduledTaskType.CustomCommand, Config = "{\"command\":\"id\"}" };
+
+    [Theory]
+    [MemberData(nameof(AdminSchedulerCalls))]
+    public async Task A_write_approver_cannot_approve_a_scheduled_custom_command(string tool, string args)
+    {
+        var resolvedByOperator = true;
+        var (invoker, approval, _, _) = await RunToConfirm(async (store, a) =>
+                resolvedByOperator = await store.ResolveAsync(a.Id, approved: true, "operator@x", McpPermissionLevels.Write),
+            tool: tool, args: args, requirements: Requirements(CommandTask));
+
+        Assert.Equal(McpPermissionLevels.Admin, approval.Level);
+        Assert.False(resolvedByOperator);
+        Assert.Equal(ApprovalStatus.Pending, approval.Status);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Theory]
+    [MemberData(nameof(AdminSchedulerCalls))]
+    public async Task An_admin_approver_can_approve_a_scheduled_custom_command(string tool, string args)
+    {
+        var (invoker, approval, _, _) = await RunToConfirm(
+            (store, a) => store.ResolveAsync(a.Id, approved: true, "admin@x", McpPermissionLevels.Admin),
+            tool: tool, args: args, requirements: Requirements(CommandTask));
+
+        Assert.Equal(McpPermissionLevels.Admin, approval.Level);
+        Assert.Equal(ApprovalStatus.Approved, approval.Status);
+        Assert.Equal(1, invoker.Calls);
     }
 
     // ---- the hero workflow -------------------------------------------------

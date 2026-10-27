@@ -28,12 +28,17 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     private readonly IGuardrailStore _guardrails;
     private readonly ILogger<ApprovalCoordinator>? _logger;
     private readonly ICapabilityOverrides? _overrides;
+    private readonly ICapabilityCatalog? _catalog;
+    private readonly IEffectiveRequirementResolver? _requirements;
 
     public ApprovalCoordinator(
         IApprovalStore store, INotificationService notify, IGuardrailStore guardrails,
-        ILogger<ApprovalCoordinator>? logger = null, ICapabilityOverrides? overrides = null)
+        ILogger<ApprovalCoordinator>? logger = null, ICapabilityOverrides? overrides = null,
+        ICapabilityCatalog? catalog = null, IEffectiveRequirementResolver? requirements = null)
     {
         _overrides = overrides;
+        _catalog = catalog;
+        _requirements = requirements;
         _store = store;
         _notify = notify;
         _guardrails = guardrails;
@@ -50,6 +55,23 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
         // A stricter level stored in Settings → MCP raises what the approver must hold.
         if (_overrides is not null)
             level = _overrides.ResolveTool(call.Name, level).RequiredLevel;
+        var arguments = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
+        // R1-05: the approver is held to what the call really does (a scheduled CustomCommand is host.exec), the same
+        // effective requirement the Mutation Gateway checks before it accepts this approval. Fail closed: if it
+        // cannot be determined, the approval asks for Admin.
+        if (_requirements is not null && _catalog?.FindByMcpTool(call.Name) is { } capability)
+        {
+            try
+            {
+                var effective = await _requirements.ResolveAsync(capability with { RequiredLevel = level }, arguments, default);
+                level = SchedulerRequirementResolver.Stricter(level, effective);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Effective requirement of {Tool} could not be resolved; the approval asks for Admin", call.Name);
+                level = McpPermissionLevels.Admin;
+            }
+        }
         var (targetServer, targetWorkload) = ApprovalDisplay.ExtractTarget(call.ArgumentsJson);
         var rule = decision.MatchedRuleIds.Count > 0 ? string.Join(", ", decision.MatchedRuleIds) : null;
 
@@ -69,7 +91,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             GuardrailPreset: _guardrails.Config.ActivePreset,
             GuardrailRule: rule,
             // Binds the approval to these exact arguments: the Mutation Gateway runs the call only if they match.
-            ArgumentsHash: ApprovalFingerprint.OfArguments(AgentArgumentBinder.ParseArguments(call.ArgumentsJson)));
+            ArgumentsHash: ApprovalFingerprint.OfArguments(arguments));
 
         // The resolver reaches back to the still-running session that is awaiting the decision.
         var approval = _store.Create(request, approved => session.ResolveConfirmationAsync(call.Id, approved));
