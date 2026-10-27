@@ -36,14 +36,11 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
         switch (capability.Id)
         {
             case "scheduler.create":
-                // The tool refuses an unparseable type itself; it can only lower nothing, so keep the outer level.
-                if (!arguments.TryGetValue("taskType", out var t) || t.ValueKind != JsonValueKind.String
-                    || !Enum.TryParse<ScheduledTaskType>(t.GetString(), true, out var type))
-                    return capability.RequiredLevel;
-                // The tool's default for maxBackups is 7, so a missing value means retention runs.
-                var maxBackups = arguments.TryGetValue("maxBackups", out var m) && m.ValueKind == JsonValueKind.Number
-                    ? m.GetInt32() : 7;
-                return LevelFor(type, maxBackups > 0);
+                // Same representations the tool accepts after the agent binder (a name or a number, as text or as a
+                // JSON number). Anything else, or a number outside the enum, is held to Admin: fail closed.
+                if (!TryTaskType(arguments, out var type))
+                    return McpPermissionLevels.Admin;
+                return LevelFor(type, RetentionRequested(arguments));
 
             case "scheduler.run":
                 if (!arguments.TryGetValue("taskId", out var id) || id.ValueKind != JsonValueKind.String)
@@ -75,6 +72,59 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
     public static string Stricter(string a, string? b) =>
         b is null || McpPermissionLevels.HasAccess(a, b) ? a : b;
 
-    private string LevelOf(string capabilityId) =>
-        _catalog.Find(capabilityId)?.RequiredLevel ?? McpPermissionLevels.Admin;
+    /// <summary>
+    /// The level of an underlying capability, including a stricter level configured in Settings → MCP. A disabled
+    /// underlying capability refuses the operation (the gateway turns the exception into a Deny).
+    /// </summary>
+    private string LevelOf(string capabilityId)
+    {
+        var capability = _catalog.Find(capabilityId);
+        if (capability is null)
+            return McpPermissionLevels.Admin;
+        var overrides = _services.GetService<ICapabilityOverrides>();
+        if (overrides is null)
+            return capability.RequiredLevel;
+        var availability = overrides.Resolve(capability);
+        if (!availability.Enabled)
+            throw new CapabilityDisabledException(capability);
+        return Stricter(capability.RequiredLevel, availability.RequiredLevel);
+    }
+
+    /// <summary>Reads <c>taskType</c> the way <c>create_scheduled_task</c> does; only defined enum values count.</summary>
+    public static bool TryTaskType(IReadOnlyDictionary<string, JsonElement> arguments, out ScheduledTaskType type)
+    {
+        type = default;
+        if (!arguments.TryGetValue("taskType", out var t))
+            return false;
+        var text = t.ValueKind switch
+        {
+            JsonValueKind.String => t.GetString(),
+            JsonValueKind.Number => t.GetRawText(),
+            _ => null,
+        };
+        return text is not null && Enum.TryParse(text.Trim(), true, out type) && Enum.IsDefined(type);
+    }
+
+    /// <summary>
+    /// Whether the created task will prune old backups: the tool stores <c>maxBackups</c> only when it is above 0 and
+    /// defaults to 7, so absent or null means retention. A value that cannot be read as an integer is treated as
+    /// retention (the stricter reading).
+    /// </summary>
+    public static bool RetentionRequested(IReadOnlyDictionary<string, JsonElement> arguments)
+    {
+        if (!arguments.TryGetValue("maxBackups", out var m) || m.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return true;
+        if (m.ValueKind == JsonValueKind.Number && m.TryGetInt32(out var n))
+            return n > 0;
+        if (m.ValueKind == JsonValueKind.String && int.TryParse(m.GetString()?.Trim(), out var s))
+            return s > 0;
+        return true;
+    }
+}
+
+/// <summary>An operation needs a capability that is switched off in Settings → MCP.</summary>
+public sealed class CapabilityDisabledException(Capability capability)
+    : InvalidOperationException($"'{capability.McpTool ?? capability.Id}' is disabled in Settings → MCP.")
+{
+    public Capability Capability { get; } = capability;
 }

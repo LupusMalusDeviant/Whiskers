@@ -213,4 +213,37 @@ public class ApprovalGateTests
         public TimeSpan Shift { get; set; }
         public override DateTimeOffset GetUtcNow() => base.GetUtcNow() + Shift;
     }
+
+    [Fact]
+    public async Task An_approval_below_the_effective_requirement_is_never_used()
+    {
+        // R1-05: raised at Write (the outer tool's level) and approved by an Operator, but the gateway now needs Admin.
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store);
+        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        Assert.True(await store.ResolveAsync(approval.Id, approved: true, "operator@x", McpPermissionLevels.Write));
+
+        var admin = SessionCall("s1", "op-1", "web-1") with { Level = McpPermissionLevels.Admin };
+        var result = await gate.CheckAsync(admin, "needs a human", []);
+        Assert.False(result.Approved);
+        Assert.Contains("requires 'admin'", result.Message);
+
+        // At its own level the same approval still counts.
+        Assert.True((await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", [])).Approved);
+    }
+
+    [Fact]
+    public async Task A_retried_call_at_a_higher_level_raises_a_new_approval()
+    {
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store);
+        var write = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "k", "k", "mcp", Args("web-1"));
+        var first = await gate.CheckAsync(write, "needs a human", []);
+        Assert.True(await store.ResolveAsync(first.ApprovalId!, approved: true, "operator@x", McpPermissionLevels.Write));
+
+        var retried = await gate.CheckAsync(write with { Level = McpPermissionLevels.Admin }, "needs a human", []);
+        Assert.False(retried.Approved);
+        Assert.NotEqual(first.ApprovalId, retried.ApprovalId);
+        Assert.Equal(McpPermissionLevels.Admin, store.Get(retried.ApprovalId!)!.Level);
+    }
 }

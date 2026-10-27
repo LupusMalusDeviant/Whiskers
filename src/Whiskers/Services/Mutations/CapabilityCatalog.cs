@@ -22,6 +22,14 @@ public interface ICapabilityCatalog
 /// </summary>
 public sealed class CapabilityCatalog : ICapabilityCatalog
 {
+    /// <summary>The UI role that holds a catalog level, so pages take their requirement from this table (R1-05).</summary>
+    public static AppRole RoleFor(string level) => McpPermissionLevels.Normalize(level) switch
+    {
+        McpPermissionLevels.Admin => AppRole.Admin,
+        McpPermissionLevels.Write => AppRole.Operator,
+        _ => AppRole.Viewer,
+    };
+
     private static readonly TimeSpan Short = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan Normal = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan Long = TimeSpan.FromMinutes(30);

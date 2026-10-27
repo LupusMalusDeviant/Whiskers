@@ -66,4 +66,49 @@ public class CapabilityTableConsistencyTests
     public void Every_non_read_mcp_tool_has_a_capability() =>
         Assert.All(McpPermissionLevels.DefaultToolLevels.Where(kv => kv.Value != McpPermissionLevels.Read),
             kv => Assert.NotNull(Catalog.FindByMcpTool(kv.Key)));
+
+    /// <summary>A UI role holds exactly the catalog level it maps to, so pages that ask the catalog agree with MCP.</summary>
+    [Theory]
+    [MemberData(nameof(Capabilities))]
+    public void The_ui_role_of_every_capability_holds_its_level_and_no_more(string id)
+    {
+        var level = Catalog.Find(id)!.RequiredLevel;
+        var role = CapabilityCatalog.RoleFor(level);
+        Assert.True(McpPermissionLevels.HasAccess(Level(role), level));
+        if (role > AppRole.Viewer)
+            Assert.False(McpPermissionLevels.HasAccess(Level(role - 1), level));
+    }
+
+    private static string Level(AppRole role) => role switch
+    {
+        AppRole.Admin => McpPermissionLevels.Admin,
+        AppRole.Operator => McpPermissionLevels.Write,
+        _ => McpPermissionLevels.Read,
+    };
+
+    /// <summary>Every capability a page runs through the gateway is in the catalog (UI-only ones included), and the
+    /// Scheduled tasks page takes the delete level from the catalog instead of a hard-coded role.</summary>
+    [Fact]
+    public void Every_capability_a_page_runs_is_in_the_catalog()
+    {
+        var components = Path.Combine(SourceRoot(), "src", "Whiskers", "Components");
+        var ids = Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories)
+            .SelectMany(f => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(f), @"RunAsync\(\s*""([a-z_]+\.[a-z_.]+)""")
+                .Select(m => (File: Path.GetFileName(f), Id: m.Groups[1].Value)))
+            .ToList();
+        Assert.NotEmpty(ids);
+        Assert.All(ids, x => Assert.True(Catalog.Find(x.Id) is not null, $"{x.File}: {x.Id}"));
+        Assert.Contains(ids, x => Catalog.Find(x.Id)!.McpTool is null);
+
+        var page = File.ReadAllText(Path.Combine(components, "Pages", "ScheduledTasksView.razor"));
+        Assert.Contains("Require(RoleOf(\"scheduler.delete\"))", page);
+    }
+
+    private static string SourceRoot()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+            if (File.Exists(Path.Combine(dir.FullName, "Whiskers.slnx")))
+                return dir.FullName;
+        throw new InvalidOperationException("Whiskers.slnx not found above the test output.");
+    }
 }

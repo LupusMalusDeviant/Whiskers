@@ -68,9 +68,73 @@ public class ApprovalSeparationOfDutyTests
             resolver.ResolveAsync(Catalog.Find("scheduler.run")!, Args(new { taskId = "x" }), CancellationToken.None));
     }
 
-    private sealed class Services(object? scheduler) : IServiceProvider
+    private sealed class Services(object? scheduler, ICapabilityOverrides? overrides = null) : IServiceProvider
     {
-        public object? GetService(Type serviceType) => serviceType == typeof(ISchedulerService) ? scheduler : null;
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(ISchedulerService) ? scheduler
+            : serviceType == typeof(ICapabilityOverrides) ? overrides : null;
+    }
+
+    private sealed class Overrides(string id, bool enabled, string level) : ICapabilityOverrides
+    {
+        public CapabilityAvailability Resolve(Capability capability) =>
+            capability.Id == id ? new(enabled, level) : new(true, capability.RequiredLevel);
+
+        public CapabilityAvailability ResolveTool(string toolName, string codeLevel) => new(true, codeLevel);
+    }
+
+    [Theory]
+    [InlineData("CustomCommand")]
+    [InlineData("customcommand")]
+    [InlineData("3")]
+    [InlineData("SelfBackup")]
+    [InlineData("6")]
+    public async Task Every_accepted_task_type_form_is_resolved(string form)
+    {
+        var expected = Resolver().LevelFor(Enum.Parse<ScheduledTaskType>(form, true), retention: true);
+        Assert.Equal(expected, await Create(new { taskType = form }));
+        if (int.TryParse(form, out var n))
+            Assert.Equal(expected, await Create(new { taskType = n }));
+    }
+
+    [Theory]
+    [InlineData("99")]
+    [InlineData("NoSuchType")]
+    [InlineData("")]
+    public async Task An_unrecognized_task_type_fails_closed(string form)
+    {
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = form }));
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = true }));
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { name = "no type" }));
+    }
+
+    [Fact]
+    public async Task Retention_is_read_like_the_tool_reads_maxBackups()
+    {
+        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "DbBackup", maxBackups = "0" }));
+        Assert.Equal(McpPermissionLevels.Write, await Create(new { taskType = "DbBackup", maxBackups = -1 }));
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup", maxBackups = "5" }));
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup", maxBackups = (int?)null }));
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup" }));
+        Assert.Equal(McpPermissionLevels.Admin, await Create(new { taskType = "DbBackup", maxBackups = "many" }));
+    }
+
+    [Fact]
+    public async Task A_raised_level_of_the_underlying_capability_applies()
+    {
+        var resolver = new SchedulerRequirementResolver(Catalog,
+            new Services(null, new Overrides("container.restart", true, McpPermissionLevels.Admin)));
+        Assert.Equal(McpPermissionLevels.Admin, await resolver.ResolveAsync(Catalog.Find("scheduler.create")!,
+            Args(new { taskType = "ContainerRestart", targetId = "web" }), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_disabled_underlying_capability_refuses()
+    {
+        var resolver = new SchedulerRequirementResolver(Catalog,
+            new Services(null, new Overrides("container.restart", false, McpPermissionLevels.Write)));
+        await Assert.ThrowsAsync<CapabilityDisabledException>(() => resolver.ResolveAsync(Catalog.Find("scheduler.create")!,
+            Args(new { taskType = "ContainerRestart", targetId = "web" }), CancellationToken.None));
     }
 
     public class SchedulerProxy : DispatchProxy

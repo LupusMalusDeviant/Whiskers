@@ -98,6 +98,11 @@ public sealed class ApprovalGate : IApprovalGate
                 a.CorrelationId == operationId && a.SessionId == sessionId && a.ToolName == subject.ToolName);
             if (own is not null)
             {
+                // R1-05: the approval must have been raised (and so approved) at the operation's effective level.
+                if (!LevelCovers(own, subject))
+                    return new ApprovalGateResult(false,
+                        $"Approval {own.Id} was given at level '{own.Level}', but '{subject.ToolName}' requires " +
+                        $"'{subject.Level}'; the call was not executed.", own.Id);
                 if (own.ArgumentsHash != argumentsHash)
                     return new ApprovalGateResult(false,
                         $"Approval {own.Id} was given for different arguments; the call was not executed.", own.Id);
@@ -116,14 +121,20 @@ public sealed class ApprovalGate : IApprovalGate
         {
             if (_raised.TryGetValue(fingerprint, out var raisedId) && _approvals.Get(raisedId) is { } raised)
             {
-                if (raised.Status == ApprovalStatus.Pending && !raised.IsExpired)
+                if (!LevelCovers(raised, subject))
+                {
+                    // Raised below what the operation now needs (a level was raised meanwhile): ask again.
+                    _raised.TryRemove(fingerprint, out _);
+                }
+                else if (raised.Status == ApprovalStatus.Pending && !raised.IsExpired)
                     return new ApprovalGateResult(false,
                         $"Approval {raised.Id} for '{subject.ToolName}' is still pending. Repeat this exact call once a human has approved it.",
                         raised.Id);
-                if (raised.ArgumentsHash == argumentsHash && Usable(raised) is { } granted)
+                else if (raised.ArgumentsHash == argumentsHash && Usable(raised) is { } granted)
                     return granted;
-                // Rejected, expired or used: this call needs a new decision.
-                _raised.TryRemove(fingerprint, out _);
+                else
+                    // Rejected, expired or used: this call needs a new decision.
+                    _raised.TryRemove(fingerprint, out _);
             }
 
             approval = Raise(subject, reason, matchedRules, argumentsHash);
@@ -151,6 +162,11 @@ public sealed class ApprovalGate : IApprovalGate
     }
 
     /// <summary>Approved, within its lifetime and not used yet → a grant. Otherwise null. Uses nothing up.</summary>
+    /// <summary>Fail closed: an approval without a readable level, or below the subject's level, does not count.</summary>
+    private static bool LevelCovers(Approval approval, ApprovalSubject subject) =>
+        !string.IsNullOrWhiteSpace(approval.Level)
+        && McpPermissionLevels.HasAccess(McpPermissionLevels.Normalize(approval.Level), McpPermissionLevels.Normalize(subject.Level));
+
     private ApprovalGateResult? Usable(Approval approval)
     {
         if (!IsLive(approval) || _consumed.ContainsKey(approval.Id))

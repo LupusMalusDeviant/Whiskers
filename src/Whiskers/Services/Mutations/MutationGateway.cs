@@ -128,6 +128,12 @@ public sealed class MutationGateway : IMutationGateway
                     RequiredLevel = SchedulerRequirementResolver.Stricter(capability.RequiredLevel, effective),
                 };
             }
+            catch (CapabilityDisabledException disabled)
+            {
+                return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
+                    $"'{capability.McpTool ?? capability.Id}' needs '{disabled.Capability.McpTool ?? disabled.Capability.Id}', " +
+                    "which is disabled in Settings → MCP.", ct);
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "The requirement of {Capability} could not be resolved (operation {OperationId})",

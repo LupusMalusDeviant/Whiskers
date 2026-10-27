@@ -8,6 +8,7 @@
 @inject IUiMutationRunner Mutations
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IStringLocalizer<SharedResource> L
+@inject Whiskers.Services.Mutations.ICapabilityCatalog Capabilities
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
    enabled (via ModuleGuard), so a disabled module never reaches the ISchedulerService injection. *@
@@ -318,6 +319,10 @@ else
             ? AppRole.Admin
             : AppRole.Operator;
 
+    private AppRole RoleOf(string capabilityId) =>
+        Whiskers.Services.Mutations.CapabilityCatalog.RoleFor(
+            Capabilities.Find(capabilityId)?.RequiredLevel ?? McpPermissionLevels.Admin);
+
     private bool Require(AppRole required)
     {
         if (_role < required)
@@ -589,7 +594,8 @@ else
 
     private async Task DeleteTask(Whiskers.Models.ScheduledTaskEntity task)
     {
-        if (!Require(AppRole.Admin)) return;
+        // The level comes from the capability catalog, the one table the MCP tool uses too (R1-05).
+        if (!Require(RoleOf("scheduler.delete"))) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ScheduledTasksView_Dialog_DeleteTitle"].Value,
             L["ScheduledTasksView_Dialog_DeleteMessage", task.Name].Value,

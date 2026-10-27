@@ -28,6 +28,7 @@ public class ScheduledTasksTakeoverTests : BunitContext
         Services.AddLocalization();
         Services.AddMudServices();
         Services.AddSingleton<IKeyInterceptorService>(new NoopKeyInterceptor());
+        Services.AddSingleton<Whiskers.Services.Mutations.ICapabilityCatalog>(new Whiskers.Services.Mutations.CapabilityCatalog());
         Services.AddSingleton<ISchedulerService>(_scheduler);
         Services.AddSingleton<IDockerService>(new FakeDocker());
         Services.AddSingleton<IServerConfigService>(new FakeServerConfig());

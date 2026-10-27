@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-05 review: interactive approvals (agent sessions) are raised at the operation's effective requirement, and the
+  approval gate refuses to reuse an approval raised below it, so an Operator can no longer approve a scheduled custom
+  command, retention or self-backup. The scheduler requirement resolver reads `taskType` in every form the tool
+  accepts (name or number) and fails closed to Admin otherwise, reads `maxBackups` like the tool (`"0"` is no
+  retention), and applies stricter or disabled settings of the underlying capability from Settings → MCP.
+- `scheduler.delete` is Write on every surface: the Scheduled tasks page now takes the level from the capability
+  catalog (it required Admin). Deleting a task is not root-equivalent; creating, updating and running stay gated by
+  the task's effective requirement.
+
 v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
 
 ### ⚠️ Upgrade notes
