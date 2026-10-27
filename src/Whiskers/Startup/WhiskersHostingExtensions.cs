@@ -259,6 +259,8 @@ public static class WhiskersHostingExtensions
 
         // Host command execution + server management. IHostCommandExecutor stays in Core (shared by many services).
         builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
+        // Compose deployment plans (R1-07): read-only, on top of the Docker service and the host executor.
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IComposePlanner, Whiskers.Services.Mutations.ComposePlanner>();
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsCertificateService, Whiskers.Services.Certificates.MtlsCertificateService>();
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
 

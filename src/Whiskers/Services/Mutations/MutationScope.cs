@@ -14,12 +14,42 @@ public sealed class MutationScope : IDisposable
     private readonly MutationScope? _parent;
     private bool _disposed;
 
-    private MutationScope(string capabilityId, string operationId, MutationPrincipal? principal, MutationScope? parent)
+    private readonly string? _serverId;
+    private readonly HashSet<string> _decided;
+
+    private MutationScope(string capabilityId, string operationId, MutationPrincipal? principal, MutationScope? parent,
+        MutationRequest? request)
     {
         CapabilityId = capabilityId;
         OperationId = operationId;
         Principal = principal;
         _parent = parent;
+        _serverId = request?.Target.ServerId;
+        // What policy saw for this decision: the resolved target, what it also touches, and the string arguments.
+        _decided = new HashSet<string>(StringComparer.Ordinal);
+        if (request is not null)
+        {
+            _decided.Add(request.Target.Id);
+            if (request.Target.Name is { } name) _decided.Add(name);
+            _decided.UnionWith(request.Target.Related);
+            foreach (var value in request.Arguments.Values)
+                if (value.ValueKind == System.Text.Json.JsonValueKind.String && value.GetString() is { Length: > 0 } s)
+                    _decided.Add(s);
+            _decided.Remove("");
+        }
+    }
+
+    /// <summary>
+    /// True when this scope or an enclosing one decided on server <paramref name="serverId"/> about any of
+    /// <paramref name="identities"/> (a container's id or name) — as its target, a related resource or an argument
+    /// value policy saw (R1-07). Used to check that a plan computed again at execution touches nothing undecided.
+    /// </summary>
+    public bool Covers(string serverId, params string[] identities)
+    {
+        for (var scope = this; scope is not null; scope = scope._parent)
+            if (scope._serverId == serverId && identities.Any(i => i.Length > 0 && scope._decided.Contains(i)))
+                return true;
+        return false;
     }
 
     /// <summary>The innermost open scope on this async flow, or <c>null</c> outside the gateway.</summary>
@@ -50,11 +80,12 @@ public sealed class MutationScope : IDisposable
     }
 
     /// <summary>Opened by the gateway only. Dispose restores the previous scope.</summary>
-    internal static MutationScope Begin(string capabilityId, string operationId, MutationPrincipal? principal = null)
+    internal static MutationScope Begin(string capabilityId, string operationId, MutationPrincipal? principal = null,
+        MutationRequest? request = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
-        var scope = new MutationScope(capabilityId, operationId, principal, CurrentScope.Value);
+        var scope = new MutationScope(capabilityId, operationId, principal, CurrentScope.Value, request);
         CurrentScope.Value = scope;
         return scope;
     }

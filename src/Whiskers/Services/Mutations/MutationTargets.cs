@@ -130,8 +130,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
 
         return capability.TargetKind switch
         {
-            "container" => await ContainerAsync(target, ct),
-            "host" => Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true),
+            "container" => await ContainerAsync(request, capability, target, ct),
+            "host" => await HostAsync(request, capability, target, ct),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
                 mustExist: capability.Id is not ("server.onboard" or "server.save")),
             "network" => await NetworkAsync(request, capability, target, ct),
@@ -143,7 +143,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         };
     }
 
-    private async Task<TargetResolution> ContainerAsync(MutationTarget target, CancellationToken ct)
+    private async Task<TargetResolution> ContainerAsync(MutationRequest request, Capability capability,
+        MutationTarget target, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(target.Id))
             return Refuse("Container ID or name is required.");
@@ -155,9 +156,51 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
 
         var containers = await docker.ListContainersAsync(all: true, serverId: server.Id, ct);
         var (container, notFound) = McpInputValidation.Resolve(containers, target.Id);
-        return container is null
-            ? Refuse(notFound ?? $"Container not found: {target.Id}", target.Id)
-            : Done(target with { Id = container.Id, Name = container.Name, ServerId = server.Id });
+        if (container is null)
+            return Refuse(notFound ?? $"Container not found: {target.Id}", target.Id);
+        var resolved = target with { Id = container.Id, Name = container.Name, ServerId = server.Id };
+
+        // A changed .env brings the container's whole compose project up (R1-07): every container of the plan is
+        // decided with it. A plan that cannot be made is refused.
+        if (capability.Id == "container.env_set" && MutationTargets.String(request.Arguments, "envVars") is { } envVars)
+            return await WithPlanAsync(resolved,
+                planner => planner.PlanEnvChangeAsync(container, server.Id, existing => DotEnvMerge.Merge(existing, envVars).Content, ct));
+        return Done(resolved);
+    }
+
+    /// <summary>A host-level operation: its server. A compose deployment that brings its file along (the MCP
+    /// <c>deploy_compose</c> tool) is planned here, and every container the plan touches is decided with it (R1-07).
+    /// Without the file (a UI deploy, which decides the plan's containers itself) only the server is resolved.</summary>
+    private async Task<TargetResolution> HostAsync(MutationRequest request, Capability capability, MutationTarget target,
+        CancellationToken ct)
+    {
+        var resolution = Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true);
+        if (resolution.Target is not { } host || capability.Id != "compose.deploy"
+            || MutationTargets.String(request.Arguments, "composeContent") is not { } content)
+            return resolution;
+        if (MutationTargets.String(request.Arguments, "projectName") is not { } project
+            || !McpInputValidation.IsSafeProjectName(project))
+            return Refuse("A compose deployment needs a valid project name.");
+        return await WithPlanAsync(host, planner => planner.PlanAsync(
+            ComposeDeployment.FromContent(host.ServerId!, ComposeDeployment.DeploymentDirectory(project), content), ct));
+    }
+
+    /// <summary>The target with every container of the plan as related resource, or a refusal when the plan cannot
+    /// be made (fail closed).</summary>
+    private async Task<TargetResolution> WithPlanAsync(MutationTarget target, Func<IComposePlanner, Task<ComposePlan>> plan)
+    {
+        var planner = _services.GetService<IComposePlanner>();
+        if (planner is null)
+            return Refuse("The compose planner is not available.");
+        try
+        {
+            var made = await plan(planner);
+            return Done(target with { Related = target.Related.Concat(made.DecidedIdentities()).Distinct(StringComparer.Ordinal).ToList() });
+        }
+        catch (ComposePlanException ex)
+        {
+            return Refuse($"The compose deployment's impact cannot be determined: {ex.Message}");
+        }
     }
 
     private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist)

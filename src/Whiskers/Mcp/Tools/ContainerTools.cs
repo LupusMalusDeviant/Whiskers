@@ -398,6 +398,7 @@ public class ContainerTools
         IMcpPermissionService permissionService,
         IDockerService docker,
         IHostCommandExecutor executor,
+        IComposePlanner planner,
         IAuditLogService auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Environment variables to set as 'KEY=VALUE' pairs, comma-separated (e.g. 'OPENAI_API_KEY=sk-...,MODEL=gpt-4')")] string envVars,
@@ -414,74 +415,31 @@ public class ContainerTools
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
         if (container is null) return resolveError ?? $"Container not found: {containerId}";
 
-        // Find compose working dir
-        string? workingDir = null;
-        if (container.Labels.TryGetValue("com.docker.compose.project.working_dir", out var wd))
-            workingDir = wd;
-        else if (container.ComposeProject != "Standalone")
+        var sid = serverId ?? "local";
+        // The plan (R1-07): the merged .env for the container's project and every container `compose up` then
+        // touches. The gateway decided on the same plan (the target's related containers); a container that turns
+        // up only now was not decided and stops the change before anything is written.
+        ComposePlan plan;
+        try
         {
-            var sid = serverId ?? "local";
-            var check = await executor.ExecuteAsync(sid,
-                $"test -f /opt/deployments/{ShellUtils.Quote(container.ComposeProject)}/docker-compose.yml && echo /opt/deployments/{ShellUtils.Quote(container.ComposeProject)}",
-                TimeSpan.FromSeconds(5));
-            if (check.Success && !string.IsNullOrWhiteSpace(check.Output))
-                workingDir = check.Output.Trim();
+            plan = await planner.PlanEnvChangeAsync(container, sid, existing => DotEnvMerge.Merge(existing, envVars).Content);
+            plan.EnsureDecided(MutationScope.Current);
         }
-
-        if (workingDir == null)
-            return $"Container '{container.Name}' is not part of a docker-compose project. Cannot edit .env file.";
-
-        var sid2 = serverId ?? "local";
-
-        // Load existing .env
-        var existing = new Dictionary<string, string>();
-        var readResult = await executor.ExecuteAsync(sid2, $"cat {ShellUtils.Quote(workingDir + "/.env")} 2>/dev/null", TimeSpan.FromSeconds(5));
-        if (readResult.Success && !string.IsNullOrWhiteSpace(readResult.Output))
+        catch (ComposePlanException ex)
         {
-            foreach (var line in readResult.Output.Split('\n'))
-            {
-                var trimmed = line.Trim();
-                if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#')) continue;
-                var eqIdx = trimmed.IndexOf('=');
-                if (eqIdx > 0)
-                    existing[trimmed[..eqIdx]] = trimmed[(eqIdx + 1)..];
-            }
+            return MutationScope.Fail($"Cannot change the .env of '{container.Name}': {ex.Message}");
         }
+        var changed = DotEnvMerge.Merge(null, envVars).Changed;
+        var workingDir = plan.ProjectDirectory;
 
-        // Parse and merge new vars
-        var changed = new List<string>();
-        foreach (var pair in envVars.Split([',', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            var eqIdx = pair.IndexOf('=');
-            if (eqIdx > 0)
-            {
-                var key = pair[..eqIdx].Trim();
-                var val = pair[(eqIdx + 1)..].Trim();
-                existing[key] = val;
-                changed.Add(key);
-            }
-        }
-
-        // Write merged .env
-        var content = string.Join('\n', existing.Select(e => $"{e.Key}={e.Value}")) + "\n";
-        var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(content));
-        var writeResult = await executor.ExecuteAsync(sid2,
-            $"echo '{b64}' | base64 -d > {ShellUtils.Quote(workingDir + "/.env")}",
-            TimeSpan.FromSeconds(10));
-
-        if (!writeResult.Success)
-            return $"Failed to write .env file: {writeResult.Error}";
-
-        // Restart via docker compose
-        var restartResult = await executor.ExecuteAsync(sid2,
-            $"cd {ShellUtils.Quote(workingDir)} && docker compose up -d 2>&1",
-            TimeSpan.FromMinutes(2));
+        // Write the planned .env and bring the project up with the planned files
+        var restartResult = await executor.ExecuteAsync(sid, plan.DeployScript(pull: false), TimeSpan.FromMinutes(2));
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         if (!restartResult.Success)
         {
             await auditLog.LogAsync(actor, actorType, "env.save", "env", container.Id, container.Name, details: $"{changed.Count} var(s): {string.Join(", ", changed)}", serverId: serverId, success: false);
-            return $"Env vars written but restart failed: {restartResult.Output}\n{restartResult.Error}";
+            return MutationScope.Fail($"Writing the .env or the restart failed: {restartResult.Output}\n{restartResult.Error}");
         }
 
         await auditLog.LogAsync(actor, actorType, "env.save", "env", container.Id, container.Name, details: $"{changed.Count} var(s): {string.Join(", ", changed)}", serverId: serverId);
@@ -494,6 +452,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IHostCommandExecutor executor,
+        IComposePlanner planner,
         IAuditLogService auditLog,
         [Description("Server ID to deploy on")] string serverId,
         [Description("Name/directory for the deployment (e.g. 'my-app')")] string projectName,
@@ -507,30 +466,59 @@ public class ContainerTools
         if (string.IsNullOrWhiteSpace(composeContent))
             return MutationScope.Fail("Error: Compose content is required.");
 
-        // Create directory and write compose file
-        var dir = $"/opt/deployments/{projectName}";
-        var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(composeContent));
-
-        var setupResult = await executor.ExecuteAsync(serverId,
-            $"mkdir -p {ShellUtils.Quote(dir)} && echo '{b64}' | base64 -d > {ShellUtils.Quote(dir + "/docker-compose.yml")}",
-            TimeSpan.FromSeconds(10));
-
-        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
-        if (!setupResult.Success)
+        // The plan (R1-07): the project compose will use and every existing container it recreates or collides
+        // with. The gateway decided on the same plan; a container that turns up only now stops the deployment
+        // before anything is written. The command then uses exactly the planned project, directory and file.
+        ComposePlan plan;
+        try
         {
-            await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, details: setupResult.Error, serverId: serverId, success: false);
-            return MutationScope.Fail($"Failed to write compose file: {setupResult.Error}");
+            plan = await planner.PlanAsync(ComposeDeployment.FromContent(serverId,
+                ComposeDeployment.DeploymentDirectory(projectName), composeContent));
+            plan.EnsureDecided(MutationScope.Current);
+        }
+        catch (ComposePlanException ex)
+        {
+            return MutationScope.Fail($"Error: {ex.Message}");
         }
 
-        // Run docker compose up
-        var deployResult = await executor.ExecuteAsync(serverId,
-            $"cd {ShellUtils.Quote(dir)} && docker compose pull 2>&1 && docker compose up -d 2>&1",
-            TimeSpan.FromMinutes(5));
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        var deployResult = await executor.ExecuteAsync(serverId, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5));
 
         await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, serverId: serverId, success: deployResult.Success);
         if (deployResult.Success)
             return $"Compose deployment '{projectName}' succeeded:\n{deployResult.Output}";
         MutationScope.Fail("Compose deployment failed.");
         return $"Compose deployment failed:\n{deployResult.Output}\n{deployResult.Error}";
+    }
+}
+
+/// <summary>Merges <c>KEY=VALUE</c> pairs (comma or newline separated) into an existing <c>.env</c>: changed keys are
+/// replaced, others kept. Shared by <c>set_container_env</c> and the gateway's plan of it (R1-07), so both see the
+/// same new file.</summary>
+public static class DotEnvMerge
+{
+    public static (string Content, IReadOnlyList<string> Changed) Merge(string? existingContent, string envVars)
+    {
+        var existing = new Dictionary<string, string>();
+        foreach (var line in (existingContent ?? "").Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#')) continue;
+            var eqIdx = trimmed.IndexOf('=');
+            if (eqIdx > 0)
+                existing[trimmed[..eqIdx]] = trimmed[(eqIdx + 1)..];
+        }
+        var changed = new List<string>();
+        foreach (var pair in (envVars ?? "").Split([',', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eqIdx = pair.IndexOf('=');
+            if (eqIdx > 0)
+            {
+                var key = pair[..eqIdx].Trim();
+                existing[key] = pair[(eqIdx + 1)..].Trim();
+                changed.Add(key);
+            }
+        }
+        return (string.Join('\n', existing.Select(e => $"{e.Key}={e.Value}")) + "\n", changed);
     }
 }

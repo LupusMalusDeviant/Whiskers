@@ -3,6 +3,7 @@
 @inject IDockerService DockerService
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
 @inject IUiMutationRunner Mutations
+@inject IComposePlanner ComposePlanner
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
@@ -259,22 +260,13 @@
         _deploying = true;
         try
         {
-            var yaml = GenerateYaml();
-            var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(yaml));
-            var dir = $"/opt/deployments/{_projectName}";
-
             var serverId = _serverId;
-            // `docker compose up` recreates every existing container of the project: each is decided too.
-            var affected = await ComposeImpact.ContainersAsync(DockerService, serverId, _projectName, dir);
-            var result = await Mutations.RunAsync("compose.deploy", new { projectName = _projectName, serverId },
-                _ => Mutations.RunForEachAsync("compose.deploy", affected, serverId, async () =>
-                {
-                    var r = await Executor.ExecuteAsync(serverId,
-                        $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
-                        TimeSpan.FromMinutes(5));
-                    if (!r.Success) MutationScope.Fail("docker compose failed.");
-                    return r;
-                }));
+            // The plan (R1-07): the project compose will really use and every existing container `up` recreates or
+            // collides with — each is decided too, and the deploy runs exactly what was planned.
+            var plan = await ComposePlanner.PlanAsync(ComposeDeployment.FromContent(serverId,
+                ComposeDeployment.DeploymentDirectory(_projectName), GenerateYaml()));
+            var result = await Mutations.DeployAsync(Executor, "compose.deploy",
+                new { projectName = _projectName, serverId }, plan);
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _projectName, _projectName, serverId: _serverId, success: result.Success);

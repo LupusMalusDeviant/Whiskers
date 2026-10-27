@@ -47,13 +47,10 @@ public static class GitDeployCommands
     public static string CurrentShaCommand(string appId) =>
         $"cd {WorkDir(appId)}/repo && git rev-parse --short=12 HEAD";
 
-    /// <summary>docker compose build with the repo-relative compose file. Quoted — a crafted
-    /// compose path must not become a command.</summary>
-    public static string ComposeBuildCommand(string appId, string composePath) =>
-        $"cd {WorkDir(appId)}/repo && docker compose -f {ShellUtils.Quote(composePath)} build --pull";
-
-    public static string ComposeUpCommand(string appId, string composePath) =>
-        $"cd {WorkDir(appId)}/repo && docker compose -f {ShellUtils.Quote(composePath)} up -d --remove-orphans";
+    /// <summary>The absolute path of the app's compose file in its checkout. The build and up commands come from
+    /// the deployment's <c>ComposePlan</c> (R1-07), which quotes it.</summary>
+    public static string ComposeFile(string appId, string composePath) =>
+        $"{WorkDir(appId)}/repo/{composePath.TrimStart('/')}";
 
     /// <summary>Removes the whole deploy workspace (teardown when the app is deleted).</summary>
     public static string RemoveWorkspaceCommand(string appId) =>

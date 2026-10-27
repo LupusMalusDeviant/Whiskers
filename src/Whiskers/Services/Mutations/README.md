@@ -111,11 +111,13 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `OwnerAccounts.cs` | `IOwnerAccounts` + `OwnerAccounts`: whether a user owner still has a way in (R1-04). Local-only sign-in needs the Identity row. With Google/OIDC as well, `known-local-accounts.json` records every email seen with a local account (at startup and when the wizard creates one) and every email seen signed in federated: no local row → *Deleted* if it had one, *Present* if seen federated, otherwise *Unverified* (refused, not suspended, until the owner signs in or an admin takes over). Missing or unreadable record → unverified (fail closed). |
 | `FederatedSignInRecorder.cs` | Blazor `CircuitHandler` that records a federated sign-in (`IOwnerAccounts.RememberFederated`) from the circuit's authentication state; only observes, never touches the sign-in itself (R1-04). |
 | `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file blocks every feature until each is taken over. |
-| `ComposeImpact.cs` | Existing containers a `docker compose up` would touch (project label or working directory) and `RunForEachAsync`, one nested UI decision per container. |
+| `ComposePlan.cs` | R1-07: `ComposeDeployment` (what is asked: server, files or directory, project directory, explicit project, new `.env`, `--remove-orphans`), `ComposePlan` (the effective project, files, services and `Impact` — every existing container recreated, removed as orphan or colliding by name; `UpCommand` / `BuildCommand` / `DeployScript` with explicit `-p`, `--project-directory`, `-f`, `--env-file`; `EnsureDecided`), `ComposeModel` (pure: project name precedence and normalisation, `.env` parsing, interpolation, file merging, impact) and `ComposePlanGate`. Anything that cannot be worked out throws `ComposePlanException` (fail closed). |
+| `ComposePlanner.cs` | `IComposePlanner` + `ComposePlanner` (singleton): reads what the deployment does not bring along from the host (a directory's default compose file + override, the existing `.env`, a container's `config_files` / working directory for a `.env` change) and lists the server's containers. Read-only. |
+| `ComposeImpact.cs` | UI side of a plan: `DeployAsync` (decide the capability, then each planned container nested, then run the plan), `GateFor` (a `ComposePlanGate` for plans made inside an operation, e.g. Git deploy) and `RunForEachAsync`. |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. A refusal with a `ReasonCode` (`MutationReasonCodes`, R1-05) is shown in the user's language (`Mutation_Refused_<code>`); the audit keeps the English `Reason`. |
 | `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`, `__resolvedRelated<n>`), so a protected container is caught by id prefix, as a container attached to a removed network, and a workload by its live controller. Without engine or store it refuses everything. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
-| `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. |
+| `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. `Covers(serverId, identities)` says whether this or an enclosing decision saw a resource (target, related resources, argument values) on that server — used by `ComposePlan.EnsureDecided` (R1-07). |
 | `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Report mode:** a call outside a scope still runs; the first sighting per capability is logged at Information. |
 
 Registration: [`../../Startup/WhiskersMutationGatewayExtensions.cs`](../../Startup/WhiskersMutationGatewayExtensions.cs)
@@ -202,10 +204,15 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   and App Store deploys, the webhook **Test** button, server save/remove/onboarding, AI-trigger save, self-backup
   create/delete/restore) run through the gateway since the step 2.2 review, but only by convention: a new direct
   call is not caught until the primitives are marked.
-- **Compose deploys** (compose editor, App Store, webhook test) are decided on the project and then once per
-  existing container of the project (`ComposeImpact`: compose project label or working directory). A service the
-  new file adds is not an existing resource and is not decided; nor is a container of another project that a
-  `container_name` in the file would collide with.
+- **Compose deploys** are planned before anything is written (R1-07, `ComposePlan`): the effective project
+  (`-p` > `COMPOSE_PROJECT_NAME` in the `.env` > top-level `name:` > directory name) and every existing container
+  `up` recreates, removes as an orphan or collides with by name. The UI (compose editor, App Store, Deploy page,
+  `.env` save, webhook **Test**, Git deploy) decides once per planned container; MCP and agent (`deploy_compose`,
+  `set_container_env`) get the planned containers as related resources of their one decision, made by the resolver.
+  Execution uses the plan's explicit `-p` / `--project-directory` / `-f` and refuses (`EnsureDecided`) when a plan made
+  again at execution touches a container no enclosing decision covered. Not covered: values in the host's own
+  environment (a name using one refuses the plan), a `.env` created between plan and `up` when there was none, and
+  the external webhook and Git-deploy webhook paths, which run the plan undecided until R1-08 / R1-09.
 - **External webhook calls** (`/api/webhooks/...`) still run without the gateway; they move in step 2.4. Only the
   UI's **Test** button is decided, as the clicking person.
 - **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the pod's **live**

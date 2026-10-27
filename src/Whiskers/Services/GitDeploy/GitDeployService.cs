@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Server;
 using Whiskers.Services.Vault;
@@ -17,16 +18,18 @@ public class GitDeployService : IGitDeployService
     private readonly JsonFileStore<GitDeployData> _store;
     private readonly IHostCommandExecutor _executor;
     private readonly IVaultService _vault;
+    private readonly IComposePlanner _planner;
     private readonly ILogger<GitDeployService> _logger;
     private GitDeployData _cached = new();
     private bool _loaded;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public GitDeployService(IHostCommandExecutor executor, IVaultService vault,
+    public GitDeployService(IHostCommandExecutor executor, IVaultService vault, IComposePlanner planner,
         ILogger<GitDeployService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
         _executor = executor;
         _vault = vault;
+        _planner = planner;
         _logger = logger;
         var paths = dataPaths ?? DataPathOptions.Default;
         _store = new JsonFileStore<GitDeployData>(storePath ?? $"{paths.RootDir}/git-deploys.json");
@@ -129,7 +132,8 @@ public class GitDeployService : IGitDeployService
         finally { _lock.Release(); }
     }
 
-    public async Task<(bool Success, string Output)> DeployAsync(string appId, IProgress<string>? progress = null, CancellationToken ct = default)
+    public async Task<(bool Success, string Output)> DeployAsync(string appId, IProgress<string>? progress = null,
+        CancellationToken ct = default, ComposePlanGate? gate = null)
     {
         ValidateId(appId);
         var app = await GetAppAsync(appId);
@@ -158,15 +162,26 @@ public class GitDeployService : IGitDeployService
             var sha = (await Sh(app.ServerId, GitDeployCommands.CurrentShaCommand(appId), 20, ct)).Output.Trim();
             Report($"✅ Revision: {sha}");
 
-            // 3) Build
-            Report("③ docker compose build…");
-            var build = await Sh(app.ServerId, GitDeployCommands.ComposeBuildCommand(appId, app.ComposePath), 600, ct);
-            Report(Tail(build.Output, 15));
+            // 3) Plan (R1-07): the project compose will use and every existing container `up --remove-orphans`
+            //    recreates, removes or collides with — decided before the first build; build and up run as planned.
+            var plan = await _planner.PlanAsync(new ComposeDeployment(app.ServerId,
+                [new ComposeFileInput(GitDeployCommands.ComposeFile(appId, app.ComposePath))]) { RemoveOrphans = true }, ct);
+            Report($"Project '{plan.ProjectName}': {plan.Impact.Count} existing container(s) affected.");
 
-            // 4) Up
-            Report("④ docker compose up -d…");
-            var up = await Sh(app.ServerId, GitDeployCommands.ComposeUpCommand(appId, app.ComposePath), 300, ct);
-            Report(Tail(up.Output + up.Error, 10));
+            async Task BuildAndUp()
+            {
+                // 4) Build
+                Report("③ docker compose build…");
+                var build = await Sh(app.ServerId, plan.BuildCommand, 600, ct);
+                Report(Tail(build.Output, 15));
+
+                // 5) Up
+                Report("④ docker compose up -d…");
+                var up = await Sh(app.ServerId, plan.UpCommand, 300, ct);
+                Report(Tail(up.Output + up.Error, 10));
+            }
+            if (gate is null) await BuildAndUp();
+            else await gate(plan, BuildAndUp);
 
             app.LastDeployedAt = DateTime.UtcNow;
             app.LastDeployedSha = sha;
@@ -179,7 +194,7 @@ public class GitDeployService : IGitDeployService
         {
             return Fail(Report, log, "Cancelled.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not MutationRefusedException)
         {
             _logger.LogError(ex, "Git deploy failed for {App}", app.Name);
             app.LastDeployedAt = DateTime.UtcNow;
