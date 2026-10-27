@@ -353,4 +353,55 @@ public class UiMutationRunnerTests
     [InlineData("{ broken", 0)]
     public void Retention_is_read_from_the_task_config(string? config, int expected) =>
         Assert.Equal(expected, Whiskers.Services.Scheduler.TaskExecutor.RetentionOf(new ScheduledTaskEntity { Config = config }));
+
+    private sealed class BrokenRequirements : IEffectiveRequirementResolver
+    {
+        public Task<string> ResolveAsync(Capability capability, IReadOnlyDictionary<string, JsonElement> arguments,
+            CancellationToken ct) => throw new InvalidOperationException("scheduler unavailable");
+    }
+
+    /// <summary>German texts, looked up the way the page's localizer would.</summary>
+    private sealed class GermanText : Microsoft.Extensions.Localization.IStringLocalizer<SharedResource>
+    {
+        private static readonly System.Resources.ResourceManager Resources =
+            new("Whiskers.Resources.SharedResource", typeof(SharedResource).Assembly);
+        private static readonly System.Globalization.CultureInfo German = new("de");
+
+        public Microsoft.Extensions.Localization.LocalizedString this[string name] =>
+            Resources.GetString(name, German) is { } value ? new(name, value) : new(name, name, resourceNotFound: true);
+
+        public Microsoft.Extensions.Localization.LocalizedString this[string name, params object[] arguments] =>
+            this[name] is { ResourceNotFound: false } text ? new(name, string.Format(text.Value, arguments)) : this[name];
+
+        public IEnumerable<Microsoft.Extensions.Localization.LocalizedString> GetAllStrings(bool includeParentCultures) => [];
+    }
+
+    [Fact]
+    public async Task A_coded_refusal_reaches_the_page_in_the_users_language_and_the_audit_in_english()
+    {
+        // R1-05: the refusals the effective requirement adds carry a code the page shows localized.
+        var audit = new AgentToolTestHelpers.NullMutationAudit();
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
+            NullLogger<MutationGateway>.Instance, requirements: new BrokenRequirements());
+        var runner = new UiMutationRunner(gateway, new CapabilityCatalog(), new FixedUser(AppRole.Admin), new GermanText());
+
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
+            runner.RunAsync("scheduler.create", new { taskType = "CustomCommand" }, _ => Task.FromResult(true)));
+
+        Assert.Contains("ließ sich nicht bestimmen", refused.Message);
+    }
+
+    [Fact]
+    public void Every_refusal_code_has_an_english_and_a_german_text()
+    {
+        var resources = new System.Resources.ResourceManager("Whiskers.Resources.SharedResource", typeof(SharedResource).Assembly);
+        var english = resources.GetResourceSet(System.Globalization.CultureInfo.InvariantCulture, true, false)!;
+        var german = resources.GetResourceSet(new System.Globalization.CultureInfo("de"), true, false)!;
+        foreach (var code in MutationReasonCodes.All)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(english.GetString(MutationReasonCodes.KeyOf(code))), code);
+            Assert.False(string.IsNullOrWhiteSpace(german.GetString(MutationReasonCodes.KeyOf(code))), code);
+        }
+    }
 }

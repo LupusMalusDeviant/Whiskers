@@ -47,9 +47,12 @@ public sealed class UiMutationRunner : IUiMutationRunner
     private readonly IMutationGateway _gateway;
     private readonly ICapabilityCatalog _catalog;
     private readonly ICurrentUserService _user;
+    private readonly Microsoft.Extensions.Localization.IStringLocalizer<SharedResource>? _text;
 
-    public UiMutationRunner(IMutationGateway gateway, ICapabilityCatalog catalog, ICurrentUserService user)
+    public UiMutationRunner(IMutationGateway gateway, ICapabilityCatalog catalog, ICurrentUserService user,
+        Microsoft.Extensions.Localization.IStringLocalizer<SharedResource>? text = null)
     {
+        _text = text;
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _user = user ?? throw new ArgumentNullException(nameof(user));
@@ -89,9 +92,17 @@ public sealed class UiMutationRunner : IUiMutationRunner
             case MutationStatus.Failed:
                 throw new MutationFailedException(outcome.Reason ?? "The action failed.", outcome.Error);
             default:
-                throw new MutationRefusedException(outcome.Reason ?? "The action was refused.", outcome.Status,
-                    outcome.OperationId);
+                throw new MutationRefusedException(LocalizedReason(outcome) ?? outcome.Reason ?? "The action was refused.",
+                    outcome.Status, outcome.OperationId);
         }
+    }
+
+    /// <summary>The refusal in the user's language when the gateway gave it a code; <c>null</c> otherwise.</summary>
+    private string? LocalizedReason<T>(MutationOutcome<T> outcome)
+    {
+        if (_text is null || outcome.ReasonCode is not { } code) return null;
+        var text = _text[MutationReasonCodes.KeyOf(code), outcome.ReasonArgs.Cast<object>().ToArray()];
+        return text.ResourceNotFound ? null : text.Value;
     }
 
     public Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,

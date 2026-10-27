@@ -130,16 +130,19 @@ public sealed class MutationGateway : IMutationGateway
             }
             catch (CapabilityDisabledException disabled)
             {
+                var outer = capability.McpTool ?? capability.Id;
+                var underlying = disabled.Capability.McpTool ?? disabled.Capability.Id;
                 return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
-                    $"'{capability.McpTool ?? capability.Id}' needs '{disabled.Capability.McpTool ?? disabled.Capability.Id}', " +
-                    "which is disabled in Settings → MCP.", ct);
+                    $"'{outer}' needs '{underlying}', which is disabled in Settings → MCP.", ct)
+                    with { ReasonCode = MutationReasonCodes.UnderlyingCapabilityDisabled, ReasonArgs = [outer, underlying] };
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "The requirement of {Capability} could not be resolved (operation {OperationId})",
                     capability.Id, operationId);
                 return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
-                    "The operation's requirement could not be determined; the mutation was refused.", ct);
+                    "The operation's requirement could not be determined; the mutation was refused.", ct)
+                    with { ReasonCode = MutationReasonCodes.RequirementUnresolved };
             }
         }
 

@@ -4811,4 +4811,10 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AutomationOwners_State_Unrecognised" xml:space="preserve">
     <value>Unrecognised owner from an older version — runs are refused until an admin takes it over.</value>
   </data>
+  <data name="Mutation_Refused_UnderlyingCapabilityDisabled" xml:space="preserve">
+    <value>'{0}' needs '{1}', which is switched off in Settings → MCP.</value>
+  </data>
+  <data name="Mutation_Refused_RequirementUnresolved" xml:space="preserve">
+    <value>What this action needs could not be determined, so it was refused.</value>
+  </data>
 </root>

@@ -6,6 +6,9 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-05 review: the two refusals the effective requirement adds (underlying capability switched off, requirement
+  not determinable) are shown in the user's language on the pages; covered end to end through the real gateway,
+  approval gate and store (`SchedulerApprovalEndToEndTests`).
 - R1-05 review: interactive approvals (agent sessions) are raised at the operation's effective requirement, and the
   approval gate refuses to reuse an approval raised below it, so an Operator can no longer approve a scheduled custom
   command, retention or self-backup. The scheduler requirement resolver reads `taskType` in every form the tool
