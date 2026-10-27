@@ -391,7 +391,7 @@ public class ContainerTools
         return $"Environment variables for {container?.Name ?? containerId}:\n{string.Join('\n', lines)}";
     }
 
-    [McpToolLevel(McpPermissionLevels.Write)]
+    [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Set environment variables in a container's .env file and restart via docker compose. Only works for containers managed by docker-compose. Provide variables as 'KEY=VALUE' pairs separated by newlines or commas. Existing variables not included are kept unchanged.")]
     public static async Task<string> SetContainerEnv(
         IHttpContextAccessor httpContextAccessor,

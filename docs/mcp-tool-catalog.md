@@ -63,7 +63,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `renew_ssl_certificate` | admin | Renew an SSL certificate using certbot. |
 | `restart_container` | write | Restart a Docker container. |
 | `resume_server_checks` | write | Resume Whiskers' background checks for a server that was paused. Safe to call even if it is not paused. Turning monitoring back on is never the dangerous direction, so this has no time limit. |
-| `set_container_env` | write | Set environment variables in a container's .env file and restart via docker compose. Only works for containers managed by docker-compose. Provide variables as 'KEY=VALUE' pairs separated by newlines or commas. Existing variables not included are kept unchanged. |
+| `set_container_env` | admin | Set environment variables in a container's .env file and restart via docker compose. Only works for containers managed by docker-compose. Provide variables as 'KEY=VALUE' pairs separated by newlines or commas. Existing variables not included are kept unchanged. |
 | `start_container` | write | Start a stopped Docker container. |
 | `stop_container` | write | Stop a running Docker container. |
 | `update_container` | write | Pull latest image and recreate a Docker container (update). |
@@ -157,6 +157,6 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | Level | Tools |
 |---|---|
 | read | 46 |
-| write | 14 |
-| admin | 26 |
+| write | 13 |
+| admin | 27 |
 | **total** | **86** |

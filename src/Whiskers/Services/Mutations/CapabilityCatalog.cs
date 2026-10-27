@@ -75,7 +75,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("container.stop", "stop_container", W, "container", Dis, Normal);
         yield return Tool("container.restart", "restart_container", W, "container", Dis, Normal);
         yield return Tool("container.update", "update_container", W, "container", Dis, Long);
-        yield return Tool("container.env_set", "set_container_env", W, "container", Dis, Normal);
+        // R1-05: writes the compose .env (any key: image, command, bind paths) and runs `docker compose up -d` — the
+        // same as the container page's .env save, root-equivalent on the host.
+        yield return Tool("container.env_set", "set_container_env", A, "container", Root, Normal);
         yield return Ui("container.remove", A, "container", Des, Normal);
         yield return Ui("container.create", A, "container", Root, Long);
         yield return Ui("container.rollback", W, "container", Dis, Long);

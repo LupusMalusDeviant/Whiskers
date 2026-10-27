@@ -28,6 +28,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   won (no level was lowered). API keys and agents at Write lose these tools:
   - Firewall `add_firewall_rule`, `remove_firewall_rule`; nginx `update_nginx_config`; systemd
     `manage_systemd_service` — Write → Admin (their UI pages already required Admin).
+  - `set_container_env` — Write → Admin: it writes the compose `.env` (any key) and runs `docker compose up -d`,
+    the same root-equivalent operation as saving the `.env` on the container page (already Admin).
   - Database dump `backup_database` and certificate renewal `renew_ssl_certificate` — Write → Admin (their UI
     pages already required Admin). A scheduled **DB backup task** now needs an Admin owner, with or without
     retention.

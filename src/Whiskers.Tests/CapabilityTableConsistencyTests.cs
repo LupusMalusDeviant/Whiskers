@@ -150,6 +150,32 @@ public class CapabilityTableConsistencyTests
         }
     }
 
+    /// <summary>The same operation offered under different capability ids on different surfaces needs the same
+    /// level everywhere (R1-05): one table, no cheaper door.</summary>
+    [Theory]
+    [InlineData("container.env_set", "container.env_file_save")]      // MCP .env write + compose up / page .env save
+    [InlineData("host.exec", "container.exec")]                       // a command as root / inside a container
+    [InlineData("app.deploy", "compose.deploy")]
+    [InlineData("compose.deploy", "gitdeploy.deploy")]
+    [InlineData("ssl.renew", "certificate.renew_mtls")]               // certificate renewals on the host
+    [InlineData("selfbackup.create", "selfbackup.delete")]
+    [InlineData("logalert.create", "logalert.delete")]
+    [InlineData("checks.pause", "checks.resume")]
+    public void Equivalent_operations_need_the_same_level(string a, string b) =>
+        Assert.Equal(Catalog.Find(a)!.RequiredLevel, Catalog.Find(b)!.RequiredLevel);
+
+    /// <summary>Anything root-equivalent on a host is Admin. The scheduler's create / run are the exception that
+    /// proves the rule: their level depends on the task, and the gateway resolves it per call (custom commands,
+    /// DB dumps, retention and self-backups are held to Admin).</summary>
+    [Theory]
+    [MemberData(nameof(Capabilities))]
+    public void A_root_equivalent_capability_needs_admin(string id)
+    {
+        var capability = Catalog.Find(id)!;
+        if (capability.Risk != CapabilityRisk.RootEquivalent || id is "scheduler.create" or "scheduler.run") return;
+        Assert.Equal(McpPermissionLevels.Admin, capability.RequiredLevel);
+    }
+
     private static string SourceRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)

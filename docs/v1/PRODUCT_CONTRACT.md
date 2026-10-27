@@ -150,7 +150,7 @@ mutating tools do for their own error texts).
 | M-03 | `restart_container` | write | ❌ | AL ✅ | INV-43, 59 |
 | M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | AL ✅ | INV-43, 44, 53 |
 | M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43, 24 (YAML free text) |
-| M-06 | `set_container_env` | write | ❌ | AL ✅ | INV-43, 51 |
+| M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | AL ✅ | INV-43, 51 |
 | M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43, 24 |
 | M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text), 43 |
 | M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
@@ -167,9 +167,9 @@ mutating tools do for their own error texts).
 | M-20 | `remove_network` | **admin** (R1-05; was write) | ❌ | AL ✅ | — |
 | M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45 |
 | M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45 |
-| M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup and DB/volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | n/a | AL ✅ | INV-04 |
+| M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | n/a | AL ✅ | INV-04 |
 | M-24 | `delete_scheduled_task` | write | n/a | AL ✅ | — |
-| M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup or retention, resolved before the caller check and the approval (R1-05) | ❌ | AL ✅ | INV-24 (policy sees only `taskId`), 30, 43 |
+| M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup, DB backup or retention, resolved before the caller check and the approval (R1-05) | ❌ | AL ✅ | INV-24 (policy sees only `taskId`), 30, 43 |
 | M-26 | `cloud_power_on` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
 | M-27 | `cloud_shutdown` | **admin** (R1-05; was write) | ❌ | ❌ AH only | 43, 45, 52 |
 | M-28 | `cloud_reboot` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
@@ -255,7 +255,7 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | AL ✅ | INV-43 |
 | U-25 | Self-backup create / delete / restore | Admin | ⚠️ archive validation | AL ✅ | INV-55 |
 | U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | AL ✅ | INV-04 |
-| U-27 | Scheduled task "Run now" | Operator; custom command, self-backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | AL ✅ | INV-43 |
+| U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | AL ✅ | INV-43 |
 | U-28 | Webhooks create / regenerate / toggle / delete / test | Admin; test = Operator | — | AL ✅ | INV-04, 19 (test fires the real action at Operator) |
 | U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | save/delete ❌, deploy ✅ | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |

@@ -98,7 +98,7 @@ public static class McpPermissionLevels
         ["get_container_env"] = Read,
 
         // Write tools
-        ["set_container_env"] = Write,
+        ["set_container_env"] = Admin,   // R1-05: compose .env + up -d, root-equivalent
         ["start_container"] = Write,
         ["stop_container"] = Write,
         ["restart_container"] = Write,
