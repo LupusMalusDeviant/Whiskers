@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
@@ -348,6 +349,61 @@ public class ToolAuthorizationWireTests
 
             var text = System.Text.Json.JsonDocument.Parse(payload).RootElement.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
             Assert.Contains("requires 'write'", text);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", previousDataDir);
+            try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_tool_called_without_a_server_receives_the_server_the_gateway_decided_on()
+    {
+        var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-serverid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataDir);
+        var previousDataDir = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
+        Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
+        // "local" and a remote default server, each with a container called "web" (R1-06).
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "aaa111local", Name = "web", ServerId = "local" },
+            new ContainerInfo { Id = "bbb222edge", Name = "web", ServerId = "edge01" })
+        {
+            DefaultServerId = "edge01", AllowMutations = true,
+        };
+        try
+        {
+            await using var factory = new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>()
+                .WithWebHostBuilder(b =>
+                {
+                    b.UseEnvironment("Development");
+                    b.ConfigureTestServices(s =>
+                    {
+                        s.AddSingleton<IDockerService>(docker);
+                        s.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+                            new ServerConfig { Id = "local", Name = "Local" },
+                            new ServerConfig { Id = "edge01", Name = "Edge", IsDefault = true }));
+                    });
+                });
+            using var client = factory.CreateClient();
+            var permissions = factory.Services.GetRequiredService<IMcpPermissionService>();
+            var key = await permissions.AddApiKeyAsync("ops", McpPermissionLevels.Write);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Key);
+            var guardrails = factory.Services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
+            var config = guardrails.Config;
+            var policy = config.ActivePolicy();
+            policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+            policy.RequireConfirmationForWrites = false;
+            await guardrails.SaveConfigAsync(config,
+                new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null, UserEmail: "admin@example.com"));
+
+            var session = await McpServedSurfaceTests.InitializeAsync(client);
+            using var response = await McpServedSurfaceTests.PostAsync(client, session,
+                """{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"restart_container","arguments":{"containerId":"web"}}}""");
+            await response.Content.ReadAsStringAsync();
+
+            // Decided on the default server's "web" — and the tool ran there, by its full id, with the server named.
+            Assert.Equal(("restart", "bbb222edge", (string?)"edge01"), Assert.Single(docker.Actions));
         }
         finally
         {

@@ -92,11 +92,12 @@ public static class McpGuardrailFilter
         {
             // The tool runs on the identity the gateway resolved and decided on (R1-06), not on a second lookup of
             // what the client typed: the target's key and serverId are replaced by their canonical values.
-            if (request.Params.Arguments is { } wire)
-                foreach (var (key, value) in MutationTargets.CanonicalArguments(capability, arguments,
-                             decided.Request.Target, McpToolParameters.TakesServerId(request.Params.Name)))
-                    if (!wire.TryGetValue(key, out var old) || old.GetRawText() != value.GetRawText())
-                        wire[key] = value;
+            // A call without an arguments object still receives the server it was decided on.
+            var wire = request.Params.Arguments ??= new Dictionary<string, JsonElement>();
+            foreach (var (key, value) in MutationTargets.CanonicalArguments(capability, arguments,
+                         decided.Request.Target, McpToolParameters.TakesServerId(request.Params.Name)))
+                if (!wire.TryGetValue(key, out var old) || old.GetRawText() != value.GetRawText())
+                    wire[key] = value;
             var result = await next(request, token);
             // A tool result marked as an error is a failed mutation, not a successful one.
             if (result.IsError == true)

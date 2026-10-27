@@ -43,6 +43,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   does not exist, or a name that fits more than one (two servers called "web", a network id prefix shared by two
   networks, two tasks with the same name), is refused before anything runs; use the id. A server id that differs
   from the stored one only in case is resolved to the stored id.
+- **R1-06: a scheduled task saved without a server acts on the server with the id `local`**, for its gates as well
+  as for its execution (the execution always did; the decision used the default server). Set the server explicitly
+  where `local` is not the intended machine.
 - **R1-06: a webhook saved without a server acts on the server with the id `local`.** Restart and rebuild webhooks
   used the default server before, compose-deploy webhooks used `local`; now all four actions use `local`. If your
   `local` server is not the machine such a webhook should act on (or you have no server with that id), set the

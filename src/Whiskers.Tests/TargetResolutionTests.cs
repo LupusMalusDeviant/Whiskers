@@ -371,6 +371,27 @@ public sealed class TargetResolutionTests : IDisposable
         Assert.Equal(("recreate", "aaa111local", (string?)"local"), Assert.Single(_docker.Actions));
     }
 
+    [Fact]
+    public async Task A_scheduled_task_without_a_server_is_decided_and_run_on_local_even_when_another_server_is_default()
+    {
+        var (runner, resolved) = AdminRunner();
+        _docker.AllowMutations = true;
+        var executor = new TaskExecutor(_docker, null!, null!, null!, null!, runner,
+            NullLogger<TaskExecutor>.Instance, notify: new FakeNotifications());
+
+        var (ok, output) = await executor.ExecuteAsync(new ScheduledTaskEntity
+        {
+            TaskId = "t-9", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart, TargetId = "web",
+            CreatedBy = "user:admin@example.com", CreatedVia = "user:admin@example.com",
+        });
+
+        Assert.True(ok, output);
+        var decided = Assert.Single(resolved);
+        Assert.Equal(("aaa111local", "local"), (decided.Id, decided.ServerId));
+        Assert.Equal(("restart", "web", (string?)"local"), Assert.Single(_docker.Actions));
+        Assert.Equal("local", ScheduledTaskServer.Of(new ScheduledTaskEntity()));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private async Task<(MutationOutcome<int> Outcome, MutationTarget? Seen)> RunAsync(string capabilityId, object arguments,
