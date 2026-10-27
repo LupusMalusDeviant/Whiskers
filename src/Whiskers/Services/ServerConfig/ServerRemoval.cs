@@ -25,7 +25,7 @@ public static class ServerRemoval
         if (server.ConnectionType != ConnectionType.Kubernetes || !vault.IsEnabled) return true;
         try
         {
-            await vault.DeleteSecretAsync(KubernetesClientCache.KubeconfigVaultKey(server.Id));
+            await vault.DeleteSecretAsync(KubernetesClientCache.KubeconfigKeyOf(server));
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)

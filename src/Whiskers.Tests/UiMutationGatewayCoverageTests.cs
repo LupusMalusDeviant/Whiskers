@@ -134,7 +134,8 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.GuardrailsView), "DisableKillSwitch", "guardrails.kill_switch_off"),
         (typeof(Whiskers.Components.Pages.AiOperationsView), "CreateKey", "mcp.key_create"),
         (typeof(Whiskers.Components.Pages.AiOperationsView), "ActivatePreset", "guardrails.save"),
-        (typeof(Whiskers.Components.Pages.Servers), "PersistServerCoreAsync", "vault.secret_set"),
+        (typeof(Whiskers.Components.Pages.Servers), "PersistServerRecordAsync", "vault.secret_set"),
+        (typeof(Whiskers.Components.Pages.Servers), "RemoveUnusedKubeconfigAsync", "vault.secret_delete"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Save", "registry.save"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
     ];
@@ -516,6 +517,35 @@ public class UiMutationGatewayCoverageTests : IDisposable
         vault.FailDeletes = true;
         Assert.False(await ServerRemoval.RemoveAsync(servers2, vault, server2));
         Assert.DoesNotContain(servers2.GetServers(), s => s.Id == server2.Id);
+    }
+
+    [Fact]
+    public async Task A_kubeconfig_staged_for_a_failed_server_save_never_takes_effect()
+    {
+        var vault = new MemoryVault();
+        var path = Path.Combine(_dir, "servers.json");
+        var (servers, server) = await KubernetesServerAsync(path, vault);
+        Assert.Equal("kubeconfig-yaml", vault.GetSecret(KubernetesClientCache.KubeconfigKeyOf(servers.GetServer(server.Id)!)));
+
+        // What the Servers page does on save: the new kubeconfig under a new key, then the record naming it.
+        var staged = $"{KubernetesClientCache.KubeconfigVaultKey(server.Id)}:{Guid.NewGuid():N}";
+        await vault.SetSecretAsync(staged, "new-yaml");
+        var edit = servers.GetServer(server.Id)!.Clone();
+        edit.KubeconfigRef = staged;
+        Directory.CreateDirectory(path + ".tmp");
+        await Assert.ThrowsAnyAsync<Exception>(() => servers.UpdateServerAsync(edit));
+
+        // The live record still names the old key, so every client built now reads the old kubeconfig.
+        Assert.Equal("kubeconfig-yaml", vault.GetSecret(KubernetesClientCache.KubeconfigKeyOf(servers.GetServer(server.Id)!)));
+    }
+
+    [Fact]
+    public void A_server_without_a_kubeconfig_reference_reads_the_key_from_before()
+    {
+        var server = new Models.ServerConfig { Id = "abc", ConnectionType = ConnectionType.Kubernetes };
+        Assert.Equal("kubeconfig:abc", KubernetesClientCache.KubeconfigKeyOf(server));
+        server.KubeconfigRef = "kubeconfig:abc:1";
+        Assert.Equal("kubeconfig:abc:1", KubernetesClientCache.KubeconfigKeyOf(server));
     }
 
     [Fact]

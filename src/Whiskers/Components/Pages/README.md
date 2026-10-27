@@ -18,7 +18,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Servers.razor` | The fleet: configured servers, add/edit, onboarding. A Kubernetes server's kubeconfig is written and removed as its own gateway decision (`vault.secret_set` / `vault.secret_delete`, R1-11). |
+| `Servers.razor` | The fleet: configured servers, add/edit, onboarding. Saving a Kubernetes server writes a changed kubeconfig as its own gateway decision (`vault.secret_set`, R1-11) under a new vault key (`ServerConfig.KubeconfigRef`) that takes effect only with the saved server record; the unused key is then removed (`vault.secret_delete`). Removing a server removes its kubeconfig within the one `server.remove` decision (`ServerRemoval`). |
 | `Terminal.razor` / `ServerTerminal.razor` | Web terminal (container / host). |
 | `Firewall.razor` (+ `AddFirewallRuleDialog.razor`) | ufw firewall management. |
 | `NginxManager.razor` | Nginx site configuration editor. |

@@ -514,7 +514,40 @@
             _ => PersistServerCoreAsync());
     }
 
+    // Set by PersistServerRecordAsync for the one save in flight (saves are serialized by _saving).
+    private string? _newKubeconfigKey, _oldKubeconfigKey;
+
     private async Task<Whiskers.Models.ServerConfig> PersistServerCoreAsync()
+    {
+        _newKubeconfigKey = _oldKubeconfigKey = null;
+        Whiskers.Models.ServerConfig saved;
+        try
+        {
+            saved = await PersistServerRecordAsync();
+        }
+        catch when (_newKubeconfigKey is not null)
+        {
+            // The server record was not written: the new kubeconfig never took effect.
+            await RemoveUnusedKubeconfigAsync(_newKubeconfigKey);
+            throw;
+        }
+        // The record names the new kubeconfig now; the old one is unused, removing it is tidying up.
+        if (_oldKubeconfigKey is not null && _oldKubeconfigKey != _newKubeconfigKey)
+            await RemoveUnusedKubeconfigAsync(_oldKubeconfigKey);
+        return saved;
+    }
+
+    private async Task RemoveUnusedKubeconfigAsync(string vaultKey)
+    {
+        try
+        {
+            await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
+                _ => Vault.DeleteSecretAsync(vaultKey));
+        }
+        catch { /* an unused secret at worst; no server names it */ }
+    }
+
+    private async Task<Whiskers.Models.ServerConfig> PersistServerRecordAsync()
     {
         // Kubernetes cluster (Track B.2): the kubeconfig goes into the VAULT (encrypted, never on
         // disk); servers.json only carries the selectors. Vault is a hard requirement here.
@@ -528,13 +561,21 @@
             _form.KubeNamespaces = _kubeNamespacesCsv
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList();
+            _form.KubeconfigRef = _editingServer?.KubeconfigRef;
             if (!string.IsNullOrWhiteSpace(_kubeconfigYaml))
             {
                 // A vault write of its own (R1-11): decided and audited by name, the kubeconfig never in the arguments.
-                var vaultKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(_editingServer?.Id ?? _form.Id);
+                // It goes to a NEW key that no server names yet, so it takes effect only with the server record
+                // below; a failed save leaves the previous kubeconfig in use.
+                var id = _editingServer?.Id ?? _form.Id;
+                var vaultKey = $"{Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(id)}:{Guid.NewGuid():N}";
                 var kubeconfig = _kubeconfigYaml.Trim();
                 await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
                     _ => Vault.SetSecretAsync(vaultKey, kubeconfig));
+                _newKubeconfigKey = vaultKey;
+                if (_editingServer is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
+                    _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(_editingServer);
+                _form.KubeconfigRef = vaultKey;
             }
         }
 

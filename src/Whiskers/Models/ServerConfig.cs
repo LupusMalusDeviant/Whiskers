@@ -79,6 +79,9 @@ public class ServerConfig
     // KubeContext null = the kubeconfig's current-context; KubeNamespaces empty = all visible.
     public string? KubeContext { get; set; }
     public List<string> KubeNamespaces { get; set; } = new();
+    /// <summary>The vault key of the kubeconfig (R1-11): a new key per change, so a new kubeconfig takes effect only
+    /// with the server record that names it. <c>null</c> on servers saved before: <c>kubeconfig:{Id}</c>.</summary>
+    public string? KubeconfigRef { get; set; }
 
     // Cloud provider control (out-of-band power/snapshot via provider API).
     // The API key is per-server: Hetzner tokens are per-project and Hostinger keys per-account,

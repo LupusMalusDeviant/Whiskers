@@ -20,6 +20,7 @@ All notable changes to Whiskers are documented here. The format follows
   permissions, the vault and registries now publish a change only after it is written, a Settings save of several
   sections (notifications, channels) is one file replacement, and a registry credential is stored under a new vault
   key per change that only takes effect with the registry entry naming it (a pull during the change reads the new one);
+  a changed kubeconfig goes to a new vault key that only takes effect with the saved server record;
   removing a Kubernetes server writes the server list first and only then removes its kubeconfig, within the one
   `server.remove` decision (`ServerRemoval`) — so a failed write leaves the live configuration as it was (`UiMutationGatewayCoverageTests`). The first-run setup wizard writes the whitelist outside
   the gateway, before any admin exists (documented baseline entry).

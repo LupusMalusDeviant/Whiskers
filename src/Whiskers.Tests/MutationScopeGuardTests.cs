@@ -18,6 +18,9 @@ public class MutationScopeGuardTests
 
         [MutatingOperation("container.stop")]
         void Stop(string id);
+
+        [MutatingOperation("config.save")]
+        Task SaveAsync<T>(string section, T value);
     }
 
     public sealed class ProbeService : IProbeService, IDisposable
@@ -26,6 +29,7 @@ public class MutationScopeGuardTests
         public Task<string> StartAsync(string id) => Task.FromResult("started " + id);
         public Task<string> ReadAsync(string id) => Task.FromResult("read " + id);
         public void Stop(string id) => throw new InvalidOperationException("stop failed for " + id);
+        public Task SaveAsync<T>(string section, T value) => Task.CompletedTask;
         public void Dispose() => Disposed = true;
     }
 
@@ -47,6 +51,20 @@ public class MutationScopeGuardTests
 
         var report = Assert.Single(monitor.Snapshot());
         Assert.Equal("container.start", report.CapabilityId);
+        Assert.Equal(2, report.Count);
+    }
+
+    [Fact]
+    public async Task A_generic_mutating_call_outside_a_scope_is_reported_too()
+    {
+        var monitor = Monitor();
+        var guarded = MutationScopeProxy<IProbeService>.Wrap(new ProbeService(), monitor);
+
+        await guarded.SaveAsync("Terminal", new { Enabled = true });
+        await guarded.SaveAsync("Dns", 42);
+
+        var report = Assert.Single(monitor.Snapshot());
+        Assert.Equal("config.save", report.CapabilityId);
         Assert.Equal(2, report.Count);
     }
 

@@ -23,8 +23,11 @@ public sealed class KubernetesClientCache : IKubernetesClientCache, IDisposable
         _vault = vault;
     }
 
-    /// <summary>The vault key that holds a server's kubeconfig YAML.</summary>
+    /// <summary>The vault key that holds a server's kubeconfig YAML before R1-11, and the prefix of the newer keys.</summary>
     public static string KubeconfigVaultKey(string serverId) => $"kubeconfig:{serverId}";
+
+    /// <summary>The vault key that holds <paramref name="server"/>'s kubeconfig: its own reference, or the old key.</summary>
+    public static string KubeconfigKeyOf(Whiskers.Models.ServerConfig server) => server.KubeconfigRef ?? KubeconfigVaultKey(server.Id);
 
     public IKubernetes GetClient(string serverId)
     {
@@ -57,7 +60,7 @@ public sealed class KubernetesClientCache : IKubernetesClientCache, IDisposable
         if (!_vault.IsEnabled)
             throw new InvalidOperationException("Vault ist deaktiviert (VAULT_KEY fehlt) — das kubeconfig kann nicht gelesen werden.");
 
-        var kubeconfigYaml = _vault.GetSecret(KubeconfigVaultKey(serverId));
+        var kubeconfigYaml = _vault.GetSecret(KubeconfigKeyOf(server));
         if (string.IsNullOrWhiteSpace(kubeconfigYaml))
             throw new InvalidOperationException($"Kein kubeconfig im Vault für Server '{server.Name}' — im Server-Dialog neu hinterlegen.");
 

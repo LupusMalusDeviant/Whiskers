@@ -87,7 +87,9 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
     protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
     {
         ArgumentNullException.ThrowIfNull(targetMethod);
-        if (_capabilities.TryGetValue(targetMethod, out var capability) && MutationScope.Current is null)
+        // A generic method arrives constructed (SaveSectionAsync<HealthSettings>); its attribute sits on the definition.
+        var marked = targetMethod.IsGenericMethod ? targetMethod.GetGenericMethodDefinition() : targetMethod;
+        if (_capabilities.TryGetValue(marked, out var capability) && MutationScope.Current is null)
         {
             if (_monitor.Enforce)
                 throw new InvalidOperationException(
