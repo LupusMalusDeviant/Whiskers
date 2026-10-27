@@ -83,9 +83,9 @@ public class TaskExecutor : ITaskExecutor
                     // Only the assignment this run was started under; a takeover meanwhile wins (no suspension).
                     if (await SuspendAsync(task))
                     {
-                        task.Enabled = false;
                         await NotifySuspendedAsync(task, lost);
-                        return (false, $"Suspended: {lost}. An admin can take the task over in Scheduled tasks. {reason}");
+                        return (false, $"Suspended: {lost}. An admin can take the task over in Scheduled tasks and " +
+                                       $"switch it on again. {reason}");
                     }
                     _logger.LogWarning("Scheduled task {Name} was refused ({Reason}); it has a new owner since the run " +
                                        "started, so it stays on", task.Name, lost);
@@ -341,20 +341,26 @@ public class TaskExecutor : ITaskExecutor
         }
     }
 
-    /// <summary>Switches the task off in the database if it still has the owner this run was started under. Without
-    /// a suspender (a caller without a database) the caller persists <c>Enabled</c> itself.</summary>
+    /// <summary>Switches the task off if it still has the owner this run was started under. With a suspender that is
+    /// the only write of <c>Enabled</c>: the caller's later save of the run's result never touches it, so a takeover
+    /// (and re-enabling) in between is not overwritten. Without one (a caller without a database) the entity is
+    /// switched off and the caller persists it.</summary>
     private async Task<bool> SuspendAsync(ScheduledTaskEntity task)
     {
-        if (_suspender is null) return true;
+        if (_suspender is null)
+        {
+            task.Enabled = false;
+            return true;
+        }
         try
         {
             return await _suspender.SuspendAsync(task.TaskId, task.CreatedBy);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Fail closed: switch it off through the caller's save instead.
-            _logger.LogError(ex, "Scheduled task {Name} could not be suspended conditionally", task.Name);
-            return true;
+            // Not suspended, never unconditionally: the run itself was refused, and the next run tries again.
+            _logger.LogError(ex, "Scheduled task {Name} could not be suspended", task.Name);
+            return false;
         }
     }
 
@@ -380,7 +386,7 @@ public class TaskExecutor : ITaskExecutor
             {
                 EventType = "automation_suspended",
                 ContainerName = task.TargetName ?? task.Name,
-                ImageInfo = $"Scheduled task \"{task.Name}\" was suspended: {lost}. It stays off until an admin takes it over in Scheduled tasks.",
+                ImageInfo = $"Scheduled task \"{task.Name}\" was suspended: {lost}. It stays off until an admin takes it over in Scheduled tasks and switches it on again.",
             });
         }
         catch (Exception ex)

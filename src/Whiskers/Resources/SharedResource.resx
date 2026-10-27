@@ -4823,4 +4823,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AutomationOwners_State_Unverified" xml:space="preserve">
     <value>Sign-in not verified yet — runs are refused until the owner signs in once or an admin takes over.</value>
   </data>
+  <data name="ScheduledTasksView_Snackbar_AdoptedStillOff" xml:space="preserve">
+    <value>"{0}" is still switched off. Switch it on to let it run again.</value>
+  </data>
 </root>

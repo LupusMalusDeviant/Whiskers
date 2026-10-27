@@ -4823,4 +4823,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AutomationOwners_State_Unverified" xml:space="preserve">
     <value>Anmeldung noch nicht bestätigt – Läufe werden abgelehnt, bis sich der Besitzer einmal anmeldet oder ein Admin übernimmt.</value>
   </data>
+  <data name="ScheduledTasksView_Snackbar_AdoptedStillOff" xml:space="preserve">
+    <value>„{0}“ ist noch ausgeschaltet. Schalte die Aufgabe ein, damit sie wieder läuft.</value>
+  </data>
 </root>

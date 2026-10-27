@@ -166,7 +166,7 @@ else
                     }
                     @if (_role >= AppRole.Admin)
                     {
-                        @if (!IsMine(context.CreatedBy))
+                        @if (!IsMine(context.CreatedBy) || ProvenanceNeedsAdoption(context))
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.PersonAdd" Color="Color.Warning" Size="Size.Small"
                                            OnClick="@(() => AdoptTask(context))" title="@L["ScheduledTasksView_Tooltip_Adopt"]" />
@@ -548,14 +548,28 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         if (await AdoptAsync(task))
+        {
             Snackbar.Add(L["ScheduledTasksView_Snackbar_Adopted", task.Name].Value, Severity.Success);
+            // A suspended task stays off after a takeover (it may have been off on purpose): say how to resume it.
+            if (!task.Enabled)
+                Snackbar.Add(L["ScheduledTasksView_Snackbar_AdoptedStillOff", task.Name].Value, Severity.Info);
+        }
         await LoadData();
     }
+
+    /// <summary>An owned task an agent created, or one whose provenance was never recorded (before R1-03), runs with
+    /// the agent's rules (R1-04) — also when its owner is this admin. Taking it over records the admin as its
+    /// provenance.</summary>
+    private static bool ProvenanceNeedsAdoption(Whiskers.Models.ScheduledTaskEntity task) =>
+        !string.IsNullOrWhiteSpace(task.CreatedBy)
+        && (string.IsNullOrWhiteSpace(task.CreatedVia)
+            || task.CreatedVia.StartsWith(PrincipalIds.AgentPrefix, StringComparison.Ordinal));
 
     private async Task AdoptAll()
     {
         if (!Require(AppRole.Admin)) return;
-        foreach (var task in _tasks.Where(t => string.IsNullOrWhiteSpace(t.CreatedBy) || OwnerRevoked(t)).ToList())
+        foreach (var task in _tasks.Where(t => string.IsNullOrWhiteSpace(t.CreatedBy) || OwnerRevoked(t)
+                                               || ProvenanceNeedsAdoption(t)).ToList())
             if (!await AdoptAsync(task)) break;
         await LoadData();
     }

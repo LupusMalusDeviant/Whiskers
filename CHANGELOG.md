@@ -114,8 +114,10 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     Take such items over in Scheduled Tasks, or keep the grace period with `Automation__RequireOwner=false`.
   - A run refused because its owner lost their authority — local account deleted, removed from the whitelist,
     demoted below what the item does (including retention deletes of a backup task), API key deleted or disabled —
-    now **suspends** the item: a scheduled task is switched off, AutoPatch / AutoUpdate are blocked until an Admin
-    takes them over in Settings → Automation owners (AutoPatch also stops mid-cycle). Admins get an
+    now **suspends** the item: a scheduled task is switched off — take it over in Scheduled Tasks **and switch it
+    on again** (the takeover does not switch it on by itself, since a task may have been off on purpose) —,
+    AutoPatch / AutoUpdate are blocked until an Admin takes them over in Settings → Automation owners (AutoPatch
+    also stops mid-cycle). Admins get an
     `automation_suspended` notification that no container mute hides. Policy refusals (kill switch, protected
     resources) still only report `automation_refused`.
   - With Google/OIDC sign-in next to local accounts, Whiskers now records which emails have a local account and
@@ -129,7 +131,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - **Tasks from before provenance was recorded** (created before this release, owner set, no `CreatedVia`) may
     have come from an agent, so they now run with the agent's guardrail rules; with the default preset their writes
     are refused (`automation_refused`). Take each such task over in Scheduled Tasks to run it with the PC-D1 rules
-    again.
+    again — also a task you own yourself (the take-over button is shown for it, and "Take over all" includes it).
   - A task an agent created keeps the agent's guardrail rules when it runs (autonomy level and confirmation, tool
     lists, forbidden arguments). With the default preset such a task's writes are refused; an Admin who takes it
     over makes it a task of their own.

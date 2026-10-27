@@ -241,6 +241,53 @@ public sealed class KillSwitchTests : IDisposable
     }
 
     [Fact]
+    public async Task The_runs_result_save_never_overwrites_a_takeover_that_switched_the_task_on_again()
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.ScheduledTasks.Add(new ScheduledTaskEntity
+            {
+                TaskId = "t9", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+                TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+            });
+            await db.SaveChangesAsync();
+        }
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);   // ops@ is not on the whitelist: lost
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: new FakeNotifications(),
+            suspender: new ScheduledTaskSuspender(_sp.GetRequiredService<IServiceScopeFactory>()));
+
+        // The scheduler's own context: it loads the task, runs it, and saves the result afterwards.
+        using var runScope = _sp.CreateScope();
+        var runDb = runScope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var tracked = runDb.ScheduledTasks.Single(t => t.TaskId == "t9");
+        var (success, output) = await executor.ExecuteAsync(tracked);
+        Assert.False(success);
+        Assert.StartsWith("Suspended:", output);
+
+        // Before that save, an admin takes the task over and switches it on again.
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var task = db.ScheduledTasks.Single(t => t.TaskId == "t9");
+            Assert.False(task.Enabled);                                    // the conditional suspension happened
+            task.CreatedBy = task.CreatedVia = "user:lea@example.com";
+            task.Enabled = true;
+            await db.SaveChangesAsync();
+        }
+        tracked.LastResult = output;
+        await runDb.SaveChangesAsync();
+
+        using (var scope = _sp.CreateScope())
+        {
+            var task = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ScheduledTasks.Single(t => t.TaskId == "t9");
+            Assert.True(task.Enabled);
+            Assert.Equal("user:lea@example.com", task.CreatedBy);
+        }
+    }
+
+    [Fact]
     public async Task An_ownerless_AutoUpdate_is_suspended_with_the_real_owner_store_and_the_admins_are_told()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");

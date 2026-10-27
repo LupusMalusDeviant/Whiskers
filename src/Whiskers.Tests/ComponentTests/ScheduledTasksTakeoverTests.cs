@@ -55,6 +55,37 @@ public class ScheduledTasksTakeoverTests : BunitContext
         Assert.Equal([("t1", PrincipalIds.User(Admin))], _scheduler.OwnerChanges);
     }
 
+    [Theory]
+    [InlineData(null)]                 // created before provenance was recorded
+    [InlineData("agent:session-1")]    // created by an agent
+    public void An_admin_can_take_over_their_own_task_that_runs_with_agent_rules(string? createdVia)
+    {
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t3", Name = "mine", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web", CreatedBy = PrincipalIds.User(Admin), CreatedVia = createdVia,
+        });
+
+        var cut = Render<ScheduledTasksView>();
+        cut.Find("button[title='ScheduledTasksView_Tooltip_Adopt']").Click();
+
+        Assert.Equal([("t3", PrincipalIds.User(Admin))], _scheduler.OwnerChanges);
+    }
+
+    [Fact]
+    public void An_admins_own_task_created_by_hand_offers_no_takeover()
+    {
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t4", Name = "mine", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web", CreatedBy = PrincipalIds.User(Admin), CreatedVia = PrincipalIds.User(Admin),
+        });
+
+        var cut = Render<ScheduledTasksView>();
+
+        Assert.Empty(cut.FindAll("button[title='ScheduledTasksView_Tooltip_Adopt']"));
+    }
+
     [Fact]
     public void A_task_whose_owner_still_holds_authority_is_not_flagged()
     {
