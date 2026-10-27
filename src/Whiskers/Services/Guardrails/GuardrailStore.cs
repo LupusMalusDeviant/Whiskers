@@ -250,6 +250,30 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
     }
 
+    public async Task DisableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default)
+    {
+        RequireAdmin(editor);
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_state.LoadError is not null)
+                throw new InvalidOperationException("The guardrail configuration could not be loaded; fix it before changing it.");
+            var next = _state.Config.Clone();
+            var active = next.Presets.FirstOrDefault(p => p.Name == next.ActivePreset);
+            if (active is null || !active.Policy.ReadOnlyMode) return;
+            active.Policy.ReadOnlyMode = false;
+            await _store.SaveAsync(next);   // throws → the kill switch stays on
+            _state = new State(next, null);
+            _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).", editor.DisplayName, active.Name);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        Changed?.Invoke();
+    }
+
     private static void RequireAdmin(AgentPrincipal editor)
     {
         if (editor.PermissionLevel != McpPermissionLevels.Admin)

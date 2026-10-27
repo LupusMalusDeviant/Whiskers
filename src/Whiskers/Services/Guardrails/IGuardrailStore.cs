@@ -20,10 +20,18 @@ public interface IGuardrailStore
 
     /// <summary>Saves the whole preset config (admin-only). Throws if editor.PermissionLevel != Admin, and
     /// <see cref="GuardrailConfigException"/> for a configuration that cannot be enforced.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("guardrails.save")]
     Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default);
 
     /// <summary>Back-compat: replace the active preset's policy. Throws if editor isn't Admin.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("guardrails.save")]
     Task SaveAsync(GuardrailPolicy policy, AgentPrincipal editor, CancellationToken ct = default);
+
+    /// <summary>Switches the kill switch off (R1-11): <c>ReadOnlyMode</c> of the active preset becomes <c>false</c>,
+    /// nothing else changes. The only configuration write the kill switch lets through. Admin-only.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("guardrails.kill_switch_off")]
+    Task DisableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default) =>
+        throw new NotSupportedException("This guardrail store cannot switch the kill switch off.");
 
     /// <summary>Fires after a successful save so consumers re-read the active policy.</summary>
     event Action? Changed;

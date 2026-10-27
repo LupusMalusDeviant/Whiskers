@@ -118,7 +118,10 @@ public class VaultService : IVaultService, IInitializable
         try
         {
             var encrypted = Encrypt(plainValue);
-            var existing = _data.Entries.FirstOrDefault(e => e.Key == key);
+            // Copy-on-write (R1-11): the new entry list is published only once it is written, so a failed write
+            // leaves the live vault as it was.
+            var next = Copy(_data);
+            var existing = next.Entries.FirstOrDefault(e => e.Key == key);
 
             if (existing != null)
             {
@@ -130,7 +133,7 @@ public class VaultService : IVaultService, IInitializable
             }
             else
             {
-                _data.Entries.Add(new VaultEntry
+                next.Entries.Add(new VaultEntry
                 {
                     Key = key,
                     EncryptedValue = encrypted,
@@ -141,7 +144,8 @@ public class VaultService : IVaultService, IInitializable
                 });
             }
 
-            await _store.SaveAsync(_data);
+            await _store.SaveAsync(next);
+            _data = next;
             _logger.LogInformation("Vault secret set: {Key}", key);
         }
         finally { _lock.Release(); }
@@ -174,10 +178,19 @@ public class VaultService : IVaultService, IInitializable
         await _lock.WaitAsync();
         try
         {
-            _data.Entries.RemoveAll(e => e.Key == key);
-            await _store.SaveAsync(_data);
+            var next = Copy(_data);
+            next.Entries.RemoveAll(e => e.Key == key);
+            await _store.SaveAsync(next);
+            _data = next;
         }
         finally { _lock.Release(); }
+    }
+
+    /// <summary>A copy of the vault data whose entries can be changed without touching the live ones.</summary>
+    private static VaultData Copy(VaultData data)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(data);
+        return System.Text.Json.JsonSerializer.Deserialize<VaultData>(json) ?? new VaultData();
     }
 
     public List<VaultEntry> GetExpiringSecrets()

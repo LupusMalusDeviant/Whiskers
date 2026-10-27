@@ -277,20 +277,27 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
             // The UI edits name, level, tool list and the active flag — never the key material. Take the hash
             // from the stored key with the same id, and drop entries the store does not know (keys are only
             // ever created by AddApiKeyAsync), so a crafted save cannot plant a key of its own.
+            // Works on a copy, published only once it is written (R1-11): a failed write leaves the live
+            // permissions as they were, and the caller's objects (the Settings page's edit buffer) never alias them.
             var stored = _data.ApiKeys.ToDictionary(k => k.Id);
-            data.ApiKeys = data.ApiKeys
-                .Where(k => stored.ContainsKey(k.Id))
-                .Select(k =>
-                {
-                    k.KeyHash = stored[k.Id].KeyHash;
-                    k.KeyHint = stored[k.Id].KeyHint;
-                    k.Key = null;
-                    return k;
-                })
-                .ToList();
-            EnforceCodeFloor(data);
-            _data = data;
-            await _store.SaveAsync(_data);
+            var next = new McpPermissionData
+            {
+                ApiKeys = data.ApiKeys
+                    .Where(k => stored.ContainsKey(k.Id))
+                    .Select(k =>
+                    {
+                        var copy = CloneKey(k);
+                        copy.KeyHash = stored[k.Id].KeyHash;
+                        copy.KeyHint = stored[k.Id].KeyHint;
+                        copy.Key = null;
+                        return copy;
+                    })
+                    .ToList(),
+                Tools = data.Tools.ToDictionary(kv => kv.Key, kv => CloneTool(kv.Value)),
+            };
+            EnforceCodeFloor(next);
+            await _store.SaveAsync(next);
+            _data = next;
             _logger.LogInformation("MCP permissions saved: {KeyCount} keys, {ToolCount} tools",
                 _data.ApiKeys.Count, _data.Tools.Count);
         }

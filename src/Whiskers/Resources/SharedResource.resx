@@ -3200,6 +3200,15 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="GuardrailsView_KillSwitch_Caption" xml:space="preserve">
     <value>Immediately blocks everything above "read" — regardless of any other setting.</value>
   </data>
+  <data name="GuardrailsView_KillSwitch_ActiveHint" xml:space="preserve">
+    <value>The kill switch is on: it refuses every configuration change, saving this page included. Switching it off is the one action it allows.</value>
+  </data>
+  <data name="GuardrailsView_KillSwitch_Disable_Button" xml:space="preserve">
+    <value>Switch kill switch off</value>
+  </data>
+  <data name="GuardrailsView_KillSwitch_Disabled_Snackbar" xml:space="preserve">
+    <value>Kill switch is off.</value>
+  </data>
   <data name="GuardrailsView_KillSwitch_Title" xml:space="preserve">
     <value>Read-only mode (kill switch)</value>
   </data>

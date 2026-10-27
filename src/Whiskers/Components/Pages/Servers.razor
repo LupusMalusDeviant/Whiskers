@@ -530,9 +530,11 @@
                 .ToList();
             if (!string.IsNullOrWhiteSpace(_kubeconfigYaml))
             {
-                await Vault.SetSecretAsync(
-                    Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(_editingServer?.Id ?? _form.Id),
-                    _kubeconfigYaml.Trim());
+                // A vault write of its own (R1-11): decided and audited by name, the kubeconfig never in the arguments.
+                var vaultKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(_editingServer?.Id ?? _form.Id);
+                var kubeconfig = _kubeconfigYaml.Trim();
+                await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
+                    _ => Vault.SetSecretAsync(vaultKey, kubeconfig));
             }
         }
 
@@ -700,8 +702,11 @@
                 await ServerConfigService.RemoveServerAsync(server.Id);
                 // A Kubernetes server leaves its kubeconfig in the vault — clean that up too.
                 if (server.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes && Vault.IsEnabled)
-                    await Vault.DeleteSecretAsync(
-                        Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(server.Id));
+                {
+                    var vaultKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(server.Id);
+                    await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
+                        _ => Vault.DeleteSecretAsync(vaultKey));
+                }
             });
             _servers = ServerConfigService.GetServers();
             await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, serverId: server.Id);

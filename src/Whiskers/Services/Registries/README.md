@@ -8,7 +8,7 @@ registries and passes an `AuthConfig`; no match = anonymous pull, unchanged.
 
 | File | Purpose |
 |---|---|
-| `IRegistryConfigService.cs` / `RegistryConfigService.cs` | CRUD (`registries.json`) + synchronous, cache-backed credential resolution for the pull hot path. |
+| `IRegistryConfigService.cs` / `RegistryConfigService.cs` | CRUD (`registries.json`) + synchronous, cache-backed credential resolution for the pull hot path. Save/delete are `registry.save` / `registry.delete` (Admin, R1-11); the class is a `[MutationHandler]`, so its own vault writes are part of that decision. |
 
 Managed in *Settings → Registries* ([`RegistriesPanel`](../../Components/Shared/RegistriesPanel.razor)).
 

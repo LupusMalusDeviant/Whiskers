@@ -9,6 +9,7 @@ namespace Whiskers.Services.Persistence;
 /// restart. One section per settings class (e.g. "Mattermost", "MetricAlert").</summary>
 public interface IAppSettingsStore
 {
+    [Whiskers.Services.Mutations.MutatingOperation("config.save")]
     Task SaveSectionAsync<T>(string section, T value);
 }
 

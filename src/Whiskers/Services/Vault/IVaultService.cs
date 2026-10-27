@@ -8,8 +8,10 @@ public interface IVaultService
     bool IsEnabled { get; }
     Task InitializeAsync(CancellationToken ct = default);
     List<VaultEntry> ListSecrets();
+    [Whiskers.Services.Mutations.MutatingOperation("vault.secret_set")]
     Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null, int? rotateAfterDays = null);
     string? GetSecret(string key);
+    [Whiskers.Services.Mutations.MutatingOperation("vault.secret_delete")]
     Task DeleteSecretAsync(string key);
     List<VaultEntry> GetExpiringSecrets();
 }

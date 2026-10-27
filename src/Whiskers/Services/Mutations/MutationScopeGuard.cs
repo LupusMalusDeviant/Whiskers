@@ -59,11 +59,14 @@ public sealed class MutationScopeMonitor : IMutationScopeMonitor
 /// checked against <see cref="MutationScope.Current"/>; every other call is passed straight through. The wrapper
 /// does not change arguments, results or exceptions.
 /// </summary>
-public class MutationScopeProxy<TService> : DispatchProxy where TService : class
+public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy where TService : class
 {
     private TService _inner = null!;
     private IMutationScopeMonitor _monitor = null!;
     private IReadOnlyDictionary<MethodInfo, string> _capabilities = null!;
+
+    /// <inheritdoc />
+    public object Inner => _inner;
 
     /// <summary>Returns <paramref name="inner"/> itself when <typeparamref name="TService"/> has no marked method.</summary>
     public static TService Wrap(TService inner, IMutationScopeMonitor monitor)
@@ -102,6 +105,14 @@ public class MutationScopeProxy<TService> : DispatchProxy where TService : class
             throw;   // unreachable
         }
     }
+}
+
+/// <summary>A scope guard around a service. The guard only implements the guarded interface; code that needs another
+/// interface of the same instance (e.g. <c>IInitializable</c> at startup) unwraps it here.</summary>
+public interface IMutationScopeProxy
+{
+    /// <summary>The service the guard forwards to.</summary>
+    object Inner { get; }
 }
 
 /// <summary>Reads <see cref="MutatingOperationAttribute"/> from an interface and the interfaces it extends.</summary>

@@ -35,6 +35,14 @@ For a human in the UI the policy applies only the rules PC-D1 names — authoriz
 resources (`GuardrailEngine.CreateForHumans`). Tool lists, argument patterns and confirmation are about delegating to
 the agent or a key; a person's click is not sent for approval.
 
+Security configuration (R1-11) is Admin-only with target kind `config` (the `section` argument names it):
+`config.save`, `config.whitelist`, `config.roles`, `config.mcp_permissions`, `mcp.key_create`, `mcp.key_delete`,
+`guardrails.save`, `guardrails.kill_switch_off`, `vault.secret_set`, `vault.secret_delete`, `registry.save`,
+`registry.delete`. `GuardrailMutationPolicy` makes two narrow exceptions, both for a person in the UI only and both
+after authorization: `guardrails.kill_switch_off` is evaluated with `ReadOnlyMode` off (every other rule applies), and
+`guardrails.save` is allowed while the store is fail-closed (`LoadError`), so a broken `guardrails.json` can be
+repaired in the UI. `UiMutationGatewayCoverageTests` lists every configuration write.
+
 ### Unattended automation (PC-D6)
 
 ```csharp
@@ -118,7 +126,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`, `__resolvedRelated<n>`), so a protected container is caught by id prefix, as a container attached to a removed network, and a workload by its live controller. Without engine or store it refuses everything. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
 | `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. `Covers(serverId, identities)` says whether this or an enclosing decision saw a resource (target, related resources, argument values) on that server — used by `ComposePlan.EnsureDecided` (R1-07). |
-| `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Report mode:** a call outside a scope still runs; the first sighting per capability is logged at Information. |
+| `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Report mode:** a call outside a scope still runs; the first sighting per capability is logged at Information. The guard implements only the guarded interface; `IMutationScopeProxy.Inner` gives the instance behind it (used by `AddInitializable` for startup warm-up). |
 
 Registration: [`../../Startup/WhiskersMutationGatewayExtensions.cs`](../../Startup/WhiskersMutationGatewayExtensions.cs)
 (`AddGuardrailPolicy`, `AddMutationGateway`, `AddMutationScopeGuard`), called **last** in `Program.cs` so module

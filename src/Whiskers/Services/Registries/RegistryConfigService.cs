@@ -7,7 +7,9 @@ namespace Whiskers.Services.Registries;
 
 /// <summary>Implements F8. Configs live in <c>registries.json</c>; credentials in the vault
 /// (<c>registry-cred:{id}</c>). Credential resolution is synchronous and cache-backed because it
-/// sits on the image-pull hot path.</summary>
+/// sits on the image-pull hot path. Its vault writes are part of <c>registry.save</c>/<c>registry.delete</c>,
+/// which the gateway decides before this class runs (R1-11).</summary>
+[Whiskers.Services.Mutations.MutationHandler]
 public class RegistryConfigService : IRegistryConfigService
 {
     private readonly JsonFileStore<RegistryConfigData> _store;

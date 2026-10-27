@@ -11,8 +11,10 @@ public interface IRegistryConfigService
 
     /// <summary>Creates/updates. A non-null <paramref name="credential"/> is stored in the vault;
     /// null keeps an existing one; empty string removes it.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("registry.save")]
     Task<RegistryConfig> SaveRegistryAsync(RegistryConfig registry, string? credential);
 
+    [Whiskers.Services.Mutations.MutatingOperation("registry.delete")]
     Task DeleteRegistryAsync(string registryId);
 
     /// <summary>Resolves (username, password, serverAddress) for the image reference's registry,

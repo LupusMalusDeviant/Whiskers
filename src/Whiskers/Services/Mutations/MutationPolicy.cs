@@ -26,6 +26,13 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     // PC-D1: a human in the UI is bound by authorization, the kill switch and protected resources only.
     private static readonly IAgentGuardrailEngine HumanEngine = GuardrailEngine.CreateForHumans();
 
+    /// <summary>The one write the kill switch lets through (R1-11): switching it off again. Admin-only like every
+    /// configuration capability, from a person in the UI only, decided and audited like any other mutation.</summary>
+    public const string KillSwitchOff = "guardrails.kill_switch_off";
+
+    /// <summary>Saving the guardrail configuration, which is how an admin repairs a store that is fail-closed.</summary>
+    public const string GuardrailsSave = "guardrails.save";
+
     private readonly IAgentGuardrailEngine? _engine;
     private readonly IGuardrailStore? _store;
 
@@ -45,11 +52,26 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             return new MutationPolicyDecision(MutationVerdict.Deny,
                 "No policy engine is registered; the mutation was refused.", []);
 
+        var policy = _store.Current;
+        var person = request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human;
+        if (person && capability.Id == GuardrailsSave && _store.LoadError is not null)
+            // The fail-closed policy refuses every write, its own repair included; without this an unreadable
+            // guardrails.json could only be fixed on disk. Authorization (Admin) already ran, the audit follows, and
+            // the store validates what is saved.
+            return new MutationPolicyDecision(MutationVerdict.Allow,
+                "The guardrail configuration is fail-closed; an admin may save a valid one.", ["fail-closed-repair"]);
+        if (person && capability.Id == KillSwitchOff)
+        {
+            // Every other rule still applies; only the kill switch itself does not stop the action that ends it.
+            policy = policy.Clone();
+            policy.ReadOnlyMode = false;
+        }
+
         var context = new AgentContext(
             request.SessionId ?? request.OperationId ?? "mutation-gateway",
             ToAgentPrincipal(request.Principal),
             ToOrigin(request),
-            _store.Current);
+            policy);
         // A person in the UI, and an unattended item running on a person's authority (PC-D6), are bound by the PC-D1
         // rules: the owner decided when creating the item. An item owned by an API key keeps every rule that binds
         // the key (tool lists, forbidden arguments, confirmation) — scheduling is not a way around them; a run that

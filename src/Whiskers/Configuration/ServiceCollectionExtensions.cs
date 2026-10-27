@@ -50,7 +50,12 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddInitializable<TResolve>(this IServiceCollection services)
         where TResolve : class
     {
-        services.AddSingleton<IInitializable>(sp => (IInitializable)sp.GetRequiredService<TResolve>());
+        // A service with mutating methods is resolved through its scope guard, which implements only that interface.
+        services.AddSingleton<IInitializable>(sp => sp.GetRequiredService<TResolve>() switch
+        {
+            Whiskers.Services.Mutations.IMutationScopeProxy guarded => (IInitializable)guarded.Inner,
+            var service => (IInitializable)service,
+        });
         return services;
     }
 }
