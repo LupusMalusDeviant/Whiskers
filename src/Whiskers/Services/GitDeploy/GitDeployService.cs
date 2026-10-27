@@ -171,8 +171,10 @@ public class GitDeployService : IGitDeployService
 
             async Task BuildAndUp()
             {
-                // Decided by a gate: planned again right before the first write, and nothing undecided may run.
-                if (gate is not null)
+                // Decided by a gate, or run inside a gateway decision (the webhook Test button): planned again right
+                // before the first write, and nothing undecided may run. Only the external webhook call has neither
+                // and runs the plan undecided until R1-08 / R1-09.
+                if (gate is not null || MutationScope.Current is not null)
                 {
                     plan = await _planner.PlanAsync(deployment, ct);
                     plan.EnsureDecided(MutationScope.Current);

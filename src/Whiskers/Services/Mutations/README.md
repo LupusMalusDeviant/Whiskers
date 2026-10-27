@@ -212,9 +212,11 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   The `.env`'s compose switches are planned too (`COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `COMPOSE_REMOVE_ORPHANS`).
   Execution uses the plan's explicit `-p` / `--project-directory` / `-f` and refuses (`EnsureDecided`) when a plan made
   again right before writing touches a container no enclosing decision covered (UI, MCP, agent, webhook Test, Git
-  deploy page). Not covered: values in the host's own environment (a name using one without default refuses the
-  plan; with a default the default is assumed), a `.env` created between plan and `up` when there was none, and the
-  external webhook and Git-deploy webhook paths, which run the plan undecided until R1-08 / R1-09.
+  deploy page; a Git deploy from the webhook **Test** has no per-container decision yet and is therefore refused when
+  it touches a container, until R1-08). Not covered: values in the host's own environment, which compose prefers to
+  the `.env` (a name using one without default refuses the plan; with a default the `.env` / default is assumed;
+  the host's orphan switches are cleared for the command), a `.env` created between plan and `up` when there was
+  none, and the external webhook and Git-deploy webhook paths, which run the plan undecided until R1-08 / R1-09.
 - **External webhook calls** (`/api/webhooks/...`) still run without the gateway; they move in step 2.4. Only the
   UI's **Test** button is decided, as the clicking person.
 - **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the pod's **live**
