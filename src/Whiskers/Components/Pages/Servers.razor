@@ -608,7 +608,11 @@
             if (_sshKeyData != null && _sshKeyFileName != null)
                 await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
 
-            await ServerConfigService.UpdateServerAsync(Record());
+            // The store decides the kubeconfig reference when it writes (R1-11): the new one, or whatever the server
+            // has at that moment — a save queued behind another admin's rotation keeps the rotated kubeconfig.
+            var previous = await ServerConfigService.UpdateServerAsync(Record(), _newKubeconfigKey);
+            if (_newKubeconfigKey is not null && previous is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
+                _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(previous);
             ConnectionManager.InvalidateClient(_form.Id);
             KubeClients.Invalidate(_form.Id); // rebuild on next use if kubeconfig/context changed
             await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
@@ -631,15 +635,11 @@
         return ServerConfigService.GetServer(_form.Id) ?? _form;
 
         // What is stored: a copy, so the dialog buffer never becomes the live record (a retry after a failed probe
-        // edits the buffer, not the server). The kubeconfig reference comes from the server as stored NOW, not as it
-        // was when the dialog opened — another save may have rotated it meanwhile (R1-11).
+        // edits the buffer, not the server). For an update the store sets the kubeconfig reference itself.
         Whiskers.Models.ServerConfig Record()
         {
             var record = _form.Clone();
-            var stored = ServerConfigService.GetServer(record.Id);
-            record.KubeconfigRef = _newKubeconfigKey ?? stored?.KubeconfigRef;
-            if (_newKubeconfigKey is not null && stored is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
-                _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(stored);
+            record.KubeconfigRef = _newKubeconfigKey;
             return record;
         }
     }

@@ -112,6 +112,45 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_save_queued_behind_a_rotation_keeps_the_rotated_kubeconfig()
+    {
+        var page = Render<Servers>();
+        var server = new ServerConfig { Name = "k8s", ConnectionType = ConnectionType.Kubernetes };
+        Set(page, "_form", server);
+        Set(page, "_kubeconfigYaml", "yaml-A");
+        await Persist(page);
+        var stale = _servers.GetServer(server.Id)!.Clone();   // what a second admin read before the rotation
+
+        Set(page, "_kubeconfigYaml", "yaml-B");
+        await Persist(page);                                   // rotation A → B, A removed
+
+        // The second admin's write reaches the store now, carrying the reference it read before.
+        stale.Name = "renamed";
+        await _servers.UpdateServerAsync(stale);   // any update — onboarding and SSH-key cleanup use this one too
+
+        var live = _servers.GetServer(server.Id)!;
+        Assert.Equal("renamed", live.Name);
+        Assert.Equal("yaml-B", _vault.GetSecret(KubernetesClientCache.KubeconfigKeyOf(live)));
+    }
+
+    [Fact]
+    public async Task Deleting_from_a_stale_page_removes_the_current_kubeconfig()
+    {
+        var page = Render<Servers>();
+        var server = new ServerConfig { Name = "k8s", ConnectionType = ConnectionType.Kubernetes };
+        Set(page, "_form", server);
+        Set(page, "_kubeconfigYaml", "yaml-A");
+        await Persist(page);
+        var shown = _servers.GetServer(server.Id)!.Clone();   // the row a second page still shows
+
+        Set(page, "_kubeconfigYaml", "yaml-B");
+        await Persist(page);
+
+        Assert.True(await ServerRemoval.RemoveAsync(_servers, _vault, shown));
+        Assert.Empty(_vault.Keys);
+    }
+
+    [Fact]
     public async Task A_rotation_removes_the_previous_key()
     {
         var page = Render<Servers>();

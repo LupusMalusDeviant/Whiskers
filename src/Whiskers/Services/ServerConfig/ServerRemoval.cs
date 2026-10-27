@@ -21,11 +21,13 @@ public static class ServerRemoval
         ArgumentNullException.ThrowIfNull(vault);
         ArgumentNullException.ThrowIfNull(server);
 
-        await servers.RemoveServerAsync(server.Id);
-        if (server.ConnectionType != ConnectionType.Kubernetes || !vault.IsEnabled) return true;
+        // The record as stored when it was removed: a page showing an older copy may name a kubeconfig that a
+        // rotation has replaced meanwhile.
+        var removed = await servers.TakeServerAsync(server.Id) ?? server;
+        if (removed.ConnectionType != ConnectionType.Kubernetes || !vault.IsEnabled) return true;
         try
         {
-            await vault.DeleteSecretAsync(KubernetesClientCache.KubeconfigKeyOf(server));
+            await vault.DeleteSecretAsync(KubernetesClientCache.KubeconfigKeyOf(removed));
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
