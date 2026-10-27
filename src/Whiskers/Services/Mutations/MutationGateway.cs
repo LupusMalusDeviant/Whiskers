@@ -308,6 +308,9 @@ public sealed class MutationGateway : IMutationGateway
         Capability? capability, MutationStatus status, string reason, CancellationToken ct, string? approvalId = null)
     {
         Debug.Assert(status is MutationStatus.Denied or MutationStatus.PendingApproval);
+        // A rule can quote the argument it matched; a payload (a command, SQL, a file body) can carry credentials.
+        // Callers log, notify and store the reason, so it leaves the gateway without payload values.
+        reason = AuditLogMutationSink.WithoutPayloadValues(reason, request.Arguments) ?? reason;
         try
         {
             await _audit.RecordDeniedAsync(operationId, request, capability, status, reason, ct);

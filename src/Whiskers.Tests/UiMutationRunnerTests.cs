@@ -289,7 +289,7 @@ public class UiMutationRunnerTests
         {
             DefaultServerId = "remote-1",
         };
-        var executor = new Whiskers.Services.Scheduler.TaskExecutor(docker, null!, null!, null!, null!,
+        var executor = new Whiskers.Services.Scheduler.TaskExecutor(docker, null!, null!, null!, null!, null!,
             NullLogger<Whiskers.Services.Scheduler.TaskExecutor>.Instance,
             guardrails: new AgentToolTestHelpers.FixedGuardrailStore(policy));
 

@@ -83,6 +83,12 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     preset for that key.
   - **A custom-command task is checked against the forbidden-argument patterns of today**, on every run, not only
     when it was created (key-owned tasks). A command that a pattern added later matches is refused.
+  - **A task whose owner lost its authority** (removed or demoted user, deleted or disabled key) is flagged in
+    Scheduled Tasks; an Admin can take over any task there, alone or with "take over all".
+  - **A refusal reason never quotes a command or SQL text**: the gateway removes payload values before the reason
+    reaches a log line, a notification, the task history or the UI.
+  - **The AutoPatch preview over MCP** (`preview_auto_patch`) runs on the caller's authority and decides every
+    container like the nightly cycle; a key whose preset confirms writes gets every container refused.
   - **AutoPatch decides every container on its own** (`container.update` of that container), in a dry run too: a
     protected container, or one the owner may no longer update, is skipped as `Aborted (refused: …)` instead of
     patched or tried. A patch that ends as `Unknown`, `RolledBack` or `RollbackNotVerified` is audited as failed,

@@ -4712,6 +4712,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ScheduledTasksView_Table_Owner" xml:space="preserve">
     <value>Owner</value>
   </data>
+  <data name="ScheduledTasksView_Chip_OwnerRevoked" xml:space="preserve">
+    <value>No authority</value>
+  </data>
+  <data name="ScheduledTasksView_Alert_OwnerRevoked" xml:space="preserve">
+    <value>{0} task(s) belong to an owner who may no longer run them (removed or demoted user, deleted or disabled key). They are refused until an admin takes them over.</value>
+  </data>
   <data name="ScheduledTasksView_Chip_NoOwner" xml:space="preserve">
     <value>No owner</value>
   </data>

@@ -403,6 +403,32 @@ public class AutomationMutationRunnerTests
     }
 
     [Fact]
+    public async Task A_refused_command_never_carries_its_text_into_the_result_or_the_notification()
+    {
+        var policy = Unattended();
+        policy.ProtectedResources.Add("*prod*");   // matches the whole command, which the rule then quotes
+        var f = Build(policy: policy);
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = "admin" });
+        var host = new CapturingHost();
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, host, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify);
+
+        var (success, output) = await executor.ExecuteAsync(new ScheduledTaskEntity
+        {
+            TaskId = "t5", Name = "sync", TaskType = ScheduledTaskType.CustomCommand, CreatedBy = "key:k1",
+            Config = "{\"command\":\"curl https://prod.example.com/sync -H 'X-Auth: Violet47Lantern'\"}",
+        });
+
+        Assert.False(success);
+        Assert.Empty(host.Commands);
+        Assert.DoesNotContain("Violet47Lantern", output);
+        Assert.Contains("protected", output);
+        Assert.All(notify.Events, e => Assert.DoesNotContain("Violet47Lantern", e.ImageInfo ?? ""));
+        Assert.NotEmpty(notify.Events);
+    }
+
+    [Fact]
     public async Task Taking_over_one_feature_after_a_broken_owner_file_leaves_the_other_blocked_across_restarts()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");

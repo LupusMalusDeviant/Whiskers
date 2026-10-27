@@ -6,6 +6,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
+@inject IAutomationOwnerResolver OwnerResolver
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
@@ -76,6 +77,18 @@ else
             }
         </MudAlert>
     }
+    @if (_tasks.Any(OwnerRevoked))
+    {
+        @* An owner who was removed, demoted to Viewer or whose key was deleted / disabled: every run is refused. *@
+        <MudAlert Severity="Severity.Error" Class="mb-3">
+            @L["ScheduledTasksView_Alert_OwnerRevoked", _tasks.Count(OwnerRevoked)]
+            @if (_role >= AppRole.Admin)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" Class="ml-2"
+                           OnClick="AdoptAll">@L["ScheduledTasksView_Button_AdoptAll"]</MudButton>
+            }
+        </MudAlert>
+    }
     <MudTable Items="@_tasks" Dense="true" Hover="true" Striped="true" Elevation="0">
         <HeaderContent>
             <MudTh>@L["ScheduledTasksView_Table_Name"]</MudTh>
@@ -105,6 +118,10 @@ else
                 else
                 {
                     <MudText Typo="Typo.body2">@context.CreatedBy</MudText>
+                    @if (OwnerRevoked(context))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">@L["ScheduledTasksView_Chip_OwnerRevoked"]</MudChip>
+                    }
                 }
             </MudTd>
             <MudTd>
@@ -144,7 +161,7 @@ else
                     }
                     @if (_role >= AppRole.Admin)
                     {
-                        @if (string.IsNullOrWhiteSpace(context.CreatedBy))
+                        @if (!string.Equals(context.CreatedBy, _email, StringComparison.OrdinalIgnoreCase))
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.PersonAdd" Color="Color.Warning" Size="Size.Small"
                                            OnClick="@(() => AdoptTask(context))" title="@L["ScheduledTasksView_Tooltip_Adopt"]" />
@@ -277,6 +294,13 @@ else
     private List<Whiskers.Models.ServerConfig> _servers = new();
     private string _formServerId = "local";
     private AppRole _role = AppRole.Viewer;
+    private string? _email;
+
+    /// <summary>The task has an owner, but that owner may no longer change anything (removed or demoted user, a
+    /// deleted or disabled key): its runs are refused until an admin takes it over.</summary>
+    private bool OwnerRevoked(Whiskers.Models.ScheduledTaskEntity task) =>
+        !string.IsNullOrWhiteSpace(task.CreatedBy)
+        && OwnerResolver.Resolve(task.CreatedBy).PermissionLevel == McpPermissionLevels.Read;
 
     // "Run now" of a custom command runs arbitrary shell text on a host, so it needs Admin (ADR-0005, PC-D2);
     // every other task type keeps Operator.
@@ -299,6 +323,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
+        _email = await CurrentUser.GetEmailAsync();
         _servers = ServerConfigService.GetEnabledServers();
         await LoadData();
     }
@@ -508,7 +533,8 @@ else
         await LoadData();
     }
 
-    /// <summary>Takes over a task from before owners were recorded; its runs then use this admin's authority.</summary>
+    /// <summary>Takes over a task — one from before owners were recorded, one whose owner lost its authority, or any
+    /// other; its runs then use this admin's authority. The previous owner goes into the audit row.</summary>
     private async Task AdoptTask(Whiskers.Models.ScheduledTaskEntity task)
     {
         if (!Require(AppRole.Admin)) return;
@@ -520,7 +546,7 @@ else
     private async Task AdoptAll()
     {
         if (!Require(AppRole.Admin)) return;
-        foreach (var task in _tasks.Where(t => string.IsNullOrWhiteSpace(t.CreatedBy)).ToList())
+        foreach (var task in _tasks.Where(t => string.IsNullOrWhiteSpace(t.CreatedBy) || OwnerRevoked(t)).ToList())
             if (!await AdoptAsync(task)) break;
         await LoadData();
     }
@@ -536,7 +562,8 @@ else
                 new { taskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, owner = email },
                 _ => Scheduler.SetOwnerAsync(taskId, email));
             await AuditLog.LogAsync(email, "web", "task.adopt", "scheduled-task", taskId, task.Name,
-                details: $"owner={email}", serverId: task.ServerId);
+                details: $"owner={email}; previous={(string.IsNullOrWhiteSpace(task.CreatedBy) ? "-" : task.CreatedBy)}",
+                serverId: task.ServerId);
             return true;
         }
         catch (MutationRefusedException ex)

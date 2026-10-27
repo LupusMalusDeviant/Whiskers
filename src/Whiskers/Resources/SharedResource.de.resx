@@ -4712,6 +4712,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Table_Owner" xml:space="preserve">
     <value>Besitzer</value>
   </data>
+  <data name="ScheduledTasksView_Chip_OwnerRevoked" xml:space="preserve">
+    <value>Keine Befugnis</value>
+  </data>
+  <data name="ScheduledTasksView_Alert_OwnerRevoked" xml:space="preserve">
+    <value>{0} Task(s) gehören einem Besitzer, der sie nicht mehr ausführen darf (Nutzer entfernt oder herabgestuft, Schlüssel gelöscht oder deaktiviert). Sie werden abgelehnt, bis ein Admin sie übernimmt.</value>
+  </data>
   <data name="ScheduledTasksView_Chip_NoOwner" xml:space="preserve">
     <value>Kein Besitzer</value>
   </data>

@@ -390,7 +390,7 @@ public class AutoPatchTests
         var runner = new RecordingRunner();
         var service = NewService(runner, new CveFindingsStore(persistPath: TempPath()), Compose("caddy"));
 
-        Assert.True(await service.RunCycleAsync(forceDryRun: false));
+        Assert.True(await service.RunCycleAsync(forceDryRun: false, "admin@example.com"));
         Assert.Empty(runner.Calls);
         Assert.Contains("No CVE scan", service.LastCycle!.Error);
     }
@@ -405,7 +405,7 @@ public class AutoPatchTests
         var notifications = new FakeNotifications();
         var service = NewService(runner, store, notifications, Compose("a"), Compose("b"));
 
-        await service.RunCycleAsync(forceDryRun: false);
+        await service.RunCycleAsync(forceDryRun: false, "admin@example.com");
 
         Assert.Equal(["a"], runner.Calls.Select(c => c.Name));        // b is never reached
         Assert.Contains("rollback not verified", service.LastCycle!.Error);
@@ -421,7 +421,7 @@ public class AutoPatchTests
         var service = NewService(runner, store, new FakeNotifications(), new AutoPatchSettings { Enabled = true, DryRun = false },
             Compose("a"));
 
-        await service.RunCycleAsync(forceDryRun: true);
+        await service.RunCycleAsync(forceDryRun: true, "admin@example.com");
 
         Assert.True(Assert.Single(runner.Calls).DryRun);
         Assert.True(service.LastCycle!.DryRun);
@@ -518,6 +518,26 @@ public class AutoPatchTests
         Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "a" && e.Kind == AutoPatchResultKind.RolledBack);
     }
 
+    [Fact]
+    public async Task A_preview_decides_every_candidate_on_the_callers_authority()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
+        // b stands for a protected container, or one the key may no longer touch by the time the cycle reaches it.
+        var automation = new RecordingAutomation { Refuse = { "b" } };
+        var runner = new RecordingRunner();
+        var service = NewService(runner, store, automation, new MemoryAutomationOwners(),
+            new AutoPatchSettings { Enabled = true, DryRun = false }, Compose("a"), Compose("b"));
+
+        await service.RunCycleAsync(forceDryRun: true, "key:k1");
+
+        Assert.All(automation.Actors, a => Assert.Equal("key:k1", a.Actor.OwnerId));
+        Assert.Equal(["container.update", "container.update"], automation.Actors.Select(a => a.Capability));
+        Assert.Equal([("local", "a", true)], runner.Calls);
+        Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "b" && e.Kind == AutoPatchResultKind.Aborted);
+    }
+
     private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
         IAutomationMutationRunner automation, IAutomationOwnerStore owners)
         => NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true });
@@ -571,7 +591,7 @@ public class AutoPatchTests
         => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
             new NoopImageUpdateStore(), runner,
             notifications, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            new UnusedAutomationRunner(), new MemoryAutomationOwners(), NullLogger<AutoPatchService>.Instance);
+            new RecordingAutomation(), new MemoryAutomationOwners(), NullLogger<AutoPatchService>.Instance);
 
     private sealed class RecordingRunner : IAutoPatchRunner
     {

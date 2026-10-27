@@ -119,15 +119,22 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   there counts as "no owners yet".
 - **Scheduled commands** carry the command itself into the decision (`host.exec`, `scheduler.create`, "Run now"),
   so forbidden-argument patterns apply on every run; the audit row keeps only its length.
-- **"Run now"** runs the task on its owner's authority; the person clicking needs `scheduler.run` (Write; a
-  custom command Admin) but not the owner's level for what the task does (e.g. retention deletes). The task's
-  content is what the owner scheduled, only the timing changes.
+- **"Run now"** is decided for the person clicking (the task's own capability, a retention delete, then
+  `scheduler.run`) and then runs on the owner's authority, re-checked as on schedule.
+- **Refusal reasons** leave the gateway without payload values (`RefuseAsync` → `WithoutPayloadValues`): a rule that
+  quotes the matched argument (protected resource) cannot carry a command or SQL text into a log line, a
+  notification, the task history or a UI message.
+- **Taking a task over**: an Admin can take over any task in Scheduled Tasks; a task whose owner lost its authority
+  (resolved as `read`) is flagged and included in "take over all". The previous owner goes into the audit row.
 - **AutoUpdate policies** have no UI yet (`SetPolicyAsync` has no caller); the owner is per feature, not per policy.
 - **An AutoPatch night** is one `autopatch.run` operation (4-hour deadline) and, inside it, one `container.update`
   decision per container it patches or tries in a dry run (protected resources, kill switch, the owner's authority
   at that moment). `Unknown`, `RolledBack` and `RollbackNotVerified` mark that decision and the night as failed.
-- **The MCP preview of AutoPatch** (`preview_auto_patch`, a dry run) is decided once, as the tool call; its
-  candidates are not decided one by one, although the script re-tags and pulls for them.
+- **The MCP preview of AutoPatch** (`preview_auto_patch`, a dry run) runs on the caller's authority
+  (`AutomationOwners.OfCaller`): every candidate is a `container.update` decision for that user or key, re-resolved
+  per candidate, so a key revoked mid-cycle stops the rest. A key-owned preview under a preset that confirms key
+  writes is refused per candidate (no one can approve a background run). A call without a user or key behind it
+  is refused.
 
 - **Two audit rows per MCP or agent mutation.** The gateway row carries decision, approval, intent and outcome; the
   tool still writes its own row with the domain details (new container id, exit code, backup file). One event per
@@ -140,7 +147,8 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   none, or work it starts in the background, is not stopped (INV-40, WP9).
 - **Calls from a tool to another capability** stay in the baseline: `deploy_app` creating a container and pulling an
   image, `preview_auto_patch` starting a background cycle (`autopatch.run`). The gateway decided on the tool's
-  capability only; the background cycle also outlives the gateway's deadline and outcome row.
+  capability only (the preview's candidates are decided one by one inside the cycle); the background cycle
+  outlives the gateway's deadline and outcome row.
 - **Not yet marked** (so neither the guard nor the architecture test sees them): the generic execution primitives
   `IHostCommandExecutor` and `IDockerService.RunHostShellAsync`, terminals and server records. The UI actions built
   on the primitives (container `.env` save + compose up, Artisan migrate/rollback, SQL file import, compose editor
