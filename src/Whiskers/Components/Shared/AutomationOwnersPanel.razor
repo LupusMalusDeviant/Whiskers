@@ -1,5 +1,6 @@
 @inject IAutomationOwnerStore Owners
 @inject IUiMutationRunner Mutations
+@inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<Whiskers.Configuration.AutoPatchSettings> AutoPatchOptions
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
@@ -24,7 +25,12 @@
                 }
                 else if (entry is not null)
                 {
-                    <MudText Typo="Typo.body2">@L["AutomationOwners_Owner", entry.OwnerId, entry.ConfirmedAt.ToLocalTime().ToString("g")]</MudText>
+                    var owner = OwnerResolver.Describe(entry.OwnerId);
+                    <MudText Typo="Typo.body2">@L["AutomationOwners_Owner", owner.Name, entry.ConfirmedAt.ToLocalTime().ToString("g")]</MudText>
+                    @if (owner.State != OwnerState.Active)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.State}"]</MudText>
+                    }
                 }
                 else
                 {
@@ -35,7 +41,7 @@
                     <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AutomationOwners_AutoPatchConfigOff"]</MudText>
                 }
             </div>
-            @if (_role >= AppRole.Admin && entry?.OwnerId != _email)
+            @if (_role >= AppRole.Admin && (string.IsNullOrWhiteSpace(_email) || entry?.OwnerId != PrincipalIds.User(_email)))
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
                            OnClick="@(() => TakeOver(feature))">@L["AutomationOwners_Button_TakeOver"]</MudButton>
@@ -66,7 +72,7 @@
     private async Task TakeOver(Feature feature)
     {
         if (_role < AppRole.Admin || string.IsNullOrWhiteSpace(_email)) return;
-        var owner = _email;
+        var owner = PrincipalIds.User(_email);
         var featureId = feature.Id;
         _busy = true;
         try

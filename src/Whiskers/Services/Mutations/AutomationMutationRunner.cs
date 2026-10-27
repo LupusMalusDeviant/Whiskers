@@ -22,7 +22,7 @@ public sealed class AutomationOptions
 /// <c>autoupdate</c>, <c>autopatch</c>); <paramref name="OwnerId"/> is the recorded owner (an email, or
 /// <c>key:&lt;id&gt;</c> for an MCP key), or <c>null</c> for an item from before owners were recorded.
 /// </summary>
-public sealed record AutomationActor(string RunnerId, string DisplayName, string? OwnerId);
+public sealed record AutomationActor(string RunnerId, string DisplayName, string? OwnerId, string? CreatedVia = null);
 
 /// <summary>The owner's authority right now. Re-read on every run (INV-04).</summary>
 public interface IAutomationOwnerResolver
@@ -30,18 +30,47 @@ public interface IAutomationOwnerResolver
     /// <summary>The owner as a principal with the level it holds now; a removed user or a deleted / disabled key
     /// comes back with <c>read</c>, so every mutation is refused.</summary>
     MutationPrincipal Resolve(string ownerId);
+
+    /// <summary>The owner for display: its name and why it may no longer act, for the UI to localize.</summary>
+    OwnerDescription Describe(string ownerId) => new(ownerId, OwnerState.Active);
 }
+
+/// <summary>Why an owner may or may not act; the UI shows it through <c>AutomationOwners_State_&lt;state&gt;</c>.</summary>
+public enum OwnerState { Active, NotAllowedToSignIn, KeyDeleted, KeyDisabled, Unrecognised }
+
+/// <summary>An owner as the UI shows it: an email, a key name or the raw stored value.</summary>
+public sealed record OwnerDescription(string Name, OwnerState State);
 
 public static class AutomationOwners
 {
-    public const string KeyPrefix = "key:";
+    public const string KeyPrefix = PrincipalIds.KeyPrefix;
 
-    /// <summary>The owner id to record for whoever created an item: <c>key:&lt;id&gt;</c> for an MCP key, the email
-    /// for a user, <c>null</c> when neither is known.</summary>
+    /// <summary>The owner id to record for whoever created an item: <c>key:&lt;id&gt;</c> for an MCP key,
+    /// <c>user:&lt;email&gt;</c> for a user, <c>null</c> when neither is known.</summary>
     public static string? IdOf(string? keyId, string? email) =>
-        !string.IsNullOrWhiteSpace(keyId) ? KeyPrefix + keyId
-        : !string.IsNullOrWhiteSpace(email) ? email
+        !string.IsNullOrWhiteSpace(keyId) ? PrincipalIds.Key(keyId)
+        : !string.IsNullOrWhiteSpace(email) ? PrincipalIds.User(email)
         : null;
+
+    /// <summary>The explicit migration of an owner id recorded before the <see cref="PrincipalIds"/> scheme: a bare
+    /// email becomes <c>user:&lt;email&gt;</c>; an id in the scheme stays. Only an unambiguous email is migrated: one
+    /// <c>@</c> with something on both sides and nothing but ASCII letters, digits and <c>. _ % + -</c> — the same rule
+    /// as the <c>PrincipalIdsForTaskOwners</c> database migration, so both lower-case it alike. Anything else is
+    /// returned unchanged and the resolver keeps it suspended.</summary>
+    public static string? MigrateLegacy(string? stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored)) return stored;
+        if (PrincipalIds.EmailOf(stored) is not null || PrincipalIds.KeyIdOf(stored) is not null) return stored;
+        var at = stored.IndexOf('@');
+        var plainEmail = at > 0 && at == stored.LastIndexOf('@') && at < stored.Length - 1
+                         && stored.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '%' or '+' or '-' or '@');
+        return plainEmail ? PrincipalIds.User(stored) : stored;
+    }
+
+    /// <summary>What to record as <see cref="AutomationActor.CreatedVia"/> for an item created by
+    /// <paramref name="caller"/>: the caller's own id (for an agent, its session).</summary>
+    public static string? ViaOf(MutationPrincipal? caller) =>
+        caller is null || string.IsNullOrWhiteSpace(caller.Id) ? null : caller.Id;
 
     /// <summary>The owner to record for an item created by <paramref name="caller"/> (the gateway's principal):
     /// the user or key an agent acts for, the user or key itself otherwise. <c>null</c> for anything without a
@@ -51,8 +80,8 @@ public static class AutomationOwners
         var source = caller?.OnBehalfOf ?? caller;
         return source?.Kind switch
         {
-            MutationPrincipalKind.Human => string.IsNullOrWhiteSpace(source.Id) ? null : source.Id,
-            MutationPrincipalKind.ApiKey => IdOf(source.CredentialId, null),
+            MutationPrincipalKind.Human => PrincipalIds.EmailOf(source.Id) is not null ? source.Id : null,
+            MutationPrincipalKind.ApiKey => IdOf(source.CredentialId ?? PrincipalIds.KeyIdOf(source.Id), null),
             _ => null,
         };
     }
@@ -71,12 +100,24 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
     }
 
+    public OwnerDescription Describe(string ownerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        if (PrincipalIds.KeyIdOf(ownerId) is { } keyId)
+        {
+            var key = _keys.GetPermissionData().ApiKeys.FirstOrDefault(k => k.Id == keyId);
+            return key is null ? new(ownerId, OwnerState.KeyDeleted)
+                : new(key.Name, key.Enabled ? OwnerState.Active : OwnerState.KeyDisabled);
+        }
+        if (PrincipalIds.EmailOf(ownerId) is not { } email) return new(ownerId, OwnerState.Unrecognised);
+        return new(email, _whitelist.IsEmailAllowed(email) ? OwnerState.Active : OwnerState.NotAllowedToSignIn);
+    }
+
     public MutationPrincipal Resolve(string ownerId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
-        if (ownerId.StartsWith(AutomationOwners.KeyPrefix, StringComparison.Ordinal))
+        if (PrincipalIds.KeyIdOf(ownerId) is { } keyId)
         {
-            var keyId = ownerId[AutomationOwners.KeyPrefix.Length..];
             var key = _keys.GetPermissionData().ApiKeys.FirstOrDefault(k => k.Id == keyId);
             var level = key is { Enabled: true } ? McpPermissionLevels.Normalize(key.PermissionLevel) : McpPermissionLevels.Read;
             return new MutationPrincipal(MutationPrincipalKind.ApiKey, ownerId,
@@ -84,16 +125,22 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
                 level, CredentialId: keyId, AllowedTools: key?.AllowedTools);
         }
 
+        // An id outside the scheme (a legacy value the migration could not map unambiguously) is never guessed at:
+        // it stays suspended until an admin takes the item over.
+        if (PrincipalIds.EmailOf(ownerId) is not { } email)
+            return new MutationPrincipal(MutationPrincipalKind.Human, ownerId,
+                $"{ownerId} (unrecognised owner, suspended)", McpPermissionLevels.Read);
+
         // A user who can no longer sign in has no authority left, whatever role entry remains.
-        var allowed = _whitelist.IsEmailAllowed(ownerId);
-        var userLevel = !allowed ? McpPermissionLevels.Read : _roles.GetRole(ownerId) switch
+        var allowed = _whitelist.IsEmailAllowed(email);
+        var userLevel = !allowed ? McpPermissionLevels.Read : _roles.GetRole(email) switch
         {
             AppRole.Admin => McpPermissionLevels.Admin,
             AppRole.Operator => McpPermissionLevels.Write,
             _ => McpPermissionLevels.Read,
         };
         return new MutationPrincipal(MutationPrincipalKind.Human, ownerId,
-            allowed ? ownerId : $"{ownerId} (no longer allowed to sign in)", userLevel);
+            allowed ? email : $"{email} (no longer allowed to sign in)", userLevel);
     }
 }
 
@@ -168,7 +215,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             var owner = _owners.Resolve(actor.OwnerId);
             return new MutationPrincipal(MutationPrincipalKind.Automation, actor.RunnerId,
                 $"{actor.DisplayName} (owner {owner.DisplayName})", owner.PermissionLevel,
-                OnBehalfOf: owner, AllowedTools: owner.AllowedTools);
+                OnBehalfOf: owner, AllowedTools: owner.AllowedTools, DelegatedBy: actor.CreatedVia);
         }
 
         // An item from before owners were recorded. During the grace period it keeps the authority it always had,

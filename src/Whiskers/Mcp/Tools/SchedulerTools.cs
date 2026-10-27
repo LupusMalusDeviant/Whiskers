@@ -82,6 +82,7 @@ public class SchedulerTools
             ServerId = serverId,
             Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null,
             CreatedBy = owner,
+            CreatedVia = AutomationOwners.ViaOf(MutationScope.Current?.Principal),
         });
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);

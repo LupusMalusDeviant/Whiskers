@@ -28,7 +28,11 @@ public class ScheduledTaskEntity
     public string? LastResult { get; set; }     // "success" or error message
     public bool LastSuccess { get; set; }
     public string? Config { get; set; }         // JSON: {"retainDays": 7, "maxBackups": 10, "command": "...", "database": "..."}
+    /// <summary>The owner (<c>user:&lt;email&gt;</c> / <c>key:&lt;id&gt;</c>) whose authority every run is re-checked against.</summary>
     public string CreatedBy { get; set; } = "";
+    /// <summary>Who set the owner up (the principal id of the creating call, e.g. <c>agent:&lt;session&gt;</c> when an agent
+    /// created the task for its user). Provenance only — authority always comes from <see cref="CreatedBy"/>.</summary>
+    public string? CreatedVia { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

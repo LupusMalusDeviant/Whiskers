@@ -92,11 +92,7 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     {
         var p = principal.Kind is MutationPrincipalKind.Agent or MutationPrincipalKind.Automation
                 && principal.OnBehalfOf is { } source ? source : principal;
-        var level = McpPermissionLevels.Normalize(p.PermissionLevel);
-        return p.Kind is MutationPrincipalKind.ApiKey or MutationPrincipalKind.Automation
-            ? new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level, p.AllowedTools,
-                McpKeyId: p.CredentialId ?? p.Id)
-            : new AgentPrincipal(AgentPrincipalKind.WebUser, p.DisplayName, level, p.AllowedTools, UserEmail: p.Id);
+        return MutationPrincipals.ToAgent(p);
     }
 
     private static AgentOrigin ToOrigin(MutationRequest request) => request.Surface switch

@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -105,9 +106,10 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             // The principal is capped at the trigger's configured ceiling (default write) so the
             // PrincipalCeilingRule constrains an unattended run — never a synthetic admin.
             var level = McpPermissionLevels.Normalize(t.MaxLevel);
+            // Each trigger is its own principal (trigger:<id>, INV-06): renaming it keeps the identity, and two
+            // triggers with the same name stay apart in policy, approvals and audit.
             var principal = new AgentPrincipal(
-                AgentPrincipalKind.McpKey, $"ai-trigger:{t.Name}", level, null,
-                McpKeyId: "ai-trigger");
+                AgentPrincipalKind.Trigger, $"AI trigger '{t.Name}'", level, null, TriggerId: t.Id);
             var ctx = new AgentContext(Guid.NewGuid().ToString("N"), principal, AgentOrigin.Trigger, policy);
 
             var session = await agentService.StartSessionAsync(ctx);
@@ -176,7 +178,7 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
         try
         {
             var audit = _sp.GetRequiredService<IAuditLogService>();
-            await audit.LogAsync($"ai-trigger:{t.Name}", "trigger", "agent.run", "ai-trigger", t.Id, t.Name,
+            await audit.LogAsync(PrincipalIds.Trigger(t.Id), "trigger", "agent.run", "ai-trigger", t.Id, t.Name,
                 details: $"{evt.EventType} @ {evt.ContainerName}");
         }
         catch (Exception ex) { _logger?.LogWarning(ex, "AI-Trigger Audit fehlgeschlagen."); }

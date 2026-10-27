@@ -117,11 +117,7 @@ public static class McpGuardrailFilter
     }
 
     /// <summary>An API key, or a web user calling <c>/mcp</c> with a session cookie.</summary>
-    internal static MutationPrincipal PrincipalOf(AgentPrincipal p) => p.McpKeyId is { } keyId
-        ? new MutationPrincipal(MutationPrincipalKind.ApiKey, $"key:{keyId}", p.DisplayName, p.PermissionLevel,
-            CredentialId: keyId, AllowedTools: p.AllowedTools)
-        : new MutationPrincipal(MutationPrincipalKind.Human, p.UserEmail ?? p.DisplayName, p.DisplayName,
-            p.PermissionLevel, AllowedTools: p.AllowedTools);
+    internal static MutationPrincipal PrincipalOf(AgentPrincipal p) => MutationPrincipals.Of(p);
 
     private static string ErrorText(CallToolResult result)
     {

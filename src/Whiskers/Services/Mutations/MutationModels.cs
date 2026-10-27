@@ -29,15 +29,19 @@ public sealed record Capability(
     string? McpTool,
     TimeSpan Deadline);
 
-/// <summary>Who acts (INV-01). Kept small in WP2; WP6 adds stable subject ids and session identity.</summary>
+/// <summary>Who acts (INV-01). Ids follow <see cref="PrincipalIds"/>.</summary>
 public enum MutationPrincipalKind { Human, ApiKey, Agent, Automation, Webhook, System }
 
-/// <param name="Id">Stable identifier: email, <c>key:&lt;id&gt;</c>, <c>trigger:&lt;id&gt;</c>, <c>task:&lt;id&gt;</c>.</param>
+/// <param name="Id">Stable identifier (<see cref="PrincipalIds"/>): <c>user:&lt;email&gt;</c>, <c>key:&lt;id&gt;</c>,
+/// <c>trigger:&lt;id&gt;</c>, <c>agent:&lt;session id&gt;</c>, <c>task:&lt;id&gt;</c>. Never derived from a display name.</param>
 /// <param name="DisplayName">What the audit log and the UI show.</param>
 /// <param name="PermissionLevel">The principal's effective level (<c>read</c> / <c>write</c> / <c>admin</c>).</param>
 /// <param name="CredentialId">The MCP key id when a key authenticated the call.</param>
 /// <param name="OnBehalfOf">The principal an agent or automation acts for; its rights are the ceiling.</param>
 /// <param name="AllowedTools">The MCP key's tool list, if it has one; the policy treats it as a ceiling.</param>
+/// <param name="SessionId">The agent session the principal acts in, if any.</param>
+/// <param name="DelegatedBy">For an automation: the principal id of the call that set the delegation up (e.g.
+/// <c>agent:&lt;session&gt;</c> when an agent created a task for its user). Provenance only, never authority.</param>
 public sealed record MutationPrincipal(
     MutationPrincipalKind Kind,
     string Id,
@@ -45,7 +49,9 @@ public sealed record MutationPrincipal(
     string PermissionLevel,
     string? CredentialId = null,
     MutationPrincipal? OnBehalfOf = null,
-    IReadOnlyList<string>? AllowedTools = null);
+    IReadOnlyList<string>? AllowedTools = null,
+    string? SessionId = null,
+    string? DelegatedBy = null);
 
 /// <summary>The entry point a mutation came in through.</summary>
 public enum MutationSurface { Mcp, Agent, Ui, Automation, Webhook, Terminal }

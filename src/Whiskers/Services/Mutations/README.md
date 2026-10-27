@@ -44,8 +44,8 @@ var outcome = await _automation.RunAsync(new AutomationActor("task:" + task.Task
 ```
 
 Same shape as the UI runner (literal capability id, lambda in the call), but the result is a `MutationOutcome` —
-a background loop has nobody to show an exception to. The owner id is an email or `key:<id>`
-(`AutomationOwners.IdOf`); `IAutomationOwnerResolver` reads its authority **on every run** (INV-04): a user's role
+a background loop has nobody to show an exception to. The owner id is `user:<email>` or `key:<id>`
+(`AutomationOwners.IdOf`, see [Principal identity](#principal-identity)); anything else is suspended; `IAutomationOwnerResolver` reads its authority **on every run** (INV-04): a user's role
 only while the whitelist still lets them sign in, a key's level only while it exists and is enabled — otherwise
 `read`, so the run is refused. The owner's level is the ceiling; the policy applies the PC-D1 rules (authorization,
 kill switch, protected resources) without asking for approval — the owner approved by scheduling.
@@ -56,6 +56,27 @@ taken over in Scheduled Tasks), AutoPatch and AutoUpdate in [`IAutomationOwnerSt
 
 **Grace period.** An item without an owner (created before 2.3) runs as `unowned:<runner>` with exactly the level
 of the capability it runs, audited as "(no owner)". `Automation:RequireOwner=true` refuses it instead.
+
+## Principal identity
+
+R1-03 (INV-01, INV-06). Every principal carries a stable id built from typed fields, never from a display name:
+
+| Principal | Id | Credential | On behalf of |
+|---|---|---|---|
+| Web user | `user:<email>` (trimmed, lower-case) | — | — |
+| API key | `key:<key id>` (a rename keeps it) | key id | — |
+| AI trigger | `trigger:<trigger id>` (each trigger its own) | — | — |
+| Agent | `agent:<session id>`, `SessionId` set | the source's key id | the user, key or trigger it acts for (same session id) |
+| Automation | `task:<id>`, `autoupdate`, `autopatch` | — | the owner (`user:` / `key:`), re-resolved per run; `DelegatedBy` = the id of the call that created the task (e.g. `agent:<session>`, stored as `ScheduledTasks.CreatedVia`), provenance only |
+
+`MutationPrincipals.Of` / `.Agent` build them for the MCP filter and the agent; `MutationPrincipals.ToAgent` maps back
+for the guardrail engine. A principal without an email or key id is `anonymous`: it can be checked, never own
+anything. Owners recorded before the scheme were bare emails: the `PrincipalIdsForTaskOwners` database migration and
+`AutomationOwnerStore` (on load) rewrite exactly those to `user:<email>` (`AutomationOwners.MigrateLegacy`). Any other
+value (anything but one ASCII email, the same rule in SQL and in C#) is ambiguous, stays as it is and resolves as suspended (`read`) until an Admin takes the item over. The MCP call
+log records the same ids; the audit log keeps display names in `Actor` and the ids in `Details.principal` (incl.
+`session`, `onBehalfOf` and `delegatedBy`). The UI shows an owner through `IAutomationOwnerResolver.Describe` (name +
+`OwnerState`, localized as `AutomationOwners_State_*`).
 
 ## Files
 
@@ -68,6 +89,7 @@ of the capability it runs, audited as "(no owner)". `Automation:RequireOwner=tru
 | `MutationTargets.cs` | `MutationTargets.FromArguments` (target from tool arguments) and `IMutationTargetResolver` + `MutationTargetResolver`: containers resolve by id, name or unique prefix to their full id and name; an unknown or ambiguous container is refused before policy (INV-57). Other kinds pass through for now. |
 | `MutationGateway.cs` | `IMutationGateway` + `MutationGateway` (the pipeline) and `IMutationVerifier`. |
 | `AutomationMutationRunner.cs` | `IAutomationMutationRunner` + `AutomationMutationRunner`, `AutomationActor`, `AutomationOptions` (`RequireOwner`), `IAutomationOwnerResolver` + `AutomationOwnerResolver`, `AutomationOwners.IdOf`: the automation entry to the gateway. |
+| `PrincipalIdentity.cs` | `PrincipalIds` (the stable id scheme `user:` / `key:` / `trigger:` / `agent:<session>`) and `MutationPrincipals` (gateway principal from an `AgentPrincipal` and back; the agent principal is the session acting on behalf of its user, key or trigger). |
 | `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file blocks every feature until each is taken over. |
 | `ComposeImpact.cs` | Existing containers a `docker compose up` would touch (project label or working directory) and `RunForEachAsync`, one nested UI decision per container. |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. |

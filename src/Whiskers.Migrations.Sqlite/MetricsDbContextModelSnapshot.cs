@@ -15,7 +15,7 @@ namespace Whiskers.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
 
             modelBuilder.Entity("Whiskers.Models.ActionOutcomeEntity", b =>
                 {
@@ -290,6 +290,9 @@ namespace Whiskers.Migrations
 
                     b.Property<string>("CreatedBy")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedVia")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CronExpression")
