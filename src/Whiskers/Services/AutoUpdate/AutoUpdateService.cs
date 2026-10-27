@@ -167,7 +167,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                     && _automation.LostAuthority(actor, "container.update") is { } lost)
                 {
                     // The owner lost their authority (PC-D6): suspend AutoUpdate until an admin takes it over.
-                    var result = await _owners.SuspendAsync(IAutomationOwnerStore.AutoUpdate, updateOwner!, lost, ct);
+                    var result = await _owners.SuspendAsync(IAutomationOwnerStore.AutoUpdate, updateOwner, lost, ct);
                     if (result == SuspendResult.Superseded)
                         throw new InvalidOperationException(
                             $"Refused: {lost}. AutoUpdate has a new owner since this run started; the next run uses it.");

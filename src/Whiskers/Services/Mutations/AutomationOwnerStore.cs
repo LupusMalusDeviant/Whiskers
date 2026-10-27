@@ -51,9 +51,10 @@ public interface IAutomationOwnerStore
     /// for the record and stays refused across restarts until an admin takes it over. Only ever lowers authority, so
     /// it needs no gateway decision. Never fails open: when the file cannot be written the feature is still blocked
     /// in memory (until the next successful write keeps it, or a restart) and <c>false</c> is returned, so the caller
-    /// can tell the admins. Only the assignment of <paramref name="expectedOwnerId"/> is suspended: when an admin took
+    /// can tell the admins. Only the assignment of <paramref name="expectedOwnerId"/> (<c>null</c>: no owner yet) is
+    /// suspended: when an admin took
     /// the feature over in the meantime, nothing changes and <see cref="SuspendResult.Superseded"/> is returned.</summary>
-    Task<SuspendResult> SuspendAsync(string feature, string expectedOwnerId, string reason, CancellationToken ct = default);
+    Task<SuspendResult> SuspendAsync(string feature, string? expectedOwnerId, string reason, CancellationToken ct = default);
 
     /// <summary>The entry of a blocked feature (owner and reason), for the UI; <c>null</c> otherwise.</summary>
     AutomationOwnerEntry? GetBlocked(string feature) => null;
@@ -93,23 +94,24 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         return WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
     }
 
-    public async Task<SuspendResult> SuspendAsync(string feature, string expectedOwnerId, string reason,
+    public async Task<SuspendResult> SuspendAsync(string feature, string? expectedOwnerId, string reason,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(feature);
-        ArgumentException.ThrowIfNullOrWhiteSpace(expectedOwnerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         await _write.WaitAsync(ct);
         try
         {
-            // Checked under the write lock: a takeover that completed after the run read its owner wins.
+            // Checked under the write lock: a takeover that completed after the run read its owner wins. With no
+            // expected owner, only a feature that still has none is suspended.
             var current = _entries.GetValueOrDefault(feature);
-            if (current is null || current.Blocked
-                || !string.Equals(current.OwnerId, expectedOwnerId, StringComparison.Ordinal))
+            var expected = string.IsNullOrWhiteSpace(expectedOwnerId) ? null : expectedOwnerId;
+            if (current is { Blocked: true }
+                || !string.Equals(current?.OwnerId is { Length: > 0 } id ? id : null, expected, StringComparison.Ordinal))
                 return SuspendResult.Superseded;
             var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
             {
-                [feature] = new(current.OwnerId, DateTime.UtcNow, Blocked: true, SuspendedReason: reason),
+                [feature] = new(current?.OwnerId ?? "", DateTime.UtcNow, Blocked: true, SuspendedReason: reason),
             };
             try
             {

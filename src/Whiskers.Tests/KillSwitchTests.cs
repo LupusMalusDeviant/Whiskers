@@ -196,6 +196,88 @@ public sealed class KillSwitchTests : IDisposable
     }
 
     [Fact]
+    public async Task A_stale_scheduler_run_never_switches_off_a_task_an_admin_took_over_meanwhile()
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.ScheduledTasks.Add(new ScheduledTaskEntity
+            {
+                TaskId = "t1", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+                TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+            });
+            await db.SaveChangesAsync();
+        }
+        var suspender = new ScheduledTaskSuspender(_sp.GetRequiredService<IServiceScopeFactory>());
+        // The run loaded the task under ops@; its owner is removed from the whitelist (authority lost).
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);
+        var stale = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart, TargetId = "web-1",
+            Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+        };
+        // Meanwhile an admin takes the task over.
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var task = db.ScheduledTasks.Single(t => t.TaskId == "t1");
+            task.CreatedBy = task.CreatedVia = "user:lea@example.com";
+            await db.SaveChangesAsync();
+        }
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify, suspender: suspender);
+
+        var (success, _) = await executor.ExecuteAsync(stale);
+
+        Assert.False(success);
+        Assert.True(stale.Enabled);
+        Assert.DoesNotContain(notify.Events, e => e.EventType == "automation_suspended");
+        using (var scope = _sp.CreateScope())
+            Assert.True(scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ScheduledTasks.Single().Enabled);
+        // The assignment the run belongs to is still suspended when nobody took it over.
+        Assert.True(await suspender.SuspendAsync("t1", "user:lea@example.com"));
+        Assert.False(await suspender.SuspendAsync("t1", "user:lea@example.com"));   // already off
+    }
+
+    [Fact]
+    public async Task An_ownerless_AutoUpdate_is_suspended_with_the_real_owner_store_and_the_admins_are_told()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        try
+        {
+            var owners = new AutomationOwnerStore(new DataPathOptions(dir), NullLogger<AutomationOwnerStore>.Instance);
+            var f = AutomationMutationRunnerTests.Build(requireOwner: true);   // the 1.0 default
+            using (var scope = _sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+                db.UpdatePolicies.Add(new UpdatePolicyEntity
+                {
+                    ContainerId = "web-1", ContainerName = "web", ServerId = "local", AutoUpdate = true, NotifyBeforeUpdate = false,
+                });
+                await db.SaveChangesAsync();
+            }
+            var updates = new UpdatesAvailable();
+            updates.Set(new ImageUpdateInfo { ContainerId = "web-1", ContainerName = "web", ServerId = "local", UpdateAvailable = true });
+            var notes = new FakeNotifications();
+            var autoUpdate = new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(),
+                new FakeDocker(new ContainerInfo { Id = "web-1", Name = "web", ServerId = "local", State = "running", Image = "web:1" }),
+                updates, notes, null!, f.Runner, owners, NullLogger<AutoUpdateService>.Instance);
+
+            await autoUpdate.CheckAndUpdateAsync(CancellationToken.None);
+
+            Assert.True(owners.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+            Assert.Contains(notes.Events, e => e.EventType == "automation_suspended" && e.ContainerName == "AutoUpdate");
+            Assert.True(new AutomationOwnerStore(new DataPathOptions(dir), NullLogger<AutomationOwnerStore>.Instance)
+                .IsBlocked(IAutomationOwnerStore.AutoUpdate));   // kept across a restart
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task A_stale_cycle_never_suspends_the_admin_who_took_AutoPatch_over_meanwhile()
     {
         // A runs the cycle; between two containers Admin B takes AutoPatch over and A is demoted. The stale cycle

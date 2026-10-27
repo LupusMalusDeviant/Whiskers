@@ -38,6 +38,7 @@ public sealed class SchedulerModule : IWhiskersModule
     public void ConfigureServices(IServiceCollection services, IConfiguration config)
     {
         // Moved verbatim from Program.cs (relocation, not a rewrite).
+        services.AddSingleton<IScheduledTaskSuspender, ScheduledTaskSuspender>();
         services.AddSingleton<ITaskExecutor, TaskExecutor>();
         services.AddSingletonWithInterfaceAndHostedService<SchedulerService, ISchedulerService>();
     }

@@ -25,6 +25,7 @@ public class TaskExecutor : ITaskExecutor
     private readonly IAutomationMutationRunner _automation;
     private readonly INotificationService? _notify;
     private readonly ILogger<TaskExecutor> _logger;
+    private readonly IScheduledTaskSuspender? _suspender;
 
     public TaskExecutor(
         IDockerService docker,
@@ -36,8 +37,10 @@ public class TaskExecutor : ITaskExecutor
         ILogger<TaskExecutor> logger,
         DataPathOptions? dataPaths = null,
         INotificationService? notify = null,
-        Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null)
+        Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null,
+        IScheduledTaskSuspender? suspender = null)
     {
+        _suspender = suspender;
         _automation = automation;
         _notify = notify;
         _guardrails = guardrails;
@@ -77,9 +80,16 @@ public class TaskExecutor : ITaskExecutor
                 if (refusal.Capabilities.Prepend(CapabilityOf(task.TaskType)).Distinct(StringComparer.Ordinal)
                         .Select(c => _automation.LostAuthority(ActorOf(task), c)).FirstOrDefault(l => l is not null) is { } lost)
                 {
-                    task.Enabled = false;
-                    await NotifySuspendedAsync(task, lost);
-                    return (false, $"Suspended: {lost}. An admin can take the task over in Scheduled tasks. {reason}");
+                    // Only the assignment this run was started under; a takeover meanwhile wins (no suspension).
+                    if (await SuspendAsync(task))
+                    {
+                        task.Enabled = false;
+                        await NotifySuspendedAsync(task, lost);
+                        return (false, $"Suspended: {lost}. An admin can take the task over in Scheduled tasks. {reason}");
+                    }
+                    _logger.LogWarning("Scheduled task {Name} was refused ({Reason}); it has a new owner since the run " +
+                                       "started, so it stays on", task.Name, lost);
+                    return (false, reason);
                 }
                 await NotifyRefusedAsync(task, reason);
             }
@@ -328,6 +338,23 @@ public class TaskExecutor : ITaskExecutor
                     box.Capabilities.Add(capabilityId);
                 }
                 return message;
+        }
+    }
+
+    /// <summary>Switches the task off in the database if it still has the owner this run was started under. Without
+    /// a suspender (a caller without a database) the caller persists <c>Enabled</c> itself.</summary>
+    private async Task<bool> SuspendAsync(ScheduledTaskEntity task)
+    {
+        if (_suspender is null) return true;
+        try
+        {
+            return await _suspender.SuspendAsync(task.TaskId, task.CreatedBy);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Fail closed: switch it off through the caller's save instead.
+            _logger.LogError(ex, "Scheduled task {Name} could not be suspended conditionally", task.Name);
+            return true;
         }
     }
 
