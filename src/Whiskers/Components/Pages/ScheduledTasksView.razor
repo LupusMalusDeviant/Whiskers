@@ -9,6 +9,7 @@
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IStringLocalizer<SharedResource> L
 @inject Whiskers.Services.Mutations.ICapabilityCatalog Capabilities
+@inject Whiskers.Services.Mutations.IEffectiveRequirementResolver Requirements
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
    enabled (via ModuleGuard), so a disabled module never reaches the ISchedulerService injection. *@
@@ -316,13 +317,30 @@ else
         !string.IsNullOrWhiteSpace(task.CreatedBy)
         && OwnerResolver.Resolve(task.CreatedBy).PermissionLevel == McpPermissionLevels.Read;
 
-    // "Run now" of a custom command runs arbitrary shell text on a host, so it needs Admin (ADR-0005, PC-D2);
-    // every other task type keeps Operator.
-    // A custom command runs as root; a self-backup and any retention delete recovery points: Admin.
-    private static AppRole RunNowRole(Whiskers.Models.ScheduledTaskEntity task) =>
-        task.TaskType is ScheduledTaskType.CustomCommand or ScheduledTaskType.SelfBackup || RetentionDecision(task) is not null
-            ? AppRole.Admin
-            : AppRole.Operator;
+    // "Run now" asks the same resolver the gateway asks for scheduler.run (R1-05): a custom command runs as root, a
+    // DB dump holds every row, a self-backup and any retention delete recovery points. Anything it cannot answer
+    // (a switched-off capability, another resolver) is held to Admin: fail closed.
+    private AppRole RunNowRole(Whiskers.Models.ScheduledTaskEntity task)
+    {
+        try
+        {
+            return Requirements is Whiskers.Services.Mutations.SchedulerRequirementResolver scheduler
+                ? Whiskers.Services.Mutations.CapabilityCatalog.RoleFor(scheduler.LevelToRun(task))
+                : AppRole.Admin;
+        }
+        catch (Exception)
+        {
+            return AppRole.Admin;
+        }
+    }
+
+    /// <summary>The arguments the gateway decides <c>scheduler.create</c> on: everything that changes what the task
+    /// needs — its type and its retention (0 = none) — as the MCP tool sends them.</summary>
+    internal static object CreateArgumentsOf(Whiskers.Models.ScheduledTaskEntity task, int maxBackups, string? command) => new
+    {
+        name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, targetId = task.TargetId,
+        maxBackups, command,
+    };
 
     private AppRole RoleOf(string capabilityId) =>
         Whiskers.Services.Mutations.CapabilityCatalog.RoleFor(
@@ -427,11 +445,7 @@ else
             };
             // The command goes to the policy; the audit row keeps only its length (it may carry credentials).
             await Mutations.RunAsync("scheduler.create",
-                new
-                {
-                    name = newTask.Name, taskType = newTask.TaskType.ToString(), serverId = newTask.ServerId,
-                    command = config.GetValueOrDefault("command"),
-                },
+                CreateArgumentsOf(newTask, Math.Max(_formMaxBackups, 0), config.GetValueOrDefault("command")),
                 _ => Scheduler.CreateTaskAsync(newTask));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 "task.create", "scheduled-task", _formName, _formName, serverId: _formServerId);

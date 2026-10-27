@@ -44,8 +44,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - `create_scheduled_task` / `run_scheduled_task` stay Write, but the requirement — and therefore the approver's
     level — is now resolved per task before the caller check and the approval: CustomCommand (`host.exec`),
     SelfBackup (`selfbackup.create`/`selfbackup.prune`) and DB/volume backups with retention (`maxBackups` > 0,
-    the default 7; `db.backup_delete`/`volume.backup_delete`) require Admin. Pass `maxBackups=0` to keep a backup
-    task at Write. Retention is read with the executor's own rule (`TaskExecutor.RetentionOf`), the one the
+    the default 7; `db.backup_delete`/`volume.backup_delete`) require Admin, and so does every DB backup (a dump
+    holds every row). Pass `maxBackups=0` to keep a **volume** backup task at Write. The Scheduled tasks page sends
+    the same arguments and asks the same resolver for "Run now". Retention is read with the executor's own rule (`TaskExecutor.RetentionOf`), the one the
     Scheduled tasks page already uses for "Run now".
 - **Deploying from the UI now requires Admin** (was Operator): the deploy form, the compose editor and the app store.
   A compose file can mount `/` or run privileged, which is root on the host. The MCP deploy tools already

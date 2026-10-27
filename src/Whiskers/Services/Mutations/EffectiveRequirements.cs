@@ -58,6 +58,14 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
         }
     }
 
+    /// <summary>The level running <paramref name="task"/> needs — the same answer <c>scheduler.run</c> gets, for pages
+    /// that decide what to show. A switched-off underlying capability throws <see cref="CapabilityDisabledException"/>.</summary>
+    public string LevelToRun(ScheduledTaskEntity task)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        return LevelFor(task.TaskType, TaskExecutor.RetentionOf(task) > 0);
+    }
+
     /// <summary>The level a task of this type needs, from the capabilities it performs.</summary>
     public string LevelFor(ScheduledTaskType type, bool retention) => type switch
     {

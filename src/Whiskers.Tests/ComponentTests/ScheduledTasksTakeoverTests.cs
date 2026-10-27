@@ -29,10 +29,12 @@ public class ScheduledTasksTakeoverTests : BunitContext
         Services.AddMudServices();
         Services.AddSingleton<IKeyInterceptorService>(new NoopKeyInterceptor());
         Services.AddSingleton<Whiskers.Services.Mutations.ICapabilityCatalog>(new Whiskers.Services.Mutations.CapabilityCatalog());
+        Services.AddSingleton<IEffectiveRequirementResolver>(sp =>
+            new SchedulerRequirementResolver(new Whiskers.Services.Mutations.CapabilityCatalog(), sp));
         Services.AddSingleton<ISchedulerService>(_scheduler);
         Services.AddSingleton<IDockerService>(new FakeDocker());
         Services.AddSingleton<IServerConfigService>(new FakeServerConfig());
-        Services.AddSingleton<ICurrentUserService>(new AdminUser());
+        Services.AddSingleton<ICurrentUserService>(new User(AppRole.Admin));
         Services.AddSingleton<IAuditLogService>(new NullAudit());
         Services.AddSingleton<IUiMutationRunner>(new PassThrough());
         Services.AddSingleton<IAutomationOwnerResolver>(new Owners());
@@ -71,6 +73,49 @@ public class ScheduledTasksTakeoverTests : BunitContext
         Assert.DoesNotContain(cut.FindAll("button"), b => b.TextContent.Contains("ScheduledTasksView_Button_AdoptAll"));
     }
 
+    [Fact]
+    public void An_operator_is_offered_run_now_exactly_where_the_gateway_lets_them_run_it()
+    {
+        // R1-05: the page asks the resolver the gateway asks for scheduler.run.
+        Services.AddSingleton<ICurrentUserService>(new User(AppRole.Operator));
+        ScheduledTaskEntity Task(string id, ScheduledTaskType type, string? config = null) => new()
+        {
+            TaskId = id, Name = id, TaskType = type, CronExpression = "0 2 * * *", TargetId = "x",
+            CreatedBy = "user:ops@example.com", Config = config,
+        };
+        _scheduler.Tasks.AddRange(
+        [
+            Task("restart", ScheduledTaskType.ContainerRestart),
+            Task("volume-no-retention", ScheduledTaskType.VolumeBackup),
+            Task("volume-retention", ScheduledTaskType.VolumeBackup, "{\"maxBackups\":\"3\"}"),
+            Task("db-dump", ScheduledTaskType.DbBackup),
+            Task("command", ScheduledTaskType.CustomCommand, "{\"command\":\"id\"}"),
+            Task("self", ScheduledTaskType.SelfBackup),
+        ]);
+
+        var cut = Render<ScheduledTasksView>();
+
+        Assert.Equal(2, cut.FindAll("button[title='ScheduledTasksView_Tooltip_RunNow']").Count);
+    }
+
+    [Theory]
+    [InlineData(ScheduledTaskType.VolumeBackup, 0, McpPermissionLevels.Write)]
+    [InlineData(ScheduledTaskType.VolumeBackup, 3, McpPermissionLevels.Admin)]
+    [InlineData(ScheduledTaskType.DbBackup, 0, McpPermissionLevels.Admin)]
+    [InlineData(ScheduledTaskType.ContainerRestart, 0, McpPermissionLevels.Write)]
+    [InlineData(ScheduledTaskType.CustomCommand, 0, McpPermissionLevels.Admin)]
+    public async Task The_page_creates_a_task_with_the_arguments_its_requirement_depends_on(ScheduledTaskType type,
+        int maxBackups, string expected)
+    {
+        var task = new ScheduledTaskEntity { Name = "n", TaskType = type, TargetId = "x" };
+        var args = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
+            System.Text.Json.JsonSerializer.Serialize(ScheduledTasksView.CreateArgumentsOf(task, maxBackups, null)))!;
+        var catalog = new Whiskers.Services.Mutations.CapabilityCatalog();
+        var resolver = new SchedulerRequirementResolver(catalog, Services);
+
+        Assert.Equal(expected, await resolver.ResolveAsync(catalog.Find("scheduler.create")!, args, CancellationToken.None));
+    }
+
     private sealed class Scheduler : ISchedulerService
     {
         public List<ScheduledTaskEntity> Tasks { get; } = [];
@@ -97,11 +142,11 @@ public class ScheduledTasksTakeoverTests : BunitContext
             ownerId == "key:gone" ? McpPermissionLevels.Read : McpPermissionLevels.Write);
     }
 
-    private sealed class AdminUser : ICurrentUserService
+    private sealed class User(AppRole role) : ICurrentUserService
     {
         public Task<string?> GetEmailAsync() => Task.FromResult<string?>(Admin);
-        public Task<AppRole> GetRoleAsync() => Task.FromResult(AppRole.Admin);
-        public Task<bool> HasRoleAsync(AppRole required) => Task.FromResult(true);
+        public Task<AppRole> GetRoleAsync() => Task.FromResult(role);
+        public Task<bool> HasRoleAsync(AppRole required) => Task.FromResult(role >= required);
     }
 
     private sealed class NullAudit : IAuditLogService

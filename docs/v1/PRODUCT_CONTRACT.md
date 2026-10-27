@@ -157,10 +157,10 @@ mutating tools do for their own error texts).
 | M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
 | M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ⚠️ `nginx -t` pre-check | AL ✅ | 41 (E-03) |
 | M-12 | `manage_systemd_service` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
-| M-13 | `renew_ssl_certificate` | write | ❌ | AL ✅ | INV-43 |
+| M-13 | `renew_ssl_certificate` | admin (R1-05) | ❌ | AL ✅ | INV-43 |
 | M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service | AL ✅ | INV-58 |
 | M-15 | `execute_query` | **admin** (PC-D3) | ❌ | ❌ AH only | INV-19 (PC-D3), 24, 43, 45 |
-| M-16 | `backup_database` | write | ❌ | AL ✅ | INV-43 |
+| M-16 | `backup_database` | admin (R1-05) | ❌ | AL ✅ | INV-43 |
 | M-17 | `set_dns_record` | write | ❌ | AL ✅ | INV-43, 52 (DNS token) |
 | M-18 | `delete_dns_record` | write | ❌ | AL ✅ | INV-43, 52 |
 | M-19 | `create_network` | **admin** (R1-05; was write) | ❌ | AL ✅ | — |
@@ -254,7 +254,7 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-23 | Cloud power / snapshot | Admin | ❌ | AL ✅ | INV-43, 52 |
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | AL ✅ | INV-43 |
 | U-25 | Self-backup create / delete / restore | Admin | ⚠️ archive validation | AL ✅ | INV-55 |
-| U-26 | Scheduled tasks create / toggle / delete | Admin | — | AL ✅ | INV-04 |
+| U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | AL ✅ | INV-04 |
 | U-27 | Scheduled task "Run now" | Operator; custom command, self-backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | AL ✅ | INV-43 |
 | U-28 | Webhooks create / regenerate / toggle / delete / test | Admin; test = Operator | — | AL ✅ | INV-04, 19 (test fires the real action at Operator) |
 | U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | save/delete ❌, deploy ✅ | INV-41 (branch), 46 |
