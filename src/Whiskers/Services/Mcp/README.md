@@ -11,6 +11,8 @@ The **authorization layer for MCP tools**. Validates incoming MCP API keys and e
 ## Related
 
 - The tools themselves and the `McpPermissionCheck` helper: [`../../Mcp/`](../../Mcp/)
-- Canonical tool > level map: [`../../Models/McpPermission.cs`](../../Models/McpPermission.cs)
+- Tool > level map: [`../../Models/McpPermission.cs`](../../Models/McpPermission.cs) — for mutating tools it is derived from the
+  capability catalog [`../Mutations/CapabilityCatalog.cs`](../Mutations/CapabilityCatalog.cs) (R1-05): change a write / admin
+  level there first, then the tool's `[McpToolLevel]`; read tools are declared by the attribute alone
 - Agent inherits these rights: [`../Agent/AgentPrincipalResolver.cs`](../Agent/AgentPrincipalResolver.cs)
 - UI: *Settings > MCP*

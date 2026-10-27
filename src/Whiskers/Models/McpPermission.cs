@@ -63,10 +63,13 @@ public static class McpPermissionLevels
     /// <see cref="Admin"/> (fail-closed) — which also means a forgotten entry produces a tool that is registered
     /// and listed but denied to the agent on every call, silently.
     ///
-    /// <para>Do not edit this map on its own. The level is <b>declared</b> on the tool method via
-    /// <c>[McpToolLevel]</c>; this dictionary must mirror those declarations exactly. <c>McpToolLevelTests</c>
-    /// compares the two in both directions and fails the build on any drift — including an entry here for a tool
-    /// that no longer exists. Change the attribute, then bring this entry along.</para></summary>
+    /// <para>Do not edit this map on its own. For a <b>mutating</b> tool (write / admin) the level comes from
+    /// <see cref="Whiskers.Services.Mutations.CapabilityCatalog"/> (R1-05, the one table for MCP and UI):
+    /// <see cref="WithCatalogLevels"/> overwrites the entry here with the catalog level. Change the catalog first,
+    /// then bring the tool's <c>[McpToolLevel]</c> attribute and this entry along. For a <b>read</b> tool the level
+    /// is declared on the method via <c>[McpToolLevel]</c> and mirrored here. <c>McpToolLevelTests</c> and
+    /// <c>CapabilityTableConsistencyTests</c> compare all three and fail the build on any drift — including an
+    /// entry here for a tool that no longer exists.</para></summary>
     public static readonly Dictionary<string, string> DefaultToolLevels = WithCatalogLevels(new()
     {
         // Read tools
