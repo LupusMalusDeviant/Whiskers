@@ -151,6 +151,29 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_client_built_during_a_rotation_reads_the_new_kubeconfig()
+    {
+        var page = Render<Servers>();
+        var server = new ServerConfig { Name = "k8s", ConnectionType = ConnectionType.Kubernetes };
+        Set(page, "_form", server);
+        Set(page, "_kubeconfigYaml", "yaml-A");
+        await Persist(page);
+        var oldKey = KubernetesClientCache.KubeconfigKeyOf(_servers.GetServer(server.Id)!);
+
+        // The build captured the record naming A; the rotation to B publishes and removes A before the read.
+        _vault.BeforeRead = key =>
+        {
+            if (key != oldKey) return;
+            _vault.BeforeRead = null;
+            Set(page, "_kubeconfigYaml", "yaml-B");
+            Persist(page).GetAwaiter().GetResult();
+        };
+
+        var cache = new KubernetesClientCache(_servers, _vault);
+        Assert.Equal("yaml-B", cache.ReadKubeconfig(server.Id).Yaml);
+    }
+
+    [Fact]
     public async Task A_rotation_removes_the_previous_key()
     {
         var page = Render<Servers>();
@@ -220,12 +243,17 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
     {
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _secrets = new();
         public IEnumerable<string> Keys => _secrets.Keys;
+        public Action<string>? BeforeRead { get; set; }
         public bool IsEnabled => true;
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public List<VaultEntry> ListSecrets() => _secrets.Keys.Select(k => new VaultEntry { Key = k }).ToList();
         public Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null,
             int? rotateAfterDays = null) { _secrets[key] = plainValue; return Task.CompletedTask; }
-        public string? GetSecret(string key) => _secrets.TryGetValue(key, out var v) ? v : null;
+        public string? GetSecret(string key)
+        {
+            BeforeRead?.Invoke(key);
+            return _secrets.TryGetValue(key, out var v) ? v : null;
+        }
         public Task DeleteSecretAsync(string key) { _secrets.TryRemove(key, out _); return Task.CompletedTask; }
         public List<VaultEntry> GetExpiringSecrets() => [];
     }
