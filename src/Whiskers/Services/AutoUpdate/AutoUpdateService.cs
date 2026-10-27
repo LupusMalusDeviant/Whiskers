@@ -74,7 +74,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         }
     }
 
-    private async Task CheckAndUpdateAsync(CancellationToken ct)
+    /// <summary>One check over every opt-in policy. Internal for tests.</summary>
+    internal async Task CheckAndUpdateAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();

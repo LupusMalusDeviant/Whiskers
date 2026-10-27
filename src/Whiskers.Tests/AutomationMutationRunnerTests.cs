@@ -237,9 +237,12 @@ public class AutomationMutationRunnerTests
         Task Restart(CancellationToken _) { runs++; return Task.CompletedTask; }
 
         var first = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, Restart);
-        // Someone approves whatever is pending in between — there must be nothing an approval could attach to.
-        foreach (var pending in f.Approvals.GetPending())
-            await f.Approvals.ResolveAsync(pending.Id, approved: true, resolvedBy: "admin@example.com", resolverLevel: "admin");
+        // An admin tries to approve in between: nothing is pending, and an approval id from the refusal (if any had
+        // leaked) or a guessed one resolves to nothing.
+        Assert.Empty(f.Approvals.GetPending());
+        var attempted = await f.Approvals.ResolveAsync(first.ApprovalId ?? first.OperationId, approved: true,
+            resolvedBy: "admin@example.com", resolverLevel: "admin");
+        Assert.False(attempted);
         var second = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, Restart);
 
         Assert.Equal(MutationStatus.Denied, first.Status);

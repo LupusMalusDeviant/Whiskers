@@ -87,7 +87,9 @@ registrations are wrapped too.
 3. Principal level below the capability level → **Denied**.
 4. Target cannot be resolved (unknown or ambiguous container) → **Denied**.
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**.
-6. Policy `Confirm` → [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
+6. Policy `Confirm` on the `Automation` surface (scheduler, AutoUpdate, AutoPatch) → **Denied**, before the approval
+   gate: nobody can confirm an unattended run, and no approval is raised (R1-01).
+   Policy `Confirm` otherwise → [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
    (the agent session's own approval for this operation, or approve-then-retry for a direct MCP call); otherwise
    **PendingApproval**.
 7. Audit intent written; if that fails → **Denied** (PC-D5). Only now is the approval used up
