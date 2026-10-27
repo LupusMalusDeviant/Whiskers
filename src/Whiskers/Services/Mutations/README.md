@@ -156,7 +156,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 - **Key-owned items** are evaluated with the full rule set of the key (tool lists, forbidden arguments,
   confirmation). A `Confirm` on the `Automation` surface is a terminal `Denied` in the gateway, before the approval
   gate (R1-01): no one can approve an unattended run, and no approval is raised that a later occurrence of the same
-  task could match. Items owned by a person, and ownerless items in the grace period, use the PC-D1 rules.
+  task could match. Items a person created or took over, and ownerless items in the grace period, use the PC-D1
+  rules. Items an agent created — and owned items whose provenance was never recorded (created before R1-03), until
+  an admin takes them over — keep the agent's rules (R1-04).
 - **Owner file** (`automation-owners.json`): unreadable, invalid, a directory or not openable → every feature
   `IsBlocked`, AutoPatch and AutoUpdate do not run (fail closed). Taking one feature over clears only its block; the
   others are written to the file as blocked entries, so they stay blocked after a restart. Only a file that is not

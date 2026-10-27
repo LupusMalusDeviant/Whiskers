@@ -118,9 +118,15 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     `automation_suspended` notification that no container mute hides. Policy refusals (kill switch, protected
     resources) still only report `automation_refused`.
   - With Google/OIDC sign-in next to local accounts, Whiskers now remembers which emails had a local account
-    (`known-local-accounts.json` in the data directory, starting with the accounts present at upgrade): an owner
-    whose local account is deleted loses their authority there too. Accounts deleted before the upgrade are not
-    known.
+    (`known-local-accounts.json` in the data directory; recorded at every start and whenever the setup wizard
+    creates an account, first at the first start after this upgrade): an owner whose local account is deleted loses
+    their authority there too. Accounts deleted before that first start are not known.
+  - Authority loss is judged by what the run actually needs: a level raised in Settings → MCP, and a key's tool
+    list, count as well.
+  - **Tasks from before provenance was recorded** (created before this release, owner set, no `CreatedVia`) may
+    have come from an agent, so they now run with the agent's guardrail rules; with the default preset their writes
+    are refused (`automation_refused`). Take each such task over in Scheduled Tasks to run it with the PC-D1 rules
+    again.
   - A task an agent created keeps the agent's guardrail rules when it runs (autonomy level and confirmation, tool
     lists, forbidden arguments). With the default preset such a task's writes are refused; an Admin who takes it
     over makes it a task of their own.

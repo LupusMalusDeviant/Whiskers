@@ -125,7 +125,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
 
         var dryRun = _settings.CurrentValue.DryRun;
-        var actor = new AutomationActor(NightlyRunner, "AutoPatch", owner);
+        // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
+        var actor = new AutomationActor(NightlyRunner, "AutoPatch", owner, owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
             new { dryRun }, async token => MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)

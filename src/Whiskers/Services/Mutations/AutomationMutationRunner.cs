@@ -199,10 +199,13 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
     private readonly ICapabilityCatalog _catalog;
     private readonly IAutomationOwnerResolver _owners;
     private readonly IOptionsMonitor<AutomationOptions> _options;
+    private readonly ICapabilityOverrides? _overrides;
 
     public AutomationMutationRunner(IMutationGateway gateway, ICapabilityCatalog catalog,
-        IAutomationOwnerResolver owners, IOptionsMonitor<AutomationOptions> options)
+        IAutomationOwnerResolver owners, IOptionsMonitor<AutomationOptions> options,
+        ICapabilityOverrides? overrides = null)
     {
+        _overrides = overrides;
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
@@ -249,9 +252,28 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         var owner = _owners.Resolve(actor.OwnerId);
         if (_owners.Describe(actor.OwnerId).State != OwnerState.Active)
             return $"its owner {owner.DisplayName} has no authority left";
-        return McpPermissionLevels.HasAccess(owner.PermissionLevel, capability.RequiredLevel)
-            ? null
-            : $"its owner {owner.DisplayName} no longer holds '{capability.RequiredLevel}' for {capability.Id}";
+        // The same requirement the gateway enforces: a level raised in Settings → MCP counts. A switched-off
+        // capability is a policy, not a lost authority, and an unreadable setting is refused there anyway.
+        var required = capability.RequiredLevel;
+        if (_overrides is not null)
+        {
+            try
+            {
+                var availability = _overrides.Resolve(capability);
+                if (availability.Enabled) required = availability.RequiredLevel;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Keep the catalog level; the run itself was refused fail-closed.
+            }
+        }
+        if (!McpPermissionLevels.HasAccess(owner.PermissionLevel, required))
+            return $"its owner {owner.DisplayName} no longer holds '{required}' for {capability.Id}";
+        // A key owner limited to a tool list holds only those tools.
+        var tool = capability.McpTool ?? capability.Id;
+        return owner.AllowedTools is { } allowed && !allowed.Contains(tool)
+            ? $"its owner {owner.DisplayName} may no longer use '{tool}'"
+            : null;
     }
 
     private MutationPrincipal PrincipalOf(AutomationActor actor, Capability? capability)

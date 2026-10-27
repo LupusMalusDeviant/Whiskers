@@ -55,7 +55,7 @@ public sealed class PrincipalPropagationTests : IDisposable
         var f = AutomationMutationRunnerTests.Build();
         f.Whitelist.Allowed.Add("ops@example.com");
         f.Roles.Map["ops@example.com"] = AppRole.Operator;
-        var outcome = await f.Runner.RunAsync(new AutomationActor("task:t1", "Scheduled task 'nightly'", owner),
+        var outcome = await f.Runner.RunAsync(new AutomationActor("task:t1", "Scheduled task 'nightly'", owner, owner),
             "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Executed, outcome.Status);

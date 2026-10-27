@@ -14,6 +14,10 @@ public interface IOwnerAccounts
 {
     /// <summary><c>false</c> when <paramref name="email"/> can no longer sign in because its account is gone.</summary>
     bool Exists(string email);
+
+    /// <summary>Records every local account that exists now. Called at startup after the Identity schema is migrated
+    /// and whenever a local account is created, so an account is known before it can own anything.</summary>
+    void RememberLocalAccounts() { }
 }
 
 /// <summary>
@@ -65,6 +69,12 @@ public sealed class OwnerAccounts : IOwnerAccounts
         }
     }
 
+    public void RememberLocalAccounts()
+    {
+        if (LocalAccounts() is not { } local) return;
+        lock (_gate) Remember(local);
+    }
+
     /// <summary>The normalized emails of all local accounts, or <c>null</c> when they cannot be read.</summary>
     private HashSet<string>? LocalAccounts()
     {
@@ -102,7 +112,13 @@ public sealed class OwnerAccounts : IOwnerAccounts
             }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
+                // First start with this record (or it was removed): history begins with the accounts present now.
+                // A local account deleted before this point is not known and its owner counts as federated.
                 known = new HashSet<string>(StringComparer.Ordinal);
+                if (local.Count > 0)
+                    _logger?.LogWarning("Starting the record of local accounts at {Path} with {Count} account(s); local " +
+                                        "accounts deleted before now are not known to automation ownership",
+                        _knownPath, local.Count);
             }
             if (local.IsSubsetOf(known)) return known;
             known.UnionWith(local);

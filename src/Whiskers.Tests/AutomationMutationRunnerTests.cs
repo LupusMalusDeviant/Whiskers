@@ -117,7 +117,7 @@ public class AutomationMutationRunnerTests
         return f;
     }
 
-    private static readonly AutomationActor Task1 = new("task:t1", "Scheduled task 'nightly'", OpsId);
+    private static readonly AutomationActor Task1 = new("task:t1", "Scheduled task 'nightly'", OpsId, OpsId);
 
     [Fact]
     public async Task An_owned_run_acts_on_behalf_of_its_owner_without_asking_for_approval()
@@ -435,7 +435,7 @@ public class AutomationMutationRunnerTests
         var task = new ScheduledTaskEntity
         {
             TaskId = "t1", Name = "volumes", TaskType = ScheduledTaskType.VolumeBackup,
-            TargetId = "data", CreatedBy = OpsId, Config = """{"maxBackups":"1"}""",
+            TargetId = "data", CreatedBy = OpsId, CreatedVia = OpsId, Config = """{"maxBackups":"1"}""",
         };
 
         var (success, output) = await executor.ExecuteAsync(task);
@@ -572,6 +572,60 @@ public class AutomationMutationRunnerTests
 
         Assert.Equal(MutationStatus.Executed, human.Status);
         Assert.Equal(MutationStatus.Denied, agent.Status);
+    }
+
+    [Fact]
+    public async Task An_owned_task_of_unknown_provenance_keeps_the_agents_rules_until_an_admin_takes_it_over()
+    {
+        // Created before provenance was recorded (R1-03): it may have come from an agent, so it does not get the
+        // rules for a person; taking it over records the admin as its provenance.
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+        policy.RequireConfirmationForWrites = false;
+        policy.ToolMode = "allow";
+        policy.ToolAllowList = ["list_containers"];
+        var f = Build(policy: policy);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Operator;
+
+        var legacy = await f.Runner.RunAsync(Task1 with { CreatedVia = null }, "container.restart",
+            new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var adopted = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
+            _ => Task.CompletedTask);
+        var ownerless = await Build(policy: policy).Runner.RunAsync(new AutomationActor("task:t2", "old", null),
+            "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+
+        Assert.Equal(MutationStatus.Denied, legacy.Status);
+        Assert.Equal(MutationStatus.Executed, adopted.Status);
+        Assert.Equal(MutationStatus.Executed, ownerless.Status);   // the grace period keeps its own rules
+    }
+
+    [Fact]
+    public void A_raised_level_and_a_key_tool_list_count_as_lost_authority()
+    {
+        // The same requirement the gateway enforces: a level raised in Settings, a key limited to other tools.
+        var f = WithOperator();
+        var raised = new AutomationMutationRunner(new MutationGateway(new CapabilityCatalog(),
+                AgentToolTestHelpers.Policy(new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault())),
+                new PrincipalAudit(), [], NullLogger<MutationGateway>.Instance),
+            new CapabilityCatalog(), new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts),
+            new StaticOptionsMonitor<AutomationOptions>(f.Options), new RaisedTo(McpPermissionLevels.Admin));
+        Assert.NotNull(raised.LostAuthority(Task1, "container.restart"));
+        Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
+
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig
+        {
+            Id = "k1", Name = "ci", PermissionLevel = McpPermissionLevels.Admin, Enabled = true,
+            AllowedTools = ["list_containers"],
+        });
+        var keyTask = new AutomationActor("task:t3", "ci", PrincipalIds.Key("k1"), PrincipalIds.Key("k1"));
+        Assert.Contains("may no longer use", f.Runner.LostAuthority(keyTask, "container.restart"));
+    }
+
+    private sealed class RaisedTo(string level) : ICapabilityOverrides
+    {
+        public CapabilityAvailability Resolve(Capability capability) => new(true, level);
+        public CapabilityAvailability ResolveTool(string toolName, string codeLevel) => new(true, level);
     }
 
     [Fact]

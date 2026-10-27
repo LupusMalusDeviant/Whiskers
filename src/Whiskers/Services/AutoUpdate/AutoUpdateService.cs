@@ -148,7 +148,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 // Through the gateway on the authority of the admin who took AutoUpdate over (PC-D6), re-checked
                 // per update; without one, the grace rule of AutomationOptions.RequireOwner applies.
                 var sid = container.ServerId == "local" ? null : container.ServerId;
-                var actor = new AutomationActor("autoupdate", "AutoUpdate", _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId);
+                // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
+                var updateOwner = _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId;
+                var actor = new AutomationActor("autoupdate", "AutoUpdate", updateOwner, updateOwner);
                 var outcome = await _automation.RunAsync(actor,
                     "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
                     async _ =>

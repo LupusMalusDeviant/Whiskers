@@ -243,6 +243,33 @@ public sealed class KillSwitchTests : IDisposable
                 Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
             Assert.False(restarted.Exists("ops@example.com"));
 
+            // Startup records the accounts before anything is looked up: an account deleted after startup but
+            // before its owner's first run is still known, and the owner resolver reports it as deleted.
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Users.Add(new AppUser
+                {
+                    Id = "u2", UserName = "lea@example.com", NormalizedUserName = "LEA@EXAMPLE.COM",
+                    Email = "lea@example.com", NormalizedEmail = "LEA@EXAMPLE.COM",
+                });
+                db.SaveChanges();
+            }
+            var booted = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            booted.RememberLocalAccounts();
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                db.Users.Remove(db.Users.Single(u => u.Id == "u2"));
+                db.SaveChanges();
+            }
+            var f = AutomationMutationRunnerTests.Build();
+            f.Whitelist.Allowed.Add("lea@example.com");
+            f.Roles.Map["lea@example.com"] = AppRole.Admin;
+            var resolver = new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, booted);
+            Assert.Equal(OwnerState.AccountDeleted, resolver.Describe("user:lea@example.com").State);
+
             // An unreadable record of local accounts fails closed for owners without a local row.
             File.WriteAllText(paths.KnownLocalAccountsJson, "{ not json");
             var broken = new OwnerAccounts(scopes,
