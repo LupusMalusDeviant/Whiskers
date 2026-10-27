@@ -232,7 +232,7 @@ public class WebhookService : IWebhookService
             {
                 capability = "compose.deploy";
                 // A plan that cannot be made is still decided on the project directory; then nothing runs.
-                var (plan, error) = await LookupAsync(webhook, () => WebhookTargets.ComposePlanAsync(_planner, webhook));
+                var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook));
                 var gate = automation.GateFor(actor, "compose.deploy");
                 outcome = await automation.RunAsync(actor, "compose.deploy",
                     new { projectName = plan?.ProjectName, projectDir = webhook.TargetId, serverId = sid },
@@ -307,11 +307,25 @@ public class WebhookService : IWebhookService
             var (value, error) = await lookup();
             return (value, value is null ? error : null);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
+            // Also a timeout (a cancellation): a delivery has no caller that could cancel it, so it is still decided.
             _logger.LogWarning(ex, "Webhook {Name}: its target could not be looked up", webhook.Name);
             return (null, $"The target of '{webhook.Name}' could not be looked up.");
         }
+    }
+
+    /// <summary>The webhook's compose plan (<see cref="WebhookTargets.ComposePlanAsync"/>). The planner's message can
+    /// quote values from the project's <c>.env</c> — a project name built from a password — so it never reaches a
+    /// refusal, the audit, a notification, the webhook log or this log; the page's Test shows it to the person.</summary>
+    private async Task<(ComposePlan? Plan, string? Error)> PlanAsync(WebhookEntity webhook)
+    {
+        var (plan, _) = await WebhookTargets.ComposePlanAsync(_planner, webhook);
+        if (plan is not null) return (plan, null);
+        _logger.LogWarning("Webhook {Name}: the compose deployment in {Directory} could not be planned",
+            webhook.Name, webhook.TargetId);
+        return (null, $"The compose deployment in '{webhook.TargetId}' could not be planned; the Test button on the " +
+                      "Webhooks page shows why.");
     }
 
     /// <summary>An action whose target or plan cannot be resolved is refused, not a failed run: an admin hears of it.</summary>
@@ -369,8 +383,9 @@ public class WebhookService : IWebhookService
         // The plan (R1-07) made again right before writing: the compose files of the directory as compose finds them,
         // the project and every existing container `up` touches — then exactly that runs (explicit -p / -f). The owner
         // decided every container of the plan made before (R1-09); one that turns up only now stops it.
-        var (plan, error) = await WebhookTargets.ComposePlanAsync(_planner, webhook);
-        if (plan is null) return (false, error!);
+        // Either failing is a refusal (nothing ran), reported to an admin like the first plan's.
+        var (plan, error) = await PlanAsync(webhook);
+        if (plan is null) throw Unresolved(error!);
         try
         {
             plan.EnsureDecided(MutationScope.Current
@@ -378,7 +393,7 @@ public class WebhookService : IWebhookService
         }
         catch (ComposePlanException ex)
         {
-            return (false, ex.Message);
+            throw Unresolved(ex.Message);   // names only containers
         }
         var result = await _executor.ExecuteAsync(sid, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5));
         return (result.Success, result.Success ? result.Output : result.Error);

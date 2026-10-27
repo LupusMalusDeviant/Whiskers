@@ -15,7 +15,7 @@ All notable changes to Whiskers are documented here. The format follows
   `gitdeploy.deploy` by the webhook's owner and then by the app's owner (R1-08). A webhook without an owner, or whose
   owner lost the authority (role, whitelist, account, key), is refused, switched off and an admin is notified; any
   other refusal (kill switch, protected resource, unknown target, the Git app owner's, unwritable audit) is reported
-  to an admin and leaves it on. A webhook whose server was removed can still be switched off and deleted. Creating,
+  to an admin and leaves it on. A webhook whose server was removed can still be switched off and deleted. A compose planning error is not passed into the audit, notifications or the webhook log (it can quote `.env` values); the Test button shows it. Creating,
   taking over, rotating the secret, switching on/off and deleting a webhook are decided by the gateway too
   (`webhook.save`, `webhook.rotate_secret`, `webhook.set_enabled`, `webhook.delete`, all Admin), on the stored
   webhook; the secret is never a decision argument. The Webhooks page's Test plans the action as the trigger does

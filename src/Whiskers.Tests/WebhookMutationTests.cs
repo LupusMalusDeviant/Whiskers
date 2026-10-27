@@ -52,6 +52,7 @@ public sealed class WebhookMutationTests : IDisposable
     private string? _protect;
     private bool _requireOwner = true;
     private bool _dockerThrows;
+    private bool _dockerTimesOut;
 
     public WebhookMutationTests()
     {
@@ -254,6 +255,65 @@ public sealed class WebhookMutationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_lookup_that_times_out_is_still_decided_and_switches_off_a_revoked_owner()
+    {
+        var webhook = Seed("restart", "web-1", owner: "user:gone@example.com");
+        _dockerThrows = true;
+        _dockerTimesOut = true;
+
+        var (success, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.NotEmpty(_audit.Requests);
+        Assert.False(Stored(webhook.WebhookId).Enabled);
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended");
+    }
+
+    [Fact]
+    public async Task A_plan_error_never_carries_a_value_from_the_env_into_audit_notification_or_webhook_log()
+    {
+        const string Password = "S3nsitive!Value";
+        _host.Files["/opt/leaky/docker-compose.yml"] = "services:\n  web:\n    image: nginx\n";
+        _host.Files["/opt/leaky/.env"] = $"DB_PASSWORD='{Password}'\nCOMPOSE_PROJECT_NAME=${{DB_PASSWORD}}\n";
+        var webhook = Seed("deploy", "/opt/leaky");
+        // The planner itself quotes the value (the page's Test shows it to the person) …
+        var (_, planError) = await WebhookTargets.ComposePlanAsync(new ComposePlanner(_docker, _host), webhook);
+        Assert.Contains(Password, planError);
+
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.DoesNotContain(Password, output);
+        Assert.DoesNotContain(_audit.Reasons, r => r.Contains(Password));
+        Assert.DoesNotContain(_notify.Events, e => (e.ImageInfo ?? "").Contains(Password));
+        using var scope = _sp.CreateScope();
+        Assert.DoesNotContain(scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookLogs.ToList(),
+            l => (l.Error ?? "").Contains(Password) || (l.Output ?? "").Contains(Password));
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
+    }
+
+    [Theory]
+    [InlineData("gone")]      // the compose file disappears after the decision
+    [InlineData("changed")]   // it now names another project, whose containers were not decided
+    public async Task A_plan_that_changes_before_compose_up_is_a_reported_refusal(string change)
+    {
+        var webhook = Seed("deploy", "/opt/shop");
+        _audit.OnBegin = r =>
+        {
+            if (r.CapabilityId != "compose.deploy" || !r.Arguments.ContainsKey("containerId")) return;
+            if (change == "gone") _host.Files.Remove("/opt/shop/docker-compose.yml");
+            else _host.Files["/opt/shop/docker-compose.yml"] = "name: payments\nservices:\n  web:\n    image: nginx\n";
+        };
+
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.StartsWith("Refused", output);
+        Assert.False(Ran("deploy"));
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
+    }
+
+    [Fact]
     public async Task An_unwritable_audit_at_a_container_of_a_git_deploy_is_a_reported_refusal()
     {
         var webhook = Seed("git-deploy", AppId);
@@ -448,25 +508,30 @@ public sealed class WebhookMutationTests : IDisposable
     // ---------------------------------------------------------------- helpers
 
     private WebhookService Service() => new(_sp.GetRequiredService<IServiceScopeFactory>(),
-        _dockerThrows ? ThrowingDocker.Wrap(_docker) : _docker, _host,
+        _dockerThrows ? ThrowingDocker.Wrap(_docker, _dockerTimesOut) : _docker, _host,
         new ComposePlanner(_docker, _host), NullLogger<WebhookService>.Instance);
 
     /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>
     public class ThrowingDocker : System.Reflection.DispatchProxy
     {
         private Whiskers.Services.Docker.IDockerService _inner = null!;
+        private bool _timeout;
 
-        public static Whiskers.Services.Docker.IDockerService Wrap(Whiskers.Services.Docker.IDockerService inner)
+        public static Whiskers.Services.Docker.IDockerService Wrap(Whiskers.Services.Docker.IDockerService inner,
+            bool timeout = false)
         {
             var proxy = Create<Whiskers.Services.Docker.IDockerService, ThrowingDocker>();
             ((ThrowingDocker)(object)proxy)._inner = inner;
+            ((ThrowingDocker)(object)proxy)._timeout = timeout;
             return proxy;
         }
 
         protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args) =>
-            method!.Name == nameof(Whiskers.Services.Docker.IDockerService.ListContainersAsync)
-                ? throw new InvalidOperationException("Cannot connect to the docker socket of 'edge-removed'")
-                : method.Invoke(_inner, args);
+            method!.Name != nameof(Whiskers.Services.Docker.IDockerService.ListContainersAsync)
+                ? method.Invoke(_inner, args)
+                : _timeout
+                    ? throw new TaskCanceledException("The host deadline expired.")
+                    : throw new InvalidOperationException("Cannot connect to the docker socket of 'edge-removed'");
     }
 
     private bool Ran(string action) => action switch
@@ -580,23 +645,31 @@ public sealed class WebhookMutationTests : IDisposable
     {
         public bool Fail { get; set; }
         public Func<MutationRequest, bool>? FailWhen { get; set; }
+        public Action<MutationRequest>? OnBegin { get; set; }
         public List<MutationRequest> Requests { get; } = [];
+        public List<string> Reasons { get; } = [];
 
         public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
             ApprovalGateResult? approval, CancellationToken ct)
         {
             if (Fail || FailWhen?.Invoke(request) == true) throw new InvalidOperationException("database is locked");
             Requests.Add(request);
+            OnBegin?.Invoke(request);
             return Task.FromResult(1L);
         }
 
         public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
-            string? reason, TimeSpan duration, CancellationToken ct) => Task.CompletedTask;
+            string? reason, TimeSpan duration, CancellationToken ct)
+        {
+            if (reason is not null) Reasons.Add(reason);
+            return Task.CompletedTask;
+        }
 
         public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
             MutationStatus status, string reason, CancellationToken ct)
         {
             Requests.Add(request);
+            Reasons.Add(reason);
             return Task.CompletedTask;
         }
     }
