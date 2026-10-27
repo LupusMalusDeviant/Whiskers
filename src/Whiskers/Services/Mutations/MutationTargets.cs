@@ -161,11 +161,21 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
 
     private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist)
     {
+        if (!mustExist)
+        {
+            // Adding or saving a server: only the very server by its id, never the default server or a name match —
+            // the operation writes this id, so a decision on another server would record the wrong one.
+            var existing = string.IsNullOrWhiteSpace(idOrName) ? null
+                : _services.GetService<IServerConfigService>()?.GetServers()
+                    .FirstOrDefault(s => string.Equals(s.Id, idOrName, StringComparison.OrdinalIgnoreCase));
+            return existing is null
+                ? Pass(target)
+                : Done(target with { Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id });
+        }
         var (server, error) = ResolveServer(idOrName);
         if (server is not null)
             return Done(target with { Id = server.Id, Name = target.Name ?? server.Name, ServerId = server.Id });
-        // A server that is being added or saved for the first time does not exist yet: nothing to resolve.
-        return mustExist || string.IsNullOrWhiteSpace(idOrName) ? Refuse(error!, idOrName) : Pass(target);
+        return Refuse(error!, idOrName);
     }
 
     private async Task<TargetResolution> NetworkAsync(MutationRequest request, Capability capability,

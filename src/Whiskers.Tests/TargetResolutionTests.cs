@@ -152,6 +152,18 @@ public sealed class TargetResolutionTests : IDisposable
         Assert.Equal("edge01", seen.ServerId);
     }
 
+    [Theory]
+    [InlineData("")]        // no id yet: not the default server
+    [InlineData("edge")]    // a new id that only matches an existing server's name
+    public async Task Saving_a_new_server_is_never_decided_on_another_one(string serverId)
+    {
+        var (outcome, seen) = await RunAsync("server.save", new { serverId, name = "New" });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.False(seen!.Resolved);
+        Assert.NotEqual("edge01", seen.Id);
+    }
+
     [Fact]
     public async Task A_new_server_does_not_have_to_exist_yet()
     {

@@ -20,7 +20,6 @@ public sealed class DockerWorkloadProvider : IWorkloadProvider
 
     public WorkloadCapabilities Capabilities => WorkloadCapabilities.Docker;
 
-    // "local" is represented as a null serverId throughout IDockerService.
     // The server this provider was created for, by its id: "local" is a server id like any other (R1-06).
     private string? Sid => string.IsNullOrWhiteSpace(ServerId) ? null : ServerId;
 
