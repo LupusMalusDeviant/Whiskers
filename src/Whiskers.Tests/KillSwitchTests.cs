@@ -241,6 +241,35 @@ public sealed class KillSwitchTests : IDisposable
     }
 
     [Fact]
+    public async Task A_failed_suspension_still_tells_an_admin_and_leaves_the_task_refused()
+    {
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true);   // ops@ is not on the whitelist: lost
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify, suspender: new ThrowingSuspender());
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t8", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.ContainerRestart,
+            TargetId = "web-1", Enabled = true, CreatedBy = "user:ops@example.com", CreatedVia = "user:ops@example.com",
+        };
+
+        var (success, output) = await executor.ExecuteAsync(task);
+
+        Assert.False(success);
+        Assert.StartsWith("Refused:", output);
+        var evt = Assert.Single(notify.Events);
+        Assert.Equal("automation_refused", evt.EventType);
+        Assert.Contains("switching the task off failed", evt.ImageInfo, StringComparison.OrdinalIgnoreCase);
+        Assert.True(task.Enabled);   // nothing claims it was switched off
+    }
+
+    private sealed class ThrowingSuspender : IScheduledTaskSuspender
+    {
+        public Task<bool> SuspendAsync(string taskId, string? expectedOwnerId, CancellationToken ct = default) =>
+            throw new InvalidOperationException("database is locked");
+    }
+
+    [Fact]
     public async Task The_runs_result_save_never_overwrites_a_takeover_that_switched_the_task_on_again()
     {
         using (var scope = _sp.CreateScope())

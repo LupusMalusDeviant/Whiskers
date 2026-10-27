@@ -7,6 +7,7 @@
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IAutomationOwnerResolver OwnerResolver
+@inject IOptionsMonitor<AutomationOptions> AutomationOptions
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
@@ -67,9 +68,11 @@ else
 {
     @if (_tasks.Any(t => string.IsNullOrWhiteSpace(t.CreatedBy)))
     {
-        @* PC-D6: tasks from before owners were recorded run in a grace period until an admin takes them over. *@
+        @* PC-D6 / R1-04: tasks from before owners were recorded are refused and suspended (the default), or run in
+           the grace period that Automation:RequireOwner=false switches on, until an admin takes them over. *@
         <MudAlert Severity="Severity.Warning" Class="mb-3">
-            @L["ScheduledTasksView_Alert_Unowned", _tasks.Count(t => string.IsNullOrWhiteSpace(t.CreatedBy))]
+            @L[AutomationOptions.CurrentValue.RequireOwner ? "ScheduledTasksView_Alert_UnownedRefused" : "ScheduledTasksView_Alert_Unowned",
+               _tasks.Count(t => string.IsNullOrWhiteSpace(t.CreatedBy))]
             @if (_role >= AppRole.Admin)
             {
                 <MudButton Variant="Variant.Text" Color="Color.Warning" Size="Size.Small" Class="ml-2"

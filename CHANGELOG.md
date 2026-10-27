@@ -117,7 +117,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     now **suspends** the item: a scheduled task is switched off — take it over in Scheduled Tasks **and switch it
     on again** (the takeover does not switch it on by itself, since a task may have been off on purpose) —,
     AutoPatch / AutoUpdate are blocked until an Admin takes them over in Settings → Automation owners (AutoPatch
-    also stops mid-cycle). Admins get an
+    also stops mid-cycle). If switching a task off fails, every run is still refused and an Admin is notified. Admins get an
     `automation_suspended` notification that no container mute hides. Policy refusals (kill switch, protected
     resources) still only report `automation_refused`.
   - With Google/OIDC sign-in next to local accounts, Whiskers now records which emails have a local account and

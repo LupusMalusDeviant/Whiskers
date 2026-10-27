@@ -81,15 +81,22 @@ public class TaskExecutor : ITaskExecutor
                         .Select(c => _automation.LostAuthority(ActorOf(task), c)).FirstOrDefault(l => l is not null) is { } lost)
                 {
                     // Only the assignment this run was started under; a takeover meanwhile wins (no suspension).
-                    if (await SuspendAsync(task))
+                    switch (await SuspendAsync(task))
                     {
-                        await NotifySuspendedAsync(task, lost);
-                        return (false, $"Suspended: {lost}. An admin can take the task over in Scheduled tasks and " +
-                                       $"switch it on again. {reason}");
+                        case Suspension.Suspended:
+                            await NotifySuspendedAsync(task, lost);
+                            return (false, $"Suspended: {lost}. An admin can take the task over in Scheduled tasks and " +
+                                           $"switch it on again. {reason}");
+                        case Suspension.Failed:
+                            // Still on, and every run is refused: an admin must hear about it all the same.
+                            await NotifyRefusedAsync(task, $"{lost}. Switching the task off failed, so it is still on " +
+                                                           $"and every run is refused. {reason}");
+                            return (false, $"Refused: {lost}; switching the task off failed. {reason}");
+                        default:
+                            _logger.LogWarning("Scheduled task {Name} was refused ({Reason}); it has a new owner since " +
+                                               "the run started, so it stays on", task.Name, lost);
+                            return (false, reason);
                     }
-                    _logger.LogWarning("Scheduled task {Name} was refused ({Reason}); it has a new owner since the run " +
-                                       "started, so it stays on", task.Name, lost);
-                    return (false, reason);
                 }
                 await NotifyRefusedAsync(task, reason);
             }
@@ -345,24 +352,30 @@ public class TaskExecutor : ITaskExecutor
     /// the only write of <c>Enabled</c>: the caller's later save of the run's result never touches it, so a takeover
     /// (and re-enabling) in between is not overwritten. Without one (a caller without a database) the entity is
     /// switched off and the caller persists it.</summary>
-    private async Task<bool> SuspendAsync(ScheduledTaskEntity task)
+    private async Task<Suspension> SuspendAsync(ScheduledTaskEntity task)
     {
         if (_suspender is null)
         {
             task.Enabled = false;
-            return true;
+            return Suspension.Suspended;
         }
         try
         {
-            return await _suspender.SuspendAsync(task.TaskId, task.CreatedBy);
+            return await _suspender.SuspendAsync(task.TaskId, task.CreatedBy)
+                ? Suspension.Suspended
+                : Suspension.Superseded;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Not suspended, never unconditionally: the run itself was refused, and the next run tries again.
             _logger.LogError(ex, "Scheduled task {Name} could not be suspended", task.Name);
-            return false;
+            return Suspension.Failed;
         }
     }
+
+    /// <summary>What became of a suspension: done, skipped because the task has a new owner since the run started,
+    /// or failed (the task is still on).</summary>
+    private enum Suspension { Suspended, Superseded, Failed }
 
     /// <summary>The capability a task type runs; its owner must hold it for the task to run at all.</summary>
     internal static string CapabilityOf(ScheduledTaskType type) => type switch

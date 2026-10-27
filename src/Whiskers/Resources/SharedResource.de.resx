@@ -4826,4 +4826,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Snackbar_AdoptedStillOff" xml:space="preserve">
     <value>„{0}“ ist noch ausgeschaltet. Schalte die Aufgabe ein, damit sie wieder läuft.</value>
   </data>
+  <data name="ScheduledTasksView_Alert_UnownedRefused" xml:space="preserve">
+    <value>{0} Aufgabe(n) stammen aus der Zeit, bevor Besitzer gespeichert wurden. Sie werden beim nächsten Lauf abgelehnt und ausgeschaltet; übernimm sie (und schalte sie wieder ein), damit sie mit der Berechtigung eines Besitzers laufen.</value>
+  </data>
 </root>

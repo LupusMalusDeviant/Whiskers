@@ -86,6 +86,24 @@ public class ScheduledTasksTakeoverTests : BunitContext
         Assert.Empty(cut.FindAll("button[title='ScheduledTasksView_Tooltip_Adopt']"));
     }
 
+    [Theory]
+    [InlineData(true, "ScheduledTasksView_Alert_UnownedRefused")]
+    [InlineData(false, "ScheduledTasksView_Alert_Unowned")]
+    public void The_unowned_banner_says_what_the_owner_rule_does(bool requireOwner, string expected)
+    {
+        Services.Configure<AutomationOptions>(o => o.RequireOwner = requireOwner);
+        _scheduler.Tasks.Add(new ScheduledTaskEntity
+        {
+            TaskId = "t5", Name = "old", TaskType = ScheduledTaskType.ContainerRestart, CronExpression = "0 2 * * *",
+            TargetId = "web",
+        });
+
+        var cut = Render<ScheduledTasksView>();
+
+        Assert.Contains(expected, cut.Markup);
+        if (!requireOwner) Assert.DoesNotContain("ScheduledTasksView_Alert_UnownedRefused", cut.Markup);
+    }
+
     [Fact]
     public void A_task_whose_owner_still_holds_authority_is_not_flagged()
     {
