@@ -93,9 +93,17 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 root = JsonNode.Parse(json) as JsonObject
                        ?? throw new JsonException("The file holds no JSON object.");
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
             {
                 FailClosed($"guardrails.json could not be read ({ex.GetType().Name}).", ex);
+                return;
+            }
+
+            // The checks below read one occurrence of a property, the deserializer another: a name given twice (in
+            // any casing) could pass the check and enforce the other value. Such a file is refused.
+            if (DuplicateProperty(root) is { } duplicate)
+            {
+                FailClosed($"guardrails.json is invalid: the property '{duplicate}' appears more than once.", null);
                 return;
             }
 
@@ -271,6 +279,30 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
         present = false;
         return null;
+    }
+
+    /// <summary>The first property name that occurs twice in one object (ignoring case), anywhere in the tree.</summary>
+    private static string? DuplicateProperty(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+            {
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (key, value) in obj)
+                {
+                    if (!seen.Add(key)) return key;
+                    if (DuplicateProperty(value) is { } inner) return inner;
+                }
+                return null;
+            }
+            case JsonArray array:
+                foreach (var item in array)
+                    if (DuplicateProperty(item) is { } inner) return inner;
+                return null;
+            default:
+                return null;
+        }
     }
 
     /// <summary>A file that names presets or an active preset is the preset format, however incomplete.</summary>

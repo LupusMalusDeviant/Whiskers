@@ -137,6 +137,9 @@ public sealed class PolicyFailClosedTests : IDisposable
     [InlineData("""{"ActivePreset":"Standard","Presets":[{"Name":"Standard"}]}""")]
     [InlineData("""{"ActivePreset":"Standard","Presets":[{"Name":"Standard","Policy":{}}]}""")]
     [InlineData("""{"Presets":[{"Name":"Standard","Policy":{}}]}""")]
+    [InlineData("""{"ReadOnlyMode":false,"readonlymode":true}""")]
+    [InlineData("""{"ReadOnlyMode":true,"ReadOnlyMode":false}""")]
+    [InlineData("""{"ActivePreset":"Standard","Presets":[{"Name":"Standard","Policy":{"MaxAutonomousLevel":"read","ReadOnlyMode":true,"RequireConfirmationForWrites":true,"ToolDenyList":[],"ToolAllowList":[],"ToolMode":"deny","ProtectedResources":["*"],"ForbiddenArgPatterns":[],"MaxActionsPerSession":20},"policy":{}}]}""")]
     public async Task A_file_without_presets_that_is_no_legacy_policy_fails_closed_and_is_not_overwritten(string json)
     {
         await File.WriteAllTextAsync(FilePath, json);
