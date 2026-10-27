@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IDockerService DockerService
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
+@inject IUiMutationRunner Mutations
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
@@ -262,9 +263,18 @@
             var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(yaml));
             var dir = $"/opt/deployments/{_projectName}";
 
-            var result = await Executor.ExecuteAsync(_serverId,
-                $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
-                TimeSpan.FromMinutes(5));
+            var serverId = _serverId;
+            // `docker compose up` recreates every existing container of the project: each is decided too.
+            var affected = await ComposeImpact.ContainersAsync(DockerService, serverId, _projectName, dir);
+            var result = await Mutations.RunAsync("compose.deploy", new { projectName = _projectName, serverId },
+                _ => Mutations.RunForEachAsync("compose.deploy", affected, serverId, async () =>
+                {
+                    var r = await Executor.ExecuteAsync(serverId,
+                        $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+                        TimeSpan.FromMinutes(5));
+                    if (!r.Success) MutationScope.Fail("docker compose failed.");
+                    return r;
+                }));
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _projectName, _projectName, serverId: _serverId, success: result.Success);
@@ -273,6 +283,7 @@
             else
                 Snackbar.Add(L["ComposeEditor_Snackbar_DeployError", result.Output, result.Error].Value, Severity.Error);
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(L["ComposeEditor_Snackbar_Error", ex.Message].Value, Severity.Error); }
         finally { _deploying = false; }
     }

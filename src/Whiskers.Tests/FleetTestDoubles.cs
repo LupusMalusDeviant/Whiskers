@@ -126,9 +126,12 @@ internal sealed class FakeDocker : IDockerService
     public async Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true)
         => (await ListAllContainersDetailedAsync(all)).Containers.ToList();
 
+    /// <summary>The server a call without a server id lists, like the configured default server.</summary>
+    public string DefaultServerId { get; set; } = "local";
+
     public Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
         => Task.FromResult<IList<ContainerInfo>>(
-            _containers.Where(c => c.ServerId == (serverId ?? "local")).ToList());
+            _containers.Where(c => c.ServerId == (serverId ?? DefaultServerId)).ToList());
 
     /// <summary>How long a log fetch takes. Zero (the default) keeps every existing test synchronous; a value
     /// longer than the monitor's fetch timeout reproduces the wedged host from the 2026-08-26 incident.</summary>

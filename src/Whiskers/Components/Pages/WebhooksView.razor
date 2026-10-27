@@ -7,6 +7,7 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IJSRuntime JS
 @inject IStringLocalizer<SharedResource> L
 
@@ -267,13 +268,55 @@ else
         // cannot fire host actions from the UI.
         if (!Require(AppRole.Operator)) return;
         Snackbar.Add(L["WebhooksView_Snackbar_Testing", wh.Name].Value, Severity.Info);
-        // Signed end-to-end test: same HMAC validation path as an external CI caller.
-        var (success, output) = await WebhookService.TriggerSignedTestAsync(wh.WebhookId);
+        bool success;
+        string output;
+        try
+        {
+            // Signed end-to-end test: same HMAC validation path as an external CI caller, but decided by the
+            // gateway as the person clicking, for the action and target the webhook really has.
+            (success, output) = await TestGatedAsync(wh);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
             "webhook.test", "webhook", wh.WebhookId, wh.Name, serverId: wh.ServerId, success: success);
         Snackbar.Add(success ? L["WebhooksView_Snackbar_TestOk", output].Value : L["WebhooksView_Snackbar_Error", output].Value,
             success ? Severity.Success : Severity.Error);
         _webhooks = await WebhookService.GetWebhooksAsync();
+    }
+
+    /// <summary>The test fires the webhook's real action: restart, rebuild (recreate), compose deploy or git deploy.
+    /// Each is decided as that capability on its actual target; a compose deploy also per existing container of
+    /// the project directory. An unknown action is decided as nothing and refused by the service itself.</summary>
+    private async Task<(bool Success, string Output)> TestGatedAsync(Whiskers.Models.WebhookEntity wh)
+    {
+        var serverId = wh.ServerId ?? "local";
+        Task<(bool, string)> Fire() => WebhookService.TriggerSignedTestAsync(wh.WebhookId);
+        switch (wh.Action)
+        {
+            case "restart":
+            case "rebuild":
+            {
+                var container = (await DockerService.ListContainersAsync(all: true, serverId: serverId))
+                    .FirstOrDefault(c => c.Name == wh.TargetId || c.Id.StartsWith(wh.TargetId ?? " ", StringComparison.Ordinal));
+                return await Mutations.RunAsync(wh.Action == "restart" ? "container.restart" : "container.update",
+                    new { containerId = container?.Id ?? wh.TargetId, name = container?.Name ?? wh.TargetId, serverId },
+                    _ => Fire());
+            }
+            case "deploy":
+            {
+                var affected = await ComposeImpact.ContainersAsync(DockerService, serverId, project: null, wh.TargetId);
+                return await Mutations.RunAsync("compose.deploy", new { projectDir = wh.TargetId, serverId },
+                    _ => Mutations.RunForEachAsync("compose.deploy", affected, serverId, Fire));
+            }
+            case "git-deploy":
+                return await Mutations.RunAsync("gitdeploy.deploy", new { appId = wh.TargetId, serverId }, _ => Fire());
+            default:
+                return await Fire();
+        }
     }
 
     private async Task RegenerateSecret(Whiskers.Models.WebhookEntity wh)

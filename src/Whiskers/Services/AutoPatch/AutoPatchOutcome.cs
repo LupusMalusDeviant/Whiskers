@@ -29,6 +29,12 @@ public enum AutoPatchResultKind
 /// <param name="Detail">The rest of the result line, e.g. "v2.11.4 -> v2.11.7" or "compose-drift run=… file=…".</param>
 public sealed record AutoPatchOutcome(AutoPatchResultKind Kind, string Detail)
 {
+    /// <summary>True when the patch went wrong: nothing verified on the new image, or the old one is back.</summary>
+    public bool Failed => IsFailure(Kind);
+
+    public static bool IsFailure(AutoPatchResultKind kind) => kind is AutoPatchResultKind.RolledBack
+        or AutoPatchResultKind.RollbackNotVerified or AutoPatchResultKind.Unknown;
+
     /// <summary>True when the container was actually touched — a history row is owed.</summary>
     public bool Attempted => Kind is AutoPatchResultKind.Updated or AutoPatchResultKind.RolledBack
         or AutoPatchResultKind.RollbackNotVerified;

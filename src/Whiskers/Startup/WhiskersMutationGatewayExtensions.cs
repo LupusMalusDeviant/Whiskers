@@ -54,6 +54,13 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IMutationAuditSink, AuditLogMutationSink>();
         services.AddSingleton<IMutationScopeMonitor, MutationScopeMonitor>();
         services.AddSingleton<IMutationGateway, MutationGateway>();
+        // Per circuit: it reads the signed-in user.
+        services.AddScoped<IUiMutationRunner, UiMutationRunner>();
+        // Unattended runs on their owner's authority (PC-D6).
+        services.AddOptions<AutomationOptions>().BindConfiguration(AutomationOptions.Section);
+        services.AddSingleton<IAutomationOwnerResolver, AutomationOwnerResolver>();
+        services.AddSingleton<IAutomationOwnerStore, AutomationOwnerStore>();
+        services.AddSingleton<IAutomationMutationRunner, AutomationMutationRunner>();
         return services;
     }
 

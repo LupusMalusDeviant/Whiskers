@@ -35,11 +35,91 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - A mutating tool that answers with an error text (container not found, command exit code ≠ 0, failed backup …)
     now returns that text with `isError: true` over MCP, and the agent sees it as a failed call. The gateway row
     records it as `Failed`.
+- **UI actions run through the Mutation Gateway** (ADR-0005 step 2.2, PC-D1). What changes for people using the web UI:
+  - The **read-only kill switch** and **protected resources** now apply to UI actions too. With the default preset
+    the Whiskers container itself (`whiskers*`) can no longer be stopped, restarted, updated or removed from the
+    Dashboard or the container page; remove the pattern from the active guardrail preset if you need that.
+  - A tool **switched off** in Settings → MCP, or raised to a stricter level there, also switches off or raises the
+    matching UI action (e.g. `restart_container` → the restart buttons).
+  - A refused action shows the reason as a warning; the gateway's AuditLog row records it.
+  - Also covered: Kubernetes start/stop/restart on the Dashboard (decided on the Deployment/StatefulSet the pod
+    belongs to), saving a container's `.env` (every service of its compose project is decided, since
+    `compose up` may recreate them all), Artisan migrate/rollback, SQL file import, deploys from the compose editor
+    and the App Store (every existing container of the project is decided as well: a protected `payments-db` in
+    project `payments` refuses the deploy), the **Test** button of a webhook (decided as its real action — restart,
+    rebuild, compose deploy, Git deploy — on its real target), adding, editing and removing a server, saving AI
+    triggers, server onboarding, and creating, deleting and restoring a Whiskers self-backup.
+  - A **cleanup task** (`docker system prune`) is refused while a stopped container matching a protected pattern
+    exists on that server — the prune would remove it. A task on `local` checks the local server, not the default
+    server.
+  - "Run now" of a scheduled task is checked for the task's own action and target as well (a restart task on a
+    protected container is refused); over MCP, `run_scheduled_task` also needs the caller's access to
+    `restart_container` / `backup_database` / `execute_command` for those task types.
+  - A UI action whose service answers with a failure instead of an exception (failed command, query error,
+    `false`) is recorded as `Failed` in the gateway row, not `Executed`.
+  - The gateway row no longer stores free-text arguments (SQL text, commands, file content); only their length.
+  - No approval is asked for a person's own click; tool allow/deny lists and argument patterns stay agent rules.
+- **Scheduled tasks, AutoUpdate and AutoPatch run on their owner's authority** (ADR-0005 step 2.3, PC-D6). What
+  changes:
+  - A new task records who created it (the signed-in user, or `key:<id>` for an MCP key; for the agent, the user or
+    key it acts for). Creating a task without such an owner (an AI trigger, a session without an email) is refused. Every run re-checks that
+    owner's current role or key level and refuses the run when it no longer covers the task (owner demoted, removed
+    from the whitelist, key deleted or disabled). A refused run is recorded as failed, sends an
+    `automation_refused` notification, and leaves a gateway AuditLog row.
+  - **Tasks from before this version have no owner.** They keep running for now (grace period), audited as
+    "no owner" and limited to the capability they run. Scheduled Tasks shows them with a warning; an Admin takes
+    them over with "Take over all" or per row. Set `Automation__RequireOwner=true` to refuse every ownerless run;
+    1.0 will make that the default.
+  - **AutoPatch does not run until an Admin takes it over** in Settings → Automation owners. `AutoPatch:Enabled`
+    alone is no longer enough; the nightly cycle logs a warning and skips. AutoUpdate keeps running without an
+    owner during the grace period; take it over there as well.
+  - What a task needs from its owner: a **custom-command** task needs an Admin owner (it runs as root on the host);
+    a backup task whose **retention** deletes old backups (volume and DB backups) needs an Admin owner for the
+    deletion; a **self-backup** task needs an Admin owner; the **cleanup** task (`docker system prune`) needs
+    Operator. Restart and backup tasks need Operator.
+  - **A task owned by an API key keeps every rule that binds the key**: tool deny/allow lists, forbidden arguments
+    and confirmation. Where the policy would ask for a confirmation (the default preset does for every write by a
+    key), the run is refused — nobody is there to confirm it. Have a person take the task over, or adjust the
+    preset for that key.
+  - **A custom-command task is checked against the forbidden-argument patterns of today**, on every run, not only
+    when it was created (key-owned tasks). A command that a pattern added later matches is refused.
+  - **A task whose owner lost its authority** (removed or demoted user, deleted or disabled key) is flagged in
+    Scheduled Tasks; an Admin can take over any task there, alone or with "take over all".
+  - **A refusal reason never quotes a command or SQL text**: the gateway removes payload values before the reason
+    reaches a log line, a notification, the task history or the UI.
+  - **The AutoPatch preview over MCP** (`preview_auto_patch`) runs on the caller's authority and decides every
+    container like the nightly cycle; a key whose preset confirms writes gets every container refused.
+  - **AutoPatch decides every container on its own** (`container.update` of that container), in a dry run too: a
+    protected container, or one the owner may no longer update, is skipped as `Aborted (refused: …)` instead of
+    patched or tried. A patch that ends as `Unknown`, `RolledBack` or `RollbackNotVerified` is audited as failed,
+    and so is the night it belongs to.
+  - **An unreadable or invalid `automation-owners.json`** (also a directory at that path, or a file that cannot be
+    opened) blocks AutoPatch and AutoUpdate (logged as an error; AutoUpdate records a failed update) until an Admin
+    takes **each** of them over again; it no longer counts as "no owner". Taking one over keeps the other blocked,
+    across restarts; the unreadable file is kept as `automation-owners.json.unreadable-<timestamp>`.
+  - The kill switch and protected resources apply to scheduled runs, AutoUpdate and AutoPatch. With the default
+    preset a scheduled backup of a `whiskers*` / `serverwatch*` volume or a restart of the Whiskers container is
+    refused; remove the pattern from the active preset if you rely on it.
+- **Arbitrary SQL needs Admin everywhere** (PC-D3): the database query in the container page and the
+  `execute_query` MCP tool were Operator / write.
+- **Container shells need Admin** (PC-D2): `/terminal/{server}/{container}` and the terminal tab in the container
+  page were Operator.
+- **"Run now" needs Admin for a custom-command task, a self-backup task and any backup task with retention**
+  (`maxBackups`): retention deletes old backups, which is decided as `volume.backup_delete` / `db.backup_delete` /
+  `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **Unattended runs had no owner and were never re-checked** (TA-04, INV-04, B-10). Scheduled tasks, AutoUpdate and
+  AutoPatch now run through the Mutation Gateway as an automation principal acting on behalf of their owner, whose
+  authority is read again on every run. A task created by a key that was later deleted no longer keeps running
+  with root on the host.
+- **UI actions bypassed the kill switch and protected resources** (TA-26, INV-20/21, PC-D1). Every UI call to a
+  mutating capability now goes through the Mutation Gateway.
+- **Root-equivalent actions at Operator** (INV-19): container shells, arbitrary SQL and running custom commands now
+  need Admin (TA-43, B-10).
 - **The tool switch and stricter tool levels applied to API keys only** (TA-10, INV-15). They now apply to every
   caller.
 - **`AllowedTools` could widen a key beyond its level** (TA-34, INV-16). The level is now checked first.
@@ -64,6 +144,12 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   a digest now logs a warning.
 
 ### Added
+- **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
+  AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
+  in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from
+  29 to 23 entries.
+- **Mutation Gateway, step 2.2 (ADR-0005).** `IUiMutationRunner` runs a page's action through the gateway as the
+  signed-in user. Sixteen pages use it; the bypass baseline shrinks from 75 to 29 entries.
 - **Mutation Gateway, step 2.1 (ADR-0005).** Every MCP tool and agent tool call that maps to a capability runs
   through the gateway: tool switch and level, container target resolution, guardrail policy, approval, audit
   intent, deadline, audit outcome. A shared approval gate binds an approval to the operation and the arguments
@@ -79,6 +165,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   already be published. A test keeps the version, image tag and label in step with the app version.
 
 ### Fixed
+- A refused container update on the Dashboard no longer overwrites the saved rollback point; the snapshot is taken
+  only once the update has been allowed.
 - The installer no longer recommends `Auth__Disabled=true` for first sign-in. It prints the setup token and
   points to `VAULT_KEY`.
 - The README renders completely on catalogues that drop raw HTML and relative paths (LobeHub): the header is

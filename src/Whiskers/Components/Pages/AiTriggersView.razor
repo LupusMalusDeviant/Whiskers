@@ -8,6 +8,7 @@
 @inject IGuardrailStore GuardrailStore
 @inject ILogMonitorService LogMonitor
 @inject ICurrentUserService CurrentUser
+@inject IUiMutationRunner Mutations
 @inject ISnackbar Snackbar
 @inject IStringLocalizer<SharedResource> L
 
@@ -156,16 +157,22 @@
             var rules = await LogMonitor.GetRulesAsync();
             if (!rules.Any(r => r.Name == ruleName))
             {
-                await LogMonitor.CreateRuleAsync(new LogAlertRuleEntity
+                var rule = new LogAlertRuleEntity
                 {
                     Name = ruleName,
                     Pattern = @"(?i)(error|exception|fatal|panic|traceback)",
                     IsRegex = true,
                     Severity = "error",
                     Enabled = true,
-                });
+                };
+                await Mutations.RunAsync("logalert.create", new { name = rule.Name, containerName = rule.ContainerName },
+                    _ => LogMonitor.CreateRuleAsync(rule));
                 Snackbar.Add(L["AiTriggersView_LogRuleCreated_Snackbar"].Value, Severity.Success);
             }
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -182,7 +189,9 @@
             if (string.IsNullOrWhiteSpace(t.Name)) t.Name = "Trigger";
         try
         {
-            await Store.SaveAsync(_triggers, await BuildPrincipalAsync());
+            var principal = await BuildPrincipalAsync();
+            await Mutations.RunAsync("aitrigger.save", new { count = _triggers.Count },
+                _ => Store.SaveAsync(_triggers, principal));
             Snackbar.Add(L["AiTriggersView_Saved_Snackbar", _triggers.Count].Value, Severity.Success);
         }
         catch (Exception ex)

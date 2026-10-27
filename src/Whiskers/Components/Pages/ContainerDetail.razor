@@ -15,6 +15,7 @@
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Models.Cve
 @implements IAsyncDisposable
@@ -807,7 +808,7 @@ else
                             <MudStack Row="true" Spacing="2">
                                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQuery"
                                            StartIcon="@Icons.Material.Filled.PlayArrow"
-                                           Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting || _role < AppRole.Operator)">
+                                           Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting || _role < AppRole.Admin)">
                                     @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
                                     @L["ContainerDetail_Db_Execute"]
                                 </MudButton>
@@ -1109,7 +1110,7 @@ else
     private async Task InitTerminal()
     {
         if (!ServerConfigService.SupportsTerminal(_resolvedServerId)) return;
-        if (_role < AppRole.Operator) { _termError = L["ContainerDetail_Terminal_NoPermission"].Value; return; }
+        if (_role < AppRole.Admin) { _termError = L["ContainerDetail_Terminal_NoPermission"].Value; return; }   // PC-D2: a shell in the container is Admin
         try
         {
             _dotNetRef = DotNetObjectReference.Create(this);
@@ -1220,7 +1221,10 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.StartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
+        try { await Mutations.RunAsync("container.start", new { containerId, name, serverId = sid }, _ => DockerService.StartContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1230,7 +1234,10 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.StopContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
+        try { await Mutations.RunAsync("container.stop", new { containerId, name, serverId = sid }, _ => DockerService.StopContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1240,7 +1247,10 @@ else
         if (!Require(AppRole.Operator)) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
-        try { await DockerService.RestartContainerAsync(ContainerId, _resolvedServerId); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
+        try { await Mutations.RunAsync("container.restart", new { containerId, name, serverId = sid }, _ => DockerService.RestartContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
@@ -1255,13 +1265,17 @@ else
         if (confirmed != true) return;
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
+        var containerId = ContainerId;
+        var sid = _resolvedServerId;
         try
         {
-            await DockerService.RemoveContainerAsync(ContainerId, force: true, serverId: _resolvedServerId);
+            await Mutations.RunAsync("container.remove", new { containerId, name, serverId = sid },
+                _ => DockerService.RemoveContainerAsync(containerId, force: true, serverId: sid));
             await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, serverId: _resolvedServerId);
             Snackbar.Add(L["ContainerDetail_Snackbar_Removed"].Value, Severity.Success);
             Nav.NavigateTo("/");
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
     }
 
@@ -1430,22 +1444,35 @@ else
                     sb.AppendLine($"{entry.Key}={entry.EffectiveValue}");
             }
 
-            // Write .env file via base64 to avoid escaping issues
+            // Write .env file via base64 to avoid escaping issues, then restart via docker compose — one gated
+            // mutation (it runs compose as root on the host). The file content stays inside the delegate.
             var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
-            var writeResult = await HostCommandExecutor.ExecuteAsync(sid,
-                $"echo '{b64}' | base64 -d > {Quote(_composeWorkingDir + "/.env")}",
-                TimeSpan.FromSeconds(10));
+            var workDir = _composeWorkingDir!;
+            // `compose up -d` recreates every service of the project whose config changed, not only this one: each of
+            // them is decided (protected resources, kill switch) before anything is written.
+            var siblings = await ComposeSiblingsAsync();
+            if (siblings.Count == 0) return;   // container not loaded: nothing to decide on, so nothing is written
+            var (writeResult, restartResult) = await ForEachServiceAsync(siblings, 0,
+                async () =>
+                {
+                    var write = await HostCommandExecutor.ExecuteAsync(sid,
+                        $"echo '{b64}' | base64 -d > {Quote(workDir + "/.env")}", TimeSpan.FromSeconds(10));
+                    if (!write.Success)
+                    {
+                        MutationScope.Fail("Writing .env failed.");
+                        return (write, (Whiskers.Services.Server.CommandResult?)null);
+                    }
+                    var restart = await HostCommandExecutor.ExecuteAsync(sid,
+                        $"cd {Quote(workDir)} && docker compose up -d 2>&1", TimeSpan.FromMinutes(2));
+                    if (!restart.Success) MutationScope.Fail("docker compose up failed.");
+                    return (write, (Whiskers.Services.Server.CommandResult?)restart);
+                });
 
-            if (!writeResult.Success)
+            if (!writeResult.Success || restartResult is null)
             {
                 Snackbar.Add(L["ContainerDetail_Env_WriteError", writeResult.Error].Value, Severity.Error);
                 return;
             }
-
-            // Restart via docker compose
-            var restartResult = await HostCommandExecutor.ExecuteAsync(sid,
-                $"cd {Quote(_composeWorkingDir)} && docker compose up -d 2>&1",
-                TimeSpan.FromMinutes(2));
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             var name = _container?.Name ?? ContainerId;
@@ -1463,6 +1490,10 @@ else
                 await AuditLog.LogAsync(actor, "web", "env.save", "env", ContainerId, name, details: "Neustart fehlgeschlagen", serverId: _resolvedServerId, success: false);
                 Snackbar.Add(L["ContainerDetail_Env_RestartError", restartResult.Output, restartResult.Error].Value, Severity.Error);
             }
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -1644,11 +1675,49 @@ else
     // Run a command in the container via `docker exec` on the HOST shell plane (nsenter/SSH) instead of
     // the Docker API exec endpoint: the mTLS socket-proxy blocks container exec (EXEC=0), but the host's
     // own docker.sock has full access, so this works uniformly on Local, SSH and TCP+mTLS servers.
-    private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string[] cmd, TimeSpan timeout)
+    /// <summary>This container plus every other container of its compose project on the same server.</summary>
+    private async Task<IReadOnlyList<ContainerInfo>> ComposeSiblingsAsync()
+    {
+        var self = _container;
+        if (self is null) return [];
+        var all = await DockerService.ListContainersAsync(all: true, serverId: _resolvedServerId);
+        var project = self.ComposeProject;
+        var others = project == "Standalone"
+            ? []
+            : all.Where(c => c.Id != self.Id && c.ComposeProject == project).ToList();
+        return [self, .. others];
+    }
+
+    /// <summary>Runs <paramref name="action"/> inside one <c>container.env_file_save</c> decision per affected
+    /// container (nested), so a single refusal stops the whole save.</summary>
+    private Task<T> ForEachServiceAsync<T>(IReadOnlyList<ContainerInfo> services, int index, Func<Task<T>> action) =>
+        index >= services.Count
+            ? action()
+            : Mutations.RunAsync("container.env_file_save",
+                new { containerId = services[index].Id, name = services[index].Name, serverId = _resolvedServerId },
+                _ => ForEachServiceAsync(services, index + 1, action));
+
+    // A changing command runs through the gateway under <paramref name="capability"/> (container target; the
+    // command text, which can carry credentials, stays in the delegate); a read-only one passes null.
+    private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string? capability,
+        string[] cmd, TimeSpan timeout)
     {
         var dockerCmd = "docker exec " + Whiskers.Utils.ShellUtils.Quote(ContainerId) + " " +
                         string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
-        var r = await HostCommandExecutor.ExecuteAsync(_resolvedServerId ?? "local", dockerCmd, timeout);
+        var sid = _resolvedServerId ?? "local";
+        if (capability is null)
+        {
+            var read = await HostCommandExecutor.ExecuteAsync(sid, dockerCmd, timeout);
+            return (read.Output, read.Error, read.ExitCode);
+        }
+        var r = await Mutations.RunAsync(capability,
+            new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId },
+            async _ =>
+            {
+                var result = await HostCommandExecutor.ExecuteAsync(sid, dockerCmd, timeout);
+                if (result.ExitCode != 0) MutationScope.Fail($"Command exited with {result.ExitCode}.");
+                return result;
+            });
         return (r.Output, r.Error, r.ExitCode);
     }
 
@@ -1665,7 +1734,7 @@ else
         try
         {
             // Try artisan migrate (Laravel)
-            var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
             if (!result.StdOut.Contains("NO_ARTISAN"))
             {
                 _migrationOutput = result.StdOut; _migrationSuccess = result.ExitCode == 0;
@@ -1693,7 +1762,7 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
             _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
@@ -1708,7 +1777,7 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            var result = await ExecInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
+            var result = await ExecInContainerViaHost(null, new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
             _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
@@ -1744,7 +1813,7 @@ else
                 DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
                 _ => "echo 'Not supported'"
             };
-            var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
+            var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
             _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0;
             if (_migrationSuccess) await LoadDatabaseInfo();
@@ -1784,7 +1853,7 @@ else
                 (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
             };
-            var result = await ExecInContainerViaHost(new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
+            var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
             _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
             _seedSuccess = result.ExitCode == 0;
             if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }
@@ -1795,7 +1864,7 @@ else
 
     private async Task ExecuteQuery()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!Require(AppRole.Admin)) return;   // PC-D3: a free-form query can write, so Admin like the other DB writes
         if (_dbCreds == null)
         {
             Snackbar.Add(L["ContainerDetail_Db_NoCredentials"].Value, Severity.Warning);
@@ -1813,7 +1882,17 @@ else
                 Password = _dbCreds.Password,
                 Database = _dbSelectedDatabase ?? _dbCreds.Database
             };
-            _dbResult = await DatabaseService.ExecuteQueryAsync(ContainerId, _dbQuery, _container.DatabaseType, creds, _resolvedServerId);
+            var containerId = ContainerId;
+            var query = _dbQuery;
+            var dbType = _container.DatabaseType;
+            var sid = _resolvedServerId;
+            // The SQL text stays in the delegate: it can carry credentials (ALTER ROLE … PASSWORD '…').
+            _dbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, queryLength = query.Length },
+                _ => DatabaseService.ExecuteQueryAsync(containerId, query, dbType, creds, sid));
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -1834,13 +1913,21 @@ else
         try
         {
             var db = _dbSelectedDatabase ?? _dbCreds.Database;
-            var (success, filePath, size, error) = await DatabaseService.BackupDatabaseAsync(
-                ContainerId, db, _container.DatabaseType, _dbCreds, _resolvedServerId);
+            var containerId = ContainerId;
+            var dbType = _container.DatabaseType;
+            var creds = _dbCreds;
+            var sid = _resolvedServerId;
+            var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
+                _ => DatabaseService.BackupDatabaseAsync(containerId, db, dbType, creds, sid));
 
             if (success)
                 Snackbar.Add(L["ContainerDetail_Db_BackupSuccess", filePath, size / 1024].Value, Severity.Success);
             else
                 Snackbar.Add(L["ContainerDetail_Db_BackupError", error].Value, Severity.Error);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

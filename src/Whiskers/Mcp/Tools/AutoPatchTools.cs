@@ -44,9 +44,13 @@ public class AutoPatchTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "preview_auto_patch");
         if (denied != null) return MutationScope.Fail(denied);
         if (autoPatch.IsRunning) return MutationScope.Fail("An auto-patch cycle is already running — read get_auto_patch_status.");
+        // Even a dry run re-tags and pulls on the host, so every candidate is decided on the caller's authority as it
+        // is when the cycle reaches it. Without a person or key behind the call there is nobody to decide for.
+        var caller = AutomationOwners.OfCaller(MutationScope.Current?.Principal);
+        if (caller is null) return MutationScope.Fail("The preview needs a signed-in user or an API key to act for.");
 
         // Detached on purpose: a cycle pulls one image per candidate and outlives any tool call.
-        _ = Task.Run(() => autoPatch.RunCycleAsync(forceDryRun: true));
+        _ = Task.Run(() => autoPatch.RunCycleAsync(forceDryRun: true, caller));
         return "Dry run started. Nothing will be recreated. Read get_auto_patch_status in a few minutes.";
     }
 

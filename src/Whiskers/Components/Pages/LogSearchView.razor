@@ -3,6 +3,7 @@
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive log-search + alert-rules UI. Rendered by LogSearch.razor only when the LogMonitor module
@@ -209,7 +210,7 @@ else
         if (!Require(AppRole.Operator)) return;
         try
         {
-            await MonitorService.CreateRuleAsync(new Whiskers.Models.LogAlertRuleEntity
+            var rule = new Whiskers.Models.LogAlertRuleEntity
             {
                 Name = _ruleName,
                 Pattern = _rulePattern,
@@ -217,10 +218,16 @@ else
                 ContainerName = _ruleContainer,
                 Severity = _ruleSeverity,
                 CooldownMinutes = _ruleCooldown
-            });
+            };
+            await Mutations.RunAsync("logalert.create", new { name = rule.Name, containerName = rule.ContainerName },
+                _ => MonitorService.CreateRuleAsync(rule));
             Snackbar.Add(L["LogSearchView_Snackbar_RuleCreated", _ruleName].Value, Severity.Success);
             _showRuleDialog = false;
             _rules = await MonitorService.GetRulesAsync();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex) { Snackbar.Add(L["LogSearchView_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
@@ -230,7 +237,13 @@ else
         if (!Require(AppRole.Operator)) return;
         try
         {
-            await MonitorService.ToggleRuleAsync(rule.RuleId, enabled);
+            await Mutations.RunAsync("logalert.toggle",
+                new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName, enabled },
+                _ => MonitorService.ToggleRuleAsync(rule.RuleId, enabled));
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex) { Snackbar.Add(L["LogSearchView_Snackbar_Error", ex.Message].Value, Severity.Error); }
         // Reload either way so the switch reflects the persisted state.
@@ -240,9 +253,19 @@ else
     private async Task DeleteRule(Whiskers.Models.LogAlertRuleEntity rule)
     {
         if (!Require(AppRole.Operator)) return;
-        await MonitorService.DeleteRuleAsync(rule.RuleId);
-        Snackbar.Add(L["LogSearchView_Snackbar_RuleDeleted"].Value, Severity.Success);
-        _rules = await MonitorService.GetRulesAsync();
+        try
+        {
+            await Mutations.RunAsync("logalert.delete",
+                new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName },
+                _ => MonitorService.DeleteRuleAsync(rule.RuleId));
+            Snackbar.Add(L["LogSearchView_Snackbar_RuleDeleted"].Value, Severity.Success);
+            _rules = await MonitorService.GetRulesAsync();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex) { Snackbar.Add(L["LogSearchView_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
     private static Color GetSeverityColor(string severity) => severity switch

@@ -48,7 +48,9 @@ public class CapabilityCatalogTests
         {
             Assert.Matches("^[a-z]+\\.[a-z_]+$", c.Id);
             Assert.Contains(c.RequiredLevel, new[] { McpPermissionLevels.Write, McpPermissionLevels.Admin });
-            Assert.InRange(c.Deadline, TimeSpan.FromSeconds(1), TimeSpan.FromHours(1));
+            // A fleet-wide run (the nightly AutoPatch cycle) patches one container after another; everything else is
+            // bounded at an hour.
+            Assert.InRange(c.Deadline, TimeSpan.FromSeconds(1), TimeSpan.FromHours(c.TargetKind == "fleet" ? 4 : 1));
         }
         Assert.Equal(_catalog.All.Count, _catalog.All.Select(c => c.Id).Distinct(StringComparer.Ordinal).Count());
     }

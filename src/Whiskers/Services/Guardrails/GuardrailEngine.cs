@@ -25,6 +25,18 @@ public sealed class GuardrailEngine : IAgentGuardrailEngine
         new ConfirmationRule(),
     });
 
+    /// <summary>
+    /// The rules that bind a human acting in the web UI (PC-D1): authorization, the kill switch and protected
+    /// resources. Tool lists, argument patterns and confirmation are about delegating to the agent or a key; a
+    /// person clicking a button is not asked to approve their own action (approvals for humans: default never).
+    /// </summary>
+    public static GuardrailEngine CreateForHumans() => new(new IGuardrailRule[]
+    {
+        new PrincipalCeilingRule(),
+        new ReadOnlyModeRule(),
+        new ProtectedResourceRule(),
+    });
+
     public GuardrailDecision Evaluate(GuardrailRequest request)
     {
         var denies = new List<(string Id, string Reason)>();

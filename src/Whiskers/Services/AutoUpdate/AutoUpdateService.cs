@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Whiskers.Models;
 using Whiskers.Services.Docker;
 using Whiskers.Services.ImageUpdate;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Notifications;
 using Whiskers.Services.Persistence;
 
@@ -19,6 +20,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     private readonly INotificationService _notifications;
     private readonly ILogger<AutoUpdateService> _logger;
     private readonly Whiskers.Services.Observability.SelfMetrics.ISelfMetrics _selfMetrics;
+    private readonly IAutomationMutationRunner _automation;
+    private readonly IAutomationOwnerStore _owners;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
@@ -28,8 +31,12 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         IImageUpdateStore updateStore,
         INotificationService notifications,
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
+        IAutomationMutationRunner automation,
+        IAutomationOwnerStore owners,
         ILogger<AutoUpdateService> logger)
     {
+        _automation = automation;
+        _owners = owners;
         _scopeFactory = scopeFactory;
         _docker = docker;
         _updateStore = updateStore;
@@ -131,14 +138,31 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
             try
             {
-                // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
-                // drops the old container, so a failed update can be rolled back from the UI (and the snapshot
-                // survives even a crash mid-update). Best-effort — a snapshot failure must never abort the update.
-                try { await CaptureSnapshotAsync(container); }
-                catch (Exception cex) { _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
+                // A broken owner file must not read as "no owner" (that would be the grace period): fail closed.
+                if (_owners.IsBlocked(IAutomationOwnerStore.AutoUpdate))
+                    throw new InvalidOperationException(
+                        "The AutoUpdate owner could not be read; take AutoUpdate over again in Settings → Automation owners.");
 
                 var progress = new Progress<string>(msg => _logger.LogDebug("Update {Container}: {Msg}", container.Name, msg));
-                var newId = await _docker.RecreateContainerAsync(container.Id, container.ServerId == "local" ? null : container.ServerId, progress);
+                // Through the gateway on the authority of the admin who took AutoUpdate over (PC-D6), re-checked
+                // per update; without one, the grace rule of AutomationOptions.RequireOwner applies.
+                var sid = container.ServerId == "local" ? null : container.ServerId;
+                var outcome = await _automation.RunAsync(
+                    new AutomationActor("autoupdate", "AutoUpdate", _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId),
+                    "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
+                    async _ =>
+                    {
+                        // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
+                        // drops the old container, so a failed update can be rolled back from the UI (and the snapshot
+                        // survives even a crash mid-update). Inside the gateway, so a refused update keeps the
+                        // previous rollback point. Best-effort — a snapshot failure must never abort the update.
+                        try { await CaptureSnapshotAsync(container); }
+                        catch (Exception cex) { _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
+                        return await _docker.RecreateContainerAsync(container.Id, sid, progress);
+                    }, ct);
+                if (outcome.Status != MutationStatus.Executed)
+                    throw outcome.Error ?? new InvalidOperationException(outcome.Reason ?? "The update was refused.");
+                var newId = outcome.Value!;
 
                 // Wait for health check (if container has one)
                 await Task.Delay(TimeSpan.FromSeconds(15), ct);

@@ -1,0 +1,93 @@
+@inject IAutomationOwnerStore Owners
+@inject IUiMutationRunner Mutations
+@inject IOptionsMonitor<Whiskers.Configuration.AutoPatchSettings> AutoPatchOptions
+@inject ISnackbar Snackbar
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IStringLocalizer<SharedResource> L
+
+@* PC-D6 (ADR-0005 step 2.3): the fleet-wide automations have no item of their own to keep an owner on, so an admin
+   takes them over here. Every run then uses that admin's authority, re-checked per run. *@
+
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@L["AutomationOwners_Intro"]</MudText>
+
+@foreach (var feature in Features)
+{
+    var entry = Owners.Get(feature.Id);
+    <MudPaper Elevation="0" Outlined="true" Class="pa-3 mb-2">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <div>
+                <MudText Typo="Typo.subtitle2">@L[feature.TitleKey]</MudText>
+                @if (Owners.IsBlocked(feature.Id))
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Blocked"]</MudText>
+                }
+                else if (entry is not null)
+                {
+                    <MudText Typo="Typo.body2">@L["AutomationOwners_Owner", entry.OwnerId, entry.ConfirmedAt.ToLocalTime().ToString("g")]</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Warning">@L[feature.NoOwnerKey]</MudText>
+                }
+                @if (feature.Id == IAutomationOwnerStore.AutoPatch && !AutoPatchOptions.CurrentValue.Enabled)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AutomationOwners_AutoPatchConfigOff"]</MudText>
+                }
+            </div>
+            @if (_role >= AppRole.Admin && entry?.OwnerId != _email)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
+                           OnClick="@(() => TakeOver(feature))">@L["AutomationOwners_Button_TakeOver"]</MudButton>
+            }
+        </MudStack>
+    </MudPaper>
+}
+
+@code {
+    private sealed record Feature(string Id, string TitleKey, string NoOwnerKey);
+
+    private static readonly Feature[] Features =
+    [
+        new(IAutomationOwnerStore.AutoPatch, "AutomationOwners_AutoPatch", "AutomationOwners_NoOwner_AutoPatch"),
+        new(IAutomationOwnerStore.AutoUpdate, "AutomationOwners_AutoUpdate", "AutomationOwners_NoOwner_AutoUpdate"),
+    ];
+
+    private AppRole _role = AppRole.Viewer;
+    private string? _email;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
+        _email = await CurrentUser.GetEmailAsync();
+    }
+
+    private async Task TakeOver(Feature feature)
+    {
+        if (_role < AppRole.Admin || string.IsNullOrWhiteSpace(_email)) return;
+        var owner = _email;
+        var featureId = feature.Id;
+        _busy = true;
+        try
+        {
+            await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
+                _ => Owners.SetAsync(featureId, owner));
+            await AuditLog.LogAsync(owner, "web", "automation.owner_set", "automation", featureId, featureId,
+                details: $"owner={owner}");
+            Snackbar.Add(L["AutomationOwners_Snackbar_Done", L[feature.TitleKey].Value].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["AutomationOwners_Snackbar_Error", ex.Message].Value, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

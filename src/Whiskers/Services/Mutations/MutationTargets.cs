@@ -21,13 +21,15 @@ public static class MutationTargets
             "cloud-server" => String(args, "server"),
             "scheduled-task" => String(args, "taskId") ?? String(args, "name"),
             "log-alert" => String(args, "name"),
+            "volume" => String(args, "volumeName") ?? String(args, "name"),
+            "workload" => String(args, "workloadId"),
             "host" or "server" => serverId ?? "local",
             _ => null,
         };
         var name = capability.TargetKind switch
         {
             "host" => String(args, "projectName") ?? String(args, "appName") ?? String(args, "serviceName") ?? String(args, "siteName"),
-            "dns-zone" => String(args, "name"),
+            "dns-zone" or "workload" => String(args, "name"),
             _ => null,
         };
         return new MutationTarget(capability.TargetKind, id ?? "", name, serverId);

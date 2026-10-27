@@ -66,6 +66,14 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("container.remove", A, "container", Des, Normal);
         yield return Ui("container.create", A, "container", Root, Long);
         yield return Ui("container.rollback", W, "container", Dis, Long);
+        // Kubernetes rows on the Dashboard (start / stop = scale the controller, restart = rollout restart).
+        yield return Ui("workload.start", W, "workload", Rev, Normal);
+        yield return Ui("workload.stop", W, "workload", Dis, Normal);
+        yield return Ui("workload.restart", W, "workload", Dis, Normal);
+        // Container page: save the compose .env and run `docker compose up -d` (root on the host).
+        yield return Ui("container.env_file_save", A, "container", Root, Normal);
+        // Container page: a changing command inside the container (Artisan migrate / rollback).
+        yield return Ui("container.exec", A, "container", Root, Normal);
         yield return Ui("image.pull", W, "host", Rev, Long);
 
         // Deployments
@@ -84,6 +92,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Hosts
         // execute_command accepts up to 600 s of its own timeout; the deadline must not cut that short.
         yield return Tool("host.exec", "execute_command", "host", Root, TimeSpan.FromMinutes(11));
+        // `docker system prune` from a scheduled cleanup task (run on schedule or with "Run now").
+        yield return Ui("host.prune", W, "host", Dis, Short);
         yield return Tool("firewall.rule_add", "add_firewall_rule", "host", Dis, Short);
         yield return Tool("firewall.rule_remove", "remove_firewall_rule", "host", Dis, Short);
         yield return Ui("firewall.set_status", A, "host", Dis, Short);
@@ -99,12 +109,28 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Databases
         yield return Tool("db.query", "execute_query", "container", Root, Normal);
         yield return Tool("db.backup", "backup_database", "container", Rev, Long);
+        // Retention of a DB-backup task: deletes old dumps with a host `rm`.
+        yield return Ui("db.backup_delete", A, "container", Des, Short);
+        // Retention of a scheduled self-backup (the newest N are kept).
+        yield return Ui("selfbackup.prune", A, "whiskers", Des, Short);
 
         // DNS
         yield return Tool("dns.record_set", "set_dns_record", "dns-zone", Dis, Short);
         yield return Tool("dns.record_delete", "delete_dns_record", "dns-zone", Des, Short);
 
         // Cloud servers
+        // Servers page: onboarding installs the agent stack on the host as root.
+        yield return Ui("server.onboard", A, "server", Root, Long);
+        // Servers page: add / edit a server (host, credentials, SSH key, kubeconfig) or remove it.
+        yield return Ui("server.save", A, "server", Root, Short);
+        yield return Ui("server.remove", A, "server", Des, Short);
+        // AI triggers page: which events start the agent and what it is told to do.
+        yield return Ui("aitrigger.save", A, "whiskers", Root, Short);
+        // Settings: restore Whiskers' own data from a self-backup (maintenance, staged swap, process restart).
+        yield return Ui("selfbackup.restore", A, "whiskers", Root, Normal);
+        // Settings: create or delete one of Whiskers' own backup archives (a recovery point).
+        yield return Ui("selfbackup.create", A, "whiskers", Rev, Long);
+        yield return Ui("selfbackup.delete", A, "whiskers", Des, Short);
         yield return Tool("cloud.power_on", "cloud_power_on", "cloud-server", Rev, Normal);
         yield return Tool("cloud.shutdown", "cloud_shutdown", "cloud-server", Dis, Normal);
         yield return Tool("cloud.reboot", "cloud_reboot", "cloud-server", Dis, Normal);
@@ -128,8 +154,11 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("checks.pause", "pause_server_checks", "server", Rev, Short);
         yield return Tool("checks.resume", "resume_server_checks", "server", Rev, Short);
         yield return Tool("autopatch.preview", "preview_auto_patch", "fleet", Rev, Long);
-        yield return Ui("autopatch.run", A, "fleet", Dis, Long);
+        // A cycle patches one container after another inside the nightly window; it must not be cut at 30 minutes.
+        yield return Ui("autopatch.run", A, "fleet", Dis, TimeSpan.FromHours(4));
         yield return Ui("autoupdate.policy_set", A, "container", Dis, Short);
+        // Who AutoPatch / AutoUpdate run as (PC-D6): an admin hands their authority to an unattended feature.
+        yield return Ui("automation.owner_set", A, "fleet", Root, Short);
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);

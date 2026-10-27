@@ -1123,7 +1123,7 @@
     <value>Das Container-Terminal ist auf mTLS-Servern nicht verfügbar (der Docker-Proxy leitet keinen interaktiven Stream weiter).</value>
   </data>
   <data name="ContainerDetail_Terminal_NoPermission" xml:space="preserve">
-    <value>Keine Berechtigung — Operator erforderlich.</value>
+    <value>Keine Berechtigung — Admin erforderlich.</value>
   </data>
   <data name="ContainerDetail_Terminal_OnlyRunning" xml:space="preserve">
     <value>Terminal ist nur für laufende Container verfügbar.</value>
@@ -4106,8 +4106,8 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="TerminalView_Error_NoContainerId" xml:space="preserve">
     <value>Keine Container-ID angegeben.</value>
   </data>
-  <data name="TerminalView_Error_OperatorRequired" xml:space="preserve">
-    <value>Keine Berechtigung — Operator erforderlich.</value>
+  <data name="TerminalView_Error_AdminRequired" xml:space="preserve">
+    <value>Keine Berechtigung — Admin erforderlich.</value>
   </data>
   <data name="TerminalView_Terminal_SessionEnded" xml:space="preserve">
     <value>Sitzung beendet</value>
@@ -4708,5 +4708,68 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="AppStore_Snackbar_InvalidVariable" xml:space="preserve">
     <value>Template-Werte müssen einzeilig sein und dürfen keine Steuerzeichen enthalten.</value>
+  </data>
+  <data name="ScheduledTasksView_Table_Owner" xml:space="preserve">
+    <value>Besitzer</value>
+  </data>
+  <data name="ScheduledTasksView_Chip_OwnerRevoked" xml:space="preserve">
+    <value>Keine Befugnis</value>
+  </data>
+  <data name="ScheduledTasksView_Alert_OwnerRevoked" xml:space="preserve">
+    <value>{0} Task(s) gehören einem Besitzer, der sie nicht mehr ausführen darf (Nutzer entfernt oder herabgestuft, Schlüssel gelöscht oder deaktiviert). Sie werden abgelehnt, bis ein Admin sie übernimmt.</value>
+  </data>
+  <data name="ScheduledTasksView_Chip_NoOwner" xml:space="preserve">
+    <value>Kein Besitzer</value>
+  </data>
+  <data name="ScheduledTasksView_Tooltip_Adopt" xml:space="preserve">
+    <value>Übernehmen: Läufe nutzen dann deine Berechtigung</value>
+  </data>
+  <data name="ScheduledTasksView_Alert_Unowned" xml:space="preserve">
+    <value>{0} Aufgabe(n) stammen aus der Zeit, bevor Besitzer gespeichert wurden. Sie laufen vorerst weiter; übernimm sie, damit jeder Lauf gegen die Berechtigung eines Besitzers geprüft wird.</value>
+  </data>
+  <data name="ScheduledTasksView_Button_AdoptAll" xml:space="preserve">
+    <value>Alle übernehmen</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_Adopted" xml:space="preserve">
+    <value>Aufgabe „{0}“ läuft jetzt mit deiner Berechtigung.</value>
+  </data>
+  <data name="Settings_Panel_Automation" xml:space="preserve">
+    <value>Besitzer der Automatisierung</value>
+  </data>
+  <data name="AutomationOwners_Intro" xml:space="preserve">
+    <value>Unbeaufsichtigte Automatisierung läuft mit der Berechtigung eines Besitzers, die bei jedem Lauf neu geprüft wird. AutoPatch läuft erst, wenn ein Admin es übernommen hat; AutoUpdate läuft während der Übergangszeit auch ohne Besitzer weiter.</value>
+  </data>
+  <data name="AutomationOwners_AutoPatch" xml:space="preserve">
+    <value>AutoPatch (nächtliche Sicherheits-Patches)</value>
+  </data>
+  <data name="AutomationOwners_AutoUpdate" xml:space="preserve">
+    <value>AutoUpdate (Update-Richtlinien je Container)</value>
+  </data>
+  <data name="AutomationOwners_Owner" xml:space="preserve">
+    <value>Besitzer: {0} (seit {1})</value>
+  </data>
+  <data name="AutomationOwners_NoOwner_AutoPatch" xml:space="preserve">
+    <value>Kein Besitzer: Der nächtliche Lauf findet nicht statt.</value>
+  </data>
+  <data name="AutomationOwners_Blocked" xml:space="preserve">
+    <value>Gesperrt: Die Besitzer-Datei war nicht lesbar. Läuft erst wieder, wenn ein Admin übernimmt.</value>
+  </data>
+  <data name="AutomationOwners_NoOwner_AutoUpdate" xml:space="preserve">
+    <value>Kein Besitzer: Updates laufen während der Übergangszeit als „kein Besitzer“.</value>
+  </data>
+  <data name="AutomationOwners_AutoPatchConfigOff" xml:space="preserve">
+    <value>In der Konfiguration ausgeschaltet (AutoPatch:Enabled).</value>
+  </data>
+  <data name="AutomationOwners_Button_TakeOver" xml:space="preserve">
+    <value>Übernehmen</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_Done" xml:space="preserve">
+    <value>{0} läuft jetzt mit deiner Berechtigung.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_Error" xml:space="preserve">
+    <value>Besitzer konnte nicht gespeichert werden: {0}</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
+    <value>Eine geplante Aufgabe braucht einen Besitzer: Melde dich mit einem Konto an, das eine E-Mail-Adresse hat.</value>
   </data>
 </root>

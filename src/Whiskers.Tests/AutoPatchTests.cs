@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -389,7 +390,7 @@ public class AutoPatchTests
         var runner = new RecordingRunner();
         var service = NewService(runner, new CveFindingsStore(persistPath: TempPath()), Compose("caddy"));
 
-        Assert.True(await service.RunCycleAsync(forceDryRun: false));
+        Assert.True(await service.RunCycleAsync(forceDryRun: false, "admin@example.com"));
         Assert.Empty(runner.Calls);
         Assert.Contains("No CVE scan", service.LastCycle!.Error);
     }
@@ -404,7 +405,7 @@ public class AutoPatchTests
         var notifications = new FakeNotifications();
         var service = NewService(runner, store, notifications, Compose("a"), Compose("b"));
 
-        await service.RunCycleAsync(forceDryRun: false);
+        await service.RunCycleAsync(forceDryRun: false, "admin@example.com");
 
         Assert.Equal(["a"], runner.Calls.Select(c => c.Name));        // b is never reached
         Assert.Contains("rollback not verified", service.LastCycle!.Error);
@@ -420,10 +421,160 @@ public class AutoPatchTests
         var service = NewService(runner, store, new FakeNotifications(), new AutoPatchSettings { Enabled = true, DryRun = false },
             Compose("a"));
 
-        await service.RunCycleAsync(forceDryRun: true);
+        await service.RunCycleAsync(forceDryRun: true, "admin@example.com");
 
         Assert.True(Assert.Single(runner.Calls).DryRun);
         Assert.True(service.LastCycle!.DryRun);
+    }
+
+    [Fact]
+    public async Task The_nightly_cycle_does_not_run_until_an_admin_has_taken_AutoPatch_over()
+    {
+        var automation = new RecordingAutomation();
+        var owners = new MemoryAutomationOwners();
+        var service = NewService(new RecordingRunner(), new CveFindingsStore(persistPath: TempPath()), automation, owners);
+
+        await service.RunNightlyAsync(CancellationToken.None);
+        Assert.Empty(automation.Actors);
+
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        var (actor, capability) = Assert.Single(automation.Actors);
+        Assert.Equal("autopatch.run", capability);
+        Assert.Equal("admin@example.com", actor.OwnerId);
+    }
+
+    [Fact]
+    public async Task The_nightly_cycle_does_not_run_while_the_owner_file_is_unreadable()
+    {
+        var automation = new RecordingAutomation();
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        owners.Blocked.Add(IAutomationOwnerStore.AutoPatch);
+        var service = NewService(new RecordingRunner(), new CveFindingsStore(persistPath: TempPath()), automation, owners);
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Empty(automation.Actors);
+    }
+
+    [Fact]
+    public async Task An_owned_night_decides_every_container_on_its_own()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
+        var automation = new RecordingAutomation { Refuse = { "b" } };
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        var runner = new RecordingRunner();
+        var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = false },
+            Compose("a"), Compose("b"));
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Equal(["autopatch.run", "container.update", "container.update"], automation.Actors.Select(a => a.Capability));
+        Assert.Equal(["a"], runner.Calls.Select(c => c.Name));        // b was refused before its patch ran
+        Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "b" && e.Kind == AutoPatchResultKind.Aborted);
+    }
+
+    [Fact]
+    public async Task A_nightly_dry_run_decides_every_container_too()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
+        var automation = new RecordingAutomation { Refuse = { "b" } };
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        var runner = new RecordingRunner();
+        var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = true },
+            Compose("a"), Compose("b"));
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        // The script re-tags and pulls even in a dry run: a protected container is never handed to it.
+        Assert.Equal(["autopatch.run", "container.update", "container.update"], automation.Actors.Select(a => a.Capability));
+        Assert.Equal([("local", "a", true)], runner.Calls);
+    }
+
+    [Fact]
+    public async Task A_patch_that_rolled_back_is_recorded_as_failed()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        var automation = new RecordingAutomation();
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        var runner = new RecordingRunner { Verdicts = { ["a"] = AutoPatchResultKind.RolledBack } };
+        var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = false },
+            Compose("a"));
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        // Both the container's decision and the night's: neither may read "executed" in the audit.
+        Assert.Equal([MutationStatus.Failed, MutationStatus.Failed], automation.Statuses);
+        Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "a" && e.Kind == AutoPatchResultKind.RolledBack);
+    }
+
+    [Fact]
+    public async Task A_preview_decides_every_candidate_on_the_callers_authority()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
+        // b stands for a protected container, or one the key may no longer touch by the time the cycle reaches it.
+        var automation = new RecordingAutomation { Refuse = { "b" } };
+        var runner = new RecordingRunner();
+        var service = NewService(runner, store, automation, new MemoryAutomationOwners(),
+            new AutoPatchSettings { Enabled = true, DryRun = false }, Compose("a"), Compose("b"));
+
+        await service.RunCycleAsync(forceDryRun: true, "key:k1");
+
+        Assert.All(automation.Actors, a => Assert.Equal("key:k1", a.Actor.OwnerId));
+        Assert.Equal(["container.update", "container.update"], automation.Actors.Select(a => a.Capability));
+        Assert.Equal([("local", "a", true)], runner.Calls);
+        Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "b" && e.Kind == AutoPatchResultKind.Aborted);
+    }
+
+    private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
+        IAutomationMutationRunner automation, IAutomationOwnerStore owners)
+        => NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true });
+
+    private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
+        IAutomationMutationRunner automation, IAutomationOwnerStore owners, AutoPatchSettings settings,
+        params ContainerInfo[] containers)
+        => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
+            new NoopImageUpdateStore(), runner,
+            new FakeNotifications(), new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            automation, owners, NullLogger<AutoPatchService>.Instance);
+
+    /// <summary>Records who each decision runs as and runs the action in a scope like the gateway's, except for a
+    /// container whose name is in <see cref="Refuse"/>. <see cref="Statuses"/> holds what the gateway would audit.</summary>
+    private sealed class RecordingAutomation : IAutomationMutationRunner
+    {
+        public List<(AutomationActor Actor, string Capability)> Actors { get; } = new();
+        public HashSet<string> Refuse { get; } = new();
+        public List<MutationStatus> Statuses { get; } = new();
+
+        public async Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
+        {
+            Actors.Add((actor, capabilityId));
+            var name = arguments.GetType().GetProperty("name")?.GetValue(arguments) as string;
+            if (name is not null && Refuse.Contains(name))
+                return new MutationOutcome<T>("op", MutationStatus.Denied, default, "protected", VerificationStatus.NotRun);
+            using var scope = MutationScope.Begin(capabilityId, "op");
+            var value = await action(ct);
+            var status = scope.FailureReason is null ? MutationStatus.Executed : MutationStatus.Failed;
+            Statuses.Add(status);
+            return new MutationOutcome<T>("op", status, value, scope.FailureReason, VerificationStatus.NotRun);
+        }
+
+        public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task> action, CancellationToken ct = default) =>
+            RunAsync<bool>(actor, capabilityId, arguments, _ => Task.FromResult(true), ct);
     }
 
     private static string TempPath() => Path.Combine(Path.GetTempPath(), $"cve-{Guid.NewGuid():N}.json");
@@ -440,7 +591,7 @@ public class AutoPatchTests
         => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
             new NoopImageUpdateStore(), runner,
             notifications, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<AutoPatchService>.Instance);
+            new RecordingAutomation(), new MemoryAutomationOwners(), NullLogger<AutoPatchService>.Instance);
 
     private sealed class RecordingRunner : IAutoPatchRunner
     {

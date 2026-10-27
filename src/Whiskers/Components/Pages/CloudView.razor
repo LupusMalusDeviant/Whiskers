@@ -5,6 +5,7 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive cloud-control UI. Rendered by Cloud.razor only when the CloudControl module is enabled
@@ -145,18 +146,29 @@
         _busy = true;
         try
         {
+            var server = s.WhiskersId;
+            var description = $"{s.Name} {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC";
             var msg = action switch
             {
-                "poweron" => await CloudControl.PowerOnAsync(s.WhiskersId),
-                "shutdown" => await CloudControl.ShutdownAsync(s.WhiskersId),
-                "reboot" => await CloudControl.RebootAsync(s.WhiskersId),
-                "reset" => await CloudControl.HardResetAsync(s.WhiskersId),
-                "snapshot" => await CloudControl.CreateSnapshotAsync(s.WhiskersId, $"{s.Name} {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC"),
+                "poweron" => await Mutations.RunAsync("cloud.power_on", new { server },
+                    _ => CloudControl.PowerOnAsync(server)),
+                "shutdown" => await Mutations.RunAsync("cloud.shutdown", new { server },
+                    _ => CloudControl.ShutdownAsync(server)),
+                "reboot" => await Mutations.RunAsync("cloud.reboot", new { server },
+                    _ => CloudControl.RebootAsync(server)),
+                "reset" => await Mutations.RunAsync("cloud.hard_reset", new { server },
+                    _ => CloudControl.HardResetAsync(server)),
+                "snapshot" => await Mutations.RunAsync("cloud.snapshot_create", new { server, description },
+                    _ => CloudControl.CreateSnapshotAsync(server, description)),
                 _ => L["CloudView_Snackbar_UnknownAction"].Value
             };
             await AuditCloudActionAsync(s, action, success: true);
             Snackbar.Add(msg, Severity.Success);
             await LoadAll();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

@@ -3,6 +3,7 @@
 @inject Whiskers.Services.Templates.ITemplateService TemplateService
 @inject Whiskers.Services.ImageSearch.IImageSearchService ImageSearch
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
+@inject IUiMutationRunner Mutations
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
@@ -541,9 +542,7 @@
             var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(yaml));
             var dir = $"/opt/deployments/{_deployProjectName}";
 
-            var result = await Executor.ExecuteAsync(_deployServerId,
-                $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
-                TimeSpan.FromMinutes(5));
+            var result = await DeployGatedAsync(_deployServerId, dir, b64, _selectedTemplate.Name);
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, _selectedTemplate.Name, details: $"Template: {_selectedTemplate.Id}", serverId: _deployServerId, success: result.Success);
@@ -557,6 +556,7 @@
                 Snackbar.Add(L["AppStore_Snackbar_DeployError", result.Output, result.Error].Value, Severity.Error);
             }
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(L["AppStore_Snackbar_Error", ex.Message].Value, Severity.Error); }
         finally { _deploying = false; }
     }
@@ -652,9 +652,7 @@
             var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
             var dir = $"/opt/deployments/{_deployProjectName}";
 
-            var result = await Executor.ExecuteAsync(_deployServerId,
-                $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
-                TimeSpan.FromMinutes(5));
+            var result = await DeployGatedAsync(_deployServerId, dir, b64, imageRef);
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, imageRef,
@@ -670,8 +668,25 @@
                 Snackbar.Add(L["AppStore_Snackbar_DeployError", result.Output, result.Error].Value, Severity.Error);
             }
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(L["AppStore_Snackbar_Error", ex.Message].Value, Severity.Error); }
         finally { _deploying = false; }
+    }
+
+    // Both store deploys write a compose file and run `docker compose up` as root on the host: one gated mutation,
+    // plus one decision per existing container of the project, since `up` recreates them.
+    private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string dir, string b64, string appName)
+    {
+        var affected = await ComposeImpact.ContainersAsync(DockerService, serverId, _deployProjectName, dir);
+        return await Mutations.RunAsync("app.deploy", new { projectName = _deployProjectName, appName, serverId },
+            _ => Mutations.RunForEachAsync("app.deploy", affected, serverId, async () =>
+            {
+                var r = await Executor.ExecuteAsync(serverId,
+                    $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
+                    TimeSpan.FromMinutes(5));
+                if (!r.Success) MutationScope.Fail("docker compose failed.");
+                return r;
+            }));
     }
 
     private static List<string> ParsePorts(string raw)

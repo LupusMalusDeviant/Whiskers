@@ -23,6 +23,9 @@ public interface IMutationPolicy
 /// </summary>
 public sealed class GuardrailMutationPolicy : IMutationPolicy
 {
+    // PC-D1: a human in the UI is bound by authorization, the kill switch and protected resources only.
+    private static readonly IAgentGuardrailEngine HumanEngine = GuardrailEngine.CreateForHumans();
+
     private readonly IAgentGuardrailEngine? _engine;
     private readonly IGuardrailStore? _store;
 
@@ -47,7 +50,17 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             ToAgentPrincipal(request.Principal),
             ToOrigin(request),
             _store.Current);
-        var decision = _engine.Evaluate(new GuardrailRequest(
+        // A person in the UI, and an unattended item running on a person's authority (PC-D6), are bound by the PC-D1
+        // rules: the owner decided when creating the item. An item owned by an API key keeps every rule that binds
+        // the key (tool lists, forbidden arguments, confirmation) — scheduling is not a way around them; a run that
+        // needs an approval is refused, since nobody is there to give it. An item from before owners were recorded
+        // runs in the grace period with the PC-D1 rules (user decision).
+        var engine = (request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
+                     || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation
+                         && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human)
+            ? HumanEngine
+            : _engine;
+        var decision = engine.Evaluate(new GuardrailRequest(
             capability.McpTool ?? capability.Id, capability.RequiredLevel, WithResolvedTarget(request), context));
 
         var verdict = decision.Verdict switch
@@ -77,7 +90,8 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     /// acts for, with that key's tool list, exactly as <c>AgentSession</c> evaluates it.</summary>
     private static AgentPrincipal ToAgentPrincipal(MutationPrincipal principal)
     {
-        var p = principal.Kind == MutationPrincipalKind.Agent && principal.OnBehalfOf is { } source ? source : principal;
+        var p = principal.Kind is MutationPrincipalKind.Agent or MutationPrincipalKind.Automation
+                && principal.OnBehalfOf is { } source ? source : principal;
         var level = McpPermissionLevels.Normalize(p.PermissionLevel);
         return p.Kind is MutationPrincipalKind.ApiKey or MutationPrincipalKind.Automation
             ? new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level, p.AllowedTools,
