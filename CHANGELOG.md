@@ -8,7 +8,7 @@ All notable changes to Whiskers are documented here. The format follows
 
 - R1-11: every security configuration write goes through the Mutation Gateway as an **Admin-only** capability:
   the Settings sections (`config.save`), whitelist (`config.whitelist`), roles (`config.roles`), MCP tool and key
-  permissions (`config.mcp_permissions`), MCP key create/delete (`mcp.key_create`, `mcp.key_delete`), guardrails and
+  permissions (`config.mcp_permissions`), the agent's LLM provider, key and system prompt (`config.agent`), MCP key create/delete (`mcp.key_create`, `mcp.key_delete`), guardrails and
   presets (`guardrails.save`, from the Guardrails and AI operations pages), vault secrets (`vault.secret_set`,
   `vault.secret_delete`, also a Kubernetes server's kubeconfig) and registries (`registry.save`, `registry.delete`).
   Each is authorized at the moment of the click (a Viewer or a demoted user is refused whatever the page shows),

@@ -36,7 +36,8 @@ resources (`GuardrailEngine.CreateForHumans`). Tool lists, argument patterns and
 the agent or a key; a person's click is not sent for approval.
 
 Security configuration (R1-11) is Admin-only with target kind `config` (the `section` argument names it):
-`config.save`, `config.whitelist`, `config.roles`, `config.mcp_permissions`, `mcp.key_create`, `mcp.key_delete`,
+`config.save`, `config.whitelist`, `config.roles`, `config.mcp_permissions`, `config.agent` (agent provider,
+key and system prompt), `mcp.key_create`, `mcp.key_delete`,
 `guardrails.save`, `guardrails.kill_switch_off`, `vault.secret_set`, `vault.secret_delete`, `registry.save`,
 `registry.delete`. `GuardrailMutationPolicy` makes one narrow exception, for a person in the UI only and after
 authorization: `guardrails.kill_switch_off` is evaluated with `ReadOnlyMode` off (every other rule applies). A

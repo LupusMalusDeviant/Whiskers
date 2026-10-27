@@ -12,6 +12,8 @@ namespace Whiskers.Services.Agent;
 /// Note: ApiKey is stored in plaintext under /app/data (same choice as servers.json); the editor is admin-only.</summary>
 public interface IAgentSettingsStore
 {
+    /// <summary>Admin-only; runs through the Mutation Gateway as <c>config.agent</c> (R1-11).</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("config.agent")]
     Task SaveAsync(AgentSettings settings, AgentPrincipal editor);
 }
 

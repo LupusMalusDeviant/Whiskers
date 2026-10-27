@@ -17,7 +17,7 @@ Two entry points feed the same loop: the UI ([`../../Components/Pages/Agent.razo
 | `AgentToolInvoker.cs` | Executes exactly one tool call **after** the guardrail gate; invokes the real MCP method via reflection under a synthetic HttpContext. The context uses the `AgentSynthetic` scheme carrying the caller's real MCP level as a claim (enforced by tool-internal `McpPermissionCheck` — defense in depth, **not** synthetic Admin) and records the agent in the audit log. |
 | `AgentArgumentBinder.cs` | Converts LLM JSON argument values into the .NET parameter types of tool methods (tolerant of LLM quirks, no silent data loss). |
 | `AgentPrincipalResolver.cs` | Derives the `AgentPrincipal` from the HTTP context (bearer MCP key or cookie web user), mirroring `McpPermissionCheck`. |
-| `AgentSettingsStore.cs` | Writes the UI-editable provider settings to `/app/data/agent-settings.json` (a reload-on-change config source). |
+| `AgentSettingsStore.cs` | Writes the UI-editable provider settings to `/app/data/agent-settings.json` (a reload-on-change config source). `SaveAsync` is `config.agent` (Admin, through the Mutation Gateway since R1-11; the kill switch refuses it). |
 | `AgentTranscriptStore.cs` | Per-user persistence of the agent conversation (survives reloads; seeds new sessions with context). |
 | `IClaudeCodeRuntime.cs` | Interface for the Claude Code runtime (deliberately **not** an LLM provider, it brings its own loop). |
 | `ClaudeCodeRuntime.cs` | Orchestrates the Claude Code CLI as a subprocess, configured via `--mcp-config` to point back at Whiskers's `/mcp` endpoint so its tool calls run through the same guardrail gate. |

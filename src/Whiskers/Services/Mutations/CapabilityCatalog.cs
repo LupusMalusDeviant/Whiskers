@@ -196,6 +196,7 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("config.whitelist", A, "config", Root, Short);
         yield return Ui("config.roles", A, "config", Root, Short);
         yield return Ui("config.mcp_permissions", A, "config", Root, Short);
+        yield return Ui("config.agent", A, "config", Root, Short);
         yield return Ui("mcp.key_create", A, "config", Root, Short);
         yield return Ui("mcp.key_delete", A, "config", Dis, Short);
         yield return Ui("guardrails.save", A, "config", Root, Short);
