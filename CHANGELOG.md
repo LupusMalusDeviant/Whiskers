@@ -45,9 +45,13 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - Also covered: Kubernetes start/stop/restart on the Dashboard (decided on the Deployment/StatefulSet the pod
     belongs to), saving a container's `.env` (every service of its compose project is decided, since
     `compose up` may recreate them all), Artisan migrate/rollback, SQL file import, deploys from the compose editor
-    and the App Store, server onboarding, and restoring a Whiskers self-backup.
+    and the App Store (every existing container of the project is decided as well: a protected `payments-db` in
+    project `payments` refuses the deploy), the **Test** button of a webhook (decided as its real action — restart,
+    rebuild, compose deploy, Git deploy — on its real target), adding, editing and removing a server, saving AI
+    triggers, server onboarding, and creating, deleting and restoring a Whiskers self-backup.
   - A **cleanup task** (`docker system prune`) is refused while a stopped container matching a protected pattern
-    exists on that server — the prune would remove it.
+    exists on that server — the prune would remove it. A task on `local` checks the local server, not the default
+    server.
   - "Run now" of a scheduled task is checked for the task's own action and target as well (a restart task on a
     protected container is refused); over MCP, `run_scheduled_task` also needs the caller's access to
     `restart_container` / `backup_database` / `execute_command` for those task types.
@@ -59,7 +63,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   `execute_query` MCP tool were Operator / write.
 - **Container shells need Admin** (PC-D2): `/terminal/{server}/{container}` and the terminal tab in the container
   page were Operator.
-- **"Run now" of a custom-command task needs Admin**; other task types stay Operator.
+- **"Run now" needs Admin for a custom-command task, a self-backup task and any backup task with retention**
+  (`maxBackups`): retention deletes old backups, which is decided as `volume.backup_delete` / `db.backup_delete` /
+  `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.

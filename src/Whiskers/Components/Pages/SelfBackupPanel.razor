@@ -142,7 +142,8 @@ else
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            var info = await BackupService.CreateBackupAsync("manual", CancellationToken.None);
+            var info = await Mutations.RunAsync("selfbackup.create", new { trigger = "manual" },
+                token => BackupService.CreateBackupAsync("manual", token));
             await AuditLog.LogAsync(actor, "web", "selfbackup.create", "whiskers", info.Id, info.FileName);
             Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupCreated", FormatBytes(info.SizeBytes) + (info.Encrypted ? L["SelfBackupPanel_Snackbar_EncryptedSuffix"].Value : "")].Value, Severity.Success);
             await LoadBackups();
@@ -174,7 +175,8 @@ else
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
-            await BackupService.DeleteBackupAsync(info.Id);
+            await Mutations.RunAsync("selfbackup.delete", new { archive = info.FileName },
+                _ => BackupService.DeleteBackupAsync(info.Id));
             await AuditLog.LogAsync(actor, "web", "selfbackup.delete", "whiskers", info.Id, info.FileName);
             Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupDeleted"].Value, Severity.Success);
             await LoadBackups();

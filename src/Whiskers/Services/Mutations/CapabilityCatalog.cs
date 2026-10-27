@@ -109,6 +109,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Databases
         yield return Tool("db.query", "execute_query", "container", Root, Normal);
         yield return Tool("db.backup", "backup_database", "container", Rev, Long);
+        // Retention of a DB-backup task: deletes old dumps with a host `rm`.
+        yield return Ui("db.backup_delete", A, "container", Des, Short);
 
         // DNS
         yield return Tool("dns.record_set", "set_dns_record", "dns-zone", Dis, Short);
@@ -117,8 +119,16 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Cloud servers
         // Servers page: onboarding installs the agent stack on the host as root.
         yield return Ui("server.onboard", A, "server", Root, Long);
+        // Servers page: add / edit a server (host, credentials, SSH key, kubeconfig) or remove it.
+        yield return Ui("server.save", A, "server", Root, Short);
+        yield return Ui("server.remove", A, "server", Des, Short);
+        // AI triggers page: which events start the agent and what it is told to do.
+        yield return Ui("aitrigger.save", A, "whiskers", Root, Short);
         // Settings: restore Whiskers' own data from a self-backup (maintenance, staged swap, process restart).
         yield return Ui("selfbackup.restore", A, "whiskers", Root, Normal);
+        // Settings: create or delete one of Whiskers' own backup archives (a recovery point).
+        yield return Ui("selfbackup.create", A, "whiskers", Rev, Long);
+        yield return Ui("selfbackup.delete", A, "whiskers", Des, Short);
         yield return Tool("cloud.power_on", "cloud_power_on", "cloud-server", Rev, Normal);
         yield return Tool("cloud.shutdown", "cloud_shutdown", "cloud-server", Dis, Normal);
         yield return Tool("cloud.reboot", "cloud_reboot", "cloud-server", Dis, Normal);

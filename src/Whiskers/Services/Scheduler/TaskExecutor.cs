@@ -143,7 +143,7 @@ public class TaskExecutor : ITaskExecutor
 
         // `docker system prune` removes every stopped container. The gateway decided on the host only, so a stopped
         // protected container would go with it: refuse the cleanup while one exists (fail closed without policy).
-        if (await StoppedProtectedContainersAsync(task.ServerId) is { Count: > 0 } blocked)
+        if (await StoppedProtectedContainersAsync(sid) is { Count: > 0 } blocked)
             return (false, $"Cleanup refused: it would remove stopped protected container(s) {string.Join(", ", blocked)}.");
 
         // Docker system prune (remove unused images, containers, networks)
@@ -157,10 +157,10 @@ public class TaskExecutor : ITaskExecutor
 
     /// <summary>Stopped containers on the server that match a protected-resource pattern. Without the guardrail
     /// store nobody can say what is protected, so every stopped container counts.</summary>
-    private async Task<IReadOnlyList<string>> StoppedProtectedContainersAsync(string? serverId)
+    private async Task<IReadOnlyList<string>> StoppedProtectedContainersAsync(string serverId)
     {
-        var sid = serverId is null or "local" ? null : serverId;
-        var stopped = (await _docker.ListContainersAsync(all: true, serverId: sid))
+        // The same explicit server the prune runs on: null would list the default server instead.
+        var stopped = (await _docker.ListContainersAsync(all: true, serverId: serverId))
             .Where(c => !string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (_guardrails is null) return stopped.Select(c => c.Name).ToList();
@@ -171,6 +171,10 @@ public class TaskExecutor : ITaskExecutor
             .Select(c => c.Name)
             .ToList();
     }
+
+    /// <summary>How many backups the task keeps (its retention); 0 when it deletes none.</summary>
+    public static int RetentionOf(ScheduledTaskEntity task) =>
+        int.TryParse(ParseConfig(task.Config).GetValueOrDefault("maxBackups", "0"), out var m) && m > 0 ? m : 0;
 
     private async Task ApplyRetention(ScheduledTaskEntity task, Dictionary<string, string> config, string? dbName = null)
     {

@@ -278,4 +278,79 @@ public class UiMutationRunnerTests
         Assert.False(success);   // refused before the (null) host executor is reached
         Assert.Contains("production-db", output);
     }
+
+    [Fact]
+    public async Task A_local_cleanup_checks_the_local_server_even_when_the_default_is_remote()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ProtectedResources.Add("production-*");
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "a1", Name = "production-db", State = "exited", ServerId = "local" })
+        {
+            DefaultServerId = "remote-1",
+        };
+        var executor = new Whiskers.Services.Scheduler.TaskExecutor(docker, null!, null!, null!, null!,
+            NullLogger<Whiskers.Services.Scheduler.TaskExecutor>.Instance,
+            guardrails: new AgentToolTestHelpers.FixedGuardrailStore(policy));
+
+        var (success, output) = await executor.ExecuteAsync(new ScheduledTaskEntity
+        {
+            TaskId = "c2", Name = "cleanup", TaskType = ScheduledTaskType.Cleanup, ServerId = "local",
+        });
+
+        Assert.False(success);   // refused before the (null) host executor is reached
+        Assert.Contains("production-db", output);
+    }
+
+    private static ContainerInfo ComposeService(string name, string project, string dir) => new()
+    {
+        Id = name + "-id", Name = name, ServerId = "local", State = "running",
+        Labels = new()
+        {
+            ["com.docker.compose.project"] = project,
+            ["com.docker.compose.project.working_dir"] = dir,
+        },
+    };
+
+    [Fact]
+    public async Task A_compose_deploy_is_decided_on_every_container_it_recreates()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ProtectedResources.Add("payments-db");   // differs from the project name "payments"
+        var (runner, _) = Runner(AppRole.Admin, policy);
+        var docker = new FakeDocker(
+            ComposeService("payments-web", "payments", "/opt/deployments/payments"),
+            ComposeService("payments-db", "payments", "/opt/deployments/payments"),
+            ComposeService("other", "other", "/opt/other"));
+        var ran = false;
+
+        var affected = await ComposeImpact.ContainersAsync(docker, "local", "payments", "/opt/deployments/payments");
+        await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("compose.deploy",
+            new { projectName = "payments", serverId = "local" },
+            _ => runner.RunForEachAsync("compose.deploy", affected, "local", () => { ran = true; return Task.FromResult(0); })));
+
+        Assert.Equal(["payments-web", "payments-db"], affected.Select(c => c.Name));
+        Assert.False(ran);
+    }
+
+    [Fact]
+    public async Task A_compose_directory_finds_its_containers_by_working_dir()
+    {
+        var docker = new FakeDocker(
+            ComposeService("api", "shop", "/srv/shop"),
+            ComposeService("worker", "shop", "/srv/shop/"),
+            ComposeService("cache", "cache", "/srv/cache"));
+
+        var affected = await ComposeImpact.ContainersAsync(docker, "local", project: null, workingDir: "/srv/shop");
+
+        Assert.Equal(["api", "worker"], affected.Select(c => c.Name));
+    }
+
+    [Theory]
+    [InlineData("{\"maxBackups\":\"3\"}", 3)]
+    [InlineData("{\"maxBackups\":\"0\"}", 0)]
+    [InlineData(null, 0)]
+    [InlineData("{ broken", 0)]
+    public void Retention_is_read_from_the_task_config(string? config, int expected) =>
+        Assert.Equal(expected, Whiskers.Services.Scheduler.TaskExecutor.RetentionOf(new ScheduledTaskEntity { Config = config }));
 }

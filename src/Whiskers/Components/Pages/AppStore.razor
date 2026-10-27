@@ -673,17 +673,21 @@
         finally { _deploying = false; }
     }
 
-    // Both store deploys write a compose file and run `docker compose up` as root on the host: one gated mutation.
-    private Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string dir, string b64, string appName) =>
-        Mutations.RunAsync("app.deploy", new { projectName = _deployProjectName, appName, serverId },
-            async _ =>
+    // Both store deploys write a compose file and run `docker compose up` as root on the host: one gated mutation,
+    // plus one decision per existing container of the project, since `up` recreates them.
+    private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string dir, string b64, string appName)
+    {
+        var affected = await ComposeImpact.ContainersAsync(DockerService, serverId, _deployProjectName, dir);
+        return await Mutations.RunAsync("app.deploy", new { projectName = _deployProjectName, appName, serverId },
+            _ => Mutations.RunForEachAsync("app.deploy", affected, serverId, async () =>
             {
                 var r = await Executor.ExecuteAsync(serverId,
                     $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
                     TimeSpan.FromMinutes(5));
                 if (!r.Success) MutationScope.Fail("docker compose failed.");
                 return r;
-            });
+            }));
+    }
 
     private static List<string> ParsePorts(string raw)
     {

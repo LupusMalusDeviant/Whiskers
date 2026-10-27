@@ -42,6 +42,7 @@ the agent or a key; a person's click is not sent for approval.
 | `CapabilityOverrides.cs` | `ICapabilityOverrides` + `McpToolCapabilityOverrides`: the MCP tool's Enabled switch and a stricter stored level (Settings → MCP), applied for **every** principal kind (INV-15). The catalog level is the floor. |
 | `MutationTargets.cs` | `MutationTargets.FromArguments` (target from tool arguments) and `IMutationTargetResolver` + `MutationTargetResolver`: containers resolve by id, name or unique prefix to their full id and name; an unknown or ambiguous container is refused before policy (INV-57). Other kinds pass through for now. |
 | `MutationGateway.cs` | `IMutationGateway` + `MutationGateway` (the pipeline) and `IMutationVerifier`. |
+| `ComposeImpact.cs` | Existing containers a `docker compose up` would touch (project label or working directory) and `RunForEachAsync`, one nested UI decision per container. |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. |
 | `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`), so a protected container is caught by id prefix too. Without engine or store it refuses everything. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
@@ -91,8 +92,15 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 - **Not yet marked** (so neither the guard nor the architecture test sees them): the generic execution primitives
   `IHostCommandExecutor` and `IDockerService.RunHostShellAsync`, terminals and server records. The UI actions built
   on the primitives (container `.env` save + compose up, Artisan migrate/rollback, SQL file import, compose editor
-  and App Store deploys, server onboarding, self-backup restore) run through the gateway since the step 2.2 review,
-  but only by convention: a new direct call is not caught until the primitives are marked.
+  and App Store deploys, the webhook **Test** button, server save/remove/onboarding, AI-trigger save, self-backup
+  create/delete/restore) run through the gateway since the step 2.2 review, but only by convention: a new direct
+  call is not caught until the primitives are marked.
+- **Compose deploys** (compose editor, App Store, webhook test) are decided on the project and then once per
+  existing container of the project (`ComposeImpact`: compose project label or working directory). A service the
+  new file adds is not an existing resource and is not decided; nor is a container of another project that a
+  `container_name` in the file would collide with.
+- **External webhook calls** (`/api/webhooks/...`) still run without the gateway; they move in step 2.4. Only the
+  UI's **Test** button is decided, as the clicking person.
 - **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the controller name the
   provider reports for the pod (and the pod name as an extra argument); there is no Kubernetes target resolver that
   reads the live owner yet.

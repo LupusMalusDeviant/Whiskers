@@ -264,15 +264,17 @@
             var dir = $"/opt/deployments/{_projectName}";
 
             var serverId = _serverId;
+            // `docker compose up` recreates every existing container of the project: each is decided too.
+            var affected = await ComposeImpact.ContainersAsync(DockerService, serverId, _projectName, dir);
             var result = await Mutations.RunAsync("compose.deploy", new { projectName = _projectName, serverId },
-                async _ =>
+                _ => Mutations.RunForEachAsync("compose.deploy", affected, serverId, async () =>
                 {
                     var r = await Executor.ExecuteAsync(serverId,
                         $"mkdir -p {dir} && echo '{b64}' | base64 -d > {dir}/docker-compose.yml && cd {dir} && docker compose pull 2>&1 && docker compose up -d 2>&1",
                         TimeSpan.FromMinutes(5));
                     if (!r.Success) MutationScope.Fail("docker compose failed.");
                     return r;
-                });
+                }));
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _projectName, _projectName, serverId: _serverId, success: result.Success);

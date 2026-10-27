@@ -189,7 +189,9 @@
             if (string.IsNullOrWhiteSpace(t.Name)) t.Name = "Trigger";
         try
         {
-            await Store.SaveAsync(_triggers, await BuildPrincipalAsync());
+            var principal = await BuildPrincipalAsync();
+            await Mutations.RunAsync("aitrigger.save", new { count = _triggers.Count },
+                _ => Store.SaveAsync(_triggers, principal));
             Snackbar.Add(L["AiTriggersView_Saved_Snackbar", _triggers.Count].Value, Severity.Success);
         }
         catch (Exception ex)
