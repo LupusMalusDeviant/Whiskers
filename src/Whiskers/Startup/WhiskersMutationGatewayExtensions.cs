@@ -59,6 +59,8 @@ public static class WhiskersMutationGatewayExtensions
         // Unattended runs on their owner's authority (PC-D6).
         services.AddOptions<AutomationOptions>().BindConfiguration(AutomationOptions.Section);
         services.AddSingleton<IOwnerAccounts, OwnerAccounts>();
+        // Observes federated sign-ins of Blazor circuits so owners without a local account count as verified (R1-04).
+        services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, FederatedSignInRecorder>();
         services.AddSingleton<IAutomationOwnerResolver, AutomationOwnerResolver>();
         services.AddSingleton<IAutomationOwnerStore, AutomationOwnerStore>();
         services.AddSingleton<IAutomationMutationRunner, AutomationMutationRunner>();

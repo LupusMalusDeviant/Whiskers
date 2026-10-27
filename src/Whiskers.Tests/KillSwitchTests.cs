@@ -135,7 +135,7 @@ public sealed class KillSwitchTests : IDisposable
         }
         var updates = new UpdatesAvailable();
         updates.Set(new ImageUpdateInfo { ContainerId = "web-1", ContainerName = "web", ServerId = "local", UpdateAvailable = true });
-        var updateOwners = new MemoryAutomationOwners();
+        var updateOwners = new MemoryAutomationOwners { FailToPersist = true };
         await updateOwners.SetAsync(IAutomationOwnerStore.AutoUpdate, owner);
         var updateNotes = new FakeNotifications();
         var autoUpdate = new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(),
@@ -159,6 +159,7 @@ public sealed class KillSwitchTests : IDisposable
         var suspended = Assert.Single(updateNotes.Events, e => e.EventType == "automation_suspended");
         Assert.Contains("account deleted", suspended.ImageInfo);
         Assert.Contains("Automation owners", suspended.ImageInfo);
+        Assert.Contains("could not be saved", suspended.ImageInfo);   // a store that failed to write says so
         Assert.True(patchOwners.IsBlocked(IAutomationOwnerStore.AutoPatch));
         Assert.Empty(script.Calls);
     }
@@ -173,7 +174,7 @@ public sealed class KillSwitchTests : IDisposable
         cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
         cves.Set(AutoPatchTests.Scan("b", "local", (CveSeverity.Critical, "1")));
         cves.Set(AutoPatchTests.Scan("c", "local", (CveSeverity.Critical, "1")));
-        var owners = new MemoryAutomationOwners();
+        var owners = new MemoryAutomationOwners { FailToPersist = true };
         await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:ops@example.com");
         // The owner is demoted right after the first container was patched.
         var script = new AutoPatchTests.RecordingRunner
@@ -189,7 +190,8 @@ public sealed class KillSwitchTests : IDisposable
 
         Assert.Single(script.Calls);                                    // stopped, not refused container by container
         Assert.True(owners.IsBlocked(IAutomationOwnerStore.AutoPatch));
-        Assert.Contains(notes.Events, e => e.EventType == "automation_suspended" && e.ContainerName == "AutoPatch");
+        Assert.Contains(notes.Events, e => e.EventType == "automation_suspended" && e.ContainerName == "AutoPatch"
+                                           && e.ImageInfo!.Contains("could not be saved"));
         Assert.Contains("suspended", autoPatch.LastCycle!.Error);
     }
 
@@ -223,11 +225,13 @@ public sealed class KillSwitchTests : IDisposable
             Assert.True(local.Exists("Ops@Example.com"));
             Assert.False(local.Exists("gone@example.com"));
 
-            // Mixed sign-in: local login stays available next to OIDC. A federated user has no local row (the
-            // whitelist decides), but a user who had a local account and lost it has lost their way in.
+            // Mixed sign-in: local login stays available next to OIDC. A user without a local row is unverified
+            // (refused) until seen signed in federated; a user who had a local account and lost it is deleted.
             var paths = new DataPathOptions(dataDir);
             var mixed = new OwnerAccounts(scopes,
                 Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.Equal(OwnerAccountState.Unverified, mixed.StateOf("federated@example.com"));
+            mixed.RememberFederated("Federated@Example.com");
             Assert.True(mixed.Exists("federated@example.com"));
             Assert.True(mixed.Exists("ops@example.com"));
             using (var scope = sp.CreateScope())
@@ -236,8 +240,10 @@ public sealed class KillSwitchTests : IDisposable
                 db.Users.Remove(db.Users.Single(u => u.Id == "u1"));
                 db.SaveChanges();
             }
-            Assert.False(mixed.Exists("ops@example.com"));
+            Assert.Equal(OwnerAccountState.Deleted, mixed.StateOf("ops@example.com"));
             Assert.True(mixed.Exists("federated@example.com"));
+            // Deleted before the record began (missing history): never seen at all → unverified, not federated.
+            Assert.Equal(OwnerAccountState.Unverified, mixed.StateOf("deleted-before-upgrade@example.com"));
             // Remembered across restarts.
             var restarted = new OwnerAccounts(scopes,
                 Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
@@ -269,6 +275,15 @@ public sealed class KillSwitchTests : IDisposable
             f.Roles.Map["lea@example.com"] = AppRole.Admin;
             var resolver = new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, booted);
             Assert.Equal(OwnerState.AccountDeleted, resolver.Describe("user:lea@example.com").State);
+
+            // A lost record starts over: owners without a local row are unverified again, not federated.
+            File.Delete(paths.KnownLocalAccountsJson);
+            var lost = new OwnerAccounts(scopes,
+                Config(("Oidc:Enabled", "true"), ("Oidc:Authority", "https://id.example.com")), paths);
+            Assert.Equal(OwnerAccountState.Unverified, lost.StateOf("federated@example.com"));
+            Assert.Equal(OwnerState.Unverified, new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, lost)
+                .Describe("user:federated@example.com").State);
+            lost.RememberFederated("federated@example.com");
 
             // An unreadable record of local accounts fails closed for owners without a local row.
             File.WriteAllText(paths.KnownLocalAccountsJson, "{ not json");

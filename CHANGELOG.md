@@ -66,13 +66,14 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     owner's current role or key level and refuses the run when it no longer covers the task (owner demoted, removed
     from the whitelist, key deleted or disabled). A refused run is recorded as failed, sends an
     `automation_refused` notification, and leaves a gateway AuditLog row.
-  - **Tasks from before this version have no owner.** They keep running for now (grace period), audited as
-    "no owner" and limited to the capability they run. Scheduled Tasks shows them with a warning; an Admin takes
-    them over with "Take over all" or per row. Set `Automation__RequireOwner=true` to refuse every ownerless run;
-    1.0 will make that the default.
+  - **Tasks from before this version have no owner, and owners are required** (`Automation:RequireOwner`, default
+    `true` since R1-04): an ownerless task is refused and switched off until an Admin takes it over — "Take over
+    all" or per row in Scheduled Tasks, which shows them with a warning. To keep them running for a while instead
+    (grace period, audited as "no owner" and limited to the capability they run), set
+    `Automation__RequireOwner=false` explicitly.
   - **AutoPatch does not run until an Admin takes it over** in Settings → Automation owners. `AutoPatch:Enabled`
-    alone is no longer enough; the nightly cycle logs a warning and skips. AutoUpdate keeps running without an
-    owner during the grace period; take it over there as well.
+    alone is no longer enough; the nightly cycle logs a warning and skips. AutoUpdate without an owner is refused
+    as well (unless the grace period is switched on as above); take it over there too.
   - What a task needs from its owner: a **custom-command** task needs an Admin owner (it runs as root on the host);
     a backup task whose **retention** deletes old backups (volume and DB backups) needs an Admin owner for the
     deletion; a **self-backup** task needs an Admin owner; the **cleanup** task (`docker system prune`) needs
@@ -117,10 +118,12 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     takes them over in Settings → Automation owners (AutoPatch also stops mid-cycle). Admins get an
     `automation_suspended` notification that no container mute hides. Policy refusals (kill switch, protected
     resources) still only report `automation_refused`.
-  - With Google/OIDC sign-in next to local accounts, Whiskers now remembers which emails had a local account
-    (`known-local-accounts.json` in the data directory; recorded at every start and whenever the setup wizard
-    creates an account, first at the first start after this upgrade): an owner whose local account is deleted loses
-    their authority there too. Accounts deleted before that first start are not known.
+  - With Google/OIDC sign-in next to local accounts, Whiskers now records which emails have a local account and
+    which were seen signed in through Google/OIDC (`known-local-accounts.json` in the data directory). An owner
+    whose local account is deleted loses their authority. **After the upgrade, items owned by a Google/OIDC user
+    are refused (not switched off) until that user has opened Whiskers once**, or an Admin takes them over — an
+    owner without a local account is only trusted once seen signing in federated (fail closed; the same applies if
+    the record is lost).
   - Authority loss is judged by what the run actually needs: a level raised in Settings → MCP, and a key's tool
     list, count as well.
   - **Tasks from before provenance was recorded** (created before this release, owner set, no `CreatedVia`) may

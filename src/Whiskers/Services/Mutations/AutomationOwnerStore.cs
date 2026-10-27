@@ -38,8 +38,10 @@ public interface IAutomationOwnerStore
 
     /// <summary>Suspends the feature because its owner lost their authority (PC-D6): it is blocked, keeps the owner
     /// for the record and stays refused across restarts until an admin takes it over. Only ever lowers authority, so
-    /// it needs no gateway decision.</summary>
-    Task SuspendAsync(string feature, string reason, CancellationToken ct = default);
+    /// it needs no gateway decision. Never fails open: when the file cannot be written the feature is still blocked
+    /// in memory (until the next successful write keeps it, or a restart) and <c>false</c> is returned, so the caller
+    /// can tell the admins.</summary>
+    Task<bool> SuspendAsync(string feature, string reason, CancellationToken ct = default);
 
     /// <summary>The entry of a blocked feature (owner and reason), for the UI; <c>null</c> otherwise.</summary>
     AutomationOwnerEntry? GetBlocked(string feature) => null;
@@ -79,11 +81,36 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         return WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
     }
 
-    public Task SuspendAsync(string feature, string reason, CancellationToken ct = default)
+    public async Task<bool> SuspendAsync(string feature, string reason, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        return WriteAsync(feature, previous => new AutomationOwnerEntry(previous?.OwnerId ?? "", DateTime.UtcNow,
-            Blocked: true, SuspendedReason: reason), ct);
+        AutomationOwnerEntry Suspended(AutomationOwnerEntry? previous) =>
+            new(previous?.OwnerId ?? "", DateTime.UtcNow, Blocked: true, SuspendedReason: reason);
+        try
+        {
+            await WriteAsync(feature, Suspended, ct);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // Fail closed: block it in memory anyway. The next write of any feature carries the block to disk.
+            await _write.WaitAsync(ct);
+            try
+            {
+                var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
+                {
+                    [feature] = Suspended(_entries.GetValueOrDefault(feature)),
+                };
+                Volatile.Write(ref _entries, next);
+            }
+            finally
+            {
+                _write.Release();
+            }
+            _logger.LogError(ex, "The suspension of {Feature} could not be saved to {Path}; it is blocked until " +
+                                 "Whiskers restarts", feature, _path);
+            return false;
+        }
     }
 
     private async Task WriteAsync(string feature, Func<AutomationOwnerEntry?, AutomationOwnerEntry> entryOf,

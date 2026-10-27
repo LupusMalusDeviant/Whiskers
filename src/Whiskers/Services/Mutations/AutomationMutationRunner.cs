@@ -37,7 +37,7 @@ public interface IAutomationOwnerResolver
 }
 
 /// <summary>Why an owner may or may not act; the UI shows it through <c>AutomationOwners_State_&lt;state&gt;</c>.</summary>
-public enum OwnerState { Active, NotAllowedToSignIn, AccountDeleted, KeyDeleted, KeyDisabled, Unrecognised }
+public enum OwnerState { Active, NotAllowedToSignIn, AccountDeleted, KeyDeleted, KeyDisabled, Unrecognised, Unverified }
 
 /// <summary>An owner as the UI shows it: an email, a key name or the raw stored value.</summary>
 public sealed record OwnerDescription(string Name, OwnerState State);
@@ -116,9 +116,12 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
 
     /// <summary>The state of a user owner: an account that is gone outranks a whitelist entry left behind.</summary>
     private OwnerState UserState(string email) =>
-        _accounts is not null && !_accounts.Exists(email) ? OwnerState.AccountDeleted
-        : _whitelist.IsEmailAllowed(email) ? OwnerState.Active
-        : OwnerState.NotAllowedToSignIn;
+        _accounts?.StateOf(email) switch
+        {
+            OwnerAccountState.Deleted => OwnerState.AccountDeleted,
+            OwnerAccountState.Unverified => OwnerState.Unverified,
+            _ => _whitelist.IsEmailAllowed(email) ? OwnerState.Active : OwnerState.NotAllowedToSignIn,
+        };
 
     public OwnerDescription Describe(string ownerId)
     {
@@ -164,6 +167,7 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
         {
             OwnerState.AccountDeleted => $"{email} (account deleted)",
             OwnerState.NotAllowedToSignIn => $"{email} (no longer allowed to sign in)",
+            OwnerState.Unverified => $"{email} (sign-in not verified yet)",
             _ => email,
         }, userLevel);
     }
@@ -250,7 +254,10 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         if (string.IsNullOrWhiteSpace(actor.OwnerId))
             return _options.CurrentValue.RequireOwner ? "it has no owner, and owners are required" : null;
         var owner = _owners.Resolve(actor.OwnerId);
-        if (_owners.Describe(actor.OwnerId).State != OwnerState.Active)
+        var state = _owners.Describe(actor.OwnerId).State;
+        // Unverified is refused but not suspended: it runs again once the owner signs in (or an admin takes over).
+        if (state == OwnerState.Unverified) return null;
+        if (state != OwnerState.Active)
             return $"its owner {owner.DisplayName} has no authority left";
         // The same requirement the gateway enforces: a level raised in Settings → MCP counts. A switched-off
         // capability is a policy, not a lost authority, and an unreadable setting is refused there anyway.

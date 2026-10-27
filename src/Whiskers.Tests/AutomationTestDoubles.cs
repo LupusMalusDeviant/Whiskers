@@ -22,11 +22,14 @@ internal sealed class MemoryAutomationOwners : IAutomationOwnerStore
 
     public Dictionary<string, string> Suspended { get; } = new(StringComparer.Ordinal);
 
-    public Task SuspendAsync(string feature, string reason, CancellationToken ct = default)
+    /// <summary>When set, the suspension "cannot be saved": still blocked, but reported as not persisted.</summary>
+    public bool FailToPersist { get; set; }
+
+    public Task<bool> SuspendAsync(string feature, string reason, CancellationToken ct = default)
     {
         Blocked.Add(feature);
         Suspended[feature] = reason;
-        return Task.CompletedTask;
+        return Task.FromResult(!FailToPersist);
     }
 }
 

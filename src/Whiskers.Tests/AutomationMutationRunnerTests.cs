@@ -89,7 +89,12 @@ public class AutomationMutationRunnerTests
     internal sealed class Accounts : IOwnerAccounts
     {
         public HashSet<string> Deleted { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public bool Exists(string email) => !Deleted.Contains(email);
+        public HashSet<string> Unverified { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool Exists(string email) => StateOf(email) == OwnerAccountState.Present;
+        public OwnerAccountState StateOf(string email) =>
+            Deleted.Contains(email) ? OwnerAccountState.Deleted
+            : Unverified.Contains(email) ? OwnerAccountState.Unverified
+            : OwnerAccountState.Present;
     }
 
     internal static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null)
@@ -448,6 +453,45 @@ public class AutomationMutationRunnerTests
     }
 
     [Fact]
+    public async Task An_unverified_owner_is_refused_but_the_task_is_not_suspended()
+    {
+        // Mixed sign-in, owner not yet seen signed in federated (R1-04): fail closed, but the task runs again as soon
+        // as the owner signs in once — it is not switched off.
+        var f = WithOperator(requireOwner: true);
+        f.Accounts.Unverified.Add(Ops);
+        var notify = new FakeNotifications();
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: notify);
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "nightly", TaskType = ScheduledTaskType.ContainerRestart,
+            TargetId = "web-1", CreatedBy = OpsId, CreatedVia = OpsId,
+        };
+
+        var (success, _) = await executor.ExecuteAsync(task);
+
+        Assert.False(success);
+        Assert.True(task.Enabled);
+        Assert.Equal("automation_refused", Assert.Single(notify.Events).EventType);
+        Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
+    }
+
+    [Theory]
+    [InlineData("OpenIdConnect", "ops@example.com")]
+    [InlineData("Google", "ops@example.com")]
+    [InlineData("LocalPassword", null)]
+    [InlineData("AuthDisabled", null)]
+    [InlineData("AgentSynthetic", null)]
+    [InlineData("McpBearer", null)]
+    public void Only_a_federated_sign_in_is_recorded_as_one(string authenticationType, string? expected)
+    {
+        var user = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Email, Ops)], authenticationType));
+        Assert.Equal(expected, FederatedSignInRecorder.FederatedEmailOf(user));
+        Assert.Null(FederatedSignInRecorder.FederatedEmailOf(new System.Security.Claims.ClaimsPrincipal()));
+    }
+
+    [Fact]
     public async Task A_task_refused_by_policy_stays_enabled_and_reports_the_refusal()
     {
         var policy = GuardrailPolicy.SafeDefault();
@@ -646,6 +690,29 @@ public class AutomationMutationRunnerTests
         Assert.Equal(MutationStatus.Executed, human.Status);
         Assert.Equal(MutationStatus.Denied, agent.Status);
         Assert.Null(f.Runner.LostAuthority(AgentCreated(), "container.restart"));   // a policy refusal: not suspended
+    }
+
+    [Fact]
+    public async Task A_suspension_that_cannot_be_saved_still_blocks_the_feature()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"owners-{Guid.NewGuid():N}");
+        var paths = new DataPathOptions(dir);
+        try
+        {
+            var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
+            await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId);
+            Directory.CreateDirectory(paths.AutomationOwnersJson + ".tmp");   // the next write fails
+
+            var saved = await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, "its owner has no authority left");
+
+            Assert.False(saved);
+            Assert.True(store.IsBlocked(IAutomationOwnerStore.AutoUpdate));
+            Assert.Null(store.Get(IAutomationOwnerStore.AutoUpdate));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
     }
 
     [Fact]

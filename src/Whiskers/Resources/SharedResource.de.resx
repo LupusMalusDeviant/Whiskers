@@ -4820,4 +4820,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AutomationOwners_NoOwner_AutoUpdate_Refused" xml:space="preserve">
     <value>Kein Besitzer: Updates werden abgelehnt, bis ein Admin AutoUpdate übernimmt.</value>
   </data>
+  <data name="AutomationOwners_State_Unverified" xml:space="preserve">
+    <value>Anmeldung noch nicht bestätigt – Läufe werden abgelehnt, bis sich der Besitzer einmal anmeldet oder ein Admin übernimmt.</value>
+  </data>
 </root>

@@ -106,6 +106,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
     private const string NightlyRunner = "autopatch";
 
+    internal const string SuspensionNotSaved =
+        " The suspension could not be saved: it holds only until Whiskers restarts — take it over or switch it off now.";
+
     /// <summary>The nightly cycle, on the authority of the admin who took AutoPatch over. Without one it does not run:
     /// the configuration switch alone is not an owner. Internal for tests.</summary>
     internal async Task RunNightlyAsync(CancellationToken ct)
@@ -143,7 +146,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     private async Task<bool> SuspendIfOwnerLostAsync(AutomationActor actor, string capabilityId, CancellationToken ct)
     {
         if (_automation.LostAuthority(actor, capabilityId) is not { } lost) return false;
-        await _owners.SuspendAsync(IAutomationOwnerStore.AutoPatch, lost, ct);
+        var saved = await _owners.SuspendAsync(IAutomationOwnerStore.AutoPatch, lost, ct);
         _logger.LogError("AutoPatch was suspended: {Reason}. Take it over again in Settings → Automation owners", lost);
         try
         {
@@ -151,7 +154,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             {
                 EventType = "automation_suspended",
                 ContainerName = "AutoPatch",
-                ImageInfo = $"AutoPatch was suspended: {lost}. It stays off until an admin takes it over in Settings.",
+                ImageInfo = $"AutoPatch was suspended: {lost}. It stays off until an admin takes it over in Settings."
+                            + (saved ? "" : SuspensionNotSaved),
             });
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
