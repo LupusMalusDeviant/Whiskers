@@ -25,20 +25,30 @@ public static class GitDeployOwners
     public static async Task<(bool Success, string Output)> DeployAsOwnerAsync(IGitDeployService gitDeploy,
         IAutomationMutationRunner? automation, string appId, CancellationToken ct = default)
     {
+        var (success, output, _) = await RunAsOwnerAsync(gitDeploy, automation, appId, ct);
+        return (success, output);
+    }
+
+    /// <summary><see cref="DeployAsOwnerAsync"/>, also telling a refusal (no owner, the owner's authority, policy, an
+    /// unknown app) from a deployment that ran and failed — a webhook reports a refusal to an admin (R1-09).</summary>
+    public static async Task<(bool Success, string Output, bool Refused)> RunAsOwnerAsync(IGitDeployService gitDeploy,
+        IAutomationMutationRunner? automation, string appId, CancellationToken ct = default)
+    {
         ArgumentNullException.ThrowIfNull(gitDeploy);
         var app = await gitDeploy.GetAppAsync(appId);
-        if (app is null) return (false, "Git deploy app not found.");
+        if (app is null) return (false, "Git deploy app not found.", true);
         if (string.IsNullOrWhiteSpace(app.Owner))
-            return (false, $"'{app.Name}' has no owner: an admin must take it over on the Git deploy page first.");
-        if (automation is null) return (false, "Automated deployments are not available.");
+            return (false, $"'{app.Name}' has no owner: an admin must take it over on the Git deploy page first.", true);
+        if (automation is null) return (false, "Automated deployments are not available.", true);
 
         var actor = ActorOf(app);
         var outcome = await automation.RunAsync(actor, "gitdeploy.deploy",
             new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision },
             token => gitDeploy.DeployAsync(app, automation.GateFor(actor, "gitdeploy.deploy"), ct: token), ct);
-        if (outcome.Error is MutationRefusedException refused) return (false, refused.Message);
+        if (outcome.Error is MutationRefusedException refused) return (false, refused.Message, true);
         return outcome.Status is MutationStatus.Executed or MutationStatus.Failed && outcome.Value.Output is not null
-            ? outcome.Value
-            : (false, outcome.Reason ?? $"The deployment was {outcome.Status}.");
+            ? (outcome.Value.Success, outcome.Value.Output, false)
+            : (false, outcome.Reason ?? $"The deployment was {outcome.Status}.",
+                outcome.Status is not (MutationStatus.Executed or MutationStatus.Failed));
     }
 }

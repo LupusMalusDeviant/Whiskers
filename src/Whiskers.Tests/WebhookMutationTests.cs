@@ -163,7 +163,7 @@ public sealed class WebhookMutationTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Actions))]
-    public async Task A_webhook_without_an_owner_is_refused_before_anything_runs(string action, string target)
+    public async Task A_webhook_without_an_owner_is_decided_refused_and_switched_off(string action, string target)
     {
         var webhook = Seed(action, target, owner: null);
 
@@ -172,7 +172,48 @@ public sealed class WebhookMutationTests : IDisposable
         Assert.False(success);
         Assert.Contains("no owner", output);
         Assert.False(Ran(action));
-        Assert.Empty(_audit.Requests);
+        Assert.Contains(_audit.Requests, r => r.Principal.Id == "unowned:webhook:" + webhook.WebhookId);
+        Assert.False(Stored(webhook.WebhookId).Enabled);
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended");
+    }
+
+    public static TheoryData<string, string> UnresolvableTargets => new()
+    {
+        { "restart", "gone" },
+        { "rebuild", "aaa" },             // ambiguous id prefix
+        { "deploy", "/opt/missing" },     // no compose file: no plan
+        { "git-deploy", "fedcba987654" }, // no such app
+    };
+
+    [Theory]
+    [MemberData(nameof(UnresolvableTargets))]
+    public async Task A_revoked_owner_switches_the_webhook_off_even_when_its_target_cannot_be_resolved(string action,
+        string target)
+    {
+        var webhook = Seed(action, target);
+        _roles.Map[Admin] = AppRole.Viewer;
+
+        var (success, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.False(Ran(action));
+        Assert.NotEmpty(_audit.Requests);
+        Assert.False(Stored(webhook.WebhookId).Enabled);
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended");
+    }
+
+    [Theory]
+    [MemberData(nameof(UnresolvableTargets))]
+    public async Task An_unresolvable_target_is_decided_and_refused_and_nothing_runs(string action, string target)
+    {
+        var webhook = Seed(action, target);
+
+        var (success, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.False(Ran(action));
+        Assert.NotEmpty(_audit.Requests);
+        Assert.True(Stored(webhook.WebhookId).Enabled);
     }
 
     [Fact]
@@ -218,10 +259,13 @@ public sealed class WebhookMutationTests : IDisposable
         var webhook = Seed("git-deploy", AppId, owner: PrincipalIds.User(Other));
         _roles.Map[Admin] = AppRole.Viewer;   // the app's owner lost Admin; the webhook's owner still has it
 
-        var (success, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
 
         Assert.False(success);
+        Assert.StartsWith("Refused", output);
         Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
+        Assert.True(Stored(webhook.WebhookId).Enabled);   // the webhook's own owner still holds the authority
     }
 
     // ---------------------------------------------------------------- management through the gateway
@@ -247,7 +291,8 @@ public sealed class WebhookMutationTests : IDisposable
     }
 
     [Theory]
-    [InlineData("webhook.save")]
+    [InlineData("create")]
+    [InlineData("take-over")]
     [InlineData("webhook.rotate_secret")]
     [InlineData("webhook.set_enabled")]
     [InlineData("webhook.delete")]
@@ -258,10 +303,12 @@ public sealed class WebhookMutationTests : IDisposable
         await Assert.ThrowsAsync<MutationRefusedException>(() => Manage(UiRunner(AppRole.Operator), capability, webhook));
 
         Assert.Equal(Snapshot(webhook), Snapshot(Stored(webhook.WebhookId)));
+        Assert.Equal(1, Count());
     }
 
     [Theory]
-    [InlineData("webhook.save")]
+    [InlineData("create")]
+    [InlineData("take-over")]
     [InlineData("webhook.rotate_secret")]
     [InlineData("webhook.set_enabled")]
     [InlineData("webhook.delete")]
@@ -276,6 +323,47 @@ public sealed class WebhookMutationTests : IDisposable
         await Assert.ThrowsAsync<MutationRefusedException>(() => Manage(UiRunner(AppRole.Admin), capability, webhook));
 
         Assert.Equal(Snapshot(webhook), Snapshot(Stored(webhook.WebhookId)));
+        Assert.Equal(1, Count());
+    }
+
+    [Fact]
+    public async Task An_admin_recovers_a_webhook_whose_owner_was_revoked_by_taking_it_over()
+    {
+        const string Gone = "gone@example.com";
+        var webhook = Seed("restart", "web-1", owner: PrincipalIds.User(Gone));   // never whitelisted: no authority
+
+        var (before, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+        Assert.False(before);
+        Assert.False(Stored(webhook.WebhookId).Enabled);
+
+        var runner = UiRunner(AppRole.Admin);
+        Assert.True(await runner.RunAsync("webhook.save",
+            new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, owner = AdminId },
+            _ => Service().SetOwnerAsync(webhook.WebhookId, AdminId, PrincipalIds.User(Gone))));
+        await runner.RunAsync("webhook.set_enabled",
+            new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, enabled = true },
+            _ => Service().SetEnabledAsync(webhook.WebhookId, true));
+
+        var (after, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+        Assert.True(after, output);
+        Assert.Equal(AdminId, Stored(webhook.WebhookId).Owner);
+    }
+
+    [Fact]
+    public async Task A_webhook_whose_server_was_removed_can_still_be_switched_off_and_deleted()
+    {
+        var webhook = Seed("restart", "web-1", serverId: "edge-removed");
+        var runner = UiRunner(AppRole.Admin);
+
+        await runner.RunAsync("webhook.set_enabled",
+            new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, enabled = false },
+            _ => Service().SetEnabledAsync(webhook.WebhookId, false));
+        Assert.False(Stored(webhook.WebhookId).Enabled);
+        await runner.RunAsync("webhook.delete",
+            new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId },
+            _ => Service().DeleteWebhookAsync(webhook.WebhookId));
+
+        Assert.Equal(0, Count());
     }
 
     [Fact]
@@ -317,14 +405,14 @@ public sealed class WebhookMutationTests : IDisposable
         _ => _host.Executed.Any(c => c.Contains("docker compose") && c.Contains(" up ")),
     };
 
-    private WebhookEntity Seed(string action, string target, string? owner = "admin")
+    private WebhookEntity Seed(string action, string target, string? owner = "admin", string serverId = "local")
     {
         using var scope = _sp.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var webhook = new WebhookEntity
         {
             Name = $"wh-{action}", Secret = WebhookService.GenerateSecret(), Action = action,
-            TargetType = action == "deploy" ? "compose" : "container", TargetId = target, ServerId = "local",
+            TargetType = action == "deploy" ? "compose" : "container", TargetId = target, ServerId = serverId,
             Owner = owner == "admin" ? AdminId : owner,
         };
         db.Webhooks.Add(webhook);
@@ -339,11 +427,23 @@ public sealed class WebhookMutationTests : IDisposable
             .Single(w => w.WebhookId == webhookId);
     }
 
+    private int Count()
+    {
+        using var scope = _sp.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Webhooks.Count();
+    }
+
     private static string Snapshot(WebhookEntity w) => $"{w.Name}|{w.Secret}|{w.Enabled}|{w.Owner}|{w.TargetId}";
 
     private Task Manage(IUiMutationRunner runner, string capability, WebhookEntity webhook) => capability switch
     {
-        "webhook.save" => runner.RunAsync("webhook.save",
+        "create" => runner.RunAsync("webhook.save",
+            new { name = "new", action = "restart", target = "web-1", serverId = "local", owner = AdminId },
+            _ => Service().CreateWebhookAsync(new WebhookEntity
+            {
+                Name = "new", Action = "restart", TargetId = "web-1", ServerId = "local", Owner = AdminId,
+            })),
+        "take-over" => runner.RunAsync("webhook.save",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, owner = "user:x@example.com" },
             _ => Service().SetOwnerAsync(webhook.WebhookId, "user:x@example.com", webhook.Owner)),
         "webhook.rotate_secret" => runner.RunAsync("webhook.rotate_secret",

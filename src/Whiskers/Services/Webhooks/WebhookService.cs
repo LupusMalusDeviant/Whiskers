@@ -178,15 +178,15 @@ public class WebhookService : IWebhookService
 
     /// <summary>
     /// Runs the webhook's action through the Mutation Gateway on its owner's authority, re-checked now (R1-09, INV-04):
-    /// the action's capability on its resolved target, and for a compose deploy every container of the plan. The
-    /// target and plan come from <see cref="WebhookTargets"/>, the same as for the Webhooks page's Test. A webhook
-    /// without an owner is refused before anything runs; a refusal because the owner lost the authority switches it
-    /// off and tells an admin, any other refusal (kill switch, protected resource) is reported and leaves it on.
+    /// the action's capability on its target, and for a compose deploy every container of the plan. The target and
+    /// plan come from <see cref="WebhookTargets"/>, the same as for the Webhooks page's Test. Every delivery is decided
+    /// — also one without an owner, or whose target or plan cannot be resolved — so it is audited, and a refusal
+    /// because the owner lost the authority (or there is none) switches the webhook off and tells an admin; any other
+    /// refusal (kill switch, protected resource, an unknown target, the Git app's own owner) is reported to an admin
+    /// and leaves it on. The action itself runs only for a webhook with an owner.
     /// </summary>
     private async Task<(bool, string)> RunAsOwnerAsync(WebhookEntity webhook)
     {
-        if (string.IsNullOrWhiteSpace(webhook.Owner))
-            return (false, $"'{webhook.Name}' has no owner: an admin must take it over on the Webhooks page first.");
         using var scope = _scopeFactory.CreateScope();
         var automation = scope.ServiceProvider.GetService<IAutomationMutationRunner>();
         if (automation is null) return (false, "Automated actions are not available.");
@@ -200,12 +200,14 @@ public class WebhookService : IWebhookService
             case "restart":
             {
                 capability = "container.restart";
+                // An unresolved container is decided by its stored name: the resolver refuses it (audited).
                 var (container, error) = await WebhookTargets.ContainerAsync(_docker, webhook);
-                if (container is null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
                 outcome = await automation.RunAsync(actor, "container.restart",
-                    new { containerId = container.Id, name = container.Name, serverId = sid },
+                    new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
                     async _ =>
                     {
+                        EnsureOwned(webhook);
+                        if (container is null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
                         await _docker.RestartContainerAsync(container.Id, sid);
                         return (true, $"Container {container.Name} restarted.");
                     });
@@ -215,11 +217,12 @@ public class WebhookService : IWebhookService
             {
                 capability = "container.update";
                 var (container, error) = await WebhookTargets.ContainerAsync(_docker, webhook);
-                if (container is null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
                 outcome = await automation.RunAsync(actor, "container.update",
-                    new { containerId = container.Id, name = container.Name, serverId = sid },
+                    new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
                     async _ =>
                     {
+                        EnsureOwned(webhook);
+                        if (container is null) return (false, error ?? $"Container '{webhook.TargetId}' not found");
                         var newId = await _docker.RecreateContainerAsync(container.Id, sid);
                         return (true, $"Container {container.Name} rebuilt (new ID: {newId[..Math.Min(12, newId.Length)]}).");
                     });
@@ -228,13 +231,15 @@ public class WebhookService : IWebhookService
             case "deploy":
             {
                 capability = "compose.deploy";
+                // A plan that cannot be made is still decided on the project directory; then nothing runs.
                 var (plan, error) = await WebhookTargets.ComposePlanAsync(_planner, webhook);
-                if (plan is null) return (false, error!);
                 var gate = automation.GateFor(actor, "compose.deploy");
                 outcome = await automation.RunAsync(actor, "compose.deploy",
-                    new { projectName = plan.ProjectName, projectDir = plan.ProjectDirectory, serverId = sid },
+                    new { projectName = plan?.ProjectName, projectDir = webhook.TargetId, serverId = sid },
                     async _ =>
                     {
+                        EnsureOwned(webhook);
+                        if (plan is null) return (false, error!);
                         (bool, string) result = (false, "The deployment did not run.");
                         await gate(plan, async () => result = await DeployCompose(webhook));
                         return result;
@@ -244,14 +249,22 @@ public class WebhookService : IWebhookService
             case "git-deploy":
             {
                 // F5: push-triggered git redeploy; TargetId = the GitDeployApp id. The webhook's owner decides firing
-                // it; the deployment then runs on the app owner's authority (R1-08), so both must hold it.
+                // it; the deployment then runs on the app owner's authority (R1-08), so both must hold it. A refusal
+                // of the app's owner is a refusal of this delivery too.
                 capability = "gitdeploy.deploy";
                 var gitDeploy = scope.ServiceProvider.GetRequiredService<IGitDeployService>();
                 var app = await gitDeploy.GetAppAsync(webhook.TargetId);
-                if (app is null) return (false, "Git deploy app not found.");
                 outcome = await automation.RunAsync(actor, "gitdeploy.deploy",
-                    new { appId = app.Id, name = app.Name, serverId = app.ServerId, revision = app.Revision },
-                    _ => GitDeployOwners.DeployAsOwnerAsync(gitDeploy, automation, app.Id));
+                    new { appId = app?.Id ?? webhook.TargetId, name = app?.Name, serverId = app?.ServerId, revision = app?.Revision },
+                    async _ =>
+                    {
+                        EnsureOwned(webhook);
+                        if (app is null) return (false, "Git deploy app not found.");
+                        var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(gitDeploy, automation, app.Id);
+                        if (refused)
+                            throw new MutationRefusedException($"Git deployment '{app.Name}': {output}", MutationStatus.Denied, "");
+                        return (success, output);
+                    });
                 break;
             }
             default:
@@ -276,6 +289,16 @@ public class WebhookService : IWebhookService
         await NotifyAsync(scope, "automation_refused", webhook,
             $"Webhook \"{webhook.Name}\" was called, but its action did not run. {reason}");
         return (false, $"Refused: {reason}");
+    }
+
+    /// <summary>A webhook without an owner never runs its action — also not when owners are optional for other
+    /// automation (<see cref="AutomationOptions.RequireOwner"/> off): only an admin taking it over enables it.</summary>
+    private static void EnsureOwned(WebhookEntity webhook)
+    {
+        if (string.IsNullOrWhiteSpace(webhook.Owner))
+            throw new MutationRefusedException(
+                $"'{webhook.Name}' has no owner: an admin must take it over on the Webhooks page first.",
+                MutationStatus.Denied, "");
     }
 
     /// <summary>Switches the webhook off if it still has the owner the call ran on; a takeover meanwhile wins.</summary>

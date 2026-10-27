@@ -109,12 +109,13 @@ public sealed class WebhookSecretTests : IDisposable
     [Fact]
     public async Task Signed_test_passes_signature_validation_end_to_end()
     {
-        // A correctly signed request must get PAST the HMAC check and stop at the next check instead — the
-        // seeded webhook has no owner (R1-09) — proving the signature was accepted without needing a Docker host.
+        // A correctly signed request must get PAST the HMAC check and stop at the next step instead — the action
+        // runs through the automation runner (R1-09), which this bare provider does not have — proving the
+        // signature was accepted without needing a Docker host.
         var wh = Seed(secret: "s3cret");
         var (success, output) = await Service().TriggerSignedTestAsync(wh.WebhookId);
         Assert.False(success);
-        Assert.Contains("has no owner", output);
+        Assert.Equal("Automated actions are not available.", output);
     }
 
     // --- Regenerate + enable guard -------------------------------------------------------------------------

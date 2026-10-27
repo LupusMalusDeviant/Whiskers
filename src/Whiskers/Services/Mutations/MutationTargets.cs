@@ -398,7 +398,9 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
 
     /// <summary>
     /// A webhook (R1-09): the stored webhook by its id, with its own name and the server its action runs on — never
-    /// the ones the page rendered. Creating a new one resolves only the chosen server.
+    /// the ones the page rendered. Creating a new one resolves only the chosen server. A webhook whose server was
+    /// removed meanwhile can still be managed (switched off, deleted, taken over): only its record changes; its
+    /// action is decided on the server again when it runs, and refused there.
     /// </summary>
     private async Task<TargetResolution> WebhookAsync(Capability capability, MutationTarget target)
     {
@@ -417,11 +419,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (webhook is null)
             return Refuse($"Webhook not found: {target.Id}", target.Id);
         var serverId = Whiskers.Services.Webhooks.WebhookTargets.ServerOf(webhook);
-        var (server, error) = ResolveServer(serverId);
-        if (server is null) return Refuse(error!, serverId);
+        var server = ResolveServer(serverId).Server;
         return Done(target with
         {
-            Id = webhook.WebhookId, Name = webhook.Name, ServerId = server.Id,
+            Id = webhook.WebhookId, Name = webhook.Name, ServerId = server?.Id ?? serverId,
             Related = new[] { webhook.Name, webhook.TargetId }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
         });
     }

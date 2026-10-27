@@ -15,8 +15,8 @@ gateway:
 - scheduled tasks, AutoUpdate and AutoPatch through [`IAutomationMutationRunner`](AutomationMutationRunner.cs)
   (surface `Automation`, an `Automation` principal acting `OnBehalfOf` the recorded owner).
 
-A tool counts as mutating when the catalog lists it (`ICapabilityCatalog.FindByMcpTool`). Webhooks / Git deploy
-(2.4) and terminals (2.5) follow; step 2.6 makes bypassing the gateway fail.
+A tool counts as mutating when the catalog lists it (`ICapabilityCatalog.FindByMcpTool`). Webhooks and Git deploy
+(2.4) run through the gateway since R1-08 / R1-09; terminals (2.5) follow; step 2.6 makes bypassing the gateway fail.
 
 ### UI handlers
 
@@ -220,8 +220,11 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   from the store; a per-container decision inside the deployment resolves that container); a webhook Git deploy
   runs through `IAutomationMutationRunner` on the app owner (`GitDeployOwners`).
 - **Webhooks** (R1-09): an external call (`/api/webhooks/...`) runs its action through `IAutomationMutationRunner` on
-  the webhook's owner (`webhook` targets resolve the stored webhook: its name and server); the UI's **Test** button is
-  decided as the clicking person first and then runs the same way. Management writes are `webhook.*` capabilities.
+  the webhook's owner (`webhook` targets resolve the stored webhook: its name and server — a removed server does not
+  block switching it off or deleting it); every delivery is decided, also one without an owner or with a target that
+  cannot be resolved (the resolver refuses it), so it is audited and a lost authority switches the webhook off. The
+  UI's **Test** button is decided as the clicking person first and then runs the same way. Management writes are
+  `webhook.*` capabilities.
   An owner (webhook, Git deploy app) set by a person on the page is recorded as its provenance too, so the PC-D1
   rules for a person apply.
 - **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the pod's **live**

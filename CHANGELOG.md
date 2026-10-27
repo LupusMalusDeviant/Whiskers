@@ -8,12 +8,14 @@ All notable changes to Whiskers are documented here. The format follows
 
 - R1-09: webhooks have an **owner** — whoever creates the webhook, or an admin taking it over on the Webhooks page
   (new Owner column). An external call to `/api/webhooks/{id}` now runs its action through the Mutation Gateway on
-  the owner's authority, re-checked at each delivery, for all four actions: restart and rebuild as
+  the owner's authority, re-checked at each delivery — every delivery is decided and audited, also one without an
+  owner or whose target cannot be resolved — for all four actions: restart and rebuild as
   `container.restart` / `container.update` on the resolved container (a stopped one too; an ambiguous id prefix is
   refused), compose deploy as `compose.deploy` plus a decision per container of its plan, Git deploy as
-  `gitdeploy.deploy` by the webhook's owner and then by the app's owner (R1-08). A webhook without an owner is refused;
-  one whose owner lost the authority (role, whitelist, account, key) is switched off and an admin is notified; any
-  other refusal (kill switch, protected resource, unwritable audit) is reported to an admin and leaves it on. Creating,
+  `gitdeploy.deploy` by the webhook's owner and then by the app's owner (R1-08). A webhook without an owner, or whose
+  owner lost the authority (role, whitelist, account, key), is refused, switched off and an admin is notified; any
+  other refusal (kill switch, protected resource, unknown target, the Git app owner's, unwritable audit) is reported
+  to an admin and leaves it on. A webhook whose server was removed can still be switched off and deleted. Creating,
   taking over, rotating the secret, switching on/off and deleting a webhook are decided by the gateway too
   (`webhook.save`, `webhook.rotate_secret`, `webhook.set_enabled`, `webhook.delete`, all Admin), on the stored
   webhook; the secret is never a decision argument. The Webhooks page's Test plans the action as the trigger does
@@ -84,8 +86,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 ### ⚠️ Upgrade notes
 
 - **R1-09: webhooks created before this release have no owner and stop working.** An external call (and the Test
-  button) is refused until an admin takes the webhook over on the Webhooks page (person icon in the Owner column);
-  CI callers keep their URL and secret. A webhook whose owner later loses Admin (restart and rebuild need Operator),
+  button) is refused and switches the webhook off (an admin is notified) until an admin takes it over on the Webhooks
+  page (person icon in the Owner column) and switches it on again; CI callers keep their URL and secret. A webhook whose owner later loses Admin (restart and rebuild need Operator),
   is removed from the whitelist or loses their account is switched off on its next call, and an admin is notified.
   Managing webhooks still needs Admin, now also checked by the gateway (kill switch, audit).
 
