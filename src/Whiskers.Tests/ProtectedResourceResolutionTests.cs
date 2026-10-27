@@ -180,6 +180,7 @@ public sealed class ProtectedResourceResolutionTests
     [InlineData("services:\n  a:\n    extends:\n      file: base.yaml\n      service: a\n")]
     [InlineData("services: [broken")]
     [InlineData("name: x\n")]
+    [InlineData("services:\n  a:\n    image: x\n---\nservices:\n  db:\n    image: y\n")]
     public async Task What_cannot_be_planned_refuses_the_deployment(string content) =>
         await Assert.ThrowsAsync<ComposePlanException>(() =>
             Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/x", content)));
@@ -404,6 +405,72 @@ public sealed class ProtectedResourceResolutionTests
 
         await Assert.ThrowsAsync<ComposePlanException>(() =>
             Planner().PlanAsync(ComposeDeployment.FromDirectory("local", "/srv/app")));
+    }
+
+    [Fact]
+    public void An_escaped_quote_does_not_end_an_env_value()
+    {
+        var env = ComposeModel.ParseEnv("A=\"x\\\"y\" # c\nB=plain # c\n");
+
+        Assert.Equal("x\"y", env["A"]);
+        Assert.Equal("plain", env["B"]);
+    }
+
+    [Fact]
+    public async Task A_git_deployment_runs_once_the_page_decided_every_planned_container()
+    {
+        var (git, app, root) = await GitAppAsync();
+        try
+        {
+            var runner = UiRunner(GuardrailPolicy.SafeDefault());
+
+            var (success, _) = await runner.RunAsync("gitdeploy.deploy", new { appId = app.Id, serverId = "local" },
+                _ => git.DeployAsync(app.Id, gate: runner.GateFor("gitdeploy.deploy")));
+
+            Assert.True(success);
+            Assert.Contains(_host.Executed, c => c.Contains("-p 'payments'") && c.EndsWith("up -d --remove-orphans"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task A_git_deployment_inside_a_decision_without_a_gate_refuses_undecided_containers()
+    {
+        // The webhook Test button: decided on the app only, then fired without a per-container gate.
+        var (git, app, root) = await GitAppAsync();
+        try
+        {
+            var runner = UiRunner(GuardrailPolicy.SafeDefault());
+
+            var (success, output) = await runner.RunAsync("gitdeploy.deploy", new { appId = app.Id, serverId = "local" },
+                _ => git.DeployAsync(app.Id));
+
+            Assert.False(success);
+            Assert.Contains("not decided", output);
+            Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private async Task<(Whiskers.Services.GitDeploy.GitDeployService Git, GitDeployApp App, string Root)> GitAppAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"gitdeploy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var git = new Whiskers.Services.GitDeploy.GitDeployService(_host, new NoVault(), Planner(),
+            NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(root, "apps.json"));
+        var app = await git.SaveAppAsync(new GitDeployApp
+        {
+            Id = "0123456789ab", Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
+        }, token: null);
+        _host.Files[$"/opt/whiskers-git/{app.Id}/repo/docker-compose.yml"] =
+            "name: payments\nservices:\n  web:\n    image: nginx\n";
+        return (git, app, root);
     }
 
     // ---------------------------------------------------------------- helpers

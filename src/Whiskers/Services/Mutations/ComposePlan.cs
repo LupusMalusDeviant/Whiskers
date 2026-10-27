@@ -99,7 +99,9 @@ public sealed record ComposePlan(
     /// <summary><c>docker compose</c> with the plan's project, directory and files, then <paramref name="subcommand"/>.</summary>
     public string Command(string subcommand)
     {
-        var sb = new StringBuilder("docker compose -p ").Append(ShellUtils.Quote(ProjectName))
+        // The shell's own orphan switches are dropped: the plan decided on orphans from the call and the .env only.
+        var sb = new StringBuilder("env -u COMPOSE_REMOVE_ORPHANS -u COMPOSE_IGNORE_ORPHANS docker compose -p ")
+            .Append(ShellUtils.Quote(ProjectName))
             .Append(" --project-directory ").Append(ShellUtils.Quote(ProjectDirectory));
         foreach (var file in Files)
             sb.Append(" -f ").Append(ShellUtils.Quote(file));
@@ -282,10 +284,19 @@ public static class ComposeModel
                 env[key] = value[1..end];
                 continue;
             }
-            if (value.Length >= 1 && value[0] is '"' or '\'' && (value.Length < 2 || value.IndexOf(value[0], 1) < 0))
-                throw new ComposePlanException($"The .env value of {key} spans several lines, which is not supported.");
-            if (value.Length >= 2 && value[0] == '"' && value.IndexOf('"', 1) is var close and > 0)
+            if (value.Length >= 1 && value[0] == '"')
+            {
+                // The first unescaped quote ends the value; none on this line = a multi-line value, not supported.
+                var close = -1;
+                for (var i = 1; i < value.Length && close < 0; i++)
+                    if (value[i] == '\\') i++;
+                    else if (value[i] == '"') close = i;
+                if (close < 0)
+                    throw new ComposePlanException($"The .env value of {key} spans several lines, which is not supported.");
                 value = value[1..close].Replace("\\n", "\n").Replace("\\\"", "\"").Replace("\\\\", "\\");
+            }
+            else if (value.Length >= 1 && value[0] == '\'')
+                throw new ComposePlanException($"The .env value of {key} spans several lines, which is not supported.");
             else if (value.IndexOf(" #", StringComparison.Ordinal) is var hash and >= 0)
                 value = value[..hash].TrimEnd();
             env[key] = TryInterpolate(value, env, out var result) ? result : null;
@@ -408,6 +419,9 @@ public static class ComposeModel
             var stream = new YamlStream();
             stream.Load(new StringReader(content));
             if (stream.Documents.Count == 0) return null;
+            // compose merges every document of a file; a plan of the first one alone would miss services.
+            if (stream.Documents.Count > 1)
+                throw new ComposePlanException($"{path} holds several YAML documents, which is not supported.");
             return stream.Documents[0].RootNode as YamlMappingNode
                    ?? throw new ComposePlanException($"{path} is not a compose mapping.");
         }

@@ -19,7 +19,11 @@ All notable changes to Whiskers are documented here. The format follows
   variable without default in a name or a compose switch that is not in the `.env`, a multi-line `.env` value,
   `include`, `extends` from another file, invalid YAML, an unreadable file) refuses the deployment
   (`ProtectedResourceResolutionTests`). A `${VAR:-default}` whose variable is not in the `.env` is planned with the
-  default; a value only the host's environment sets would win in compose and is not seen.
+  default; compose gives a value from the host's environment precedence over the `.env`, which the plan does not
+  see. The host environment's `COMPOSE_REMOVE_ORPHANS` / `COMPOSE_IGNORE_ORPHANS` are cleared for the command.
+  A compose file with several YAML documents is refused. A Git deploy fired by the webhook **Test** button checks
+  its plan against the Test decision, which covers no containers yet: until R1-08 it is refused when the deployment
+  touches an existing container.
 
 - R1-06: every mutation's target is resolved against the inventory before policy — servers (an empty server id is
   the configured default server, decided by the gateway), containers, networks with the containers attached to them,
