@@ -21,11 +21,27 @@ internal static class GuardrailRuleHelpers
         }
     }
 
-    /// <summary>Glob (* and ?) → anchored, case-insensitive regex.</summary>
+    /// <summary>How long one policy pattern may take against one value. A pattern that takes longer counts as a
+    /// match (INV-25: an evaluation error never allows).</summary>
+    public static readonly TimeSpan PatternTimeout = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>Glob (* and ?) → anchored, case-insensitive regex. A timeout counts as a match (fail closed).</summary>
     public static bool GlobMatch(string glob, string value)
     {
         var pattern = "^" + Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-        return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase);
+        try { return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase, PatternTimeout); }
+        catch (RegexMatchTimeoutException) { return true; }
+    }
+
+    /// <summary>The first pattern in <paramref name="patterns"/> that is not a valid regex, or <c>null</c>.</summary>
+    public static string? FirstInvalidRegex(IEnumerable<string> patterns)
+    {
+        foreach (var pattern in patterns)
+        {
+            try { _ = new Regex(pattern, RegexOptions.IgnoreCase, PatternTimeout); }
+            catch (ArgumentException) { return pattern; }
+        }
+        return null;
     }
 }
 
@@ -146,11 +162,25 @@ public sealed class ForbiddenArgumentRule : IGuardrailRule
         var patterns = request.Context.Policy.ForbiddenArgPatterns;
         if (patterns.Count > 0)
         {
+            // INV-25: a pattern the engine cannot evaluate refuses every call, with or without arguments — a broken
+            // policy must never read as "nothing forbidden".
+            if (GuardrailRuleHelpers.FirstInvalidRegex(patterns) is { } invalid)
+            {
+                reason = $"The guardrail policy holds an invalid forbidden-argument pattern ('{invalid}'); refused until it is fixed.";
+                return GuardrailVerdict.Deny;
+            }
             foreach (var value in GuardrailRuleHelpers.ArgumentValues(request))
             {
                 foreach (var pattern in patterns)
                 {
-                    if (SafeIsMatch(pattern, value))
+                    bool matched;
+                    try { matched = Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase, GuardrailRuleHelpers.PatternTimeout); }
+                    catch (RegexMatchTimeoutException)
+                    {
+                        reason = $"A forbidden-argument pattern ('{pattern}') timed out; refused.";
+                        return GuardrailVerdict.Deny;
+                    }
+                    if (matched)
                     {
                         reason = $"Argument contains a forbidden pattern ('{pattern}').";
                         return GuardrailVerdict.Deny;
@@ -160,15 +190,6 @@ public sealed class ForbiddenArgumentRule : IGuardrailRule
         }
         reason = "";
         return GuardrailVerdict.Allow;
-    }
-
-    // A broken regex from the policy must never defeat the gate: when in doubt it does not block,
-    // but it also does not throw — an invalid policy regex silently ignores this one rule.
-    private static bool SafeIsMatch(string pattern, string value)
-    {
-        try { return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100)); }
-        catch (ArgumentException) { return false; }
-        catch (RegexMatchTimeoutException) { return false; }
     }
 }
 

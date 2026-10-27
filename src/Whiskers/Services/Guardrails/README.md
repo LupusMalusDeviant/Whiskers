@@ -16,6 +16,10 @@ Who asks the engine:
 The key's scope (`McpPermissionCheck`) is checked inside each tool on top.
 Aggregation is **most-restrictive-wins**: any `Deny` beats everything, otherwise a `Confirm` wins, otherwise `Allow`.
 
+**Fail closed (INV-25).** An error while evaluating the policy never allows: a forbidden-argument pattern that is not
+a valid regex denies every call, and a pattern or protected-resource glob that runs into its 100 ms timeout counts as
+a match.
+
 ## Files
 
 | File | Purpose |
@@ -24,7 +28,7 @@ Aggregation is **most-restrictive-wins**: any `Deny` beats everything, otherwise
 | `GuardrailEngine.cs` | Aggregates all rules with most-restrictive-wins; `CreateDefault()` wires the built-in rule set in evaluation order. |
 | `BuiltInGuardrailRules.cs` | The built-in rules: `PrincipalCeilingRule` (≤ trigger rights), `ReadOnlyModeRule` (kill switch), `ToolDenyListRule`, `ToolAllowListRule`, `ProtectedResourceRule` (glob), `ForbiddenArgumentRule` (regex), `ConfirmationRule` (hybrid autonomy). |
 | `IGuardrailStore.cs` | `IGuardrailStore` (load/save policy, change event) and `IGuardrailRuleCatalog` (rule descriptors for the UI). |
-| `GuardrailStore.cs` | Persists the policy in its own admin-only `guardrails.json` (separate from agent settings, so a compromised settings editor cannot relax it). Warmed up at startup (order 80). |
+| `GuardrailStore.cs` | Persists the policy in its own admin-only `guardrails.json` (separate from agent settings, so a compromised settings editor cannot relax it). Warmed up at startup (order 80). Hands out and stores **copies** only; a save is validated and becomes live only after the file is written. An unreadable or invalid file (incl. a missing active preset) enforces `GuardrailPolicy.FailClosed()` until an Admin saves a valid configuration; the file is kept as `guardrails.json.unreadable-<timestamp>` (INV-25, INV-28). |
 | `DirectMcpCallGuard.cs` | The gate for direct MCP calls of tools **without** a capability (reads). `Deny` blocks; `Confirm` goes to the [approval gate](../Approvals/) (approve-then-retry). Mutating tools are decided by the gateway instead. |
 | `GuardrailRuleCatalog.cs` | Describes the built-in rule types for the settings UI, so the form stays generic and the rules remain extensible. |
 
@@ -34,4 +38,4 @@ Registration: [`Startup/WhiskersMutationGatewayExtensions.AddGuardrailPolicy`](.
 
 - Policy model: [`../../Configuration/GuardrailPolicy.cs`](../../Configuration/GuardrailPolicy.cs) (the configurable, restrictive-by-default policy)
 - Approvals: [`../Approvals/`](../Approvals/)
-- Tests: `GuardrailEngineTests`, `DirectMcpCallGuardTests`, `GuardrailModuleIndependenceTests` in [`../../../Whiskers.Tests/`](../../../Whiskers.Tests/)
+- Tests: `GuardrailEngineTests`, `PolicyFailClosedTests`, `PolicyChangeAuditTests`, `DirectMcpCallGuardTests`, `GuardrailModuleIndependenceTests` in [`../../../Whiskers.Tests/`](../../../Whiskers.Tests/)

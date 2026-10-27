@@ -34,6 +34,32 @@ public class GuardrailPolicy
     /// <summary>Maximum number of executed actions per session — code-enforced.</summary>
     public int MaxActionsPerSession { get; set; } = 20;
 
+    /// <summary>A deep copy: callers that edit it never change a live policy.</summary>
+    public GuardrailPolicy Clone() => new()
+    {
+        MaxAutonomousLevel = MaxAutonomousLevel,
+        ReadOnlyMode = ReadOnlyMode,
+        RequireConfirmationForWrites = RequireConfirmationForWrites,
+        ToolDenyList = [.. ToolDenyList],
+        ToolAllowList = [.. ToolAllowList],
+        ToolMode = ToolMode,
+        ProtectedResources = [.. ProtectedResources],
+        ForbiddenArgPatterns = [.. ForbiddenArgPatterns],
+        MaxActionsPerSession = MaxActionsPerSession,
+    };
+
+    /// <summary>What applies while no valid policy could be loaded (INV-25): every mutation refused (kill switch),
+    /// no tool allowed for agents and MCP clients, every resource protected.</summary>
+    public static GuardrailPolicy FailClosed() => new()
+    {
+        MaxAutonomousLevel = "read",
+        ReadOnlyMode = true,
+        RequireConfirmationForWrites = true,
+        ToolMode = "allow",
+        ProtectedResources = { "*" },
+        MaxActionsPerSession = 0,
+    };
+
     /// <summary>Restrictive default: read-only autonomous, writes via confirmation, Whiskers protected,
     /// obviously destructive shell/SQL patterns blocked.</summary>
     public static GuardrailPolicy SafeDefault() => new()

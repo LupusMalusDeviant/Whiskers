@@ -108,11 +108,22 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **"Run now" needs Admin for a custom-command task, a self-backup task and any backup task with retention**
   (`maxBackups`): retention deletes old backups, which is decided as `volume.backup_delete` / `db.backup_delete` /
   `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
+- **The guardrail policy fails closed** (R1-02, INV-25):
+  - A forbidden-argument pattern that is not a valid regex now **refuses every call** (it was ignored). Fix or
+    remove the pattern in Guardrails; saving a configuration with an invalid pattern is refused.
+  - A pattern or protected-resource glob that takes longer than 100 ms counts as a match and refuses the call.
+  - An unreadable or invalid `guardrails.json` (broken JSON, no presets, duplicate names, an active preset that does
+    not exist) no longer falls back to another preset: every mutation is refused, agents and MCP clients get no
+    tool, and the Guardrails page shows a single "Fail-closed" preset until an Admin saves a valid configuration.
+    The file is kept as `guardrails.json.unreadable-<timestamp>`.
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **Guardrail policy errors allowed the call, and the live policy could be changed without saving** (TA-32/33,
+  C-09/15, INV-25/28). See the upgrade note. The store now hands out copies only, and a save becomes live only
+  after it was written: a failed write leaves the previous policy active.
 - **Unattended runs had no owner and were never re-checked** (TA-04, INV-04, B-10). Scheduled tasks, AutoUpdate and
   AutoPatch now run through the Mutation Gateway as an automation principal acting on behalf of their owner, whose
   authority is read again on every run. A task created by a key that was later deleted no longer keeps running
