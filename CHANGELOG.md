@@ -107,13 +107,14 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     owner's current role or key level and refuses the run when it no longer covers the task (owner demoted, removed
     from the whitelist, key deleted or disabled). A refused run is recorded as failed, sends an
     `automation_refused` notification, and leaves a gateway AuditLog row.
-  - **Tasks from before this version have no owner.** They keep running for now (grace period), audited as
-    "no owner" and limited to the capability they run. Scheduled Tasks shows them with a warning; an Admin takes
-    them over with "Take over all" or per row. Set `Automation__RequireOwner=true` to refuse every ownerless run;
-    1.0 will make that the default.
+  - **Tasks from before this version have no owner, and owners are required** (`Automation:RequireOwner`, default
+    `true` since R1-04): an ownerless task is refused and switched off until an Admin takes it over — "Take over
+    all" or per row in Scheduled Tasks, which shows them with a warning. To keep them running for a while instead
+    (grace period, audited as "no owner" and limited to the capability they run), set
+    `Automation__RequireOwner=false` explicitly.
   - **AutoPatch does not run until an Admin takes it over** in Settings → Automation owners. `AutoPatch:Enabled`
-    alone is no longer enough; the nightly cycle logs a warning and skips. AutoUpdate keeps running without an
-    owner during the grace period; take it over there as well.
+    alone is no longer enough; the nightly cycle logs a warning and skips. AutoUpdate without an owner is refused
+    as well (unless the grace period is switched on as above); take it over there too.
   - What a task needs from its owner: a **custom-command** task needs an Admin owner (it runs as root on the host);
     a backup task whose **retention** deletes old backups (volume and DB backups) needs an Admin owner for the
     deletion; a **self-backup** task needs an Admin owner; the **cleanup** task (`docker system prune`) needs
@@ -151,6 +152,33 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **"Run now" needs Admin for a custom-command task, a self-backup task and any backup task with retention**
   (`maxBackups`): retention deletes old backups, which is decided as `volume.backup_delete` / `db.backup_delete` /
   `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
+- **Unattended items need an owner and are suspended when it loses its authority** (R1-04, PC-D6, INV-04):
+  - `Automation:RequireOwner` now defaults to `true`: a scheduled task or AutoUpdate without an owner is refused.
+    Take such items over in Scheduled Tasks, or keep the grace period with `Automation__RequireOwner=false`.
+  - A run refused because its owner lost their authority — local account deleted, removed from the whitelist,
+    demoted below what the item does (including retention deletes of a backup task), API key deleted or disabled —
+    now **suspends** the item: a scheduled task is switched off — take it over in Scheduled Tasks **and switch it
+    on again** (the takeover does not switch it on by itself, since a task may have been off on purpose) —,
+    AutoPatch / AutoUpdate are blocked until an Admin takes them over in Settings → Automation owners (AutoPatch
+    also stops mid-cycle). If switching a task off fails, every run is still refused and an Admin is notified. Admins get an
+    `automation_suspended` notification that no container mute hides. Policy refusals (kill switch, protected
+    resources) still only report `automation_refused`.
+  - With Google/OIDC sign-in next to local accounts, Whiskers now records which emails have a local account and
+    which were seen signed in through Google/OIDC (`known-local-accounts.json` in the data directory). An owner
+    whose local account is deleted loses their authority. **After the upgrade, items owned by a Google/OIDC user
+    are refused (not switched off) until that user has opened Whiskers once**, or an Admin takes them over — an
+    owner without a local account is only trusted once seen signing in federated (fail closed; the same applies if
+    the record is lost).
+  - Authority loss is judged by what the run actually needs: a level raised in Settings → MCP, and a key's tool
+    list, count as well.
+  - **Tasks from before provenance was recorded** (created before this release, owner set, no `CreatedVia`) may
+    have come from an agent, so they now run with the agent's guardrail rules; with the default preset their writes
+    are refused (`automation_refused`). Take each such task over in Scheduled Tasks to run it with the PC-D1 rules
+    again — also a task you own yourself (the take-over button is shown for it, and "Take over all" includes it).
+  - A task an agent created keeps the agent's guardrail rules when it runs (autonomy level and confirmation, tool
+    lists, forbidden arguments). With the default preset such a task's writes are refused; an Admin who takes it
+    over makes it a task of their own.
+  - Taking an item over records the previous and the new owner's authority in the audit row.
 - **Principals have stable ids** (R1-03, INV-01/06):
   - Owners of scheduled tasks, AutoPatch and AutoUpdate are now recorded as `user:<email>` or `key:<key id>`. The
     database migration `PrincipalIdsForTaskOwners` (which also adds `ScheduledTasks.CreatedVia`: who created the task,
@@ -176,6 +204,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **Agent-created tasks ran with a person's authority, and a deleted local account kept its tasks running**
+  (known items 6/7, PC-D6). See the upgrade note.
 - **Identities were rebuilt from display names** (TA-31, C-12, INV-01/06): every AI trigger shared one identity, and
   renaming an API key split it into two in the logs. Principals now carry typed ids end to end.
 - **Guardrail policy errors allowed the call, and the live policy could be changed without saving** (TA-32/33,

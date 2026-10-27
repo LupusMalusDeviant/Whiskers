@@ -18,8 +18,10 @@ public interface ISchedulerService
     /// <summary>Makes <paramref name="ownerId"/> the task's owner: every later run uses that owner's authority
     /// (PC-D6). Returns false when the task does not exist.</summary>
     [MutatingOperation("scheduler.update")]
-    /// <summary>Hands a task to <paramref name="ownerId"/>; <paramref name="createdVia"/> records who did it
-    /// (provenance only, defaults to the owner).</summary>
-    Task<bool> SetOwnerAsync(string taskId, string ownerId, string? createdVia = null);
+    /// <summary>Hands a task to <paramref name="ownerId"/> if its owner is still <paramref name="expectedOwnerId"/>
+    /// (<c>null</c>: it has none) — one conditional update, so a takeover is never audited against an owner it did
+    /// not replace. <paramref name="createdVia"/> records who did it (provenance only, defaults to the owner). Returns
+    /// false when the task does not exist or its owner changed meanwhile.</summary>
+    Task<bool> SetOwnerAsync(string taskId, string ownerId, string? expectedOwnerId, string? createdVia = null);
     Task<List<TaskRunHistoryEntity>> GetHistoryAsync(string? taskId = null, int limit = 50);
 }

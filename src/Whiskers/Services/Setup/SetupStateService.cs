@@ -145,6 +145,8 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
                     var r = await users.CreateAsync(new AppUser { UserName = email, Email = email, EmailConfirmed = true }, req.Password);
                     if (!r.Succeeded)
                         return SetupCompletionResult.Failed(r.Errors.Select(e => e.Description));
+                    // Known before it can own anything (R1-04).
+                    scope.ServiceProvider.GetService<Whiskers.Services.Mutations.IOwnerAccounts>()?.RememberLocalAccounts();
                 }
             }
 

@@ -3,9 +3,22 @@ using Whiskers.Configuration;
 
 namespace Whiskers.Services.Mutations;
 
+/// <summary>What <see cref="IAutomationOwnerStore.SuspendAsync"/> did.</summary>
+public enum SuspendResult
+{
+    /// <summary>Suspended and saved.</summary>
+    Suspended,
+    /// <summary>Suspended in memory only: the file could not be written (holds until a restart).</summary>
+    NotSaved,
+    /// <summary>Not suspended: the feature has another owner now (taken over meanwhile) or is already blocked.</summary>
+    Superseded,
+}
+
 /// <summary>The owner an admin confirmed for a fleet-wide automation feature. <see cref="Blocked"/> marks a
-/// feature whose owner was lost with an unreadable file: it stays refused until an admin takes it over.</summary>
-public sealed record AutomationOwnerEntry(string OwnerId, DateTime ConfirmedAt, bool Blocked = false);
+/// feature that must not run until an admin takes it over: its owner was lost with an unreadable file, or the owner
+/// lost their authority and the feature was suspended (<see cref="SuspendedReason"/>, PC-D6).</summary>
+public sealed record AutomationOwnerEntry(string OwnerId, DateTime ConfirmedAt, bool Blocked = false,
+    string? SuspendedReason = null);
 
 /// <summary>
 /// Owners of the fleet-wide automation features that have no item of their own to store one on (PC-D6):
@@ -29,10 +42,23 @@ public interface IAutomationOwnerStore
     /// its authority. Only taking that feature over clears it; taking over another feature does not.</summary>
     bool IsBlocked(string feature);
 
-    /// <summary>Records <paramref name="ownerId"/> as the feature's owner and clears its block. Throws when the file
-    /// cannot be written.</summary>
+    /// <summary>Records <paramref name="ownerId"/> as the feature's owner and clears its block. Returns the owner it
+    /// replaced (also a suspended one; <c>null</c>: none), read under the same lock as the write, so a takeover is
+    /// audited with the assignment it actually replaced. Throws when the file cannot be written.</summary>
     [MutatingOperation("automation.owner_set")]
-    Task SetAsync(string feature, string ownerId, CancellationToken ct = default);
+    Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default);
+
+    /// <summary>Suspends the feature because its owner lost their authority (PC-D6): it is blocked, keeps the owner
+    /// for the record and stays refused across restarts until an admin takes it over. Only ever lowers authority, so
+    /// it needs no gateway decision. Never fails open: when the file cannot be written the feature is still blocked
+    /// in memory (until the next successful write keeps it, or a restart) and <c>false</c> is returned, so the caller
+    /// can tell the admins. Only the assignment of <paramref name="expectedOwnerId"/> (<c>null</c>: no owner yet) is
+    /// suspended: when an admin took
+    /// the feature over in the meantime, nothing changes and <see cref="SuspendResult.Superseded"/> is returned.</summary>
+    Task<SuspendResult> SuspendAsync(string feature, string? expectedOwnerId, string reason, CancellationToken ct = default);
+
+    /// <summary>The entry of a blocked feature (owner and reason), for the UI; <c>null</c> otherwise.</summary>
+    AutomationOwnerEntry? GetBlocked(string feature) => null;
 }
 
 /// <summary>A small JSON file in the data directory (<c>automation-owners.json</c>), written atomically.</summary>
@@ -60,16 +86,81 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
     public AutomationOwnerEntry? Get(string feature) =>
         Volatile.Read(ref _entries).GetValueOrDefault(feature) is { Blocked: false } entry ? entry : null;
 
-    public async Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
+    public AutomationOwnerEntry? GetBlocked(string feature) =>
+        Volatile.Read(ref _entries).GetValueOrDefault(feature) is { Blocked: true } entry ? entry : null;
+
+    public async Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        var replaced = await WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
+        return replaced?.OwnerId is { Length: > 0 } previous ? previous : null;
+    }
+
+    public async Task<SuspendResult> SuspendAsync(string feature, string? expectedOwnerId, string reason,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(feature);
-        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         await _write.WaitAsync(ct);
         try
         {
+            // Checked under the write lock: a takeover that completed after the run read its owner wins. With no
+            // expected owner, only a feature that still has none is suspended.
+            var current = _entries.GetValueOrDefault(feature);
+            var expected = string.IsNullOrWhiteSpace(expectedOwnerId) ? null : expectedOwnerId;
+            if (current is { Blocked: true }
+                || !string.Equals(current?.OwnerId is { Length: > 0 } id ? id : null, expected, StringComparison.Ordinal))
+                return SuspendResult.Superseded;
             var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
             {
-                [feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow),
+                [feature] = new(current?.OwnerId ?? "", DateTime.UtcNow, Blocked: true, SuspendedReason: reason),
+            };
+            try
+            {
+                Persist(next, ct);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                // Fail closed: block it in memory anyway. The next write of any feature carries the block to disk.
+                Volatile.Write(ref _entries, next);
+                _logger.LogError(ex, "The suspension of {Feature} could not be saved to {Path}; it is blocked until " +
+                                     "Whiskers restarts", feature, _path);
+                return SuspendResult.NotSaved;
+            }
+            Volatile.Write(ref _entries, next);
+            _loadFailed = false;
+            return SuspendResult.Suspended;
+        }
+        finally
+        {
+            _write.Release();
+        }
+    }
+
+    /// <summary>Writes <paramref name="next"/> atomically. Call under <see cref="_write"/>.</summary>
+    private void Persist(Dictionary<string, AutomationOwnerEntry> next, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        if (_loadFailed) KeepUnreadableFile();
+        var temp = _path + ".tmp";
+        // The other features' blocks are written too, so they survive a restart until each is taken over.
+        File.WriteAllText(temp, JsonSerializer.Serialize(next, Json));
+        File.Move(temp, _path, overwrite: true);
+    }
+
+    /// <summary>Replaces the feature's entry and returns the one it replaced.</summary>
+    private async Task<AutomationOwnerEntry?> WriteAsync(string feature,
+        Func<AutomationOwnerEntry?, AutomationOwnerEntry> entryOf, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(feature);
+        await _write.WaitAsync(ct);
+        try
+        {
+            var replaced = _entries.GetValueOrDefault(feature);
+            var next = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal)
+            {
+                [feature] = entryOf(replaced),
             };
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             if (_loadFailed) KeepUnreadableFile();
@@ -79,6 +170,7 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
             File.Move(temp, _path, overwrite: true);
             Volatile.Write(ref _entries, next);
             _loadFailed = false;
+            return replaced;
         }
         finally
         {

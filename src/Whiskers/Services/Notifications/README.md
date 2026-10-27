@@ -11,7 +11,7 @@ Each channel has its own interface (distinct strategies) so the composite can en
 | `INotificationService.cs` | The notification surface consumers call (channel-agnostic). |
 | `INotificationChannel.cs` | The unifying channel contract (changeme C9): every channel implements it, so the composite fans out over `IEnumerable<INotificationChannel>` instead of hard-wiring each one. `Name` defaults to the type name minus `NotificationService`. |
 | `NoopNotificationService.cs` | Core default `INotificationService` that does nothing. Registered before the module loop so every consumer still resolves when the **Notifications module** is off; the module's composite wins by last-registration when on (RoadToSAP Phase 1). |
-| `CompositeNotificationService.cs` | Delegates each notification to all configured channels + the in-app feed + the AI-trigger dispatcher. Also the single enforcement point for the per-container mute/prefs and the writer of the persisted `AlertHistory`. |
+| `CompositeNotificationService.cs` | Delegates each notification to all configured channels + the in-app feed + the AI-trigger dispatcher. Also the single enforcement point for the per-container mute/prefs (administrative events `automation_suspended` / `automation_refused` are never muted, R1-04) and the writer of the persisted `AlertHistory`. |
 | `NotificationFormatter.cs` | Single source of truth: event → title / severity / detail / in-app link, shared by the store and the outbound channels. |
 | `IMattermostNotificationService.cs` / `MattermostNotificationService.cs` | Mattermost channel (webhook). |
 | `IMatrixNotificationService.cs` / `MatrixNotificationService.cs` | Matrix channel. |

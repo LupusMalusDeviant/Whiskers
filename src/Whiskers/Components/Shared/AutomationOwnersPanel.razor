@@ -2,6 +2,7 @@
 @inject IUiMutationRunner Mutations
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<Whiskers.Configuration.AutoPatchSettings> AutoPatchOptions
+@inject IOptionsMonitor<AutomationOptions> AutomationOptions
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
@@ -21,7 +22,15 @@
                 <MudText Typo="Typo.subtitle2">@L[feature.TitleKey]</MudText>
                 @if (Owners.IsBlocked(feature.Id))
                 {
-                    <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Blocked"]</MudText>
+                    var blocked = Owners.GetBlocked(feature.Id);
+                    @if (blocked?.SuspendedReason is not null && !string.IsNullOrWhiteSpace(blocked.OwnerId))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Suspended", OwnerResolver.Describe(blocked.OwnerId).Name]</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Error">@L["AutomationOwners_Blocked"]</MudText>
+                    }
                 }
                 else if (entry is not null)
                 {
@@ -34,7 +43,7 @@
                 }
                 else
                 {
-                    <MudText Typo="Typo.body2" Color="Color.Warning">@L[feature.NoOwnerKey]</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Warning">@L[NoOwnerKeyOf(feature)]</MudText>
                 }
                 @if (feature.Id == IAutomationOwnerStore.AutoPatch && !AutoPatchOptions.CurrentValue.Enabled)
                 {
@@ -52,6 +61,12 @@
 
 @code {
     private sealed record Feature(string Id, string TitleKey, string NoOwnerKey);
+
+    // AutoUpdate without an owner runs only in the grace period that Automation:RequireOwner=false switches on (R1-04).
+    private string NoOwnerKeyOf(Feature feature) =>
+        feature.Id == IAutomationOwnerStore.AutoUpdate && AutomationOptions.CurrentValue.RequireOwner
+            ? "AutomationOwners_NoOwner_AutoUpdate_Refused"
+            : feature.NoOwnerKey;
 
     private static readonly Feature[] Features =
     [
@@ -77,10 +92,13 @@
         _busy = true;
         try
         {
-            await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
+            // The replaced owner comes from the store's locked write, not from this page: another admin may have
+            // taken the feature over since it was rendered.
+            var previous = await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
                 _ => Owners.SetAsync(featureId, owner));
             await AuditLog.LogAsync(owner, "web", "automation.owner_set", "automation", featureId, featureId,
-                details: $"owner={owner}");
+                details: $"previous={AutomationOwners.AuthorityOf(OwnerResolver, previous)}; " +
+                         $"new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
             Snackbar.Add(L["AutomationOwners_Snackbar_Done", L[feature.TitleKey].Value].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
