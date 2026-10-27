@@ -27,3 +27,13 @@ public sealed class MutatingOperationAttribute : Attribute
 public sealed class MutationHandlerAttribute : Attribute
 {
 }
+
+/// <summary>
+/// Marks a runner method that takes a capability id and an action and runs the action inside the Mutation Gateway
+/// (<see cref="IUiMutationRunner"/>, <see cref="IAutomationMutationRunner"/>). <c>MutationBypassArchitectureTests</c>
+/// treats a lambda handed to such a method, next to a capability id literal, as gated for that capability.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class MutationEntryPointAttribute : Attribute
+{
+}

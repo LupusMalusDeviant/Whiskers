@@ -4,16 +4,19 @@ The **Mutation Gateway** ([ADR-0005](../../../../docs/adr/0005-mutation-gateway.
 infrastructure mutation is meant to take. An entry point describes the mutation as a `MutationRequest`; the gateway
 decides, executes the supplied delegate, verifies and records.
 
-**State: WP2 step 2.2.** MCP tools, the agent and the UI run every mutation through the gateway:
+**State: WP2 step 2.3.** MCP tools, the agent, the UI and unattended automation run every mutation through the
+gateway:
 
 - direct MCP calls in [`McpGuardrailFilter`](../../Mcp/McpGuardrailFilter.cs) (surface `Mcp`);
 - agent tool calls in [`AgentToolInvoker`](../Agent/AgentToolInvoker.cs) (surface `Agent`, the principal acting
   `OnBehalfOf` the user, key or trigger that started it);
 - UI handlers through [`IUiMutationRunner`](UiMutationRunner.cs) (surface `Ui`, the signed-in user as a `Human`
-  principal).
+  principal);
+- scheduled tasks, AutoUpdate and AutoPatch through [`IAutomationMutationRunner`](AutomationMutationRunner.cs)
+  (surface `Automation`, an `Automation` principal acting `OnBehalfOf` the recorded owner).
 
-A tool counts as mutating when the catalog lists it (`ICapabilityCatalog.FindByMcpTool`). Scheduler / AutoUpdate /
-AutoPatch (2.3), webhooks / Git deploy (2.4) and terminals (2.5) follow; step 2.6 makes bypassing the gateway fail.
+A tool counts as mutating when the catalog lists it (`ICapabilityCatalog.FindByMcpTool`). Webhooks / Git deploy
+(2.4) and terminals (2.5) follow; step 2.6 makes bypassing the gateway fail.
 
 ### UI handlers
 
@@ -32,16 +35,40 @@ For a human in the UI the policy applies only the rules PC-D1 names — authoriz
 resources (`GuardrailEngine.CreateForHumans`). Tool lists, argument patterns and confirmation are about delegating to
 the agent or a key; a person's click is not sent for approval.
 
+### Unattended automation (PC-D6)
+
+```csharp
+var outcome = await _automation.RunAsync(new AutomationActor("task:" + task.TaskId, $"Scheduled task '{task.Name}'",
+        task.CreatedBy), "container.restart", new { containerId, serverId = task.ServerId },
+    _ => _docker.RestartContainerAsync(containerId, task.ServerId));
+```
+
+Same shape as the UI runner (literal capability id, lambda in the call), but the result is a `MutationOutcome` —
+a background loop has nobody to show an exception to. The owner id is an email or `key:<id>`
+(`AutomationOwners.IdOf`); `IAutomationOwnerResolver` reads its authority **on every run** (INV-04): a user's role
+only while the whitelist still lets them sign in, a key's level only while it exists and is enabled — otherwise
+`read`, so the run is refused. The owner's level is the ceiling; the policy applies the PC-D1 rules (authorization,
+kill switch, protected resources) without asking for approval — the owner approved by scheduling.
+
+Where the owner is kept: scheduled tasks in `ScheduledTaskEntity.CreatedBy` (set by the UI and `create_scheduled_task`;
+taken over in Scheduled Tasks), AutoPatch and AutoUpdate in [`IAutomationOwnerStore`](AutomationOwnerStore.cs)
+(`automation-owners.json`, taken over in Settings → Automation owners). AutoPatch skips its night without an owner.
+
+**Grace period.** An item without an owner (created before 2.3) runs as `unowned:<runner>` with exactly the level
+of the capability it runs, audited as "(no owner)". `Automation:RequireOwner=true` refuses it instead.
+
 ## Files
 
 | File | Purpose |
 |---|---|
-| `MutationAttributes.cs` | `[MutatingOperation("<area>.<verb>")]` on service-interface methods that change infrastructure; `[MutationHandler]` on classes allowed to call them. |
+| `MutationAttributes.cs` | `[MutatingOperation("<area>.<verb>")]` on service-interface methods that change infrastructure; `[MutationHandler]` on classes allowed to call them; `[MutationEntryPoint]` on the runner methods whose lambda argument the architecture test counts as gated. |
 | `MutationModels.cs` | `Capability`, `CapabilityRisk`, `MutationPrincipal` (incl. `OnBehalfOf`, `AllowedTools`), `MutationSurface`, `MutationTarget`, `MutationRequest`, `MutationOutcome<T>` (incl. `ApprovalId`, `MatchedRules`), `MutationContext`. |
 | `CapabilityCatalog.cs` | `ICapabilityCatalog` — the single table of mutating capabilities (INV-13). An MCP-exposed capability takes its tool's level from `McpPermissionLevels.DefaultToolLevels`, a UI-only one the role its handler checks. |
 | `CapabilityOverrides.cs` | `ICapabilityOverrides` + `McpToolCapabilityOverrides`: the MCP tool's Enabled switch and a stricter stored level (Settings → MCP), applied for **every** principal kind (INV-15). The catalog level is the floor. |
 | `MutationTargets.cs` | `MutationTargets.FromArguments` (target from tool arguments) and `IMutationTargetResolver` + `MutationTargetResolver`: containers resolve by id, name or unique prefix to their full id and name; an unknown or ambiguous container is refused before policy (INV-57). Other kinds pass through for now. |
 | `MutationGateway.cs` | `IMutationGateway` + `MutationGateway` (the pipeline) and `IMutationVerifier`. |
+| `AutomationMutationRunner.cs` | `IAutomationMutationRunner` + `AutomationMutationRunner`, `AutomationActor`, `AutomationOptions` (`RequireOwner`), `IAutomationOwnerResolver` + `AutomationOwnerResolver`, `AutomationOwners.IdOf`: the automation entry to the gateway. |
+| `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate in `automation-owners.json`, written atomically; an unreadable file means "no owner". |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. |
 | `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`), so a protected container is caught by id prefix too. Without engine or store it refuses everything. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
@@ -74,7 +101,19 @@ Refusals (1–7) are recorded as one row each; a failed refusal record is logged
 Over MCP a tool that throws is rethrown, so the client sees the same error as before the gateway; a tool that
 reported a failure is answered with its own text, marked `isError`. The agent gets the tool's text as an error.
 
-## Known gaps after step 2.2
+## Known gaps after step 2.3
+
+- **Grace period.** Ownerless tasks and an ownerless AutoUpdate run with the level of the capability they run until
+  an Admin takes them over or `Automation:RequireOwner` is set (INV-04 stays ⚠️ until 1.0 makes that the default).
+- **Not gated in automation:** self-backup tasks (no capability yet) and the DB-backup retention, which deletes old
+  dumps with a host command (`IHostCommandExecutor` is not marked). `UpdateRiskService` (`image.pull`) and
+  `LoopSuspensionService` (`checks.resume`) stay in the baseline.
+- **"Run now"** runs the task on its owner's authority; the person clicking needs `scheduler.run` (Write; a
+  custom command Admin) but not the owner's level for what the task does (e.g. retention deletes). The task's
+  content is what the owner scheduled, only the timing changes.
+- **AutoUpdate policies** have no UI yet (`SetPolicyAsync` has no caller); the owner is per feature, not per policy.
+- **A running AutoPatch cycle** is one gateway operation (`autopatch.run`, 4-hour deadline); the per-container
+  patches inside it are not decided one by one.
 
 - **Two audit rows per MCP or agent mutation.** The gateway row carries decision, approval, intent and outcome; the
   tool still writes its own row with the domain details (new container id, exit code, backup file). One event per
@@ -99,11 +138,12 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 
 ## Tests
 
-`MutationGatewayTests` (pipeline), `UiMutationRunnerTests` (UI principal, PC-D1 rules, PC-D3), `ToolAuthorizationTests` (tool switch and stricter level for every principal,
+`MutationGatewayTests` (pipeline), `UiMutationRunnerTests` (UI principal, PC-D1 rules, PC-D3),
+`AutomationMutationRunnerTests` (owner re-check per run, keys, grace period, `RequireOwner`, refused task, owner store), `ToolAuthorizationTests` (tool switch and stricter level for every principal,
 target resolution, session approval, approval used only after the intent, reported tool failures over MCP and for
 the agent), `ApprovalGateTests`, `MutationScopeGuardTests`, `CapabilityCatalogTests`,
 `MutationGatewayBootTests` (real composition root and `AuditLog` table), `GuardrailModuleIndependenceTests` (Agent
 module off) and `MutationBypassArchitectureTests`, which reads method IL and compares every call to a marked method
 outside the gateway with [`docs/v1/mutation-bypass-baseline.txt`](../../../../docs/v1/mutation-bypass-baseline.txt).
 An MCP tool mapped to a capability counts as inside the gateway, because both dispatchers run it there. The baseline
-may only shrink: 104 lines after step 2.0, 75 after step 2.1, 29 after step 2.2.
+may only shrink: 104 lines after step 2.0, 75 after step 2.1, 29 after step 2.2, 23 after step 2.3.

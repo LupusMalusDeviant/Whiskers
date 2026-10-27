@@ -10,6 +10,9 @@ Scheduled **automatic container updates**. When an image update is detected ([`.
 
 ## Behaviour notes
 
+- **Through the Mutation Gateway:** each recreate runs as `container.update` on the authority of the AutoUpdate
+  owner (Settings → Automation owners), re-checked per update; without an owner it runs in the grace period
+  (ADR-0005 step 2.3, see [`../Mutations/`](../Mutations/)).
 - **Server-scoped matching:** a policy applies only to its own `ServerId` — a same-named container on another host is never auto-recreated (id-match before name-match; an empty policy `ServerId` matches any host for back-compat).
 
 ## Related

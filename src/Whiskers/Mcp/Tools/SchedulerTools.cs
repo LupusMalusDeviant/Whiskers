@@ -61,6 +61,13 @@ public class SchedulerTools
             if (deniedCmd != null) return MutationScope.Fail(deniedCmd);
         }
 
+        // The caller owns the task — for the agent, the user or key it acts for — and every run re-checks that
+        // owner's authority (PC-D6). Without one the task would land in the grace period meant for tasks from
+        // before owners were recorded, so refuse instead (an AI trigger has no human or key behind it).
+        var owner = AutomationOwners.OfCaller(MutationScope.Current?.Principal);
+        if (owner is null)
+            return MutationScope.Fail("A scheduled task needs an owner, and this call has no user or API key to own it.");
+
         var config = new Dictionary<string, string>();
         if (maxBackups > 0) config["maxBackups"] = maxBackups.ToString();
         if (!string.IsNullOrEmpty(command)) config["command"] = command;
@@ -73,7 +80,8 @@ public class SchedulerTools
             TargetId = targetId,
             TargetName = targetId,
             ServerId = serverId,
-            Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null
+            Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null,
+            CreatedBy = owner,
         });
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);

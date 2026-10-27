@@ -50,7 +50,10 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             ToAgentPrincipal(request.Principal),
             ToOrigin(request),
             _store.Current);
-        var engine = request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human
+        // A person in the UI, and an unattended item running on its owner's authority (PC-D6), are bound by the
+        // PC-D1 rules. The owner decided when creating the item; a run nobody watches cannot wait for an approval.
+        var engine = (request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
+                     || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation)
             ? HumanEngine
             : _engine;
         var decision = engine.Evaluate(new GuardrailRequest(
@@ -83,7 +86,8 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     /// acts for, with that key's tool list, exactly as <c>AgentSession</c> evaluates it.</summary>
     private static AgentPrincipal ToAgentPrincipal(MutationPrincipal principal)
     {
-        var p = principal.Kind == MutationPrincipalKind.Agent && principal.OnBehalfOf is { } source ? source : principal;
+        var p = principal.Kind is MutationPrincipalKind.Agent or MutationPrincipalKind.Automation
+                && principal.OnBehalfOf is { } source ? source : principal;
         var level = McpPermissionLevels.Normalize(p.PermissionLevel);
         return p.Kind is MutationPrincipalKind.ApiKey or MutationPrincipalKind.Automation
             ? new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level, p.AllowedTools,

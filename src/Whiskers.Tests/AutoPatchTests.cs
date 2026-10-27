@@ -1,3 +1,4 @@
+using Whiskers.Services.Mutations;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -426,6 +427,49 @@ public class AutoPatchTests
         Assert.True(service.LastCycle!.DryRun);
     }
 
+    [Fact]
+    public async Task The_nightly_cycle_does_not_run_until_an_admin_has_taken_AutoPatch_over()
+    {
+        var automation = new RecordingAutomation();
+        var owners = new MemoryAutomationOwners();
+        var service = NewService(new RecordingRunner(), new CveFindingsStore(persistPath: TempPath()), automation, owners);
+
+        await service.RunNightlyAsync(CancellationToken.None);
+        Assert.Empty(automation.Actors);
+
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        var (actor, capability) = Assert.Single(automation.Actors);
+        Assert.Equal("autopatch.run", capability);
+        Assert.Equal("admin@example.com", actor.OwnerId);
+    }
+
+    private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
+        IAutomationMutationRunner automation, IAutomationOwnerStore owners)
+        => new(new StaticOptionsMonitor<AutoPatchSettings>(new AutoPatchSettings { Enabled = true }), new FakeDocker(), store,
+            new NoopImageUpdateStore(), runner,
+            new FakeNotifications(), new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            automation, owners, NullLogger<AutoPatchService>.Instance);
+
+    /// <summary>Records who a cycle would run as, without running it.</summary>
+    private sealed class RecordingAutomation : IAutomationMutationRunner
+    {
+        public List<(AutomationActor Actor, string Capability)> Actors { get; } = new();
+
+        public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
+        {
+            Actors.Add((actor, capabilityId));
+            return Task.FromResult(new MutationOutcome<T>("op", MutationStatus.Executed, default, null,
+                VerificationStatus.NotRun));
+        }
+
+        public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task> action, CancellationToken ct = default) =>
+            RunAsync<bool>(actor, capabilityId, arguments, _ => Task.FromResult(true), ct);
+    }
+
     private static string TempPath() => Path.Combine(Path.GetTempPath(), $"cve-{Guid.NewGuid():N}.json");
 
     private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store, params ContainerInfo[] containers)
@@ -440,7 +484,7 @@ public class AutoPatchTests
         => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
             new NoopImageUpdateStore(), runner,
             notifications, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<AutoPatchService>.Instance);
+            new UnusedAutomationRunner(), new MemoryAutomationOwners(), NullLogger<AutoPatchService>.Instance);
 
     private sealed class RecordingRunner : IAutoPatchRunner
     {

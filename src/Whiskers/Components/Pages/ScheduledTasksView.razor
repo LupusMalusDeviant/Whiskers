@@ -64,12 +64,25 @@
 }
 else
 {
+    @if (_tasks.Any(t => string.IsNullOrWhiteSpace(t.CreatedBy)))
+    {
+        @* PC-D6: tasks from before owners were recorded run in a grace period until an admin takes them over. *@
+        <MudAlert Severity="Severity.Warning" Class="mb-3">
+            @L["ScheduledTasksView_Alert_Unowned", _tasks.Count(t => string.IsNullOrWhiteSpace(t.CreatedBy))]
+            @if (_role >= AppRole.Admin)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Warning" Size="Size.Small" Class="ml-2"
+                           OnClick="AdoptAll">@L["ScheduledTasksView_Button_AdoptAll"]</MudButton>
+            }
+        </MudAlert>
+    }
     <MudTable Items="@_tasks" Dense="true" Hover="true" Striped="true" Elevation="0">
         <HeaderContent>
             <MudTh>@L["ScheduledTasksView_Table_Name"]</MudTh>
             <MudTh>@L["ScheduledTasksView_Table_Type"]</MudTh>
             <MudTh>@L["ScheduledTasksView_Table_Schedule"]</MudTh>
             <MudTh>@L["ScheduledTasksView_Table_Target"]</MudTh>
+            <MudTh>@L["ScheduledTasksView_Table_Owner"]</MudTh>
             <MudTh>@L["ScheduledTasksView_Table_NextRun"]</MudTh>
             <MudTh>@L["ScheduledTasksView_Table_LastRun"]</MudTh>
             <MudTh>@L["ScheduledTasksView_Table_Status"]</MudTh>
@@ -84,6 +97,16 @@ else
             </MudTd>
             <MudTd><code>@context.CronExpression</code></MudTd>
             <MudTd><code>@(context.TargetName ?? context.TargetId ?? "-")</code></MudTd>
+            <MudTd>
+                @if (string.IsNullOrWhiteSpace(context.CreatedBy))
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">@L["ScheduledTasksView_Chip_NoOwner"]</MudChip>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">@context.CreatedBy</MudText>
+                }
+            </MudTd>
             <MudTd>
                 @if (context.NextRun != null)
                 {
@@ -121,6 +144,11 @@ else
                     }
                     @if (_role >= AppRole.Admin)
                     {
+                        @if (string.IsNullOrWhiteSpace(context.CreatedBy))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.PersonAdd" Color="Color.Warning" Size="Size.Small"
+                                           OnClick="@(() => AdoptTask(context))" title="@L["ScheduledTasksView_Tooltip_Adopt"]" />
+                        }
                         <MudSwitch T="bool" Value="@context.Enabled" Color="Color.Success" Size="Size.Small"
                                    ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
@@ -325,6 +353,14 @@ else
     {
         if (!Require(AppRole.Admin)) return;
         if (!CanCreate) return;
+        // The creator owns the task: every run re-checks their authority (PC-D6). Without an email the task would
+        // fall into the grace period meant for tasks from before owners were recorded.
+        var owner = await CurrentUser.GetEmailAsync();
+        if (string.IsNullOrWhiteSpace(owner))
+        {
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_NoOwner"].Value, Severity.Warning);
+            return;
+        }
         try
         {
             var config = new Dictionary<string, string>();
@@ -339,7 +375,8 @@ else
                 TargetId = _formTargetId,
                 TargetName = _formTargetId,
                 ServerId = _formServerId,
-                Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null
+                Config = config.Any() ? System.Text.Json.JsonSerializer.Serialize(config) : null,
+                CreatedBy = owner,
             };
             // Never the command text itself: it may carry credentials.
             await Mutations.RunAsync("scheduler.create",
@@ -416,6 +453,48 @@ else
         }
         // Reload either way so the switch reflects the persisted state.
         await LoadData();
+    }
+
+    /// <summary>Takes over a task from before owners were recorded; its runs then use this admin's authority.</summary>
+    private async Task AdoptTask(Whiskers.Models.ScheduledTaskEntity task)
+    {
+        if (!Require(AppRole.Admin)) return;
+        if (await AdoptAsync(task))
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_Adopted", task.Name].Value, Severity.Success);
+        await LoadData();
+    }
+
+    private async Task AdoptAll()
+    {
+        if (!Require(AppRole.Admin)) return;
+        foreach (var task in _tasks.Where(t => string.IsNullOrWhiteSpace(t.CreatedBy)).ToList())
+            if (!await AdoptAsync(task)) break;
+        await LoadData();
+    }
+
+    private async Task<bool> AdoptAsync(Whiskers.Models.ScheduledTaskEntity task)
+    {
+        var email = await CurrentUser.GetEmailAsync();
+        if (string.IsNullOrWhiteSpace(email)) return false;
+        var taskId = task.TaskId;
+        try
+        {
+            await Mutations.RunAsync("scheduler.update",
+                new { taskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, owner = email },
+                _ => Scheduler.SetOwnerAsync(taskId, email));
+            await AuditLog.LogAsync(email, "web", "task.adopt", "scheduled-task", taskId, task.Name,
+                details: $"owner={email}", serverId: task.ServerId);
+            return true;
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["ScheduledTasksView_Snackbar_Error", ex.Message].Value, Severity.Error);
+        }
+        return false;
     }
 
     private async Task DeleteTask(Whiskers.Models.ScheduledTaskEntity task)

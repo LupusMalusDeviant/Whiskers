@@ -43,6 +43,26 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     matching UI action (e.g. `restart_container` → the restart buttons).
   - A refused action shows the reason as a warning; the gateway's AuditLog row records it.
   - No approval is asked for a person's own click; tool allow/deny lists and argument patterns stay agent rules.
+- **Scheduled tasks, AutoUpdate and AutoPatch run on their owner's authority** (ADR-0005 step 2.3, PC-D6). What
+  changes:
+  - A new task records who created it (the signed-in user, or `key:<id>` for an MCP key; for the agent, the user or
+    key it acts for). Creating a task without such an owner (an AI trigger, a session without an email) is refused. Every run re-checks that
+    owner's current role or key level and refuses the run when it no longer covers the task (owner demoted, removed
+    from the whitelist, key deleted or disabled). A refused run is recorded as failed, sends an
+    `automation_refused` notification, and leaves a gateway AuditLog row.
+  - **Tasks from before this version have no owner.** They keep running for now (grace period), audited as
+    "no owner" and limited to the capability they run. Scheduled Tasks shows them with a warning; an Admin takes
+    them over with "Take over all" or per row. Set `Automation__RequireOwner=true` to refuse every ownerless run;
+    1.0 will make that the default.
+  - **AutoPatch does not run until an Admin takes it over** in Settings → Automation owners. `AutoPatch:Enabled`
+    alone is no longer enough; the nightly cycle logs a warning and skips. AutoUpdate keeps running without an
+    owner during the grace period; take it over there as well.
+  - What a task needs from its owner: a **custom-command** task needs an Admin owner (it runs as root on the host);
+    a backup task whose **retention** deletes old backups needs an Admin owner for the deletion; the **cleanup**
+    task (`docker system prune`) needs Operator. Restart and backup tasks need Operator.
+  - The kill switch and protected resources apply to scheduled runs, AutoUpdate and AutoPatch. With the default
+    preset a scheduled backup of a `whiskers*` / `serverwatch*` volume or a restart of the Whiskers container is
+    refused; remove the pattern from the active preset if you rely on it.
 - **Arbitrary SQL needs Admin everywhere** (PC-D3): the database query in the container page and the
   `execute_query` MCP tool were Operator / write.
 - **Container shells need Admin** (PC-D2): `/terminal/{server}/{container}` and the terminal tab in the container
@@ -53,6 +73,10 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+- **Unattended runs had no owner and were never re-checked** (TA-04, INV-04, B-10). Scheduled tasks, AutoUpdate and
+  AutoPatch now run through the Mutation Gateway as an automation principal acting on behalf of their owner, whose
+  authority is read again on every run. A task created by a key that was later deleted no longer keeps running
+  with root on the host.
 - **UI actions bypassed the kill switch and protected resources** (TA-26, INV-20/21, PC-D1). Every UI call to a
   mutating capability now goes through the Mutation Gateway.
 - **Root-equivalent actions at Operator** (INV-19): container shells, arbitrary SQL and running custom commands now
@@ -81,6 +105,10 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   a digest now logs a warning.
 
 ### Added
+- **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
+  AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
+  in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from
+  29 to 23 entries.
 - **Mutation Gateway, step 2.2 (ADR-0005).** `IUiMutationRunner` runs a page's action through the gateway as the
   signed-in user. Sixteen pages use it; the bypass baseline shrinks from 75 to 29 entries.
 - **Mutation Gateway, step 2.1 (ADR-0005).** Every MCP tool and agent tool call that maps to a capability runs

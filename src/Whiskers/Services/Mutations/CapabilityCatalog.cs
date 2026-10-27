@@ -89,6 +89,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("firewall.set_status", A, "host", Dis, Short);
         yield return Tool("nginx.update", "update_nginx_config", "host", Dis, Short);
         yield return Ui("nginx.reload", A, "host", Dis, Short);
+        // Scheduled cleanup task: docker system prune of unused images, containers and networks.
+        yield return Ui("host.prune", W, "host", Dis, Short);
         yield return Ui("nginx.site_enable", A, "host", Dis, Short);
         yield return Ui("nginx.site_disable", A, "host", Dis, Short);
         yield return Tool("systemd.manage", "manage_systemd_service", "host", Dis, Normal);
@@ -128,8 +130,11 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("checks.pause", "pause_server_checks", "server", Rev, Short);
         yield return Tool("checks.resume", "resume_server_checks", "server", Rev, Short);
         yield return Tool("autopatch.preview", "preview_auto_patch", "fleet", Rev, Long);
-        yield return Ui("autopatch.run", A, "fleet", Dis, Long);
+        // A cycle patches one container after another inside the nightly window; it must not be cut at 30 minutes.
+        yield return Ui("autopatch.run", A, "fleet", Dis, TimeSpan.FromHours(4));
         yield return Ui("autoupdate.policy_set", A, "container", Dis, Short);
+        // Who AutoPatch / AutoUpdate run as (PC-D6): an admin hands their authority to an unattended feature.
+        yield return Ui("automation.owner_set", A, "fleet", Root, Short);
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);
