@@ -115,6 +115,10 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("dns.record_delete", "delete_dns_record", "dns-zone", Des, Short);
 
         // Cloud servers
+        // Servers page: onboarding installs the agent stack on the host as root.
+        yield return Ui("server.onboard", A, "server", Root, Long);
+        // Settings: restore Whiskers' own data from a self-backup (maintenance, staged swap, process restart).
+        yield return Ui("selfbackup.restore", A, "whiskers", Root, Normal);
         yield return Tool("cloud.power_on", "cloud_power_on", "cloud-server", Rev, Normal);
         yield return Tool("cloud.shutdown", "cloud_shutdown", "cloud-server", Dis, Normal);
         yield return Tool("cloud.reboot", "cloud_reboot", "cloud-server", Dis, Normal);

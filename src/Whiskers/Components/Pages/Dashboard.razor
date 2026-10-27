@@ -789,6 +789,11 @@
             .ToList();
     }
 
+    /// <summary>The Kubernetes controller a pod row acts on (start/stop scale it, restart rolls it): the provider puts
+    /// its name in the compose-project label. A protected pattern must match what is changed, not only the pod.</summary>
+    private static string WorkloadController(ContainerInfo pod) =>
+        pod.ComposeProject is { Length: > 0 } controller && controller != "Standalone" ? controller : pod.Name;
+
     private async Task StartContainer(ContainerInfo container)
     {
         if (!Require(AppRole.Operator)) return;
@@ -797,7 +802,7 @@
         {
             // K8s rows route through the workload seam (start = scale the controller back up).
             if (_k8sServerIds.Contains(container.ServerId))
-                await Mutations.RunAsync("workload.start", new { workloadId = container.Id, name = container.Name, serverId = container.ServerId },
+                await Mutations.RunAsync("workload.start", new { workloadId = container.Id, name = WorkloadController(container), pod = container.Name, serverId = container.ServerId },
                     token => WorkloadFactory.GetForServer(container.ServerId).StartAsync(container.Id, token));
             else
                 await Mutations.RunAsync("container.start", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
@@ -825,7 +830,7 @@
         {
             // K8s rows route through the workload seam (stop = scale the controller to 0).
             if (_k8sServerIds.Contains(container.ServerId))
-                await Mutations.RunAsync("workload.stop", new { workloadId = container.Id, name = container.Name, serverId = container.ServerId },
+                await Mutations.RunAsync("workload.stop", new { workloadId = container.Id, name = WorkloadController(container), pod = container.Name, serverId = container.ServerId },
                     token => WorkloadFactory.GetForServer(container.ServerId).StopAsync(container.Id, token));
             else
                 await Mutations.RunAsync("container.stop", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
@@ -853,7 +858,7 @@
         {
             // K8s rows route through the workload seam (restart = rollout-restart of the controller).
             if (_k8sServerIds.Contains(container.ServerId))
-                await Mutations.RunAsync("workload.restart", new { workloadId = container.Id, name = container.Name, serverId = container.ServerId },
+                await Mutations.RunAsync("workload.restart", new { workloadId = container.Id, name = WorkloadController(container), pod = container.Name, serverId = container.ServerId },
                     token => WorkloadFactory.GetForServer(container.ServerId).RestartAsync(container.Id, token));
             else
                 await Mutations.RunAsync("container.restart", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },

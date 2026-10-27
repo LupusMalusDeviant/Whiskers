@@ -24,8 +24,10 @@ public class TaskExecutor : ITaskExecutor
         IBackupService selfBackupService,
         IHostCommandExecutor executor,
         ILogger<TaskExecutor> logger,
-        DataPathOptions? dataPaths = null)
+        DataPathOptions? dataPaths = null,
+        Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null)
     {
+        _guardrails = guardrails;
         _docker = docker;
         _dbService = dbService;
         _backupService = backupService;
@@ -139,11 +141,35 @@ public class TaskExecutor : ITaskExecutor
     {
         var sid = task.ServerId ?? "local";
 
+        // `docker system prune` removes every stopped container. The gateway decided on the host only, so a stopped
+        // protected container would go with it: refuse the cleanup while one exists (fail closed without policy).
+        if (await StoppedProtectedContainersAsync(task.ServerId) is { Count: > 0 } blocked)
+            return (false, $"Cleanup refused: it would remove stopped protected container(s) {string.Join(", ", blocked)}.");
+
         // Docker system prune (remove unused images, containers, networks)
         var result = await _executor.ExecuteAsync(sid,
             "docker system prune -f --volumes=false 2>&1", TimeSpan.FromMinutes(2));
 
         return (result.Success, result.Success ? $"Cleanup done:\n{result.Output}" : result.Error);
+    }
+
+    private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
+
+    /// <summary>Stopped containers on the server that match a protected-resource pattern. Without the guardrail
+    /// store nobody can say what is protected, so every stopped container counts.</summary>
+    private async Task<IReadOnlyList<string>> StoppedProtectedContainersAsync(string? serverId)
+    {
+        var sid = serverId is null or "local" ? null : serverId;
+        var stopped = (await _docker.ListContainersAsync(all: true, serverId: sid))
+            .Where(c => !string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (_guardrails is null) return stopped.Select(c => c.Name).ToList();
+        var patterns = _guardrails.Current.ProtectedResources;
+        return stopped
+            .Where(c => patterns.Any(p => Whiskers.Services.Guardrails.GuardrailRuleHelpers.GlobMatch(p, c.Name)
+                                          || Whiskers.Services.Guardrails.GuardrailRuleHelpers.GlobMatch(p, c.Id)))
+            .Select(c => c.Name)
+            .ToList();
     }
 
     private async Task ApplyRetention(ScheduledTaskEntity task, Dictionary<string, string> config, string? dbName = null)

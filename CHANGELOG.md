@@ -42,8 +42,12 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - A tool **switched off** in Settings → MCP, or raised to a stricter level there, also switches off or raises the
     matching UI action (e.g. `restart_container` → the restart buttons).
   - A refused action shows the reason as a warning; the gateway's AuditLog row records it.
-  - Also covered: Kubernetes start/stop/restart on the Dashboard, saving a container's `.env` (with `compose up`),
-    Artisan migrate/rollback, SQL file import, and deploys from the compose editor and the App Store.
+  - Also covered: Kubernetes start/stop/restart on the Dashboard (decided on the Deployment/StatefulSet the pod
+    belongs to), saving a container's `.env` (every service of its compose project is decided, since
+    `compose up` may recreate them all), Artisan migrate/rollback, SQL file import, deploys from the compose editor
+    and the App Store, server onboarding, and restoring a Whiskers self-backup.
+  - A **cleanup task** (`docker system prune`) is refused while a stopped container matching a protected pattern
+    exists on that server — the prune would remove it.
   - "Run now" of a scheduled task is checked for the task's own action and target as well (a restart task on a
     protected container is refused); over MCP, `run_scheduled_task` also needs the caller's access to
     `restart_container` / `backup_database` / `execute_command` for those task types.

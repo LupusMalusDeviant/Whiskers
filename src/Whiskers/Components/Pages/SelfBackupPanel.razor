@@ -1,4 +1,5 @@
 @inject Whiskers.Services.Backup.IBackupService BackupService
+@inject IUiMutationRunner Mutations
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
@@ -240,12 +241,23 @@ else
         if (confirmed != true) return;
 
         var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-        await AuditLog.LogAsync(actor, "web", "selfbackup.restore", "whiskers", "", description);
         Snackbar.Add(L["SelfBackupPanel_Snackbar_RestoreRunning"].Value, Severity.Info);
         try
         {
             // This enters maintenance, stages the restore and stops the process — the circuit will drop here.
-            await BackupService.BeginRestoreAsync(archivePath, actor);
+            // Through the gateway: the kill switch stops it too. The outcome row may stay at the intent, since the
+            // process stops before the gateway can complete it.
+            await Mutations.RunAsync("selfbackup.restore", new { archive = Path.GetFileName(archivePath) },
+                async _ =>
+                {
+                    // Logged before the call: the process stops while restoring.
+                    await AuditLog.LogAsync(actor, "web", "selfbackup.restore", "whiskers", "", description);
+                    await BackupService.BeginRestoreAsync(archivePath, actor);
+                });
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

@@ -230,4 +230,52 @@ public class UiMutationRunnerTests
         Assert.DoesNotContain("Secret", stored);
         Assert.Contains("db-1", stored);
     }
+
+    [Fact]
+    public void A_refusal_reason_never_carries_a_payload_value()
+    {
+        var args = UiMutationRunner.ToArguments(new { query = "ALTER ROLE production PASSWORD 'Violet!47'" });
+
+        var reason = AuditLogMutationSink.WithoutPayloadValues(
+            "Protected resource 'production*' matched ALTER ROLE production PASSWORD 'Violet!47'", args);
+
+        Assert.DoesNotContain("Violet", reason);
+        Assert.Contains("production*", reason);
+    }
+
+    [Fact]
+    public async Task A_kubernetes_action_is_decided_on_the_controller_it_changes()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ProtectedResources.Add("payments");   // the Deployment, matched exactly
+        var (runner, _) = Runner(AppRole.Admin, policy);
+        var ran = false;
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("workload.stop",
+            new { workloadId = "shop/payments-7fdc9-abcde", name = "payments", pod = "payments-7fdc9-abcde", serverId = "k8s" },
+            _ => { ran = true; return Task.CompletedTask; }));
+
+        Assert.False(ran);
+    }
+
+    [Fact]
+    public async Task A_cleanup_is_refused_while_a_stopped_protected_container_would_be_pruned()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ProtectedResources.Add("production-*");
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "a1", Name = "production-db", State = "exited", ServerId = "local" },
+            new ContainerInfo { Id = "b2", Name = "web", State = "running", ServerId = "local" });
+        var executor = new Whiskers.Services.Scheduler.TaskExecutor(docker, null!, null!, null!, null!,
+            NullLogger<Whiskers.Services.Scheduler.TaskExecutor>.Instance,
+            guardrails: new AgentToolTestHelpers.FixedGuardrailStore(policy));
+
+        var (success, output) = await executor.ExecuteAsync(new ScheduledTaskEntity
+        {
+            TaskId = "c1", Name = "cleanup", TaskType = ScheduledTaskType.Cleanup,
+        });
+
+        Assert.False(success);   // refused before the (null) host executor is reached
+        Assert.Contains("production-db", output);
+    }
 }

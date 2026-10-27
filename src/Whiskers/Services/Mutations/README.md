@@ -89,12 +89,15 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   image, `preview_auto_patch` starting a background cycle (`autopatch.run`). The gateway decided on the tool's
   capability only; the background cycle also outlives the gateway's deadline and outcome row.
 - **Not yet marked** (so neither the guard nor the architecture test sees them): the generic execution primitives
-  `IHostCommandExecutor` and `IDockerService.RunHostShellAsync`, terminals, self-backup restore, onboarding installs
-  and server records. The UI actions built on the primitives (container `.env` save + compose up, Artisan
-  migrate/rollback, SQL file import, compose editor and App Store deploys) run through the gateway since the step 2.2
-  review, but only by convention: a new direct call is not caught until the primitives are marked.
-- **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the workload id and name as
-  given; there is no Kubernetes target resolver yet, so a protected pattern must match the workload name.
+  `IHostCommandExecutor` and `IDockerService.RunHostShellAsync`, terminals and server records. The UI actions built
+  on the primitives (container `.env` save + compose up, Artisan migrate/rollback, SQL file import, compose editor
+  and App Store deploys, server onboarding, self-backup restore) run through the gateway since the step 2.2 review,
+  but only by convention: a new direct call is not caught until the primitives are marked.
+- **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the controller name the
+  provider reports for the pod (and the pod name as an extra argument); there is no Kubernetes target resolver that
+  reads the live owner yet.
+- **Bulk prune** (`host.prune`) is refused while a stopped protected container exists on the server; images and
+  networks it removes are not checked against protected patterns.
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row
   (`AuditLogMutationSink.PayloadArguments`, only their length is stored); the policy and the approval card still see
   them.
