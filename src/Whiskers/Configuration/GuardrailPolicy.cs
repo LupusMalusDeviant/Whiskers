@@ -40,11 +40,12 @@ public class GuardrailPolicy
         MaxAutonomousLevel = MaxAutonomousLevel,
         ReadOnlyMode = ReadOnlyMode,
         RequireConfirmationForWrites = RequireConfirmationForWrites,
-        ToolDenyList = [.. ToolDenyList],
-        ToolAllowList = [.. ToolAllowList],
+        // A missing list stays missing, so validation still refuses it.
+        ToolDenyList = ToolDenyList is null ? null! : [.. ToolDenyList],
+        ToolAllowList = ToolAllowList is null ? null! : [.. ToolAllowList],
         ToolMode = ToolMode,
-        ProtectedResources = [.. ProtectedResources],
-        ForbiddenArgPatterns = [.. ForbiddenArgPatterns],
+        ProtectedResources = ProtectedResources is null ? null! : [.. ProtectedResources],
+        ForbiddenArgPatterns = ForbiddenArgPatterns is null ? null! : [.. ForbiddenArgPatterns],
         MaxActionsPerSession = MaxActionsPerSession,
     };
 

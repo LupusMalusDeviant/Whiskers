@@ -12,10 +12,14 @@ public interface IGuardrailStore
     /// <summary>The active preset's policy — what the engine enforces.</summary>
     GuardrailPolicy Current { get; }
 
-    /// <summary>All presets + which one is active (for the editor UI).</summary>
+    /// <summary>All presets + which one is active (for the editor UI). A copy; edits change nothing.</summary>
     GuardrailConfig Config { get; }
 
-    /// <summary>Saves the whole preset config (admin-only). Throws if editor.PermissionLevel != Admin.</summary>
+    /// <summary>Why the stored configuration is not enforced and the fail-closed policy is, or <c>null</c>.</summary>
+    string? LoadError => null;
+
+    /// <summary>Saves the whole preset config (admin-only). Throws if editor.PermissionLevel != Admin, and
+    /// <see cref="GuardrailConfigException"/> for a configuration that cannot be enforced.</summary>
     Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default);
 
     /// <summary>Back-compat: replace the active preset's policy. Throws if editor isn't Admin.</summary>

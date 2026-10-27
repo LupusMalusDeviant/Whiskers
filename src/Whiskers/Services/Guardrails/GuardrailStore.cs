@@ -12,15 +12,22 @@ namespace Whiskers.Services.Guardrails;
 /// <para>R1-02: callers only ever get copies (<see cref="Current"/>, <see cref="Config"/>) and a save is copied in,
 /// validated, persisted and only then made live — a failed write leaves the previous policy active. A file that
 /// cannot be read or holds an invalid configuration puts the store into <see cref="GuardrailPolicy.FailClosed"/>
-/// until an admin saves a valid one (INV-25, INV-28).</para></summary>
+/// until an admin saves a valid one (INV-25, INV-28). Configuration and load status are published together as one
+/// immutable state, so a reader never pairs a configuration with the wrong status.</para></summary>
 public sealed class GuardrailStore : IGuardrailStore, IInitializable
 {
+    /// <summary>Name of the single preset <see cref="Config"/> shows while the store is fail-closed.</summary>
+    public const string FailClosedPreset = "Fail-closed";
+
+    /// <summary>What is enforced: a valid configuration, or (when <paramref name="LoadError"/> is set) the
+    /// fail-closed policy.</summary>
+    private sealed record State(GuardrailConfig Config, string? LoadError);
+
     private readonly JsonFileStore<GuardrailConfig> _store;
     private readonly string _filePath;
     private readonly ILogger<GuardrailStore>? _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
-    private GuardrailConfig _config = GuardrailConfig.SafeDefault();
-    private volatile string? _loadError;
+    private volatile State _state = new(GuardrailConfig.SafeDefault(), null);
 
     public event Action? Changed;
 
@@ -35,23 +42,28 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         get
         {
-            var config = Volatile.Read(ref _config);
-            return _loadError is null ? config.ActivePolicy().Clone() : GuardrailPolicy.FailClosed();
+            var state = _state;
+            return state.LoadError is null ? state.Config.ActivePolicy().Clone() : GuardrailPolicy.FailClosed();
         }
     }
 
-    public GuardrailConfig Config => _loadError is null
-        ? Volatile.Read(ref _config).Clone()
-        : new GuardrailConfig
+    public GuardrailConfig Config
+    {
+        get
         {
-            ActivePreset = FailClosedPreset,
-            Presets = { new GuardrailPreset { Name = FailClosedPreset, Policy = GuardrailPolicy.FailClosed() } },
-        };
+            var state = _state;
+            return state.LoadError is null
+                ? state.Config.Clone()
+                : new GuardrailConfig
+                {
+                    ActivePreset = FailClosedPreset,
+                    Presets = { new GuardrailPreset { Name = FailClosedPreset, Policy = GuardrailPolicy.FailClosed() } },
+                };
+        }
+    }
 
     /// <summary>Why the stored configuration is not enforced (the fail-closed policy is), or <c>null</c>.</summary>
-    public string? LoadError => _loadError;
-
-    private const string FailClosedPreset = "Fail-closed (guardrails.json unreadable)";
+    public string? LoadError => _state.LoadError;
 
     /// <summary>Loads the config from disk; creates the SafeDefault on first run and migrates a
     /// legacy single-policy file into a "Standard" preset.</summary>
@@ -66,7 +78,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             {
                 var initial = GuardrailConfig.SafeDefault();
                 await _store.SaveAsync(initial);
-                _config = initial;
+                _state = new State(initial, null);
                 _logger?.LogInformation("Guardrails: SafeDefault created.");
                 return;
             }
@@ -74,7 +86,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             GuardrailConfig loaded;
             try
             {
-                loaded = await _store.LoadAsync() ?? new GuardrailConfig();
+                loaded = await _store.LoadAsync()
+                         ?? throw new System.Text.Json.JsonException("The file holds no configuration.");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
                                            or NotSupportedException)
@@ -83,16 +96,27 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 return;
             }
 
-            // Migrate a legacy single-policy file (no presets) into a "Standard" preset.
+            // A file without presets is migrated only when it is positively a legacy single-policy file. Anything else
+            // without presets (null, an empty list, unrelated JSON) is invalid and is neither guessed at nor overwritten.
             if (loaded.Presets is null || loaded.Presets.Count == 0)
             {
-                var legacy = await TryLoadLegacyPolicyAsync();
-                loaded = new GuardrailConfig
+                if (await TryLoadLegacyPolicyAsync() is not { } legacy)
+                {
+                    FailClosed("guardrails.json is invalid: it holds no presets and no legacy policy.", null);
+                    return;
+                }
+                var migrated = new GuardrailConfig
                 {
                     ActivePreset = "Standard",
-                    Presets = new() { new GuardrailPreset { Name = "Standard", Policy = legacy ?? GuardrailPolicy.SafeDefault() } },
+                    Presets = new() { new GuardrailPreset { Name = "Standard", Policy = legacy } },
                 };
-                await _store.SaveAsync(loaded);
+                if (migrated.Problem() is { } legacyProblem)
+                {
+                    FailClosed($"guardrails.json is invalid: {legacyProblem}", null);
+                    return;
+                }
+                await _store.SaveAsync(migrated);
+                loaded = migrated;
                 _logger?.LogInformation("Guardrails: legacy policy migrated into preset 'Standard'.");
             }
 
@@ -104,10 +128,14 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 return;
             }
 
-            _config = loaded;
-            _loadError = null;
+            _state = new State(loaded.Clone(), null);
             _logger?.LogInformation("Guardrails loaded ({Count} presets, active={Active}).",
-                _config.Presets.Count, _config.ActivePreset);
+                loaded.Presets.Count, loaded.ActivePreset);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Whatever else goes wrong while loading, the store stays recoverable and enforces nothing weaker.
+            FailClosed($"guardrails.json could not be loaded ({ex.GetType().Name}).", ex);
         }
         finally
         {
@@ -119,17 +147,18 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         RequireAdmin(editor);
         ArgumentNullException.ThrowIfNull(config);
-        // The caller keeps its object; what is stored and enforced is a copy nobody else holds.
+        // Validate what was handed in, then the copy that is stored and enforced: a copy nobody else holds.
+        if (config.Problem() is { } given)
+            throw new GuardrailConfigException(given);
         var next = config.Clone();
         if (next.Problem() is { } problem)
-            throw new InvalidOperationException(problem);
+            throw new GuardrailConfigException(problem);
 
         await _lock.WaitAsync(ct);
         try
         {
             await _store.SaveAsync(next);   // throws → the previous policy stays live
-            Volatile.Write(ref _config, next);
-            _loadError = null;
+            _state = new State(next, null);
             _logger?.LogWarning("Guardrails changed by {Editor} ({Count} presets, active={Active}).",
                 editor.DisplayName, next.Presets.Count, next.ActivePreset);
         }
@@ -149,7 +178,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         await _lock.WaitAsync(ct);
         try
         {
-            var next = _loadError is null ? _config.Clone() : new GuardrailConfig { ActivePreset = "Standard" };
+            var state = _state;
+            var next = state.LoadError is null ? state.Config.Clone() : new GuardrailConfig { ActivePreset = "Standard" };
             var active = next.Presets.FirstOrDefault(p => p.Name == next.ActivePreset);
             if (active is null)
             {
@@ -158,10 +188,9 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             }
             active.Policy = policy.Clone();
             if (next.Problem() is { } problem)
-                throw new InvalidOperationException(problem);
+                throw new GuardrailConfigException(problem);
             await _store.SaveAsync(next);
-            Volatile.Write(ref _config, next);
-            _loadError = null;
+            _state = new State(next, null);
         }
         finally
         {
@@ -175,7 +204,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     /// unreadable file is kept next to it; the first save replaces it.</summary>
     private void FailClosed(string reason, Exception? ex)
     {
-        _loadError = reason;
+        _state = new State(new GuardrailConfig(), reason);
         _logger?.LogError(ex, "Guardrails: {Reason} Every mutation is refused until an admin saves a valid configuration",
             reason);
         try

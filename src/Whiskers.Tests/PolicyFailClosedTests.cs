@@ -120,10 +120,103 @@ public sealed class PolicyFailClosedTests : IDisposable
         if (defect == "Missing") config.ActivePreset = "Missing";
         else config.Presets[0].Policy.ForbiddenArgPatterns.Add("[unclosed");
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => store.SaveConfigAsync(config, Admin));
+        var ex = await Assert.ThrowsAsync<GuardrailConfigException>(() => store.SaveConfigAsync(config, Admin));
 
+        Assert.Equal(defect == "Missing" ? GuardrailConfigProblemKind.ActivePresetMissing : GuardrailConfigProblemKind.InvalidPattern,
+            ex.Problem.Kind);
         Assert.Null(store.LoadError);
         Assert.DoesNotContain("[unclosed", store.Current.ForbiddenArgPatterns);
+    }
+
+    [Theory]
+    [InlineData("""{"ActivePreset":"Locked","Presets":null}""")]
+    [InlineData("""{"ActivePreset":"Locked","Presets":[]}""")]
+    [InlineData("""{"Unrelated":true}""")]
+    [InlineData("null")]
+    public async Task A_file_without_presets_that_is_no_legacy_policy_fails_closed_and_is_not_overwritten(string json)
+    {
+        await File.WriteAllTextAsync(FilePath, json);
+        var store = new GuardrailStore(filePath: FilePath);
+
+        await store.InitializeAsync();
+
+        Assert.NotNull(store.LoadError);
+        Assert.Equal(GuardrailVerdict.Deny,
+            Evaluate(store.Current, "restart_container", McpPermissionLevels.Write).Verdict);
+        Assert.Equal(json, await File.ReadAllTextAsync(FilePath));
+    }
+
+    [Fact]
+    public async Task A_legacy_single_policy_file_is_still_migrated()
+    {
+        await File.WriteAllTextAsync(FilePath, """{"ReadOnlyMode":true,"ProtectedResources":["db*"]}""");
+        var store = new GuardrailStore(filePath: FilePath);
+
+        await store.InitializeAsync();
+
+        Assert.Null(store.LoadError);
+        Assert.True(store.Current.ReadOnlyMode);
+        Assert.Contains("db*", store.Current.ProtectedResources);
+    }
+
+    [Theory]
+    [InlineData("ForbiddenArgPatterns")]
+    [InlineData("ProtectedResources")]
+    [InlineData("ToolAllowList")]
+    [InlineData("ToolDenyList")]
+    [InlineData("ToolMode")]
+    [InlineData("MaxAutonomousLevel")]
+    public async Task A_policy_with_a_missing_field_fails_closed_and_stays_recoverable(string field)
+    {
+        var json = $$$"""{"ActivePreset":"Standard","Presets":[{"Name":"Standard","Policy":{"{{{field}}}":null}}]}""";
+        await File.WriteAllTextAsync(FilePath, json);
+        var store = new GuardrailStore(filePath: FilePath);
+
+        await store.InitializeAsync();   // must not throw: startup has to reach the Guardrails page
+
+        Assert.NotNull(store.LoadError);
+        Assert.Equal(GuardrailVerdict.Deny,
+            Evaluate(store.Current, "restart_container", McpPermissionLevels.Write).Verdict);
+        await store.SaveConfigAsync(GuardrailConfig.SafeDefault(), Admin);
+        Assert.Null(store.LoadError);
+    }
+
+    [Fact]
+    public async Task A_null_entry_in_a_list_is_refused_on_save()
+    {
+        var store = new GuardrailStore(filePath: FilePath);
+        await store.InitializeAsync();
+        var config = GuardrailConfig.SafeDefault();
+        config.Presets[0].Policy.ProtectedResources.Add(null!);
+
+        var ex = await Assert.ThrowsAsync<GuardrailConfigException>(() => store.SaveConfigAsync(config, Admin));
+
+        Assert.Equal(GuardrailConfigProblemKind.MissingValue, ex.Problem.Kind);
+    }
+
+    [Fact]
+    public async Task Readers_during_recovery_never_see_a_policy_that_was_not_enforced()
+    {
+        await File.WriteAllTextAsync(FilePath, "{ broken");
+        var store = new GuardrailStore(filePath: FilePath);
+        await store.InitializeAsync();
+        var recovered = GuardrailConfig.SafeDefault();
+        recovered.Presets[0].Policy.ReadOnlyMode = true;   // the admin recovers with the kill switch on
+
+        using var stop = new CancellationTokenSource();
+        var weaker = 0;
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+                if (!store.Current.ReadOnlyMode) Interlocked.Increment(ref weaker);
+        })).ToArray();
+        await store.SaveConfigAsync(recovered, Admin);
+        await Task.Delay(50);
+        stop.Cancel();
+        await Task.WhenAll(readers);
+
+        Assert.Equal(0, weaker);   // before: fail-closed; after: the recovered policy — both read-only
+        Assert.Null(store.LoadError);
     }
 
     public void Dispose()
