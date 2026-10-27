@@ -117,7 +117,9 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - What a task needs from its owner: a **custom-command** task needs an Admin owner (it runs as root on the host);
     a backup task whose **retention** deletes old backups (volume and DB backups) needs an Admin owner for the
     deletion; a **self-backup** task needs an Admin owner; the **cleanup** task (`docker system prune`) needs
-    Operator. Restart and backup tasks need Operator.
+    Operator. Restart tasks and volume backup tasks without retention need Operator; **every DB backup task needs
+    an Admin owner** (R1-05: a dump holds every row) — take an existing DB backup task owned by an Operator over as
+    an Admin, or it is refused.
   - **A task owned by an API key keeps every rule that binds the key**: tool deny/allow lists, forbidden arguments
     and confirmation. Where the policy would ask for a confirmation (the default preset does for every write by a
     key), the run is refused — nobody is there to confirm it. Have a person take the task over, or adjust the

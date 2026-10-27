@@ -261,7 +261,7 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |
 | U-31 | AI triggers save (prompt, preset, MaxLevel) | Admin | — | ❌ ILogger only | INV-23, 27, 28, 46 |
 | U-32 | Guardrail policy edit / preset switch / kill switch | Admin | — | ❌ ILogger only | INV-28, 46 |
-| U-33 | Approvals approve / reject | approve: level ≥ tool level; reject: anyone | — | ❌ | INV-31, 32, 33, 34, 37 |
+| U-33 | Approvals approve / reject | approve: level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); reject: anyone | — | ❌ | INV-31, 32, 33, 34, 37 |
 | U-34 | Settings: keys, tool levels, roles, whitelist, vault, terminal | Admin | — | AL ✅ | INV-15, 16, 17 (C-24) |
 
 ### 7.6 Totals
