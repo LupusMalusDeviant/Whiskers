@@ -37,10 +37,11 @@ public static class MutationTargets
     /// The arguments the operation runs with: the caller's arguments, with the key that named the target and
     /// <c>serverId</c> replaced by the identity the gateway decided on (R1-06). The tool then acts on exactly what
     /// was resolved and checked, never on a second, independent lookup of what the caller typed. Keys the caller
-    /// did not pass stay absent (a tool without that parameter must not receive it).
+    /// did not pass stay absent (a tool without that parameter must not receive it), except <c>serverId</c> for a
+    /// tool that takes one (<paramref name="takesServerId"/>).
     /// </summary>
     public static Dictionary<string, JsonElement> CanonicalArguments(Capability capability,
-        IReadOnlyDictionary<string, JsonElement> args, MutationTarget resolved)
+        IReadOnlyDictionary<string, JsonElement> args, MutationTarget resolved, bool takesServerId = false)
     {
         ArgumentNullException.ThrowIfNull(capability);
         ArgumentNullException.ThrowIfNull(args);
@@ -49,7 +50,10 @@ public static class MutationTargets
         if (resolved.Resolved && IdKey(capability.TargetKind, args) is { } key && key != "serverId"
             && !string.IsNullOrEmpty(resolved.Id))
             canonical[key] = JsonSerializer.SerializeToElement(resolved.Id);
-        if (String(args, "serverId") is not null && !string.IsNullOrEmpty(resolved.ServerId))
+        // The server is passed whenever the tool takes one, also when the caller left it out: "no server" means the
+        // default server to the gateway, while a tool may read it as "local" — the decision would then be made on
+        // one machine and the operation run on another.
+        if ((takesServerId || String(args, "serverId") is not null) && !string.IsNullOrEmpty(resolved.ServerId))
             canonical["serverId"] = JsonSerializer.SerializeToElement(resolved.ServerId);
         if (String(args, "containerId") is not null && resolved.RelatedContainerId is { Length: > 0 } related
             && capability.TargetKind == "network")
@@ -80,8 +84,10 @@ public static class MutationTargets
             : null;
 }
 
-/// <summary>Result of resolving a target against the inventory: the canonical target, or why it was refused.</summary>
-public sealed record TargetResolution(MutationTarget? Target, string? Error);
+/// <summary>Result of resolving a target against the inventory: the canonical target, or why it was refused —
+/// with a <see cref="MutationReasonCodes"/> code and its arguments, so the UI can say it in the user's language.</summary>
+public sealed record TargetResolution(MutationTarget? Target, string? Error, string? Code = null,
+    IReadOnlyList<string>? Args = null);
 
 /// <summary>Pipeline step after authorization: the target must exist and be unambiguous before policy is
 /// evaluated (INV-57). An unresolved target is refused.</summary>
@@ -141,7 +147,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (string.IsNullOrWhiteSpace(target.Id))
             return Refuse("Container ID or name is required.");
         var (server, error) = ResolveServer(target.ServerId);
-        if (server is null) return Refuse(error!);
+        if (server is null) return Refuse(error!, target.ServerId);
         var docker = _services.GetService<IDockerService>();
         if (docker is null)
             return Refuse("No container runtime is available to resolve the target.");
@@ -149,7 +155,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         var containers = await docker.ListContainersAsync(all: true, serverId: server.Id, ct);
         var (container, notFound) = McpInputValidation.Resolve(containers, target.Id);
         return container is null
-            ? Refuse(notFound ?? $"Container not found: {target.Id}")
+            ? Refuse(notFound ?? $"Container not found: {target.Id}", target.Id)
             : Done(target with { Id = container.Id, Name = container.Name, ServerId = server.Id });
     }
 
@@ -159,14 +165,14 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (server is not null)
             return Done(target with { Id = server.Id, Name = target.Name ?? server.Name, ServerId = server.Id });
         // A server that is being added or saved for the first time does not exist yet: nothing to resolve.
-        return mustExist || string.IsNullOrWhiteSpace(idOrName) ? Refuse(error!) : Pass(target);
+        return mustExist || string.IsNullOrWhiteSpace(idOrName) ? Refuse(error!, idOrName) : Pass(target);
     }
 
     private async Task<TargetResolution> NetworkAsync(MutationRequest request, Capability capability,
         MutationTarget target, CancellationToken ct)
     {
         var (server, error) = ResolveServer(target.ServerId);
-        if (server is null) return Refuse(error!);
+        if (server is null) return Refuse(error!, target.ServerId);
         if (Creates.Contains(capability.Id))
             return Pass(target with { ServerId = server.Id });
         if (string.IsNullOrWhiteSpace(target.Id))
@@ -179,9 +185,9 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         var exact = networks.Where(n => n.Id == target.Id || n.Name == target.Id).ToList();
         var matches = exact.Count > 0 ? exact
             : networks.Where(n => n.Id.StartsWith(target.Id, StringComparison.Ordinal)).ToList();
-        if (matches.Count == 0) return Refuse($"Network not found: {target.Id}");
+        if (matches.Count == 0) return Refuse($"Network not found: {target.Id}", target.Id);
         if (matches.Count > 1)
-            return Refuse($"Ambiguous network '{target.Id}' — matches {matches.Count} networks; use the full id.");
+            return Refuse($"Ambiguous network '{target.Id}' — matches {matches.Count} networks; use the full id.", target.Id);
         var network = matches[0];
 
         // What the operation also touches: for connect / disconnect the container named in the call, resolved on
@@ -194,7 +200,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             var containers = await docker.ListContainersAsync(all: true, serverId: server.Id, ct);
             var (container, notFound) = McpInputValidation.Resolve(containers, containerArg);
-            if (container is null) return Refuse(notFound ?? $"Container not found: {containerArg}");
+            if (container is null) return Refuse(notFound ?? $"Container not found: {containerArg}", containerArg);
             related.Add(container.Id);
             related.Add(container.Name);
             relatedContainerId = container.Id;
@@ -216,7 +222,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Refuse("Cloud control is not available.");
         var (server, error) = Unique(cloud.CloudServers(), target.Id, "cloud server");
         return server is null
-            ? Refuse(error!)
+            ? Refuse(error!, target.Id)
             : Done(target with { Id = server.Id, Name = server.Name, ServerId = server.Id });
     }
 
@@ -233,11 +239,11 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             var byName = tasks.Where(t => t.Name == target.Id).ToList();
             if (byName.Count > 1)
-                return Refuse($"Ambiguous task '{target.Id}' — {byName.Count} tasks have that name; use the task id.");
+                return Refuse($"Ambiguous task '{target.Id}' — {byName.Count} tasks have that name; use the task id.", target.Id);
             byId = byName.FirstOrDefault();
         }
         return byId is null
-            ? Refuse($"Scheduled task not found: {target.Id}")
+            ? Refuse($"Scheduled task not found: {target.Id}", target.Id)
             : Done(target with { Id = byId.TaskId, Name = byId.Name, ServerId = byId.ServerId ?? target.ServerId });
     }
 
@@ -265,14 +271,14 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (string.IsNullOrWhiteSpace(target.Id))
             return Refuse("Workload ID is required.");
         var (server, error) = ResolveServer(target.ServerId);
-        if (server is null) return Refuse(error!);
+        if (server is null) return Refuse(error!, target.ServerId);
         var factory = _services.GetService<IWorkloadProviderFactory>();
         if (factory is null)
             return Refuse("No workload runtime is available to resolve the target.");
 
         // Live, not the label the page rendered: start / stop scale and restart rolls the pod's CURRENT controller.
         var pod = await factory.GetForServer(server.Id).GetWorkloadAsync(target.Id, ct);
-        if (pod is null) return Refuse($"Workload not found: {target.Id}");
+        if (pod is null) return Refuse($"Workload not found: {target.Id}", target.Id);
         var controller = pod.ComposeProject is { Length: > 0 } c && c != "Standalone" ? c : pod.Name;
         return Done(target with
         {
@@ -313,5 +319,15 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
 
     private static TargetResolution Done(MutationTarget target) => new(target with { Resolved = true }, null);
     private static TargetResolution Pass(MutationTarget target) => new(target, null);
-    private static TargetResolution Refuse(string error) => new(null, error);
+    /// <summary>A refusal with its reason code: unknown or ambiguous <paramref name="named"/> where the message says
+    /// so, otherwise the English detail as the argument of <see cref="MutationReasonCodes.TargetNotResolved"/>.</summary>
+    private static TargetResolution Refuse(string error, string? named = null)
+    {
+        if (!string.IsNullOrWhiteSpace(named) && error.StartsWith("Ambiguous", StringComparison.Ordinal))
+            return new(null, error, MutationReasonCodes.TargetAmbiguous, [named]);
+        if (!string.IsNullOrWhiteSpace(named)
+            && (error.StartsWith("Unknown", StringComparison.Ordinal) || error.Contains("not found", StringComparison.Ordinal)))
+            return new(null, error, MutationReasonCodes.TargetUnknown, [named]);
+        return new(null, error, MutationReasonCodes.TargetNotResolved, [error]);
+    }
 }

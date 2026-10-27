@@ -17,6 +17,11 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-06: AutoUpdate no longer turns the server id `local` into "the default server": a container listed on `local` is
   decided and recreated on `local`, also when another server is the default. Webhooks decide (Test button) and run
   on the same server and container (`WebhookTargets`).
+- R1-06: a tool that takes a `serverId` always receives the server the gateway decided on, also when the caller left
+  it out (a missing server is the default server to the gateway, but some tools read it as `local`). AutoPatch, the
+  Docker workload provider and the Networks, Scheduled tasks, Volume backups, App Store and Webhooks pages no longer
+  turn `local` into "the default server" either. Refused targets carry a reason code (unknown, ambiguous, not
+  resolvable) and are shown in the user's language.
 
 - R1-05 review: the two refusals the effective requirement adds (underlying capability switched off, requirement
   not determinable) are shown in the user's language on the pages; covered end to end through the real gateway,

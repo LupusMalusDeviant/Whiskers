@@ -131,7 +131,17 @@ public static class MutationReasonCodes
     /// <summary>The operation's requirement could not be determined.</summary>
     public const string RequirementUnresolved = "RequirementUnresolved";
 
-    public static readonly IReadOnlyList<string> All = [UnderlyingCapabilityDisabled, RequirementUnresolved];
+    /// <summary>{0} does not exist (R1-06).</summary>
+    public const string TargetUnknown = "TargetUnknown";
+
+    /// <summary>{0} fits more than one target (R1-06).</summary>
+    public const string TargetAmbiguous = "TargetAmbiguous";
+
+    /// <summary>The target could not be resolved; {0} is the detail (R1-06).</summary>
+    public const string TargetNotResolved = "TargetNotResolved";
+
+    public static readonly IReadOnlyList<string> All =
+        [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

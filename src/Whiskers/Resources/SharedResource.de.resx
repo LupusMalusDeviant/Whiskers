@@ -4838,4 +4838,13 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Snackbar_OwnerChanged" xml:space="preserve">
     <value>Der Besitzer von „{0}“ hat sich inzwischen geändert, die Aufgabe wurde deshalb nicht übernommen. Die Liste wird neu geladen; prüfe den neuen Besitzer und versuche es erneut.</value>
   </data>
+  <data name="Mutation_Refused_TargetUnknown" xml:space="preserve">
+    <value>„{0}“ wurde nicht gefunden.</value>
+  </data>
+  <data name="Mutation_Refused_TargetAmbiguous" xml:space="preserve">
+    <value>„{0}“ passt auf mehr als ein Ziel; verwende die ID.</value>
+  </data>
+  <data name="Mutation_Refused_TargetNotResolved" xml:space="preserve">
+    <value>Das Ziel konnte nicht aufgelöst werden: {0}</value>
+  </data>
 </root>

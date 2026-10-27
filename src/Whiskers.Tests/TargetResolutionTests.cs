@@ -98,6 +98,35 @@ public sealed class TargetResolutionTests : IDisposable
         Assert.Equal("bbb222edge", canonical["containerId"].GetString());
     }
 
+    [Fact]
+    public void A_tool_that_takes_a_server_always_receives_the_resolved_one()
+    {
+        // set_container_env reads a missing server as "local"; the gateway decided on the default server.
+        var capability = new CapabilityCatalog().Find("container.env_set")!;
+        var resolved = new MutationTarget("container", "bbb222edge", "web", "edge01") { Resolved = true };
+
+        var canonical = MutationTargets.CanonicalArguments(capability, Args(new { containerId = "web" }), resolved,
+            takesServerId: Whiskers.Mcp.McpToolParameters.TakesServerId("set_container_env"));
+
+        Assert.Equal("edge01", canonical["serverId"].GetString());
+        Assert.True(Whiskers.Mcp.McpToolParameters.TakesServerId("restart_container"));
+        Assert.False(Whiskers.Mcp.McpToolParameters.TakesServerId("cloud_reboot"));
+    }
+
+    [Theory]
+    [InlineData("no-such-server", MutationReasonCodes.TargetUnknown)]
+    [InlineData("twin", MutationReasonCodes.TargetAmbiguous)]
+    public async Task A_refused_target_carries_a_reason_code_for_the_users_language(string serverId, string code)
+    {
+        _servers.GetServers().Add(new ServerConfig { Id = "twin-a", Name = "twin" });
+        _servers.GetServers().Add(new ServerConfig { Id = "twin-b", Name = "Twin" });
+
+        var (outcome, _) = await RunAsync("checks.pause", new { serverId, reason = "test" });
+
+        Assert.Equal(code, outcome.ReasonCode);
+        Assert.Equal([serverId], outcome.ReasonArgs);
+    }
+
     [Theory]
     [InlineData("no-such-server", "Unknown server")]
     [InlineData("twin", "Ambiguous server")]
@@ -493,13 +522,24 @@ public sealed class TargetResolutionTests : IDisposable
         public Task<IList<ContainerInfo>> ListWorkloadsAsync(bool all = true, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
+        /// <summary>Mapped by the real Kubernetes provider: the pod's controller reference is a ReplicaSet of the
+        /// Deployment "api", which the provider folds to the Deployment.</summary>
         public Task<ContainerInfo?> GetWorkloadAsync(string id, CancellationToken ct = default) =>
             Task.FromResult(id == "prod/pod-x1"
-                ? new ContainerInfo
+                ? Whiskers.Services.Workloads.Kubernetes.KubernetesWorkloadProvider.ToWorkload(new k8s.Models.V1Pod
                 {
-                    Id = id, Name = "pod-x1", ServerId = "local",
-                    Labels = new() { ["com.docker.compose.project"] = "api" },
-                }
+                    Metadata = new k8s.Models.V1ObjectMeta
+                    {
+                        Name = "pod-x1", NamespaceProperty = "prod",
+                        OwnerReferences =
+                        [
+                            new k8s.Models.V1OwnerReference
+                            {
+                                Kind = "ReplicaSet", Name = "api-7d9f8", Controller = true, ApiVersion = "apps/v1", Uid = "u1",
+                            },
+                        ],
+                    },
+                }, "local", "Local")
                 : null);
 
         public Task StartAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();

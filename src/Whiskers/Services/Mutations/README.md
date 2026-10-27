@@ -127,7 +127,7 @@ registrations are wrapped too.
 1. Unknown capability → **Denied**.
 2. Tool switched off in Settings → MCP → **Denied**. A stricter stored level raises the requirement.
 3. Principal level below the capability level → **Denied**.
-4. Target cannot be resolved (unknown or ambiguous server, container, network, cloud server, task, zone or workload) → **Denied**. From here on `MutationContext.Request.Target` is canonical; the MCP and agent adapters run the tool with `MutationTargets.CanonicalArguments`.
+4. Target cannot be resolved (unknown or ambiguous server, container, network, cloud server, task, zone or workload) → **Denied**. From here on `MutationContext.Request.Target` is canonical; the MCP and agent adapters run the tool with `MutationTargets.CanonicalArguments`, which also passes the resolved `serverId` to every tool that takes one (`McpToolParameters.TakesServerId`, the agent entry's parameters). The refusal carries `MutationReasonCodes.TargetUnknown` / `TargetAmbiguous` / `TargetNotResolved`.
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**.
 6. Policy `Confirm` on the `Automation` surface (scheduler, AutoUpdate, AutoPatch) → **Denied**, before the approval
    gate: nobody can confirm an unattended run, and no approval is raised (R1-01).

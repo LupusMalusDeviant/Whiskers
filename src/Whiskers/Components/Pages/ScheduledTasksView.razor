@@ -412,7 +412,7 @@ else
 
     private async Task LoadContainersForServer()
     {
-        var sid = _formServerId == "local" ? null : _formServerId;
+        var sid = _formServerId;
         _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
     }
 

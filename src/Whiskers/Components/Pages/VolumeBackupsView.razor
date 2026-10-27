@@ -182,7 +182,7 @@ else
     private async Task LoadVolumesForServer()
     {
         _volumeLabels.Clear();
-        var sid = _backupServerId == "local" ? null : _backupServerId;
+        var sid = _backupServerId;
 
         try
         {
@@ -224,10 +224,10 @@ else
             var backupServerId = _backupServerId;
             var notes = _backupNotes;
             var backup = await Mutations.RunAsync("volume.backup",
-                new { volumeName, containerName, serverId = backupServerId == "local" ? null : backupServerId },
+                new { volumeName, containerName, serverId = backupServerId },
                 _ => BackupService.BackupVolumeAsync(volumeName, containerName, backupServerId, notes));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", backup.BackupId, _selectedVolume, serverId: _backupServerId == "local" ? null : _backupServerId);
+            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", backup.BackupId, _selectedVolume, serverId: _backupServerId);
             Snackbar.Add(L["VolumeBackupsView_Snackbar_BackupCreated", backup.FileName, FormatBytes(backup.SizeBytes)].Value, Severity.Success);
             _showBackupDialog = false;
             await LoadBackups();
@@ -239,7 +239,7 @@ else
         catch (Exception ex)
         {
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", _selectedVolume, _selectedVolume, details: ex.Message, serverId: _backupServerId == "local" ? null : _backupServerId, success: false);
+            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", _selectedVolume, _selectedVolume, details: ex.Message, serverId: _backupServerId, success: false);
             Snackbar.Add(L["VolumeBackupsView_Snackbar_BackupFailed", ex.Message].Value, Severity.Error);
         }
         finally

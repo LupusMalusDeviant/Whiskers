@@ -233,7 +233,7 @@ else
 
     private async Task LoadContainersForServer()
     {
-        var sid = _formServerId == "local" ? null : _formServerId;
+        var sid = _formServerId;
         // all: true — a stopped container is a legitimate restart/rebuild target too. The server-scoped
         // overload is used on purpose; ListAllContainersAsync spans the whole fleet.
         _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
