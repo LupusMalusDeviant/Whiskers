@@ -116,7 +116,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     entry, an active preset that does not exist) no longer falls back to another preset or to the default: every mutation is refused, agents and MCP clients get no
     tool, and the Guardrails page shows a single "Fail-closed" preset until an Admin saves a valid configuration.
     The file is not overwritten and a copy is kept as `guardrails.json.unreadable-<timestamp>`. An old
-    single-policy file (from before presets) is still migrated into a "Standard" preset.
+    single-policy file (from before presets) is still migrated into a "Standard" preset; fields it lacks get the
+    restrictive default.
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.

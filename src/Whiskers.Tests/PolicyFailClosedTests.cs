@@ -133,6 +133,10 @@ public sealed class PolicyFailClosedTests : IDisposable
     [InlineData("""{"ActivePreset":"Locked","Presets":[]}""")]
     [InlineData("""{"Unrelated":true}""")]
     [InlineData("null")]
+    [InlineData("""{"ActivePreset":"Locked","Presets":[],"ReadOnlyMode":false}""")]
+    [InlineData("""{"ActivePreset":"Standard","Presets":[{"Name":"Standard"}]}""")]
+    [InlineData("""{"ActivePreset":"Standard","Presets":[{"Name":"Standard","Policy":{}}]}""")]
+    [InlineData("""{"Presets":[{"Name":"Standard","Policy":{}}]}""")]
     public async Task A_file_without_presets_that_is_no_legacy_policy_fails_closed_and_is_not_overwritten(string json)
     {
         await File.WriteAllTextAsync(FilePath, json);
@@ -157,6 +161,25 @@ public sealed class PolicyFailClosedTests : IDisposable
         Assert.Null(store.LoadError);
         Assert.True(store.Current.ReadOnlyMode);
         Assert.Contains("db*", store.Current.ProtectedResources);
+        // Fields the old file did not carry keep the restrictive default, not an empty one.
+        Assert.Equal(GuardrailPolicy.SafeDefault().ForbiddenArgPatterns, store.Current.ForbiddenArgPatterns);
+    }
+
+    [Fact]
+    public async Task A_file_written_by_the_store_loads_again()
+    {
+        var first = new GuardrailStore(filePath: FilePath);
+        await first.InitializeAsync();
+        var config = first.Config;
+        config.Presets.Add(new GuardrailPreset { Name = "Second", Policy = GuardrailPolicy.SafeDefault() });
+        config.ActivePreset = "Second";
+        await first.SaveConfigAsync(config, Admin);
+
+        var second = new GuardrailStore(filePath: FilePath);
+        await second.InitializeAsync();
+
+        Assert.Null(second.LoadError);
+        Assert.Equal("Second", second.Config.ActivePreset);
     }
 
     [Theory]

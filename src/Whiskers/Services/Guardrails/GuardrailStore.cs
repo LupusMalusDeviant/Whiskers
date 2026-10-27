@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
@@ -83,24 +85,46 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 return;
             }
 
-            GuardrailConfig loaded;
+            string json;
+            JsonObject root;
             try
             {
-                loaded = await _store.LoadAsync()
-                         ?? throw new System.Text.Json.JsonException("The file holds no configuration.");
+                json = await File.ReadAllTextAsync(_filePath, ct);
+                root = JsonNode.Parse(json) as JsonObject
+                       ?? throw new JsonException("The file holds no JSON object.");
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
-                                           or NotSupportedException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
                 FailClosed($"guardrails.json could not be read ({ex.GetType().Name}).", ex);
                 return;
             }
 
-            // A file without presets is migrated only when it is positively a legacy single-policy file. Anything else
-            // without presets (null, an empty list, unrelated JSON) is invalid and is neither guessed at nor overwritten.
-            if (loaded.Presets is null || loaded.Presets.Count == 0)
+            GuardrailConfig loaded;
+            if (IsPresetFile(root))
             {
-                if (await TryLoadLegacyPolicyAsync() is not { } legacy)
+                // Whiskers writes every field of a preset file. One that is missing would be filled with a permissive
+                // default by the deserializer, so the file is refused instead (INV-25).
+                if (IncompletePresetFile(root) is { } incomplete)
+                {
+                    FailClosed($"guardrails.json is invalid: {incomplete}", null);
+                    return;
+                }
+                try
+                {
+                    loaded = root.Deserialize<GuardrailConfig>(JsonOptions)
+                             ?? throw new JsonException("The file holds no configuration.");
+                }
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
+                {
+                    FailClosed($"guardrails.json could not be read ({ex.GetType().Name}).", ex);
+                    return;
+                }
+            }
+            else
+            {
+                // No preset fields at all: migrated only when it is positively a legacy single-policy file. Anything
+                // else (unrelated JSON) is invalid and is neither guessed at nor overwritten.
+                if (LegacyPolicy(root) is not { } legacy)
                 {
                     FailClosed("guardrails.json is invalid: it holds no presets and no legacy policy.", null);
                     return;
@@ -225,27 +249,79 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 $"Guardrails may only be changed by admins ({editor.DisplayName} is '{editor.PermissionLevel}').");
     }
 
-    private async Task<GuardrailPolicy?> TryLoadLegacyPolicyAsync()
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    private static readonly string[] PolicyFields =
+    [
+        nameof(GuardrailPolicy.MaxAutonomousLevel), nameof(GuardrailPolicy.ReadOnlyMode),
+        nameof(GuardrailPolicy.RequireConfirmationForWrites), nameof(GuardrailPolicy.ToolDenyList),
+        nameof(GuardrailPolicy.ToolAllowList), nameof(GuardrailPolicy.ToolMode), nameof(GuardrailPolicy.ProtectedResources),
+        nameof(GuardrailPolicy.ForbiddenArgPatterns), nameof(GuardrailPolicy.MaxActionsPerSession),
+    ];
+
+    private static JsonNode? Field(JsonObject obj, string name, out bool present)
     {
+        foreach (var (key, value) in obj)
+        {
+            if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+            {
+                present = true;
+                return value;
+            }
+        }
+        present = false;
+        return null;
+    }
+
+    /// <summary>A file that names presets or an active preset is the preset format, however incomplete.</summary>
+    private static bool IsPresetFile(JsonObject root)
+    {
+        Field(root, nameof(GuardrailConfig.Presets), out var presets);
+        Field(root, nameof(GuardrailConfig.ActivePreset), out var active);
+        return presets || active;
+    }
+
+    /// <summary>Why a preset file is incomplete, or <c>null</c>: the active preset, a non-empty preset list, and
+    /// for every preset a name and a policy object carrying every policy field.</summary>
+    private static string? IncompletePresetFile(JsonObject root)
+    {
+        if (Field(root, nameof(GuardrailConfig.ActivePreset), out _) is not JsonValue)
+            return "the active preset is missing.";
+        if (Field(root, nameof(GuardrailConfig.Presets), out _) is not JsonArray { Count: > 0 } presets)
+            return "it holds no presets.";
+        foreach (var node in presets)
+        {
+            if (node is not JsonObject preset) return "a preset is not an object.";
+            if (Field(preset, nameof(GuardrailPreset.Name), out _) is not JsonValue nameNode)
+                return "a preset has no name.";
+            var name = nameNode.ToJsonString();
+            if (Field(preset, nameof(GuardrailPreset.Policy), out _) is not JsonObject policy)
+                return $"preset {name} has no policy.";
+            foreach (var field in PolicyFields)
+            {
+                Field(policy, field, out var present);
+                if (!present) return $"preset {name}: '{field}' is missing.";
+            }
+        }
+        return null;
+    }
+
+    /// <summary>A legacy single-policy file: an object carrying at least one known policy field. Fields it does not
+    /// carry keep the restrictive default rather than the permissive <c>new GuardrailPolicy()</c>.</summary>
+    private static GuardrailPolicy? LegacyPolicy(JsonObject root)
+    {
+        if (!PolicyFields.Any(f => { Field(root, f, out var present); return present; })) return null;
         try
         {
-            var json = await File.ReadAllTextAsync(_filePath);
-            // A blank/unrelated JSON deserializes into a DEFAULT GuardrailPolicy that silently drops
-            // SafeDefault's protections (ProtectedResources / ForbiddenArgPatterns). Only trust the file
-            // as a legacy policy if it actually carries at least one known policy property.
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
-            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            var merged = JsonSerializer.SerializeToNode(GuardrailPolicy.SafeDefault())!.AsObject();
+            foreach (var field in PolicyFields)
             {
-                "MaxAutonomousLevel", "ReadOnlyMode", "RequireConfirmationForWrites", "ToolDenyList",
-                "ToolAllowList", "ToolMode", "ProtectedResources", "ForbiddenArgPatterns", "MaxActionsPerSession"
-            };
-            if (!doc.RootElement.EnumerateObject().Any(p => known.Contains(p.Name))) return null;
-
-            return System.Text.Json.JsonSerializer.Deserialize<GuardrailPolicy>(json,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var value = Field(root, field, out var present);
+                if (present) merged[field] = value?.DeepClone();
+            }
+            return merged.Deserialize<GuardrailPolicy>(JsonOptions);
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
         {
             return null;
         }
