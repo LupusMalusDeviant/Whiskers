@@ -217,7 +217,10 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   the `.env` (a name using one without default refuses the plan; with a default the `.env` / default is assumed;
   the host's orphan switches are cleared for the command), a `.env` created between plan and `up` when there was
   none, and the external webhook and Git-deploy webhook paths, which run the plan undecided until R1-08 / R1-09.
-- **External webhook calls** (`/api/webhooks/...`) still run without the gateway; they move in step 2.4. Only the
+- **Git deployments** (R1-08) are decided on the stored app (`git-deploy-app` targets: name, server and revision
+  from the store; a per-container decision inside the deployment resolves that container); a webhook Git deploy
+  runs through `IAutomationMutationRunner` on the app owner (`GitDeployOwners`).
+- **External webhook calls** (`/api/webhooks/...`) still run without the gateway (except `git-deploy`, R1-08); they move in R1-09. Only the
   UI's **Test** button is decided, as the clicking person.
 - **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the pod's **live**
   controller: the resolver re-reads the pod (`IWorkloadProvider.GetWorkloadAsync`) instead of trusting the name the

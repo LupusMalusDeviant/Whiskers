@@ -61,14 +61,19 @@ public class GitDeployService : IGitDeployService
         finally { _lock.Release(); }
     }
 
-    public async Task<List<GitDeployApp>> GetAppsAsync() => (await LoadAsync()).Apps.ToList();
+    // Copies: a caller that edits what it got must not change the stored app (and its revision) behind the lock.
+    public async Task<List<GitDeployApp>> GetAppsAsync() => (await LoadAsync()).Apps.Select(a => a.Clone()).ToList();
 
     public async Task<GitDeployApp?> GetAppAsync(string appId) =>
-        (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId);
+        (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId)?.Clone();
 
-    public async Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token)
+    public async Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId)
     {
         ValidateId(app.Id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        // Checked again under the lock; this early check keeps a stale edit from touching the vault token.
+        if ((await LoadAsync()).Apps.FirstOrDefault(a => a.Id == app.Id) is { } before && before.Revision != app.Revision)
+            throw new GitDeployConflictException($"'{before.Name}' was changed meanwhile; reload and save again.");
         if (string.IsNullOrWhiteSpace(app.Name)) throw new ArgumentException("Name is required.");
         if (!app.RepoUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Only https:// repository URLs are supported.");
@@ -98,11 +103,81 @@ public class GitDeployService : IGitDeployService
         try
         {
             var idx = data.Apps.FindIndex(a => a.Id == app.Id);
-            if (idx >= 0) data.Apps[idx] = app; else data.Apps.Add(app);
+            var stored = app.Clone();
+            if (idx >= 0)
+            {
+                var existing = data.Apps[idx];
+                // Edited from a stale copy: someone saved (or a deploy was decided on) a newer revision meanwhile.
+                if (existing.Revision != app.Revision)
+                    throw new GitDeployConflictException($"'{existing.Name}' was changed meanwhile; reload and save again.");
+                stored.CreatedAt = existing.CreatedAt;
+                stored.LastDeployedAt = existing.LastDeployedAt;
+                stored.LastDeployedSha = existing.LastDeployedSha;
+                stored.LastDeploySucceeded = existing.LastDeploySucceeded;
+            }
+            // Whoever saves the inputs answers for what a webhook later deploys with them (R1-08).
+            stored.Owner = ownerId;
+            stored.Revision = app.Revision + 1;
+            if (idx >= 0) data.Apps[idx] = stored; else data.Apps.Add(stored);
+            await _store.SaveAsync(data);
+            return stored.Clone();
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task<bool> SetOwnerAsync(string appId, string ownerId, string? expectedOwnerId)
+    {
+        ValidateId(appId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        var data = await LoadAsync();
+        await _lock.WaitAsync();
+        try
+        {
+            var existing = data.Apps.FirstOrDefault(a => a.Id == appId);
+            if (existing is null || (existing.Owner ?? "") != (expectedOwnerId ?? "")) return false;
+            var stored = existing.Clone();
+            stored.Owner = ownerId;
+            // A new owner answers for the inputs from now on: a deployment decided before the takeover is refused.
+            stored.Revision = existing.Revision + 1;
+            data.Apps[data.Apps.IndexOf(existing)] = stored;
+            await _store.SaveAsync(data);
+            return true;
+        }
+        finally { _lock.Release(); }
+    }
+
+    /// <summary>Stops the deployment unless the stored app is still exactly <paramref name="snapshot"/>: the same
+    /// revision and the same inputs (server, repository, branch, compose path, token use, owner).</summary>
+    private async Task EnsureUnchangedAsync(GitDeployApp snapshot)
+    {
+        var current = (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == snapshot.Id);
+        if (current is null)
+            throw new GitDeployConflictException("The app was deleted meanwhile.");
+        if (current.Revision != snapshot.Revision || current.ServerId != snapshot.ServerId
+            || current.RepoUrl != snapshot.RepoUrl || current.Branch != snapshot.Branch
+            || current.ComposePath != snapshot.ComposePath || current.HasToken != snapshot.HasToken
+            || current.Owner != snapshot.Owner)
+            throw new GitDeployConflictException(
+                $"'{current.Name}' was changed after the deployment was decided; start the deployment again.");
+    }
+
+    /// <summary>Records a deployment's result without touching the inputs or the revision.</summary>
+    private async Task RecordResultAsync(string appId, bool success, string? sha)
+    {
+        var data = await LoadAsync();
+        await _lock.WaitAsync();
+        try
+        {
+            var idx = data.Apps.FindIndex(a => a.Id == appId);
+            if (idx < 0) return;
+            var stored = data.Apps[idx].Clone();
+            stored.LastDeployedAt = DateTime.UtcNow;
+            stored.LastDeploySucceeded = success;
+            if (sha is not null) stored.LastDeployedSha = sha;
+            data.Apps[idx] = stored;
             await _store.SaveAsync(data);
         }
         finally { _lock.Release(); }
-        return app;
     }
 
     public async Task DeleteAppAsync(string appId)
@@ -132,18 +207,24 @@ public class GitDeployService : IGitDeployService
         finally { _lock.Release(); }
     }
 
-    public async Task<(bool Success, string Output)> DeployAsync(string appId, IProgress<string>? progress = null,
-        CancellationToken ct = default, ComposePlanGate? gate = null)
+    public async Task<(bool Success, string Output)> DeployAsync(GitDeployApp app, ComposePlanGate gate,
+        IProgress<string>? progress = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(app);
+        ArgumentNullException.ThrowIfNull(gate);
+        var appId = app.Id;
         ValidateId(appId);
-        var app = await GetAppAsync(appId);
-        if (app is null) return (false, "Git deploy app not found.");
+        // The snapshot the deployment was decided on (server, repository, branch, compose path) is what runs; the
+        // stored app must still be at its revision (R1-08). Copy it so nobody can change it underneath.
+        app = app.Clone();
 
         var log = new StringBuilder();
         void Report(string line) { progress?.Report(line); log.AppendLine(line); }
 
         try
         {
+            await EnsureUnchangedAsync(app);
+
             // 1) Credentials (private repos): refresh the askpass pair from the vault every run,
             //    so a rotated token takes effect without re-saving the app.
             if (app.HasToken)
@@ -171,14 +252,11 @@ public class GitDeployService : IGitDeployService
 
             async Task BuildAndUp()
             {
-                // Decided by a gate, or run inside a gateway decision (the webhook Test button): planned again right
-                // before the first write, and nothing undecided may run. Only the external webhook call has neither
-                // and runs the plan undecided until R1-08 / R1-09.
-                if (gate is not null || MutationScope.Current is not null)
-                {
-                    plan = await _planner.PlanAsync(deployment, ct);
-                    plan.EnsureDecided(MutationScope.Current);
-                }
+                // Decided by the gate: the app is unchanged, planned again right before the first write, and nothing
+                // undecided may run.
+                await EnsureUnchangedAsync(app);
+                plan = await _planner.PlanAsync(deployment, ct);
+                plan.EnsureDecided(MutationScope.Current);
                 // 4) Build
                 Report("③ docker compose build…");
                 var build = await Sh(app.ServerId, plan.BuildCommand, 600, ct);
@@ -189,13 +267,9 @@ public class GitDeployService : IGitDeployService
                 var up = await Sh(app.ServerId, plan.UpCommand, 300, ct);
                 Report(Tail(up.Output + up.Error, 10));
             }
-            if (gate is null) await BuildAndUp();
-            else await gate(plan, BuildAndUp);
+            await gate(plan, BuildAndUp);
 
-            app.LastDeployedAt = DateTime.UtcNow;
-            app.LastDeployedSha = sha;
-            app.LastDeploySucceeded = true;
-            await SaveAppAsync(app, token: null);
+            await RecordResultAsync(appId, success: true, sha);
             Report($"🎉 Deploy finished: {app.Name} @ {sha}");
             return (true, $"{app.Name} @ {sha}");
         }
@@ -203,12 +277,14 @@ public class GitDeployService : IGitDeployService
         {
             return Fail(Report, log, "Cancelled.");
         }
+        catch (GitDeployConflictException ex)
+        {
+            return Fail(Report, log, ex.Message);   // nothing of this deployment ran on the changed app
+        }
         catch (Exception ex) when (ex is not MutationRefusedException)
         {
             _logger.LogError(ex, "Git deploy failed for {App}", app.Name);
-            app.LastDeployedAt = DateTime.UtcNow;
-            app.LastDeploySucceeded = false;
-            try { await SaveAppAsync(app, token: null); } catch { /* status is best-effort */ }
+            try { await RecordResultAsync(appId, success: false, sha: null); } catch { /* status is best-effort */ }
             return Fail(Report, log, ex.Message);
         }
     }

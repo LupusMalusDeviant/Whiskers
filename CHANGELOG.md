@@ -6,6 +6,16 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-08: Git deployments have an **owner** — whoever saves the app, or an admin taking it over on the Git deploy
+  page. A webhook deploy runs on the owner's authority, re-checked every time through the automation runner: the
+  deployment and every container of its compose plan are decided as the owner; an owner who lost the authority (role,
+  whitelist, account) is refused before anything is fetched. The decision is made on the **stored** app (the target
+  resolver looks up its name, server and revision; another server or an outdated revision is refused), and the
+  deployment runs exactly that snapshot: the app must still be at the same revision with the same inputs before the
+  fetch and again before the build, otherwise it is refused. A save from a stale copy is refused too. The Webhooks
+  page's Test of a Git deploy decides as the clicking person and then runs on the owner's authority
+  (`GitDeployMutationTests`).
+
 - R1-07: every compose deployment is planned before anything is written (`ComposePlan`, `IComposePlanner`): the
   project `docker compose` really uses (`-p`, else `COMPOSE_PROJECT_NAME` from the `.env`, else the top-level
   `name:` with `.env` interpolation, else the directory name, normalised as compose does), the compose files (a
@@ -57,6 +67,11 @@ All notable changes to Whiskers are documented here. The format follows
 v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
 
 ### ⚠️ Upgrade notes
+
+- **R1-08: Git deploy apps saved before this release have no owner.** A webhook (or the Webhooks page's Test) no
+  longer deploys them until an admin takes them over on the Git deploy page (person icon in the Owner column);
+  deploying from the Git deploy page itself still works. Saving an app makes you its owner. A webhook deploy now fails
+  when the owner lost Admin, was removed from the whitelist or lost their account.
 
 - **R1-07: compose deployments name their project and files explicitly.** Whiskers now runs
   `docker compose -p <project> --project-directory <dir> -f <file>…` with the project and files it planned, instead of

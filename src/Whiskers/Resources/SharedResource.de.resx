@@ -4844,4 +4844,19 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Mutation_Refused_TargetNotResolved" xml:space="preserve">
     <value>Das Ziel konnte nicht aufgelöst werden: {0}</value>
   </data>
+  <data name="GitDeployView_Table_Owner" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="GitDeployView_Chip_NoOwner" xml:space="preserve">
+    <value>Kein Owner</value>
+  </data>
+  <data name="GitDeployView_Tooltip_Adopt" xml:space="preserve">
+    <value>Übernehmen: Webhook-Deploys laufen dann mit deinen Rechten</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Conflict" xml:space="preserve">
+    <value>„{0}“ wurde zwischendurch geändert. Die Liste ist neu geladen; bitte erneut versuchen.</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Adopted" xml:space="preserve">
+    <value>„{0}“ gehört jetzt dir.</value>
+  </data>
 </root>
