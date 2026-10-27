@@ -9,6 +9,8 @@ internal sealed class MemoryAutomationOwners : IAutomationOwnerStore
 
     public AutomationOwnerEntry? Get(string feature) => _entries.GetValueOrDefault(feature);
 
+    public bool IsReadable { get; set; } = true;
+
     public Task SetAsync(string feature, string ownerId, CancellationToken ct = default)
     {
         _entries[feature] = new AutomationOwnerEntry(ownerId, DateTime.UtcNow);

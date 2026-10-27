@@ -74,8 +74,17 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     alone is no longer enough; the nightly cycle logs a warning and skips. AutoUpdate keeps running without an
     owner during the grace period; take it over there as well.
   - What a task needs from its owner: a **custom-command** task needs an Admin owner (it runs as root on the host);
-    a backup task whose **retention** deletes old backups needs an Admin owner for the deletion; the **cleanup**
-    task (`docker system prune`) needs Operator. Restart and backup tasks need Operator.
+    a backup task whose **retention** deletes old backups (volume and DB backups) needs an Admin owner for the
+    deletion; a **self-backup** task needs an Admin owner; the **cleanup** task (`docker system prune`) needs
+    Operator. Restart and backup tasks need Operator.
+  - **A task owned by an API key keeps every rule that binds the key**: tool deny/allow lists, forbidden arguments
+    and confirmation. Where the policy would ask for a confirmation (the default preset does for every write by a
+    key), the run is refused — nobody is there to confirm it. Have a person take the task over, or adjust the
+    preset for that key.
+  - **AutoPatch decides every container on its own** (`container.update` of that container): a protected
+    container, or one the owner may no longer update, is skipped as `Aborted (refused: …)` instead of patched.
+  - **An unreadable or invalid `automation-owners.json`** stops AutoPatch and AutoUpdate (logged as an error;
+    AutoUpdate records a failed update) until an Admin takes them over again; it no longer counts as "no owner".
   - The kill switch and protected resources apply to scheduled runs, AutoUpdate and AutoPatch. With the default
     preset a scheduled backup of a `whiskers*` / `serverwatch*` volume or a restart of the Whiskers container is
     refused; remove the pattern from the active preset if you rely on it.

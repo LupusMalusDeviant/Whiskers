@@ -445,24 +445,67 @@ public class AutoPatchTests
         Assert.Equal("admin@example.com", actor.OwnerId);
     }
 
+    [Fact]
+    public async Task The_nightly_cycle_does_not_run_while_the_owner_file_is_unreadable()
+    {
+        var automation = new RecordingAutomation();
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        owners.IsReadable = false;
+        var service = NewService(new RecordingRunner(), new CveFindingsStore(persistPath: TempPath()), automation, owners);
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Empty(automation.Actors);
+    }
+
+    [Fact]
+    public async Task An_owned_night_decides_every_container_on_its_own()
+    {
+        var store = new CveFindingsStore(persistPath: TempPath()) { LastScanAt = DateTime.UtcNow };
+        store.Set(Scan("a", "local", (CveSeverity.Critical, "1")));
+        store.Set(Scan("b", "local", (CveSeverity.Critical, "1")));
+        var automation = new RecordingAutomation { Refuse = { "b" } };
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "admin@example.com");
+        var runner = new RecordingRunner();
+        var service = NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true, DryRun = false },
+            Compose("a"), Compose("b"));
+
+        await service.RunNightlyAsync(CancellationToken.None);
+
+        Assert.Equal(["autopatch.run", "container.update", "container.update"], automation.Actors.Select(a => a.Capability));
+        Assert.Equal(["a"], runner.Calls.Select(c => c.Name));        // b was refused before its patch ran
+        Assert.Contains(service.LastCycle!.Entries, e => e.ContainerName == "b" && e.Kind == AutoPatchResultKind.Aborted);
+    }
+
     private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
         IAutomationMutationRunner automation, IAutomationOwnerStore owners)
-        => new(new StaticOptionsMonitor<AutoPatchSettings>(new AutoPatchSettings { Enabled = true }), new FakeDocker(), store,
+        => NewService(runner, store, automation, owners, new AutoPatchSettings { Enabled = true });
+
+    private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store,
+        IAutomationMutationRunner automation, IAutomationOwnerStore owners, AutoPatchSettings settings,
+        params ContainerInfo[] containers)
+        => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
             new NoopImageUpdateStore(), runner,
             new FakeNotifications(), new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             automation, owners, NullLogger<AutoPatchService>.Instance);
 
-    /// <summary>Records who a cycle would run as, without running it.</summary>
+    /// <summary>Records who each decision runs as and runs the action, except for a container whose name is in
+    /// <see cref="Refuse"/>.</summary>
     private sealed class RecordingAutomation : IAutomationMutationRunner
     {
         public List<(AutomationActor Actor, string Capability)> Actors { get; } = new();
+        public HashSet<string> Refuse { get; } = new();
 
-        public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
+        public async Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
         {
             Actors.Add((actor, capabilityId));
-            return Task.FromResult(new MutationOutcome<T>("op", MutationStatus.Executed, default, null,
-                VerificationStatus.NotRun));
+            var name = arguments.GetType().GetProperty("name")?.GetValue(arguments) as string;
+            if (name is not null && Refuse.Contains(name))
+                return new MutationOutcome<T>("op", MutationStatus.Denied, default, "protected", VerificationStatus.NotRun);
+            return new MutationOutcome<T>("op", MutationStatus.Executed, await action(ct), null, VerificationStatus.NotRun);
         }
 
         public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,

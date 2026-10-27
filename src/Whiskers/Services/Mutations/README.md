@@ -106,15 +106,22 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 
 - **Grace period.** Ownerless tasks and an ownerless AutoUpdate run with the level of the capability they run until
   an Admin takes them over or `Automation:RequireOwner` is set (INV-04 stays ⚠️ until 1.0 makes that the default).
-- **Not gated in automation:** self-backup tasks (no capability yet) and the DB-backup retention, which deletes old
-  dumps with a host command (`IHostCommandExecutor` is not marked). `UpdateRiskService` (`image.pull`) and
+- **Gated by convention only:** self-backup tasks (`selfbackup.create` / `selfbackup.prune`) and the DB-backup
+  retention (`db.backup_delete`, a host `rm`) run through the gateway, but their services are not marked, so the
+  architecture test would not catch a new direct call. `UpdateRiskService` (`image.pull`) and
   `LoopSuspensionService` (`checks.resume`) stay in the baseline.
+- **Key-owned items** are evaluated with the full rule set of the key (tool lists, forbidden arguments,
+  confirmation); a `Confirm` is refused, since no one can approve an unattended run. Items owned by a person, and
+  ownerless items in the grace period, use the PC-D1 rules.
+- **Owner file** (`automation-owners.json`): unreadable or invalid → `IsReadable == false`, AutoPatch and AutoUpdate
+  do not run (fail closed) until an Admin takes them over again.
 - **"Run now"** runs the task on its owner's authority; the person clicking needs `scheduler.run` (Write; a
   custom command Admin) but not the owner's level for what the task does (e.g. retention deletes). The task's
   content is what the owner scheduled, only the timing changes.
 - **AutoUpdate policies** have no UI yet (`SetPolicyAsync` has no caller); the owner is per feature, not per policy.
-- **A running AutoPatch cycle** is one gateway operation (`autopatch.run`, 4-hour deadline); the per-container
-  patches inside it are not decided one by one.
+- **An AutoPatch night** is one `autopatch.run` operation (4-hour deadline) and, inside it, one `container.update`
+  decision per container it patches (protected resources, kill switch, the owner's authority at that moment). A dry
+  run decides nothing per container.
 
 - **Two audit rows per MCP or agent mutation.** The gateway row carries decision, approval, intent and outcome; the
   tool still writes its own row with the domain details (new container id, exit code, backup file). One event per

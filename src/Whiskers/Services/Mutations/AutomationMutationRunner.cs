@@ -146,7 +146,8 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             : MutationTargets.FromArguments(capability, args);
         var request = new MutationRequest(capabilityId, PrincipalOf(actor, capability), MutationSurface.Automation,
             target, args);
-        return _gateway.ExecuteAsync(request, (_, token) => action(token), ct);
+        // A failure answered as a value (false, a failed command, (false, …)) is recorded as Failed.
+        return _gateway.ExecuteAsync(request, async (_, token) => MutationResults.Report(await action(token)), ct);
     }
 
     public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,

@@ -146,7 +146,11 @@ public class TaskExecutor : ITaskExecutor
     private async Task<(bool, string)> ExecuteSelfBackup(ScheduledTaskEntity task)
     {
         // Whiskers self-backup of /app/data (F3). Backs up the app itself, so ServerId/TargetId are ignored.
-        var info = await _selfBackupService.CreateBackupAsync($"scheduled-{task.Name}");
+        var label = $"scheduled-{task.Name}";
+        var outcome = await _automation.RunAsync(ActorOf(task), "selfbackup.create", new { label },
+            _ => _selfBackupService.CreateBackupAsync(label));
+        if (Problem(outcome) is { } problem) return (false, problem);
+        var info = outcome.Value!;
 
         var config = ParseConfig(task.Config);
         await ApplyRetention(task, config);
@@ -244,7 +248,10 @@ public class TaskExecutor : ITaskExecutor
             else if (task.TaskType == ScheduledTaskType.SelfBackup)
             {
                 // Self-backups are tracked by the self-backup service (files + sidecars); keep the newest N.
-                await _selfBackupService.PruneAsync(maxBackups);
+                var outcome = await _automation.RunAsync(ActorOf(task), "selfbackup.prune", new { keep = maxBackups },
+                    _ => _selfBackupService.PruneAsync(maxBackups));
+                if (Problem(outcome) is { } problem)
+                    _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
             }
             else if (task.TaskType == ScheduledTaskType.DbBackup && !string.IsNullOrWhiteSpace(dbName))
             {
@@ -258,7 +265,12 @@ public class TaskExecutor : ITaskExecutor
                 var sid = task.ServerId ?? "local";
                 var glob = $"{_hostBackupDir}/{dbName}_*.sql*";
                 var script = $"ls -1t {glob} 2>/dev/null | tail -n +{maxBackups + 1} | xargs -r rm -f";
-                await _executor.ExecuteAsync(sid, script, TimeSpan.FromSeconds(15));
+                // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
+                var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
+                    new { containerId = task.TargetId, database = dbName, keep = maxBackups, serverId = task.ServerId },
+                    _ => _executor.ExecuteAsync(sid, script, TimeSpan.FromSeconds(15)));
+                if (Problem(outcome) is { } problem)
+                    _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
             }
         }
         catch (Exception ex)

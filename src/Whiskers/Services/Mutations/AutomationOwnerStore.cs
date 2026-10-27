@@ -18,6 +18,11 @@ public interface IAutomationOwnerStore
 
     AutomationOwnerEntry? Get(string feature);
 
+    /// <summary><c>false</c> while the owner file exists but could not be read or holds an invalid entry. The
+    /// features then must not run at all: "no owner" would put AutoUpdate into the grace period, i.e. a broken file
+    /// would raise its authority. Taking a feature over in Settings writes a fresh file.</summary>
+    bool IsReadable { get; }
+
     /// <summary>Records <paramref name="ownerId"/> as the feature's owner. Throws when the file cannot be written.</summary>
     [MutatingOperation("automation.owner_set")]
     Task SetAsync(string feature, string ownerId, CancellationToken ct = default);
@@ -32,14 +37,17 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
     private readonly ILogger<AutomationOwnerStore> _logger;
     private readonly SemaphoreSlim _write = new(1, 1);
     private Dictionary<string, AutomationOwnerEntry> _entries;
+    private volatile bool _readable;
 
     public AutomationOwnerStore(DataPathOptions paths, ILogger<AutomationOwnerStore> logger)
     {
         ArgumentNullException.ThrowIfNull(paths);
         _path = paths.AutomationOwnersJson;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _entries = Load();
+        (_entries, _readable) = Load();
     }
+
+    public bool IsReadable => _readable;
 
     public AutomationOwnerEntry? Get(string feature) =>
         Volatile.Read(ref _entries).GetValueOrDefault(feature);
@@ -60,6 +68,7 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
             await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(next, Json), ct);
             File.Move(temp, _path, overwrite: true);
             Volatile.Write(ref _entries, next);
+            _readable = true;
         }
         finally
         {
@@ -67,21 +76,22 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         }
     }
 
-    private Dictionary<string, AutomationOwnerEntry> Load()
+    private (Dictionary<string, AutomationOwnerEntry> Entries, bool Readable) Load()
     {
         try
         {
-            if (!File.Exists(_path)) return new(StringComparer.Ordinal);
+            if (!File.Exists(_path)) return (new(StringComparer.Ordinal), true);
             var loaded = JsonSerializer.Deserialize<Dictionary<string, AutomationOwnerEntry>>(File.ReadAllText(_path));
-            return loaded is null
-                ? new(StringComparer.Ordinal)
-                : new Dictionary<string, AutomationOwnerEntry>(loaded, StringComparer.Ordinal);
+            if (loaded is null || loaded.Values.Any(e => e is null || string.IsNullOrWhiteSpace(e.OwnerId)))
+                throw new JsonException("The owner file holds an empty or invalid entry.");
+            return (new Dictionary<string, AutomationOwnerEntry>(loaded, StringComparer.Ordinal), true);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException)
         {
-            // Unreadable means "no owner": AutoPatch then stays off and AutoUpdate falls back to the grace rule.
-            _logger.LogError(ex, "Automation owners could not be read from {Path}; treating every feature as unowned", _path);
-            return new(StringComparer.Ordinal);
+            // Fail closed: AutoPatch and AutoUpdate do not run until an admin takes them over again.
+            _logger.LogError(ex, "Automation owners could not be read from {Path}; AutoPatch and AutoUpdate will not run " +
+                                 "until an admin takes them over in Settings", _path);
+            return (new(StringComparer.Ordinal), false);
         }
     }
 }

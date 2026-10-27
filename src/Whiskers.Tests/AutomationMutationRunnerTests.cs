@@ -84,14 +84,14 @@ public class AutomationMutationRunnerTests
     private sealed record Fixture(AutomationMutationRunner Runner, PrincipalAudit Audit, Roles Roles,
         Whitelist Whitelist, Keys Keys, AutomationOptions Options);
 
-    private static Fixture Build(bool requireOwner = false)
+    private static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null)
     {
         var roles = new Roles();
         var whitelist = new Whitelist();
         var keys = new Keys();
         var options = new AutomationOptions { RequireOwner = requireOwner };
         var audit = new PrincipalAudit();
-        var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
             NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
@@ -169,13 +169,22 @@ public class AutomationMutationRunnerTests
         Assert.Contains("no longer allowed", Assert.Single(f.Audit.Principals).DisplayName);
     }
 
+    /// <summary>A policy that lets keys act without confirmation, so the key's own state decides.</summary>
+    private static GuardrailPolicy Unattended()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.RequireConfirmationForWrites = false;
+        policy.MaxAutonomousLevel = "admin";
+        return policy;
+    }
+
     [Theory]
     [InlineData(true, "write", MutationStatus.Executed)]
     [InlineData(false, "write", MutationStatus.Denied)]   // disabled
     [InlineData(true, "read", MutationStatus.Denied)]
     public async Task A_key_owned_run_follows_the_keys_current_state(bool enabled, string level, MutationStatus expected)
     {
-        var f = Build();
+        var f = Build(policy: Unattended());
         f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = level, Enabled = enabled });
         var actor = new AutomationActor("task:t2", "Scheduled task 'ci'", AutomationOwners.IdOf("k1", "ignored@example.com"));
 
@@ -184,6 +193,64 @@ public class AutomationMutationRunnerTests
 
         Assert.Equal(expected, outcome.Status);
         Assert.Equal("key:k1", Assert.Single(f.Audit.Principals).OnBehalfOf?.Id);
+    }
+
+    [Fact]
+    public async Task A_key_owned_task_keeps_the_keys_deny_list()
+    {
+        var policy = Unattended();
+        policy.ToolDenyList.Add("restart_container");
+        var f = Build(policy: policy);
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = "admin" });
+        var ran = false;
+
+        var outcome = await f.Runner.RunAsync(new AutomationActor("task:t2", "Scheduled task 'ci'", "key:k1"),
+            "container.restart", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; });
+
+        Assert.False(ran);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+    }
+
+    [Fact]
+    public async Task A_key_owned_task_that_would_need_an_approval_is_refused_not_auto_confirmed()
+    {
+        var f = Build();   // SafeDefault: keys confirm every write
+        f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = "admin" });
+        var ran = false;
+
+        var outcome = await f.Runner.RunAsync(new AutomationActor("task:t2", "Scheduled task 'ci'", "key:k1"),
+            "container.restart", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; });
+
+        Assert.False(ran);
+        Assert.NotEqual(MutationStatus.Executed, outcome.Status);
+    }
+
+    [Fact]
+    public async Task A_scheduled_self_backup_follows_its_owner_too()
+    {
+        var f = Build();   // ops@example.com is not on the whitelist → read
+        var executor = new TaskExecutor(new FakeDocker(), null!, null!, null!, null!, f.Runner,
+            NullLogger<TaskExecutor>.Instance, notify: new FakeNotifications());
+
+        var (success, _) = await executor.ExecuteAsync(new ScheduledTaskEntity
+        {
+            TaskId = "t3", Name = "self", TaskType = ScheduledTaskType.SelfBackup, CreatedBy = Ops,
+        });
+
+        Assert.False(success);   // refused before the (null) self-backup service is reached
+        Assert.Contains(f.Audit.Events, e => e.StartsWith("denied", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_failure_answered_as_a_value_is_recorded_as_failed()
+    {
+        var f = WithOperator();
+
+        var outcome = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
+            _ => Task.FromResult((false, "docker said no")));
+
+        Assert.Equal(MutationStatus.Failed, outcome.Status);
+        Assert.Contains("complete:Failed", f.Audit.Events);
     }
 
     [Fact]
@@ -313,9 +380,18 @@ public class AutomationMutationRunnerTests
             Assert.Equal("admin@example.com", second.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId);
             Assert.Null(second.Get(IAutomationOwnerStore.AutoUpdate));
 
+            Assert.True(second.IsReadable);
+
             await File.WriteAllTextAsync(paths.AutomationOwnersJson, "{ not json");
             var third = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
             Assert.Null(third.Get(IAutomationOwnerStore.AutoPatch));
+            Assert.False(third.IsReadable);   // fail closed: not "unowned", which would be the grace period
+
+            await File.WriteAllTextAsync(paths.AutomationOwnersJson, "{ \"autoupdate\": { \"OwnerId\": \"\" } }");
+            Assert.False(new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance).IsReadable);
+
+            await third.SetAsync(IAutomationOwnerStore.AutoUpdate, "admin@example.com");
+            Assert.True(third.IsReadable);
         }
         finally
         {

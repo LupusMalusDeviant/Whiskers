@@ -138,11 +138,10 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
             try
             {
-                // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
-                // drops the old container, so a failed update can be rolled back from the UI (and the snapshot
-                // survives even a crash mid-update). Best-effort — a snapshot failure must never abort the update.
-                try { await CaptureSnapshotAsync(container); }
-                catch (Exception cex) { _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
+                // A broken owner file must not read as "no owner" (that would be the grace period): fail closed.
+                if (!_owners.IsReadable)
+                    throw new InvalidOperationException(
+                        "The AutoUpdate owner could not be read; take AutoUpdate over again in Settings → Automation owners.");
 
                 var progress = new Progress<string>(msg => _logger.LogDebug("Update {Container}: {Msg}", container.Name, msg));
                 // Through the gateway on the authority of the admin who took AutoUpdate over (PC-D6), re-checked
@@ -151,7 +150,16 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 var outcome = await _automation.RunAsync(
                     new AutomationActor("autoupdate", "AutoUpdate", _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId),
                     "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
-                    _ => _docker.RecreateContainerAsync(container.Id, sid, progress), ct);
+                    async _ =>
+                    {
+                        // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
+                        // drops the old container, so a failed update can be rolled back from the UI (and the snapshot
+                        // survives even a crash mid-update). Inside the gateway, so a refused update keeps the
+                        // previous rollback point. Best-effort — a snapshot failure must never abort the update.
+                        try { await CaptureSnapshotAsync(container); }
+                        catch (Exception cex) { _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
+                        return await _docker.RecreateContainerAsync(container.Id, sid, progress);
+                    }, ct);
                 if (outcome.Status != MutationStatus.Executed)
                     throw outcome.Error ?? new InvalidOperationException(outcome.Reason ?? "The update was refused.");
                 var newId = outcome.Value!;

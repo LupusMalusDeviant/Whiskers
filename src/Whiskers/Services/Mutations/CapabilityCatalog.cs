@@ -99,8 +99,6 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("firewall.set_status", A, "host", Dis, Short);
         yield return Tool("nginx.update", "update_nginx_config", "host", Dis, Short);
         yield return Ui("nginx.reload", A, "host", Dis, Short);
-        // Scheduled cleanup task: docker system prune of unused images, containers and networks.
-        yield return Ui("host.prune", W, "host", Dis, Short);
         yield return Ui("nginx.site_enable", A, "host", Dis, Short);
         yield return Ui("nginx.site_disable", A, "host", Dis, Short);
         yield return Tool("systemd.manage", "manage_systemd_service", "host", Dis, Normal);
@@ -113,6 +111,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("db.backup", "backup_database", "container", Rev, Long);
         // Retention of a DB-backup task: deletes old dumps with a host `rm`.
         yield return Ui("db.backup_delete", A, "container", Des, Short);
+        // Retention of a scheduled self-backup (the newest N are kept).
+        yield return Ui("selfbackup.prune", A, "whiskers", Des, Short);
 
         // DNS
         yield return Tool("dns.record_set", "set_dns_record", "dns-zone", Dis, Short);
