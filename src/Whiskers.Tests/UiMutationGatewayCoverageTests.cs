@@ -12,7 +12,9 @@ using Whiskers.Services.Mcp;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Registries;
+using Whiskers.Services.ServerConfig;
 using Whiskers.Services.Vault;
+using Whiskers.Services.Workloads.Kubernetes;
 
 namespace Whiskers.Tests;
 
@@ -133,8 +135,6 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.AiOperationsView), "CreateKey", "mcp.key_create"),
         (typeof(Whiskers.Components.Pages.AiOperationsView), "ActivatePreset", "guardrails.save"),
         (typeof(Whiskers.Components.Pages.Servers), "PersistServerCoreAsync", "vault.secret_set"),
-        (typeof(Whiskers.Components.Pages.Servers), "DeleteServer", "vault.secret_delete"),
-        (typeof(Whiskers.Components.Pages.Servers), "DeleteServer", "vault.secret_set"),   // puts the kubeconfig back
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Save", "registry.save"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
     ];
@@ -467,6 +467,100 @@ public class UiMutationGatewayCoverageTests : IDisposable
             Assert.Equal(("me", "two", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
         else
             Assert.Null(registries.GetCredentialForImage("ghcr.io/x/y:1"));
+    }
+
+    [Fact]
+    public async Task A_pull_during_a_credential_rotation_gets_the_new_credential_not_none()
+    {
+        var vault = new MemoryVault();
+        var path = Path.Combine(_dir, "registries.json");
+        var registries = new RegistryConfigService(vault, path);
+        var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "one");
+        var oldRef = Assert.Single(await registries.GetRegistriesAsync()).CredentialRef!;
+
+        // The pull captured the old entry; the rotation publishes and removes the old key before the pull reads it.
+        vault.BeforeRead = key =>
+        {
+            if (key != oldRef) return;
+            vault.BeforeRead = null;
+            registries.SaveRegistryAsync(new RegistryConfig { Id = saved.Id, Name = "ghcr", Host = "ghcr.io", Username = "me" }, "two")
+                .GetAwaiter().GetResult();
+        };
+
+        Assert.Equal(("me", "two", "ghcr.io"), registries.GetCredentialForImage("ghcr.io/x/y:1"));
+    }
+
+    [Fact]
+    public async Task A_server_that_cannot_be_removed_keeps_its_kubeconfig()
+    {
+        var vault = new MemoryVault();
+        var path = Path.Combine(_dir, "servers.json");
+        var (servers, server) = await KubernetesServerAsync(path, vault);
+
+        Directory.CreateDirectory(path + ".tmp");   // writing servers.json fails
+        await Assert.ThrowsAnyAsync<Exception>(() => ServerRemoval.RemoveAsync(servers, vault, server));
+
+        Assert.Contains(servers.GetServers(), s => s.Id == server.Id);
+        Assert.Equal("kubeconfig-yaml", vault.GetSecret(KubernetesClientCache.KubeconfigVaultKey(server.Id)));
+    }
+
+    [Fact]
+    public async Task A_removed_server_takes_its_kubeconfig_along_and_a_failed_cleanup_does_not_undo_the_removal()
+    {
+        var vault = new MemoryVault();
+        var (servers, server) = await KubernetesServerAsync(Path.Combine(_dir, "servers.json"), vault);
+        Assert.True(await ServerRemoval.RemoveAsync(servers, vault, server));
+        Assert.Null(vault.GetSecret(KubernetesClientCache.KubeconfigVaultKey(server.Id)));
+
+        var (servers2, server2) = await KubernetesServerAsync(Path.Combine(_dir, "servers2.json"), vault);
+        vault.FailDeletes = true;
+        Assert.False(await ServerRemoval.RemoveAsync(servers2, vault, server2));
+        Assert.DoesNotContain(servers2.GetServers(), s => s.Id == server2.Id);
+    }
+
+    [Fact]
+    public void Removing_a_server_is_one_decision_whose_execution_owns_the_kubeconfig_cleanup()
+    {
+        Assert.True(typeof(ServerRemoval).IsDefined(typeof(MutationHandlerAttribute), false));
+        Assert.DoesNotContain(MutationCallScanner.CallsIn(typeof(Whiskers.Components.Pages.Servers)),
+            c => c.Handler == "DeleteServer" && c.Capability.StartsWith("vault.", StringComparison.Ordinal));
+    }
+
+    private static async Task<(ServerConfigService Servers, Models.ServerConfig Server)> KubernetesServerAsync(
+        string path, MemoryVault vault)
+    {
+        var servers = new ServerConfigService(Microsoft.Extensions.Options.Options.Create(new DockerSettings { SocketPath = "unix:///nope.sock" }),
+            NullLogger<ServerConfigService>.Instance, storePath: path);
+        await servers.InitializeAsync();
+        var server = new Models.ServerConfig { Name = "k8s", ConnectionType = ConnectionType.Kubernetes };
+        await servers.AddServerAsync(server);
+        await vault.SetSecretAsync(KubernetesClientCache.KubeconfigVaultKey(server.Id), "kubeconfig-yaml");
+        return (servers, server);
+    }
+
+    /// <summary>An in-memory vault that can fail its deletes and run code before a read.</summary>
+    private sealed class MemoryVault : IVaultService
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _secrets = new();
+        public Action<string>? BeforeRead { get; set; }
+        public bool FailDeletes { get; set; }
+        public bool IsEnabled => true;
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public List<VaultEntry> ListSecrets() => _secrets.Keys.Select(k => new VaultEntry { Key = k }).ToList();
+        public Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null,
+            int? rotateAfterDays = null) { _secrets[key] = plainValue; return Task.CompletedTask; }
+        public string? GetSecret(string key)
+        {
+            BeforeRead?.Invoke(key);
+            return _secrets.TryGetValue(key, out var v) ? v : null;
+        }
+        public Task DeleteSecretAsync(string key)
+        {
+            if (FailDeletes) throw new IOException("vault.json not writable");
+            _secrets.TryRemove(key, out _);
+            return Task.CompletedTask;
+        }
+        public List<VaultEntry> GetExpiringSecrets() => [];
     }
 
     [Fact]

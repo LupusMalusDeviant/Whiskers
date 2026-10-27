@@ -698,32 +698,10 @@
         {
             await Mutations.RunAsync("server.remove", new { serverId = server.Id, name = server.Name }, async _ =>
             {
-                // A Kubernetes server leaves its kubeconfig in the vault — clean that up too. Its own decision comes
-                // first (R1-11): refused, nothing is removed. Should the server then fail to go, the kubeconfig is put
-                // back, so a failed removal leaves a working server.
-                string? vaultKey = null, kubeconfig = null;
-                if (server.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes && Vault.IsEnabled)
-                {
-                    vaultKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(server.Id);
-                    kubeconfig = Vault.GetSecret(vaultKey);
-                    await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
-                        _ => Vault.DeleteSecretAsync(vaultKey));
-                }
-                try
-                {
-                    ConnectionManager.InvalidateClient(server.Id);
-                    await ServerConfigService.RemoveServerAsync(server.Id);
-                }
-                catch when (vaultKey is not null && kubeconfig is not null)
-                {
-                    try
-                    {
-                        await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
-                            _ => Vault.SetSecretAsync(vaultKey, kubeconfig));
-                    }
-                    catch { /* the removal's own error is the one to report */ }
-                    throw;
-                }
+                // The server record first, then a Kubernetes server's kubeconfig, as one decision (R1-11): a failed
+                // removal leaves a working server, a failed cleanup at most an unused secret.
+                ConnectionManager.InvalidateClient(server.Id);
+                await Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(ServerConfigService, Vault, server);
             });
             _servers = ServerConfigService.GetServers();
             await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, serverId: server.Id);

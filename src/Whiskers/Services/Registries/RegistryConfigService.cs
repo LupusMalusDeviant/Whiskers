@@ -14,7 +14,7 @@ public class RegistryConfigService : IRegistryConfigService
 {
     private readonly JsonFileStore<RegistryConfigData> _store;
     private readonly IVaultService _vault;
-    private RegistryConfigData _cached = new();
+    private volatile RegistryConfigData _cached = new();   // replaced, never changed in place: read lock-free
     private bool _loaded;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -136,13 +136,21 @@ public class RegistryConfigService : IRegistryConfigService
     public (string Username, string Password, string ServerAddress)? GetCredentialForImage(string imageRef)
     {
         var host = RegistryHostOf(imageRef);
-        var match = _cached.Registries.FirstOrDefault(r =>
-            r.HasCredential && string.Equals(r.Host, host, StringComparison.OrdinalIgnoreCase));
-        if (match is null || !_vault.IsEnabled) return null;
+        // Lock-free for the pull hot path. A rotation may publish a new snapshot and delete the key this read
+        // captured in between (R1-11); a vanished secret on a snapshot that is no longer current is read again from
+        // the current one.
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var snapshot = _cached;
+            var match = snapshot.Registries.FirstOrDefault(r =>
+                r.HasCredential && string.Equals(r.Host, host, StringComparison.OrdinalIgnoreCase));
+            if (match is null || !_vault.IsEnabled) return null;
 
-        var password = _vault.GetSecret(CredentialKey(match));
-        if (string.IsNullOrEmpty(password)) return null;
-        return (match.Username, password, match.Host);
+            var password = _vault.GetSecret(CredentialKey(match));
+            if (!string.IsNullOrEmpty(password)) return (match.Username, password, match.Host);
+            if (ReferenceEquals(snapshot, _cached)) return null;
+        }
+        return null;
     }
 
     /// <summary>Registry host of an image reference, Docker-convention style: the first path
