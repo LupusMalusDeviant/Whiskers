@@ -4859,4 +4859,19 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="GitDeployView_Snackbar_Adopted" xml:space="preserve">
     <value>You now own '{0}'.</value>
   </data>
+  <data name="WebhooksView_Table_Owner" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="WebhooksView_Chip_NoOwner" xml:space="preserve">
+    <value>No owner</value>
+  </data>
+  <data name="WebhooksView_Tooltip_Adopt" xml:space="preserve">
+    <value>Take over: external calls then run on your authority</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Conflict" xml:space="preserve">
+    <value>'{0}' was taken over by someone else meanwhile. The list is reloaded.</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Adopted" xml:space="preserve">
+    <value>You now own '{0}'.</value>
+  </data>
 </root>

@@ -58,6 +58,9 @@ public class WebhookEntity
     public string TargetId { get; set; } = "";         // Container name or compose project dir
     public string Action { get; set; } = "restart";    // restart, rebuild, deploy
     public string? ServerId { get; set; }
+    // R1-09 (INV-04): the principal id (user:<email> / key:<id>) an external trigger runs on, re-checked at each
+    // delivery. Null for a webhook saved before owners were recorded: refused until an admin takes it over.
+    public string? Owner { get; set; }
     public bool Enabled { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastTriggered { get; set; }

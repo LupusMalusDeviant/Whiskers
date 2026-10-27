@@ -17,8 +17,6 @@ Whiskers.Services.Cloud.Providers.HetznerCloudProvider -> hetzner.snapshot_delet
 Whiskers.Services.ImageUpdate.UpdateRiskService -> image.pull
 Whiskers.Services.Observability.LoopSuspensionService -> checks.resume
 Whiskers.Services.Onboarding.OnboardingService -> certificate.issue_mtls
-Whiskers.Services.Webhooks.WebhookService -> container.restart
-Whiskers.Services.Webhooks.WebhookService -> container.update
 Whiskers.Services.Workloads.DockerWorkloadProvider -> container.restart
 Whiskers.Services.Workloads.DockerWorkloadProvider -> container.start
 Whiskers.Services.Workloads.DockerWorkloadProvider -> container.stop

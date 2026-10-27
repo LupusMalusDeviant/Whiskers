@@ -4859,4 +4859,19 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GitDeployView_Snackbar_Adopted" xml:space="preserve">
     <value>„{0}“ gehört jetzt dir.</value>
   </data>
+  <data name="WebhooksView_Table_Owner" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="WebhooksView_Chip_NoOwner" xml:space="preserve">
+    <value>Kein Owner</value>
+  </data>
+  <data name="WebhooksView_Tooltip_Adopt" xml:space="preserve">
+    <value>Übernehmen: Externe Aufrufe laufen dann mit deinen Rechten</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Conflict" xml:space="preserve">
+    <value>„{0}“ wurde zwischendurch von jemand anderem übernommen. Die Liste ist neu geladen.</value>
+  </data>
+  <data name="WebhooksView_Snackbar_Adopted" xml:space="preserve">
+    <value>„{0}“ gehört jetzt dir.</value>
+  </data>
 </root>

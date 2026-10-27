@@ -133,6 +133,26 @@ public sealed class GitDeployMutationTests : IDisposable
     }
 
     [Fact]
+    public async Task An_edit_while_the_containers_are_decided_is_refused_before_the_build()
+    {
+        var git = await AppAsync();
+        var decided = (await git.GetAppAsync(AppId))!;
+
+        var (success, output) = await git.DeployAsync(decided, async (_, proceed) =>
+        {
+            // Saved after the fetch, while the plan's containers are being decided.
+            var edit = (await git.GetAppAsync(AppId))!;
+            edit.Branch = "evil";
+            await git.SaveAppAsync(edit, token: null, AdminId);
+            await proceed();
+        });
+
+        Assert.False(success);
+        Assert.Contains("changed", output);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
+    }
+
+    [Fact]
     public async Task A_snapshot_with_other_inputs_than_the_stored_app_is_refused()
     {
         var git = await AppAsync();

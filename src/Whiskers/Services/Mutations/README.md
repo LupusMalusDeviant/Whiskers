@@ -211,17 +211,19 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   `set_container_env`) get the planned containers as related resources of their one decision, made by the resolver.
   The `.env`'s compose switches are planned too (`COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `COMPOSE_REMOVE_ORPHANS`).
   Execution uses the plan's explicit `-p` / `--project-directory` / `-f` and refuses (`EnsureDecided`) when a plan made
-  again right before writing touches a container no enclosing decision covered (UI, MCP, agent, webhook Test, Git
-  deploy page; a Git deploy from the webhook **Test** has no per-container decision yet and is therefore refused when
-  it touches a container, until R1-08). Not covered: values in the host's own environment, which compose prefers to
+  again right before writing touches a container no enclosing decision covered (UI, MCP, agent, webhooks, Git
+  deploy). Not covered: values in the host's own environment, which compose prefers to
   the `.env` (a name using one without default refuses the plan; with a default the `.env` / default is assumed;
-  the host's orphan switches are cleared for the command), a `.env` created between plan and `up` when there was
-  none, and the external webhook and Git-deploy webhook paths, which run the plan undecided until R1-08 / R1-09.
+  the host's orphan switches are cleared for the command), and a `.env` created between plan and `up` when there was
+  none.
 - **Git deployments** (R1-08) are decided on the stored app (`git-deploy-app` targets: name, server and revision
   from the store; a per-container decision inside the deployment resolves that container); a webhook Git deploy
   runs through `IAutomationMutationRunner` on the app owner (`GitDeployOwners`).
-- **External webhook calls** (`/api/webhooks/...`) still run without the gateway (except `git-deploy`, R1-08); they move in R1-09. Only the
-  UI's **Test** button is decided, as the clicking person.
+- **Webhooks** (R1-09): an external call (`/api/webhooks/...`) runs its action through `IAutomationMutationRunner` on
+  the webhook's owner (`webhook` targets resolve the stored webhook: its name and server); the UI's **Test** button is
+  decided as the clicking person first and then runs the same way. Management writes are `webhook.*` capabilities.
+  An owner (webhook, Git deploy app) set by a person on the page is recorded as its provenance too, so the PC-D1
+  rules for a person apply.
 - **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the pod's **live**
   controller: the resolver re-reads the pod (`IWorkloadProvider.GetWorkloadAsync`) instead of trusting the name the
   page rendered (R1-06). The provider resolves the controller again when it acts; a controller change in between is

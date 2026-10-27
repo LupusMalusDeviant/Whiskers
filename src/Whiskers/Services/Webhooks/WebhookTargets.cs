@@ -1,6 +1,7 @@
 using Whiskers.Mcp.Tools;
 using Whiskers.Models;
 using Whiskers.Services.Docker;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Services.Webhooks;
 
@@ -29,5 +30,25 @@ public static class WebhookTargets
             return (null, "The webhook names no container.");
         var containers = await docker.ListContainersAsync(all: true, serverId: ServerOf(webhook), ct);
         return McpInputValidation.Resolve(containers, webhook.TargetId);
+    }
+
+    /// <summary>The plan of a compose deploy webhook (R1-07), the same for the page's Test and the trigger: the
+    /// compose project directory (<c>TargetId</c>) must be an absolute path — it reaches the host shell (quoted).</summary>
+    public static async Task<(ComposePlan? Plan, string? Error)> ComposePlanAsync(IComposePlanner planner,
+        WebhookEntity webhook, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(webhook);
+        var dir = webhook.TargetId ?? "";
+        if (!dir.StartsWith('/'))
+            return (null, "Deploy target must be an absolute path.");
+        try
+        {
+            return (await planner.PlanAsync(ComposeDeployment.FromDirectory(ServerOf(webhook), dir), ct), null);
+        }
+        catch (ComposePlanException ex)
+        {
+            return (null, ex.Message);
+        }
     }
 }

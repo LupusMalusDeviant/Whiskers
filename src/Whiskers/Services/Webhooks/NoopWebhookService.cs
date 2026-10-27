@@ -18,6 +18,11 @@ public sealed class NoopWebhookService : IWebhookService
 
     public Task<List<WebhookEntity>> GetWebhooksAsync() => Task.FromResult(new List<WebhookEntity>());
 
+    public Task<WebhookEntity?> GetWebhookAsync(string webhookId) => Task.FromResult<WebhookEntity?>(null);
+
+    public Task<bool> SetOwnerAsync(string webhookId, string ownerId, string? expectedOwnerId)
+        => throw new InvalidOperationException(Disabled);
+
     public Task<WebhookEntity> CreateWebhookAsync(WebhookEntity webhook)
         => throw new InvalidOperationException(Disabled);
 
