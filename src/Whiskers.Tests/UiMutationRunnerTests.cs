@@ -153,4 +153,81 @@ public class UiMutationRunnerTests
         Assert.Equal(["containerId", "minutes"], args.Keys.Order());
         Assert.Equal(JsonValueKind.Number, args["minutes"].ValueKind);
     }
+
+    [Fact]
+    public async Task A_failure_answered_without_an_exception_is_recorded_as_failed_and_still_reaches_the_page()
+    {
+        var (runner, audit) = Runner(AppRole.Admin);
+
+        var result = await runner.RunAsync("host.exec", new { serverId = "local" },
+            _ => Task.FromResult(new Whiskers.Services.Server.CommandResult { ExitCode = 1, Error = "ufw: denied" }));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("complete:Failed", audit.Events);
+        Assert.DoesNotContain("complete:Executed", audit.Events);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void Failure_values_are_recognised(bool ok, bool failed)
+    {
+        Assert.Equal(failed, MutationResults.FailureOf(ok) is not null);
+        Assert.Equal(failed, MutationResults.FailureOf((ok, "out")) is not null);
+        Assert.Equal(failed, MutationResults.FailureOf(new QueryResult { Error = ok ? null : "x" }) is not null);
+        Assert.Null(MutationResults.FailureOf("anything"));
+    }
+
+    [Fact]
+    public async Task Kubernetes_workload_actions_are_stopped_by_the_kill_switch()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ReadOnlyMode = true;
+        var (runner, _) = Runner(AppRole.Admin, policy);
+        var ran = false;
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("workload.stop",
+            new { workloadId = "default/deployment/web", name = "web", serverId = "k8s" },
+            _ => { ran = true; return Task.CompletedTask; }));
+
+        Assert.False(ran);
+    }
+
+    [Fact]
+    public async Task A_protected_kubernetes_workload_is_protected_too()
+    {
+        var (runner, _) = Runner(AppRole.Admin);   // SafeDefault protects whiskers*
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("workload.restart",
+            new { workloadId = "default/deployment/whiskers", name = "whiskers", serverId = "k8s" },
+            _ => Task.CompletedTask));
+    }
+
+    [Fact]
+    public void Volume_and_workload_targets_are_named()
+    {
+        var catalog = new CapabilityCatalog();
+        var volume = MutationTargets.FromArguments(catalog.Find("volume.backup")!,
+            UiMutationRunner.ToArguments(new { volumeName = "pgdata" }));
+        var workload = MutationTargets.FromArguments(catalog.Find("workload.start")!,
+            UiMutationRunner.ToArguments(new { workloadId = "ns/deployment/web", name = "web" }));
+
+        Assert.Equal("pgdata", volume.Id);
+        Assert.Equal(("ns/deployment/web", "web"), (workload.Id, workload.Name));
+    }
+
+    [Fact]
+    public void Free_text_payloads_never_reach_the_audit_row()
+    {
+        var args = UiMutationRunner.ToArguments(new
+        {
+            containerId = "db-1", query = "ALTER ROLE app PASSWORD 'Violet!47'", command = "mysql -pSecret",
+        });
+
+        var stored = JsonSerializer.Serialize(AuditLogMutationSink.WithoutPayloads(args));
+
+        Assert.DoesNotContain("Violet", stored);
+        Assert.DoesNotContain("Secret", stored);
+        Assert.Contains("db-1", stored);
+    }
 }

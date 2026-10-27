@@ -79,19 +79,25 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 - **Two audit rows per MCP or agent mutation.** The gateway row carries decision, approval, intent and outcome; the
   tool still writes its own row with the domain details (new container id, exit code, backup file). One event per
   attempt (INV-45) needs typed tool outcomes and verifiers.
-- **Failure reports are per tool.** The 25 mutating MCP tools mark their error answers with `MutationScope.Fail`.
-  A failure a tool does not mark (for example an error string coming back from a cloud provider API as a normal
-  answer) is still recorded as `Executed`; the tool's own row has the real result.
+- **Failure reports.** The 25 mutating MCP tools mark their error answers with `MutationScope.Fail`. UI actions are
+  classified by `MutationResults`: `false`, a failed `CommandResult`, a `QueryResult` with an error or a tuple whose
+  first item is `false` is recorded as `Failed` (the page still gets the value). A failure answered in another shape
+  (an error string from a cloud provider API) is still recorded as `Executed`; the own row has the real result.
 - **Deadlines** reach a tool through its `CancellationToken` parameter, over MCP and for the agent. A tool that has
   none, or work it starts in the background, is not stopped (INV-40, WP9).
 - **Calls from a tool to another capability** stay in the baseline: `deploy_app` creating a container and pulling an
   image, `preview_auto_patch` starting a background cycle (`autopatch.run`). The gateway decided on the tool's
   capability only; the background cycle also outlives the gateway's deadline and outcome row.
 - **Not yet marked** (so neither the guard nor the architecture test sees them): the generic execution primitives
-  `IHostCommandExecutor` and `IDockerService.RunHostShellAsync`, terminals, self-backup restore, onboarding installs,
-  and the UI actions built on them (container `.env` save, Artisan commands, server records).
-- **Kubernetes workload actions** on the Dashboard call the workload provider directly; the gateway resolves Docker
-  containers only.
+  `IHostCommandExecutor` and `IDockerService.RunHostShellAsync`, terminals, self-backup restore, onboarding installs
+  and server records. The UI actions built on the primitives (container `.env` save + compose up, Artisan
+  migrate/rollback, SQL file import, compose editor and App Store deploys) run through the gateway since the step 2.2
+  review, but only by convention: a new direct call is not caught until the primitives are marked.
+- **Kubernetes workload actions** (`workload.start` / `stop` / `restart`) are decided on the workload id and name as
+  given; there is no Kubernetes target resolver yet, so a protected pattern must match the workload name.
+- **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row
+  (`AuditLogMutationSink.PayloadArguments`, only their length is stored); the policy and the approval card still see
+  them.
 - **A UI action that outlives its deadline** keeps running when the service call ignores the token (most do); the
   page then shows a timeout while the work continues.
 - **Approvals are in memory.** Persistence, execution-time expiry and no-self-approval follow in WP3.

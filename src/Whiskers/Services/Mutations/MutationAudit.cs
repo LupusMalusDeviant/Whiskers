@@ -126,10 +126,23 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             onBehalfOf = request.Principal.OnBehalfOf?.Id,
         },
         sessionId = request.SessionId,
-        arguments = Redact(JsonSerializer.Serialize(request.Arguments)),
+        arguments = Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
     }));
 
     private static string? Redact(string? text) => text is null ? null : SecretRedactor.Redact(text);
+
+    /// <summary>Argument names whose value is free text that can carry credentials in any syntax (SQL
+    /// <c>PASSWORD '…'</c>, a shell command, a file body). The pattern-based redactor cannot recognise all of them, so
+    /// the audit row keeps only their length (TA-09, "never log secrets").</summary>
+    internal static readonly HashSet<string> PayloadArguments = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "query", "sql", "command", "script", "content", "body", "env", "compose", "yaml", "password", "secret", "token",
+    };
+
+    internal static IReadOnlyDictionary<string, object?> WithoutPayloads(IReadOnlyDictionary<string, JsonElement> arguments) =>
+        arguments.ToDictionary(a => a.Key, a => PayloadArguments.Contains(a.Key)
+            ? (object?)$"<withheld: {(a.Value.ValueKind == JsonValueKind.String ? a.Value.GetString()!.Length : a.Value.GetRawText().Length)} chars>"
+            : a.Value);
 
     // The intent is nested as JSON so the outcome row stays one readable document; a capped (truncated) intent
     // is no longer valid JSON and is kept as text instead.

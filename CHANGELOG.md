@@ -42,6 +42,14 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - A tool **switched off** in Settings → MCP, or raised to a stricter level there, also switches off or raises the
     matching UI action (e.g. `restart_container` → the restart buttons).
   - A refused action shows the reason as a warning; the gateway's AuditLog row records it.
+  - Also covered: Kubernetes start/stop/restart on the Dashboard, saving a container's `.env` (with `compose up`),
+    Artisan migrate/rollback, SQL file import, and deploys from the compose editor and the App Store.
+  - "Run now" of a scheduled task is checked for the task's own action and target as well (a restart task on a
+    protected container is refused); over MCP, `run_scheduled_task` also needs the caller's access to
+    `restart_container` / `backup_database` / `execute_command` for those task types.
+  - A UI action whose service answers with a failure instead of an exception (failed command, query error,
+    `false`) is recorded as `Failed` in the gateway row, not `Executed`.
+  - The gateway row no longer stores free-text arguments (SQL text, commands, file content); only their length.
   - No approval is asked for a person's own click; tool allow/deny lists and argument patterns stay agent rules.
 - **Arbitrary SQL needs Admin everywhere** (PC-D3): the database query in the container page and the
   `execute_query` MCP tool were Operator / write.
@@ -98,6 +106,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   already be published. A test keeps the version, image tag and label in step with the app version.
 
 ### Fixed
+- A refused container update on the Dashboard no longer overwrites the saved rollback point; the snapshot is taken
+  only once the update has been allowed.
 - The installer no longer recommends `Auth__Disabled=true` for first sign-in. It prints the setup token and
   points to `VAULT_KEY`.
 - The README renders completely on catalogues that drop raw HTML and relative paths (LobeHub): the header is

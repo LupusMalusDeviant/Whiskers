@@ -66,6 +66,14 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("container.remove", A, "container", Des, Normal);
         yield return Ui("container.create", A, "container", Root, Long);
         yield return Ui("container.rollback", W, "container", Dis, Long);
+        // Kubernetes rows on the Dashboard (start / stop = scale the controller, restart = rollout restart).
+        yield return Ui("workload.start", W, "workload", Rev, Normal);
+        yield return Ui("workload.stop", W, "workload", Dis, Normal);
+        yield return Ui("workload.restart", W, "workload", Dis, Normal);
+        // Container page: save the compose .env and run `docker compose up -d` (root on the host).
+        yield return Ui("container.env_file_save", A, "container", Root, Normal);
+        // Container page: a changing command inside the container (Artisan migrate / rollback).
+        yield return Ui("container.exec", A, "container", Root, Normal);
         yield return Ui("image.pull", W, "host", Rev, Long);
 
         // Deployments
@@ -84,6 +92,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Hosts
         // execute_command accepts up to 600 s of its own timeout; the deadline must not cut that short.
         yield return Tool("host.exec", "execute_command", "host", Root, TimeSpan.FromMinutes(11));
+        // `docker system prune` from a scheduled cleanup task (run on schedule or with "Run now").
+        yield return Ui("host.prune", W, "host", Dis, Short);
         yield return Tool("firewall.rule_add", "add_firewall_rule", "host", Dis, Short);
         yield return Tool("firewall.rule_remove", "remove_firewall_rule", "host", Dis, Short);
         yield return Ui("firewall.set_status", A, "host", Dis, Short);

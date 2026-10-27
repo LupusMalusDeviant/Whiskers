@@ -365,6 +365,34 @@ else
         }
     }
 
+    /// <summary>"Run now" is decided twice: once for the task's own action and target as the person clicking (a
+    /// protected container, a switched-off or stricter capability, the kill switch), then as <c>scheduler.run</c>.
+    /// Checking only <c>scheduler.run</c> would let anyone who may run tasks trigger what the task does.</summary>
+    private Task<(bool Success, string Output)> RunNowGatedAsync(Whiskers.Models.ScheduledTaskEntity task)
+    {
+        var serverId = task.ServerId;
+        var target = task.TargetId;
+        return task.TaskType switch
+        {
+            ScheduledTaskType.ContainerRestart => Mutations.RunAsync("container.restart",
+                new { containerId = target, name = task.TargetName, serverId }, _ => RunScheduledAsync(task)),
+            ScheduledTaskType.DbBackup => Mutations.RunAsync("db.backup",
+                new { containerId = target, name = task.TargetName, serverId }, _ => RunScheduledAsync(task)),
+            ScheduledTaskType.VolumeBackup => Mutations.RunAsync("volume.backup",
+                new { volumeName = target, serverId }, _ => RunScheduledAsync(task)),
+            ScheduledTaskType.CustomCommand => Mutations.RunAsync("host.exec",
+                new { serverId, hasCommand = true }, _ => RunScheduledAsync(task)),
+            ScheduledTaskType.Cleanup => Mutations.RunAsync("host.prune",
+                new { serverId }, _ => RunScheduledAsync(task)),
+            _ => RunScheduledAsync(task),
+        };
+    }
+
+    private Task<(bool Success, string Output)> RunScheduledAsync(Whiskers.Models.ScheduledTaskEntity task) =>
+        Mutations.RunAsync("scheduler.run",
+            new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId },
+            _ => Scheduler.RunNowAsync(task.TaskId));
+
     private async Task RunNow(Whiskers.Models.ScheduledTaskEntity task)
     {
         if (!Require(RunNowRole(task))) return;
@@ -373,9 +401,7 @@ else
         string output;
         try
         {
-            (success, output) = await Mutations.RunAsync("scheduler.run",
-                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId },
-                _ => Scheduler.RunNowAsync(task.TaskId));
+            (success, output) = await RunNowGatedAsync(task);
         }
         catch (MutationRefusedException ex)
         {

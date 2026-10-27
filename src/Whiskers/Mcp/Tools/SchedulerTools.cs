@@ -121,10 +121,19 @@ public class SchedulerTools
         // as execute_command so run_scheduled_task cannot be used to bypass that boundary.
         var target = (await scheduler.GetTasksAsync()).FirstOrDefault(t => t.TaskId == taskId);
         if (target is null) return MutationScope.Fail($"Task '{taskId}' not found.");
-        if (target.TaskType == ScheduledTaskType.CustomCommand)
+        // The caller must also be allowed what the task does (tool switch, level, key tool list): running a task is
+        // not a way around restart_container, backup_database or execute_command.
+        var underlying = target.TaskType switch
         {
-            var deniedCmd = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "execute_command");
-            if (deniedCmd != null) return MutationScope.Fail(deniedCmd);
+            ScheduledTaskType.CustomCommand => "execute_command",
+            ScheduledTaskType.ContainerRestart => "restart_container",
+            ScheduledTaskType.DbBackup => "backup_database",
+            _ => null,
+        };
+        if (underlying is not null)
+        {
+            var deniedTool = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, underlying);
+            if (deniedTool != null) return MutationScope.Fail(deniedTool);
         }
 
         var (success, output) = await scheduler.RunNowAsync(taskId);

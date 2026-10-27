@@ -68,10 +68,15 @@ public sealed class UiMutationRunner : IUiMutationRunner
             : MutationTargets.FromArguments(capability, args);
         var request = new MutationRequest(capabilityId, await PrincipalAsync(), MutationSurface.Ui, target, args);
 
-        var outcome = await _gateway.ExecuteAsync(request, (_, token) => action(token), ct);
+        // A service that answers with a failure value instead of throwing is recorded as Failed (MutationResults).
+        var outcome = await _gateway.ExecuteAsync(request,
+            async (_, token) => MutationResults.Report(await action(token)), ct);
         switch (outcome.Status)
         {
             case MutationStatus.Executed:
+                return outcome.Value!;
+            case MutationStatus.Failed when outcome.Error is null:
+                // A reported failure: the action ran and answered; the page shows its own error from the value.
                 return outcome.Value!;
             case MutationStatus.Failed when outcome.Error is { } error and not OperationCanceledException:
                 ExceptionDispatchInfo.Capture(error).Throw();

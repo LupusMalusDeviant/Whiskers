@@ -797,7 +797,8 @@
         {
             // K8s rows route through the workload seam (start = scale the controller back up).
             if (_k8sServerIds.Contains(container.ServerId))
-                await WorkloadFactory.GetForServer(container.ServerId).StartAsync(container.Id);
+                await Mutations.RunAsync("workload.start", new { workloadId = container.Id, name = container.Name, serverId = container.ServerId },
+                    token => WorkloadFactory.GetForServer(container.ServerId).StartAsync(container.Id, token));
             else
                 await Mutations.RunAsync("container.start", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
                     _ => DockerService.StartContainerAsync(container.Id, container.ServerId));
@@ -824,7 +825,8 @@
         {
             // K8s rows route through the workload seam (stop = scale the controller to 0).
             if (_k8sServerIds.Contains(container.ServerId))
-                await WorkloadFactory.GetForServer(container.ServerId).StopAsync(container.Id);
+                await Mutations.RunAsync("workload.stop", new { workloadId = container.Id, name = container.Name, serverId = container.ServerId },
+                    token => WorkloadFactory.GetForServer(container.ServerId).StopAsync(container.Id, token));
             else
                 await Mutations.RunAsync("container.stop", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
                     _ => DockerService.StopContainerAsync(container.Id, container.ServerId));
@@ -851,7 +853,8 @@
         {
             // K8s rows route through the workload seam (restart = rollout-restart of the controller).
             if (_k8sServerIds.Contains(container.ServerId))
-                await WorkloadFactory.GetForServer(container.ServerId).RestartAsync(container.Id);
+                await Mutations.RunAsync("workload.restart", new { workloadId = container.Id, name = container.Name, serverId = container.ServerId },
+                    token => WorkloadFactory.GetForServer(container.ServerId).RestartAsync(container.Id, token));
             else
                 await Mutations.RunAsync("container.restart", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
                     _ => DockerService.RestartContainerAsync(container.Id, container.ServerId));
@@ -918,12 +921,16 @@
         {
             Snackbar.Add(L["Dashboard_Snackbar_Updating", container.Name].Value, Severity.Info);
             var progress = new Progress<string>(msg => Snackbar.Add(msg, Severity.Info));
-            // C12: snapshot the current image + config BEFORE recreating, so this update can be rolled back.
-            // Best-effort — a snapshot failure must not block the update itself.
-            try { await AutoUpdate.CaptureSnapshotAsync(container); }
-            catch (Exception cex) { _logger?.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
             await Mutations.RunAsync("container.update", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
-                _ => DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress));
+                async _ =>
+                {
+                    // C12: snapshot the current image + config BEFORE recreating, so this update can be rolled back.
+                    // Inside the gateway: a refused update must not overwrite the previous rollback point.
+                    // Best-effort — a snapshot failure must not block the update itself.
+                    try { await AutoUpdate.CaptureSnapshotAsync(container); }
+                    catch (Exception cex) { _logger?.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
+                    await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
+                });
             ImageUpdateStore.Remove(container.Id, container.ServerId);
             await AuditLog.LogAsync(actor, "web", "container.update", "container", container.Id, container.Name, serverId: container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Updated", container.Name].Value, Severity.Success);
