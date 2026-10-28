@@ -32,6 +32,7 @@
 @inject IOptionsMonitor<Whiskers.Configuration.EmailSettings> EmailOptions
 @inject IOptionsMonitor<Whiskers.Configuration.WebhookNotificationSettings> WebhookOptions
 @inject Whiskers.Services.Persistence.IAppSettingsStore AppSettings
+@inject IUiMutationRunner Mutations
 @inject IConfiguration Configuration
 @inject IStringLocalizer<SharedResource> L
 
@@ -780,79 +781,125 @@ else
     private async Task SaveNotifications()
     {
         var mmCur = MattermostOptions.CurrentValue;
-        await AppSettings.SaveSectionAsync("Mattermost", new MattermostSettings
+        try
         {
-            Enabled = _mmEnabled, WebhookUrl = _mmWebhook?.Trim() ?? "", Channel = _mmChannel?.Trim() ?? "",
-            BotUsername = string.IsNullOrWhiteSpace(_mmBot) ? "Whiskers" : _mmBot.Trim(),
-            BotIconUrl = mmCur.BotIconUrl, ThrottleMinutes = _mmThrottle,
-        });
-        await AppSettings.SaveSectionAsync("Matrix", new MatrixSettings
-        {
-            Enabled = _mxEnabled, HomeserverUrl = _mxHomeserver?.Trim() ?? "", RoomId = _mxRoom?.Trim() ?? "",
-            AccessToken = _mxToken ?? "", ThrottleMinutes = _mxThrottle,
-        });
-        await Audit("notifications");
-        Snackbar.Add(L["Settings_Snackbar_NotificationsSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "notifications" }, async _ =>
+            {
+                // One file replacement for both sections: a failed write changes neither.
+                await AppSettings.SaveSectionsAsync(new Dictionary<string, object>
+                {
+                    ["Mattermost"] = new MattermostSettings
+                {
+                    Enabled = _mmEnabled, WebhookUrl = _mmWebhook?.Trim() ?? "", Channel = _mmChannel?.Trim() ?? "",
+                    BotUsername = string.IsNullOrWhiteSpace(_mmBot) ? "Whiskers" : _mmBot.Trim(),
+                    BotIconUrl = mmCur.BotIconUrl, ThrottleMinutes = _mmThrottle,
+                },
+                    ["Matrix"] = new MatrixSettings
+                {
+                    Enabled = _mxEnabled, HomeserverUrl = _mxHomeserver?.Trim() ?? "", RoomId = _mxRoom?.Trim() ?? "",
+                    AccessToken = _mxToken ?? "", ThrottleMinutes = _mxThrottle,
+                },
+                });
+            });
+            await Audit("notifications");
+            Snackbar.Add(L["Settings_Snackbar_NotificationsSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveHealth()
     {
-        await AppSettings.SaveSectionAsync("HealthMonitor", new HealthMonitorSettings
+        try
         {
-            CheckIntervalSeconds = _hInterval, HistoryRetentionHours = _hRetention,
-            RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
-        });
-        await Audit("healthmonitor");
-        Snackbar.Add(L["Settings_Snackbar_HealthSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "healthmonitor" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync("HealthMonitor", new HealthMonitorSettings
+                {
+                    CheckIntervalSeconds = _hInterval, HistoryRetentionHours = _hRetention,
+                    RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
+                });
+            });
+            await Audit("healthmonitor");
+            Snackbar.Add(L["Settings_Snackbar_HealthSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveMetricAlert()
     {
-        await AppSettings.SaveSectionAsync("MetricAlert", new MetricAlertSettings
+        try
         {
-            Enabled = _maEnabled, CpuPercent = _maCpu, MemoryPercent = _maMem, DiskPercent = _maDisk,
-            SustainedMinutes = _maSustained, CooldownMinutes = _maCooldown,
-            AnomalyEnabled = _maAnom, AnomalyWindow = _maAnomWindow, AnomalySigma = _maAnomSigma, AnomalyFloorPercent = _maAnomFloor,
-        });
-        await Audit("metricalert");
-        Snackbar.Add(L["Settings_Snackbar_MetricAlertsSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "metricalert" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync("MetricAlert", new MetricAlertSettings
+                {
+                    Enabled = _maEnabled, CpuPercent = _maCpu, MemoryPercent = _maMem, DiskPercent = _maDisk,
+                    SustainedMinutes = _maSustained, CooldownMinutes = _maCooldown,
+                    AnomalyEnabled = _maAnom, AnomalyWindow = _maAnomWindow, AnomalySigma = _maAnomSigma, AnomalyFloorPercent = _maAnomFloor,
+                });
+            });
+            await Audit("metricalert");
+            Snackbar.Add(L["Settings_Snackbar_MetricAlertsSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveCve()
     {
         var cur = CveSettings.CurrentValue;
-        await AppSettings.SaveSectionAsync("CveMonitor", new CveMonitorSettings
+        try
         {
-            Enabled = _cveEnabled, CheckIntervalHours = _cveInterval, ScanContainers = _cveScanContainers,
-            ScanOs = _cveScanOs, EnableOsCveIds = _cveOsIds, TrivyImage = string.IsNullOrWhiteSpace(_cveTrivy) ? cur.TrivyImage : _cveTrivy.Trim(),
-            NotifyOnFinding = _cveNotify, NotifySeverity = _cveSeverity, MaxConcurrentScans = _cveMaxScans,
-            OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
-        });
-        await Audit("cvemonitor");
-        Snackbar.Add(L["Settings_Snackbar_CveSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "cvemonitor" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync("CveMonitor", new CveMonitorSettings
+                {
+                    Enabled = _cveEnabled, CheckIntervalHours = _cveInterval, ScanContainers = _cveScanContainers,
+                    ScanOs = _cveScanOs, EnableOsCveIds = _cveOsIds, TrivyImage = string.IsNullOrWhiteSpace(_cveTrivy) ? cur.TrivyImage : _cveTrivy.Trim(),
+                    NotifyOnFinding = _cveNotify, NotifySeverity = _cveSeverity, MaxConcurrentScans = _cveMaxScans,
+                    OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
+                });
+            });
+            await Audit("cvemonitor");
+            Snackbar.Add(L["Settings_Snackbar_CveSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveImageUpdate()
     {
-        await AppSettings.SaveSectionAsync("ImageUpdate", new ImageUpdateSettings
+        try
         {
-            Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
-        });
-        await Audit("imageupdate");
-        Snackbar.Add(L["Settings_Snackbar_ImageUpdatesSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "imageupdate" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync("ImageUpdate", new ImageUpdateSettings
+                {
+                    Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
+                });
+            });
+            await Audit("imageupdate");
+            Snackbar.Add(L["Settings_Snackbar_ImageUpdatesSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveTerminal()
     {
-        await AppSettings.SaveSectionAsync("Terminal", new TerminalSettings
+        try
         {
-            Enabled = _termEnabled,
-            DefaultShell = string.IsNullOrWhiteSpace(_termShell) ? "/bin/bash" : _termShell.Trim(),
-            MaxSessions = _termMaxSessions,
-            IdleTimeoutMinutes = _termIdle,
-        });
-        await Audit("terminal");
-        Snackbar.Add(L["Settings_Snackbar_TerminalSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "terminal" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync("Terminal", new TerminalSettings
+                {
+                    Enabled = _termEnabled,
+                    DefaultShell = string.IsNullOrWhiteSpace(_termShell) ? "/bin/bash" : _termShell.Trim(),
+                    MaxSessions = _termMaxSessions,
+                    IdleTimeoutMinutes = _termIdle,
+                });
+            });
+            await Audit("terminal");
+            Snackbar.Add(L["Settings_Snackbar_TerminalSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private void LoadDns()
@@ -877,81 +924,113 @@ else
             .Distinct()
             .ToList();
 
-        await AppSettings.SaveSectionAsync(DnsSettings.SectionName, new DnsSettings
+        try
         {
-            Provider = string.IsNullOrWhiteSpace(_dnsProvider) ? "infomaniak" : _dnsProvider,
-            ApiToken = token,
-            AllowedZones = zones,
-            DefaultTtl = Math.Clamp(_dnsDefaultTtl, 60, 86400),
-        });
-        await Audit("dns");
-        _dnsApiToken = "";
-        _dnsHasToken = !string.IsNullOrWhiteSpace(token);
-        _dnsTokenTail = _dnsHasToken && token.Length >= 4 ? token[^4..] : "";
-        Snackbar.Add(L["Settings_Dns_Snackbar_Saved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync(DnsSettings.SectionName, new DnsSettings
+                {
+                    Provider = string.IsNullOrWhiteSpace(_dnsProvider) ? "infomaniak" : _dnsProvider,
+                    ApiToken = token,
+                    AllowedZones = zones,
+                    DefaultTtl = Math.Clamp(_dnsDefaultTtl, 60, 86400),
+                });
+            });
+            await Audit("dns");
+            _dnsApiToken = "";
+            _dnsHasToken = !string.IsNullOrWhiteSpace(token);
+            _dnsTokenTail = _dnsHasToken && token.Length >= 4 ? token[^4..] : "";
+            Snackbar.Add(L["Settings_Dns_Snackbar_Saved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task ClearDnsToken()
     {
         var current = DnsOptions.CurrentValue;
-        await AppSettings.SaveSectionAsync(DnsSettings.SectionName, new DnsSettings
+        try
         {
-            Provider = current.Provider,
-            ApiToken = "",
-            AllowedZones = current.AllowedZones,
-            DefaultTtl = current.DefaultTtl,
-        });
-        await Audit("dns");
-        _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
-        Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
+            await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync(DnsSettings.SectionName, new DnsSettings
+                {
+                    Provider = current.Provider,
+                    ApiToken = "",
+                    AllowedZones = current.AllowedZones,
+                    DefaultTtl = current.DefaultTtl,
+                });
+            });
+            await Audit("dns");
+            _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
+            Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveAiChat()
     {
-        await AppSettings.SaveSectionAsync("AiChat", new AiChatSettings
+        try
         {
-            Enabled = _aiEnabled,
-            Provider = string.IsNullOrWhiteSpace(_aiProvider) ? "openai" : _aiProvider,
-            Model = _aiModel?.Trim() ?? "",
-            ApiUrl = string.IsNullOrWhiteSpace(_aiApiUrl) ? null : _aiApiUrl.Trim(),
-            ApiKey = _aiApiKey ?? "",
-        });
-        await Audit("aichat");
-        Snackbar.Add(L["Settings_Snackbar_AiChatSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "aichat" }, async _ =>
+            {
+                await AppSettings.SaveSectionAsync("AiChat", new AiChatSettings
+                {
+                    Enabled = _aiEnabled,
+                    Provider = string.IsNullOrWhiteSpace(_aiProvider) ? "openai" : _aiProvider,
+                    Model = _aiModel?.Trim() ?? "",
+                    ApiUrl = string.IsNullOrWhiteSpace(_aiApiUrl) ? null : _aiApiUrl.Trim(),
+                    ApiKey = _aiApiKey ?? "",
+                });
+            });
+            await Audit("aichat");
+            Snackbar.Add(L["Settings_Snackbar_AiChatSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveChannels()
     {
-        await AppSettings.SaveSectionAsync("Telegram", new TelegramSettings
+        try
         {
-            Enabled = _tgEnabled, BotToken = _tgToken?.Trim() ?? "", ChatId = _tgChat?.Trim() ?? "",
-            ThrottleMinutes = TelegramOptions.CurrentValue.ThrottleMinutes,
-        });
-        await AppSettings.SaveSectionAsync("Ntfy", new NtfySettings
-        {
-            Enabled = _ntfyEnabled, ServerUrl = string.IsNullOrWhiteSpace(_ntfyServer) ? "https://ntfy.sh" : _ntfyServer.Trim(),
-            Topic = _ntfyTopic?.Trim() ?? "", Token = _ntfyToken?.Trim() ?? "", ThrottleMinutes = NtfyOptions.CurrentValue.ThrottleMinutes,
-        });
-        await AppSettings.SaveSectionAsync("Discord", new DiscordSettings
-        {
-            Enabled = _dcEnabled, WebhookUrl = _dcWebhook?.Trim() ?? "", ThrottleMinutes = DiscordOptions.CurrentValue.ThrottleMinutes,
-        });
-        await AppSettings.SaveSectionAsync("Slack", new SlackSettings
-        {
-            Enabled = _slEnabled, WebhookUrl = _slWebhook?.Trim() ?? "", ThrottleMinutes = SlackOptions.CurrentValue.ThrottleMinutes,
-        });
-        await AppSettings.SaveSectionAsync("Email", new EmailSettings
-        {
-            Enabled = _mailEnabled, Host = _mailHost?.Trim() ?? "", Port = _mailPort, UseSsl = _mailSsl,
-            Username = _mailUser?.Trim() ?? "", Password = _mailPass ?? "", From = _mailFrom?.Trim() ?? "",
-            To = _mailTo?.Trim() ?? "", ThrottleMinutes = EmailOptions.CurrentValue.ThrottleMinutes,
-        });
-        await AppSettings.SaveSectionAsync("WebhookNotification", new WebhookNotificationSettings
-        {
-            Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", Secret = _whSecret ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
-        });
-        await Audit("notification-channels");
-        Snackbar.Add(L["Settings_Snackbar_ChannelsSaved"].Value, Severity.Success);
+            await Mutations.RunAsync("config.save", new { section = "notification-channels" }, async _ =>
+            {
+                // One file replacement for all six sections: a failed write changes none.
+                await AppSettings.SaveSectionsAsync(new Dictionary<string, object>
+                {
+                    ["Telegram"] = new TelegramSettings
+                {
+                    Enabled = _tgEnabled, BotToken = _tgToken?.Trim() ?? "", ChatId = _tgChat?.Trim() ?? "",
+                    ThrottleMinutes = TelegramOptions.CurrentValue.ThrottleMinutes,
+                },
+                    ["Ntfy"] = new NtfySettings
+                {
+                    Enabled = _ntfyEnabled, ServerUrl = string.IsNullOrWhiteSpace(_ntfyServer) ? "https://ntfy.sh" : _ntfyServer.Trim(),
+                    Topic = _ntfyTopic?.Trim() ?? "", Token = _ntfyToken?.Trim() ?? "", ThrottleMinutes = NtfyOptions.CurrentValue.ThrottleMinutes,
+                },
+                    ["Discord"] = new DiscordSettings
+                {
+                    Enabled = _dcEnabled, WebhookUrl = _dcWebhook?.Trim() ?? "", ThrottleMinutes = DiscordOptions.CurrentValue.ThrottleMinutes,
+                },
+                    ["Slack"] = new SlackSettings
+                {
+                    Enabled = _slEnabled, WebhookUrl = _slWebhook?.Trim() ?? "", ThrottleMinutes = SlackOptions.CurrentValue.ThrottleMinutes,
+                },
+                    ["Email"] = new EmailSettings
+                {
+                    Enabled = _mailEnabled, Host = _mailHost?.Trim() ?? "", Port = _mailPort, UseSsl = _mailSsl,
+                    Username = _mailUser?.Trim() ?? "", Password = _mailPass ?? "", From = _mailFrom?.Trim() ?? "",
+                    To = _mailTo?.Trim() ?? "", ThrottleMinutes = EmailOptions.CurrentValue.ThrottleMinutes,
+                },
+                    ["WebhookNotification"] = new WebhookNotificationSettings
+                {
+                    Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", Secret = _whSecret ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
+                },
+                });
+            });
+            await Audit("notification-channels");
+            Snackbar.Add(L["Settings_Snackbar_ChannelsSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task TestChannels()
@@ -1008,7 +1087,14 @@ else
     {
         if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
-        var newKey = await McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel);
+        Whiskers.Models.McpApiKeyConfig newKey;
+        try
+        {
+            // Name and level only: the key is generated inside and never travels through the arguments.
+            newKey = await Mutations.RunAsync("mcp.key_create", new { section = "mcp-api-keys", name = _newKeyName.Trim(), level = _newKeyLevel },
+                _ => McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel));
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         ReloadApiKeysKeepingPendingToggles();
         _freshKey = (newKey.Id, newKey.Key!); // shown now, never again
         _newKeyName = "";
@@ -1023,7 +1109,12 @@ else
         // Same guard as every other write on this page — hiding the page is not authorization.
         if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         var name = _mcpApiKeys.FirstOrDefault(k => k.Id == id)?.Name ?? id;
-        await McpPermissionService.RemoveApiKeyAsync(id);
+        try
+        {
+            await Mutations.RunAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name },
+                _ => McpPermissionService.RemoveApiKeyAsync(id));
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         ReloadApiKeysKeepingPendingToggles();
         if (_freshKey?.Id == id) _freshKey = null;
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "mcp.key.delete", "mcp-api-key", id, name);
@@ -1045,14 +1136,19 @@ else
         _savingMcp = true;
         try
         {
-            await McpPermissionService.SavePermissionDataAsync(new Whiskers.Models.McpPermissionData
-            {
-                ApiKeys = _mcpApiKeys,
-                Tools = _mcpTools
-            });
+            await Mutations.RunAsync("config.mcp_permissions", new { section = "mcp-permissions" },
+                _ => McpPermissionService.SavePermissionDataAsync(new Whiskers.Models.McpPermissionData
+                {
+                    ApiKeys = _mcpApiKeys,
+                    Tools = _mcpTools
+                }));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "config.save", "config", "mcp-permissions", "MCP-Rechte");
             Snackbar.Add(L["Settings_Snackbar_McpSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -1094,14 +1190,19 @@ else
         _savingWhitelist = true;
         try
         {
-            await WhitelistService.SaveWhitelistAsync(new Whiskers.Models.WhitelistData
-            {
-                Enabled = _whitelistEnabled,
-                Emails = _whitelistEmails
-            });
+            await Mutations.RunAsync("config.whitelist", new { section = "whitelist" },
+                _ => WhitelistService.SaveWhitelistAsync(new Whiskers.Models.WhitelistData
+                {
+                    Enabled = _whitelistEnabled,
+                    Emails = _whitelistEmails.ToList()
+                }));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "config.save", "config", "whitelist", "E-Mail-Whitelist");
             Snackbar.Add(L["Settings_Snackbar_WhitelistSaved"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -1163,7 +1264,21 @@ else
         // DefaultRole travels along: without it every role change reset a configured default to Viewer.
         try
         {
-            await RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData { Roles = _roleEntries, DefaultRole = _defaultRole });
+            await Mutations.RunAsync("config.roles", new { section = "roles" },
+                _ => RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData
+                {
+                    Roles = _roleEntries.Select(r => new Whiskers.Models.UserRoleEntry { Email = r.Email, Role = r.Role }).ToList(),
+                    DefaultRole = _defaultRole,
+                }));
+        }
+        catch (MutationRefusedException ex)
+        {
+            // Nothing was written: show the stored roles again, not the refused edit.
+            Snackbar.Add(ex.Message, Severity.Warning);
+            var stored = RoleService.GetRoleData();
+            _roleEntries = stored.Roles;
+            _defaultRole = stored.DefaultRole;
+            return;
         }
         catch (InvalidOperationException)
         {
@@ -1189,7 +1304,12 @@ else
     private async Task DeleteVaultSecret(string key)
     {
         if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
-        await VaultService.DeleteSecretAsync(key);
+        try
+        {
+            await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key },
+                _ => VaultService.DeleteSecretAsync(key));
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         await AuditVault("vault.delete", key);
         LoadVault();
     }
@@ -1201,11 +1321,18 @@ else
         var key = _newVaultKey.Trim();
         try
         {
-            await VaultService.SetSecretAsync(key, _newVaultValue);
+            // The key name only: the secret value never goes into the arguments the audit keeps.
+            var value = _newVaultValue;
+            await Mutations.RunAsync("vault.secret_set", new { section = "vault", key },
+                _ => VaultService.SetSecretAsync(key, value));
             await AuditVault("vault.set", key);
             Snackbar.Add(L["Settings_Snackbar_SecretSaved", key].Value, Severity.Success);
             _newVaultKey = ""; _newVaultValue = "";
             LoadVault();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

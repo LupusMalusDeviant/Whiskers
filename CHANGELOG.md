@@ -6,6 +6,26 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-11: every security configuration write goes through the Mutation Gateway as an **Admin-only** capability:
+  the Settings sections (`config.save`), whitelist (`config.whitelist`), roles (`config.roles`), MCP tool and key
+  permissions (`config.mcp_permissions`), the agent's LLM provider, key and system prompt (`config.agent`), MCP key create/delete (`mcp.key_create`, `mcp.key_delete`), guardrails and
+  presets (`guardrails.save`, from the Guardrails and AI operations pages), vault secrets (`vault.secret_set`,
+  `vault.secret_delete`, also a Kubernetes server's kubeconfig) and registries (`registry.save`, `registry.delete`).
+  Each is authorized at the moment of the click (a Viewer or a demoted user is refused whatever the page shows),
+  decided and audited before the store is written; secret values and keys are never arguments. While the kill switch
+  is on it refuses all of them; the one exception is the new **Switch kill switch off** button on the Guardrails page
+  (`guardrails.kill_switch_off`: Admin, a person in the UI only, audited, changes nothing but `ReadOnlyMode` of the
+  active preset). A fail-closed guardrail store (unreadable `guardrails.json`) refuses every save too, also of the
+  guardrails — **upgrade note:** to recover, fix or remove `guardrails.json` on the host and restart Whiskers
+  (removing it recreates the SafeDefault preset). Agent provider saves are serialized as well. MCP
+  permissions, the vault and registries now publish a change only after it is written, a Settings save of several
+  sections (notifications, channels) is one file replacement, and a registry credential is stored under a new vault
+  key per change that only takes effect with the registry entry naming it (a pull during the change reads the new one);
+  a changed kubeconfig goes to a new vault key that only takes effect with the saved server record;
+  removing a Kubernetes server writes the server list first and only then removes its kubeconfig, within the one
+  `server.remove` decision (`ServerRemoval`) — so a failed write leaves the live configuration as it was (`UiMutationGatewayCoverageTests`). The first-run setup wizard writes the whitelist outside
+  the gateway, before any admin exists (documented baseline entry).
+
 - R1-09: webhooks have an **owner** — whoever creates the webhook, or an admin taking it over on the Webhooks page
   (new Owner column). An external call to `/api/webhooks/{id}` now runs its action through the Mutation Gateway on
   the owner's authority, re-checked at each delivery — every delivery is decided and audited, also one without an
@@ -84,6 +104,12 @@ All notable changes to Whiskers are documented here. The format follows
 v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
 
 ### ⚠️ Upgrade notes
+
+- **R1-11: while the kill switch is on, configuration can no longer be saved** — Settings, roles, whitelist, keys,
+  vault, registries and guardrails included. Switch it off with the button on the Guardrails page first. Registry
+  changes now need Admin (they had no role check). An unreadable `guardrails.json` can no longer be fixed by saving
+  on the Guardrails page: repair or remove it on the host and restart Whiskers (without the file the safe default is
+  created).
 
 - **R1-09: webhooks created before this release have no owner and stop working.** An external call (and the Test
   button) is refused and switches the webhook off (an admin is notified) until an admin takes it over on the Webhooks

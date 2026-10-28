@@ -13,6 +13,9 @@ public class RegistryConfig
     public string Username { get; set; } = "";
     /// <summary>Whether a vault credential exists (the secret itself is vault-only).</summary>
     public bool HasCredential { get; set; }
+    /// <summary>The vault key of the credential (R1-11): a new key per change, so a new credential takes effect only
+    /// with the registry entry that names it. <c>null</c> on registries saved before: <c>registry-cred:{Id}</c>.</summary>
+    public string? CredentialRef { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

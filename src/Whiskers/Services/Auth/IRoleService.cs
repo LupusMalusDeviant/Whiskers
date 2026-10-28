@@ -14,6 +14,7 @@ public interface IRoleService
     /// <summary>True if this email has an EXPLICIT role entry (any role, not the default fallback).</summary>
     bool HasExplicitRole(string? email);
     UserRoleData GetRoleData();
+    [Whiskers.Services.Mutations.MutatingOperation("config.roles")]
     Task SaveRoleDataAsync(UserRoleData data);
     Task SetRoleAsync(string email, AppRole role);
     Task RemoveRoleAsync(string email);

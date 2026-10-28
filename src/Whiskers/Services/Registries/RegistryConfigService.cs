@@ -7,12 +7,14 @@ namespace Whiskers.Services.Registries;
 
 /// <summary>Implements F8. Configs live in <c>registries.json</c>; credentials in the vault
 /// (<c>registry-cred:{id}</c>). Credential resolution is synchronous and cache-backed because it
-/// sits on the image-pull hot path.</summary>
+/// sits on the image-pull hot path. Its vault writes are part of <c>registry.save</c>/<c>registry.delete</c>,
+/// which the gateway decides before this class runs (R1-11).</summary>
+[Whiskers.Services.Mutations.MutationHandler]
 public class RegistryConfigService : IRegistryConfigService
 {
     private readonly JsonFileStore<RegistryConfigData> _store;
     private readonly IVaultService _vault;
-    private RegistryConfigData _cached = new();
+    private volatile RegistryConfigData _cached = new();   // replaced, never changed in place: read lock-free
     private bool _loaded;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -41,62 +43,114 @@ public class RegistryConfigService : IRegistryConfigService
     {
         if (string.IsNullOrWhiteSpace(registry.Name)) throw new ArgumentException("Name is required.");
         if (string.IsNullOrWhiteSpace(registry.Host)) throw new ArgumentException("Host is required.");
-        registry.Host = registry.Host.Trim().TrimEnd('/');
-        // Accept a pasted URL, keep only the host[:port] part.
-        registry.Host = registry.Host
+        if (credential is { Length: > 0 } && !_vault.IsEnabled)
+            throw new InvalidOperationException("Registry-Credentials benötigen den Vault — VAULT_KEY setzen und neu starten.");
+
+        // R1-11: a failed save leaves the live configuration as it was. A new credential is written under a NEW vault
+        // key that no registry names yet, so it takes effect only together with the registry entry that names it —
+        // that entry is published only after registries.json is written. The previous key is removed afterwards.
+        // Everything runs under one lock, so a concurrent save or delete of the same registry cannot interleave.
+        // The caller's object is never stored (the page keeps editing it).
+        var stored = Copy(registry);
+        stored.Host = stored.Host.Trim().TrimEnd('/')
+            // Accept a pasted URL, keep only the host[:port] part.
             .Replace("https://", "", StringComparison.OrdinalIgnoreCase)
             .Replace("http://", "", StringComparison.OrdinalIgnoreCase);
-
-        if (credential is not null)
-        {
-            if (credential.Length == 0)
-            {
-                if (_vault.IsEnabled) await _vault.DeleteSecretAsync(CredVaultKey(registry.Id));
-                registry.HasCredential = false;
-            }
-            else
-            {
-                if (!_vault.IsEnabled)
-                    throw new InvalidOperationException("Registry-Credentials benötigen den Vault — VAULT_KEY setzen und neu starten.");
-                await _vault.SetSecretAsync(CredVaultKey(registry.Id), credential.Trim());
-                registry.HasCredential = true;
-            }
-        }
 
         await _lock.WaitAsync();
         try
         {
-            var idx = _cached.Registries.FindIndex(r => r.Id == registry.Id);
-            if (idx >= 0) _cached.Registries[idx] = registry; else _cached.Registries.Add(registry);
-            await _store.SaveAsync(_cached);
+            var existing = _cached.Registries.FirstOrDefault(r => r.Id == stored.Id);
+            var oldRef = existing is { HasCredential: true } ? CredentialKey(existing) : null;
+            string? newRef = null;
+            if (credential is null)
+            {
+                stored.HasCredential = existing?.HasCredential ?? false;
+                stored.CredentialRef = existing?.CredentialRef;
+            }
+            else if (credential.Length == 0)
+            {
+                stored.HasCredential = false;
+                stored.CredentialRef = null;
+            }
+            else
+            {
+                newRef = $"{CredVaultKey(stored.Id)}:{Guid.NewGuid():N}";
+                await _vault.SetSecretAsync(newRef, credential.Trim());
+                stored.HasCredential = true;
+                stored.CredentialRef = newRef;
+            }
+
+            var next = new RegistryConfigData { Registries = _cached.Registries.Select(Copy).ToList() };
+            var idx = next.Registries.FindIndex(r => r.Id == stored.Id);
+            if (idx >= 0) next.Registries[idx] = stored; else next.Registries.Add(stored);
+            try
+            {
+                await _store.SaveAsync(next);
+            }
+            catch
+            {
+                // The new key was never live; removing it only tidies up.
+                if (newRef is not null)
+                    try { await _vault.DeleteSecretAsync(newRef); } catch { /* an unused orphan at worst */ }
+                throw;
+            }
+            _cached = next;
+
+            if (credential is not null && oldRef is not null && oldRef != stored.CredentialRef && _vault.IsEnabled)
+                try { await _vault.DeleteSecretAsync(oldRef); } catch { /* no registry names it any more */ }
         }
         finally { _lock.Release(); }
-        return registry;
+        registry.HasCredential = stored.HasCredential;
+        registry.Host = stored.Host;
+        return Copy(stored);
     }
 
     public async Task DeleteRegistryAsync(string registryId)
     {
-        if (_vault.IsEnabled)
-            try { await _vault.DeleteSecretAsync(CredVaultKey(registryId)); } catch { /* best effort */ }
+        // The registry goes first and is published only once written (R1-11): a failed write leaves it and its
+        // credential in place. The credential is removed afterwards, under the same lock, so a save of the same
+        // registry cannot slip in between; a save afterwards writes a new key that this delete never touches.
         await _lock.WaitAsync();
         try
         {
-            _cached.Registries.RemoveAll(r => r.Id == registryId);
-            await _store.SaveAsync(_cached);
+            var existing = _cached.Registries.FirstOrDefault(r => r.Id == registryId);
+            var next = new RegistryConfigData { Registries = _cached.Registries.Where(r => r.Id != registryId).Select(Copy).ToList() };
+            await _store.SaveAsync(next);
+            _cached = next;
+            if (existing is not null && _vault.IsEnabled)
+                try { await _vault.DeleteSecretAsync(CredentialKey(existing)); } catch { /* no registry names it any more */ }
         }
         finally { _lock.Release(); }
     }
 
+    private static RegistryConfig Copy(RegistryConfig r) => new()
+    {
+        Id = r.Id, Name = r.Name, Host = r.Host, Username = r.Username, HasCredential = r.HasCredential,
+        CredentialRef = r.CredentialRef, CreatedAt = r.CreatedAt,
+    };
+
+    /// <summary>The vault key holding a registry's credential: its own reference, or the pre-R1-11 key.</summary>
+    private static string CredentialKey(RegistryConfig r) => r.CredentialRef ?? CredVaultKey(r.Id);
+
     public (string Username, string Password, string ServerAddress)? GetCredentialForImage(string imageRef)
     {
         var host = RegistryHostOf(imageRef);
-        var match = _cached.Registries.FirstOrDefault(r =>
-            r.HasCredential && string.Equals(r.Host, host, StringComparison.OrdinalIgnoreCase));
-        if (match is null || !_vault.IsEnabled) return null;
+        // Lock-free for the pull hot path. A rotation may publish a new snapshot and delete the key this read
+        // captured in between (R1-11); a vanished secret on a snapshot that is no longer current is read again from
+        // the current one.
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var snapshot = _cached;
+            var match = snapshot.Registries.FirstOrDefault(r =>
+                r.HasCredential && string.Equals(r.Host, host, StringComparison.OrdinalIgnoreCase));
+            if (match is null || !_vault.IsEnabled) return null;
 
-        var password = _vault.GetSecret(CredVaultKey(match.Id));
-        if (string.IsNullOrEmpty(password)) return null;
-        return (match.Username, password, match.Host);
+            var password = _vault.GetSecret(CredentialKey(match));
+            if (!string.IsNullOrEmpty(password)) return (match.Username, password, match.Host);
+            if (ReferenceEquals(snapshot, _cached)) return null;
+        }
+        return null;
     }
 
     /// <summary>Registry host of an image reference, Docker-convention style: the first path

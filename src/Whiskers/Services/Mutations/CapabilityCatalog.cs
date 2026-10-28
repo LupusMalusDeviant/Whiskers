@@ -188,5 +188,23 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("volume.backup", W, "volume", Rev, Long);
         yield return Ui("volume.restore", A, "volume", Des, Long);
         yield return Ui("volume.backup_delete", A, "volume", Des, Short);
+
+        // Security configuration (R1-11): who may sign in, with which role, which keys and tools the MCP surface
+        // accepts, the guardrail policy, vault secrets and the settings sections. Each decides what every other
+        // decision rests on, so all are Admin and root-equivalent; the id is the section, key or secret name.
+        yield return Ui("config.save", A, "config", Root, Short);
+        yield return Ui("config.whitelist", A, "config", Root, Short);
+        yield return Ui("config.roles", A, "config", Root, Short);
+        yield return Ui("config.mcp_permissions", A, "config", Root, Short);
+        yield return Ui("config.agent", A, "config", Root, Short);
+        yield return Ui("mcp.key_create", A, "config", Root, Short);
+        yield return Ui("mcp.key_delete", A, "config", Dis, Short);
+        yield return Ui("guardrails.save", A, "config", Root, Short);
+        // The one configuration write the kill switch lets through: switching the kill switch itself off.
+        yield return Ui("guardrails.kill_switch_off", A, "config", Root, Short);
+        yield return Ui("vault.secret_set", A, "config", Root, Short);
+        yield return Ui("vault.secret_delete", A, "config", Des, Short);
+        yield return Ui("registry.save", A, "config", Root, Short);
+        yield return Ui("registry.delete", A, "config", Dis, Short);
     }
 }

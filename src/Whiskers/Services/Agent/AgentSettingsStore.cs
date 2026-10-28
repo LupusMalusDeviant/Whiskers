@@ -12,12 +12,17 @@ namespace Whiskers.Services.Agent;
 /// Note: ApiKey is stored in plaintext under /app/data (same choice as servers.json); the editor is admin-only.</summary>
 public interface IAgentSettingsStore
 {
+    /// <summary>Admin-only; runs through the Mutation Gateway as <c>config.agent</c> (R1-11).</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("config.agent")]
     Task SaveAsync(AgentSettings settings, AgentPrincipal editor);
 }
 
 public sealed class AgentSettingsStore : IAgentSettingsStore
 {
     private readonly string _path;
+    // One save at a time (R1-11): two interleaved saves must not move each other's document into place, so a save
+    // that reports a failure never leaves its settings live.
+    private readonly SemaphoreSlim _lock = new(1, 1);
 
     public AgentSettingsStore(string? path = null, DataPathOptions? dataPaths = null)
         => _path = path ?? (dataPaths ?? DataPathOptions.Default).AgentSettingsJson;
@@ -44,9 +49,26 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
             }
         };
 
-        var tmp = _path + ".tmp";
-        await File.WriteAllTextAsync(tmp, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-        File.Move(tmp, _path, overwrite: true);
+        await _lock.WaitAsync();
+        try
+        {
+            var tmp = $"{_path}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllTextAsync(tmp, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                File.Move(tmp, _path, overwrite: true);
+            }
+            finally
+            {
+                // Best effort: a leftover temp file must neither mask the write failure nor keep the lock held.
+                try { if (File.Exists(tmp)) File.Delete(tmp); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     // The agent settings include the provider API key + system prompt (an injection vector) — persisting

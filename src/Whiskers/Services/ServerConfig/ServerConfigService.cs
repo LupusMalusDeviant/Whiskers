@@ -152,20 +152,27 @@ public class ServerConfigService : IServerConfigService, IInitializable
         }
     }
 
-    public async Task UpdateServerAsync(Models.ServerConfig server)
+    /// <summary>Updates a server. Its kubeconfig reference always stays as stored: only the overload with a new
+    /// reference changes it, so no caller holding an older copy (onboarding, SSH-key cleanup) can point it back.</summary>
+    public Task UpdateServerAsync(Models.ServerConfig server) => UpdateServerAsync(server, newKubeconfigRef: null);
+
+    /// <inheritdoc />
+    public async Task<Models.ServerConfig?> UpdateServerAsync(Models.ServerConfig server, string? newKubeconfigRef)
     {
         await _lock.WaitAsync();
         try
         {
             var index = _cached.Servers.FindIndex(s => s.Id == server.Id);
-            if (index >= 0)
-            {
-                var servers = new List<Models.ServerConfig>(_cached.Servers);
-                servers[index] = server;
-                var newData = new ServerConfigData { Servers = servers };
-                await _store.SaveAsync(newData);
-                _cached = newData;
-            }
+            if (index < 0) return null;
+            var current = _cached.Servers[index];
+            // Decided under the lock: a save that queued behind a kubeconfig rotation keeps the rotated reference.
+            server.KubeconfigRef = newKubeconfigRef ?? current.KubeconfigRef;
+            var servers = new List<Models.ServerConfig>(_cached.Servers);
+            servers[index] = server;
+            var newData = new ServerConfigData { Servers = servers };
+            await _store.SaveAsync(newData);
+            _cached = newData;
+            return current;
         }
         finally
         {
@@ -173,7 +180,10 @@ public class ServerConfigService : IServerConfigService, IInitializable
         }
     }
 
-    public async Task RemoveServerAsync(string serverId)
+    public Task RemoveServerAsync(string serverId) => TakeServerAsync(serverId);
+
+    /// <inheritdoc />
+    public async Task<Models.ServerConfig?> TakeServerAsync(string serverId)
     {
         await _lock.WaitAsync();
         try
@@ -191,6 +201,7 @@ public class ServerConfigService : IServerConfigService, IInitializable
             var keyDir = Path.Combine(_sshKeysBasePath, serverId);
             if (Directory.Exists(keyDir))
                 Directory.Delete(keyDir, true);
+            return server;
         }
         finally
         {

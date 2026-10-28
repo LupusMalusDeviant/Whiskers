@@ -26,6 +26,10 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     // PC-D1: a human in the UI is bound by authorization, the kill switch and protected resources only.
     private static readonly IAgentGuardrailEngine HumanEngine = GuardrailEngine.CreateForHumans();
 
+    /// <summary>The one write the kill switch lets through (R1-11): switching it off again. Admin-only like every
+    /// configuration capability, from a person in the UI only, decided and audited like any other mutation.</summary>
+    public const string KillSwitchOff = "guardrails.kill_switch_off";
+
     private readonly IAgentGuardrailEngine? _engine;
     private readonly IGuardrailStore? _store;
 
@@ -45,11 +49,22 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             return new MutationPolicyDecision(MutationVerdict.Deny,
                 "No policy engine is registered; the mutation was refused.", []);
 
+        var policy = _store.Current;
+        var person = request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human;
+        // A fail-closed store (unreadable guardrails.json) has no exception: its policy has the kill switch on and
+        // refuses every write, a save of the guardrails included. It is repaired on the host (user decision, R1-11).
+        if (person && capability.Id == KillSwitchOff && _store.LoadError is null)
+        {
+            // Every other rule still applies; only the kill switch itself does not stop the action that ends it.
+            policy = policy.Clone();
+            policy.ReadOnlyMode = false;
+        }
+
         var context = new AgentContext(
             request.SessionId ?? request.OperationId ?? "mutation-gateway",
             ToAgentPrincipal(request.Principal),
             ToOrigin(request),
-            _store.Current);
+            policy);
         // A person in the UI, and an unattended item running on a person's authority (PC-D6), are bound by the PC-D1
         // rules: the owner decided when creating the item. An item owned by an API key keeps every rule that binds
         // the key (tool lists, forbidden arguments, confirmation) — scheduling is not a way around them; a run that

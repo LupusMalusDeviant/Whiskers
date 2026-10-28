@@ -3200,6 +3200,15 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_KillSwitch_Caption" xml:space="preserve">
     <value>Blockiert sofort alles oberhalb von „read" — egal welche andere Einstellung.</value>
   </data>
+  <data name="GuardrailsView_KillSwitch_ActiveHint" xml:space="preserve">
+    <value>Der Kill-Switch ist an: Er lehnt jede Konfigurationsänderung ab, auch das Speichern dieser Seite. Ihn auszuschalten ist die einzige Aktion, die er zulässt.</value>
+  </data>
+  <data name="GuardrailsView_KillSwitch_Disable_Button" xml:space="preserve">
+    <value>Kill-Switch ausschalten</value>
+  </data>
+  <data name="GuardrailsView_KillSwitch_Disabled_Snackbar" xml:space="preserve">
+    <value>Kill-Switch ist aus.</value>
+  </data>
   <data name="GuardrailsView_KillSwitch_Title" xml:space="preserve">
     <value>Read-Only-Modus (Kill-Switch)</value>
   </data>
@@ -4770,7 +4779,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Eine geplante Aufgabe braucht einen Besitzer: Melde dich mit einem Konto an, das eine E-Mail-Adresse hat.</value>
   </data>
   <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
-    <value>guardrails.json konnte nicht gelesen werden oder ist ungültig. Jede Änderung wird abgelehnt, Agenten und MCP-Clients bekommen kein Werkzeug, bis Sie hier eine gültige Konfiguration speichern. Die bisherige Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;.</value>
+    <value>guardrails.json konnte nicht gelesen werden oder ist ungültig. Jede Änderung wird abgelehnt (auch das Speichern dieser Seite), Agenten und MCP-Clients bekommen kein Werkzeug. Reparieren oder entfernen Sie guardrails.json auf dem Host und starten Sie Whiskers neu; ohne Datei wird die sichere Standardkonfiguration angelegt. Die bisherige Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;.</value>
   </data>
   <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
     <value>Gesperrt (Konfiguration unlesbar)</value>

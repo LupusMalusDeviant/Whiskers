@@ -4,6 +4,7 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
 @* F8: registries managed in the UI — credentials go to the vault and are used for authenticated
@@ -95,13 +96,18 @@
         try
         {
             var cred = string.IsNullOrWhiteSpace(_formCredential) ? null : _formCredential;
-            await Registries.SaveRegistryAsync(_form, cred);
+            // Host and name only: the credential never goes into the arguments the audit keeps.
+            var form = _form;
+            await Mutations.RunAsync("registry.save",
+                new { section = "registries", registryId = string.IsNullOrWhiteSpace(form.Id) ? null : form.Id, name = form.Name, host = form.Host },
+                _ => Registries.SaveRegistryAsync(form, cred));
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
                 _editing == null ? "registry.create" : "registry.update", "registry", _form.Id, _form.Name);
             Snackbar.Add(L["RegistriesPanel_Snackbar_Saved", _form.Name].Value, Severity.Success);
             _showDialog = false;
             _registries = await Registries.GetRegistriesAsync();
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(L["RegistriesPanel_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
@@ -111,7 +117,12 @@
             L["RegistriesPanel_Dialog_DeleteTitle"].Value, L["RegistriesPanel_Dialog_DeleteMessage", reg.Name].Value,
             yesText: L["RegistriesPanel_Button_Delete"].Value, cancelText: L["RegistriesPanel_Button_Cancel"].Value);
         if (confirmed != true) return;
-        await Registries.DeleteRegistryAsync(reg.Id);
+        try
+        {
+            await Mutations.RunAsync("registry.delete", new { section = "registries", registryId = reg.Id, name = reg.Name },
+                _ => Registries.DeleteRegistryAsync(reg.Id));
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
             "registry.delete", "registry", reg.Id, reg.Name);
         Snackbar.Add(L["RegistriesPanel_Snackbar_Deleted"].Value, Severity.Success);

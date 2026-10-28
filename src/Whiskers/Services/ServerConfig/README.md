@@ -10,7 +10,8 @@ A server config carries its connection type (`Local`, `SSH`, or `TCP`), transpor
 
 | File | Purpose |
 |---|---|
-| `IServerConfigService.cs` / `ServerConfigService.cs` | Stores and serves the configured Docker hosts plus their SSH key material; the single source of truth consumers resolve a server by id. Exposes `IsInitialized` (true once the registry has loaded) for the `/readyz` readiness probe. |
+| `IServerConfigService.cs` / `ServerConfigService.cs` | Stores and serves the configured Docker hosts plus their SSH key material; the single source of truth consumers resolve a server by id. Exposes `IsInitialized` (true once the registry has loaded) for the `/readyz` readiness probe. `UpdateServerAsync` keeps the stored `KubeconfigRef` under the write lock; only `UpdateServerAsync(server, newKubeconfigRef)` replaces it and returns the replaced record. `TakeServerAsync` removes a server and returns the record as stored then. |
+| `ServerRemoval.cs` | The execution of `server.remove` (`[MutationHandler]`, R1-11): writes the server list first, then removes a Kubernetes server's kubeconfig from the vault; a failed removal keeps both, a failed cleanup leaves only an unused secret. |
 
 ## Related
 

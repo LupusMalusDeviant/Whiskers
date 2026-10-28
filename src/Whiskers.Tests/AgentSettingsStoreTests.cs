@@ -58,4 +58,33 @@ public class AgentSettingsStoreTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.SaveAsync(new AgentSettings(), Viewer));
         await store.SaveAsync(new AgentSettings { Provider = "ollama" }, Admin); // admin succeeds, no throw
     }
+
+    [Fact] // R1-11: concurrent saves never move each other's document; each save leaves exactly its own file behind
+    public async Task Concurrent_saves_are_isolated()
+    {
+        var path = TempPath();
+        var store = new AgentSettingsStore(path);
+        var saves = Enumerable.Range(0, 32)
+            .Select(i => Task.Run(() => store.SaveAsync(new AgentSettings { Provider = "p" + i }, Admin)));
+        await Task.WhenAll(saves);   // none fails
+
+        var config = new ConfigurationBuilder().AddJsonFile(path, optional: false).Build();
+        var bound = config.GetSection(AgentSettings.SectionName).Get<AgentSettings>()!;
+        Assert.StartsWith("p", bound.Provider);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + ".*.tmp"));
+    }
+
+    [Fact] // R1-11: a failed save releases the store — the next save runs instead of waiting forever
+    public async Task A_failed_save_does_not_block_the_next_one()
+    {
+        var path = TempPath();
+        Directory.CreateDirectory(path);   // the target is a directory: replacing it fails
+        var store = new AgentSettingsStore(path);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => store.SaveAsync(new AgentSettings(), Admin));
+        var second = store.SaveAsync(new AgentSettings(), Admin);
+        Assert.Same(second, await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(10))));
+        await Assert.ThrowsAnyAsync<Exception>(() => second);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + ".*.tmp"));
+    }
 }

@@ -8,5 +8,6 @@ public interface IWhitelistService
     Task InitializeAsync(CancellationToken ct = default);
     bool IsEmailAllowed(string? email);
     WhitelistData GetWhitelist();
+    [Whiskers.Services.Mutations.MutatingOperation("config.whitelist")]
     Task SaveWhitelistAsync(WhitelistData data);
 }

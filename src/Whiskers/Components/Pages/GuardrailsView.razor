@@ -5,6 +5,7 @@
 @using Whiskers.Services.Guardrails
 @using Whiskers.Services.Auth
 @inject IGuardrailStore GuardrailStore
+@inject IUiMutationRunner Mutations
 @inject IAgentToolRegistry ToolRegistry
 @inject ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
@@ -81,6 +82,18 @@
                 </div>
                 <MudSwitch @bind-Value="_edit.Policy.ReadOnlyMode" Color="Color.Warning" />
             </div>
+            @if (GuardrailStore.LoadError is null && GuardrailStore.Current.ReadOnlyMode)
+            {
+                @* While the kill switch is on it refuses every configuration write, a normal save included; this is
+                   the one action it lets through (R1-11). *@
+                <MudAlert Severity="Severity.Warning" Class="mt-3" Dense="true">
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <span style="flex:1;">@L["GuardrailsView_KillSwitch_ActiveHint"]</span>
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="DisableKillSwitch">@L["GuardrailsView_KillSwitch_Disable_Button"]</MudButton>
+                    </div>
+                </MudAlert>
+            }
         </MudPaper>
 
         <MudGrid>
@@ -320,13 +333,42 @@
 
         try
         {
-            await GuardrailStore.SaveConfigAsync(_config, await BuildPrincipalAsync());
+            var principal = await BuildPrincipalAsync();
+            await Mutations.RunAsync("guardrails.save", new { section = "guardrails" },
+                _ => GuardrailStore.SaveConfigAsync(_config, principal));
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (GuardrailConfigException ex)
         {
             Snackbar.Add(L[$"GuardrailsView_Problem_{ex.Problem.Kind}", ex.Problem.Preset ?? "", ex.Problem.Value ?? ""].Value,
                 Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task DisableKillSwitch()
+    {
+        try
+        {
+            var principal = await BuildPrincipalAsync();
+            await Mutations.RunAsync("guardrails.kill_switch_off", new { section = "guardrails" },
+                _ => GuardrailStore.DisableKillSwitchAsync(principal));
+            // Only ReadOnlyMode of the stored active preset changed; unsaved edits of other fields stay on screen.
+            var stored = GuardrailStore.Config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);
+            var shown = _config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);
+            if (stored is not null && shown is not null) shown.Policy.ReadOnlyMode = stored.Policy.ReadOnlyMode;
+            Snackbar.Add(L["GuardrailsView_KillSwitch_Disabled_Snackbar"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
         }
         catch (Exception ex)
         {

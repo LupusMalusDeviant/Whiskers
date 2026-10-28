@@ -8,7 +8,7 @@ registries and passes an `AuthConfig`; no match = anonymous pull, unchanged.
 
 | File | Purpose |
 |---|---|
-| `IRegistryConfigService.cs` / `RegistryConfigService.cs` | CRUD (`registries.json`) + synchronous, cache-backed credential resolution for the pull hot path. |
+| `IRegistryConfigService.cs` / `RegistryConfigService.cs` | CRUD (`registries.json`) + synchronous, cache-backed credential resolution for the pull hot path. Save/delete are `registry.save` / `registry.delete` (Admin, R1-11); the class is a `[MutationHandler]`, so its own vault writes are part of that decision. Each credential change gets a new vault key (`registry-cred:{id}:{guid}`, `RegistryConfig.CredentialRef`; older entries keep `registry-cred:{id}`), so a new credential takes effect only with the published entry that names it; save, delete and the cleanup of the old key run under one lock; the lock-free credential lookup re-reads the current snapshot when a rotation removed the key it captured. |
 
 Managed in *Settings → Registries* ([`RegistriesPanel`](../../Components/Shared/RegistriesPanel.razor)).
 

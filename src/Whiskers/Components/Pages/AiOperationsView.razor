@@ -5,6 +5,7 @@
 @using Whiskers.Models.Agent
 @inject Whiskers.Services.Mcp.IMcpPermissionService Mcp
 @inject Whiskers.Services.Guardrails.IGuardrailStore GuardrailStore
+@inject IUiMutationRunner Mutations
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
 @inject IStringLocalizer<SharedResource> L
@@ -149,10 +150,14 @@ else
         _busy = true;
         try
         {
-            var cfg = await Mcp.AddApiKeyAsync(L["AiOps_KeyName"].Value, McpPermissionLevels.Read);
+            var name = L["AiOps_KeyName"].Value;
+            var cfg = await Mutations.RunAsync("mcp.key_create",
+                new { section = "mcp-api-keys", name, level = McpPermissionLevels.Read },
+                _ => Mcp.AddApiKeyAsync(name, McpPermissionLevels.Read));
             _mcpKey = cfg.Key;   // shown once here; not re-displayed after leaving
             Snackbar.Add(L["AiOps_Key_Created"].Value, Severity.Success);
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         finally { _busy = false; }
     }
 
@@ -166,12 +171,13 @@ else
             var cfg = GuardrailStore.Config;
             var presets = cfg.Presets.Where(p => p.Name != name).ToList();
             presets.Add(new GuardrailPreset { Name = name, Policy = AiOperationsPresets.PolicyFor(name) });
-            await GuardrailStore.SaveConfigAsync(
-                new GuardrailConfig { ActivePreset = name, Presets = presets },
-                await BuildPrincipalAsync());
+            var principal = await BuildPrincipalAsync();
+            await Mutations.RunAsync("guardrails.save", new { section = "guardrails", preset = name },
+                _ => GuardrailStore.SaveConfigAsync(new GuardrailConfig { ActivePreset = name, Presets = presets }, principal));
             _activePreset = name;
             Snackbar.Add(L["AiOps_Preset_Activated", name].Value, Severity.Success);
         }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         finally { _busy = false; }
     }
 

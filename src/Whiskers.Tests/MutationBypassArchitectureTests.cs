@@ -152,6 +152,42 @@ internal static class MutationCallScanner
         return result;
     }
 
+    /// <summary>
+    /// Every call to a [MutatingOperation] method made by <paramref name="component"/> (its own methods, lambdas and
+    /// state machines), as the source-level handler it sits in, the capability it performs, and the capability of the
+    /// runner lambda it runs inside (null when it is not inside one). R1-11 maps handlers to capabilities with it.
+    /// </summary>
+    public static IReadOnlyList<(string Handler, string Capability, string? GatedAs)> CallsIn(Type component)
+    {
+        var uiGated = UiRunnerLambdas(component.Assembly);
+        var calls = new List<(string, string, string?)>();
+        foreach (var type in SafeTypes(component.Assembly).Where(t => OwnerOf(t) == component))
+            foreach (var method in type.GetMethods(All).Cast<MethodBase>().Concat(type.GetConstructors(All)))
+            {
+                var gated = UiGatedCapability(uiGated, method);
+                foreach (var capability in CalledCapabilities(method))
+                    calls.Add((HandlerName(type, method), capability, gated));
+            }
+        return calls;
+    }
+
+    /// <summary>The outermost source method a body belongs to: <c>&lt;&lt;SaveAll&gt;b__0&gt;d.MoveNext</c>,
+    /// <c>&lt;SaveAll&gt;b__0</c> and <c>&lt;SaveAll&gt;d__12.MoveNext</c> are all <c>SaveAll</c>.</summary>
+    private static string HandlerName(Type type, MethodBase method)
+    {
+        static string? Inner(string name)
+        {
+            var trimmed = name.TrimStart('<');
+            var end = trimmed.IndexOf('>');
+            return name.StartsWith('<') && end > 0 ? trimmed[..end] : null;
+        }
+
+        string? found = null;
+        for (var t = type; t is not null && t != OwnerOf(type); t = t.DeclaringType)
+            if (Inner(t.Name) is { Length: > 0 } fromType) found = fromType;
+        return found ?? Inner(method.Name) ?? method.Name;
+    }
+
     /// <summary>Names of the [MutatingOperation] interface methods <paramref name="owner"/> implements.</summary>
     private static HashSet<string> OwnMutatingOperationNames(Type owner) =>
         owner.IsInterface

@@ -225,7 +225,7 @@ catalog level, tool switch and stricter stored level (INV-15), container target 
 humans under PC-D1: kill switch and protected resources (INV-21, 24) — tool lists, argument patterns and
 confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1 · Execution = inside the gateway
 scope with a deadline · Audit: the gateway row plus the page's own row. **Not through the gateway yet:** the
-Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW status is), U-20, U-21, U-25, U-34.
+Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW status is), U-20, U-21, U-25.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
@@ -260,9 +260,9 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | ✅ gateway (stored app, revision pinned; save records the owner — R1-08) | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |
 | U-31 | AI triggers save (prompt, preset, MaxLevel) | Admin | — | ❌ ILogger only | INV-23, 27, 28, 46 |
-| U-32 | Guardrail policy edit / preset switch / kill switch | Admin | — | ❌ ILogger only | INV-28, 46 |
+| U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | — | GW ✅ | INV-28 |
 | U-33 | Approvals approve / reject | approve: level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); reject: anyone | — | ❌ | INV-31, 32, 33, 34, 37 |
-| U-34 | Settings: keys, tool levels, roles, whitelist, vault, terminal | Admin | — | AL ✅ | INV-15, 16, 17 (C-24) |
+| U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | — | AL ✅ GW ✅ | INV-15, 16 |
 
 ### 7.6 Totals
 
