@@ -10,7 +10,7 @@ All notable changes to Whiskers are documented here. The format follows
   configuration. Program reads those settings while the builder is set up, before a test's in-memory configuration
   is layered in, so these tests had been booting every module (and the real authentication setup) while reporting
   green. `BootSettings` passes the settings as environment variables too (all or nothing, restored afterwards);
-  every boot test now asserts the complete module set and the authentication setup it ended up with
+  every boot test that sets one of these now asserts the complete module set and the authentication setup it ended up with
   (`BootSettings.AssertBoot`, an inherited flag fails it too), lean boots switch default-off modules off explicitly
   (`BootSettings.OnlyCore`), and `BootMatrixTests` compares against module sets written out per case. The only product
   change: `ModuleCatalog.All()` is internal instead of private, for that check.

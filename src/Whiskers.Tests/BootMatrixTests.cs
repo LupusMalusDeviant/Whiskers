@@ -99,12 +99,14 @@ public class BootMatrixTests
     public async Task An_auth_setting_given_only_in_memory_is_caught()
     {
         // The original mistake: Auth:Disabled only in the factory's in-memory configuration. The builder never sees
-        // it and registers the real authentication; the check must say so.
+        // it and registers the real authentication; the check must say so. The builder's value is pinned to false,
+        // so an Auth__Disabled=true from the shell running the tests cannot turn this case around.
+        using var inherited = BootSettings.Apply(BootSettings.AuthDisabled);   // as if the shell had it set
         var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-boot-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dataDir);
-        using var data = BootSettings.Apply([new("WHISKERS_DATA_DIR", dataDir)]);
         try
         {
+            using var builderSees = BootSettings.Apply([new("WHISKERS_DATA_DIR", dataDir), new("Auth:Disabled", "false")]);
             await using var factory = new WebApplicationFactory<Program>()
                 .WithWebHostBuilder(b =>
                 {
@@ -121,5 +123,8 @@ public class BootMatrixTests
         {
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort temp cleanup */ }
         }
+
+        // The pinned value is gone again; the inherited one is back.
+        Assert.Equal("true", Environment.GetEnvironmentVariable("Auth__Disabled"));
     }
 }
