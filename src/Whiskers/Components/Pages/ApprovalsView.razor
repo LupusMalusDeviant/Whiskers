@@ -6,6 +6,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
 @inject IStringLocalizer<SharedResource> L
+@inject ILogger<ApprovalsView> Logger
 
 <PageTitle>@L["ApprovalsView_PageTitle"]</PageTitle>
 
@@ -165,8 +166,9 @@ else
                 .Take(15)
                 .ToList();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.LogWarning(ex, "Approval history could not be read; showing the approvals in memory");
             _recent = ApprovalStore.GetAll().Where(a => a.Status != ApprovalStatus.Pending).Take(15).ToList();
         }
     }

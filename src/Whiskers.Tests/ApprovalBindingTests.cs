@@ -187,6 +187,7 @@ public class ApprovalBindingTests
         Assert.Equal(baseline, Of(Call()));
         Assert.Equal(Of(Call(extra: "x")), Of(reordered));
         Assert.NotEqual(baseline, Of(Call(), version: "v2"));
+        Assert.Null(Of(Call(), version: null));          // no policy version, no binding: nothing to approve against
         Assert.NotEqual(baseline, Of(Call(), capability with { RequiredLevel = McpPermissionLevels.Admin }));
         Assert.NotEqual(baseline, Of(Call() with { Target = Call().Target with { Related = ["db"] } }));
         Assert.NotEqual(baseline, Of(Call(principal: Key with { OnBehalfOf = Key with { Id = "user:x" } })));

@@ -13,11 +13,14 @@ namespace Whiskers.Services.Approvals;
 /// </summary>
 public static class ApprovalBinding
 {
-    /// <summary>The binding of a gateway call, from the request as the gateway resolved it.</summary>
-    public static string Of(MutationRequest request, Capability capability, string? policyVersion)
+    /// <summary>The binding of a gateway call, from the request as the gateway resolved it. <c>null</c> when the
+    /// policy version is unknown: such a call can neither raise nor use an approval (fail closed), since a grant
+    /// bound to no version would survive any change of the policy.</summary>
+    public static string? Of(MutationRequest request, Capability capability, string? policyVersion)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(capability);
+        if (string.IsNullOrWhiteSpace(policyVersion)) return null;
         var p = request.Principal;
         var target = request.Target;
         return Hash(w =>
@@ -41,12 +44,14 @@ public static class ApprovalBinding
         });
     }
 
-    /// <summary>The binding of a direct MCP read that needs a confirmation.</summary>
-    public static string OfDirectCall(AgentPrincipal principal, string toolName, string level,
+    /// <summary>The binding of a direct MCP read that needs a confirmation. A read has no resolved target: it is bound
+    /// to its caller, tool, level, arguments and policy version. <c>null</c> when the policy version is unknown.</summary>
+    public static string? OfDirectCall(AgentPrincipal principal, string toolName, string level,
         IReadOnlyDictionary<string, JsonElement> arguments, string? policyVersion)
     {
         ArgumentNullException.ThrowIfNull(principal);
         ArgumentNullException.ThrowIfNull(arguments);
+        if (string.IsNullOrWhiteSpace(policyVersion)) return null;
         return Hash(w =>
         {
             w.WriteString("kind", "direct");
