@@ -166,7 +166,7 @@
 
         Reload();
         _presets = GuardrailStore.Config.Presets.Select(p => p.Name).ToList();
-        _capabilities = Capabilities.All.Where(c => !AiTriggerAuthority.NotGrantable.Contains(c.Id)).OrderBy(c => c.McpTool ?? c.Id, StringComparer.Ordinal).ToList();
+        _capabilities = Capabilities.All.Where(c => c.McpTool is not null && !AiTriggerAuthority.NotGrantable.Contains(c.Id)).OrderBy(c => c.McpTool ?? c.Id, StringComparer.Ordinal).ToList();
         if (_presets.Count == 0) _presets.Add("Standard");
     }
 

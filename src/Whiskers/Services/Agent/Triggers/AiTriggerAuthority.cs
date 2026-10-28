@@ -60,13 +60,20 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         if (!trigger.HasWriteGrant) return new(McpPermissionLevels.Read, null);
 
         // A grant is only as good as its owner: every granted capability must still be the owner's to give.
+        var needed = McpPermissionLevels.Read;
         foreach (var id in trigger.WriteCapabilities)
         {
             if (_catalog.Find(id) is not { } capability) continue;           // unknown ids grant nothing
-            if (OwnerLacks(owner, Effective(capability)) is { } lost)
+            var effective = Effective(capability);
+            if (OwnerLacks(owner, effective) is { } lost)
                 return new(McpPermissionLevels.Read, await SuspendAsync(trigger, lost));
+            if (McpPermissionLevels.GetRank(effective.RequiredLevel) > McpPermissionLevels.GetRank(needed))
+                needed = McpPermissionLevels.Normalize(effective.RequiredLevel);
         }
-        return new(McpPermissionLevels.Normalize(owner.PermissionLevel), null);
+        // No more than the grant needs: the owner's level, capped at the highest level among the granted capabilities,
+        // so a run granted one write capability cannot reach an admin-level tool the grant never named.
+        var ownerLevel = McpPermissionLevels.Normalize(owner.PermissionLevel);
+        return new(McpPermissionLevels.GetRank(ownerLevel) < McpPermissionLevels.GetRank(needed) ? ownerLevel : needed, null);
     }
 
     public async Task<string?> RefusalAsync(string triggerId, Capability capability, MutationTarget target,
@@ -78,6 +85,17 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         if (trigger is null) return "the AI trigger no longer exists";
         if (!trigger.Enabled) return "the AI trigger is switched off";
         if (!trigger.HasWriteGrant) return "the AI trigger is read-only: an Admin has granted it no capabilities and targets";
+
+        // PC-D6 first: the owner's authority as it is now, for this capability at its effective level. A run whose owner
+        // lost it is suspended on any write it tries, inside the grant or not.
+        var owner = _owners.Resolve(trigger.OwnerId!);
+        var state = _owners.Describe(trigger.OwnerId!).State;
+        if (state == OwnerState.Unverified)
+            return $"its owner {owner.DisplayName} has not signed in yet";
+        var lost = state != OwnerState.Active
+            ? $"its owner {owner.DisplayName} has no authority left"
+            : OwnerLacks(owner, capability);
+        if (lost is not null) return await SuspendAsync(trigger, lost);
 
         // PC-D7: only what an Admin listed. Anything else would need a confirmation, which an unattended run cannot get.
         if (!trigger.WriteCapabilities.Contains(capability.Id, StringComparer.Ordinal))
@@ -98,16 +116,7 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
             : target.Related.Select(r => (IReadOnlyList<string>)[r]).ToList();
         if (resources.FirstOrDefault(g => !g.Any(a => Granted(trigger, a))) is { } outside)
             return $"the operation also touches '{string.Join(" / ", outside)}', which is not among the targets granted to the AI trigger";
-
-        // PC-D6: the owner's authority as it is now, for this capability at its effective level.
-        var owner = _owners.Resolve(trigger.OwnerId!);
-        var state = _owners.Describe(trigger.OwnerId!).State;
-        if (state == OwnerState.Unverified)
-            return $"its owner {owner.DisplayName} has not signed in yet";
-        var lost = state != OwnerState.Active
-            ? $"its owner {owner.DisplayName} has no authority left"
-            : OwnerLacks(owner, capability);
-        return lost is null ? null : await SuspendAsync(trigger, lost);
+        return null;
     }
 
     /// <summary>Capabilities an AI trigger can never be granted: the object they change is a further argument the

@@ -14,8 +14,9 @@ have neither (their old `MaxLevel` is ignored) and no owner. `AiTriggerAuthority
 before every run: no owner, an owner who can no longer sign in, or — with a grant — one who no longer holds a granted
 capability (level raised in Settings → MCP and key tool lists included) suspends the trigger (`SuspendedReason`,
 switched off) and notifies the Admins (`automation_suspended`); an owner not verified yet is refused without
-suspension. A run without a grant gets a `read` principal; with one, the owner's current level — never a synthetic
-admin. As the gateway's `ITriggerAuthority` it then checks **every** mutation made for the run — nested ones too (a
+suspension. A run without a grant gets a `read` principal; with one, the owner's current level capped at the highest level the granted capabilities need — never a
+synthetic admin. The owner is checked first on every mutation, so a lost authority suspends the trigger even on a call
+outside the grant; the page offers only capabilities an agent can call (with an MCP tool). As the gateway's `ITriggerAuthority` it then checks **every** mutation made for the run — nested ones too (a
 scheduled task the trigger runs) — against the current grant, matched only on canonical identities (the resolved id,
 and the name only where the resolver took it from the inventory: never a DNS record name or a compose project name;
 a creation the resolver passes through is matched by the id it is to get, which is what it creates), including every resource the operation also touches

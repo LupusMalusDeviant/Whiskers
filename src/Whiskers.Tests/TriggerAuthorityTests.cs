@@ -59,6 +59,19 @@ public sealed class TriggerAuthorityTests : IDisposable
     }
 
     [Fact]
+    public async Task A_granted_run_holds_no_more_than_the_grant_needs_even_with_an_admin_owner()
+    {
+        var trigger = Granted();                                    // an admin owner, one capability
+        var expected = McpPermissionLevels.Normalize(Restart.RequiredLevel);
+
+        var start = await Authority(new MemoryTriggers(trigger), new Owners()).BeginRunAsync(trigger);
+
+        Assert.Null(start.Refusal);
+        Assert.Equal(expected, start.Level);
+        Assert.NotEqual(McpPermissionLevels.Admin, start.Level);
+    }
+
+    [Fact]
     public async Task A_trigger_without_an_owner_is_suspended_at_its_next_run_read_only_or_not()
     {
         var trigger = new AiTrigger { Id = "t1", Name = "legacy" };
