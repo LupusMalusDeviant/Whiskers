@@ -19,7 +19,7 @@ public class ApprovalGateTests
     private static Task<Approval> RaiseForSession(ApprovalStore store, string session, string operation, string container) =>
         store.CreateAsync(new ApprovalRequest(session, "call-1", "ops@example.com", "agent-web", "restart_container",
             McpPermissionLevels.Write, null, "needs a human", CorrelationId: operation,
-            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(container)), Binding: Bound, Interactive: true),
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(container)), Binding: Bound, Interactive: true, Requesters: ["key:test-requester"]),
             _ => Task.CompletedTask);
 
     private static ApprovalSubject SessionCall(string session, string operation, string container) =>
@@ -81,7 +81,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
-            "mcp-direct", Args("web-1")) { Binding = Bound };
+            "mcp-direct", Args("web-1")) { Requesters = ["key:test-requester"], Binding = Bound };
 
         var results = await Task.WhenAll(Enumerable.Range(0, 16)
             .Select(_ => Task.Run(() => gate.CheckAsync(direct, "needs a human", []))));
@@ -97,7 +97,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
-            "mcp-direct", Args("web-1")) { Binding = Bound };
+            "mcp-direct", Args("web-1")) { Requesters = ["key:test-requester"], Binding = Bound };
 
         var raised = await gate.CheckAsync(direct, "needs a human", []);
         await store.ResolveAsync(raised.ApprovalId!, true, "admin@example.com", McpPermissionLevels.Admin);
@@ -119,7 +119,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
-            "mcp-direct", Args("web-1")) { Binding = Bound };
+            "mcp-direct", Args("web-1")) { Requesters = ["key:test-requester"], Binding = Bound };
 
         var raised = await gate.CheckAsync(direct, "needs a human", []);
         await store.ResolveAsync(raised.ApprovalId!, false, "admin@example.com", McpPermissionLevels.Admin);
@@ -180,7 +180,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var subject = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "ApiKey:key:k1", "ci",
-            "mcp-direct", Args("web-1")) { Binding = Bound };
+            "mcp-direct", Args("web-1")) { Requesters = ["key:test-requester"], Binding = Bound };
 
         var result = await gate.CheckAsync(subject, "needs a human", ["confirm"]);
 
@@ -241,7 +241,7 @@ public class ApprovalGateTests
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var write = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "k", "k", "mcp", Args("web-1")) { Binding = Bound };
+        var write = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "k", "k", "mcp", Args("web-1")) { Requesters = ["key:test-requester"], Binding = Bound };
         var first = await gate.CheckAsync(write, "needs a human", []);
         Assert.True(await store.ResolveAsync(first.ApprovalId!, approved: true, "operator@x", McpPermissionLevels.Write));
 

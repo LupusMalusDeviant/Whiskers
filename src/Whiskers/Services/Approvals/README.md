@@ -35,7 +35,7 @@ their `Confirm` outright, since nobody could approve it and a later run of the s
    the decision was made under. Every call records a decision of its own, so the binding names the decision's
    content — its policy version — rather than its id. A call with any other binding never inherits the approval;
    an approval or a subject without a binding is never used.
-6. The notification bell and the **Freigaben** page read `GetPending()` and call `ResolveAsync(id, approved, resolvedBy)`.
+6. The notification bell and the **Approvals** page read `GetPending()` and decide with `DecideAsync(id, approved, ApprovalResolver)` — see *Who decides* below.
 
 There is no way to grant a call without an approval decided in `IApprovalStore`.
 
@@ -51,16 +51,55 @@ closed approvals from memory, never an open one. Overdue approvals (default 15 m
 lapses ten minutes after the approval (`GrantExpiresAt`). A host without a database (unit tests) uses
 `InMemoryApprovalPersistence` with the same conditional semantics.
 
+## Who decides (R1-15)
+
+A human decides through `IApprovalStore.DecideAsync` with an `ApprovalResolver` — their principal id
+(`user:<email>`) and the level their role grants **now** (`ApprovalResolver.CurrentAsync`); the chat, the Approvals
+page and the bell all go through it. `ApprovalEligibility` holds approving and rejecting to the same rules (INV-37):
+
+- **Level (INV-34).** The resolver holds at least the approval's level — the effective level of the action. An
+  approval without a readable level asks for Admin. A Viewer decides nothing.
+- **Separation of duties (INV-33, PC-D4).** An approval records who asked (`Approval.Requesters`: the caller, then
+  everyone it acts for — an agent's user, an automation's owner); an approval that names nobody (raised before
+  R1-15) is decided by nobody, and `LoadAsync` cancels it so the caller asks again. None of them decides a non-interactive request
+  (direct MCP, AI trigger, scheduled task, webhook; any unknown kind). An interactive request (agent chat `agent-web` —
+  also an approval the gateway raises for a chat call, from the trusted `MutationRequest.AgentOrigin`,
+  a UI click `web`, the web terminal) may be decided by its requester unless the active guardrail policy sets
+  `RequireSecondApprover`; such a decision is recorded as `SelfApproved`. An unreadable policy requires a second
+  approver.
+- **Expiry (INV-32).** An approval past `ExpiresAt` is expired, not decided — checked by the store and again by the
+  conditional database update; a decision is committed in one transaction only if the approval has not expired once its row is held
+  (after any lock wait; `ResolveAsync(…, stillDecidable)`), so a late write never becomes durable and the waiting session gets a "no". A timer (`ApprovalStore.SweepInterval`) expires overdue approvals even when nobody
+  opens the list, so a waiting session is released. A grant is usable only until `GrantExpiresAt` — checked again
+  once the row is held before a use is committed (`ConsumeAsync(…, stillUsable)`), so a use that waited past the end
+  of the grant does not count.
+- **Bounded (C-19).** One principal has at most `ApprovalEligibility.MaxPendingPerPrincipal` approvals waiting;
+  an approval counts against everyone in its requester chain (an agent session and the user it acts for), so more
+  chats do not raise the bound. Beyond it `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
+
+A raised approval is announced with its id, its risk and its target as `ApprovalDisplay.NotifiedTarget` names it
+(`ApprovalSubject.NotifiedTarget` / the agent decision's `NotifiedTarget`): the kind (`container`, `dns-zone`, …),
+and — only for a target the resolver found, of a kind whose id it takes from the inventory (container, network, pod,
+Git app, server, cloud server, scheduled task, webhook) — that id, plus the server where that comes from the
+inventory too (container, network, pod, Git app); each only as a plain identifier the secret redactor leaves alone.
+Never the arguments or any other value a caller can put into the call — a DNS zone, a host or a scheduled task's
+server may be the caller's — since the bell may forward it to external channels. The approval's card in the app
+shows the resolved target (`NotifiableTarget`, `TargetServer`/`TargetWorkload`). The event carries `ApprovalId`, so the bell opens the approval's card (`approvals#<id>`).
+External channels get the absolute link (`<public url>/approvals#<id>`) only when the admin configured the public
+address (`WhiskersPublicUrl`, `Whiskers:PublicUrl`; never a request's host) — otherwise the id and
+"Whiskers → Approvals".
+
 ## Files
 
 | File | Purpose |
 |---|---|
-| `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore`: create / list / resolve / use / cancel approvals, the persisted history, a `Changed` event for the bell + page, automatic expiry, `LoadAsync` after a restart. A resolver may only approve what its own level could do. |
+| `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore`: create / list / decide / use / cancel approvals, the persisted history, a `Changed` event for the bell + page, expiry at decision time and on a timer, the per-principal bound, `LoadAsync` after a restart. |
+| `ApprovalEligibility.cs` | `ApprovalResolver`, `ApprovalDecisionResult`, `ApprovalEligibility` (who may decide: level, requester, interactive kinds, `RequestersOf`), `ApprovalLimitException`, `ApprovalDecisionMessages` (UI resource keys). |
 | `ApprovalPersistence.cs` | `IApprovalPersistence`: `DbApprovalPersistence` (table `Approvals`, conditional decide/use) and `InMemoryApprovalPersistence` (hosts without a database). |
 | `ApprovalBinding.cs` | `ApprovalBinding.Of` (gateway calls) and `OfDirectCall` (direct MCP reads): the hash an approval is bound to. |
-| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject`, `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsumeAsync`). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
+| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject` (with its `Requesters`), `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsumeAsync`). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
 | `ApprovalFingerprint.cs` | The hashes that bind an approval: arguments (keys sorted, raw JSON values) and caller + tool + arguments. |
-| `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. |
+| `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. `NotificationText`: the notification of a raised approval (id, risk, target, link; no arguments). |
 
 The agent-specific bridge, [`ApprovalCoordinator`](../Agent/Approvals/), stays in the Agent module.
 

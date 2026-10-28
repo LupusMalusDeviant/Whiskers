@@ -1,0 +1,550 @@
+using System.Runtime.CompilerServices;
+using Whiskers.Configuration;
+using Whiskers.Models;
+using Whiskers.Models.Agent;
+using Whiskers.Services.Agent;
+using Whiskers.Services.Agent.Approvals;
+using Whiskers.Services.Agent.Providers;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Guardrails;
+using Whiskers.Services.Mutations;
+using Whiskers.Services.Notifications;
+
+namespace Whiskers.Tests;
+
+/// <summary>R1-15 (INV-36, C-08, C-18): an approval from a chat that was closed or lost its connection never resumes
+/// the session unattended, and a session waits on unique operation ids, not on provider tool-call ids.</summary>
+public class OrphanedApprovalTests
+{
+    private sealed class Provider(params List<AgentStreamDelta>[] turns) : IAgentLlmProvider
+    {
+        private readonly Queue<List<AgentStreamDelta>> _turns = new(turns);
+        public string Id => "fake";
+        public List<AgentCompletionRequest> Requests { get; } = [];
+
+        public async IAsyncEnumerable<AgentStreamDelta> StreamAsync(
+            AgentCompletionRequest request, [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            Requests.Add(request);
+            var turn = _turns.Count > 0 ? _turns.Dequeue() : [new(Final: AgentStopReason.Stop)];
+            foreach (var d in turn) yield return d;
+            await Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    }
+
+    private sealed class Catalog : IAgentToolCatalog
+    {
+        public IReadOnlyList<AgentToolDefinition> GetVisibleTools(AgentContext context) => Array.Empty<AgentToolDefinition>();
+    }
+
+    private sealed class Invoker : IAgentToolInvoker
+    {
+        public int Calls;
+        public Task<AgentToolResult> InvokeAsync(AgentToolCall call, AgentContext context, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult(new AgentToolResult(call.Id, "OK", false,
+                new GuardrailDecision(GuardrailVerdict.Allow, "", Array.Empty<string>())));
+        }
+    }
+
+    private sealed class ConfirmEverything : IAgentGuardrailEngine
+    {
+        public GuardrailDecision Evaluate(GuardrailRequest request) =>
+            new(GuardrailVerdict.Confirm, "Writes need a human.", Array.Empty<string>());
+    }
+
+    private sealed class Policy : IGuardrailStore
+    {
+        public GuardrailPolicy Current { get; set; } = GuardrailPolicy.SafeDefault();
+        public GuardrailConfig Config => GuardrailConfig.SafeDefault();
+        public Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SaveAsync(GuardrailPolicy policy, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public event Action? Changed { add { } remove { } }
+    }
+
+    private sealed class Notify : INotificationService
+    {
+        public Task SendAsync(NotificationEvent evt) => Task.CompletedTask;
+        public Task SendTestAsync() => Task.CompletedTask;
+    }
+
+    private const string Owner = "alice@example.com";
+
+    private static readonly AgentContext Context = new("chat-1",
+        new AgentPrincipal(AgentPrincipalKind.WebUser, Owner, McpPermissionLevels.Admin, null, UserEmail: Owner),
+        AgentOrigin.WebUi, GuardrailPolicy.SafeDefault());
+
+    private static readonly ApprovalResolver Approver =
+        new(PrincipalIds.User("bob@example.com"), McpPermissionLevels.Admin, "bob@example.com");
+
+    private static List<AgentStreamDelta> ToolTurn(string providerCallId) =>
+    [
+        new(ToolCallDelta: new AgentToolCall(providerCallId, "stop_container", "{\"containerId\":\"web\"}")),
+        new(Final: AgentStopReason.ToolCalls),
+    ];
+
+    private static List<AgentStreamDelta> TextTurn(string text) => [new(TextDelta: text), new(Final: AgentStopReason.Stop)];
+
+    private static AgentSession Session(Invoker invoker, params List<AgentStreamDelta>[] turns) =>
+        new(Context, new Provider(turns), new Catalog(), invoker, new ConfirmEverything(), AgentToolTestHelpers.DefaultRegistry(),
+            new AgentSettings { Model = "x", MaxToolIterations = 4 }, "system");
+
+    /// <summary>Runs the chat until it asks for an approval, raising it as the chat page does.</summary>
+    private static async Task<Approval> RunToApprovalAsync(IAsyncEnumerator<AgentEvent> run, AgentSession session,
+        IApprovalCoordinator coordinator)
+    {
+        while (await run.MoveNextAsync())
+            if (run.Current is AgentEvent.ConfirmationRequired c)
+                return await coordinator.RaiseAsync(session, c.Call, Context, c.Reason, c.Decision);
+        throw new InvalidOperationException("The run ended without asking for an approval.");
+    }
+
+    private static async Task<List<AgentEvent>> DrainAsync(IAsyncEnumerator<AgentEvent> run)
+    {
+        var events = new List<AgentEvent>();
+        try
+        {
+            while (await run.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10))) events.Add(run.Current);
+        }
+        catch (OperationCanceledException) { }
+        return events;
+    }
+
+    [Theory]
+    [InlineData(true)]    // the page was left / the connection is gone: the component is disposed
+    [InlineData(false)]   // "Clear chat"
+    public async Task An_approval_from_an_ended_chat_cannot_resume_it(bool disposed)
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        var lifetime = new AgentChatLifetime(store);
+        lifetime.Attach(session, lifetime.BeginRun());
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        await using var run = session.SendAsync("stop web", ct: lifetime.BeginRun()).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(run, session, coordinator);
+        Assert.True(approval.Interactive);
+
+        if (disposed) await lifetime.DisposeAsync();
+        else await lifetime.EndAsync();
+
+        // The approval is gone from the list, and approving it elsewhere changes nothing.
+        Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
+        Assert.Empty(store.GetPending());
+        Assert.Equal(ApprovalDecisionResult.NotPending, await store.DecideAsync(approval.Id, true, Approver));
+
+        // The run stops instead of going on with a "rejected" result.
+        var rest = await DrainAsync(run);
+        Assert.DoesNotContain(rest, e => e is AgentEvent.ToolExecuted);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task While_the_chat_is_open_its_approval_resumes_it()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        lifetime.Attach(session, lifetime.BeginRun());
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        await using var run = session.SendAsync("stop web", ct: lifetime.BeginRun()).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(run, session, coordinator);
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true, Approver));
+
+        var rest = await DrainAsync(run);
+        Assert.Contains(rest, e => e is AgentEvent.ToolExecuted { Result.IsError: false });
+        Assert.Equal(1, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_new_session_after_clearing_the_chat_is_not_affected()
+    {
+        var store = new ApprovalStore();
+        await using var lifetime = new AgentChatLifetime(store);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        var first = Session(new Invoker(), ToolTurn("call_0"));
+        lifetime.Attach(first, lifetime.BeginRun());
+        await using var firstRun = first.SendAsync("one", ct: lifetime.BeginRun()).GetAsyncEnumerator();
+        var old = await RunToApprovalAsync(firstRun, first, coordinator);
+        await lifetime.EndAsync();
+
+        var invoker = new Invoker();
+        var second = new AgentSession(Context with { SessionId = "chat-2" }, new Provider(ToolTurn("call_0"), TextTurn("done")),
+            new Catalog(), invoker, new ConfirmEverything(), AgentToolTestHelpers.DefaultRegistry(),
+            new AgentSettings { Model = "x", MaxToolIterations = 4 }, "system");
+        lifetime.Attach(second, lifetime.BeginRun());
+        await using var secondRun = second.SendAsync("two", ct: lifetime.BeginRun()).GetAsyncEnumerator();
+        var current = await RunToApprovalAsync(secondRun, second, coordinator);
+
+        Assert.Equal(ApprovalStatus.Cancelled, old.Status);
+        Assert.Equal(ApprovalStatus.Pending, current.Status);
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(current.Id, true, Approver));
+        await DrainAsync(secondRun);
+        Assert.Equal(1, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_decision_addressed_by_a_reused_provider_call_id_never_reaches_a_later_call()
+    {
+        // Providers reuse tool-call ids across turns (Gemini "call_0", fallback ids). The second call carries the
+        // same provider id as the first; only its own approval may decide it.
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        lifetime.Attach(session, lifetime.BeginRun());
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        await using var run = session.SendAsync("stop web twice", ct: lifetime.BeginRun()).GetAsyncEnumerator();
+        var first = await RunToApprovalAsync(run, session, coordinator);
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(first.Id, false, Approver));
+        var second = await RunToApprovalAsync(run, session, coordinator);
+
+        // Unique ids, although the provider's id repeats.
+        Assert.Equal("call_0", first.ToolCallId);
+        Assert.Equal("call_0", second.ToolCallId);
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.NotEqual(first.CorrelationId, second.CorrelationId);
+
+        // A stale "yes" by provider id, then the real decision ("no") by the approval.
+        await session.ResolveConfirmationAsync("call_0", true);
+        Assert.Equal(ApprovalDecisionResult.NotPending, await store.DecideAsync(first.Id, true, Approver));
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(second.Id, false, Approver));
+
+        await DrainAsync(run);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_restart_cancels_the_pending_approvals_of_chats()
+    {
+        var persistence = new InMemoryApprovalPersistence();
+        var before = new ApprovalStore(persistence: persistence);
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"));
+        var coordinator = new ApprovalCoordinator(before, new Notify(), new Policy());
+        await using var run = session.SendAsync("stop web").GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(run, session, coordinator);
+
+        var after = new ApprovalStore(persistence: persistence);
+        await after.LoadAsync();
+
+        Assert.Equal(ApprovalStatus.Cancelled, after.Get(approval.Id)!.Status);
+        Assert.Equal(ApprovalDecisionResult.NotPending, await after.DecideAsync(approval.Id, true, Approver));
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_dropped_browser_connection_ends_the_chat_before_its_components_are_disposed()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        var connection = new ChatConnectionWatcher();
+        await using var lifetime = new AgentChatLifetime(store, connection);
+        lifetime.Attach(session, lifetime.BeginRun());
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        await using var run = session.SendAsync("stop web", ct: lifetime.BeginRun()).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(run, session, coordinator);
+
+        // What Blazor calls when the connection drops; the circuit (and the page) is kept for a while after.
+        await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+
+        Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
+        Assert.Equal(ApprovalDecisionResult.NotPending, await store.DecideAsync(approval.Id, true, Approver));
+        Assert.DoesNotContain(await DrainAsync(run), e => e is AgentEvent.ToolExecuted);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task After_a_reconnect_the_chat_goes_on_with_a_new_run()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), ToolTurn("call_1"), TextTurn("done"));
+        var connection = new ChatConnectionWatcher();
+        await using var lifetime = new AgentChatLifetime(store, connection);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        lifetime.Attach(session, lifetime.BeginRun());
+        await using (var first = session.SendAsync("one", ct: lifetime.BeginRun()).GetAsyncEnumerator())
+        {
+            await RunToApprovalAsync(first, session, coordinator);
+            await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+            await DrainAsync(first);
+        }
+
+        // The page attaches the session again for its next message, with the new run token.
+        lifetime.Attach(session, lifetime.BeginRun());
+        await using var second = session.SendAsync("two", ct: lifetime.BeginRun()).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(second, session, coordinator);
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true, Approver));
+        await DrainAsync(second);
+        Assert.Equal(1, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_disposed_chat_no_longer_listens_to_its_connection()
+    {
+        var store = new ApprovalStore();
+        var connection = new ChatConnectionWatcher();
+        var lifetime = new AgentChatLifetime(store, connection);
+        await lifetime.DisposeAsync();
+
+        var calls = 0;
+        connection.ConnectionDown += () => { calls++; return Task.CompletedTask; };
+        await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+        Assert.Equal(1, calls);   // only the handler added afterwards
+    }
+
+    // ---- a chat ended while a send was still preparing ---------------------------------------------------------------
+
+    [Theory]
+    [InlineData("closed")]
+    [InlineData("connection")]
+    [InlineData("disposed")]
+    public async Task A_send_that_was_still_preparing_when_the_chat_ended_never_starts(string how)
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        var connection = new ChatConnectionWatcher();
+        var lifetime = new AgentChatLifetime(store, connection);
+
+        // The send takes its run before its first await (reading the page, the screenshot, starting the session)…
+        var run = lifetime.BeginRun();
+        // …and the chat ends meanwhile.
+        switch (how)
+        {
+            case "closed": await lifetime.EndAsync(); break;
+            case "connection": await connection.OnConnectionDownAsync(null!, CancellationToken.None); break;
+            default: await lifetime.DisposeAsync(); break;
+        }
+
+        Assert.Throws<OperationCanceledException>(() => lifetime.Attach(session, run));
+        Assert.True(run.IsCancellationRequested);
+        // Even a send that went on regardless takes no step.
+        var events = await DrainAsync(session.SendAsync("stop web", ct: run).GetAsyncEnumerator());
+        Assert.DoesNotContain(events, e => e is AgentEvent.ConfirmationRequired or AgentEvent.ToolExecuted);
+        Assert.Empty(store.GetPending());
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_run_token_from_before_the_chat_ended_cannot_attach_to_the_next_run()
+    {
+        var store = new ApprovalStore();
+        await using var lifetime = new AgentChatLifetime(store);
+        var session = Session(new Invoker(), TextTurn("done"));
+
+        var stale = lifetime.BeginRun();
+        await lifetime.EndAsync();
+        var fresh = lifetime.BeginRun();
+
+        Assert.NotEqual(stale, fresh);
+        Assert.Throws<OperationCanceledException>(() => lifetime.Attach(session, stale));
+        lifetime.Attach(session, fresh);
+        Assert.False(fresh.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task A_disposed_chat_starts_no_run_at_all()
+    {
+        var store = new ApprovalStore();
+        var lifetime = new AgentChatLifetime(store);
+        await lifetime.DisposeAsync();
+
+        var run = lifetime.BeginRun();
+        Assert.True(run.IsCancellationRequested);
+        Assert.Throws<OperationCanceledException>(() => lifetime.Attach(Session(new Invoker()), run));
+    }
+
+    [Fact]
+    public async Task An_approval_raised_just_after_the_chat_ended_is_cancelled_at_once()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+        var run = lifetime.BeginRun();
+        lifetime.Attach(session, run);
+
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        AgentEvent.ConfirmationRequired? asked = null;
+        while (asked is null && await events.MoveNextAsync()) asked = events.Current as AgentEvent.ConfirmationRequired;
+
+        // The chat ends between the question and the page raising the approval for it.
+        await lifetime.EndAsync();
+        var approval = await coordinator.RaiseAsync(session, asked!.Call, Context, asked.Reason, asked.Decision);
+        await lifetime.AfterRaiseAsync(session, run);
+
+        Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
+        Assert.Equal(ApprovalDecisionResult.NotPending, await store.DecideAsync(approval.Id, true, Approver));
+        await DrainAsync(events);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    /// <summary>Every tool call the assistant made has a result in the history (what a provider requires).</summary>
+    private static void AssertEveryCallAnswered(IReadOnlyList<AgentMessage> history)
+    {
+        var asked = history.Where(m => m.Role == AgentRole.Assistant).SelectMany(m => m.ToolCalls ?? []).Select(c => c.Id).ToList();
+        var answered = history.Where(m => m.Role == AgentRole.Tool).Select(m => m.ToolCallId!).ToList();
+        Assert.Equal(asked, answered);
+    }
+
+    [Theory]
+    [InlineData("closed")]
+    [InlineData("connection")]
+    public async Task The_next_message_after_an_ended_run_sends_a_complete_conversation(string how)
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        // Two calls in one turn: the run ends at the first, the second never comes up.
+        var provider = new Provider(
+            [new(ToolCallDelta: new AgentToolCall("call_0", "stop_container", "{}")),
+             new(ToolCallDelta: new AgentToolCall("call_1", "stop_container", "{}")),
+             new(Final: AgentStopReason.ToolCalls)],
+            TextTurn("fine"));
+        var session = new AgentSession(Context, provider, new Catalog(), invoker, new ConfirmEverything(),
+            AgentToolTestHelpers.DefaultRegistry(), new AgentSettings { Model = "x", MaxToolIterations = 4 }, "system");
+        var connection = new ChatConnectionWatcher();
+        await using var lifetime = new AgentChatLifetime(store, connection);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        var first = lifetime.BeginRun();
+        lifetime.Attach(session, first);
+        await using (var run = session.SendAsync("stop both", ct: first).GetAsyncEnumerator())
+        {
+            await RunToApprovalAsync(run, session, coordinator);
+            if (how == "closed") await lifetime.EndAsync();
+            else await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+            await DrainAsync(run);
+        }
+        AssertEveryCallAnswered(session.History);
+
+        var next = lifetime.BeginRun();
+        lifetime.Attach(session, next);
+        var events = await DrainAsync(session.SendAsync("anything else?", ct: next).GetAsyncEnumerator());
+
+        Assert.Contains(events, e => e is AgentEvent.AssistantDelta { Text: "fine" });
+        AssertEveryCallAnswered(provider.Requests[^1].Messages);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    /// <summary>A coordinator whose approval is stored only when the test lets it.</summary>
+    private sealed class SlowCoordinator(IApprovalCoordinator inner) : IApprovalCoordinator
+    {
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context,
+            string reason, GuardrailDecision decision)
+        {
+            Entered.TrySetResult();
+            await Release.Task;
+            return await inner.RaiseAsync(session, call, context, reason, decision);
+        }
+    }
+
+    [Fact]
+    public async Task Clearing_the_chat_while_an_approval_is_being_stored_leaves_nothing_pending()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        var coordinator = new SlowCoordinator(new ApprovalCoordinator(store, new Notify(), new Policy()));
+        var run = lifetime.BeginRun();
+        lifetime.Attach(session, run);
+
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        AgentEvent.ConfirmationRequired? asked = null;
+        while (asked is null && await events.MoveNextAsync()) asked = events.Current as AgentEvent.ConfirmationRequired;
+
+        // The page starts storing the approval; Clear ends the run and scans the store before it is stored, and the
+        // page drops its session — the raise still finishes against the run's own session.
+        var raising = lifetime.RaiseAsync(coordinator, session, Context, asked!, run);
+        await coordinator.Entered.Task;
+        await lifetime.EndAsync();
+        Assert.Empty(store.GetPending());
+        coordinator.Release.SetResult();
+        var approval = await raising;
+
+        Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
+        Assert.Empty(store.GetPending());
+        await DrainAsync(events);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_dropped_connection_stops_every_chat_before_any_cleanup_is_awaited()
+    {
+        // The chat page and the chat widget share one connection; the first one's cleanup is slow (a database write).
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var connection = new ChatConnectionWatcher();
+        var slowCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.ConnectionDown += () => slowCleanup.Task;
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var widget = new AgentChatLifetime(store, connection);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+        var run = widget.BeginRun();
+        widget.Attach(session, run);
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(events, session, coordinator);
+
+        var down = connection.OnConnectionDownAsync(null!, CancellationToken.None);
+
+        // While the first chat is still cleaning up, the second one has stopped already: approving its request
+        // elsewhere resumes nothing.
+        Assert.False(down.IsCompleted);
+        Assert.True(run.IsCancellationRequested);
+        await store.DecideAsync(approval.Id, true, Approver);
+        slowCleanup.SetResult();
+        await down;
+        await DrainAsync(events);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    private sealed class FailingCoordinator : IApprovalCoordinator
+    {
+        public Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context,
+            string reason, GuardrailDecision decision) => throw new ApprovalLimitException("user:alice@example.com");
+    }
+
+    [Fact]
+    public async Task A_run_whose_approval_could_not_be_raised_ends_and_runs_nothing()
+    {
+        // The chat decides only through a recorded approval; without one the call cannot be decided, so the run ends.
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        var run = lifetime.BeginRun();
+        lifetime.Attach(session, run);
+
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        AgentEvent.ConfirmationRequired? asked = null;
+        while (asked is null && await events.MoveNextAsync()) asked = events.Current as AgentEvent.ConfirmationRequired;
+
+        await Assert.ThrowsAsync<ApprovalLimitException>(
+            () => lifetime.RaiseAsync(new FailingCoordinator(), session, Context, asked!, run));
+
+        Assert.True(run.IsCancellationRequested);
+        var rest = await DrainAsync(events);
+        Assert.DoesNotContain(rest, e => e is AgentEvent.ToolExecuted { Result.IsError: false });
+        Assert.Equal(0, invoker.Calls);
+        AssertEveryCallAnswered(session.History);
+    }
+}

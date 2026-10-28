@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Guardrails;
@@ -33,6 +34,18 @@ public sealed record ApprovalSubject(
     /// and level, normalized arguments, resolved target and policy version. An approval is usable only for a call
     /// with the same binding; a subject without one can never use an approval.</summary>
     public string? Binding { get; init; }
+
+    /// <summary>The principal ids that ask (R1-15): the caller first, then whoever it acts for. None of them may decide
+    /// the approval unless the request is interactive (<see cref="ApprovalEligibility"/>).</summary>
+    public IReadOnlyList<string> Requesters { get; init; } = Array.Empty<string>();
+
+    /// <summary>The target as the gateway resolved it (R1-15). Shown on the card; without it the card falls back to
+    /// the arguments.</summary>
+    public string? TargetServer { get; init; }
+    public string? TargetWorkload { get; init; }
+
+    /// <summary>What the notification names of the target (R1-15, <see cref="ApprovalDisplay.NotifiedTarget"/>).</summary>
+    public string? NotifiedTarget { get; init; }
 }
 
 public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
@@ -79,13 +92,15 @@ public sealed class ApprovalGate : IApprovalGate
     private readonly INotificationService? _notify;
     private readonly ILogger<ApprovalGate>? _logger;
     private readonly TimeProvider _time;
+    private readonly WhiskersPublicUrl? _publicUrl;
 
     // Two concurrent first calls must raise one approval, not two (only one of which could ever be used).
     private readonly SemaphoreSlim _raiseLock = new(1, 1);
 
     public ApprovalGate(IApprovalStore approvals, IGuardrailStore? policy = null, INotificationService? notify = null,
-        ILogger<ApprovalGate>? logger = null, TimeProvider? time = null)
+        ILogger<ApprovalGate>? logger = null, TimeProvider? time = null, WhiskersPublicUrl? publicUrl = null)
     {
+        _publicUrl = publicUrl;
         _approvals = approvals ?? throw new ArgumentNullException(nameof(approvals));
         _policy = policy;
         _notify = notify;
@@ -150,12 +165,17 @@ public sealed class ApprovalGate : IApprovalGate
             // None, or raised below what the operation now needs (a level was raised meanwhile): ask again.
             approval = await RaiseAsync(subject, reason, matchedRules, argumentsHash, ct);
         }
+        catch (ApprovalLimitException ex)
+        {
+            // C-19: refused, not queued — the caller has enough approvals waiting already.
+            return new ApprovalGateResult(false, $"{ex.Message} '{subject.ToolName}' was not executed.");
+        }
         finally
         {
             _raiseLock.Release();
         }
 
-        await NotifyAsync(subject);
+        await NotifyAsync(subject, approval);
         return new ApprovalGateResult(false,
             $"Human approval required: {reason} Approval {approval.Id} was raised (Whiskers → Approvals). " +
             $"After it is approved, repeat this exact call within {GrantLifetime.TotalMinutes:0} minutes; it then runs once.",
@@ -185,7 +205,10 @@ public sealed class ApprovalGate : IApprovalGate
         string argumentsHash, CancellationToken ct)
     {
         var argsJson = JsonSerializer.Serialize(subject.Arguments);
-        var (server, workload) = ApprovalDisplay.ExtractTarget(argsJson);
+        var resolved = subject.TargetServer is not null || subject.TargetWorkload is not null;
+        var (server, workload) = resolved
+            ? (subject.TargetServer, subject.TargetWorkload)
+            : ApprovalDisplay.ExtractTarget(argsJson);
         return _approvals.CreateAsync(new ApprovalRequest(
             SessionId: subject.SessionId ?? DirectSessionId,
             ToolCallId: Guid.NewGuid().ToString("N"),
@@ -204,12 +227,13 @@ public sealed class ApprovalGate : IApprovalGate
             GuardrailRule: matchedRules.Count > 0 ? string.Join(", ", matchedRules) : null,
             ArgumentsHash: argumentsHash,
             DecisionId: subject.DecisionId,
-            Binding: subject.Binding),
+            Binding: subject.Binding,
+            Requesters: subject.Requesters),
             // The decision is read back from the store on the retry; nothing waits on it here.
             _ => Task.CompletedTask, ct);
     }
 
-    private async Task NotifyAsync(ApprovalSubject subject)
+    private async Task NotifyAsync(ApprovalSubject subject, Approval approval)
     {
         try
         {
@@ -217,8 +241,9 @@ public sealed class ApprovalGate : IApprovalGate
                 await _notify.SendAsync(new NotificationEvent
                 {
                     EventType = "agent_approval",
-                    ImageInfo = $"\"{subject.ActorDisplay}\" wants to run \"{subject.ToolName}\" — approval required.",
+                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.NotifiedTarget, _publicUrl),
                     CorrelationId = subject.OperationId,
+                    ApprovalId = approval.Id,
                 });
         }
         catch (Exception ex)

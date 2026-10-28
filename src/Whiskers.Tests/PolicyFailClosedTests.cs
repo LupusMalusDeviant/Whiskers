@@ -168,6 +168,25 @@ public sealed class PolicyFailClosedTests : IDisposable
         Assert.Equal(GuardrailPolicy.SafeDefault().ForbiddenArgPatterns, store.Current.ForbiddenArgPatterns);
     }
 
+    [Theory]
+    [InlineData("""{"MaxAutonomousLevel":"read","RequireSecondApprover":true}""", true)]
+    [InlineData("""{"MaxAutonomousLevel":"read","requiresecondapprover":true}""", true)]
+    [InlineData("""{"MaxAutonomousLevel":"read"}""", false)]
+    public async Task A_legacy_file_keeps_its_second_approver_setting(string json, bool expected)
+    {
+        // R1-15: the optional flag is not required in a file, but a file that turns it on must not lose it.
+        await File.WriteAllTextAsync(FilePath, json);
+        var store = new GuardrailStore(filePath: FilePath);
+
+        await store.InitializeAsync();
+
+        Assert.Null(store.LoadError);
+        Assert.Equal(expected, store.Current.RequireSecondApprover);
+        var reloaded = new GuardrailStore(filePath: FilePath);
+        await reloaded.InitializeAsync();
+        Assert.Equal(expected, reloaded.Current.RequireSecondApprover);
+    }
+
     [Fact]
     public async Task A_file_written_by_the_store_loads_again()
     {

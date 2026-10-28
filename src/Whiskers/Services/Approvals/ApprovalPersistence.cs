@@ -15,13 +15,19 @@ public interface IApprovalPersistence
 {
     Task InsertAsync(Approval approval, CancellationToken ct = default);
 
-    /// <summary>Pending → <paramref name="status"/>. <c>false</c> when the approval is not pending (any more).</summary>
+    /// <summary>Pending → <paramref name="status"/>. <c>false</c> when the approval is not pending (any more), or —
+    /// for a human decision (approved, rejected) — when it expired before <paramref name="at"/> (INV-32).
+    /// <paramref name="stillDecidable"/> is asked for a human decision once the row is held (after any lock wait) and
+    /// before the change is committed; <c>false</c> commits nothing — so a decision whose write waited past the
+    /// expiry never becomes durable, not even for a moment.</summary>
     Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by, DateTime? grantExpiresAt,
-        CancellationToken ct = default);
+        bool selfApproved = false, Func<bool>? stillDecidable = null, CancellationToken ct = default);
 
     /// <summary>Uses the approval once. <c>false</c> unless it is approved, unused and its grant has not lapsed at
-    /// <paramref name="now"/>.</summary>
-    Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default);
+    /// <paramref name="now"/>. <paramref name="stillUsable"/> is asked once the row is held (after any lock wait) and
+    /// before the use is committed; <c>false</c> commits nothing — a grant that lapsed during the wait is not used.</summary>
+    Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, Func<bool>? stillUsable = null,
+        CancellationToken ct = default);
 
     /// <summary>Approvals that can still be decided or used: pending ones, and approved ones not used yet.</summary>
     Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default);
@@ -48,33 +54,72 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
     }
 
     public async Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-        DateTime? grantExpiresAt, CancellationToken ct = default)
+        DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
+        CancellationToken ct = default)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var pending = nameof(ApprovalStatus.Pending);
-        var updated = await db.Approvals
-            .Where(a => a.Id == approvalId && a.Status == pending)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(a => a.Status, status.ToString())
-                .SetProperty(a => a.ResolvedAt, at)
-                .SetProperty(a => a.ResolvedBy, by)
-                .SetProperty(a => a.GrantExpiresAt, grantExpiresAt), ct);
-        return updated == 1;
+        var target = status.ToString();
+        var decision = ApprovalRecords.IsDecision(status);
+        // One transaction: the update holds the row (it waits here for any lock), then the decision is checked once
+        // more against the clock before it is committed. Not committed (refused, or the process stops) = not decided.
+        // It runs inside the provider's execution strategy (PostgreSQL retries transient failures and refuses a
+        // transaction opened outside it); a retry after a commit whose answer was lost finds the row already decided
+        // by this very call.
+        return await InTransactionAsync(db, async () =>
+        {
+            var updated = await db.Approvals
+                .Where(a => a.Id == approvalId && a.Status == pending && (!decision || a.ExpiresAt > at))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(a => a.Status, target)
+                    .SetProperty(a => a.ResolvedAt, at)
+                    .SetProperty(a => a.ResolvedBy, by)
+                    .SetProperty(a => a.GrantExpiresAt, grantExpiresAt)
+                    .SetProperty(a => a.SelfApproved, selfApproved), ct);
+            return updated == 1 && (!decision || stillDecidable is null || stillDecidable());
+        }, () => db.Approvals.AsNoTracking().AnyAsync(a => a.Id == approvalId && a.Status == target
+            && a.ResolvedAt == at && a.ResolvedBy == by, ct), ct);
     }
 
-    public async Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default)
+    /// <summary>Runs <paramref name="change"/> in a transaction through the provider's execution strategy and commits
+    /// only when it returns <c>true</c>. A retry (the connection broke) first asks <paramref name="alreadyDone"/>
+    /// whether the commit before it got through.</summary>
+    private static async Task<bool> InTransactionAsync(MetricsDbContext db, Func<Task<bool>> change,
+        Func<Task<bool>> alreadyDone, CancellationToken ct)
+    {
+        var attempt = 0;
+        return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0)
+            {
+                db.ChangeTracker.Clear();
+                if (await alreadyDone()) return true;
+            }
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            if (!await change()) return false;   // rolled back on dispose
+            await tx.CommitAsync(ct);
+            return true;
+        });
+    }
+
+    public async Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now,
+        Func<bool>? stillUsable = null, CancellationToken ct = default)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var approved = nameof(ApprovalStatus.Approved);
-        var updated = await db.Approvals
-            .Where(a => a.Id == approvalId && a.Status == approved && a.ConsumedAt == null
-                        && a.GrantExpiresAt != null && a.GrantExpiresAt > now)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(a => a.ConsumedAt, now)
-                .SetProperty(a => a.ConsumedBy, operationId), ct);
-        return updated == 1;
+        // As for a decision: one transaction, the grant checked again once the row is held, then committed.
+        return await InTransactionAsync(db, async () =>
+        {
+            var updated = await db.Approvals
+                .Where(a => a.Id == approvalId && a.Status == approved && a.ConsumedAt == null
+                            && a.GrantExpiresAt != null && a.GrantExpiresAt > now)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(a => a.ConsumedAt, now)
+                    .SetProperty(a => a.ConsumedBy, operationId), ct);
+            return updated == 1 && (stillUsable is null || stillUsable());
+        }, () => db.Approvals.AsNoTracking().AnyAsync(a => a.Id == approvalId && a.ConsumedBy == operationId, ct), ct);
     }
 
     public async Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default)
@@ -119,26 +164,33 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
     }
 
     public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-        DateTime? grantExpiresAt, CancellationToken ct = default)
+        DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
+        CancellationToken ct = default)
     {
         lock (_lock)
         {
-            if (!_rows.TryGetValue(approvalId, out var row) || row.Status != nameof(ApprovalStatus.Pending))
+            if (!_rows.TryGetValue(approvalId, out var row) || row.Status != nameof(ApprovalStatus.Pending)
+                || (ApprovalRecords.IsDecision(status) && row.ExpiresAt <= at))
+                return Task.FromResult(false);
+            if (ApprovalRecords.IsDecision(status) && stillDecidable is not null && !stillDecidable())
                 return Task.FromResult(false);
             row.Status = status.ToString();
             row.ResolvedAt = at;
             row.ResolvedBy = by;
             row.GrantExpiresAt = grantExpiresAt;
+            row.SelfApproved = selfApproved;
             return Task.FromResult(true);
         }
     }
 
-    public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default)
+    public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now,
+        Func<bool>? stillUsable = null, CancellationToken ct = default)
     {
         lock (_lock)
         {
             if (!_rows.TryGetValue(approvalId, out var row) || row.Status != nameof(ApprovalStatus.Approved)
-                || row.ConsumedAt is not null || row.GrantExpiresAt is not { } until || until <= now)
+                || row.ConsumedAt is not null || row.GrantExpiresAt is not { } until || until <= now
+                || (stillUsable is not null && !stillUsable()))
                 return Task.FromResult(false);
             row.ConsumedAt = now;
             row.ConsumedBy = operationId;
@@ -167,6 +219,20 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
 
 internal static class ApprovalRecords
 {
+    /// <summary>A human decision, as opposed to the system expiring or cancelling an approval.</summary>
+    public static bool IsDecision(ApprovalStatus status) => status is ApprovalStatus.Approved or ApprovalStatus.Rejected;
+
+    // Principal ids never contain a line break (user:, key:, trigger:, agent:, task: ids).
+    private const char RequesterSeparator = '\n';
+
+    private static string? JoinRequesters(IReadOnlyList<string> ids) =>
+        ids.Count == 0 ? null : string.Join(RequesterSeparator, ids);
+
+    private static IReadOnlyList<string> SplitRequesters(string? value) =>
+        string.IsNullOrEmpty(value)
+            ? Array.Empty<string>()
+            : value.Split(RequesterSeparator, StringSplitOptions.RemoveEmptyEntries);
+
     public static ApprovalRecordEntity ToEntity(Approval a) => new()
     {
         Id = a.Id,
@@ -189,6 +255,8 @@ internal static class ApprovalRecords
         DecisionId = a.DecisionId,
         Binding = a.Binding,
         Interactive = a.Interactive,
+        RequesterIds = JoinRequesters(a.Requesters),
+        SelfApproved = a.SelfApproved,
         Status = a.Status.ToString(),
         CreatedAt = a.CreatedAt,
         ExpiresAt = a.ExpiresAt,
@@ -221,6 +289,8 @@ internal static class ApprovalRecords
         DecisionId = e.DecisionId,
         Binding = e.Binding,
         Interactive = e.Interactive,
+        Requesters = SplitRequesters(e.RequesterIds),
+        SelfApproved = e.SelfApproved,
         // An unreadable status is never a usable one.
         Status = Enum.TryParse<ApprovalStatus>(e.Status, out var status) ? status : ApprovalStatus.Cancelled,
         CreatedAt = DateTime.SpecifyKind(e.CreatedAt, DateTimeKind.Utc),

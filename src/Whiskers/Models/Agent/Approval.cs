@@ -22,8 +22,8 @@ public sealed record ApprovalRequest(
     string? ParamsJson,
     string Reason,
     string? Diff = null,
-    // WP-05 correlation + richer approval context (all display-only; the executed call is bound by
-    // ToolCallId, never by these fields).
+    // WP-05 correlation + richer approval context (display-only; what an approval can be used for is its Binding
+    // and ArgumentsHash, never these fields).
     string? CorrelationId = null,
     string? RiskLevel = null,
     string? TargetServer = null,
@@ -38,7 +38,10 @@ public sealed record ApprovalRequest(
     // R1-14: what the approval is bound to (ApprovalBinding); null binds it to nothing, so it can never be used.
     string? Binding = null,
     // R1-14: a live agent session waits on it (the resolver reaches back to that session).
-    bool Interactive = false);
+    bool Interactive = false,
+    // R1-15: the principal ids that asked for it (the caller, and whoever it acts for); none of them may decide a
+    // non-interactive request (PC-D4). The first one is the principal its pending approvals are counted against.
+    IReadOnlyList<string>? Requesters = null);
 
 /// <summary>A pending (or resolved) request for a human to approve/reject a single call. Persisted from the moment it
 /// is raised (R1-14), with its decision and its single use; an <see cref="Interactive"/> one, whose resolver reaches a
@@ -66,7 +69,7 @@ public sealed class Approval
     public string? Diff { get; init; }
 
     // WP-05: correlation + richer context so the approval card explains what is being decided.
-    // These are display-only — execution is bound to <see cref="ToolCallId"/>, not to these values.
+    // These are display-only — what the approval can be used for is <see cref="Binding"/>, not these values.
     /// <summary>Correlation id shared with the recorded history entry and the raised notification.</summary>
     public string? CorrelationId { get; init; }
     /// <summary>Coarse risk level derived from the tool's required permission: low | medium | high.</summary>
@@ -96,6 +99,14 @@ public sealed class Approval
     /// <summary>A live agent session waits on this approval.</summary>
     public bool Interactive { get; init; }
 
+    /// <summary>The principal ids that asked for the approval (R1-15): the caller, and the principals it acts for.
+    /// The first one is the requesting principal. Empty for an approval raised before R1-15.</summary>
+    public IReadOnlyList<string> Requesters { get; init; } = Array.Empty<string>();
+
+    /// <summary>One of the <see cref="Requesters"/> decided it (an interactive request, PC-D4): kept on record so a
+    /// self-approval is visible as such.</summary>
+    public bool SelfApproved { get; set; }
+
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; init; } = DateTime.UtcNow.AddMinutes(15);
@@ -112,5 +123,7 @@ public sealed class Approval
     public string? ConsumedBy { get; set; }
 
     public bool IsPending => Status == ApprovalStatus.Pending;
-    public bool IsExpired => Status == ApprovalStatus.Pending && DateTime.UtcNow >= ExpiresAt;
+
+    /// <summary>Pending, but past <see cref="ExpiresAt"/> at <paramref name="now"/>: it can no longer be decided.</summary>
+    public bool IsExpiredAt(DateTime now) => Status == ApprovalStatus.Pending && now >= ExpiresAt;
 }

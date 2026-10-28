@@ -17,5 +17,7 @@ public class NotificationEvent
     public int? WindowMinutes { get; set; }
     /// <summary>WP-05: for agent-approval events, ties the notification to the approval + history entry.</summary>
     public string? CorrelationId { get; set; }
+    /// <summary>R1-15: for agent-approval events, the approval to open (the in-app link goes to its card).</summary>
+    public string? ApprovalId { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

@@ -83,7 +83,7 @@ public class AgentSessionTests
         {
             events.Add(e);
             if (autoConfirm && e is AgentEvent.ConfirmationRequired cr)
-                await session.ResolveConfirmationAsync(cr.Call.Id, true);
+                await session.ResolveConfirmationAsync(cr.Call.CorrelationId, true);
         }
         return events;
     }
@@ -269,7 +269,7 @@ public class AgentSessionTests
         {
             events.Add(e);
             if (e is AgentEvent.ConfirmationRequired cr)
-                await session.ResolveConfirmationAsync(cr.Call.Id, false);
+                await session.ResolveConfirmationAsync(cr.Call.CorrelationId, false);
         }
 
         Assert.Equal(0, invoker.Calls);

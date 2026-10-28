@@ -7,8 +7,9 @@ using Xunit;
 
 namespace Whiskers.Tests;
 
-/// <summary>R1-05: a scheduler approval is held to what the task runs, not to the outer tool's level.</summary>
-public class ApprovalSeparationOfDutyTests
+/// <summary>R1-05: a scheduler approval is held to what the task runs, not to the outer tool's level. R1-15 adds who
+/// may decide it (ApprovalSeparationOfDutyTests.Eligibility.cs).</summary>
+public partial class ApprovalSeparationOfDutyTests
 {
     private static readonly CapabilityCatalog Catalog = new();
 

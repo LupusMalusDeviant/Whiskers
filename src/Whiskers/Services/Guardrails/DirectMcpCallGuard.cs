@@ -77,6 +77,8 @@ public sealed class DirectMcpCallGuard : IDirectMcpCallGuard
                 // R1-14: this caller and credential, these arguments, this policy version.
                 Binding = ApprovalBinding.OfDirectCall(principal, toolName, level, arguments,
                     Mutations.PolicySnapshot.Of(preset, policy).VersionHash),
+                // R1-15: a direct call is never interactive; its caller does not decide it.
+                Requesters = [actor],
             },
             decision.Reason, decision.MatchedRuleIds, ct);
         if (!gate.Approved)

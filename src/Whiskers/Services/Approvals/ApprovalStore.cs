@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
+using Whiskers.Services.Guardrails;
 
 namespace Whiskers.Services.Approvals;
 
@@ -13,7 +14,8 @@ public interface IApprovalStore
 {
     /// <summary>Registers and persists a pending approval. <paramref name="resolver"/> is invoked with the human's
     /// decision (true = approve) exactly once when the approval is resolved. Throws when it cannot be persisted:
-    /// an approval nobody could find again is never raised.</summary>
+    /// an approval nobody could find again is never raised. Throws <see cref="ApprovalLimitException"/> when its
+    /// requesting principal already has <see cref="ApprovalEligibility.MaxPendingPerPrincipal"/> approvals waiting.</summary>
     Task<Approval> CreateAsync(ApprovalRequest request, Func<bool, Task> resolver, CancellationToken ct = default);
 
     /// <summary>Pending approvals (newest first), with overdue ones swept to Expired first.</summary>
@@ -32,11 +34,19 @@ public interface IApprovalStore
     /// used (pending and not expired, or approved and not used yet), newest first; <c>null</c> when there is none.</summary>
     Approval? FindOpen(string binding);
 
-    /// <summary>Approve/reject a pending approval. Invokes its resolver. Returns false if not pending.
-    /// When <paramref name="resolverLevel"/> is supplied (read/write/admin), the resolver must hold at
-    /// least the approval's own level — a lower-privileged user cannot approve a higher-privileged action.
-    /// Pass null only for system-internal resolves (expiry/cancel).</summary>
+    /// <summary>A human approves or rejects a pending approval (R1-15). Both are held to the same rules
+    /// (<see cref="ApprovalEligibility"/>): the resolver holds at least the approval's level, and a requester never
+    /// decides a non-interactive request — nor an interactive one while the policy requires a second approver. An
+    /// approval past its expiry is expired instead. Invokes its resolver once it is on record.</summary>
+    Task<ApprovalDecisionResult> DecideAsync(string approvalId, bool approved, ApprovalResolver resolver);
+
+    /// <summary><see cref="DecideAsync"/> for the web user <paramref name="resolvedBy"/> (an email) holding
+    /// <paramref name="resolverLevel"/>; <c>true</c> when it was decided. Without both, nothing is decided.</summary>
     Task<bool> ResolveAsync(string approvalId, bool approved, string? resolvedBy, string? resolverLevel = null);
+
+    /// <summary>Whether <paramref name="resolver"/> could decide <paramref name="approvalId"/> now; <c>null</c> when
+    /// they could, otherwise why not. For the UI: <see cref="DecideAsync"/> checks again.</summary>
+    ApprovalDecisionResult? CanDecide(string approvalId, ApprovalResolver resolver);
 
     /// <summary>Uses an approved approval once, for operation <paramref name="operationId"/>. <c>false</c> when it is
     /// not approved, was used already (by anyone, before or after a restart) or its grant lapsed at
@@ -54,7 +64,7 @@ public interface IApprovalStore
     event Action? Changed;
 }
 
-public sealed class ApprovalStore : IApprovalStore
+public sealed class ApprovalStore : IApprovalStore, IDisposable
 {
     /// <summary>How long an approval stays usable after it was approved.</summary>
     public static readonly TimeSpan GrantLifetime = TimeSpan.FromMinutes(10);
@@ -67,14 +77,43 @@ public sealed class ApprovalStore : IApprovalStore
     private readonly ILogger<ApprovalStore>? _logger;
     private readonly TimeSpan _ttl;
     private readonly TimeProvider _time;
+    private readonly IGuardrailStore? _policy;
+    private readonly ITimer _sweep;
+
+    // Counting a principal's pending approvals and adding one happen together, so the limit holds under concurrency.
+    private readonly SemaphoreSlim _createLock = new(1, 1);
+
+    /// <summary>How often overdue approvals are expired even when nobody looks at the list, so a session waiting on
+    /// one is released (C-07).</summary>
+    public static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(30);
 
     public ApprovalStore(ILogger<ApprovalStore>? logger = null, TimeSpan? approvalTtl = null,
-        IApprovalPersistence? persistence = null, TimeProvider? time = null)
+        IApprovalPersistence? persistence = null, TimeProvider? time = null, IGuardrailStore? policy = null)
     {
         _logger = logger;
         _ttl = approvalTtl ?? TimeSpan.FromMinutes(15);
         _persistence = persistence ?? new InMemoryApprovalPersistence();
         _time = time ?? TimeProvider.System;
+        _policy = policy;
+        _sweep = _time.CreateTimer(_ => SweepExpired(), null, SweepInterval, SweepInterval);
+    }
+
+    public void Dispose() => _sweep.Dispose();
+
+    /// <summary>Whether the active policy requires a second approver for interactive requests too. Unreadable →
+    /// required (fail closed).</summary>
+    private bool RequireSecondApprover
+    {
+        get
+        {
+            if (_policy is null) return false;
+            try { return _policy.Current.RequireSecondApprover; }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Guardrail policy could not be read; a second approver is required");
+                return true;
+            }
+        }
     }
 
     public event Action? Changed;
@@ -94,6 +133,36 @@ public sealed class ApprovalStore : IApprovalStore
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(resolver);
+        await _createLock.WaitAsync(ct);
+        try
+        {
+            return await CreateLockedAsync(request, resolver, ct);
+        }
+        finally
+        {
+            _createLock.Release();
+        }
+    }
+
+    private async Task<Approval> CreateLockedAsync(ApprovalRequest request, Func<bool, Task> resolver, CancellationToken ct)
+    {
+        var requesters = (request.Requesters ?? Array.Empty<string>())
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
+        // C-19: one principal cannot flood the list (and the bell). An approval counts against everyone in its
+        // requester chain — the agent session and the user or key it acts for — so a user cannot get past the bound
+        // by opening more chats. A caller that names no requester is counted under its displayed actor.
+        var counted = requesters.Count > 0 ? requesters : [request.Actor];
+        SweepExpired();
+        var pending = _entries.Values.Where(e => e.Approval.Status == ApprovalStatus.Pending).ToList();
+        foreach (var id in counted)
+        {
+            if (pending.Count(e => CountedAgainst(e.Approval).Contains(id, StringComparer.Ordinal))
+                < ApprovalEligibility.MaxPendingPerPrincipal) continue;
+            _logger?.LogWarning("Approval for {Tool} not raised: {Requester} has too many pending approvals",
+                request.ToolName, id);
+            throw new ApprovalLimitException(id);
+        }
+
         var now = Now;
         var approval = new Approval
         {
@@ -118,6 +187,7 @@ public sealed class ApprovalStore : IApprovalStore
             DecisionId = request.DecisionId,
             Binding = request.Binding,
             Interactive = request.Interactive,
+            Requesters = requesters,
         };
         // Persisted first: an approval that is not on record is never shown, decided or used.
         await _persistence.InsertAsync(approval, ct);
@@ -126,6 +196,9 @@ public sealed class ApprovalStore : IApprovalStore
         Changed?.Invoke();
         return approval;
     }
+
+    private static IReadOnlyList<string> CountedAgainst(Approval approval) =>
+        approval.Requesters.Count > 0 ? approval.Requesters : [approval.Actor];
 
     public IReadOnlyList<Approval> GetPending()
     {
@@ -168,34 +241,72 @@ public sealed class ApprovalStore : IApprovalStore
 
     public async Task<bool> ResolveAsync(string approvalId, bool approved, string? resolvedBy, string? resolverLevel = null)
     {
-        if (!_entries.TryGetValue(approvalId, out var entry) || entry.Approval.Status != ApprovalStatus.Pending)
-            return false;
-
-        // Approving is itself a privileged action: a resolver may only approve an action whose level it
-        // could perform. Rejecting is always allowed (it only makes things safer).
-        if (approved && resolverLevel != null
-            && !McpPermissionLevels.HasAccess(resolverLevel, entry.Approval.Level))
+        // A decision always names who made it and at which level; without them nothing is decided (R1-15).
+        if (string.IsNullOrWhiteSpace(resolvedBy) || string.IsNullOrWhiteSpace(resolverLevel))
         {
-            _logger?.LogWarning("Approval {Id} ({Tool}, level={Level}) approval denied: resolver level {ResolverLevel} is insufficient",
-                approvalId, entry.Approval.ToolName, entry.Approval.Level, resolverLevel);
+            _logger?.LogWarning("Approval {Id} not decided: no resolver or no resolver level was given", approvalId);
             return false;
         }
+        var resolver = new ApprovalResolver(Mutations.PrincipalIds.User(resolvedBy), resolverLevel, resolvedBy.Trim());
+        return await DecideAsync(approvalId, approved, resolver) == ApprovalDecisionResult.Decided;
+    }
+
+    public ApprovalDecisionResult? CanDecide(string approvalId, ApprovalResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+        if (!_entries.TryGetValue(approvalId, out var entry)) return ApprovalDecisionResult.NotFound;
+        if (entry.Approval.IsExpiredAt(Now)) return ApprovalDecisionResult.Expired;
+        if (entry.Approval.Status != ApprovalStatus.Pending) return ApprovalDecisionResult.NotPending;
+        return ApprovalEligibility.Check(entry.Approval, resolver, RequireSecondApprover);
+    }
+
+    public async Task<ApprovalDecisionResult> DecideAsync(string approvalId, bool approved, ApprovalResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+        if (!_entries.TryGetValue(approvalId, out var entry)) return ApprovalDecisionResult.NotFound;
+        var approval = entry.Approval;
+
+        // INV-32: past its expiry it is expired, not decided — whoever looks first.
+        if (approval.IsExpiredAt(Now))
+        {
+            SweepExpired();
+            return ApprovalDecisionResult.Expired;
+        }
+        if (approval.Status != ApprovalStatus.Pending) return ApprovalDecisionResult.NotPending;
+
+        // INV-33/34/37: approving and rejecting are held to the same rules.
+        if (ApprovalEligibility.Check(approval, resolver, RequireSecondApprover) is { } refused)
+        {
+            _logger?.LogWarning("Approval {Id} ({Tool}, level={Level}) not {Decision} by {Resolver} (level {ResolverLevel}): {Reason}",
+                approvalId, approval.ToolName, approval.Level, approved ? "approved" : "rejected", resolver.PrincipalId,
+                resolver.Level, refused);
+            return refused;
+        }
+        var selfApproved = ApprovalEligibility.IsRequester(approval, resolver);
 
         // Exactly-once: only the thread that flips Resolved 0→1 performs the transition + resolver.
         if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0)
-            return false;
+            return ApprovalDecisionResult.NotPending;
 
         var status = approved ? ApprovalStatus.Approved : ApprovalStatus.Rejected;
-        if (!await PersistAsync(entry, status, resolvedBy, mustStore: true))
+        if (!await PersistAsync(entry, status, resolver.Display, mustStore: true, selfApproved: selfApproved))
         {
-            // Not on record (or decided elsewhere first), not decided here: the approval stays pending in this store
-            // and nothing waiting on it is released.
+            // Not on record (decided elsewhere first, expired meanwhile, or the write failed), not decided here: the
+            // approval stays pending in this store and nothing waiting on it is released.
             Interlocked.Exchange(ref entry.Resolved, 0);
-            return false;
+            if (approval.IsExpiredAt(Now))
+            {
+                SweepExpired();
+                return ApprovalDecisionResult.Expired;
+            }
+            return ApprovalDecisionResult.NotRecorded;
         }
+        if (selfApproved)
+            _logger?.LogInformation("Approval {Id} ({Tool}) was {Decision} by its own requester {Resolver}",
+                approvalId, approval.ToolName, approved ? "approved" : "rejected", resolver.PrincipalId);
         await SafeResolve(entry, approved);
         Changed?.Invoke();
-        return true;
+        return ApprovalDecisionResult.Decided;
     }
 
     public async Task<bool> TryConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default)
@@ -208,7 +319,9 @@ public sealed class ApprovalStore : IApprovalStore
             || approval.GrantExpiresAt is not { } until || until <= now)
             return false;
         // The database decides who wins: one conditional update, whichever process or consumer asks.
-        if (!await _persistence.ConsumeAsync(approvalId, operationId, now, ct)) return false;
+        // INV-32: the grant is checked again against the clock once the row is held — a use whose write waited past
+        // the grant's end does not count.
+        if (!await _persistence.ConsumeAsync(approvalId, operationId, now, () => until > Now, ct)) return false;
         approval.ConsumedAt = now;
         approval.ConsumedBy = operationId;
         Changed?.Invoke();
@@ -237,8 +350,10 @@ public sealed class ApprovalStore : IApprovalStore
         {
             var entry = new Entry(approval, _ => Task.CompletedTask);
             if (!_entries.TryAdd(approval.Id, entry)) continue;
-            // Nobody is waiting on an interactive approval any more: its session died with the process.
-            if (approval.Interactive && approval.Status == ApprovalStatus.Pending)
+            // Nobody is waiting on an interactive approval any more: its session died with the process. And a pending
+            // approval that does not say who asked (raised before R1-15) can never be decided: it is cancelled, the
+            // caller asks again.
+            if (approval.Status == ApprovalStatus.Pending && (approval.Interactive || approval.Requesters.Count == 0))
             {
                 Interlocked.Exchange(ref entry.Resolved, 1);
                 await PersistAsync(entry, ApprovalStatus.Cancelled, "system", ct);
@@ -251,7 +366,8 @@ public sealed class ApprovalStore : IApprovalStore
 
     private void SweepExpired()
     {
-        var overdue = _entries.Values.Where(e => e.Approval.IsExpired).ToList();
+        var now = Now;
+        var overdue = _entries.Values.Where(e => e.Approval.IsExpiredAt(now)).ToList();
         if (overdue.Count == 0) return;
 
         foreach (var entry in overdue)
@@ -259,7 +375,7 @@ public sealed class ApprovalStore : IApprovalStore
             if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0) continue;
             // Expired here at once, so nothing reads it as pending while the record is written.
             entry.Approval.Status = ApprovalStatus.Expired;
-            entry.Approval.ResolvedAt = Now;
+            entry.Approval.ResolvedAt = now;
             entry.Approval.ResolvedBy = "system";
             _ = ExpireAsync(entry);
         }
@@ -276,14 +392,16 @@ public sealed class ApprovalStore : IApprovalStore
     /// (<paramref name="mustStore"/>); a failed write of a system expiry or cancellation still ends it here (that only
     /// makes things safer: the record stays pending until it expires, and nothing can use a pending approval).</summary>
     private async Task<bool> PersistAsync(Entry entry, ApprovalStatus status, string? by, CancellationToken ct = default,
-        bool mustStore = false)
+        bool mustStore = false, bool selfApproved = false)
     {
         var at = Now;
         DateTime? grantUntil = status == ApprovalStatus.Approved ? at + GrantLifetime : null;
         bool stored;
         try
         {
-            stored = await _persistence.ResolveAsync(entry.Approval.Id, status, at, by, grantUntil, ct);
+            // INV-32: a human decision is committed only if the approval has not expired by the time its row is held.
+            stored = await _persistence.ResolveAsync(entry.Approval.Id, status, at, by, grantUntil, selfApproved,
+                () => !entry.Approval.IsExpiredAt(Now), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -295,6 +413,7 @@ public sealed class ApprovalStore : IApprovalStore
         entry.Approval.ResolvedAt = at;
         entry.Approval.ResolvedBy = by;
         entry.Approval.GrantExpiresAt = grantUntil;
+        entry.Approval.SelfApproved = selfApproved;
         return true;
     }
 

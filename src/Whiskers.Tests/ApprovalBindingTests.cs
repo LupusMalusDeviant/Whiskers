@@ -54,6 +54,72 @@ public class ApprovalBindingTests
         return raised.ApprovalId!;
     }
 
+    [Fact]
+    public async Task A_gateway_approval_records_who_asked_and_announces_no_target_the_caller_named()
+    {
+        // R1-15: the requester (for separation of duties); a target the resolver did not find in the inventory keeps
+        // what the caller sent, so the notification does not name it.
+        const string marker = "caller-named-7f3c";
+        var approvals = new ApprovalStore();
+        var notify = new NotifyRecorder();
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(Policy());
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], NullLogger<MutationGateway>.Instance,
+            approvals: new ApprovalGate(approvals, store, notify));
+
+        var raised = await gateway.ExecuteAsync(Call(container: marker, server: marker), (_, _) => Task.FromResult(0));
+
+        Assert.Equal(["key:k1"], approvals.Get(raised.ApprovalId!)!.Requesters);
+        var text = Assert.Single(notify.Sent).ImageInfo!;
+        Assert.Contains("target container ", text);   // the kind, and nothing the caller named
+        Assert.DoesNotContain(marker, text);
+    }
+
+    [Theory]
+    [InlineData(AgentOrigin.WebUi, false, "agent-web", true)]
+    [InlineData(AgentOrigin.WebUi, true, "agent-web", false)]
+    [InlineData(AgentOrigin.Trigger, false, "trigger", false)]
+    [InlineData(AgentOrigin.McpTool, false, "agent-mcp", false)]
+    [InlineData(null, false, "agent", false)]
+    public async Task A_gateway_approval_for_the_web_chat_is_interactive(AgentOrigin? origin, bool secondApprover,
+        string kind, bool selfDecides)
+    {
+        // R1-15 (PC-D4): an approval the gateway raises for an agent call — e.g. after the effective level rose above
+        // what the session checked — is interactive only when Whiskers says the call came from the web chat.
+        var user = new AgentPrincipal(AgentPrincipalKind.WebUser, "alice", McpPermissionLevels.Admin, null,
+            UserEmail: "alice@example.com");
+        var policy = Policy();
+        policy.RequireSecondApprover = secondApprover;
+        var guardrails = new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        var approvals = new ApprovalStore(policy: guardrails);
+        var request = Call(MutationPrincipals.Agent(user, "chat-1")) with { Surface = MutationSurface.Agent, AgentOrigin = origin };
+
+        var raised = await Gateway(approvals, policy).ExecuteAsync(request, (_, _) => Task.FromResult(0));
+
+        Assert.Equal(MutationStatus.PendingApproval, raised.Status);
+        var approval = approvals.Get(raised.ApprovalId!)!;
+        Assert.Equal(kind, approval.ActorType);
+        Assert.Contains("user:alice@example.com", approval.Requesters);
+        var result = await approvals.DecideAsync(approval.Id, true, ApprovalResolver.User("alice@example.com", AppRole.Admin));
+        Assert.Equal(selfDecides ? ApprovalDecisionResult.Decided : ApprovalDecisionResult.RequesterCannotDecide, result);
+    }
+
+    [Fact]
+    public void Only_a_target_found_in_the_inventory_may_be_named()
+    {
+        var found = new MutationTarget("container", "3f2a9c", "web", "srv1") { Resolved = true };
+        Assert.Equal(("srv1", "3f2a9c"), ApprovalDisplay.NotifiableTarget(found));
+        Assert.Equal((null, null), ApprovalDisplay.NotifiableTarget(found with { Resolved = false }));
+        Assert.Equal((null, null), ApprovalDisplay.NotifiableTarget(null));
+    }
+
+    private sealed class NotifyRecorder : Whiskers.Services.Notifications.INotificationService
+    {
+        public List<NotificationEvent> Sent { get; } = [];
+        public Task SendAsync(NotificationEvent evt) { Sent.Add(evt); return Task.CompletedTask; }
+        public Task SendTestAsync() => Task.CompletedTask;
+    }
+
     public static TheoryData<string> Differences() =>
     [
         "principal", "credential", "capability", "arguments", "target", "server",
@@ -112,7 +178,7 @@ public class ApprovalBindingTests
         var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "agent-mcp",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
             ArgumentsHash: ApprovalFingerprint.OfArguments(request.Arguments), Binding: decided!.Binding,
-            Interactive: true), _ => Task.CompletedTask);
+            Interactive: true, Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
         var runs = 0;
 
@@ -133,7 +199,7 @@ public class ApprovalBindingTests
         var request = Call(operationId: "op-1", sessionId: "s1");
         var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "agent-mcp",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
-            ArgumentsHash: ApprovalFingerprint.OfArguments(request.Arguments)), _ => Task.CompletedTask);
+            ArgumentsHash: ApprovalFingerprint.OfArguments(request.Arguments), Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
 
         var outcome = await Gateway(approvals).ExecuteAsync(request, (_, _) => Task.FromResult(1));
@@ -146,7 +212,7 @@ public class ApprovalBindingTests
     {
         var approvals = new ApprovalStore();
         var unbound = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "ci", "mcp-direct",
-            Args("web-1"));
+            Args("web-1")) { Requesters = ["key:test-requester"] };
 
         var result = await new ApprovalGate(approvals).CheckAsync(unbound, "needs a human", []);
 

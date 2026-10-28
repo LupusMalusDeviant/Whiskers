@@ -39,7 +39,8 @@ else
     <MudStack Spacing="3">
         @foreach (var a in _pending)
         {
-            <MudPaper Class="pa-4" Outlined="true" Style="border-color: var(--mud-palette-warning);">
+            var refusal = _resolver is null ? ApprovalDecisionResult.InsufficientLevel : ApprovalStore.CanDecide(a.Id, _resolver);
+            <MudPaper id="@a.Id" Class="pa-4" Outlined="true" Style="border-color: var(--mud-palette-warning);">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Wrap="Wrap.Wrap">
                     <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@a.Actor</MudChip>
                     <MudText Typo="Typo.body1">@((MarkupString)L["ApprovalsView_WantsToRun", a.ToolName].Value)</MudText>
@@ -77,7 +78,8 @@ else
                     </MudStack>
                 }
 
-                @if (!string.IsNullOrWhiteSpace(a.ParamsJson))
+                @* C-10: the arguments are for those who could act on them, not for Viewers. *@
+                @if (!string.IsNullOrWhiteSpace(a.ParamsJson) && _mayReadArguments)
                 {
                     <MudExpansionPanels Elevation="0" Class="mb-2">
                         <MudExpansionPanel Text="@L["ApprovalsView_Params_Title"].Value" Dense="true">
@@ -91,15 +93,19 @@ else
                     <pre class="sw-approval-params">@a.Diff</pre>
                 }
 
-                <MudStack Row="true" Spacing="2" Class="mt-2">
+                <MudStack Row="true" Spacing="2" Class="mt-2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
                     <MudButton Color="Color.Success" Variant="Variant.Filled"
                                StartIcon="@Icons.Material.Filled.Check"
-                               Disabled="@(_busy.Contains(a.Id))"
+                               Disabled="@(_busy.Contains(a.Id) || refusal is not null)"
                                OnClick="@(() => Resolve(a.Id, true))">@L["ApprovalsView_Approve_Button"]</MudButton>
                     <MudButton Color="Color.Error" Variant="Variant.Outlined"
                                StartIcon="@Icons.Material.Filled.Block"
-                               Disabled="@(_busy.Contains(a.Id))"
+                               Disabled="@(_busy.Contains(a.Id) || refusal is not null)"
                                OnClick="@(() => Resolve(a.Id, false))">@L["ApprovalsView_Reject_Button"]</MudButton>
+                    @if (refusal is { } why)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L[ApprovalDecisionMessages.Key(why)]</MudText>
+                    }
                 </MudStack>
             </MudPaper>
         }
@@ -120,7 +126,13 @@ else
                     <td>@((a.ResolvedAt ?? a.CreatedAt).ToLocalTime().ToString("HH:mm:ss"))</td>
                     <td>@a.Actor</td>
                     <td><code>@a.ToolName</code></td>
-                    <td><MudChip T="string" Size="Size.Small" Color="@StatusColor(a.Status)">@StatusLabel(a.Status)</MudChip></td>
+                    <td>
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(a.Status)">@StatusLabel(a.Status)</MudChip>
+                        @if (a.SelfApproved)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">@L["ApprovalsView_SelfApproved"]</MudChip>
+                        }
+                    </td>
                     <td>@(a.ResolvedBy ?? "—")</td>
                 </tr>
             }
@@ -146,6 +158,9 @@ else
     private IReadOnlyList<Approval> _pending = Array.Empty<Approval>();
     private IReadOnlyList<Approval> _recent = Array.Empty<Approval>();
     private readonly HashSet<string> _busy = new();
+    // Who is looking: decides which cards they can act on and whether they see the arguments.
+    private ApprovalResolver? _resolver;
+    private bool _mayReadArguments;
 
     protected override async Task OnInitializedAsync()
     {
@@ -157,6 +172,9 @@ else
 
     private async Task RefreshAsync()
     {
+        _resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
+        _mayReadArguments = _resolver is not null
+                            && McpPermissionLevels.HasAccess(_resolver.Level, McpPermissionLevels.Write);
         _pending = ApprovalStore.GetPending();
         // R1-14: the decided ones come from the persisted history, so they survive a restart.
         try
@@ -178,23 +196,16 @@ else
         _busy.Add(approvalId);
         try
         {
-            var by = await CurrentUser.GetEmailAsync() ?? "web";
-            var level = RoleToLevel(await CurrentUser.GetRoleAsync());
-            var ok = await ApprovalStore.ResolveAsync(approvalId, approved, by, level);
-            if (!ok)
-            {
-                // ResolveAsync returns false both for "no longer pending" and "insufficient level" —
-                // look at the approval again to tell the user which one it was.
-                var current = ApprovalStore.Get(approvalId);
-                if (current is null)
-                    Snackbar.Add(L["ApprovalsView_NotFound_Snackbar"].Value, Severity.Warning);
-                else if (current.Status != ApprovalStatus.Pending)
-                    Snackbar.Add(L["ApprovalsView_AlreadyResolved_Snackbar", StatusLabel(current.Status)].Value, Severity.Warning);
-                else if (approved)
-                    Snackbar.Add(L["ApprovalsView_NoPermission_Snackbar"].Value, Severity.Error);
-                else
-                    Snackbar.Add(L["ApprovalsView_ResolveFailed_Snackbar"].Value, Severity.Error);
-            }
+            // The person signed in now, at their current role (R1-15).
+            var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
+            var result = resolver is null
+                ? ApprovalDecisionResult.InsufficientLevel
+                : await ApprovalStore.DecideAsync(approvalId, approved, resolver);
+            if (result == ApprovalDecisionResult.NotPending && ApprovalStore.Get(approvalId) is { } current)
+                Snackbar.Add(L["ApprovalsView_AlreadyResolved_Snackbar", StatusLabel(current.Status)].Value, Severity.Warning);
+            else if (result != ApprovalDecisionResult.Decided)
+                Snackbar.Add(L[ApprovalDecisionMessages.Key(result)].Value,
+                    ApprovalDecisionMessages.EndsTheCard(result) ? Severity.Warning : Severity.Error);
         }
         catch (Exception ex)
         {
@@ -206,13 +217,6 @@ else
         }
         // Store raises Changed → list refreshes.
     }
-
-    private static string RoleToLevel(AppRole role) => role switch
-    {
-        AppRole.Admin => McpPermissionLevels.Admin,
-        AppRole.Operator => McpPermissionLevels.Write,
-        _ => McpPermissionLevels.Read,
-    };
 
     private static Color LevelColor(string level) => level switch
     {

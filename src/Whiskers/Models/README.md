@@ -17,7 +17,7 @@ Plain data models, DTOs, records and enums passed between services, the UI, and 
 | `AppTemplate.cs` | An app-store deployment template. |
 | `LogAlertRule.cs` | A log-pattern alert rule. |
 | `ScheduledTask.cs` | A scheduled task definition. |
-| `NotificationEvent.cs` | A notification payload. |
+| `NotificationEvent.cs` | A notification payload. `ApprovalId` (R1-15) makes an approval notification open the approval's card. |
 | `ContainerNotificationPrefs.cs` | Per-container notification preferences. |
 | `VolumeBackup.cs` | A volume backup record. |
 | `AuditLogEntry.cs` | An audit-trail entry. |

@@ -136,6 +136,9 @@ namespace Whiskers.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RequesterIds")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("ResolvedAt")
                         .HasColumnType("TEXT");
 
@@ -144,6 +147,9 @@ namespace Whiskers.Migrations
 
                     b.Property<string>("RiskLevel")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("SelfApproved")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SessionId")
                         .IsRequired()

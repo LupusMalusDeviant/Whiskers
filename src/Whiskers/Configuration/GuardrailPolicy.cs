@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Whiskers.Configuration;
 
 /// <summary>The configurable but code-enforced security policy of the agent. Persisted in its
@@ -34,6 +36,13 @@ public class GuardrailPolicy
     /// <summary>Maximum number of executed actions per session — code-enforced.</summary>
     public int MaxActionsPerSession { get; set; } = 20;
 
+    /// <summary>PC-D4 (R1-15): nobody approves or rejects their own request, not even in the interactive agent chat.
+    /// Off by default, so a single-admin install can work; a non-interactive request (direct MCP, AI trigger,
+    /// scheduled task) is never decided by its requester either way. Optional in <c>guardrails.json</c>, and left out
+    /// of the stored and hashed policy while off, so existing policies keep their version.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool RequireSecondApprover { get; set; }
+
     /// <summary>A deep copy: callers that edit it never change a live policy.</summary>
     public GuardrailPolicy Clone() => new()
     {
@@ -47,6 +56,7 @@ public class GuardrailPolicy
         ProtectedResources = ProtectedResources is null ? null! : [.. ProtectedResources],
         ForbiddenArgPatterns = ForbiddenArgPatterns is null ? null! : [.. ForbiddenArgPatterns],
         MaxActionsPerSession = MaxActionsPerSession,
+        RequireSecondApprover = RequireSecondApprover,
     };
 
     /// <summary>What applies while no valid policy could be loaded (INV-25): every mutation refused (kill switch),
@@ -59,6 +69,7 @@ public class GuardrailPolicy
         ToolMode = "allow",
         ProtectedResources = { "*" },
         MaxActionsPerSession = 0,
+        RequireSecondApprover = true,
     };
 
     /// <summary>Restrictive default: read-only autonomous, writes via confirmation, Whiskers protected,
