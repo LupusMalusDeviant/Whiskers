@@ -55,6 +55,49 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal(0, await check.PolicyDecisions.CountAsync());
     }
 
+    [Theory]
+    [InlineData("DROP TABLE PolicySnapshots;")]                       // a decision table without its versions
+    [InlineData("DROP TABLE ScheduledTasks;")]                        // a table every supported release has
+    public async Task A_source_missing_other_tables_is_refused_before_anything_is_copied(string drop)
+    {
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.ContainerMetrics.Add(new ContainerMetricEntity { ContainerId = "c1", ContainerName = "web", ServerId = "s1",
+                Timestamp = DateTime.UtcNow });
+            await src.SaveChangesAsync();
+            await src.Database.ExecuteSqlRawAsync(drop);
+        }
+
+        int rc;
+        var log = new StringWriter();
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, log);
+
+        Assert.NotEqual(0, rc);
+        Assert.Contains("not a complete Whiskers database", log.ToString());
+        await using var check = NewDb(dstPath);
+        Assert.Equal(0, await check.ContainerMetrics.CountAsync());   // nothing copied
+    }
+
+    [Fact]
+    public async Task An_empty_file_is_refused_not_migrated()
+    {
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        int rc;
+        var log = new StringWriter();
+        await using (var src = new MetricsDbContext(
+                         new DbContextOptionsBuilder<MetricsDbContext>().UseSqlite($"Data Source={srcPath}").Options))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, log);
+
+        Assert.NotEqual(0, rc);
+        Assert.Contains("not a complete Whiskers database", log.ToString());
+    }
+
     [Fact]
     public async Task Copies_all_rows_reassigns_ids_preserves_business_keys_and_leaves_source_intact()
     {
