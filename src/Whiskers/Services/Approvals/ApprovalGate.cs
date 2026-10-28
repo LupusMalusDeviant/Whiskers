@@ -39,10 +39,13 @@ public sealed record ApprovalSubject(
     /// the approval unless the request is interactive (<see cref="ApprovalEligibility"/>).</summary>
     public IReadOnlyList<string> Requesters { get; init; } = Array.Empty<string>();
 
-    /// <summary>The target as the gateway resolved it (R1-15). Shown on the card and named in the notification;
-    /// without it the card falls back to the arguments and the notification names no target.</summary>
+    /// <summary>The target as the gateway resolved it (R1-15). Shown on the card; without it the card falls back to
+    /// the arguments.</summary>
     public string? TargetServer { get; init; }
     public string? TargetWorkload { get; init; }
+
+    /// <summary>The kind of the target (the capability's, R1-15): all the notification names of it.</summary>
+    public string? TargetKind { get; init; }
 }
 
 public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
@@ -238,7 +241,7 @@ public sealed class ApprovalGate : IApprovalGate
                 await _notify.SendAsync(new NotificationEvent
                 {
                     EventType = "agent_approval",
-                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.TargetServer, subject.TargetWorkload, _publicUrl),
+                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.TargetKind, _publicUrl),
                     CorrelationId = subject.OperationId,
                     ApprovalId = approval.Id,
                 });

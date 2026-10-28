@@ -24,8 +24,10 @@ public interface IApprovalPersistence
         bool selfApproved = false, Func<bool>? stillDecidable = null, CancellationToken ct = default);
 
     /// <summary>Uses the approval once. <c>false</c> unless it is approved, unused and its grant has not lapsed at
-    /// <paramref name="now"/>.</summary>
-    Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default);
+    /// <paramref name="now"/>. <paramref name="stillUsable"/> is asked once the row is held (after any lock wait) and
+    /// before the use is committed; <c>false</c> commits nothing — a grant that lapsed during the wait is not used.</summary>
+    Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, Func<bool>? stillUsable = null,
+        CancellationToken ct = default);
 
     /// <summary>Approvals that can still be decided or used: pending ones, and approved ones not used yet.</summary>
     Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default);
@@ -76,18 +78,24 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
         return true;
     }
 
-    public async Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default)
+    public async Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now,
+        Func<bool>? stillUsable = null, CancellationToken ct = default)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var approved = nameof(ApprovalStatus.Approved);
+        // As for a decision: one transaction, the grant checked again once the row is held, then committed.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         var updated = await db.Approvals
             .Where(a => a.Id == approvalId && a.Status == approved && a.ConsumedAt == null
                         && a.GrantExpiresAt != null && a.GrantExpiresAt > now)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(a => a.ConsumedAt, now)
                 .SetProperty(a => a.ConsumedBy, operationId), ct);
-        return updated == 1;
+        if (updated != 1) return false;
+        if (stillUsable is not null && !stillUsable()) return false;   // rolled back on dispose
+        await tx.CommitAsync(ct);
+        return true;
     }
 
     public async Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default)
@@ -151,12 +159,14 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
         }
     }
 
-    public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default)
+    public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now,
+        Func<bool>? stillUsable = null, CancellationToken ct = default)
     {
         lock (_lock)
         {
             if (!_rows.TryGetValue(approvalId, out var row) || row.Status != nameof(ApprovalStatus.Approved)
-                || row.ConsumedAt is not null || row.GrantExpiresAt is not { } until || until <= now)
+                || row.ConsumedAt is not null || row.GrantExpiresAt is not { } until || until <= now
+                || (stillUsable is not null && !stillUsable()))
                 return Task.FromResult(false);
             row.ConsumedAt = now;
             row.ConsumedBy = operationId;

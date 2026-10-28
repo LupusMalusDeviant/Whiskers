@@ -86,21 +86,29 @@ public partial class ApprovalStoreTests
         Assert.True(await persistence.ResolveAsync(a.Id, ApprovalStatus.Expired, a.ExpiresAt.AddSeconds(1), "system", null));
     }
 
-    /// <summary>A database whose decision write waits (a lock) until the clock has passed the approval's expiry.</summary>
+    /// <summary>A database whose decision write (or, with <see cref="OnConsume"/>, whose use) waits for a lock until
+    /// the clock has moved on by <see cref="Wait"/>.</summary>
     private sealed class LockedUntilExpiry(InMemoryApprovalPersistence inner, ManualTime time) : IApprovalPersistence
     {
+        public TimeSpan Wait { get; init; } = Ttl;
+        public bool OnConsume { get; init; }
+
         public Task InsertAsync(Approval approval, CancellationToken ct = default) => inner.InsertAsync(approval, ct);
 
         public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
             DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
             CancellationToken ct = default)
         {
-            if (ApprovalRecords.IsDecision(status)) time.Now += Ttl;   // the lock is released only after the expiry
+            if (ApprovalRecords.IsDecision(status) && !OnConsume) time.Now += Wait;   // the lock is released only now
             return inner.ResolveAsync(approvalId, status, at, by, grantExpiresAt, selfApproved, stillDecidable, ct);
         }
 
-        public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>
-            inner.ConsumeAsync(approvalId, operationId, now, ct);
+        public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, Func<bool>? stillUsable = null,
+            CancellationToken ct = default)
+        {
+            if (OnConsume) time.Now += Wait;
+            return inner.ConsumeAsync(approvalId, operationId, now, stillUsable, ct);
+        }
 
         public Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default) => inner.LoadOpenAsync(ct);
 
@@ -128,6 +136,24 @@ public partial class ApprovalStoreTests
         Assert.Equal(nameof(ApprovalStatus.Expired), Assert.Single(await records.LoadHistoryAsync(0, 10)).Status.ToString());
         Assert.Empty(await records.LoadOpenAsync());
         Assert.False(await store.TryConsumeAsync(a.Id, "op-1", time.Now.UtcDateTime));
+    }
+
+    [Fact]
+    public async Task A_use_whose_write_completes_only_after_the_grant_ended_does_not_count()
+    {
+        var time = new ManualTime();
+        var records = new InMemoryApprovalPersistence();
+        var store = new ApprovalStore(approvalTtl: Ttl, time: time,
+            persistence: new LockedUntilExpiry(records, time) { OnConsume = true, Wait = TimeSpan.FromSeconds(2) });
+        var a = await store.CreateAsync(Req(), _ => Task.CompletedTask);
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(a.Id, true, Admin()));
+
+        time.Now += ApprovalStore.GrantLifetime - TimeSpan.FromSeconds(1);   // used one second before the grant ends…
+        var used = await store.TryConsumeAsync(a.Id, "op-1", time.Now.UtcDateTime);   // …but on record only after it
+
+        Assert.False(used);
+        Assert.Null(a.ConsumedAt);
+        Assert.Null(Assert.Single(await records.LoadHistoryAsync(0, 10)).ConsumedAt);
     }
 
     [Fact]

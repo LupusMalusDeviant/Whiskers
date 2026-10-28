@@ -57,6 +57,7 @@ public class ApprovalNotificationTests
             Requesters = [requester],
             TargetServer = server,
             TargetWorkload = resource,
+            TargetKind = "container",
         };
 
     private static void AssertSafe(NotificationEvent sent, Approval approval, string risk, string target)
@@ -73,7 +74,7 @@ public class ApprovalNotificationTests
     }
 
     [Fact]
-    public async Task A_gateway_approval_names_the_resolved_target_and_links_to_its_card()
+    public async Task A_gateway_approval_names_the_target_kind_and_links_to_its_card()
     {
         var store = new ApprovalStore();
         var notify = new Recorder();
@@ -82,14 +83,15 @@ public class ApprovalNotificationTests
         var result = await gate.CheckAsync(Call("key:k1", server: "srv-1", resource: "web"), "needs a human", []);
 
         var approval = store.Get(result.ApprovalId!)!;
-        AssertSafe(Assert.Single(notify.Sent), approval, "high", "srv-1 / web");
+        AssertSafe(Assert.Single(notify.Sent), approval, "high", "container");
+        // A resolved server or name never leaves the app: the card shows them, the notification does not.
+        Assert.DoesNotContain("srv-1", notify.Sent[0].ImageInfo);
         Assert.Equal(["key:k1"], approval.Requesters);
-        // The card shows the resolved target too.
         Assert.Equal(("srv-1", "web"), (approval.TargetServer, approval.TargetWorkload));
     }
 
     [Fact]
-    public async Task Without_a_resolved_target_a_notification_names_none_even_if_the_arguments_hold_one()
+    public async Task A_notification_names_no_value_from_the_arguments()
     {
         var store = new ApprovalStore();
         var notify = new Recorder();
@@ -97,7 +99,7 @@ public class ApprovalNotificationTests
 
         var result = await gate.CheckAsync(Call("key:k1"), "needs a human", []);
 
-        AssertSafe(Assert.Single(notify.Sent), store.Get(result.ApprovalId!)!, "high", "—");
+        AssertSafe(Assert.Single(notify.Sent), store.Get(result.ApprovalId!)!, "high", "container");
     }
 
     private static AgentContext Chat => new("chat-1",
@@ -108,7 +110,7 @@ public class ApprovalNotificationTests
         JsonSerializer.Serialize(new { serverId = ArgumentMarker, containerId = ArgumentMarker, name = ArgumentMarker }));
 
     [Fact]
-    public async Task A_chat_approval_names_the_target_the_gateway_resolved()
+    public async Task A_chat_approval_names_the_target_kind_and_not_the_resolved_names()
     {
         var store = new ApprovalStore();
         var notify = new Recorder();
@@ -120,9 +122,11 @@ public class ApprovalNotificationTests
             {
                 ResolvedServer = "srv-2",
                 ResolvedResource = "web",
+                TargetKind = "container",
             });
 
-        AssertSafe(Assert.Single(notify.Sent), approval, approval.RiskLevel!, "srv-2 / web");
+        AssertSafe(Assert.Single(notify.Sent), approval, approval.RiskLevel!, "container");
+        Assert.DoesNotContain("srv-2", notify.Sent[0].ImageInfo);
         Assert.Equal(["user:alice@example.com"], approval.Requesters);
         Assert.Equal(call.CorrelationId, approval.CorrelationId);
     }
@@ -150,21 +154,20 @@ public class ApprovalNotificationTests
     [InlineData("srv\nInjected: line")]
     [InlineData("password=only-in-the-arguments")]
     [InlineData("token:abc123")]
-    [InlineData("db name with spaces")]
-    public void Even_a_resolved_name_that_is_not_a_plain_identifier_is_withheld(string name)
+    [InlineData("kind with spaces")]
+    public void A_target_kind_that_is_not_a_plain_identifier_is_withheld(string kind)
     {
-        var text = ApprovalDisplay.NotificationText(Plain(), name, new string('w', 500));
-        Assert.Contains("target (withheld) / (withheld)", text);
-        Assert.DoesNotContain(name, text);
-        Assert.DoesNotContain("ww", text);
+        var text = ApprovalDisplay.NotificationText(Plain(), kind);
+        Assert.Contains("target (withheld)", text);
+        Assert.DoesNotContain(kind, text);
     }
 
     [Theory]
-    [InlineData("srv-1")]
-    [InlineData("web_1.internal")]
-    [InlineData("ghcr.io/org/app:1.2")]
-    public void A_plain_resolved_identifier_is_shown(string name) =>
-        Assert.Contains($"target — / {name}", ApprovalDisplay.NotificationText(Plain(), null, name));
+    [InlineData("container")]
+    [InlineData("dns-zone")]
+    [InlineData("scheduled-task")]
+    public void A_target_kind_is_shown(string kind) =>
+        Assert.Contains($"target {kind}", ApprovalDisplay.NotificationText(Plain(), kind));
 
     [Theory]
     [InlineData("https://whiskers.example.com", "https://whiskers.example.com/approvals#")]
@@ -196,7 +199,7 @@ public class ApprovalNotificationTests
     {
         var publicUrl = new WhiskersPublicUrl(WhiskersPublicUrl.Parse(configured));
         Assert.Null(publicUrl.Base);
-        var text = ApprovalDisplay.NotificationText(Plain(), null, null, publicUrl);
+        var text = ApprovalDisplay.NotificationText(Plain(), null, publicUrl);
         Assert.Contains("(Whiskers → Approvals)", text);
         Assert.DoesNotContain("://", text);
     }

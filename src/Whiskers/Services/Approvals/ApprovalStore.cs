@@ -319,7 +319,9 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             || approval.GrantExpiresAt is not { } until || until <= now)
             return false;
         // The database decides who wins: one conditional update, whichever process or consumer asks.
-        if (!await _persistence.ConsumeAsync(approvalId, operationId, now, ct)) return false;
+        // INV-32: the grant is checked again against the clock once the row is held — a use whose write waited past
+        // the grant's end does not count.
+        if (!await _persistence.ConsumeAsync(approvalId, operationId, now, () => until > Now, ct)) return false;
         approval.ConsumedAt = now;
         approval.ConsumedBy = operationId;
         Changed?.Invoke();

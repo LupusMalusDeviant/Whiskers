@@ -70,17 +70,19 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
 - **Expiry (INV-32).** An approval past `ExpiresAt` is expired, not decided — checked by the store and again by the
   conditional database update; a decision is committed in one transaction only if the approval has not expired once its row is held
   (after any lock wait; `ResolveAsync(…, stillDecidable)`), so a late write never becomes durable and the waiting session gets a "no". A timer (`ApprovalStore.SweepInterval`) expires overdue approvals even when nobody
-  opens the list, so a waiting session is released. A grant is usable only until `GrantExpiresAt`.
+  opens the list, so a waiting session is released. A grant is usable only until `GrantExpiresAt` — checked again
+  once the row is held before a use is committed (`ConsumeAsync(…, stillUsable)`), so a use that waited past the end
+  of the grant does not count.
 - **Bounded (C-19).** One principal has at most `ApprovalEligibility.MaxPendingPerPrincipal` approvals waiting;
   an approval counts against everyone in its requester chain (an agent session and the user it acts for), so more
   chats do not raise the bound. Beyond it `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
 
-A raised approval is announced with its id, its risk and the target **the resolver found in the inventory**
-(`ApprovalDisplay.NotifiableTarget`: canonical id and server of a `Resolved` target, carried as
-`ApprovalSubject.TargetServer`/`TargetWorkload` or the agent decision's `ResolvedServer`/`ResolvedResource`) — never
-with its arguments, a value read from them, or a target created by the operation or passed through as named, since the bell may forward
-it to external channels; without a resolved target it names none, and a resolved name that is not a plain identifier
-reads `(withheld)`. The event carries `ApprovalId`, so the bell opens the approval's card (`approvals#<id>`).
+A raised approval is announced with its id, its risk and the **kind** of its target (`ApprovalSubject.TargetKind` /
+the agent decision's `TargetKind`: the capability's — `container`, `dns-zone`, …) — never a server, a resource name,
+the arguments or any other value a caller can put into the call, since the bell may forward it to external channels
+(even a resolved target may carry a caller-passed server id: a DNS zone has none). The concrete target the resolver
+found (`ApprovalDisplay.NotifiableTarget`, `TargetServer`/`TargetWorkload`) is shown only on the approval's card in
+the app. The event carries `ApprovalId`, so the bell opens the approval's card (`approvals#<id>`).
 External channels get the absolute link (`<public url>/approvals#<id>`) only when the admin configured the public
 address (`WhiskersPublicUrl`, `Whiskers:PublicUrl`; never a request's host) — otherwise the id and
 "Whiskers → Approvals".

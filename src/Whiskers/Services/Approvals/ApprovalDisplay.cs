@@ -15,9 +15,10 @@ public static class ApprovalDisplay
         _ => "low",
     };
 
-    /// <summary>What a notification may name of a gateway target: its canonical id and server — only when the resolver
-    /// found it in the inventory (<see cref="Whiskers.Services.Mutations.MutationTarget.Resolved"/>). A target that is
-    /// created by the operation or passed through keeps what the caller sent, and is named not at all.</summary>
+    /// <summary>What the approval card (in the app, for those who may decide) shows of a gateway target: its canonical
+    /// id and server — only when the resolver found it (<see cref="Whiskers.Services.Mutations.MutationTarget.Resolved"/>).
+    /// A notification names neither: a resolved target may still carry a server id the caller passed (a DNS zone has
+    /// no server), so only <see cref="NotificationText"/>'s target kind leaves the app.</summary>
     public static (string? Server, string? Resource) NotifiableTarget(Whiskers.Services.Mutations.MutationTarget? target) =>
         target is { Resolved: true } ? (target.ServerId, target.Id) : (null, null);
 
@@ -25,18 +26,16 @@ public static class ApprovalDisplay
     public static string LinkOf(string approvalId) => $"approvals#{Uri.EscapeDataString(approvalId)}";
 
     /// <summary>The notification for a raised approval (C-22): who wants to run what, the approval id, the risk and
-    /// the target the gateway resolved (<paramref name="resolvedServer"/>, <paramref name="resolvedResource"/>) —
-    /// never a value read from the arguments, and never the arguments themselves: the bell may forward this to
-    /// external channels. The in-app link to the card travels as <c>NotificationEvent.ApprovalId</c>; with a
+    /// the kind of its target (<paramref name="targetKind"/>, the capability's — <c>container</c>, <c>dns-zone</c>, …)
+    /// — never a server, a resource name or any other value a caller can put into the call, and never the arguments:
+    /// the bell may forward this to external channels. The concrete target is on the approval's card. The in-app link to the card travels as <c>NotificationEvent.ApprovalId</c>; with a
     /// configured public address (<paramref name="publicUrl"/>) the text carries the absolute link too, so e-mail and
     /// chat channels open the card.</summary>
-    public static string NotificationText(Whiskers.Models.Agent.Approval approval, string? resolvedServer,
-        string? resolvedResource, Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null)
+    public static string NotificationText(Whiskers.Models.Agent.Approval approval, string? targetKind,
+        Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null)
     {
         ArgumentNullException.ThrowIfNull(approval);
-        var target = resolvedServer is null && resolvedResource is null
-            ? "—"
-            : $"{Short(resolvedServer) ?? "—"} / {Short(resolvedResource) ?? "—"}";
+        var target = Short(targetKind) ?? "—";
         return $"\"{Short(approval.Actor)}\" wants to run \"{approval.ToolName}\" — approval required. " +
                $"Approval {approval.Id} · risk {approval.RiskLevel ?? RiskOf(approval.Level)} · target {target} " +
                (publicUrl?.Link(LinkOf(approval.Id)) is { } link ? $"— {link}" : "(Whiskers → Approvals)");

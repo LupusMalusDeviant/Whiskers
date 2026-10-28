@@ -185,6 +185,12 @@ public sealed class ApprovalPersistenceTests : IDisposable
         Assert.True(await persistence.ResolveAsync(approval.Id, ApprovalStatus.Approved, DateTime.UtcNow, "bob",
             DateTime.UtcNow.AddMinutes(10), stillDecidable: () => true));
         Assert.Equal(nameof(ApprovalStatus.Approved), (await _db.RowAsync(approval.Id))!.Status);
+
+        // The same for its use: a grant that lapsed while the row was being waited for is not used.
+        Assert.False(await persistence.ConsumeAsync(approval.Id, "op-1", DateTime.UtcNow, stillUsable: () => false));
+        Assert.Null((await _db.RowAsync(approval.Id))!.ConsumedAt);
+        Assert.True(await persistence.ConsumeAsync(approval.Id, "op-2", DateTime.UtcNow, stillUsable: () => true));
+        Assert.Equal("op-2", (await _db.RowAsync(approval.Id))!.ConsumedBy);
     }
 
     [Fact]
@@ -213,7 +219,8 @@ public sealed class ApprovalPersistenceTests : IDisposable
             CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
 
-        public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>
+        public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, Func<bool>? stillUsable = null,
+            CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
 
         public Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default) => _inner.LoadOpenAsync(ct);
