@@ -54,6 +54,17 @@ public class ApprovalBindingTests
         return raised.ApprovalId!;
     }
 
+    [Fact]
+    public async Task A_gateway_approval_records_who_asked_and_the_resolved_target()
+    {
+        // R1-15: the requester (for separation of duties) and the target as resolved, not as read from the arguments.
+        var approvals = new ApprovalStore();
+        var raised = await Gateway(approvals).ExecuteAsync(Call(), (_, _) => Task.FromResult(0));
+        var approval = approvals.Get(raised.ApprovalId!)!;
+        Assert.Equal(["key:k1"], approval.Requesters);
+        Assert.Equal(("srv1", "web-1"), (approval.TargetServer, approval.TargetWorkload));
+    }
+
     public static TheoryData<string> Differences() =>
     [
         "principal", "credential", "capability", "arguments", "target", "server",

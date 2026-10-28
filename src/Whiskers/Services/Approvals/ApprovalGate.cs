@@ -37,6 +37,11 @@ public sealed record ApprovalSubject(
     /// <summary>The principal ids that ask (R1-15): the caller first, then whoever it acts for. None of them may decide
     /// the approval unless the request is interactive (<see cref="ApprovalEligibility"/>).</summary>
     public IReadOnlyList<string> Requesters { get; init; } = Array.Empty<string>();
+
+    /// <summary>The target as the gateway resolved it (R1-15). Shown on the card and named in the notification;
+    /// without it the card falls back to the arguments and the notification names no target.</summary>
+    public string? TargetServer { get; init; }
+    public string? TargetWorkload { get; init; }
 }
 
 public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
@@ -194,7 +199,10 @@ public sealed class ApprovalGate : IApprovalGate
         string argumentsHash, CancellationToken ct)
     {
         var argsJson = JsonSerializer.Serialize(subject.Arguments);
-        var (server, workload) = ApprovalDisplay.ExtractTarget(argsJson);
+        var resolved = subject.TargetServer is not null || subject.TargetWorkload is not null;
+        var (server, workload) = resolved
+            ? (subject.TargetServer, subject.TargetWorkload)
+            : ApprovalDisplay.ExtractTarget(argsJson);
         return _approvals.CreateAsync(new ApprovalRequest(
             SessionId: subject.SessionId ?? DirectSessionId,
             ToolCallId: Guid.NewGuid().ToString("N"),
@@ -227,8 +235,9 @@ public sealed class ApprovalGate : IApprovalGate
                 await _notify.SendAsync(new NotificationEvent
                 {
                     EventType = "agent_approval",
-                    ImageInfo = ApprovalDisplay.NotificationText(approval),
+                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.TargetServer, subject.TargetWorkload),
                     CorrelationId = subject.OperationId,
+                    ApprovalId = approval.Id,
                 });
         }
         catch (Exception ex)

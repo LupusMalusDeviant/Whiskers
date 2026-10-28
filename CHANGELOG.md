@@ -17,7 +17,8 @@ All notable changes to Whiskers are documented here. The format follows
   lifetime. Clearing or closing a chat, leaving the page or losing the browser connection stops its run and cancels
   its pending approvals, so approving one elsewhere can no longer resume it unattended; sessions wait on unique operation ids instead of provider tool-call ids. One
   principal has at most 25 approvals waiting. Approval notifications name the approval, risk, target and a link to
-  it (a target only when it is a plain identifier), never the arguments; Viewers no longer see an approval's
+  it (the target only as the gateway resolved it; the bell opens the approval's card), never the arguments or a
+  value read from them; Viewers no longer see an approval's
   arguments. Additive migrations (SQLite + PostgreSQL)
   add `RequesterIds` and `SelfApproved` to `Approvals`. **Upgrade note:** a pending approval raised before the
   upgrade records no requester and is cancelled at startup — the caller asks again; approved, unused ones keep their

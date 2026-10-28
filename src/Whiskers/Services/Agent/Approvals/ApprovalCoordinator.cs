@@ -72,7 +72,12 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
                 level = McpPermissionLevels.Admin;
             }
         }
-        var (targetServer, targetWorkload) = ApprovalDisplay.ExtractTarget(call.ArgumentsJson);
+        // The gateway's resolved target when it decided the call; else the card reads it from the arguments (the
+        // notification then names none).
+        var resolved = decision.ResolvedServer is not null || decision.ResolvedResource is not null;
+        var (targetServer, targetWorkload) = resolved
+            ? (decision.ResolvedServer, decision.ResolvedResource)
+            : ApprovalDisplay.ExtractTarget(call.ArgumentsJson);
         var rule = decision.MatchedRuleIds.Count > 0 ? string.Join(", ", decision.MatchedRuleIds) : null;
 
         var request = new ApprovalRequest(
@@ -112,8 +117,9 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = "agent_approval",
-                ImageInfo = ApprovalDisplay.NotificationText(approval),
+                ImageInfo = ApprovalDisplay.NotificationText(approval, decision.ResolvedServer, decision.ResolvedResource),
                 CorrelationId = call.CorrelationId,
+                ApprovalId = approval.Id,
             });
         }
         catch (Exception ex)

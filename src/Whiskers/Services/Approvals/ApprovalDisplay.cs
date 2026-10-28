@@ -15,20 +15,23 @@ public static class ApprovalDisplay
         _ => "low",
     };
 
-    /// <summary>Where the approval is decided: its card on the Approvals page.</summary>
-    public static string LinkOf(string approvalId) => $"/approvals#{approvalId}";
+    /// <summary>Where the approval is decided: its card on the Approvals page (relative, path-base-safe).</summary>
+    public static string LinkOf(string approvalId) => $"approvals#{Uri.EscapeDataString(approvalId)}";
 
-    /// <summary>The notification for a raised approval (C-22): who wants to run what, the approval id, the risk, the
-    /// target and a link to decide it. Never the arguments — the bell may forward this to external channels.</summary>
-    public static string NotificationText(Whiskers.Models.Agent.Approval approval)
+    /// <summary>The notification for a raised approval (C-22): who wants to run what, the approval id, the risk and
+    /// the target the gateway resolved (<paramref name="resolvedServer"/>, <paramref name="resolvedResource"/>) —
+    /// never a value read from the arguments, and never the arguments themselves: the bell may forward this to
+    /// external channels. The in-app link to the card travels as <c>NotificationEvent.ApprovalId</c>.</summary>
+    public static string NotificationText(Whiskers.Models.Agent.Approval approval, string? resolvedServer,
+        string? resolvedResource)
     {
         ArgumentNullException.ThrowIfNull(approval);
-        var target = approval.TargetServer is null && approval.TargetWorkload is null
+        var target = resolvedServer is null && resolvedResource is null
             ? "—"
-            : $"{Short(approval.TargetServer) ?? "—"} / {Short(approval.TargetWorkload) ?? "—"}";
+            : $"{Short(resolvedServer) ?? "—"} / {Short(resolvedResource) ?? "—"}";
         return $"\"{Short(approval.Actor)}\" wants to run \"{approval.ToolName}\" — approval required. " +
-               $"Approval {approval.Id} · risk {approval.RiskLevel ?? RiskOf(approval.Level)} · target {target} · " +
-               LinkOf(approval.Id);
+               $"Approval {approval.Id} · risk {approval.RiskLevel ?? RiskOf(approval.Level)} · target {target} " +
+               "(Whiskers → Approvals)";
     }
 
     /// <summary>What a notification shows of a value taken from the arguments: an identifier (letters, digits and

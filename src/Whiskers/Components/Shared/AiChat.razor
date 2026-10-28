@@ -188,6 +188,9 @@
     private async Task Send()
     {
         if (string.IsNullOrWhiteSpace(_input) || _thinking) return;
+        // R1-15: this run's token, taken before the first await — closing the chat while the send prepares (page
+        // context, screenshot) refuses it.
+        var run = Lifetime.BeginRun();
         var userMsg = _input.Trim();
         _input = "";
         _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "user", Content = userMsg });
@@ -197,7 +200,7 @@
 
         try
         {
-            if (AgentMode) await SendAgentAsync(userMsg);
+            if (AgentMode) await SendAgentAsync(userMsg, run);
             else await SendAdvisorAsync(userMsg);
         }
         catch (OperationCanceledException)
@@ -247,7 +250,7 @@
         _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "assistant", Content = response });
     }
 
-    private async Task SendAgentAsync(string userMsg)
+    private async Task SendAgentAsync(string userMsg, CancellationToken run)
     {
         PageCtx? ctx = null;
         try { ctx = await JS.InvokeAsync<PageCtx>("swAgent.getPageContext"); } catch { }
@@ -267,10 +270,10 @@
             _session = await AgentService.StartSessionAsync(_context);
         }
         // Every run is tied to the chat: a run after closing the widget or a dropped connection is a new run.
-        Lifetime.Attach(_session);
+        Lifetime.Attach(_session, run);
 
         _streaming = null;
-        await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg", Lifetime.Token))
+        await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg", run))
         {
             switch (ev)
             {
@@ -298,7 +301,10 @@
                     _pendingConfirm = c;
                     _pendingReason = c.Reason;
                     if (_session is not null && _context is not null)
+                    {
                         _pendingApprovalId = (await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason, c.Decision)).Id;
+                        await Lifetime.AfterRaiseAsync(_session, run);
+                    }
                     StateHasChanged();
                     await ScrollToBottom();
                     break;
@@ -350,6 +356,7 @@
     private async Task CloseAsync()
     {
         _isOpen = false;
+        // A send that is still preparing took its run token already and is refused when it tries to start.
         if (_lifetime is not null) await _lifetime.EndAsync();
         _pendingConfirm = null;
         _pendingApprovalId = null;

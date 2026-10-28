@@ -122,10 +122,10 @@ public class OrphanedApprovalTests
         var invoker = new Invoker();
         var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
         var lifetime = new AgentChatLifetime(store);
-        lifetime.Attach(session);
+        lifetime.Attach(session, lifetime.BeginRun());
         var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
 
-        await using var run = session.SendAsync("stop web", ct: lifetime.Token).GetAsyncEnumerator();
+        await using var run = session.SendAsync("stop web", ct: lifetime.BeginRun()).GetAsyncEnumerator();
         var approval = await RunToApprovalAsync(run, session, coordinator);
         Assert.True(approval.Interactive);
 
@@ -150,10 +150,10 @@ public class OrphanedApprovalTests
         var invoker = new Invoker();
         var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
         await using var lifetime = new AgentChatLifetime(store);
-        lifetime.Attach(session);
+        lifetime.Attach(session, lifetime.BeginRun());
         var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
 
-        await using var run = session.SendAsync("stop web", ct: lifetime.Token).GetAsyncEnumerator();
+        await using var run = session.SendAsync("stop web", ct: lifetime.BeginRun()).GetAsyncEnumerator();
         var approval = await RunToApprovalAsync(run, session, coordinator);
         Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true, Approver));
 
@@ -170,8 +170,8 @@ public class OrphanedApprovalTests
         var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
 
         var first = Session(new Invoker(), ToolTurn("call_0"));
-        lifetime.Attach(first);
-        await using var firstRun = first.SendAsync("one", ct: lifetime.Token).GetAsyncEnumerator();
+        lifetime.Attach(first, lifetime.BeginRun());
+        await using var firstRun = first.SendAsync("one", ct: lifetime.BeginRun()).GetAsyncEnumerator();
         var old = await RunToApprovalAsync(firstRun, first, coordinator);
         await lifetime.EndAsync();
 
@@ -179,8 +179,8 @@ public class OrphanedApprovalTests
         var second = new AgentSession(Context with { SessionId = "chat-2" }, new Provider(ToolTurn("call_0"), TextTurn("done")),
             new Catalog(), invoker, new ConfirmEverything(), AgentToolTestHelpers.DefaultRegistry(),
             new AgentSettings { Model = "x", MaxToolIterations = 4 }, "system");
-        lifetime.Attach(second);
-        await using var secondRun = second.SendAsync("two", ct: lifetime.Token).GetAsyncEnumerator();
+        lifetime.Attach(second, lifetime.BeginRun());
+        await using var secondRun = second.SendAsync("two", ct: lifetime.BeginRun()).GetAsyncEnumerator();
         var current = await RunToApprovalAsync(secondRun, second, coordinator);
 
         Assert.Equal(ApprovalStatus.Cancelled, old.Status);
@@ -199,10 +199,10 @@ public class OrphanedApprovalTests
         var invoker = new Invoker();
         var session = Session(invoker, ToolTurn("call_0"), ToolTurn("call_0"), TextTurn("done"));
         await using var lifetime = new AgentChatLifetime(store);
-        lifetime.Attach(session);
+        lifetime.Attach(session, lifetime.BeginRun());
         var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
 
-        await using var run = session.SendAsync("stop web twice", ct: lifetime.Token).GetAsyncEnumerator();
+        await using var run = session.SendAsync("stop web twice", ct: lifetime.BeginRun()).GetAsyncEnumerator();
         var first = await RunToApprovalAsync(run, session, coordinator);
         Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(first.Id, false, Approver));
         var second = await RunToApprovalAsync(run, session, coordinator);
@@ -249,10 +249,10 @@ public class OrphanedApprovalTests
         var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
         var connection = new ChatConnectionWatcher();
         await using var lifetime = new AgentChatLifetime(store, connection);
-        lifetime.Attach(session);
+        lifetime.Attach(session, lifetime.BeginRun());
         var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
 
-        await using var run = session.SendAsync("stop web", ct: lifetime.Token).GetAsyncEnumerator();
+        await using var run = session.SendAsync("stop web", ct: lifetime.BeginRun()).GetAsyncEnumerator();
         var approval = await RunToApprovalAsync(run, session, coordinator);
 
         // What Blazor calls when the connection drops; the circuit (and the page) is kept for a while after.
@@ -274,8 +274,8 @@ public class OrphanedApprovalTests
         await using var lifetime = new AgentChatLifetime(store, connection);
         var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
 
-        lifetime.Attach(session);
-        await using (var first = session.SendAsync("one", ct: lifetime.Token).GetAsyncEnumerator())
+        lifetime.Attach(session, lifetime.BeginRun());
+        await using (var first = session.SendAsync("one", ct: lifetime.BeginRun()).GetAsyncEnumerator())
         {
             await RunToApprovalAsync(first, session, coordinator);
             await connection.OnConnectionDownAsync(null!, CancellationToken.None);
@@ -283,8 +283,8 @@ public class OrphanedApprovalTests
         }
 
         // The page attaches the session again for its next message, with the new run token.
-        lifetime.Attach(session);
-        await using var second = session.SendAsync("two", ct: lifetime.Token).GetAsyncEnumerator();
+        lifetime.Attach(session, lifetime.BeginRun());
+        await using var second = session.SendAsync("two", ct: lifetime.BeginRun()).GetAsyncEnumerator();
         var approval = await RunToApprovalAsync(second, session, coordinator);
         Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true, Approver));
         await DrainAsync(second);
@@ -303,5 +303,93 @@ public class OrphanedApprovalTests
         connection.ConnectionDown += () => { calls++; return Task.CompletedTask; };
         await connection.OnConnectionDownAsync(null!, CancellationToken.None);
         Assert.Equal(1, calls);   // only the handler added afterwards
+    }
+
+    // ---- a chat ended while a send was still preparing ---------------------------------------------------------------
+
+    [Theory]
+    [InlineData("closed")]
+    [InlineData("connection")]
+    [InlineData("disposed")]
+    public async Task A_send_that_was_still_preparing_when_the_chat_ended_never_starts(string how)
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        var connection = new ChatConnectionWatcher();
+        var lifetime = new AgentChatLifetime(store, connection);
+
+        // The send takes its run before its first await (reading the page, the screenshot, starting the session)…
+        var run = lifetime.BeginRun();
+        // …and the chat ends meanwhile.
+        switch (how)
+        {
+            case "closed": await lifetime.EndAsync(); break;
+            case "connection": await connection.OnConnectionDownAsync(null!, CancellationToken.None); break;
+            default: await lifetime.DisposeAsync(); break;
+        }
+
+        Assert.Throws<OperationCanceledException>(() => lifetime.Attach(session, run));
+        Assert.True(run.IsCancellationRequested);
+        // Even a send that went on regardless takes no step.
+        var events = await DrainAsync(session.SendAsync("stop web", ct: run).GetAsyncEnumerator());
+        Assert.DoesNotContain(events, e => e is AgentEvent.ConfirmationRequired or AgentEvent.ToolExecuted);
+        Assert.Empty(store.GetPending());
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_run_token_from_before_the_chat_ended_cannot_attach_to_the_next_run()
+    {
+        var store = new ApprovalStore();
+        await using var lifetime = new AgentChatLifetime(store);
+        var session = Session(new Invoker(), TextTurn("done"));
+
+        var stale = lifetime.BeginRun();
+        await lifetime.EndAsync();
+        var fresh = lifetime.BeginRun();
+
+        Assert.NotEqual(stale, fresh);
+        Assert.Throws<OperationCanceledException>(() => lifetime.Attach(session, stale));
+        lifetime.Attach(session, fresh);
+        Assert.False(fresh.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task A_disposed_chat_starts_no_run_at_all()
+    {
+        var store = new ApprovalStore();
+        var lifetime = new AgentChatLifetime(store);
+        await lifetime.DisposeAsync();
+
+        var run = lifetime.BeginRun();
+        Assert.True(run.IsCancellationRequested);
+        Assert.Throws<OperationCanceledException>(() => lifetime.Attach(Session(new Invoker()), run));
+    }
+
+    [Fact]
+    public async Task An_approval_raised_just_after_the_chat_ended_is_cancelled_at_once()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+        var run = lifetime.BeginRun();
+        lifetime.Attach(session, run);
+
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        AgentEvent.ConfirmationRequired? asked = null;
+        while (asked is null && await events.MoveNextAsync()) asked = events.Current as AgentEvent.ConfirmationRequired;
+
+        // The chat ends between the question and the page raising the approval for it.
+        await lifetime.EndAsync();
+        var approval = await coordinator.RaiseAsync(session, asked!.Call, Context, asked.Reason, asked.Decision);
+        await lifetime.AfterRaiseAsync(session, run);
+
+        Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
+        Assert.Equal(ApprovalDecisionResult.NotPending, await store.DecideAsync(approval.Id, true, Approver));
+        await DrainAsync(events);
+        Assert.Equal(0, invoker.Calls);
     }
 }

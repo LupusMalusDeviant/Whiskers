@@ -351,6 +351,8 @@
     private async Task Send()
     {
         if (_running || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0)) return;
+        // R1-15: this run's token, taken before the first await — a chat ended while the send prepares refuses it.
+        var run = Lifetime.BeginRun();
         var typed = _input.Trim();
         _input = "";
 
@@ -381,9 +383,9 @@
                 _session = await AgentService.StartSessionAsync(_context, _seedHistory);
             }
             // Every run is tied to the chat: a run after a dropped connection is a new run of this chat.
-            Lifetime.Attach(_session);
+            Lifetime.Attach(_session, run);
 
-            await foreach (var ev in _session.SendAsync(message, ct: Lifetime.Token))
+            await foreach (var ev in _session.SendAsync(message, ct: run))
             {
                 switch (ev)
                 {
@@ -400,6 +402,7 @@
                         if (_session is not null && _context is not null)
                         {
                             var approval = await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason, c.Decision);
+                            await Lifetime.AfterRaiseAsync(_session, run);
                             _pendingApprovalId = approval.Id;
                         }
                         break;

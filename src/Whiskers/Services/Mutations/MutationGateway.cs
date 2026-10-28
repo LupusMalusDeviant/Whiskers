@@ -40,6 +40,10 @@ public sealed record MutationDecisionResult(
     /// <summary>What an approval for this call must be bound to (R1-14, <see cref="ApprovalBinding"/>); set for a
     /// call the policy decided.</summary>
     public string? Binding { get; init; }
+
+    /// <summary>The target as the gateway resolved it from the inventory (R1-15): what an approval notification may
+    /// name, unlike a value read from the arguments.</summary>
+    public MutationTarget? Target { get; init; }
 }
 
 /// <summary>Step 7 of the pipeline: checks that a capability actually took effect (INV-43).</summary>
@@ -126,6 +130,7 @@ public sealed class MutationGateway : IMutationGateway
             decision.MatchedRules, prepared.Request.DecisionId, decision.Policy?.Preset, null)
         {
             Binding = ApprovalBinding.Of(prepared.Request, prepared.Capability!, decision.Policy?.VersionHash),
+            Target = prepared.Request.Target,
         };
     }
 
@@ -508,6 +513,9 @@ public sealed class MutationGateway : IMutationGateway
             Binding = ApprovalBinding.Of(request, capability, policy?.VersionHash),
             // R1-15: the caller and everyone it acts for; none of them decides a non-interactive request.
             Requesters = ApprovalEligibility.RequestersOf(p),
+            // The resolved target, not a value from the arguments: this is what the notification names.
+            TargetServer = request.Target?.ServerId,
+            TargetWorkload = request.Target is { } target ? target.Name ?? target.Id : null,
         };
     }
 
