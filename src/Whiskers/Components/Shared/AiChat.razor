@@ -354,10 +354,13 @@
     private async Task CloseAsync()
     {
         _isOpen = false;
-        // A send that is still preparing took its run token already and is refused when it tries to start.
-        if (_lifetime is not null) await _lifetime.EndAsync();
+        // A send that is still preparing took its run token already and is refused when it tries to start. The run is
+        // stopped (synchronously, inside EndAsync) and its controls dropped before anything is awaited: a chat reopened
+        // meanwhile keeps the controls of its own, newer run.
+        var ending = _lifetime?.EndAsync() ?? Task.CompletedTask;
         _pendingConfirm = null;
         _pendingApprovalId = null;
+        await ending;
     }
 
     private async Task<AgentContext> BuildContextAsync()
