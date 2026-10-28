@@ -156,6 +156,11 @@ public sealed record ComposePlan(
                 $"The deployment would touch containers that were not decided: {string.Join(", ", missing)}.");
     }
 
+    /// <summary>Each impacted container's aliases (id and name), one entry per container.</summary>
+    public IReadOnlyList<IReadOnlyList<string>> DecidedResources() =>
+        Impact.Select(i => (IReadOnlyList<string>)new[] { i.Container.Id, i.Container.Name }.Where(v => v.Length > 0).ToList())
+            .Where(g => g.Count > 0).ToList();
+
     /// <summary>The identities a decision on this plan must cover: each impacted container's id and name.</summary>
     public IReadOnlyList<string> DecidedIdentities() =>
         Impact.SelectMany(i => new[] { i.Container.Id, i.Container.Name })

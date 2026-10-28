@@ -223,8 +223,10 @@ public sealed class TriggerAuthorityTests : IDisposable
         Assert.Equal(MutationReasonCodes.TriggerNotAllowed, outcome.ReasonCode);
     }
 
-    [Fact]
-    public async Task What_an_operation_also_touches_must_be_granted_too()
+    [Theory]
+    [InlineData("db")]          // granted by name
+    [InlineData("cid-db")]      // granted by id
+    public async Task What_an_operation_also_touches_must_be_granted_too_by_any_of_its_names(string grant)
     {
         // Disconnecting "db" from a granted network: the network is granted, the container it cuts off is not.
         var disconnect = new CapabilityCatalog().Find("network.disconnect")!;
@@ -234,16 +236,76 @@ public sealed class TriggerAuthorityTests : IDisposable
         var gateway = Gateway(new MemoryTriggers(trigger), new Owners());
         MutationRequest Call() => AgentCall(disconnect, "app-net") with
         {
-            Target = new MutationTarget("network", "net-1", "app-net", "srv1") { Related = ["cid-db", "db"], Resolved = true },
+            Target = new MutationTarget("network", "net-1", "app-net", "srv1")
+            {
+                Related = ["cid-db", "db", "cid-api", "api"], RelatedResources = [["cid-db", "db"], ["cid-api", "api"]],
+                Resolved = true,
+            },
         };
 
         var refused = await gateway.ExecuteAsync(Call(), (_, _) => Task.FromResult(1));
-        trigger.WriteTargets.AddRange(["db", "cid-*"]);
+        trigger.WriteTargets.Add(grant);
+        var stillRefused = await gateway.ExecuteAsync(Call(), (_, _) => Task.FromResult(1));   // "api" is not granted
+        trigger.WriteTargets.Add("api");
         var allowed = await gateway.ExecuteAsync(Call(), (_, _) => Task.FromResult(1));
 
         Assert.Equal(MutationStatus.Denied, refused.Status);
         Assert.Contains("also touches", refused.Reason);
+        Assert.Equal(MutationStatus.Denied, stillRefused.Status);
+        Assert.Contains("api", stillRefused.Reason);
         Assert.Equal(MutationStatus.Executed, allowed.Status);
+    }
+
+    [Fact]
+    public async Task A_dns_record_name_cannot_unlock_another_zone_through_the_real_resolver()
+    {
+        // Granted: set_dns_record on the zone "allowed.example". The call names the zone "other.example" and a record
+        // called "allowed.example" in it.
+        var set = new CapabilityCatalog().Find("dns.record_set")!;
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add(set.Id);
+        trigger.WriteTargets.Add("allowed.example");
+        var gateway = new MutationGateway(new CapabilityCatalog(), new AllowAll(), new Audit(), [],
+            NullLogger<MutationGateway>.Instance, targets: new MutationTargetResolver(new ServiceCollection().BuildServiceProvider()),
+            triggers: Authority(new MemoryTriggers(trigger), new Owners()));
+        MutationRequest Call(string zone)
+        {
+            var args = new Dictionary<string, JsonElement>
+            {
+                ["zone"] = JsonSerializer.SerializeToElement(zone),
+                ["name"] = JsonSerializer.SerializeToElement("allowed.example"),
+                ["type"] = JsonSerializer.SerializeToElement("A"),
+            };
+            return AgentCall(set, "x") with { Target = MutationTargets.FromArguments(set, args), Arguments = args };
+        }
+
+        var other = await gateway.ExecuteAsync(Call("other.example"), (_, _) => Task.FromResult(1));
+        var granted = await gateway.ExecuteAsync(Call("allowed.example"), (_, _) => Task.FromResult(1));
+
+        Assert.Equal(MutationStatus.Denied, other.Status);
+        Assert.Equal(MutationReasonCodes.TriggerNotAllowed, other.ReasonCode);
+        Assert.Equal(MutationStatus.Executed, granted.Status);
+    }
+
+    [Theory]
+    [InlineData("dns-zone", "other.example", "allowed.example")]   // a record name is not the zone
+    [InlineData("host", "srv2", "allowed-project")]                // a project name is not the host
+    [InlineData("container", "new-db", "allowed")]                 // a creation's name is the caller's
+    public async Task A_name_the_caller_typed_never_stands_in_for_the_target(string kind, string id, string name)
+    {
+        var anyCapability = new CapabilityCatalog().All.First(c => c.TargetKind == kind);
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add(anyCapability.Id);
+        trigger.WriteTargets.Add(name);
+        var request = AgentCall(anyCapability, name) with
+        {
+            Target = new MutationTarget(kind, id, name, "srv1") { Resolved = kind != "container" },
+        };
+
+        var outcome = await Gateway(new MemoryTriggers(trigger), new Owners()).ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Contains("not among the targets", outcome.Reason);
     }
 
     [Fact]
@@ -428,13 +490,13 @@ public sealed class TriggerAuthorityTests : IDisposable
         var trigger = new AgentPrincipal(AgentPrincipalKind.Trigger, "AI trigger 'restart web'", McpPermissionLevels.Admin,
             null, TriggerId: "t1");
         return new MutationRequest(capability.Id, MutationPrincipals.Agent(trigger, "run-1"), MutationSurface.Agent,
-            new MutationTarget("container", "id-" + name, name, "srv1"),
+            new MutationTarget("container", "id-" + name, name, "srv1") { Resolved = true },
             new Dictionary<string, JsonElement> { ["containerId"] = JsonSerializer.SerializeToElement(name) }, SessionId: "run-1");
     }
 
     private static MutationRequest PersonsCall(Capability capability, string name, MutationSurface surface) => new(capability.Id,
         new MutationPrincipal(MutationPrincipalKind.Human, "user:ops@example.com", "ops@example.com", McpPermissionLevels.Admin),
-        surface, new MutationTarget("container", "id-" + name, name, "srv1"),
+        surface, new MutationTarget("container", "id-" + name, name, "srv1") { Resolved = true },
         new Dictionary<string, JsonElement> { ["containerId"] = JsonSerializer.SerializeToElement(name) });
 
     internal static AiTriggerAuthority Authority(IAiTriggerStore triggers, IAutomationOwnerResolver owners,

@@ -16,9 +16,12 @@ capability (level raised in Settings → MCP and key tool lists included) suspen
 switched off) and notifies the Admins (`automation_suspended`); an owner not verified yet is refused without
 suspension. A run without a grant gets a `read` principal; with one, the owner's current level — never a synthetic
 admin. As the gateway's `ITriggerAuthority` it then checks **every** mutation made for the run — nested ones too (a
-scheduled task the trigger runs) — against the current grant, including everything the operation also touches
-(`MutationTarget.Related`: the containers a network removal cuts off, the container it connects or disconnects, a
-workload's pod), and the owner's current authority: anything outside the grant is refused (`TriggerNotAllowed`), a
+scheduled task the trigger runs) — against the current grant, matched only on canonical identities (the resolved id,
+and the name only where the resolver took it from the inventory: never a DNS record name, a compose project name or
+the name of something being created), including every resource the operation also touches
+(`MutationTarget.RelatedResources`, one alias group per resource — the containers a network removal cuts off, the
+container it connects or disconnects, a workload's pod — of which one id or name must be granted), and the owner's
+current authority: anything outside the grant is refused (`TriggerNotAllowed`), a
 lost authority suspends the trigger. The gateway refuses every Confirm of the run and of anything nested in it
 instead of raising an approval (`UnattendedConfirm`), and every audit row of the run carries `trigger:<id>`.
 

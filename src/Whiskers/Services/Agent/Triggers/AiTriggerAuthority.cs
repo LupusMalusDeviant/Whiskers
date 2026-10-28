@@ -82,13 +82,19 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         // PC-D7: only what an Admin listed. Anything else would need a confirmation, which an unattended run cannot get.
         if (!trigger.WriteCapabilities.Contains(capability.Id, StringComparer.Ordinal))
             return $"'{capability.McpTool ?? capability.Id}' is not among the capabilities granted to the AI trigger";
-        if (!Granted(trigger, target.Id) && !Granted(trigger, target.Name))
+        // Only canonical identities count: the resolved id, and the name where the resolver took it from the inventory.
+        // A name the caller typed (a DNS record name, a compose project name) never stands in for the target.
+        var own = Identities(target);
+        if (!own.Any(i => Granted(trigger, i)))
             return $"{target.Kind} '{target.Name ?? target.Id}' is not among the targets granted to the AI trigger";
-        // What the operation also touches (the containers a network removal cuts off, the container it connects, a
-        // workload's pod) must be granted too, by name or id: a grant on a network is not one on what hangs off it.
-        var own = new HashSet<string>(new[] { target.Id, target.Name ?? "" }.Where(v => v.Length > 0), StringComparer.Ordinal);
-        if (target.Related.FirstOrDefault(r => !own.Contains(r) && !Granted(trigger, r)) is { } outside)
-            return $"the operation also touches '{outside}', which is not among the targets granted to the AI trigger";
+        // Every resource the operation also touches (the containers a network removal cuts off, the container it
+        // connects, a workload's pod) must be granted too, by one of its names or ids: a grant on a network is not
+        // one on what hangs off it.
+        var resources = target.RelatedResources.Count > 0
+            ? target.RelatedResources
+            : target.Related.Select(r => (IReadOnlyList<string>)[r]).ToList();
+        if (resources.FirstOrDefault(g => !g.Any(own.Contains) && !g.Any(a => Granted(trigger, a))) is { } outside)
+            return $"the operation also touches '{string.Join(" / ", outside)}', which is not among the targets granted to the AI trigger";
 
         // PC-D6: the owner's authority as it is now, for this capability at its effective level.
         var owner = _owners.Resolve(trigger.OwnerId!);
@@ -99,6 +105,26 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
             ? $"its owner {owner.DisplayName} has no authority left"
             : OwnerLacks(owner, capability);
         return lost is null ? null : await SuspendAsync(trigger, lost);
+    }
+
+    /// <summary>Kinds whose resolved <see cref="MutationTarget.Name"/> comes from the inventory, not from the call.</summary>
+    private static readonly HashSet<string> InventoryNamed = new(StringComparer.Ordinal)
+    {
+        "container", "network", "cloud-server", "scheduled-task", "workload", "webhook",
+    };
+
+    /// <summary>The target's canonical identities: its id, and its name only when the resolver found the target in the
+    /// inventory under that name (never for a creation, a host, a server or a DNS zone, whose name is the caller's).</summary>
+    internal static HashSet<string> Identities(MutationTarget target)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(target.Id)) ids.Add(target.Id);
+        if (!target.Resolved) return ids;
+        if (InventoryNamed.Contains(target.Kind) && !string.IsNullOrEmpty(target.Name)) ids.Add(target.Name);
+        // The resolver's own alias group for the target (a Git app's stored name, a workload's pod name).
+        foreach (var group in target.RelatedResources)
+            if (group.Contains(target.Id)) ids.UnionWith(group);
+        return ids;
     }
 
     private static bool Granted(AiTrigger trigger, string? value) =>
