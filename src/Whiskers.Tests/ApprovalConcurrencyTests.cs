@@ -89,6 +89,24 @@ public sealed class ApprovalConcurrencyTests : IDisposable
     }
 
     [Fact]
+    public async Task The_database_refuses_a_use_after_the_grant_lapsed()
+    {
+        var store = await _db.StartAsync();
+        var approval = await store.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "mcp-direct", "restart_container",
+            McpPermissionLevels.Write, null, "needs a human", Binding: "b"), _ => Task.CompletedTask);
+        await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
+        var until = (await _db.RowAsync(approval.Id))!.GrantExpiresAt!.Value;
+        var persistence = _db.Persistence();
+
+        // Straight against the database, past the store's own check.
+        Assert.False(await persistence.ConsumeAsync(approval.Id, "op-late", until.AddSeconds(1)));
+        Assert.False(await persistence.ConsumeAsync(approval.Id, "op-at", until));
+        Assert.Null((await _db.RowAsync(approval.Id))!.ConsumedAt);
+        Assert.True(await persistence.ConsumeAsync(approval.Id, "op-in-time", until.AddSeconds(-1)));
+        Assert.Equal("op-in-time", (await _db.RowAsync(approval.Id))!.ConsumedBy);
+    }
+
+    [Fact]
     public async Task Concurrent_decisions_of_one_approval_record_one_outcome()
     {
         var store = await _db.StartAsync();

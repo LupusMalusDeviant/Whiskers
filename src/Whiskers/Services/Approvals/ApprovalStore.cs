@@ -257,6 +257,10 @@ public sealed class ApprovalStore : IApprovalStore
         foreach (var entry in overdue)
         {
             if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0) continue;
+            // Expired here at once, so nothing reads it as pending while the record is written.
+            entry.Approval.Status = ApprovalStatus.Expired;
+            entry.Approval.ResolvedAt = Now;
+            entry.Approval.ResolvedBy = "system";
             _ = ExpireAsync(entry);
         }
         Changed?.Invoke();
