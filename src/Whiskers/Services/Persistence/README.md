@@ -30,7 +30,7 @@ Chosen at startup, SQLite by default:
 dotnet Whiskers.dll --migrate-to-postgres "Host=…;Database=whiskers;Username=…;Password=…"
 ```
 
-It migrates the target schema, verifies the target is **empty** (aborts otherwise — no merge), then copies every metrics table (the list in `SqliteToPostgresMigrator.MetricsTables`, pinned against the EF model by a test) plus the local-login users with their claims, logins and tokens, in batches. The source is never modified — back up `metrics.db` first. Surrogate `Id`s are reassigned by the target (no FKs between tables); unique business keys are preserved. See `SqliteToPostgresMigrator`.
+It migrates the target schema, verifies the target is **empty** (aborts otherwise — no merge), then copies every metrics table (the list in `SqliteToPostgresMigrator.MetricsTables`, pinned against the EF model by a test; a table a source from an older release does not have yet — e.g. `PolicyDecisions` / `PolicySnapshots` before R1-12 — is copied as empty) plus the local-login users with their claims, logins and tokens, in batches. The source is never modified — back up `metrics.db` first. Surrogate `Id`s are reassigned by the target (no FKs between tables); unique business keys are preserved. See `SqliteToPostgresMigrator`.
 
 ## Schema & migrations
 

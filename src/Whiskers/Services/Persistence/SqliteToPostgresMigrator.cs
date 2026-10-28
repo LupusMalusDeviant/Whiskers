@@ -35,6 +35,17 @@ public static class SqliteToPostgresMigrator
             (ctx, ct) => set(ctx).AnyAsync(ct),
             (src, dst, ct) => CopyAsync(set(src), dst, resetId, ct));
 
+    /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
+    private static async Task<bool> SourceHasTableAsync(MetricsDbContext source, Table table, CancellationToken ct)
+    {
+        if (!source.Database.IsSqlite()) return true;
+        var name = source.Model.FindEntityType(table.EntityType)?.GetTableName() ?? table.Name;
+        var count = await source.Database
+            .SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM sqlite_master WHERE type = 'table' AND name = {name}")
+            .SingleAsync(ct);
+        return count > 0;
+    }
+
     /// <summary>Every metrics table. No foreign keys between them, so any order is safe.</summary>
     internal static readonly IReadOnlyList<Table> MetricsTables =
     [
@@ -140,7 +151,17 @@ public static class SqliteToPostgresMigrator
 
         var report = new List<(string Table, int Rows)>();
         foreach (var table in MetricsTables)
+        {
+            // A source from an older release lacks the tables added since (R1-12: PolicyDecisions, PolicySnapshots).
+            // They are empty there by definition — copying them would fail half-way, after earlier tables committed.
+            if (!await SourceHasTableAsync(source, table, ct))
+            {
+                await log.WriteLineAsync($"Note: the source has no '{table.Name}' table (older release) — nothing to copy.");
+                report.Add((table.Name, 0));
+                continue;
+            }
             report.Add((table.Name, await table.CopyAsync(source, target, ct)));
+        }
 
         if (copyIdentity)
         {

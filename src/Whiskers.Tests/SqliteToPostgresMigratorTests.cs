@@ -29,6 +29,33 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
     }
 
     [Fact]
+    public async Task A_source_from_before_the_policy_decision_tables_migrates_completely()
+    {
+        // A database migrated by the release before R1-12 has no PolicyDecisions / PolicySnapshots tables.
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.ScheduledTasks.Add(new ScheduledTaskEntity { TaskId = "task-abc", Name = "nightly", CronExpression = "0 2 * * *",
+                TaskType = ScheduledTaskType.DbBackup, CreatedBy = "admin" });
+            await src.SaveChangesAsync();
+            await src.Database.ExecuteSqlRawAsync("DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;");
+        }
+
+        int rc;
+        var log = new StringWriter();
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, log);
+
+        Assert.Equal(0, rc);
+        Assert.Contains("no 'PolicyDecisions' table", log.ToString());
+        await using var check = NewDb(dstPath);
+        Assert.Equal(1, await check.ScheduledTasks.CountAsync());
+        Assert.Equal(0, await check.PolicyDecisions.CountAsync());
+    }
+
+    [Fact]
     public async Task Copies_all_rows_reassigns_ids_preserves_business_keys_and_leaves_source_intact()
     {
         var srcPath = NewDbPath();
