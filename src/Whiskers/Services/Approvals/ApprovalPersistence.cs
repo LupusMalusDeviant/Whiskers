@@ -16,14 +16,12 @@ public interface IApprovalPersistence
     Task InsertAsync(Approval approval, CancellationToken ct = default);
 
     /// <summary>Pending → <paramref name="status"/>. <c>false</c> when the approval is not pending (any more), or —
-    /// for a human decision (approved, rejected) — when it expired before <paramref name="at"/> (INV-32).</summary>
+    /// for a human decision (approved, rejected) — when it expired before <paramref name="at"/> (INV-32).
+    /// <paramref name="stillDecidable"/> is asked for a human decision once the row is held (after any lock wait) and
+    /// before the change is committed; <c>false</c> commits nothing — so a decision whose write waited past the
+    /// expiry never becomes durable, not even for a moment.</summary>
     Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by, DateTime? grantExpiresAt,
-        bool selfApproved = false, CancellationToken ct = default);
-
-    /// <summary>Approved/Rejected → Expired, for a decision whose write completed only after the approval's expiry
-    /// (INV-32): the decision was checked against the time it was made, so a write delayed past the expiry is taken
-    /// back. Only while nobody used it. <c>false</c> when the approval is no longer in that state.</summary>
-    Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at, CancellationToken ct = default);
+        bool selfApproved = false, Func<bool>? stillDecidable = null, CancellationToken ct = default);
 
     /// <summary>Uses the approval once. <c>false</c> unless it is approved, unused and its grant has not lapsed at
     /// <paramref name="now"/>.</summary>
@@ -54,12 +52,16 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
     }
 
     public async Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-        DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default)
+        DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
+        CancellationToken ct = default)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var pending = nameof(ApprovalStatus.Pending);
         var decision = ApprovalRecords.IsDecision(status);
+        // One transaction: the update holds the row (it waits here for any lock), then the decision is checked once
+        // more against the clock before it is committed. Not committed (refused, or the process stops) = not decided.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         var updated = await db.Approvals
             .Where(a => a.Id == approvalId && a.Status == pending && (!decision || a.ExpiresAt > at))
             .ExecuteUpdateAsync(s => s
@@ -68,24 +70,10 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
                 .SetProperty(a => a.ResolvedBy, by)
                 .SetProperty(a => a.GrantExpiresAt, grantExpiresAt)
                 .SetProperty(a => a.SelfApproved, selfApproved), ct);
-        return updated == 1;
-    }
-
-    public async Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
-        CancellationToken ct = default)
-    {
-        using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var status = decided.ToString();
-        var updated = await db.Approvals
-            .Where(a => a.Id == approvalId && a.Status == status && a.ConsumedAt == null)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(a => a.Status, nameof(ApprovalStatus.Expired))
-                .SetProperty(a => a.ResolvedAt, at)
-                .SetProperty(a => a.ResolvedBy, "system")
-                .SetProperty(a => a.GrantExpiresAt, (DateTime?)null)
-                .SetProperty(a => a.SelfApproved, false), ct);
-        return updated == 1;
+        if (updated != 1) return false;
+        if (decision && stillDecidable is not null && !stillDecidable()) return false;   // rolled back on dispose
+        await tx.CommitAsync(ct);
+        return true;
     }
 
     public async Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default)
@@ -144,34 +132,21 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
     }
 
     public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-        DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default)
+        DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
+        CancellationToken ct = default)
     {
         lock (_lock)
         {
             if (!_rows.TryGetValue(approvalId, out var row) || row.Status != nameof(ApprovalStatus.Pending)
                 || (ApprovalRecords.IsDecision(status) && row.ExpiresAt <= at))
                 return Task.FromResult(false);
+            if (ApprovalRecords.IsDecision(status) && stillDecidable is not null && !stillDecidable())
+                return Task.FromResult(false);
             row.Status = status.ToString();
             row.ResolvedAt = at;
             row.ResolvedBy = by;
             row.GrantExpiresAt = grantExpiresAt;
             row.SelfApproved = selfApproved;
-            return Task.FromResult(true);
-        }
-    }
-
-    public Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
-        CancellationToken ct = default)
-    {
-        lock (_lock)
-        {
-            if (!_rows.TryGetValue(approvalId, out var row) || row.Status != decided.ToString() || row.ConsumedAt is not null)
-                return Task.FromResult(false);
-            row.Status = nameof(ApprovalStatus.Expired);
-            row.ResolvedAt = at;
-            row.ResolvedBy = "system";
-            row.GrantExpiresAt = null;
-            row.SelfApproved = false;
             return Task.FromResult(true);
         }
     }

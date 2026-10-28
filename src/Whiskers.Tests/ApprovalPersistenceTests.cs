@@ -166,6 +166,28 @@ public sealed class ApprovalPersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_decision_refused_once_its_row_is_held_is_not_committed_and_a_restart_finds_it_pending()
+    {
+        // INV-32: the write waited for the row past the expiry; nothing of it becomes durable, so neither a crash nor
+        // a restart can turn it into a usable grant.
+        var persistence = _db.Persistence();
+        var store = await _db.StartAsync();
+        var approval = await store.CreateAsync(Request("c-late"), _ => Task.CompletedTask);
+
+        Assert.False(await persistence.ResolveAsync(approval.Id, ApprovalStatus.Approved, DateTime.UtcNow, "bob",
+            DateTime.UtcNow.AddMinutes(10), stillDecidable: () => false));
+
+        var row = await _db.RowAsync(approval.Id);
+        Assert.Equal(nameof(ApprovalStatus.Pending), row!.Status);
+        Assert.Null(row.GrantExpiresAt);
+        Assert.False(await persistence.ConsumeAsync(approval.Id, "op-1", DateTime.UtcNow));
+        // A decision that is still in time is committed.
+        Assert.True(await persistence.ResolveAsync(approval.Id, ApprovalStatus.Approved, DateTime.UtcNow, "bob",
+            DateTime.UtcNow.AddMinutes(10), stillDecidable: () => true));
+        Assert.Equal(nameof(ApprovalStatus.Approved), (await _db.RowAsync(approval.Id))!.Status);
+    }
+
+    [Fact]
     public async Task An_approval_whose_decision_cannot_be_recorded_stays_pending()
     {
         var persistence = new FailingPersistence { FailInsert = false };
@@ -187,11 +209,9 @@ public sealed class ApprovalPersistenceTests : IDisposable
             FailInsert ? throw new InvalidOperationException("database unavailable") : _inner.InsertAsync(approval, ct);
 
         public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-            DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default) =>
+            DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
+            CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
-
-        public Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
-            CancellationToken ct = default) => throw new InvalidOperationException("database unavailable");
 
         public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");

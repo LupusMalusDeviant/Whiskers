@@ -30,12 +30,15 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     private readonly ICapabilityOverrides? _overrides;
     private readonly ICapabilityCatalog? _catalog;
     private readonly IEffectiveRequirementResolver? _requirements;
+    private readonly Whiskers.Configuration.WhiskersPublicUrl? _publicUrl;
 
     public ApprovalCoordinator(
         IApprovalStore store, INotificationService notify, IGuardrailStore guardrails,
         ILogger<ApprovalCoordinator>? logger = null, ICapabilityOverrides? overrides = null,
-        ICapabilityCatalog? catalog = null, IEffectiveRequirementResolver? requirements = null)
+        ICapabilityCatalog? catalog = null, IEffectiveRequirementResolver? requirements = null,
+        Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null)
     {
+        _publicUrl = publicUrl;
         _overrides = overrides;
         _catalog = catalog;
         _requirements = requirements;
@@ -117,7 +120,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = "agent_approval",
-                ImageInfo = ApprovalDisplay.NotificationText(approval, decision.ResolvedServer, decision.ResolvedResource),
+                ImageInfo = ApprovalDisplay.NotificationText(approval, decision.ResolvedServer, decision.ResolvedResource, _publicUrl),
                 CorrelationId = call.CorrelationId,
                 ApprovalId = approval.Id,
             });

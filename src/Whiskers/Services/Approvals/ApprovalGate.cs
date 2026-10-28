@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Guardrails;
@@ -88,13 +89,15 @@ public sealed class ApprovalGate : IApprovalGate
     private readonly INotificationService? _notify;
     private readonly ILogger<ApprovalGate>? _logger;
     private readonly TimeProvider _time;
+    private readonly WhiskersPublicUrl? _publicUrl;
 
     // Two concurrent first calls must raise one approval, not two (only one of which could ever be used).
     private readonly SemaphoreSlim _raiseLock = new(1, 1);
 
     public ApprovalGate(IApprovalStore approvals, IGuardrailStore? policy = null, INotificationService? notify = null,
-        ILogger<ApprovalGate>? logger = null, TimeProvider? time = null)
+        ILogger<ApprovalGate>? logger = null, TimeProvider? time = null, WhiskersPublicUrl? publicUrl = null)
     {
+        _publicUrl = publicUrl;
         _approvals = approvals ?? throw new ArgumentNullException(nameof(approvals));
         _policy = policy;
         _notify = notify;
@@ -235,7 +238,7 @@ public sealed class ApprovalGate : IApprovalGate
                 await _notify.SendAsync(new NotificationEvent
                 {
                     EventType = "agent_approval",
-                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.TargetServer, subject.TargetWorkload),
+                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.TargetServer, subject.TargetWorkload, _publicUrl),
                     CorrelationId = subject.OperationId,
                     ApprovalId = approval.Id,
                 });

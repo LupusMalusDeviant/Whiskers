@@ -166,6 +166,41 @@ public class ApprovalNotificationTests
     public void A_plain_resolved_identifier_is_shown(string name) =>
         Assert.Contains($"target — / {name}", ApprovalDisplay.NotificationText(Plain(), null, name));
 
+    [Theory]
+    [InlineData("https://whiskers.example.com", "https://whiskers.example.com/approvals#")]
+    [InlineData("https://example.com/whiskers/", "https://example.com/whiskers/approvals#")]
+    public async Task With_a_configured_public_address_outbound_channels_get_the_approval_link(string configured, string prefix)
+    {
+        var store = new ApprovalStore();
+        var notify = new Recorder();
+        var publicUrl = new WhiskersPublicUrl(WhiskersPublicUrl.Parse(configured));
+        var gate = new ApprovalGate(store, new Policy(), notify, publicUrl: publicUrl);
+
+        var result = await gate.CheckAsync(Call("key:k1", server: "srv-1", resource: "web"), "needs a human", []);
+
+        // What an e-mail, Telegram or ntfy message carries.
+        var outbound = NotificationFormatter.PlainText(Assert.Single(notify.Sent));
+        Assert.Contains(prefix + Uri.EscapeDataString(result.ApprovalId!), outbound);
+        Assert.DoesNotContain(ArgumentMarker, outbound);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not a url")]
+    [InlineData("ftp://whiskers.example.com")]
+    [InlineData("https://user:pw@whiskers.example.com")]
+    [InlineData("https://whiskers.example.com/?next=evil")]
+    [InlineData("/relative")]
+    public void Without_a_valid_public_address_no_absolute_link_is_made(string? configured)
+    {
+        var publicUrl = new WhiskersPublicUrl(WhiskersPublicUrl.Parse(configured));
+        Assert.Null(publicUrl.Base);
+        var text = ApprovalDisplay.NotificationText(Plain(), null, null, publicUrl);
+        Assert.Contains("(Whiskers → Approvals)", text);
+        Assert.DoesNotContain("://", text);
+    }
+
     [Fact]
     public void An_approval_notification_without_an_id_still_opens_the_list()
     {

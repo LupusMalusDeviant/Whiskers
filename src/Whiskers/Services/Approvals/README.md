@@ -68,8 +68,8 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
   `RequireSecondApprover`; such a decision is recorded as `SelfApproved`. An unreadable policy requires a second
   approver.
 - **Expiry (INV-32).** An approval past `ExpiresAt` is expired, not decided — checked by the store and again by the
-  conditional database update; a decision whose write completes only after the expiry (it waited on a lock) is taken
-  back (`IApprovalPersistence.ExpireLateDecisionAsync`) and the waiting session gets a "no". A timer (`ApprovalStore.SweepInterval`) expires overdue approvals even when nobody
+  conditional database update; a decision is committed in one transaction only if the approval has not expired once its row is held
+  (after any lock wait; `ResolveAsync(…, stillDecidable)`), so a late write never becomes durable and the waiting session gets a "no". A timer (`ApprovalStore.SweepInterval`) expires overdue approvals even when nobody
   opens the list, so a waiting session is released. A grant is usable only until `GrantExpiresAt`.
 - **Bounded (C-19).** One principal has at most `ApprovalEligibility.MaxPendingPerPrincipal` approvals waiting;
   an approval counts against everyone in its requester chain (an agent session and the user it acts for), so more
@@ -81,7 +81,9 @@ A raised approval is announced with its id, its risk and the target **the resolv
 with its arguments, a value read from them, or a target created by the operation or passed through as named, since the bell may forward
 it to external channels; without a resolved target it names none, and a resolved name that is not a plain identifier
 reads `(withheld)`. The event carries `ApprovalId`, so the bell opens the approval's card (`approvals#<id>`).
-External channels get the id and "Whiskers → Approvals", not a URL: Whiskers has no configured public origin.
+External channels get the absolute link (`<public url>/approvals#<id>`) only when the admin configured the public
+address (`WhiskersPublicUrl`, `Whiskers:PublicUrl`; never a request's host) — otherwise the id and
+"Whiskers → Approvals".
 
 ## Files
 

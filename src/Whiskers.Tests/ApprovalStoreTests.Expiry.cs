@@ -92,14 +92,12 @@ public partial class ApprovalStoreTests
         public Task InsertAsync(Approval approval, CancellationToken ct = default) => inner.InsertAsync(approval, ct);
 
         public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-            DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default)
+            DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
+            CancellationToken ct = default)
         {
             if (ApprovalRecords.IsDecision(status)) time.Now += Ttl;   // the lock is released only after the expiry
-            return inner.ResolveAsync(approvalId, status, at, by, grantExpiresAt, selfApproved, ct);
+            return inner.ResolveAsync(approvalId, status, at, by, grantExpiresAt, selfApproved, stillDecidable, ct);
         }
-
-        public Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
-            CancellationToken ct = default) => inner.ExpireLateDecisionAsync(approvalId, decided, at, ct);
 
         public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>
             inner.ConsumeAsync(approvalId, operationId, now, ct);

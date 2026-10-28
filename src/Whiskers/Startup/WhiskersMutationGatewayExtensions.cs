@@ -40,6 +40,8 @@ public static class WhiskersMutationGatewayExtensions
             persistence: sp.GetRequiredService<IApprovalPersistence>(),
             // R1-15: RequireSecondApprover is read from the active policy at each decision.
             policy: sp.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>()));
+        // R1-15: absolute links in notifications come only from the configured public address, never a request host.
+        services.AddSingleton(sp => Whiskers.Configuration.WhiskersPublicUrl.From(sp.GetRequiredService<IConfiguration>()));
         services.AddSingleton<IApprovalGate, ApprovalGate>();
         // R1-15: a chat ends its session (and its approvals) when the browser connection drops.
         services.AddScoped<Whiskers.Services.Agent.Approvals.ChatConnectionWatcher>();

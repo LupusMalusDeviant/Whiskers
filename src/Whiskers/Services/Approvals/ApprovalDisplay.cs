@@ -27,9 +27,11 @@ public static class ApprovalDisplay
     /// <summary>The notification for a raised approval (C-22): who wants to run what, the approval id, the risk and
     /// the target the gateway resolved (<paramref name="resolvedServer"/>, <paramref name="resolvedResource"/>) —
     /// never a value read from the arguments, and never the arguments themselves: the bell may forward this to
-    /// external channels. The in-app link to the card travels as <c>NotificationEvent.ApprovalId</c>.</summary>
+    /// external channels. The in-app link to the card travels as <c>NotificationEvent.ApprovalId</c>; with a
+    /// configured public address (<paramref name="publicUrl"/>) the text carries the absolute link too, so e-mail and
+    /// chat channels open the card.</summary>
     public static string NotificationText(Whiskers.Models.Agent.Approval approval, string? resolvedServer,
-        string? resolvedResource)
+        string? resolvedResource, Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null)
     {
         ArgumentNullException.ThrowIfNull(approval);
         var target = resolvedServer is null && resolvedResource is null
@@ -37,7 +39,7 @@ public static class ApprovalDisplay
             : $"{Short(resolvedServer) ?? "—"} / {Short(resolvedResource) ?? "—"}";
         return $"\"{Short(approval.Actor)}\" wants to run \"{approval.ToolName}\" — approval required. " +
                $"Approval {approval.Id} · risk {approval.RiskLevel ?? RiskOf(approval.Level)} · target {target} " +
-               "(Whiskers → Approvals)";
+               (publicUrl?.Link(LinkOf(approval.Id)) is { } link ? $"— {link}" : "(Whiskers → Approvals)");
     }
 
     /// <summary>What a notification shows of a value taken from the arguments: an identifier (letters, digits and

@@ -397,7 +397,9 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         bool stored;
         try
         {
-            stored = await _persistence.ResolveAsync(entry.Approval.Id, status, at, by, grantUntil, selfApproved, ct);
+            // INV-32: a human decision is committed only if the approval has not expired by the time its row is held.
+            stored = await _persistence.ResolveAsync(entry.Approval.Id, status, at, by, grantUntil, selfApproved,
+                () => !entry.Approval.IsExpiredAt(Now), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -405,22 +407,6 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             stored = false;
         }
         if (!stored && (mustStore || status == ApprovalStatus.Approved)) return false;
-        // INV-32: the write may have waited (a database lock) until after the expiry, and the condition checked the
-        // time the decision was made. A decision on record only after the expiry does not count: taken back, and the
-        // caller sees an expired approval.
-        if (stored && ApprovalRecords.IsDecision(status) && entry.Approval.IsExpiredAt(Now))
-        {
-            try
-            {
-                await _persistence.ExpireLateDecisionAsync(entry.Approval.Id, status, Now, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "A decision on approval {Id} recorded after its expiry could not be taken back",
-                    entry.Approval.Id);
-            }
-            return false;
-        }
         entry.Approval.Status = status;
         entry.Approval.ResolvedAt = at;
         entry.Approval.ResolvedBy = by;
