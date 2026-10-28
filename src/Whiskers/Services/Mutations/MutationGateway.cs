@@ -124,6 +124,10 @@ public sealed class MutationGateway : IMutationGateway
         var callerOperationId = string.IsNullOrWhiteSpace(request.OperationId) ? null : request.OperationId;
         var operationId = callerOperationId ?? Guid.NewGuid().ToString("N");
         request = request with { OperationId = operationId };
+        // INV-23: a mutation nested in a pinned run's mutation (a scheduled task an AI trigger runs) is decided
+        // against the run's preset too; the global kill switch still reaches it (EffectivePolicy).
+        if (request.PinnedPolicy is null && MutationScope.Current?.PinnedPolicy is { } inherited)
+            request = request with { PinnedPolicy = inherited };
 
         // 1–2: the capability must exist, be switched on, and the principal must hold its level. Unknown means Deny.
         var capability = _catalog.Find(request.CapabilityId);

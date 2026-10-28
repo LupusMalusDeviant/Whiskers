@@ -141,7 +141,8 @@ registrations are wrapped too.
 4. Target cannot be resolved (unknown or ambiguous server, container, network, cloud server, task, zone or workload) → **Denied**. From here on `MutationContext.Request.Target` is canonical; the MCP and agent adapters run the tool with `MutationTargets.CanonicalArguments`, which also passes the resolved `serverId` to every tool that takes one (`McpToolParameters.TakesServerId`, the agent entry's parameters). The refusal carries `MutationReasonCodes.TargetUnknown` / `TargetAmbiguous` / `TargetNotResolved`.
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**. The policy is the live
    active preset, or for a pinned run (an AI trigger's, `MutationRequest.PinnedPolicy`) that run's preset with the
-   global kill switch (`EffectivePolicy`, INV-23). Every verdict — Allow, Confirm and Deny — is then **recorded**
+   global kill switch (`EffectivePolicy`, INV-23); a call nested in a pinned run's mutation without a pin of its own
+   inherits it from `MutationScope.PinnedPolicy`. Every verdict — Allow, Confirm and Deny — is then **recorded**
    (`IPolicyDecisionStore`, INV-22, R1-12) before anything acts on it; a failed write → **Denied**. From here on
    `MutationRequest.DecisionId` names the record, the audit rows carry it as `decisionId`, the outcome as
    `MutationOutcome.DecisionId`, and an approval raised for the call as `Approval.DecisionId`. `DecideAsync` runs

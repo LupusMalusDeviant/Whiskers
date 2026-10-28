@@ -11,7 +11,8 @@ notification (`agent_action`) and written to the audit log.
 **Pinned preset (INV-23, R1-12).** The trigger's preset is copied when the run starts (`PinnedPolicy` on the
 `AgentContext`); the session and the Mutation Gateway decide every call of the run against it, so switching or
 editing the active preset does not reach a running trigger — only the global kill switch does, and a fail-closed
-guardrail store stops it. A trigger whose preset does not exist (renamed or deleted) **does not run**: there is no
+guardrail store stops it. Mutations nested in a call of the run (a scheduled task it runs) inherit the pin through
+the gateway's `MutationScope`. A trigger whose preset does not exist (renamed or deleted) **does not run**: there is no
 fallback to another preset; the refusal is audited (`agent.run`, unsuccessful) and the AI triggers page marks the
 missing preset.
 

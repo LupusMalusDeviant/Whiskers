@@ -24,6 +24,7 @@ public sealed class MutationScope : IDisposable
         OperationId = operationId;
         Principal = principal;
         _parent = parent;
+        PinnedPolicy = request?.PinnedPolicy ?? parent?.PinnedPolicy;
         _serverId = request?.Target.ServerId;
         // What policy saw for this decision: the resolved target, what it also touches, and the string arguments.
         _decided = new HashSet<string>(StringComparer.Ordinal);
@@ -60,6 +61,11 @@ public sealed class MutationScope : IDisposable
 
     /// <summary>Who the gateway let this mutation run for (an agent with its <c>OnBehalfOf</c>), when known.</summary>
     public MutationPrincipal? Principal { get; }
+
+    /// <summary>The preset the run this scope belongs to is pinned to (INV-23, R1-12), from this scope or an enclosing
+    /// one. A gateway call made inside the scope without a pin of its own is decided against it — a scheduled task an
+    /// AI trigger runs stays under the trigger's preset.</summary>
+    public Whiskers.Models.Agent.PinnedPolicy? PinnedPolicy { get; }
 
     /// <summary>The failure the delegate reported with <see cref="Fail"/>, or <c>null</c>. The first report wins.</summary>
     public string? FailureReason { get; private set; }

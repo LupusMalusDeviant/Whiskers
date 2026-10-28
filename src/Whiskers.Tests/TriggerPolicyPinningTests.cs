@@ -189,6 +189,54 @@ public class TriggerPolicyPinningTests
         Assert.NotEqual(started, recorded[2].Policy.VersionHash);  // the kill switch did
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_mutation_nested_in_a_pinned_run_is_decided_against_the_pinned_preset(bool killSwitch)
+    {
+        // The trigger's preset protects "web", the live one does not. The trigger runs a tool (here: starting another
+        // container) whose execution makes a nested gateway call without a pin of its own — as run_scheduled_task
+        // does for the task's container.restart. The nested call must stay under the trigger's preset.
+        var guarded = Open();
+        guarded.ProtectedResources.Add("web");
+        var store = new PresetStore("Live", new GuardrailPreset { Name = "Live", Policy = Open() });
+        var decisions = new MemoryDecisions();
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
+            decisions: decisions);
+        var outer = TriggerCall(PinnedPolicy.Of("Guarded", guarded)) with
+        {
+            Target = new MutationTarget("container", "c2", "worker", "srv1"),
+            Arguments = new Dictionary<string, JsonElement> { ["containerId"] = JsonSerializer.SerializeToElement("worker") },
+        };
+        var owner = new MutationPrincipal(MutationPrincipalKind.Human, "user:ops@example.com", "ops@example.com",
+            McpPermissionLevels.Admin);
+        var nested = new MutationRequest("container.restart",
+            new MutationPrincipal(MutationPrincipalKind.Automation, "task:t1", "Scheduled task", McpPermissionLevels.Admin,
+                OnBehalfOf: owner),
+            MutationSurface.Automation, new MutationTarget("container", "c1", "web", "srv1"),
+            new Dictionary<string, JsonElement> { ["containerId"] = JsonSerializer.SerializeToElement("web") });
+        MutationOutcome<int>? inner = null;
+
+        var outcome = await gateway.ExecuteAsync(outer, async (_, ct) =>
+        {
+            if (killSwitch) store.Presets.Single().Policy.ReadOnlyMode = true;
+            inner = await gateway.ExecuteAsync(nested, (_, _) => Task.FromResult(1), ct);
+            return 0;
+        });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(MutationStatus.Denied, inner!.Status);
+        var nestedDecision = decisions.Records.Single(r => r.Capability.Id == "container.restart");
+        Assert.Equal("Guarded", nestedDecision.Policy.Preset);
+        Assert.Equal(MutationVerdict.Deny, nestedDecision.Decision.Verdict);
+        // Outside the run the same call follows the live preset: allowed (it does not protect "web"), unless the
+        // kill switch is on.
+        var alone = await gateway.ExecuteAsync(nested, (_, _) => Task.FromResult(1));
+        Assert.Equal(killSwitch ? MutationStatus.Denied : MutationStatus.Executed, alone.Status);
+        Assert.Equal("Live", decisions.Records.Last().Policy.Preset);
+    }
+
     // ---- Helpers -----------------------------------------------------------
 
     private static NotificationEvent Event() => new()
