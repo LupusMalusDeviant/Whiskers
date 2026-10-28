@@ -146,6 +146,18 @@ public sealed class TriggerAuthorityTests : IDisposable
     }
 
     [Fact]
+    public async Task The_store_drops_capabilities_a_trigger_can_never_be_granted()
+    {
+        var store = new AiTriggerStore(Path.Combine(_dir, "ai-triggers.json"));
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add("hetzner.snapshot_delete");
+
+        await store.SaveAsync([trigger], Editor("admin@example.com"));
+
+        Assert.DoesNotContain("hetzner.snapshot_delete", store.Triggers[0].WriteCapabilities);
+    }
+
+    [Fact]
     public async Task A_trigger_saved_before_owners_were_recorded_is_taken_over_only_when_an_admin_switches_it_on()
     {
         var path = Path.Combine(_dir, "ai-triggers.json");
@@ -343,7 +355,8 @@ public sealed class TriggerAuthorityTests : IDisposable
                 new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }))),
             triggers: Authority(new MemoryTriggers(trigger), new Owners()));
         var args = new Dictionary<string, JsonElement> { ["networkId"] = JsonSerializer.SerializeToElement("safe-net") };
-        if (operation != "remove") args["containerId"] = JsonSerializer.SerializeToElement(operation == "connect" ? "net-1" : "db");
+        // A removal carrying a stray containerId must still be checked against every attached container.
+        args["containerId"] = JsonSerializer.SerializeToElement(operation == "connect" ? "net-1" : operation == "remove" ? "net-1" : "db");
         var request = AgentCall(capability, "x") with { Target = MutationTargets.FromArguments(capability, args), Arguments = args };
 
         var ran = false;
@@ -354,6 +367,26 @@ public sealed class TriggerAuthorityTests : IDisposable
         var expectRun = grant == "net-1" && operation == "connect";
         Assert.Equal(expectRun, ran);
         Assert.Equal(expectRun ? MutationStatus.Executed : MutationStatus.Denied, outcome.Status);
+    }
+
+    [Fact]
+    public async Task A_snapshot_deletion_is_never_granted_to_a_trigger()
+    {
+        var delete = new CapabilityCatalog().Find("hetzner.snapshot_delete")!;
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add(delete.Id);
+        trigger.WriteTargets.Add("*");
+        var request = AgentCall(delete, "srv1") with
+        {
+            Target = new MutationTarget("cloud-server", "srv1", "srv1", "srv1") { Resolved = true },
+        };
+
+        var ran = false;
+        var outcome = await Gateway(new MemoryTriggers(trigger), new Owners())
+            .ExecuteAsync(request, (_, _) => { ran = true; return Task.FromResult(1); });
+
+        Assert.False(ran);
+        Assert.Equal(MutationReasonCodes.TriggerNotAllowed, outcome.ReasonCode);
     }
 
     [Theory]

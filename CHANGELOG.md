@@ -14,7 +14,8 @@ All notable changes to Whiskers are documented here. The format follows
   touches, such as the containers a network removal cuts off — against the grant and the owner's current authority:
   anything outside the grant is refused. Targets are matched on what Whiskers resolved (an id, or a name from its
   inventory), never on a name the call supplied, and a touched resource counts as granted by any one of its names
-  or ids. **Every trigger now has an owner** (the Admin who created it, changed its
+  or ids. Deleting a Hetzner snapshot can no longer be granted to a trigger at all (the grant could not bound which
+  snapshot); a saved grant for it is dropped. **Every trigger now has an owner** (the Admin who created it, changed its
   grant or switched it on again), re-checked before each run; an owner who lost the right (demoted below a granted
   capability, removed from the whitelist, account deleted) suspends the trigger and notifies the Admins
   (`automation_suspended`); switching it on again makes the Admin who does it the owner. Every Confirm of a trigger

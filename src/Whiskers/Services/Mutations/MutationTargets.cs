@@ -254,16 +254,19 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Refuse($"Ambiguous network '{target.Id}' — matches {matches.Count} networks; use the full id.", target.Id);
         var network = matches[0];
 
-        // What the operation also touches: for connect / disconnect the container named in the call, resolved on
-        // the same server; otherwise (removal) every attached container, which the removal cuts off.
+        // What the operation also touches, decided by the capability, never by which arguments the call happens to
+        // carry: for connect / disconnect the container named in the call, resolved on the same server; for anything
+        // else (removal) every attached container, which the removal cuts off.
         var related = new List<string>();
         var resources = new List<IReadOnlyList<string>>();
         string? relatedContainerId = null;
-        if (MutationTargets.String(request.Arguments, "containerId") is not { } containerArg)
+        if (!ContainerScoped.Contains(capability.Id))
         {
             related.AddRange(network.Containers.SelectMany(c => new[] { c.ContainerId, c.Name }));
             resources.AddRange(network.Containers.Select(c => Aliases(c.ContainerId, c.Name)));
         }
+        else if (MutationTargets.String(request.Arguments, "containerId") is not { } containerArg)
+            return Refuse("Container ID or name is required.");
         else
         {
             var containers = await docker.ListContainersAsync(all: true, serverId: server.Id, ct);
@@ -282,6 +285,12 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             RelatedContainerId = relatedContainerId,
         });
     }
+
+    /// <summary>Network capabilities that act on one container named in the call.</summary>
+    private static readonly HashSet<string> ContainerScoped = new(StringComparer.Ordinal)
+    {
+        "network.connect", "network.disconnect",
+    };
 
     private TargetResolution CloudServer(MutationTarget target)
     {

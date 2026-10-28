@@ -82,6 +82,8 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         // PC-D7: only what an Admin listed. Anything else would need a confirmation, which an unattended run cannot get.
         if (!trigger.WriteCapabilities.Contains(capability.Id, StringComparer.Ordinal))
             return $"'{capability.McpTool ?? capability.Id}' is not among the capabilities granted to the AI trigger";
+        if (NotGrantable.Contains(capability.Id))
+            return $"'{capability.McpTool ?? capability.Id}' cannot be granted to an AI trigger: what it acts on is not its resolved target";
         // Only canonical identities count: the resolved id, and the name where the resolver took it from the inventory.
         // A name the caller typed (a DNS record name, a compose project name) never stands in for the target.
         var own = Identities(target);
@@ -107,6 +109,14 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
             : OwnerLacks(owner, capability);
         return lost is null ? null : await SuspendAsync(trigger, lost);
     }
+
+    /// <summary>Capabilities an AI trigger can never be granted: the object they change is a further argument the
+    /// resolver does not check (a snapshot deletion targets the cloud server that selects the account, while the
+    /// snapshot is any id in that account), so a target grant would not bound what they change.</summary>
+    internal static readonly IReadOnlySet<string> NotGrantable = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "hetzner.snapshot_delete",
+    };
 
     /// <summary>Kinds whose resolved <see cref="MutationTarget.Name"/> comes from the inventory, not from the call.</summary>
     private static readonly HashSet<string> InventoryNamed = new(StringComparer.Ordinal)

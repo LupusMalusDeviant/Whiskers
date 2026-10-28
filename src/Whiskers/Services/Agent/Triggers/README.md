@@ -23,7 +23,9 @@ the name of something being created), including every resource the operation als
 the container it connects or disconnects, the containers a compose plan recreates — each needing a granted id or name
 of its own, whatever names it shares with the target), and the owner's
 current authority: anything outside the grant is refused (`TriggerNotAllowed`), a
-lost authority suspends the trigger. The gateway refuses every Confirm of the run and of anything nested in it
+lost authority suspends the trigger. Capabilities whose changed object the resolver does not check
+(`AiTriggerAuthority.NotGrantable`: `hetzner.snapshot_delete`, whose target is only the server that selects the
+account) can never be granted: the store drops them, the page does not offer them and the check refuses them. The gateway refuses every Confirm of the run and of anything nested in it
 instead of raising an approval (`UnattendedConfirm`), and every audit row of the run carries `trigger:<id>`.
 
 **Untrusted event text (INV-27).** The run's first message carries the event — names, image, server, log line — as

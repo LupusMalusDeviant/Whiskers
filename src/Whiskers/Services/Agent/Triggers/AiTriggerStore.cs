@@ -79,6 +79,7 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
             foreach (var incoming in triggers)
             {
                 var t = Normalized(incoming);
+                t.WriteCapabilities.RemoveAll(AiTriggerAuthority.NotGrantable.Contains);
                 previous.TryGetValue(t.Id, out var prev);
                 t.OwnerId = prev?.OwnerId;
                 t.SuspendedReason = prev?.SuspendedReason;
