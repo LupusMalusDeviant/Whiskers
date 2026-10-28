@@ -87,15 +87,14 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         var own = Identities(target);
         if (!own.Any(i => Granted(trigger, i)))
             return $"{target.Kind} '{target.Name ?? target.Id}' is not among the targets granted to the AI trigger";
-        // Every resource the operation also touches (the containers a network removal cuts off, the container it
-        // connects, a workload's pod) must be granted too, by one of its names or ids: a grant on a network is not
-        // one on what hangs off it.
-        var resources = target.RelatedResources.Count > 0
+        // Every other resource the operation also touches (the containers a network removal cuts off, the container
+        // it connects, the containers a compose plan recreates) must be granted too, by one of its own names or ids —
+        // whatever names it shares with the target: a grant on a network is not one on what hangs off it. A resolved
+        // target lists them per resource; for any other, every related value counts as a resource of its own.
+        var resources = target.Resolved
             ? target.RelatedResources
             : target.Related.Select(r => (IReadOnlyList<string>)[r]).ToList();
-        // Only the target itself (its group holds its resolved id) is skipped; any other resource needs a granted alias
-        // of its own, even when it shares a name with the target.
-        if (resources.FirstOrDefault(g => !g.Contains(target.Id) && !g.Any(a => Granted(trigger, a))) is { } outside)
+        if (resources.FirstOrDefault(g => !g.Any(a => Granted(trigger, a))) is { } outside)
             return $"the operation also touches '{string.Join(" / ", outside)}', which is not among the targets granted to the AI trigger";
 
         // PC-D6: the owner's authority as it is now, for this capability at its effective level.
@@ -123,9 +122,7 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         if (!string.IsNullOrEmpty(target.Id)) ids.Add(target.Id);
         if (!target.Resolved) return ids;
         if (InventoryNamed.Contains(target.Kind) && !string.IsNullOrEmpty(target.Name)) ids.Add(target.Name);
-        // The resolver's own alias group for the target (a Git app's stored name, a workload's pod name).
-        foreach (var group in target.RelatedResources)
-            if (group.Contains(target.Id)) ids.UnionWith(group);
+        ids.UnionWith(target.Aliases.Where(a => a.Length > 0));      // the inventory's other names for the target
         return ids;
     }
 

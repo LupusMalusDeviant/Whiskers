@@ -203,7 +203,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Done(target with
             {
                 Related = target.Related.Concat(made.DecidedIdentities()).Distinct(StringComparer.Ordinal).ToList(),
-                RelatedResources = Group(target).Concat(made.DecidedResources()).ToList(),
+                RelatedResources = target.RelatedResources.Concat(made.DecidedResources()).ToList(),
             });
         }
         catch (ComposePlanException ex)
@@ -354,7 +354,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = pod.Id, Name = controller, ServerId = server.Id,
             Related = new[] { pod.Id, pod.Name }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
-            RelatedResources = [Aliases(pod.Id, pod.Name)],
+            Aliases = Aliases(pod.Name),
         });
     }
 
@@ -377,7 +377,6 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
                     ? Done(target with
                     {
                         Id = c.Id, Name = c.Name, ServerId = c.ServerId, Related = [c.Id, c.Name!],
-                        RelatedResources = [Aliases(c.Id, c.Name)],
                     })
                     : resolved;
             }
@@ -409,8 +408,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = app.Id, Name = capability.Id == "gitdeploy.save" ? target.Name ?? app.Name : app.Name,
             ServerId = server.Id, Related = [app.Name, app.RepoUrl],
-            // The repository is the app's own source, not another resource it acts on.
-            RelatedResources = [Aliases(app.Id, app.Name, app.RepoUrl)],
+            // The stored name and the repository are the app's own, not another resource it acts on.
+            Aliases = Aliases(app.Name, app.RepoUrl),
         });
     }
 
@@ -442,8 +441,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = webhook.WebhookId, Name = webhook.Name, ServerId = server?.Id ?? serverId,
             Related = new[] { webhook.Name, webhook.TargetId }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
-            RelatedResources = new[] { Aliases(webhook.WebhookId, webhook.Name), Aliases(webhook.TargetId) }
-                .Where(g => g.Count > 0).ToList(),
+            Aliases = Aliases(webhook.Name),
+            RelatedResources = new[] { Aliases(webhook.TargetId) }.Where(g => g.Count > 0).ToList(),
         });
     }
 
@@ -483,9 +482,6 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     private static IReadOnlyList<string> Aliases(params string?[] aliases) =>
         aliases.Where(a => !string.IsNullOrEmpty(a)).Select(a => a!).Distinct(StringComparer.Ordinal).ToList();
 
-    /// <summary>The resources a target already lists, grouped (or each entry on its own when it was not).</summary>
-    private static IEnumerable<IReadOnlyList<string>> Group(MutationTarget target) =>
-        target.RelatedResources.Count > 0 ? target.RelatedResources : target.Related.Select(r => Aliases(r));
     private static TargetResolution Pass(MutationTarget target) => new(target, null);
     /// <summary>A refusal with its reason code: unknown or ambiguous <paramref name="named"/> where the message says
     /// so, otherwise the English detail as the argument of <see cref="MutationReasonCodes.TargetNotResolved"/>.</summary>

@@ -67,10 +67,14 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// <summary>For a network connect / disconnect: the resolved id of the container named in the call.</summary>
     public string? RelatedContainerId { get; init; }
 
-    /// <summary><see cref="Related"/> per resource (R1-13): each entry holds the aliases of one resource the
-    /// operation also touches (a container's id and name), as the resolver found them. Empty when the resolver did
-    /// not group them; then every entry of <see cref="Related"/> counts as a resource of its own.</summary>
+    /// <summary>The other resources the operation also touches (R1-13), one entry per resource with its aliases (a
+    /// container's id and name) as the resolver found them in the inventory. Never the target itself: its own
+    /// aliases are <see cref="Aliases"/>. Set by the resolver for every <see cref="Resolved"/> target.</summary>
     public IReadOnlyList<IReadOnlyList<string>> RelatedResources { get; init; } = Array.Empty<IReadOnlyList<string>>();
+
+    /// <summary>Further names of the target itself from the inventory (R1-13): a workload's pod name, a Git app's
+    /// stored name and repository. Never a name the caller supplied.</summary>
+    public IReadOnlyList<string> Aliases { get; init; } = Array.Empty<string>();
 
     /// <summary>The resolver found the target in the inventory and <see cref="Id"/> is canonical. False for a
     /// target that is created by the operation or whose kind is resolved by its own service.</summary>

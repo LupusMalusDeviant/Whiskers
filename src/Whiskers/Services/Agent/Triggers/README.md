@@ -19,8 +19,9 @@ admin. As the gateway's `ITriggerAuthority` it then checks **every** mutation ma
 scheduled task the trigger runs) — against the current grant, matched only on canonical identities (the resolved id,
 and the name only where the resolver took it from the inventory: never a DNS record name, a compose project name or
 the name of something being created), including every resource the operation also touches
-(`MutationTarget.RelatedResources`, one alias group per resource — the containers a network removal cuts off, the
-container it connects or disconnects, a workload's pod — of which one id or name must be granted), and the owner's
+(`MutationTarget.RelatedResources`, one alias group per other resource — the containers a network removal cuts off,
+the container it connects or disconnects, the containers a compose plan recreates — each needing a granted id or name
+of its own, whatever names it shares with the target), and the owner's
 current authority: anything outside the grant is refused (`TriggerNotAllowed`), a
 lost authority suspends the trigger. The gateway refuses every Confirm of the run and of anything nested in it
 instead of raising an approval (`UnattendedConfirm`), and every audit row of the run carries `trigger:<id>`.

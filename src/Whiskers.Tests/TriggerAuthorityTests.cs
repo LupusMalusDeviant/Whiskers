@@ -287,20 +287,24 @@ public sealed class TriggerAuthorityTests : IDisposable
         Assert.Equal(MutationStatus.Executed, granted.Status);
     }
 
-    [Fact]
-    public async Task A_related_resource_sharing_a_name_with_the_target_still_needs_its_own_grant()
+    [Theory]
+    [InlineData("net-1", "web")]     // network granted by id; the container is called like the network
+    [InlineData("web", "net-1")]     // network granted by name; the container is called like the network's id
+    public async Task A_related_resource_sharing_a_name_with_the_target_still_needs_its_own_grant(string grant,
+        string containerName)
     {
-        // The network "web" is granted by its id only; the container it would cut off is also called "web".
+        // The network (id "net-1", name "web") is granted by one of its names; the container it would cut off
+        // carries the other one as its own name.
         var disconnect = new CapabilityCatalog().Find("network.disconnect")!;
         var trigger = Granted();
         trigger.WriteCapabilities.Add(disconnect.Id);
         trigger.WriteTargets.Clear();
-        trigger.WriteTargets.Add("net-1");
+        trigger.WriteTargets.Add(grant);
         var request = AgentCall(disconnect, "web") with
         {
             Target = new MutationTarget("network", "net-1", "web", "srv1")
             {
-                Related = ["cid-db", "web"], RelatedResources = [["cid-db", "web"]], Resolved = true,
+                Related = ["cid-db", containerName], RelatedResources = [["cid-db", containerName]], Resolved = true,
             },
         };
 
@@ -308,6 +312,48 @@ public sealed class TriggerAuthorityTests : IDisposable
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Contains("also touches", outcome.Reason);
+    }
+
+    [Theory]
+    [InlineData("net-1", "disconnect")]   // network granted by id; the container is named like the network
+    [InlineData("safe-net", "disconnect")]
+    [InlineData("net-1", "connect")]
+    [InlineData("safe-net", "connect")]
+    [InlineData("net-1", "remove")]       // removal cuts off every attached container
+    public async Task Network_operations_through_the_real_resolver_need_a_grant_for_the_container(string grant, string operation)
+    {
+        // Network "safe-net" (id "net-1"). Its attached container "db" (id "cid-db") has nothing granted, and the
+        // container "net-1" (id "cid-x") is named after the network's id.
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "cid-db", Name = "db", ServerId = "local" },
+            new ContainerInfo { Id = "cid-x", Name = "net-1", ServerId = "local" });
+        docker.Networks.Add(new NetworkInfo
+        {
+            Id = "net-1", Name = "safe-net", ServerId = "local",
+            Containers = [new NetworkContainer { ContainerId = "cid-db", Name = "db" }],
+        });
+        var capability = new CapabilityCatalog().Find("network." + operation)!;
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add(capability.Id);
+        trigger.WriteTargets.Clear();
+        trigger.WriteTargets.Add(grant);
+        var gateway = new MutationGateway(new CapabilityCatalog(), new AllowAll(), new Audit(), [],
+            NullLogger<MutationGateway>.Instance,
+            targets: new MutationTargetResolver(new TestServices(docker,
+                new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }))),
+            triggers: Authority(new MemoryTriggers(trigger), new Owners()));
+        var args = new Dictionary<string, JsonElement> { ["networkId"] = JsonSerializer.SerializeToElement("safe-net") };
+        if (operation != "remove") args["containerId"] = JsonSerializer.SerializeToElement(operation == "connect" ? "net-1" : "db");
+        var request = AgentCall(capability, "x") with { Target = MutationTargets.FromArguments(capability, args), Arguments = args };
+
+        var ran = false;
+        var outcome = await gateway.ExecuteAsync(request, (_, _) => { ran = true; return Task.FromResult(1); });
+
+        // "net-1" is granted as a name only when the grant is "net-1" itself: then connecting the container named
+        // "net-1" is what was granted. Everything else touches an ungranted container.
+        var expectRun = grant == "net-1" && operation == "connect";
+        Assert.Equal(expectRun, ran);
+        Assert.Equal(expectRun ? MutationStatus.Executed : MutationStatus.Denied, outcome.Status);
     }
 
     [Theory]
