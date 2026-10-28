@@ -267,13 +267,19 @@ public sealed class PolicyDecisionRecordTests : IDisposable
         Assert.Equal(12, Decisions().Count);
     }
 
-    [Fact]
-    public async Task The_audit_outcome_keeps_the_decision_id_and_stays_valid_json_with_a_long_reason()
+    [Theory]
+    [InlineData("plain")]
+    [InlineData("escaped")]
+    public async Task The_audit_outcome_keeps_the_decision_id_and_stays_valid_json_with_a_long_reason(string kind)
     {
         var audit = new AuditLogMutationSink(_sp.GetRequiredService<IServiceScopeFactory>());
         var gateway = Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), audit);
 
-        var outcome = await gateway.ExecuteAsync<int>(Request(), (_, _) => throw new InvalidOperationException(new string('x', 9000)));
+        // Varied text the redactor does not collapse; "escaped" serializes to several characters per character.
+        var reason = string.Concat(Enumerable.Range(0, 3000).Select(i => kind == "escaped"
+            ? (i % 3 == 0 ? "\u0001" : i % 3 == 1 ? "<" : "&")
+            : (i % 7).ToString() + " "));
+        var outcome = await gateway.ExecuteAsync<int>(Request(), (_, _) => throw new InvalidOperationException(reason));
 
         Assert.Equal(MutationStatus.Failed, outcome.Status);
         using var scope = _sp.CreateScope();
@@ -281,7 +287,7 @@ public sealed class PolicyDecisionRecordTests : IDisposable
         using var json = JsonDocument.Parse(row.Details!);   // valid JSON
         Assert.Equal(outcome.DecisionId, json.RootElement.GetProperty("decisionId").GetString());
         Assert.Equal(outcome.DecisionId, json.RootElement.GetProperty("intent").GetProperty("decisionId").GetString());
-        Assert.True(row.Details!.Length <= 4001);
+        Assert.True(row.Details!.Length <= 4000);
     }
 
     [Fact]

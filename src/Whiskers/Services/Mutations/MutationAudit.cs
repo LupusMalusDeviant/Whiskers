@@ -69,26 +69,23 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
                      ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
         entity.Success = status == MutationStatus.Executed && verification != VerificationStatus.Failed;
         var intent = ParseOrRaw(entity.Details);
-        // INV-22: the decision id is kept at the top of the outcome, before any variable-length text, and the row stays
-        // valid JSON: a long reason is shortened in its own field, and an intent that no longer fits is kept as text.
-        string Outcome(object? intentValue) => JsonSerializer.Serialize(new
+        var redactedReason = Redact(reason);
+        // INV-22: the decision id is kept at the top of the outcome and the row stays valid JSON: the variable-length
+        // fields shrink until the serialized document fits (escaping can make it far longer than its text) — the
+        // reason first, then the intent (kept as text), at last both dropped.
+        string Outcome(int budget, object? intentValue) => JsonSerializer.Serialize(new
         {
             operationId,
             decisionId = DecisionIdOf(intent),
             phase = "outcome",
             status = status.ToString(),
             verification = verification.ToString(),
-            reason = Field(Redact(reason), MaxReasonChars),
+            reason = Field(redactedReason, budget),
             durationMs = (long)duration.TotalMilliseconds,
             intent = intentValue,
         });
-        var details = Outcome(intent);
-        if (details.Length > MaxDetailChars)
-        {
-            var room = Math.Max(0, entity.Details!.Length - (details.Length - MaxDetailChars) - 64);
-            details = Outcome(Field(entity.Details, room));
-        }
-        entity.Details = Cap(details);
+        entity.Details = TryFit(budget => Outcome(budget, intent))
+                         ?? Fit(budget => Outcome(budget, Field(entity.Details, budget)));
         await db.SaveChangesAsync(ct);
     }
 
@@ -122,7 +119,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     };
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,
-        string? verification, string? reason, long? durationMs, ApprovalGateResult? approval = null) => Cap(JsonSerializer.Serialize(new
+        string? verification, string? reason, long? durationMs, ApprovalGateResult? approval = null) => Fit(budget => JsonSerializer.Serialize(new
     {
         operationId,
         // INV-22: the recorded policy decision this row is about (null when refused before the policy step).
@@ -131,7 +128,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         status,
         verification,
         // A rule's reason can quote the argument it matched (e.g. a protected name inside SQL text).
-        reason = Field(Redact(WithoutPayloadValues(reason, request.Arguments)), MaxReasonChars),
+        reason = Field(Redact(WithoutPayloadValues(reason, request.Arguments)), budget),
         durationMs,
         approval = approval is null ? null : new { id = approval.ApprovalId, approvedBy = approval.ApprovedBy },
         principal = new
@@ -145,7 +142,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             delegatedBy = request.Principal.DelegatedBy,
         },
         sessionId = request.SessionId,
-        arguments = Field(Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))), MaxArgumentChars),
+        arguments = Field(Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
+            budget >= MaxReasonChars ? MaxArgumentChars : budget),
     }));
 
     private static string? Redact(string? text) => text is null ? null : SecretRedactor.Redact(text);
@@ -177,8 +175,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             ? (object?)$"<withheld: {(a.Value.ValueKind == JsonValueKind.String ? a.Value.GetString()!.Length : a.Value.GetRawText().Length)} chars>"
             : a.Value);
 
-    // The intent is nested as JSON so the outcome row stays one readable document; a capped (truncated) intent
-    // is no longer valid JSON and is kept as text instead.
+    // The intent is nested as JSON so the outcome row stays one readable document; an intent that is not valid JSON
+    // (a row written before R1-12 could be cut off) is kept as text instead.
     private static object? ParseOrRaw(string? json)
     {
         if (json is null) return null;
@@ -186,13 +184,26 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         catch (JsonException) { return json; }
     }
 
-    /// <summary>Shortens one text field, so the document around it stays valid JSON.</summary>
+    /// <summary>Shortens one text field, so the document around it stays valid JSON. A negative budget drops it.</summary>
     private static string? Field(string? text, int max) =>
-        text is null || text.Length <= max ? text : text[..Math.Max(0, max - 1)] + "…";
+        text is null || max < 0 ? null : text.Length <= max ? text : text[..Math.Max(0, max - 1)] + "…";
+
+    /// <summary>Builds the details with a shrinking budget for their variable-length fields until the serialized
+    /// document fits <see cref="MaxDetailChars"/> — always complete JSON, never a cut-off document.</summary>
+    private static string Fit(Func<int, string> build) => TryFit(build) ?? build(-1);
+
+    private static string? TryFit(Func<int, string> build)
+    {
+        for (var budget = MaxReasonChars; budget > 0; budget /= 2)
+        {
+            var json = build(budget);
+            if (json.Length <= MaxDetailChars) return json;
+        }
+        return null;
+    }
 
     private static string? DecisionIdOf(object? intent) =>
         intent is JsonElement { ValueKind: JsonValueKind.Object } e && e.TryGetProperty("decisionId", out var id)
             && id.ValueKind == JsonValueKind.String ? id.GetString() : null;
 
-    private static string Cap(string s) => s.Length > MaxDetailChars ? s[..MaxDetailChars] + "…" : s;
 }

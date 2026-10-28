@@ -205,7 +205,7 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             await audit.LogAsync(PrincipalIds.Trigger(t.Id), "trigger", "agent.run", "ai-trigger", t.Id, t.Name,
                 details: $"{evt.EventType} @ {evt.ContainerName}: not run — {reason}", success: false);
         }
-        catch (Exception ex) { _logger?.LogWarning(ex, "AI-Trigger Audit fehlgeschlagen."); }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Audit of the refused AI trigger run failed."); }
     }
 
     private async Task TryNotifyAsync(AiTrigger t, NotificationEvent evt, string summary)
