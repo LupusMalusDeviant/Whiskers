@@ -35,6 +35,24 @@ public static class SqliteToPostgresMigrator
             (ctx, ct) => set(ctx).AnyAsync(ct),
             (src, dst, ct) => CopyAsync(set(src), dst, resetId, ct));
 
+    /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
+    /// exactly one of these sets — the tables of every release after its own (R1-12: the decision tables).</summary>
+    internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
+    [
+        new(StringComparer.Ordinal) { "PolicyDecisions", "PolicySnapshots" },
+    ];
+
+    /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
+    private static async Task<bool> SourceHasTableAsync(MetricsDbContext source, Table table, CancellationToken ct)
+    {
+        if (!source.Database.IsSqlite()) return true;
+        var name = source.Model.FindEntityType(table.EntityType)?.GetTableName() ?? table.Name;
+        var count = await source.Database
+            .SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM sqlite_master WHERE type = 'table' AND name = {name}")
+            .SingleAsync(ct);
+        return count > 0;
+    }
+
     /// <summary>Every metrics table. No foreign keys between them, so any order is safe.</summary>
     internal static readonly IReadOnlyList<Table> MetricsTables =
     [
@@ -56,6 +74,9 @@ public static class SqliteToPostgresMigrator
         T("Notifications",     c => c.Notifications,     e => e.Id = 0),
         T("SelfMetricSamples", c => c.SelfMetricSamples, e => e.Id = 0),
         T("ActionOutcomes",    c => c.ActionOutcomes,    e => e.Id = 0),
+        // R1-12: string keys that approvals and audit rows name — copied as they are.
+        T("PolicySnapshots",   c => c.PolicySnapshots,   _ => { }),
+        T("PolicyDecisions",   c => c.PolicyDecisions,   _ => { }),
     ];
 
     /// <summary>CLI entry point: builds the SQLite source + PostgreSQL target contexts, migrates the target
@@ -135,9 +156,32 @@ public static class SqliteToPostgresMigrator
             return 3;
         }
 
+        // The source schema is checked before anything is copied: a missing table would otherwise fail half-way,
+        // after earlier tables committed. Only a known older release may lack tables, and only all of a release's
+        // tables together (R1-12 added PolicyDecisions and PolicySnapshots); anything else is not a Whiskers
+        // database this tool understands (a wrong path, a damaged file).
+        var missing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var table in MetricsTables)
+            if (!await SourceHasTableAsync(source, table, ct)) missing.Add(table.Name);
+        if (missing.Count > 0 && !OlderReleaseTables.Any(set => set.SetEquals(missing)))
+        {
+            await log.WriteLineAsync($"ABORT: the source is not a complete Whiskers database (missing: " +
+                $"{string.Join(", ", missing.Order(StringComparer.Ordinal))}). Check the path, or start the current " +
+                "Whiskers on it once so it migrates its schema, then run this tool again. Nothing was copied.");
+            return 4;
+        }
+
         var report = new List<(string Table, int Rows)>();
         foreach (var table in MetricsTables)
+        {
+            if (missing.Contains(table.Name))
+            {
+                await log.WriteLineAsync($"Note: the source has no '{table.Name}' table (older release) — nothing to copy.");
+                report.Add((table.Name, 0));
+                continue;
+            }
             report.Add((table.Name, await table.CopyAsync(source, target, ct)));
+        }
 
         if (copyIdentity)
         {

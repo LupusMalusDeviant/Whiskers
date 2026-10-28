@@ -276,6 +276,118 @@ namespace Whiskers.Migrations
                     b.ToTable("McpToolCalls");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.PolicyDecisionEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CapabilityId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CredentialId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InputHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MatchedRules")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OnBehalfOfId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PolicyVersion")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Preset")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrincipalId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrincipalKind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequiredLevel")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Surface")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetKind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetRelated")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetServerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("PolicyVersion");
+
+                    b.HasIndex("Timestamp");
+
+                    b.HasIndex("PrincipalId", "Timestamp");
+
+                    b.ToTable("PolicyDecisions");
+                });
+
+            modelBuilder.Entity("Whiskers.Models.PolicySnapshotEntity", b =>
+                {
+                    b.Property<string>("VersionHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PolicyJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Preset")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("VersionHash");
+
+                    b.ToTable("PolicySnapshots");
+                });
+
             modelBuilder.Entity("Whiskers.Models.ScheduledTaskEntity", b =>
                 {
                     b.Property<long>("Id")

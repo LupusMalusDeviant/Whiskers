@@ -7,8 +7,13 @@ namespace Whiskers.Services.Mutations;
 
 public enum MutationVerdict { Allow, Confirm, Deny }
 
-/// <summary>The policy step's answer for one request. WP4 persists it as a decision record (INV-22).</summary>
-public sealed record MutationPolicyDecision(MutationVerdict Verdict, string Reason, IReadOnlyList<string> MatchedRules);
+/// <summary>The policy step's answer for one request. The gateway persists it as a decision record (INV-22, R1-12)
+/// together with <see cref="Policy"/>, the exact policy it was made under.</summary>
+public sealed record MutationPolicyDecision(MutationVerdict Verdict, string Reason, IReadOnlyList<string> MatchedRules)
+{
+    /// <summary>The policy version and preset that produced the verdict; null when no policy could be consulted.</summary>
+    public PolicySnapshot? Policy { get; init; }
+}
 
 /// <summary>Step 3 of the gateway pipeline: may this principal perform this capability on this target now?</summary>
 public interface IMutationPolicy
@@ -49,7 +54,8 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             return new MutationPolicyDecision(MutationVerdict.Deny,
                 "No policy engine is registered; the mutation was refused.", []);
 
-        var policy = _store.Current;
+        // INV-23: a pinned run keeps its preset (with the global kill switch); everything else the live active one.
+        var (preset, policy) = EffectivePolicy.Of(request.PinnedPolicy, _store);
         var person = request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human;
         // A fail-closed store (unreadable guardrails.json) has no exception: its policy has the kill switch on and
         // refuses every write, a save of the guardrails included. It is repaired on the host (user decision, R1-11).
@@ -74,10 +80,14 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         // action into one the user authorised by hand. An owned item whose provenance was never recorded (created
         // before R1-03) may have come from an agent, so it gets the agent's rules too until an admin takes it over,
         // which records the admin as its provenance. An item without an owner keeps the grace rules.
-        var engine = (request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
-                     || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation
-                         && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human
-                         && !CreatedByAgent(request.Principal))
+        // A pinned run is an AI trigger's (R1-12): whatever it sets off — a scheduled task a person created included —
+        // keeps the agent's rules of the pinned preset (tool lists, forbidden arguments, confirmation), so running a
+        // task is not a way around them.
+        var engine = request.PinnedPolicy is null
+                     && ((request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
+                         || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation
+                             && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human
+                             && !CreatedByAgent(request.Principal)))
             ? HumanEngine
             : _engine;
         var decision = engine.Evaluate(new GuardrailRequest(
@@ -89,7 +99,10 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             GuardrailVerdict.Confirm => MutationVerdict.Confirm,
             _ => MutationVerdict.Deny,
         };
-        return new MutationPolicyDecision(verdict, decision.Reason, decision.MatchedRuleIds);
+        return new MutationPolicyDecision(verdict, decision.Reason, decision.MatchedRuleIds)
+        {
+            Policy = PolicySnapshot.Of(preset, policy),
+        };
     }
 
     private static bool CreatedByAgent(MutationPrincipal principal) =>

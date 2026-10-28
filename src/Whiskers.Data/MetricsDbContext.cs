@@ -85,6 +85,12 @@ public class MetricsDbContext : DbContext
     /// <summary>Automatic actions and whether they actually achieved anything (Plan-0006 WP2).</summary>
     public DbSet<ActionOutcomeEntity> ActionOutcomes => Set<ActionOutcomeEntity>();
 
+    /// <summary>Every policy decision of the Mutation Gateway, written before the mutation runs (INV-22, R1-12).</summary>
+    public DbSet<PolicyDecisionEntity> PolicyDecisions => Set<PolicyDecisionEntity>();
+
+    /// <summary>Immutable policy versions the decisions were made under, keyed by content hash (R1-12).</summary>
+    public DbSet<PolicySnapshotEntity> PolicySnapshots => Set<PolicySnapshotEntity>();
+
     public MetricsDbContext(DbContextOptions<MetricsDbContext> options) : base(options) { }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -191,6 +197,20 @@ public class MetricsDbContext : DbContext
             // every update/recreate — but that upsert runs at most once per check interval, so a plain scan is
             // fine and this index just speeds id-scoped reads.
             e.HasIndex(x => new { x.ContainerId, x.ServerId });
+        });
+
+        modelBuilder.Entity<PolicyDecisionEntity>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Timestamp);
+            e.HasIndex(x => x.OperationId);
+            e.HasIndex(x => new { x.PrincipalId, x.Timestamp });
+            e.HasIndex(x => x.PolicyVersion);
+        });
+
+        modelBuilder.Entity<PolicySnapshotEntity>(e =>
+        {
+            e.HasKey(x => x.VersionHash);
         });
     }
 }

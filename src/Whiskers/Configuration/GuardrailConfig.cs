@@ -51,11 +51,12 @@ public class GuardrailConfig
     public string ActivePreset { get; set; } = "Standard";
     public List<GuardrailPreset> Presets { get; set; } = new();
 
-    /// <summary>The policy of the active preset (falls back to the first preset, then a SafeDefault).</summary>
+    /// <summary>The policy of the active preset. An active preset that does not exist never falls back to another
+    /// preset (R1-12): the result is the fail-closed policy. The store refuses such a configuration anyway.</summary>
     public GuardrailPolicy ActivePolicy()
     {
-        var preset = Presets.FirstOrDefault(p => p.Name == ActivePreset) ?? Presets.FirstOrDefault();
-        return preset?.Policy ?? GuardrailPolicy.SafeDefault();
+        var preset = Presets?.FirstOrDefault(p => p?.Name == ActivePreset);
+        return preset?.Policy ?? GuardrailPolicy.FailClosed();
     }
 
     /// <summary>A deep copy: callers that edit it never change the live configuration. Missing parts stay missing,

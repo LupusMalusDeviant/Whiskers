@@ -22,7 +22,14 @@ public sealed record ApprovalSubject(
     string ActorType,
     IReadOnlyDictionary<string, JsonElement> Arguments,
     string? OperationId = null,
-    string? SessionId = null);
+    string? SessionId = null)
+{
+    /// <summary>The recorded policy decision that asked for the approval (INV-22, R1-12).</summary>
+    public string? DecisionId { get; init; }
+
+    /// <summary>The preset that decision was made under (a trigger's pinned one, or the active one).</summary>
+    public string? Preset { get; init; }
+}
 
 public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
 
@@ -196,9 +203,11 @@ public sealed class ApprovalGate : IApprovalGate
             RiskLevel: ApprovalDisplay.RiskOf(subject.Level),
             TargetServer: server,
             TargetWorkload: workload,
-            GuardrailPreset: _policy?.Config.ActivePreset,
+            // The preset the decision was made under, not whichever is active by now (R1-12).
+            GuardrailPreset: subject.Preset ?? _policy?.Config.ActivePreset,
             GuardrailRule: matchedRules.Count > 0 ? string.Join(", ", matchedRules) : null,
-            ArgumentsHash: argumentsHash),
+            ArgumentsHash: argumentsHash,
+            DecisionId: subject.DecisionId),
             // The decision is read back from the store on the retry; nothing waits on it here.
             _ => Task.CompletedTask);
         return approval;

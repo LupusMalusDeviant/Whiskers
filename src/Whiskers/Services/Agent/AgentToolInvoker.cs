@@ -132,10 +132,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             return Error(call.Id, refused.Reason, refused);
         }
 
-        var request = new MutationRequest(capability.Id, PrincipalOf(context), MutationSurface.Agent,
-            MutationTargets.FromArguments(capability, args), args,
-            // The session's approval for this call carries the same correlation id (ApprovalCoordinator).
-            OperationId: call.CorrelationId, SessionId: context.SessionId);
+        var request = RequestOf(call, capability, args, context);
         // The gateway's token carries the capability deadline and the session's cancellation into the tool.
         // The tool runs on the identity the gateway resolved and decided on (R1-06), not on the raw arguments.
         var outcome = await _gateway.ExecuteAsync(request, (decided, token) =>
@@ -184,6 +181,35 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     }
 
     /// <summary>The agent acts for the user, key or trigger that started it; their rights are its ceiling.</summary>
+    public async Task<GuardrailDecision?> DecideAsync(AgentToolCall call, AgentContext context, CancellationToken ct = default)
+    {
+        if (_gateway is null || !_registry.Tools.TryGetValue(call.Name, out var entry)
+            || _capabilities.FindByMcpTool(entry.Name) is not { } capability)
+            return null;
+        var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
+        var decided = await _gateway.DecideAsync(RequestOf(call, capability, args, context), ct);
+        if (decided is null) return null;
+        var verdict = decided.Refused is MutationStatus.PendingApproval || decided.Verdict == MutationVerdict.Confirm
+            ? GuardrailVerdict.Confirm
+            : decided.Refused is not null || decided.Verdict == MutationVerdict.Deny ? GuardrailVerdict.Deny : GuardrailVerdict.Allow;
+        return new GuardrailDecision(verdict, decided.Reason, decided.MatchedRules)
+        {
+            DecisionId = decided.DecisionId,
+            Preset = decided.Preset,
+        };
+    }
+
+    /// <summary>The gateway request for an agent tool call — the same for deciding and for running it.</summary>
+    private static MutationRequest RequestOf(AgentToolCall call, Capability capability,
+        IReadOnlyDictionary<string, JsonElement> args, AgentContext context) =>
+        new(capability.Id, PrincipalOf(context), MutationSurface.Agent, MutationTargets.FromArguments(capability, args), args,
+            // The session's approval for this call carries the same correlation id (ApprovalCoordinator).
+            OperationId: call.CorrelationId, SessionId: context.SessionId)
+        {
+            // INV-23: a pinned run (an AI trigger's) is decided against its own preset, not the live active one.
+            PinnedPolicy = context.Pinned,
+        };
+
     internal static MutationPrincipal PrincipalOf(AgentContext ctx) =>
         MutationPrincipals.Agent(ctx.Principal, ctx.SessionId);
 

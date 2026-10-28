@@ -99,9 +99,21 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             var agentService = _sp.GetRequiredService<IAgentService>();
             var guardrails = _sp.GetRequiredService<IGuardrailStore>();
 
-            var preset = guardrails.Config.Presets.FirstOrDefault(p => p.Name == t.GuardrailPreset)
-                         ?? guardrails.Config.Presets.FirstOrDefault();
-            var policy = preset?.Policy ?? GuardrailPolicy.SafeDefault();
+            // INV-23 (R1-12): the trigger's preset is fixed for the whole run. A preset that does not exist (renamed or
+            // deleted since the trigger was saved) never falls back to another one: the run does not start.
+            var preset = guardrails.LoadError is null
+                ? guardrails.Config.Presets.FirstOrDefault(p => p.Name == t.GuardrailPreset)
+                : null;
+            if (preset?.Policy is null)
+            {
+                var reason = guardrails.LoadError is null
+                    ? $"guardrail preset '{t.GuardrailPreset}' does not exist"
+                    : "the guardrail configuration cannot be read (fail-closed)";
+                _logger?.LogWarning("AI-Trigger '{Name}' not run: {Reason}.", t.Name, reason);
+                await TryAuditRefusedAsync(t, evt, reason);
+                return;
+            }
+            var pinned = PinnedPolicy.Of(preset.Name, preset.Policy);
 
             // The principal is capped at the trigger's configured ceiling (default write) so the
             // PrincipalCeilingRule constrains an unattended run — never a synthetic admin.
@@ -110,7 +122,8 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             // triggers with the same name stay apart in policy, approvals and audit.
             var principal = new AgentPrincipal(
                 AgentPrincipalKind.Trigger, $"AI trigger '{t.Name}'", level, null, TriggerId: t.Id);
-            var ctx = new AgentContext(Guid.NewGuid().ToString("N"), principal, AgentOrigin.Trigger, policy);
+            var ctx = new AgentContext(Guid.NewGuid().ToString("N"), principal, AgentOrigin.Trigger,
+                pinned.Policy.Clone(), pinned);
 
             var session = await agentService.StartSessionAsync(ctx);
             var sb = new StringBuilder();
@@ -182,6 +195,17 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
                 details: $"{evt.EventType} @ {evt.ContainerName}");
         }
         catch (Exception ex) { _logger?.LogWarning(ex, "AI-Trigger Audit fehlgeschlagen."); }
+    }
+
+    private async Task TryAuditRefusedAsync(AiTrigger t, NotificationEvent evt, string reason)
+    {
+        try
+        {
+            var audit = _sp.GetRequiredService<IAuditLogService>();
+            await audit.LogAsync(PrincipalIds.Trigger(t.Id), "trigger", "agent.run", "ai-trigger", t.Id, t.Name,
+                details: $"{evt.EventType} @ {evt.ContainerName}: not run — {reason}", success: false);
+        }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Audit of the refused AI trigger run failed."); }
     }
 
     private async Task TryNotifyAsync(AiTrigger t, NotificationEvent evt, string summary)

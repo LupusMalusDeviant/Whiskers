@@ -131,6 +131,10 @@ public sealed class AgentSession : IAgentSession
             foreach (var call in calls)
             {
                 var decision = Evaluate(call);
+                // INV-22 (R1-12): a block or an approval request rests on a decision the gateway recorded, so the
+                // approval names it and the block is on record. An allowed call is decided and recorded when it runs.
+                if (decision.Verdict != GuardrailVerdict.Allow)
+                    decision = await RecordedAsync(call, decision, ct);
                 yield return new AgentEvent.ToolProposed(call, decision);
 
                 if (decision.Verdict == GuardrailVerdict.Deny)
@@ -192,10 +196,32 @@ public sealed class AgentSession : IAgentSession
         return new AgentEvent.ToolExecuted(result);
     }
 
-    // The guardrail policy in effect right now: the live store (so a Read-only kill-switch reaches an
-    // already-open session) or — absent a store (pinned-preset trigger runs / tests) — the session context.
-    private GuardrailPolicy LivePolicy => _guardrailStore?.Current ?? _context.Policy;
+    // The guardrail policy in effect right now, as the gateway will decide it: the live active preset (so a switch
+    // or the kill switch reaches an already-open session), or for a pinned run its own preset with the global kill
+    // switch (INV-23). Absent a store (tests) the session context.
+    private GuardrailPolicy LivePolicy => _guardrailStore is null
+        ? _context.Policy
+        : Whiskers.Services.Mutations.EffectivePolicy.Of(_context.Pinned, _guardrailStore).Policy;
     private AgentContext LiveContext => _context with { Policy = LivePolicy };
+
+    /// <summary>The gateway's recorded decision for a call the session is about to block or pause on. It is the one
+    /// authority: what the session pauses or blocks on is exactly the recorded verdict, so an approval or a block
+    /// always names the decision that produced it — an Allow simply runs (and is decided again when it does). A
+    /// gateway that cannot decide (no mutation, test doubles) leaves the session's own verdict.</summary>
+    private async Task<GuardrailDecision> RecordedAsync(AgentToolCall call, GuardrailDecision local, CancellationToken ct)
+    {
+        GuardrailDecision? recorded;
+        try
+        {
+            recorded = await _invoker.DecideAsync(call, LiveContext, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new GuardrailDecision(GuardrailVerdict.Deny, "The call could not be decided; it was not executed.",
+                Array.Empty<string>());
+        }
+        return recorded ?? local;
+    }
 
     private GuardrailDecision Evaluate(AgentToolCall call)
     {

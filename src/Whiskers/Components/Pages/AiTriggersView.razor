@@ -89,7 +89,10 @@
                                       Placeholder="@L["AiTriggersView_NameFilter_Placeholder"]" Margin="Margin.Dense" Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" md="6">
+                        @* R1-12: a trigger whose preset no longer exists does not run (no fallback to another preset). *@
                         <MudSelect T="string" @bind-Value="t.GuardrailPreset" Label="@L["AiTriggersView_Preset_Label"]"
+                                   Error="@(!_presets.Contains(t.GuardrailPreset))"
+                                   ErrorText="@L["AiTriggersView_Preset_Missing", t.GuardrailPreset ?? ""]"
                                    Margin="Margin.Dense" Variant="Variant.Outlined">
                             @foreach (var p in _presets)
                             {

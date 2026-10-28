@@ -88,10 +88,13 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             RiskLevel: ApprovalDisplay.RiskOf(level),
             TargetServer: targetServer,
             TargetWorkload: targetWorkload,
-            GuardrailPreset: _guardrails.Config.ActivePreset,
+            // The preset of the recorded decision that asked (a pinned run's own), else the active one.
+            GuardrailPreset: decision.Preset ?? _guardrails.Config.ActivePreset,
             GuardrailRule: rule,
             // Binds the approval to these exact arguments: the Mutation Gateway runs the call only if they match.
-            ArgumentsHash: ApprovalFingerprint.OfArguments(arguments));
+            ArgumentsHash: ApprovalFingerprint.OfArguments(arguments),
+            // R1-12: the recorded gateway decision that asked for this approval.
+            DecisionId: decision.DecisionId);
 
         // The resolver reaches back to the still-running session that is awaiting the decision.
         var approval = _store.Create(request, approved => session.ResolveConfirmationAsync(call.Id, approved));

@@ -83,7 +83,14 @@ public sealed record MutationRequest(
     MutationTarget Target,
     IReadOnlyDictionary<string, JsonElement> Arguments,
     string? OperationId = null,
-    string? SessionId = null);
+    string? SessionId = null)
+{
+    /// <summary>The preset a run is pinned to (INV-23, an AI trigger's run). Null: the live active preset governs.</summary>
+    public Whiskers.Models.Agent.PinnedPolicy? PinnedPolicy { get; init; }
+
+    /// <summary>Set by the gateway once the policy decision is recorded (INV-22); the audit names it.</summary>
+    public string? DecisionId { get; init; }
+}
 
 public enum MutationStatus
 {
@@ -120,6 +127,9 @@ public sealed record MutationOutcome<T>(
 
     /// <summary>The values the localized text of <see cref="ReasonCode"/> fills in, in order.</summary>
     public IReadOnlyList<string> ReasonArgs { get; init; } = [];
+
+    /// <summary>The recorded policy decision (INV-22), when the call got as far as the policy step.</summary>
+    public string? DecisionId { get; init; }
 }
 
 /// <summary>Refusal codes with a localized text (<c>Mutation_Refused_&lt;code&gt;</c> in the shared resources).</summary>
@@ -140,8 +150,12 @@ public static class MutationReasonCodes
     /// <summary>The target could not be resolved; {0} is the detail (R1-06).</summary>
     public const string TargetNotResolved = "TargetNotResolved";
 
+    /// <summary>The policy decision could not be recorded (INV-22, R1-12).</summary>
+    public const string DecisionNotRecorded = "DecisionNotRecorded";
+
     public static readonly IReadOnlyList<string> All =
-        [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved];
+        [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
+            DecisionNotRecorded];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

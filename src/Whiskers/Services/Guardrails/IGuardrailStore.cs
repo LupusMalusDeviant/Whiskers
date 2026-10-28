@@ -18,6 +18,10 @@ public interface IGuardrailStore
     /// <summary>Why the stored configuration is not enforced and the fail-closed policy is, or <c>null</c>.</summary>
     string? LoadError => null;
 
+    /// <summary>The active preset's name and policy, read together (R1-12): a decision records the preset that
+    /// actually produced it. The default is for test doubles; the store reads both from one state.</summary>
+    (string Preset, GuardrailPolicy Policy) Active => (Config.ActivePreset, Current);
+
     /// <summary>Saves the whole preset config (admin-only). Throws if editor.PermissionLevel != Admin, and
     /// <see cref="GuardrailConfigException"/> for a configuration that cannot be enforced.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("guardrails.save")]

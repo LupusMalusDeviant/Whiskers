@@ -32,7 +32,9 @@ public sealed record ApprovalRequest(
     string? GuardrailRule = null,
     // ADR-0005: hash of exactly the arguments that were shown for approval. The Mutation Gateway runs an approved
     // mutation only when its arguments hash to the same value.
-    string? ArgumentsHash = null);
+    string? ArgumentsHash = null,
+    // R1-12: the recorded policy decision that asked for this approval.
+    string? DecisionId = null);
 
 /// <summary>A pending (or resolved) request for a human to approve/reject a single agent tool call.
 /// Lives in-memory only: resolving it must reach the live <see cref="Services.Agent.IAgentSession"/>
@@ -76,6 +78,11 @@ public sealed class Approval
     /// <summary>Hash of the approved arguments (<c>ApprovalFingerprint.OfArguments</c>); the gateway executes only
     /// a call whose arguments produce the same hash. Null for approvals raised before ADR-0005.</summary>
     public string? ArgumentsHash { get; init; }
+
+    /// <summary>The recorded policy decision (INV-22) that asked for this approval — the gateway's decision when it
+    /// raised the approval, or the one an agent session had the gateway record before it paused (R1-12). The audit
+    /// row of the execution names its own decision and this approval.</summary>
+    public string? DecisionId { get; init; }
 
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;

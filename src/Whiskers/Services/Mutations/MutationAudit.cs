@@ -33,6 +33,8 @@ public interface IMutationAuditSink
 public sealed class AuditLogMutationSink : IMutationAuditSink
 {
     private const int MaxDetailChars = 4000;
+    private const int MaxReasonChars = 1000;
+    private const int MaxArgumentChars = 1500;
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
 
@@ -66,16 +68,24 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         var entity = await db.AuditLog.FindAsync([auditId], ct)
                      ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
         entity.Success = status == MutationStatus.Executed && verification != VerificationStatus.Failed;
-        entity.Details = Cap(JsonSerializer.Serialize(new
+        var intent = ParseOrRaw(entity.Details);
+        var redactedReason = Redact(reason);
+        // INV-22: the decision id is kept at the top of the outcome and the row stays valid JSON: the variable-length
+        // fields shrink until the serialized document fits (escaping can make it far longer than its text) — the
+        // reason first, then the intent (kept as text), at last both dropped.
+        string Outcome(int budget, object? intentValue) => JsonSerializer.Serialize(new
         {
             operationId,
+            decisionId = DecisionIdOf(intent),
             phase = "outcome",
             status = status.ToString(),
             verification = verification.ToString(),
-            reason = Redact(reason),
+            reason = Field(redactedReason, budget),
             durationMs = (long)duration.TotalMilliseconds,
-            intent = ParseOrRaw(entity.Details),
-        }));
+            intent = intentValue,
+        });
+        entity.Details = TryFit(budget => Outcome(budget, intent))
+                         ?? Fit(budget => Outcome(budget, Field(entity.Details, budget)));
         await db.SaveChangesAsync(ct);
     }
 
@@ -109,14 +119,16 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     };
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,
-        string? verification, string? reason, long? durationMs, ApprovalGateResult? approval = null) => Cap(JsonSerializer.Serialize(new
+        string? verification, string? reason, long? durationMs, ApprovalGateResult? approval = null) => Fit(budget => JsonSerializer.Serialize(new
     {
         operationId,
+        // INV-22: the recorded policy decision this row is about (null when refused before the policy step).
+        decisionId = request.DecisionId,
         phase,
         status,
         verification,
         // A rule's reason can quote the argument it matched (e.g. a protected name inside SQL text).
-        reason = Redact(WithoutPayloadValues(reason, request.Arguments)),
+        reason = Field(Redact(WithoutPayloadValues(reason, request.Arguments)), budget),
         durationMs,
         approval = approval is null ? null : new { id = approval.ApprovalId, approvedBy = approval.ApprovedBy },
         principal = new
@@ -130,10 +142,14 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             delegatedBy = request.Principal.DelegatedBy,
         },
         sessionId = request.SessionId,
-        arguments = Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
+        arguments = Field(Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
+            budget >= MaxReasonChars ? MaxArgumentChars : budget),
     }));
 
-    private static string? Redact(string? text) => text is null ? null : SecretRedactor.Redact(text);
+    // URL user info first: a token alone in front of the host (https://<token>@github.com) is no pattern the
+    // redactor knows, and a reason can quote a resolved repository URL.
+    private static string? Redact(string? text) =>
+        text is null ? null : SecretRedactor.Redact(PolicyDecisions.WithoutUrlCredentials(text)!);
 
     /// <summary>Argument names whose value is free text that can carry credentials in any syntax (SQL
     /// <c>PASSWORD '…'</c>, a shell command, a file body). The pattern-based redactor cannot recognise all of them, so
@@ -162,8 +178,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             ? (object?)$"<withheld: {(a.Value.ValueKind == JsonValueKind.String ? a.Value.GetString()!.Length : a.Value.GetRawText().Length)} chars>"
             : a.Value);
 
-    // The intent is nested as JSON so the outcome row stays one readable document; a capped (truncated) intent
-    // is no longer valid JSON and is kept as text instead.
+    // The intent is nested as JSON so the outcome row stays one readable document; an intent that is not valid JSON
+    // (a row written before R1-12 could be cut off) is kept as text instead.
     private static object? ParseOrRaw(string? json)
     {
         if (json is null) return null;
@@ -171,5 +187,26 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         catch (JsonException) { return json; }
     }
 
-    private static string Cap(string s) => s.Length > MaxDetailChars ? s[..MaxDetailChars] + "…" : s;
+    /// <summary>Shortens one text field, so the document around it stays valid JSON. A negative budget drops it.</summary>
+    private static string? Field(string? text, int max) =>
+        text is null || max < 0 ? null : text.Length <= max ? text : text[..Math.Max(0, max - 1)] + "…";
+
+    /// <summary>Builds the details with a shrinking budget for their variable-length fields until the serialized
+    /// document fits <see cref="MaxDetailChars"/> — always complete JSON, never a cut-off document.</summary>
+    private static string Fit(Func<int, string> build) => TryFit(build) ?? build(-1);
+
+    private static string? TryFit(Func<int, string> build)
+    {
+        for (var budget = MaxReasonChars; budget > 0; budget /= 2)
+        {
+            var json = build(budget);
+            if (json.Length <= MaxDetailChars) return json;
+        }
+        return null;
+    }
+
+    private static string? DecisionIdOf(object? intent) =>
+        intent is JsonElement { ValueKind: JsonValueKind.Object } e && e.TryGetProperty("decisionId", out var id)
+            && id.ValueKind == JsonValueKind.String ? id.GetString() : null;
+
 }

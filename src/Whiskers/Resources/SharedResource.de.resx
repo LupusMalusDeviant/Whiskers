@@ -2498,6 +2498,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AiTriggersView_NewTrigger_Button" xml:space="preserve">
     <value>Neuer Trigger</value>
   </data>
+  <data name="AiTriggersView_Preset_Missing" xml:space="preserve">
+    <value>Das Preset '{0}' existiert nicht; dieser Trigger läuft erst wieder, wenn du ein vorhandenes wählst.</value>
+  </data>
   <data name="AiTriggersView_Preset_Label" xml:space="preserve">
     <value>Guardrail-Preset</value>
   </data>
@@ -4849,6 +4852,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Mutation_Refused_TargetAmbiguous" xml:space="preserve">
     <value>„{0}“ passt auf mehr als ein Ziel; verwende die ID.</value>
+  </data>
+  <data name="Mutation_Refused_DecisionNotRecorded" xml:space="preserve">
+    <value>Die Richtlinien-Entscheidung konnte nicht gespeichert werden; es wurde nichts geändert.</value>
   </data>
   <data name="Mutation_Refused_TargetNotResolved" xml:space="preserve">
     <value>Das Ziel konnte nicht aufgelöst werden: {0}</value>
