@@ -100,18 +100,36 @@ public class ApprovalNotificationTests
         Assert.Equal(call.CorrelationId, approval.CorrelationId);
     }
 
-    [Fact]
-    public void A_target_in_a_notification_is_one_bounded_line()
+    [Theory]
+    [InlineData("srv\nInjected: line")]
+    [InlineData("password=only-in-the-arguments")]
+    [InlineData("token:abc123")]
+    [InlineData("db name with spaces")]
+    public void A_target_that_is_not_a_plain_identifier_is_withheld(string target)
     {
         var approval = new Approval
         {
             SessionId = "s", ToolCallId = "c", Actor = "key:k1", ActorType = "mcp-direct", ToolName = "t", Reason = "r",
-            Level = McpPermissionLevels.Write, TargetServer = "srv\nInjected: line", TargetWorkload = new string('w', 500),
+            Level = McpPermissionLevels.Write, TargetServer = target, TargetWorkload = new string('w', 500),
         };
         var text = ApprovalDisplay.NotificationText(approval);
-        Assert.DoesNotContain('\n', text);
-        Assert.Contains("srv Injected: line", text);
-        Assert.DoesNotContain(new string('w', 81), text);
+        Assert.Contains("target (withheld) / (withheld)", text);
+        Assert.DoesNotContain(target, text);
+        Assert.DoesNotContain("ww", text);
+    }
+
+    [Theory]
+    [InlineData("srv-1")]
+    [InlineData("web_1.internal")]
+    [InlineData("ghcr.io/org/app:1.2")]
+    public void A_plain_identifier_is_shown(string target)
+    {
+        var approval = new Approval
+        {
+            SessionId = "s", ToolCallId = "c", Actor = "key:k1", ActorType = "mcp-direct", ToolName = "t", Reason = "r",
+            Level = McpPermissionLevels.Write, TargetWorkload = target,
+        };
+        Assert.Contains($"target — / {target}", ApprovalDisplay.NotificationText(approval));
     }
 
     [Fact]

@@ -100,6 +100,9 @@ public static class ApprovalEligibility
             : McpPermissionLevels.Admin;
         if (!McpPermissionLevels.HasAccess(McpPermissionLevels.Normalize(resolver.Level), required))
             return ApprovalDecisionResult.InsufficientLevel;
+        // Fail closed: an approval that does not say who asked (raised before R1-15) cannot be told apart from one
+        // the resolver asked for — nobody decides it.
+        if (approval.Requesters.Count == 0) return ApprovalDecisionResult.RequesterCannotDecide;
         if (IsRequester(approval, resolver) && (requireSecondApprover || !IsInteractiveRequest(approval)))
             return ApprovalDecisionResult.RequesterCannotDecide;
         return null;

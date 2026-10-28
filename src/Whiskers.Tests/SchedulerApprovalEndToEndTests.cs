@@ -122,7 +122,7 @@ public class SchedulerApprovalEndToEndTests
         var tool = Catalog.Find(capabilityId)!.McpTool!;
         var lowered = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "admin@example.com", "agent-web", tool,
             McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
-            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(args))), _ => Task.CompletedTask);
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(args)), Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         Assert.True(await approvals.ResolveAsync(lowered.Id, approved: true, "operator@example.com", McpPermissionLevels.Write));
         var runs = 0;
 

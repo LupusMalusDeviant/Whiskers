@@ -112,7 +112,7 @@ public class ApprovalBindingTests
         var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "agent-mcp",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
             ArgumentsHash: ApprovalFingerprint.OfArguments(request.Arguments), Binding: decided!.Binding,
-            Interactive: true), _ => Task.CompletedTask);
+            Interactive: true, Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
         var runs = 0;
 
@@ -133,7 +133,7 @@ public class ApprovalBindingTests
         var request = Call(operationId: "op-1", sessionId: "s1");
         var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "agent-mcp",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
-            ArgumentsHash: ApprovalFingerprint.OfArguments(request.Arguments)), _ => Task.CompletedTask);
+            ArgumentsHash: ApprovalFingerprint.OfArguments(request.Arguments), Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
 
         var outcome = await Gateway(approvals).ExecuteAsync(request, (_, _) => Task.FromResult(1));
@@ -146,7 +146,7 @@ public class ApprovalBindingTests
     {
         var approvals = new ApprovalStore();
         var unbound = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "ci", "mcp-direct",
-            Args("web-1"));
+            Args("web-1")) { Requesters = ["key:test-requester"] };
 
         var result = await new ApprovalGate(approvals).CheckAsync(unbound, "needs a human", []);
 

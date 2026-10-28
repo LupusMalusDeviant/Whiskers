@@ -31,13 +31,19 @@ public static class ApprovalDisplay
                LinkOf(approval.Id);
     }
 
-    // A target is a name, not a payload: one line, bounded.
+    /// <summary>What a notification shows of a value taken from the arguments: an identifier (letters, digits and
+    /// <c>. _ - : / @</c>, at most 80 characters) that the secret redactor leaves alone; anything else is withheld.</summary>
     private static string? Short(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        var line = string.Join(' ', value.Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
-        return line.Length > 80 ? line[..80] + "…" : line;
+        var trimmed = value.Trim();
+        return Identifier.IsMatch(trimmed) && Whiskers.Utils.SecretRedactor.Redact(trimmed) == trimmed
+            ? trimmed
+            : "(withheld)";
     }
+
+    private static readonly System.Text.RegularExpressions.Regex Identifier = new(
+        @"^[A-Za-z0-9._:/@-]{1,80}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     // Well-known argument keys that name the target of an operation.
     private static readonly string[] ServerKeys = { "serverId", "server", "serverName" };

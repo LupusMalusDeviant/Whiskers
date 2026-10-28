@@ -240,4 +240,68 @@ public class OrphanedApprovalTests
         Assert.Equal(ApprovalDecisionResult.NotPending, await after.DecideAsync(approval.Id, true, Approver));
         Assert.Equal(0, invoker.Calls);
     }
+
+    [Fact]
+    public async Task A_dropped_browser_connection_ends_the_chat_before_its_components_are_disposed()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        var connection = new ChatConnectionWatcher();
+        await using var lifetime = new AgentChatLifetime(store, connection);
+        lifetime.Attach(session);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        await using var run = session.SendAsync("stop web", ct: lifetime.Token).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(run, session, coordinator);
+
+        // What Blazor calls when the connection drops; the circuit (and the page) is kept for a while after.
+        await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+
+        Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
+        Assert.Equal(ApprovalDecisionResult.NotPending, await store.DecideAsync(approval.Id, true, Approver));
+        Assert.DoesNotContain(await DrainAsync(run), e => e is AgentEvent.ToolExecuted);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task After_a_reconnect_the_chat_goes_on_with_a_new_run()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), ToolTurn("call_1"), TextTurn("done"));
+        var connection = new ChatConnectionWatcher();
+        await using var lifetime = new AgentChatLifetime(store, connection);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        lifetime.Attach(session);
+        await using (var first = session.SendAsync("one", ct: lifetime.Token).GetAsyncEnumerator())
+        {
+            await RunToApprovalAsync(first, session, coordinator);
+            await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+            await DrainAsync(first);
+        }
+
+        // The page attaches the session again for its next message, with the new run token.
+        lifetime.Attach(session);
+        await using var second = session.SendAsync("two", ct: lifetime.Token).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(second, session, coordinator);
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true, Approver));
+        await DrainAsync(second);
+        Assert.Equal(1, invoker.Calls);
+    }
+
+    [Fact]
+    public async Task A_disposed_chat_no_longer_listens_to_its_connection()
+    {
+        var store = new ApprovalStore();
+        var connection = new ChatConnectionWatcher();
+        var lifetime = new AgentChatLifetime(store, connection);
+        await lifetime.DisposeAsync();
+
+        var calls = 0;
+        connection.ConnectionDown += () => { calls++; return Task.CompletedTask; };
+        await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+        Assert.Equal(1, calls);   // only the handler added afterwards
+    }
 }

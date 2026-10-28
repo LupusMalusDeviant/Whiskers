@@ -55,7 +55,7 @@ public sealed class ApprovalConcurrencyTests : IDisposable
         // database decides, and it lets exactly one use through.
         var first = await _db.StartAsync();
         var approval = await first.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "mcp-direct", "restart_container",
-            McpPermissionLevels.Write, null, "needs a human", Binding: "b"), _ => Task.CompletedTask);
+            McpPermissionLevels.Write, null, "needs a human", Binding: "b", Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await first.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
         var second = await _db.StartAsync();
         Assert.NotNull(second.Get(approval.Id));
@@ -93,7 +93,7 @@ public sealed class ApprovalConcurrencyTests : IDisposable
     {
         var store = await _db.StartAsync();
         var approval = await store.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "mcp-direct", "restart_container",
-            McpPermissionLevels.Write, null, "needs a human", Binding: "b"), _ => Task.CompletedTask);
+            McpPermissionLevels.Write, null, "needs a human", Binding: "b", Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
         var until = (await _db.RowAsync(approval.Id))!.GrantExpiresAt!.Value;
         var persistence = _db.Persistence();
@@ -111,7 +111,7 @@ public sealed class ApprovalConcurrencyTests : IDisposable
     {
         var store = await _db.StartAsync();
         var approval = await store.CreateAsync(new ApprovalRequest("s1", "call-1", "ci", "mcp-direct", "restart_container",
-            McpPermissionLevels.Write, null, "needs a human", Binding: "b"), _ => Task.CompletedTask);
+            McpPermissionLevels.Write, null, "needs a human", Binding: "b", Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         var other = await _db.StartAsync();
 
         var decisions = await Task.WhenAll(

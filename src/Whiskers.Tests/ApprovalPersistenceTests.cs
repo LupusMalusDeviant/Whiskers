@@ -63,11 +63,13 @@ public sealed class ApprovalPersistenceTests : IDisposable
         new("restart_container", McpPermissionLevels.Write, "key:k1", "ci", "mcp-direct", Args(container))
         {
             Binding = "binding-" + container,
+            Requesters = ["key:k1"],
         };
 
     private static ApprovalRequest Request(string toolCallId, bool interactive = false) => new(
         "s1", toolCallId, "ops@example.com", "agent-web", "restart_container", McpPermissionLevels.Write, null,
-        "needs a human", Binding: "binding-" + toolCallId, Interactive: interactive);
+        "needs a human", Binding: "binding-" + toolCallId, Interactive: interactive,
+        Requesters: ["user:ops@example.com"]);
 
     [Fact]
     public async Task An_approved_retry_survives_a_restart_and_then_runs_once()

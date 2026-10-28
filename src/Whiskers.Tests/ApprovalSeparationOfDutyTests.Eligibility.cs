@@ -228,4 +228,36 @@ public partial class ApprovalSeparationOfDutyTests
         Assert.Equal(ApprovalDecisionResult.InsufficientLevel, await store.DecideAsync(approval.Id, false, viewer));
         Assert.Equal(ApprovalDecisionResult.InsufficientLevel, await store.DecideAsync(approval.Id, true, viewer));
     }
+
+    // ---- approvals that do not say who asked (raised before R1-15) -----------------------------------------------
+
+    [Fact]
+    public async Task An_approval_that_does_not_say_who_asked_is_decided_by_nobody()
+    {
+        foreach (var approve in new[] { true, false })
+        {
+            var (store, approval, decisions) = await Raise(Request("mcp-direct", McpPermissionLevels.Read));
+            Assert.Empty(approval.Requesters);
+            Assert.Equal(ApprovalDecisionResult.RequesterCannotDecide, await store.DecideAsync(approval.Id, approve, User(Bob)));
+            Assert.Equal(ApprovalStatus.Pending, approval.Status);
+            Assert.Empty(decisions);
+        }
+    }
+
+    [Fact]
+    public async Task After_an_upgrade_a_pending_approval_without_requesters_is_cancelled_so_the_caller_asks_again()
+    {
+        var persistence = new InMemoryApprovalPersistence();
+        var before = new ApprovalStore(persistence: persistence);
+        var legacy = await before.CreateAsync(Request("mcp-direct", McpPermissionLevels.Write), _ => Task.CompletedTask);
+        var current = await before.CreateAsync(Request("mcp-direct", McpPermissionLevels.Write, "key:k1"), _ => Task.CompletedTask);
+
+        var after = new ApprovalStore(persistence: persistence);
+        await after.LoadAsync();
+
+        Assert.Equal(ApprovalStatus.Cancelled, after.Get(legacy.Id)!.Status);
+        Assert.Equal(ApprovalStatus.Pending, after.Get(current.Id)!.Status);
+        Assert.Equal(ApprovalDecisionResult.NotPending, await after.DecideAsync(legacy.Id, true, User(Bob)));
+        Assert.Equal(ApprovalDecisionResult.Decided, await after.DecideAsync(current.Id, true, User(Bob)));
+    }
 }

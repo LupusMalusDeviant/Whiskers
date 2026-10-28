@@ -13,7 +13,7 @@ public partial class ApprovalStoreTests
         ToolName: "stop_container",
         Level: "write",
         ParamsJson: "{\"id\":\"abc\"}",
-        Reason: "Schreibender Zugriff erfordert Freigabe.");
+        Reason: "Schreibender Zugriff erfordert Freigabe.", Requesters: ["key:test-requester"]);
 
     [Fact]
     public async Task Create_adds_a_pending_approval_and_fires_Changed()

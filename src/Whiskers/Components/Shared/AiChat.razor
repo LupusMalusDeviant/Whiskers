@@ -17,6 +17,7 @@
 @inject ICurrentUserService CurrentUser
 @inject IApprovalCoordinator ApprovalCoordinator
 @inject IApprovalStore ApprovalStore
+@inject IChatConnectionWatcher ConnectionWatcher
 @inject IChatWidgetParser WidgetParser
 @inject IJSRuntime JS
 @inject IStringLocalizer<SharedResource> L
@@ -61,7 +62,7 @@
                 </div>
                 <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearChat" title="@L["AiChat_Button_ClearChat"]"
                                Style="color: var(--sw-text-muted);" />
-                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _isOpen = false)"
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CloseAsync"
                                Style="color: var(--sw-text-muted);" />
             </div>
 
@@ -147,7 +148,7 @@
     private string? _pendingApprovalId;
     // R1-15: the session's run and its pending approvals end with this chat (INV-36).
     private AgentChatLifetime? _lifetime;
-    private AgentChatLifetime Lifetime => _lifetime ??= new AgentChatLifetime(ApprovalStore);
+    private AgentChatLifetime Lifetime => _lifetime ??= new AgentChatLifetime(ApprovalStore, ConnectionWatcher);
     private Whiskers.Services.AiChat.ChatMessage? _streaming;
 
     private bool AgentMode => AgentSettings.CurrentValue.Enabled;
@@ -264,8 +265,9 @@
         {
             _context = await BuildContextAsync();
             _session = await AgentService.StartSessionAsync(_context);
-            Lifetime.Attach(_session);
         }
+        // Every run is tied to the chat: a run after closing the widget or a dropped connection is a new run.
+        Lifetime.Attach(_session);
 
         _streaming = null;
         await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg", Lifetime.Token))
@@ -341,6 +343,16 @@
     public async ValueTask DisposeAsync()
     {
         if (_lifetime is not null) await _lifetime.DisposeAsync();
+    }
+
+    /// <summary>Closing the widget ends what runs in it (R1-15): nobody watches a closed chat. The conversation stays;
+    /// the next message starts a new run.</summary>
+    private async Task CloseAsync()
+    {
+        _isOpen = false;
+        if (_lifetime is not null) await _lifetime.EndAsync();
+        _pendingConfirm = null;
+        _pendingApprovalId = null;
     }
 
     private async Task<AgentContext> BuildContextAsync()

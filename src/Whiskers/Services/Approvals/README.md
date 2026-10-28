@@ -35,7 +35,7 @@ their `Confirm` outright, since nobody could approve it and a later run of the s
    the decision was made under. Every call records a decision of its own, so the binding names the decision's
    content — its policy version — rather than its id. A call with any other binding never inherits the approval;
    an approval or a subject without a binding is never used.
-6. The notification bell and the **Freigaben** page read `GetPending()` and call `ResolveAsync(id, approved, resolvedBy)`.
+6. The notification bell and the **Approvals** page read `GetPending()` and decide with `DecideAsync(id, approved, ApprovalResolver)` — see *Who decides* below.
 
 There is no way to grant a call without an approval decided in `IApprovalStore`.
 
@@ -60,7 +60,8 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
 - **Level (INV-34).** The resolver holds at least the approval's level — the effective level of the action. An
   approval without a readable level asks for Admin. A Viewer decides nothing.
 - **Separation of duties (INV-33, PC-D4).** An approval records who asked (`Approval.Requesters`: the caller, then
-  everyone it acts for — an agent's user, an automation's owner). None of them decides a non-interactive request
+  everyone it acts for — an agent's user, an automation's owner); an approval that names nobody (raised before
+  R1-15) is decided by nobody, and `LoadAsync` cancels it so the caller asks again. None of them decides a non-interactive request
   (direct MCP, AI trigger, scheduled task, webhook; any unknown kind). An interactive request (agent chat `agent-web`,
   a UI click `web`, the web terminal) may be decided by its requester unless the active guardrail policy sets
   `RequireSecondApprover`; such a decision is recorded as `SelfApproved`. An unreadable policy requires a second
@@ -72,7 +73,9 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
   beyond that `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
 
 A raised approval is announced with its id, risk, target and a link to `/approvals#<id>`
-(`ApprovalDisplay.NotificationText`), never with its arguments: the bell may forward it to external channels.
+(`ApprovalDisplay.NotificationText`), never with its arguments: the bell may forward it to external channels. A
+target taken from the arguments is shown only when it is a plain identifier the secret redactor leaves alone;
+otherwise it reads `(withheld)`.
 
 ## Files
 

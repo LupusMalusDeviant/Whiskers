@@ -24,6 +24,7 @@
 @inject IAgentProviderFactory ProviderFactory
 @inject IApprovalCoordinator ApprovalCoordinator
 @inject IApprovalStore ApprovalStore
+@inject IChatConnectionWatcher ConnectionWatcher
 @inject IChatWidgetParser WidgetParser
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
@@ -266,7 +267,7 @@
     private string? _pendingApprovalId;
     // R1-15: the session's run and its pending approvals end with this page (INV-36).
     private AgentChatLifetime? _lifetime;
-    private AgentChatLifetime Lifetime => _lifetime ??= new AgentChatLifetime(ApprovalStore);
+    private AgentChatLifetime Lifetime => _lifetime ??= new AgentChatLifetime(ApprovalStore, ConnectionWatcher);
 
     private string _email = "local@serverwatch.local";
     private IReadOnlyList<AgentMessage> _seedHistory = Array.Empty<AgentMessage>();
@@ -378,8 +379,9 @@
             {
                 _context = await BuildContextAsync();
                 _session = await AgentService.StartSessionAsync(_context, _seedHistory);
-                Lifetime.Attach(_session);
             }
+            // Every run is tied to the chat: a run after a dropped connection is a new run of this chat.
+            Lifetime.Attach(_session);
 
             await foreach (var ev in _session.SendAsync(message, ct: Lifetime.Token))
             {

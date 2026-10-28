@@ -345,8 +345,10 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         {
             var entry = new Entry(approval, _ => Task.CompletedTask);
             if (!_entries.TryAdd(approval.Id, entry)) continue;
-            // Nobody is waiting on an interactive approval any more: its session died with the process.
-            if (approval.Interactive && approval.Status == ApprovalStatus.Pending)
+            // Nobody is waiting on an interactive approval any more: its session died with the process. And a pending
+            // approval that does not say who asked (raised before R1-15) can never be decided: it is cancelled, the
+            // caller asks again.
+            if (approval.Status == ApprovalStatus.Pending && (approval.Interactive || approval.Requesters.Count == 0))
             {
                 Interlocked.Exchange(ref entry.Resolved, 1);
                 await PersistAsync(entry, ApprovalStatus.Cancelled, "system", ct);

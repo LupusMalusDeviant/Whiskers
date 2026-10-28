@@ -169,7 +169,7 @@ public class ToolAuthorizationTests
         var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ops@example.com", "agent-web",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
             ArgumentsHash: ApprovalFingerprint.OfArguments(Args("web-1")),
-            Binding: await BindingOf(gateway)), _ => Task.CompletedTask);
+            Binding: await BindingOf(gateway), Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
 
         var executed = await gateway.ExecuteAsync(Request(Agent, MutationSurface.Agent, operationId: "op-1", sessionId: "s1"), Run);
@@ -193,7 +193,7 @@ public class ToolAuthorizationTests
         var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ops@example.com", "agent-web",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: operation,
             ArgumentsHash: ApprovalFingerprint.OfArguments(Args("web-1")),
-            Binding: await BindingOf(gateway)), _ => Task.CompletedTask);
+            Binding: await BindingOf(gateway), Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
         return approval;
     }
