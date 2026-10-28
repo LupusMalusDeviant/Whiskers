@@ -262,7 +262,7 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |
 | U-31 | AI triggers save (prompt, preset, write grant) | Admin | — | AL ✅ (`aitrigger.save` through the gateway) | INV-23, 27, 28, 46 |
 | U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | — | GW ✅ | INV-28 |
-| U-33 | Approvals approve / reject | approve **and** reject (same rules since R1-15, INV-37): level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); a requester never decides their own non-interactive request, and decides an interactive one only while `RequireSecondApprover` is off (PC-D4); not after expiry | — | ✅ (R1-15: `ApprovalSeparationOfDutyTests`, `ApprovalStoreTests`) | INV-31, 32, 33, 34, 37 |
+| U-33 | Approvals approve / reject | approve **and** reject (same rules since R1-15, INV-37): level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); a requester never decides their own non-interactive request, and decides an interactive one only while `RequireSecondApprover` is off (PC-D4); not after expiry | — | ✅ (R1-15: `ApprovalSeparationOfDutyTests`, `ApprovalStoreTests`) | — (INV-31 closed by R1-14; INV-32, 33, 34, 37 by R1-15) |
 | U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | — | AL ✅ GW ✅ | INV-15, 16 |
 
 ### 7.6 Totals

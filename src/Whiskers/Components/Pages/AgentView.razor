@@ -140,7 +140,7 @@
                                   Margin="Margin.Dense" Immediate="true" Disabled="@_running"
                                   OnKeyDown="OnKeyDown" Class="flex-1" />
                     <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Send"
-                               Disabled="@(_running || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0))">@L["AgentView_Button_Send"]</MudButton>
+                               Disabled="@(_running || _clearing || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0))">@L["AgentView_Button_Send"]</MudButton>
                 </div>
             </MudPaper>
         </MudItem>
@@ -244,6 +244,7 @@
     private readonly List<Line> _lines = new();
     private string _input = "";
     private bool _running;
+    private bool _clearing;
     private bool _isAdmin;
 
     private sealed record Attachment(string Name, string Content);
@@ -351,7 +352,7 @@
 
     private async Task Send()
     {
-        if (_running || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0)) return;
+        if (_running || _clearing || (string.IsNullOrWhiteSpace(_input) && _attachments.Count == 0)) return;
         // R1-15: this run's token, taken before the first await — a chat ended while the send prepares refuses it.
         var run = Lifetime.BeginRun();
         var typed = _input.Trim();
@@ -441,14 +442,26 @@
 
     private async Task ClearChat()
     {
-        await Lifetime.EndAsync();
-        _lines.Clear();
-        _session = null;
-        _context = null;
-        _pendingConfirm = null;
-        _pendingApprovalId = null;
-        _seedHistory = Array.Empty<AgentMessage>();
-        await TranscriptStore.ClearAsync(_email);
+        // R1-15: no send starts while Clear runs, and Clear only drops what belonged to the ended run: the run is
+        // stopped (synchronously, inside EndAsync) and the chat reset before anything is awaited — a send started
+        // afterwards gets a new session that Clear never touches.
+        _clearing = true;
+        try
+        {
+            var ending = Lifetime.EndAsync();
+            _lines.Clear();
+            _session = null;
+            _context = null;
+            _pendingConfirm = null;
+            _pendingApprovalId = null;
+            _seedHistory = Array.Empty<AgentMessage>();
+            await ending;
+            await TranscriptStore.ClearAsync(_email);
+        }
+        finally
+        {
+            _clearing = false;
+        }
     }
 
     private async Task Resolve(bool approved)

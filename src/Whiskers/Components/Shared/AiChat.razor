@@ -133,6 +133,7 @@
 
     private bool _isOpen;
     private bool _thinking;
+    private bool _clearing;
     private bool _loaded;
     private bool _dragArmed;
     private bool _includeScreenshot;
@@ -188,7 +189,7 @@
 
     private async Task Send()
     {
-        if (string.IsNullOrWhiteSpace(_input) || _thinking) return;
+        if (string.IsNullOrWhiteSpace(_input) || _thinking || _clearing) return;
         // R1-15: this run's token, taken before the first await — closing the chat while the send prepares (page
         // context, screenshot) refuses it.
         var run = Lifetime.BeginRun();
@@ -380,13 +381,25 @@
 
     private async Task ClearChat()
     {
-        await Lifetime.EndAsync();
-        _messages.Clear();
-        _session = null;
-        _context = null;
-        _pendingConfirm = null;
-        _pendingApprovalId = null;
-        await HistoryStore.ClearAsync(_userEmail);
+        // R1-15: no send starts while Clear runs, and Clear only drops what belonged to the ended run: the run is
+        // stopped (synchronously, inside EndAsync) and the chat reset before anything is awaited — a send started
+        // afterwards gets a new session that Clear never touches.
+        _clearing = true;
+        try
+        {
+            var ending = Lifetime.EndAsync();
+            _messages.Clear();
+            _session = null;
+            _context = null;
+            _pendingConfirm = null;
+            _pendingApprovalId = null;
+            await ending;
+            await HistoryStore.ClearAsync(_userEmail);
+        }
+        finally
+        {
+            _clearing = false;
+        }
     }
 
     private async Task ScrollToBottom()
