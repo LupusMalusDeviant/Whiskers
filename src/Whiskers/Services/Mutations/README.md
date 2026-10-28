@@ -141,10 +141,10 @@ registrations are wrapped too.
 3. Principal level below the capability level → **Denied**.
 4. Target cannot be resolved (unknown or ambiguous server, container, network, cloud server, task, zone or workload) → **Denied**. From here on `MutationContext.Request.Target` is canonical; the MCP and agent adapters run the tool with `MutationTargets.CanonicalArguments`, which also passes the resolved `serverId` to every tool that takes one (`McpToolParameters.TakesServerId`, the agent entry's parameters). The refusal carries `MutationReasonCodes.TargetUnknown` / `TargetAmbiguous` / `TargetNotResolved`.
    An AI trigger (R1-13): the gateway notes the trigger behind the call (`MutationRequest.TriggerId`: the trigger
-   itself, an agent on its behalf, or — through `MutationScope.TriggerId` — a mutation nested in theirs). For a call
-   made as or for the trigger, `ITriggerAuthority` checks the trigger's grant (capability and resolved target) and
-   its owner's current authority; a refusal, an error or no registered authority → **Denied**
-   (`MutationReasonCodes.TriggerNotAllowed`).
+   itself, an agent on its behalf, or — through `MutationScope.TriggerId` — a mutation nested in theirs). For every
+   such call, nested ones included, `ITriggerAuthority` checks the trigger's grant (capability, resolved target and
+   every related resource) and its owner's current authority; a refusal, an error or no registered authority →
+   **Denied** (`MutationReasonCodes.TriggerNotAllowed`). The caller's own level check (step 3) still applies.
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**. The policy is the live
    active preset, or for a pinned run (an AI trigger's, `MutationRequest.PinnedPolicy`) that run's preset with the
    global kill switch (`EffectivePolicy`, INV-23); a call nested in a pinned run's mutation without a pin of its own

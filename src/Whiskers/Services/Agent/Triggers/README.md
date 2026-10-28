@@ -6,17 +6,21 @@ and, for each enabled matching trigger, starts an agent run under the trigger's 
 preset. Any guardrail confirmation is **denied**, never auto-approved (no human is watching an unattended run). The
 result is sent as a notification (`agent_action`) and written to the audit log.
 
-**Read-only unless granted (PC-D6, PC-D7, R1-13).** A trigger may change nothing until an Admin grants it
-`WriteCapabilities` (catalog ids) **and** `WriteTargets` (globs on the resolved target's id or name). Saving a grant
-makes that Admin its `OwnerId`; the store sets the owner and the suspension itself and ignores what the page sends.
-Triggers saved before R1-13 have no grant and are read-only; their old `MaxLevel` is ignored. A run of a trigger
-without a grant gets a `read` principal; with a grant, its owner's level as it is when the run starts — never a
-synthetic admin. `AiTriggerAuthority` (registered as the gateway's `ITriggerAuthority`) then checks **every** mutation
-of the run against the current grant and the owner's current authority (`IAutomationOwnerResolver`): anything outside
-the grant is refused (`TriggerNotAllowed`), and an owner who lost the right suspends the trigger (`SuspendedReason`,
-switched off) and notifies the Admins (`automation_suspended`). Switching a suspended trigger on again is a takeover:
-the Admin who does it becomes the owner. The gateway refuses every Confirm of the run — and of anything nested in it
-— instead of raising an approval (`UnattendedConfirm`), and every audit row of the run carries `trigger:<id>`.
+**Owner and grant (PC-D6, PC-D7, R1-13).** Every trigger has an owner (`OwnerId`): the Admin who created it, last
+changed its write grant, or switched it on after a suspension or while it had no owner (a takeover). The store sets
+owner and suspension itself and ignores what the page sends. A trigger may change nothing until an Admin grants it
+`WriteCapabilities` (catalog ids) **and** `WriteTargets` (globs on a resolved id or name); triggers saved before R1-13
+have neither (their old `MaxLevel` is ignored) and no owner. `AiTriggerAuthority.BeginRunAsync` re-checks the owner
+before every run: no owner, an owner who can no longer sign in, or — with a grant — one who no longer holds a granted
+capability (level raised in Settings → MCP and key tool lists included) suspends the trigger (`SuspendedReason`,
+switched off) and notifies the Admins (`automation_suspended`); an owner not verified yet is refused without
+suspension. A run without a grant gets a `read` principal; with one, the owner's current level — never a synthetic
+admin. As the gateway's `ITriggerAuthority` it then checks **every** mutation made for the run — nested ones too (a
+scheduled task the trigger runs) — against the current grant, including everything the operation also touches
+(`MutationTarget.Related`: the containers a network removal cuts off, the container it connects or disconnects, a
+workload's pod), and the owner's current authority: anything outside the grant is refused (`TriggerNotAllowed`), a
+lost authority suspends the trigger. The gateway refuses every Confirm of the run and of anything nested in it
+instead of raising an approval (`UnattendedConfirm`), and every audit row of the run carries `trigger:<id>`.
 
 **Untrusted event text (INV-27).** The run's first message carries the event — names, image, server, log line — as
 one JSON value between `<event-data id="…">` markers with a random id per run, so it can neither end the block nor

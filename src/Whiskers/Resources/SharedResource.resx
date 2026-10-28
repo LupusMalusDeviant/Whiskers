@@ -4893,7 +4893,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Read-only</value>
   </data>
   <data name="AiTriggersView_Owner_Chip" xml:space="preserve">
-    <value>Writes on behalf of {0}</value>
+    <value>Owner: {0}</value>
   </data>
   <data name="AiTriggersView_Suspended_Alert" xml:space="preserve">
     <value>Suspended: {0}. Switch it on again and save to take it over; you become its owner.</value>
@@ -4918,5 +4918,8 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Mutation_Refused_UnattendedConfirm" xml:space="preserve">
     <value>Refused: this unattended run needs a confirmation nobody can give ({0}).</value>
+  </data>
+  <data name="AiTriggersView_NoOwner_Chip" xml:space="preserve">
+    <value>No owner: it is suspended at its next run. Switch it off, save, switch it on and save again to take it over.</value>
   </data>
 </root>

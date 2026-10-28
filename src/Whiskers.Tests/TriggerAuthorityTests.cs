@@ -49,13 +49,56 @@ public sealed class TriggerAuthorityTests : IDisposable
     [Fact]
     public async Task A_new_trigger_is_read_only()
     {
-        var trigger = new AiTrigger();
-        var owners = new Owners();
+        var trigger = new AiTrigger { OwnerId = Admin };
 
-        var start = await new AiTriggerAuthority(new MemoryTriggers(trigger), owners).BeginRunAsync(trigger);
+        var start = await Authority(new MemoryTriggers(trigger), new Owners()).BeginRunAsync(trigger);
 
+        Assert.False(new AiTrigger().HasWriteGrant);
         Assert.False(trigger.HasWriteGrant);
         Assert.Equal((McpPermissionLevels.Read, (string?)null), (start.Level, start.Refusal));
+    }
+
+    [Fact]
+    public async Task A_trigger_without_an_owner_is_suspended_at_its_next_run_read_only_or_not()
+    {
+        var trigger = new AiTrigger { Id = "t1", Name = "legacy" };
+        var notify = new Notify();
+        var services = new ServiceCollection().AddSingleton<INotificationService>(notify).BuildServiceProvider();
+
+        var start = await Authority(new MemoryTriggers(trigger), new Owners(), services).BeginRunAsync(trigger);
+
+        Assert.Contains("no owner", start.Refusal);
+        Assert.False(trigger.Enabled);
+        Assert.Equal("automation_suspended", Assert.Single(notify.Events).EventType);
+    }
+
+    [Fact]
+    public async Task A_read_only_trigger_whose_owner_lost_sign_in_is_suspended_too()
+    {
+        var trigger = new AiTrigger { Id = "t1", Name = "watch", OwnerId = Admin };
+        var owners = new Owners();
+        owners.States[Admin] = OwnerState.NotAllowedToSignIn;
+
+        var start = await Authority(new MemoryTriggers(trigger), owners).BeginRunAsync(trigger);
+
+        Assert.NotNull(start.Refusal);
+        Assert.False(trigger.Enabled);
+    }
+
+    [Fact]
+    public async Task An_owner_demoted_below_a_granted_capability_suspends_the_trigger_before_its_run_starts()
+    {
+        // container.remove is Admin-only; the owner is an Operator now. The run must not start at write level and
+        // fail later on a level check that would never suspend the trigger.
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add(Remove.Id);
+        var owners = new Owners();
+        owners.Levels[Admin] = McpPermissionLevels.Write;
+
+        var start = await Authority(new MemoryTriggers(trigger), owners).BeginRunAsync(trigger);
+
+        Assert.Contains("no longer holds 'admin'", start.Refusal);
+        Assert.False(trigger.Enabled);
     }
 
     [Fact]
@@ -71,7 +114,7 @@ public sealed class TriggerAuthorityTests : IDisposable
 
         var trigger = Assert.Single(store.Triggers);
         Assert.False(trigger.HasWriteGrant);
-        Assert.Equal(McpPermissionLevels.Read, (await new AiTriggerAuthority(store, new Owners()).BeginRunAsync(trigger)).Level);
+        Assert.Equal(McpPermissionLevels.Read, (await Authority(store, new Owners()).BeginRunAsync(trigger)).Level);
         var outcome = await Gateway(store, new Owners()).ExecuteAsync(AgentCall(Restart, "web"), (_, _) => Task.FromResult(1));
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Equal(MutationReasonCodes.TriggerNotAllowed, outcome.ReasonCode);
@@ -94,12 +137,35 @@ public sealed class TriggerAuthorityTests : IDisposable
         await store.SaveAsync([Copy(store.Triggers[0], t => t.Prompt = "changed")], Editor("other@example.com"));
         Assert.Equal(Admin, store.Triggers[0].OwnerId);
 
-        // Changing the grant makes the editor the owner; removing it leaves nothing to own.
+        // Changing the grant makes the editor the owner; a read-only trigger keeps an owner too (PC-D6).
         await store.SaveAsync([Copy(store.Triggers[0], t => t.WriteTargets = ["web", "api"])], Editor("other@example.com"));
         Assert.Equal("user:other@example.com", store.Triggers[0].OwnerId);
-        await store.SaveAsync([Copy(store.Triggers[0], t => t.WriteCapabilities = [])], Editor("other@example.com"));
-        Assert.Null(store.Triggers[0].OwnerId);
+        await store.SaveAsync([Copy(store.Triggers[0], t => t.WriteCapabilities = [])], Editor("admin@example.com"));
+        Assert.Equal(Admin, store.Triggers[0].OwnerId);
         Assert.False(store.Triggers[0].HasWriteGrant);
+    }
+
+    [Fact]
+    public async Task A_trigger_saved_before_owners_were_recorded_is_taken_over_only_when_an_admin_switches_it_on()
+    {
+        var path = Path.Combine(_dir, "ai-triggers.json");
+        await File.WriteAllTextAsync(path, """
+            { "Triggers": [ { "Id": "t1", "Name": "on", "Enabled": true }, { "Id": "t2", "Name": "off", "Enabled": false } ] }
+            """);
+        var store = new AiTriggerStore(path);
+        await store.InitializeAsync();
+
+        // Saving the page leaves them ownerless: nobody took them over.
+        await store.SaveAsync(store.Triggers.Select(AiTriggerStore.Normalized).ToList(), Editor("admin@example.com"));
+        Assert.All(store.Triggers, t => Assert.Null(t.OwnerId));
+
+        // Switching the disabled one on takes it over; the enabled one is taken over once its first run suspended it.
+        await store.SaveAsync(store.Triggers.Select(t => Copy(t, c => c.Enabled = true)).ToList(), Editor("admin@example.com"));
+        Assert.Null(store.Triggers.Single(t => t.Id == "t1").OwnerId);
+        Assert.Equal(Admin, store.Triggers.Single(t => t.Id == "t2").OwnerId);
+        Assert.True(await store.SuspendAsync("t1", null, "it has no owner"));
+        await store.SaveAsync(store.Triggers.Select(t => Copy(t, c => c.Enabled = true)).ToList(), Editor("admin@example.com"));
+        Assert.Equal(Admin, store.Triggers.Single(t => t.Id == "t1").OwnerId);
     }
 
     [Fact]
@@ -155,6 +221,52 @@ public sealed class TriggerAuthorityTests : IDisposable
         Assert.False(ran);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Equal(MutationReasonCodes.TriggerNotAllowed, outcome.ReasonCode);
+    }
+
+    [Fact]
+    public async Task What_an_operation_also_touches_must_be_granted_too()
+    {
+        // Disconnecting "db" from a granted network: the network is granted, the container it cuts off is not.
+        var disconnect = new CapabilityCatalog().Find("network.disconnect")!;
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add(disconnect.Id);
+        trigger.WriteTargets.Add("app-net");
+        var gateway = Gateway(new MemoryTriggers(trigger), new Owners());
+        MutationRequest Call() => AgentCall(disconnect, "app-net") with
+        {
+            Target = new MutationTarget("network", "net-1", "app-net", "srv1") { Related = ["cid-db", "db"], Resolved = true },
+        };
+
+        var refused = await gateway.ExecuteAsync(Call(), (_, _) => Task.FromResult(1));
+        trigger.WriteTargets.AddRange(["db", "cid-*"]);
+        var allowed = await gateway.ExecuteAsync(Call(), (_, _) => Task.FromResult(1));
+
+        Assert.Equal(MutationStatus.Denied, refused.Status);
+        Assert.Contains("also touches", refused.Reason);
+        Assert.Equal(MutationStatus.Executed, allowed.Status);
+    }
+
+    [Fact]
+    public async Task A_mutation_nested_in_a_trigger_call_is_held_to_the_trigger_grant_and_owner()
+    {
+        // The trigger may run a task on "web"; the task (owned by a person) then restarts "db" and "web". The person's
+        // authority would allow both, but the trigger's grant does not reach "db", and a lost owner stops both.
+        var triggers = new MemoryTriggers(Granted());
+        var owners = new Owners();
+        var gateway = Gateway(triggers, owners);
+        var nested = new List<MutationStatus>();
+
+        await gateway.ExecuteAsync(AgentCall(Restart, "web"), async (_, _) =>
+        {
+            nested.Add((await gateway.ExecuteAsync(PersonsCall(Restart, "db", MutationSurface.Automation), (_, _) => Task.FromResult(1))).Status);
+            nested.Add((await gateway.ExecuteAsync(PersonsCall(Restart, "web", MutationSurface.Automation), (_, _) => Task.FromResult(1))).Status);
+            owners.Levels[Admin] = McpPermissionLevels.Read;
+            nested.Add((await gateway.ExecuteAsync(PersonsCall(Restart, "web", MutationSurface.Automation), (_, _) => Task.FromResult(1))).Status);
+            return 1;
+        });
+
+        Assert.Equal([MutationStatus.Denied, MutationStatus.Executed, MutationStatus.Denied], nested);
+        Assert.False(triggers.Items[0].Enabled);
     }
 
     [Fact]
@@ -217,7 +329,7 @@ public sealed class TriggerAuthorityTests : IDisposable
         var owners = new Owners();
         owners.States[Admin] = state;
 
-        var start = await new AiTriggerAuthority(triggers, owners).BeginRunAsync(triggers.Items[0]);
+        var start = await Authority(triggers, owners).BeginRunAsync(triggers.Items[0]);
 
         Assert.NotNull(start.Refusal);
         Assert.False(triggers.Items[0].Enabled);
@@ -230,7 +342,7 @@ public sealed class TriggerAuthorityTests : IDisposable
         var owners = new Owners();
         owners.Levels[Admin] = McpPermissionLevels.Write;
 
-        var start = await new AiTriggerAuthority(triggers, owners).BeginRunAsync(triggers.Items[0]);
+        var start = await Authority(triggers, owners).BeginRunAsync(triggers.Items[0]);
 
         Assert.Equal((McpPermissionLevels.Write, (string?)null), (start.Level, start.Refusal));
     }
@@ -243,7 +355,7 @@ public sealed class TriggerAuthorityTests : IDisposable
         var approvals = new CountingApprovals();
         var gateway = new MutationGateway(new CapabilityCatalog(), new ConfirmAll(), new Audit(), [],
             NullLogger<MutationGateway>.Instance, approvals: approvals,
-            triggers: new AiTriggerAuthority(new MemoryTriggers(Granted()), new Owners()));
+            triggers: Authority(new MemoryTriggers(Granted()), new Owners()));
 
         var executed = await gateway.ExecuteAsync(AgentCall(Restart, "web"), (_, _) => Task.FromResult(1));
         var decided = await gateway.DecideAsync(AgentCall(Restart, "web"));
@@ -251,7 +363,7 @@ public sealed class TriggerAuthorityTests : IDisposable
         MutationOutcome<int>? nested = null;
         var outer = await new MutationGateway(new CapabilityCatalog(), new AllowAll(), new Audit(), [],
             NullLogger<MutationGateway>.Instance, approvals: approvals,
-            triggers: new AiTriggerAuthority(new MemoryTriggers(Granted()), new Owners()))
+            triggers: Authority(new MemoryTriggers(Granted()), new Owners()))
             .ExecuteAsync(AgentCall(Restart, "web"), async (_, _) =>
             {
                 nested = await gateway.ExecuteAsync(PersonsCall(Restart, "web", MutationSurface.Ui), (_, _) => Task.FromResult(1));
@@ -273,7 +385,7 @@ public sealed class TriggerAuthorityTests : IDisposable
     {
         var gateway = new MutationGateway(new CapabilityCatalog(), new AllowAll(),
             new AuditLogMutationSink(_sp.GetRequiredService<IServiceScopeFactory>()), [], NullLogger<MutationGateway>.Instance,
-            triggers: new AiTriggerAuthority(new MemoryTriggers(Granted()), new Owners()));
+            triggers: Authority(new MemoryTriggers(Granted()), new Owners()));
 
         await gateway.ExecuteAsync(AgentCall(Restart, "web"), async (_, _) =>
         {
@@ -325,10 +437,13 @@ public sealed class TriggerAuthorityTests : IDisposable
         surface, new MutationTarget("container", "id-" + name, name, "srv1"),
         new Dictionary<string, JsonElement> { ["containerId"] = JsonSerializer.SerializeToElement(name) });
 
+    internal static AiTriggerAuthority Authority(IAiTriggerStore triggers, IAutomationOwnerResolver owners,
+        IServiceProvider? sp = null) => new(triggers, owners, new CapabilityCatalog(), sp: sp);
+
     private static MutationGateway Gateway(IAiTriggerStore triggers, IAutomationOwnerResolver owners,
         IServiceProvider? sp = null) =>
         new(new CapabilityCatalog(), new AllowAll(), new Audit(), [], NullLogger<MutationGateway>.Instance,
-            triggers: new AiTriggerAuthority(triggers, owners, sp));
+            triggers: Authority(triggers, owners, sp));
 
     internal sealed class MemoryTriggers(params AiTrigger[] triggers) : IAiTriggerStore
     {
@@ -338,7 +453,7 @@ public sealed class TriggerAuthorityTests : IDisposable
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor) => throw new NotSupportedException();
 
-        public Task<bool> SuspendAsync(string triggerId, string expectedOwnerId, string reason)
+        public Task<bool> SuspendAsync(string triggerId, string? expectedOwnerId, string reason)
         {
             var t = Items.FirstOrDefault(x => x.Id == triggerId && x.OwnerId == expectedOwnerId && x.Enabled);
             if (t is null) return Task.FromResult(false);

@@ -20,14 +20,15 @@ public interface IAiTriggerStore
     Task InitializeAsync(CancellationToken ct = default);
 
     /// <summary>Replaces every trigger. The owner and the suspension are the store's (PC-D6, R1-13): whatever the
-    /// caller sent for them is ignored. Assigning or changing a trigger's write grant makes
-    /// <paramref name="editor"/> its owner, and so does switching a suspended trigger on again (a takeover).</summary>
+    /// caller sent for them is ignored. <paramref name="editor"/> becomes the owner of a trigger it creates, of one
+    /// whose write grant it changes, and of one it switches on again after a suspension or without an owner (a
+    /// takeover). Every other trigger keeps its owner.</summary>
     Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor);
 
-    /// <summary>Switches trigger <paramref name="triggerId"/> off because its owner lost their authority — only while
-    /// its owner is still <paramref name="expectedOwnerId"/> and it is on. <c>false</c> when an Admin took it over or
-    /// switched it off meanwhile, or it is gone.</summary>
-    Task<bool> SuspendAsync(string triggerId, string expectedOwnerId, string reason) => Task.FromResult(false);
+    /// <summary>Switches trigger <paramref name="triggerId"/> off because its owner lost their authority (or it has
+    /// none: <paramref name="expectedOwnerId"/> <c>null</c>) — only while its owner is still that one and it is on.
+    /// <c>false</c> when an Admin took it over or switched it off meanwhile, or it is gone.</summary>
+    Task<bool> SuspendAsync(string triggerId, string? expectedOwnerId, string reason) => Task.FromResult(false);
 
     event Action? Changed;
 }
@@ -82,18 +83,18 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
                 t.OwnerId = prev?.OwnerId;
                 t.SuspendedReason = prev?.SuspendedReason;
 
-                var granted = t.WriteCapabilities.Count > 0 && t.WriteTargets.Count > 0;
                 var grantChanged = prev is null
                                    || !prev.WriteCapabilities.ToHashSet(StringComparer.Ordinal).SetEquals(t.WriteCapabilities)
                                    || !prev.WriteTargets.ToHashSet(StringComparer.Ordinal).SetEquals(t.WriteTargets);
-                // Switching a suspended trigger on again is a takeover: the Admin doing it owns it from now on.
-                var takeover = t.SuspendedReason is not null && t.Enabled;
+                // Switching a suspended or ownerless trigger on is a takeover: the Admin doing it owns it from now on.
+                // A trigger saved before R1-13 has no owner; its first run suspends it until an Admin does that.
+                var takeover = t.Enabled && prev is not null
+                               && (t.SuspendedReason is not null || (string.IsNullOrWhiteSpace(t.OwnerId) && !prev.Enabled));
                 if (takeover) t.SuspendedReason = null;
-                if (!granted) t.OwnerId = null;                       // read-only: nothing runs on anyone's authority
-                else if (grantChanged || takeover || string.IsNullOrWhiteSpace(t.OwnerId))
+                if (prev is null || grantChanged || takeover)
                 {
                     if (editorId == PrincipalIds.Anonymous)
-                        throw new UnauthorizedAccessException("A write grant needs an editor with an identity to own it.");
+                        throw new UnauthorizedAccessException("An AI trigger needs an editor with an identity to own it.");
                     t.OwnerId = editorId;
                 }
                 saved.Add(t);
@@ -109,15 +110,16 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
         Changed?.Invoke();
     }
 
-    public async Task<bool> SuspendAsync(string triggerId, string expectedOwnerId, string reason)
+    public async Task<bool> SuspendAsync(string triggerId, string? expectedOwnerId, string reason)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(triggerId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(expectedOwnerId);
         await _lock.WaitAsync();
         try
         {
             var current = _triggers.FirstOrDefault(t => t.Id == triggerId);
-            if (current is null || !current.Enabled || current.OwnerId != expectedOwnerId) return false;
+            if (current is null || !current.Enabled
+                || !string.Equals(NullIfEmpty(current.OwnerId), NullIfEmpty(expectedOwnerId), StringComparison.Ordinal))
+                return false;
             var suspended = Normalized(current);
             suspended.Enabled = false;
             suspended.SuspendedReason = string.IsNullOrWhiteSpace(reason) ? "its owner lost their authority" : reason;
@@ -151,6 +153,8 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
         SuspendedReason = s.SuspendedReason,
         CooldownSeconds = s.CooldownSeconds,
     };
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static List<string> Clean(List<string>? values) =>
         (values ?? new()).Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim())

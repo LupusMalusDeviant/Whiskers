@@ -134,8 +134,7 @@ public sealed class MutationGateway : IMutationGateway
         if (request.PinnedPolicy is null && MutationScope.Current?.PinnedPolicy is { } inherited)
             request = request with { PinnedPolicy = inherited };
         // R1-13: the trigger the mutation is made for, directly or because it is nested in a trigger's mutation.
-        var directTrigger = TriggerAuthority.TriggerOf(request.Principal);
-        if ((directTrigger ?? MutationScope.Current?.TriggerId) is { } triggerId)
+        if ((TriggerAuthority.TriggerOf(request.Principal) ?? MutationScope.Current?.TriggerId) is { } triggerId)
             request = request with { TriggerId = triggerId };
 
         // 1–2: the capability must exist, be switched on, and the principal must hold its level. Unknown means Deny.
@@ -226,16 +225,18 @@ public sealed class MutationGateway : IMutationGateway
             request = request with { Target = resolution.Target };
         }
 
-        // PC-D6 / PC-D7 (R1-13): an AI trigger writes only what an Admin granted it (capability and target) and only
-        // while the owner of that grant still holds the authority, re-read for this mutation. No answer is a Deny.
-        if (directTrigger is not null)
+        // PC-D6 / PC-D7 (R1-13): an AI trigger writes only what an Admin granted it (capability and every resource it
+        // touches) and only while the owner of that grant still holds the authority, re-read for this mutation. That
+        // holds for a mutation nested in the trigger's as well (a scheduled task it runs): the nested principal's own
+        // authority is checked too, but it cannot carry the trigger past its grant. No answer is a Deny.
+        if (request.TriggerId is { } grantTrigger)
         {
             string? refusal;
             try
             {
                 refusal = _triggers is null
                     ? "AI trigger grants cannot be checked (the Agent module is off)"
-                    : await _triggers.RefusalAsync(directTrigger, capability, request.Target, ct);
+                    : await _triggers.RefusalAsync(grantTrigger, capability, request.Target, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {

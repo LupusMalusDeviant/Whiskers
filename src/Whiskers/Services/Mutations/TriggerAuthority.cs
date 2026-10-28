@@ -9,7 +9,8 @@ namespace Whiskers.Services.Mutations;
 public interface ITriggerAuthority
 {
     /// <summary><c>null</c> when trigger <paramref name="triggerId"/> may perform <paramref name="capability"/> (at
-    /// its effective level) on the resolved <paramref name="target"/>; otherwise why not. An owner who lost the
+    /// its effective level) on the resolved <paramref name="target"/> and everything it also touches
+    /// (<see cref="MutationTarget.Related"/>); otherwise why not. An owner who lost the
     /// authority suspends the trigger and an Admin is told.</summary>
     Task<string?> RefusalAsync(string triggerId, Capability capability, MutationTarget target, CancellationToken ct);
 }

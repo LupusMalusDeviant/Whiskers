@@ -11,8 +11,10 @@ public sealed record TriggerRunAuthority(string Level, string? Refusal);
 /// <summary>The trigger side of <see cref="ITriggerAuthority"/>: also decides what a run starts with.</summary>
 public interface IAiTriggerAuthority : ITriggerAuthority
 {
-    /// <summary>A trigger without a write grant runs read-only. One with a grant runs at its owner's level as it is
-    /// now; an owner who lost their authority suspends the trigger, and the run does not start.</summary>
+    /// <summary>Every run re-checks the trigger's owner (PC-D6): no owner, or an owner who lost their authority —
+    /// for a trigger with a write grant, for any capability granted — suspends the trigger, and the run does not
+    /// start. Otherwise a trigger without a write grant runs read-only, one with a grant at its owner's level as it
+    /// is now.</summary>
     Task<TriggerRunAuthority> BeginRunAsync(AiTrigger trigger, CancellationToken ct = default);
 }
 
@@ -25,15 +27,19 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
 {
     private readonly IAiTriggerStore _store;
     private readonly IAutomationOwnerResolver _owners;
+    private readonly ICapabilityCatalog _catalog;
+    private readonly ICapabilityOverrides? _overrides;
     private readonly IServiceProvider? _sp;
     private readonly ILogger<AiTriggerAuthority>? _logger;
 
     /// <param name="sp">Resolves the notification service lazily: it depends on the trigger dispatcher.</param>
-    public AiTriggerAuthority(IAiTriggerStore store, IAutomationOwnerResolver owners, IServiceProvider? sp = null,
-        ILogger<AiTriggerAuthority>? logger = null)
+    public AiTriggerAuthority(IAiTriggerStore store, IAutomationOwnerResolver owners, ICapabilityCatalog catalog,
+        ICapabilityOverrides? overrides = null, IServiceProvider? sp = null, ILogger<AiTriggerAuthority>? logger = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
+        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        _overrides = overrides;
         _sp = sp;
         _logger = logger;
     }
@@ -41,13 +47,25 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
     public async Task<TriggerRunAuthority> BeginRunAsync(AiTrigger trigger, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(trigger);
-        if (!trigger.HasWriteGrant) return new(McpPermissionLevels.Read, null);
-        var owner = _owners.Resolve(trigger.OwnerId!);
-        var state = _owners.Describe(trigger.OwnerId!).State;
+        if (string.IsNullOrWhiteSpace(trigger.OwnerId))
+            return new(McpPermissionLevels.Read, await SuspendAsync(trigger,
+                "it has no owner (saved before owners were recorded); an admin must switch it on again to take it over"));
+        var owner = _owners.Resolve(trigger.OwnerId);
+        var state = _owners.Describe(trigger.OwnerId).State;
+        // Unverified is refused but not suspended: it runs again once the owner signs in (or an admin takes over).
         if (state == OwnerState.Unverified)
-            return new(McpPermissionLevels.Read, $"its owner {owner.DisplayName} has not signed in since the grant");
-        if (state != OwnerState.Active || !McpPermissionLevels.HasAccess(owner.PermissionLevel, McpPermissionLevels.Write))
+            return new(McpPermissionLevels.Read, $"its owner {owner.DisplayName} has not signed in yet");
+        if (state != OwnerState.Active)
             return new(McpPermissionLevels.Read, await SuspendAsync(trigger, $"its owner {owner.DisplayName} has no authority left"));
+        if (!trigger.HasWriteGrant) return new(McpPermissionLevels.Read, null);
+
+        // A grant is only as good as its owner: every granted capability must still be the owner's to give.
+        foreach (var id in trigger.WriteCapabilities)
+        {
+            if (_catalog.Find(id) is not { } capability) continue;           // unknown ids grant nothing
+            if (OwnerLacks(owner, Effective(capability)) is { } lost)
+                return new(McpPermissionLevels.Read, await SuspendAsync(trigger, lost));
+        }
         return new(McpPermissionLevels.Normalize(owner.PermissionLevel), null);
     }
 
@@ -64,23 +82,54 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         // PC-D7: only what an Admin listed. Anything else would need a confirmation, which an unattended run cannot get.
         if (!trigger.WriteCapabilities.Contains(capability.Id, StringComparer.Ordinal))
             return $"'{capability.McpTool ?? capability.Id}' is not among the capabilities granted to the AI trigger";
-        if (!trigger.WriteTargets.Any(g => TriggerAuthority.GlobMatch(g, target.Id) || TriggerAuthority.GlobMatch(g, target.Name)))
+        if (!Granted(trigger, target.Id) && !Granted(trigger, target.Name))
             return $"{target.Kind} '{target.Name ?? target.Id}' is not among the targets granted to the AI trigger";
+        // What the operation also touches (the containers a network removal cuts off, the container it connects, a
+        // workload's pod) must be granted too, by name or id: a grant on a network is not one on what hangs off it.
+        var own = new HashSet<string>(new[] { target.Id, target.Name ?? "" }.Where(v => v.Length > 0), StringComparer.Ordinal);
+        if (target.Related.FirstOrDefault(r => !own.Contains(r) && !Granted(trigger, r)) is { } outside)
+            return $"the operation also touches '{outside}', which is not among the targets granted to the AI trigger";
 
         // PC-D6: the owner's authority as it is now, for this capability at its effective level.
         var owner = _owners.Resolve(trigger.OwnerId!);
         var state = _owners.Describe(trigger.OwnerId!).State;
         if (state == OwnerState.Unverified)
-            return $"its owner {owner.DisplayName} has not signed in since the grant";
-        var tool = capability.McpTool ?? capability.Id;
+            return $"its owner {owner.DisplayName} has not signed in yet";
         var lost = state != OwnerState.Active
             ? $"its owner {owner.DisplayName} has no authority left"
-            : !McpPermissionLevels.HasAccess(owner.PermissionLevel, capability.RequiredLevel)
-                ? $"its owner {owner.DisplayName} no longer holds '{capability.RequiredLevel}' for {capability.Id}"
-                : owner.AllowedTools is { } allowed && !allowed.Contains(tool)
-                    ? $"its owner {owner.DisplayName} may no longer use '{tool}'"
-                    : null;
+            : OwnerLacks(owner, capability);
         return lost is null ? null : await SuspendAsync(trigger, lost);
+    }
+
+    private static bool Granted(AiTrigger trigger, string? value) =>
+        trigger.WriteTargets.Any(g => TriggerAuthority.GlobMatch(g, value));
+
+    /// <summary>Why the owner cannot give <paramref name="capability"/> (at its effective level and as a tool its key
+    /// may use), or <c>null</c>.</summary>
+    private static string? OwnerLacks(MutationPrincipal owner, Capability capability)
+    {
+        var tool = capability.McpTool ?? capability.Id;
+        return !McpPermissionLevels.HasAccess(owner.PermissionLevel, capability.RequiredLevel)
+            ? $"its owner {owner.DisplayName} no longer holds '{capability.RequiredLevel}' for {capability.Id}"
+            : owner.AllowedTools is { } allowed && !allowed.Contains(tool)
+                ? $"its owner {owner.DisplayName} may no longer use '{tool}'"
+                : null;
+    }
+
+    /// <summary>The capability with a stricter level stored in Settings → MCP, as the gateway applies it. A switched-off
+    /// tool is a policy, not a lost authority (the gateway refuses it anyway).</summary>
+    private Capability Effective(Capability capability)
+    {
+        if (_overrides is null) return capability;
+        try
+        {
+            var availability = _overrides.Resolve(capability);
+            return availability.Enabled ? capability with { RequiredLevel = availability.RequiredLevel } : capability;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return capability;                                  // the gateway refuses the call fail-closed
+        }
     }
 
     /// <summary>Suspends the trigger (unless an Admin took it over meanwhile) and tells the Admins. Returns the
@@ -91,7 +140,7 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         bool suspended;
         try
         {
-            suspended = await _store.SuspendAsync(trigger.Id, trigger.OwnerId!, lost);
+            suspended = await _store.SuspendAsync(trigger.Id, trigger.OwnerId, lost);
         }
         catch (Exception ex)
         {

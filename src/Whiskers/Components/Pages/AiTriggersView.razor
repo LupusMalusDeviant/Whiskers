@@ -73,9 +73,13 @@
                     {
                         <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Visibility">@L["AiTriggersView_ReadOnly_Chip"]</MudChip>
                     }
-                    else if (!string.IsNullOrWhiteSpace(t.OwnerId))
+                    @if (string.IsNullOrWhiteSpace(t.OwnerId))
                     {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.Edit">@L["AiTriggersView_Owner_Chip", t.OwnerId]</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Icon="@Icons.Material.Filled.PersonOff">@L["AiTriggersView_NoOwner_Chip"]</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Person">@L["AiTriggersView_Owner_Chip", t.OwnerId]</MudChip>
                     }
                     <MudSpacer />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
