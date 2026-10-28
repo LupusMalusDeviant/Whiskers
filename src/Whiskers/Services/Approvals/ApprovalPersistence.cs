@@ -20,6 +20,11 @@ public interface IApprovalPersistence
     Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by, DateTime? grantExpiresAt,
         bool selfApproved = false, CancellationToken ct = default);
 
+    /// <summary>Approved/Rejected → Expired, for a decision whose write completed only after the approval's expiry
+    /// (INV-32): the decision was checked against the time it was made, so a write delayed past the expiry is taken
+    /// back. Only while nobody used it. <c>false</c> when the approval is no longer in that state.</summary>
+    Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at, CancellationToken ct = default);
+
     /// <summary>Uses the approval once. <c>false</c> unless it is approved, unused and its grant has not lapsed at
     /// <paramref name="now"/>.</summary>
     Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default);
@@ -63,6 +68,23 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
                 .SetProperty(a => a.ResolvedBy, by)
                 .SetProperty(a => a.GrantExpiresAt, grantExpiresAt)
                 .SetProperty(a => a.SelfApproved, selfApproved), ct);
+        return updated == 1;
+    }
+
+    public async Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
+        CancellationToken ct = default)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var status = decided.ToString();
+        var updated = await db.Approvals
+            .Where(a => a.Id == approvalId && a.Status == status && a.ConsumedAt == null)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(a => a.Status, nameof(ApprovalStatus.Expired))
+                .SetProperty(a => a.ResolvedAt, at)
+                .SetProperty(a => a.ResolvedBy, "system")
+                .SetProperty(a => a.GrantExpiresAt, (DateTime?)null)
+                .SetProperty(a => a.SelfApproved, false), ct);
         return updated == 1;
     }
 
@@ -134,6 +156,22 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
             row.ResolvedBy = by;
             row.GrantExpiresAt = grantExpiresAt;
             row.SelfApproved = selfApproved;
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
+        CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            if (!_rows.TryGetValue(approvalId, out var row) || row.Status != decided.ToString() || row.ConsumedAt is not null)
+                return Task.FromResult(false);
+            row.Status = nameof(ApprovalStatus.Expired);
+            row.ResolvedAt = at;
+            row.ResolvedBy = "system";
+            row.GrantExpiresAt = null;
+            row.SelfApproved = false;
             return Task.FromResult(true);
         }
     }

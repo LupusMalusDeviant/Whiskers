@@ -86,6 +86,52 @@ public partial class ApprovalStoreTests
         Assert.True(await persistence.ResolveAsync(a.Id, ApprovalStatus.Expired, a.ExpiresAt.AddSeconds(1), "system", null));
     }
 
+    /// <summary>A database whose decision write waits (a lock) until the clock has passed the approval's expiry.</summary>
+    private sealed class LockedUntilExpiry(InMemoryApprovalPersistence inner, ManualTime time) : IApprovalPersistence
+    {
+        public Task InsertAsync(Approval approval, CancellationToken ct = default) => inner.InsertAsync(approval, ct);
+
+        public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
+            DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default)
+        {
+            if (ApprovalRecords.IsDecision(status)) time.Now += Ttl;   // the lock is released only after the expiry
+            return inner.ResolveAsync(approvalId, status, at, by, grantExpiresAt, selfApproved, ct);
+        }
+
+        public Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
+            CancellationToken ct = default) => inner.ExpireLateDecisionAsync(approvalId, decided, at, ct);
+
+        public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>
+            inner.ConsumeAsync(approvalId, operationId, now, ct);
+
+        public Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default) => inner.LoadOpenAsync(ct);
+
+        public Task<IReadOnlyList<Approval>> LoadHistoryAsync(int skip, int take, CancellationToken ct = default) =>
+            inner.LoadHistoryAsync(skip, take, ct);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_decision_whose_write_completes_only_after_the_expiry_does_not_count(bool approve)
+    {
+        var time = new ManualTime();
+        var records = new InMemoryApprovalPersistence();
+        var store = new ApprovalStore(approvalTtl: Ttl, time: time, persistence: new LockedUntilExpiry(records, time));
+        var decisions = new List<bool>();
+        var a = await store.CreateAsync(Req(), d => { decisions.Add(d); return Task.CompletedTask; });
+
+        time.Now += Ttl - TimeSpan.FromSeconds(1);   // decided one second before the expiry…
+        var result = await store.DecideAsync(a.Id, approve, Admin());   // …but on record only after it
+
+        Assert.Equal(ApprovalDecisionResult.Expired, result);
+        Assert.Equal(ApprovalStatus.Expired, a.Status);
+        Assert.Equal([false], decisions);   // the waiting session is released with a "no", never a "yes"
+        Assert.Equal(nameof(ApprovalStatus.Expired), Assert.Single(await records.LoadHistoryAsync(0, 10)).Status.ToString());
+        Assert.Empty(await records.LoadOpenAsync());
+        Assert.False(await store.TryConsumeAsync(a.Id, "op-1", time.Now.UtcDateTime));
+    }
+
     [Fact]
     public async Task An_approved_approval_is_usable_only_within_its_grant()
     {

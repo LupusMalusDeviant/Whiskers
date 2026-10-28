@@ -23,9 +23,17 @@ public sealed class ChatConnectionWatcher : CircuitHandler, IChatConnectionWatch
     public override async Task OnConnectionDownAsync(Circuit circuit, CancellationToken cancellationToken)
     {
         if (ConnectionDown is not { } handlers) return;
+        // Every chat is told before any is awaited: each stops its run synchronously, before its first await, so a
+        // slow cleanup of one chat (cancelling its approvals in the database) never leaves another one running.
+        var endings = new List<Task>();
         foreach (var handler in handlers.GetInvocationList().Cast<Func<Task>>())
         {
-            try { await handler(); }
+            try { endings.Add(handler()); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Ending a chat after its connection dropped failed"); }
+        }
+        foreach (var ending in endings)
+        {
+            try { await ending; }
             catch (Exception ex) { _logger?.LogWarning(ex, "Ending a chat after its connection dropped failed"); }
         }
     }

@@ -487,6 +487,36 @@ public class OrphanedApprovalTests
         Assert.Equal(0, invoker.Calls);
     }
 
+    [Fact]
+    public async Task A_dropped_connection_stops_every_chat_before_any_cleanup_is_awaited()
+    {
+        // The chat page and the chat widget share one connection; the first one's cleanup is slow (a database write).
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var connection = new ChatConnectionWatcher();
+        var slowCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.ConnectionDown += () => slowCleanup.Task;
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var widget = new AgentChatLifetime(store, connection);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+        var run = widget.BeginRun();
+        widget.Attach(session, run);
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        var approval = await RunToApprovalAsync(events, session, coordinator);
+
+        var down = connection.OnConnectionDownAsync(null!, CancellationToken.None);
+
+        // While the first chat is still cleaning up, the second one has stopped already: approving its request
+        // elsewhere resumes nothing.
+        Assert.False(down.IsCompleted);
+        Assert.True(run.IsCancellationRequested);
+        await store.DecideAsync(approval.Id, true, Approver);
+        slowCleanup.SetResult();
+        await down;
+        await DrainAsync(events);
+        Assert.Equal(0, invoker.Calls);
+    }
+
     private sealed class FailingCoordinator : IApprovalCoordinator
     {
         public Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context,

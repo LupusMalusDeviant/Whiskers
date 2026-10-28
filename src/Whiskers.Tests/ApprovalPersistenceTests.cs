@@ -190,6 +190,9 @@ public sealed class ApprovalPersistenceTests : IDisposable
             DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
 
+        public Task<bool> ExpireLateDecisionAsync(string approvalId, ApprovalStatus decided, DateTime at,
+            CancellationToken ct = default) => throw new InvalidOperationException("database unavailable");
+
         public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
 
