@@ -200,6 +200,7 @@ public sealed class LocalAuthIdentityTests : IDisposable
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(config));
             });
             using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            BootSettings.AssertAuthenticationSetup(factory.Services, disabled: false);
 
             // 1. GET /login → the antiforgery token is rendered (proves it works under interactive render) + the
             //    antiforgery cookie is set (carried by the client's CookieContainer).

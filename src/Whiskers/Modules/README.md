@@ -55,7 +55,7 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
 - **§6 DoD (nearly complete):** a `docs/modules/` index ✅ + an `ARCHITECTURE.md` "Module System" chapter ✅ +
   a DI-level all-on/all-off/only-core matrix test ✅ + a full-app `WebApplicationFactory` boot-matrix test ✅
   (`BootMatrixTests`, boots the real app under ValidateOnBuild in each configuration, pings `/healthz` and checks
-  that every module flag it set is in effect — `Features:<id>:Enabled` is read while the builder is set up, so a
+  the complete module set it ended up with against `ModuleCatalog.All()`, plus the authentication setup — `Features:<id>:Enabled` is read while the builder is set up, so a
   boot test passes its settings through `BootSettings` (environment variables) as well as the in-memory
   configuration) +
   a `Modules/HelloWorld` example ✅; **still open — only `Program.cs` <150 lines** (needs the auth/OIDC/endpoint

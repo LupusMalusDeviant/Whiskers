@@ -51,15 +51,18 @@ public class BootMatrixTests
             var resp = await client.GetAsync("/healthz");
             Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
-            // The boot must really be the configuration it claims: a flag Program never saw would leave this a
-            // full boot under a "lean" name and pass anyway.
+            // The boot must really be the configuration it claims — the complete module set, not only the flags
+            // this case sets: a flag Program never saw, or one inherited from the environment, would leave a
+            // "lean" boot full (or a full one lean) and pass anyway.
+            var expected = ModuleCatalog.DiscoverEnabled(new ConfigurationBuilder().AddInMemoryCollection(
+                featureSettings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value))).Build())
+                .Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
             var registry = factory.Services.GetRequiredService<IModuleRegistry>();
-            foreach (var (key, value) in featureSettings)
-            {
-                var id = key.Split(':')[1];
-                Assert.True(registry.IsEnabled(id) == bool.Parse(value),
-                    $"Module '{id}' is {(registry.IsEnabled(id) ? "on" : "off")}, but the boot set {key}={value}.");
-            }
+            foreach (var module in ModuleCatalog.All())
+                Assert.True(registry.IsEnabled(module.Id) == expected.Contains(module.Id),
+                    $"Module '{module.Id}' is {(registry.IsEnabled(module.Id) ? "on" : "off")}, but this boot asked " +
+                    $"for it {(expected.Contains(module.Id) ? "on" : "off")}.");
+            BootSettings.AssertAuthenticationSetup(factory.Services, disabled: true);
         }
         finally
         {
