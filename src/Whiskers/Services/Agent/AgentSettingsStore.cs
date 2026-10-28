@@ -50,15 +50,23 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
         };
 
         await _lock.WaitAsync();
-        var tmp = $"{_path}.{Guid.NewGuid():N}.tmp";
         try
         {
-            await File.WriteAllTextAsync(tmp, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-            File.Move(tmp, _path, overwrite: true);
+            var tmp = $"{_path}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllTextAsync(tmp, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                File.Move(tmp, _path, overwrite: true);
+            }
+            finally
+            {
+                // Best effort: a leftover temp file must neither mask the write failure nor keep the lock held.
+                try { if (File.Exists(tmp)) File.Delete(tmp); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
         }
         finally
         {
-            if (File.Exists(tmp)) File.Delete(tmp);
             _lock.Release();
         }
     }
