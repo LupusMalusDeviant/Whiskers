@@ -163,7 +163,7 @@ registrations are wrapped too.
    (the agent session's own approval for this operation, or approve-then-retry for a direct MCP call); otherwise
    **PendingApproval**.
 7. Audit intent written; if that fails → **Denied** (PC-D5). Only now is the approval used up
-   (`IApprovalGate.TryConsume`); a concurrent call that already used it turns this attempt's row into **Denied**.
+   (`IApprovalGate.TryConsumeAsync`, one conditional database update since R1-14, so also across a restart); a concurrent call that already used it turns this attempt's row into **Denied**.
 8. Delegate runs inside a `MutationScope`, cancelled at the capability's deadline; an exception, the deadline or a
    reported failure (`MutationScope.Fail`, or an MCP result with `isError`) → **Failed**. A reported failure keeps
    the delegate's value, so the caller still gets the tool's own answer.
@@ -267,7 +267,7 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   them.
 - **A UI action that outlives its deadline** keeps running when the service call ignores the token (most do); the
   page then shows a timeout while the work continues.
-- **Approvals are in memory.** Persistence, execution-time expiry and no-self-approval follow in WP3.
+- **Approval eligibility.** Approvals are persisted and fully bound since R1-14 (`../Approvals/`); who may approve (no self-approval for unattended requests) and requester-session lifetime follow in R1-15.
 - `MutationPrincipal` maps onto `AgentPrincipal` for the policy; WP6 brings structured identity.
 
 ## Tests

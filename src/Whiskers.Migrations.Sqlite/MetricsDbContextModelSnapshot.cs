@@ -73,6 +73,113 @@ namespace Whiskers.Migrations
                     b.ToTable("ActionOutcomes");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.ApprovalRecordEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActorType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ArgumentsHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Binding")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConsumedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Diff")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("GrantExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GuardrailPreset")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GuardrailRule")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Interactive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParamsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResolvedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RiskLevel")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetServer")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetWorkload")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ToolCallId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ToolName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Binding");
+
+                    b.HasIndex("CorrelationId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("Approvals", (string)null);
+                });
+
             modelBuilder.Entity("Whiskers.Models.AuditLogEntity", b =>
                 {
                     b.Property<long>("Id")

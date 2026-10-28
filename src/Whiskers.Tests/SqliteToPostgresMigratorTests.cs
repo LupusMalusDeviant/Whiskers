@@ -28,10 +28,12 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         return ctx;
     }
 
-    [Fact]
-    public async Task A_source_from_before_the_policy_decision_tables_migrates_completely()
+    [Theory]
+    [InlineData("DROP TABLE Approvals; DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;", "PolicyDecisions")]  // before R1-12
+    [InlineData("DROP TABLE Approvals;", "Approvals")]                                                               // before R1-14
+    public async Task A_source_from_an_older_release_migrates_completely(string drop, string absent)
     {
-        // A database migrated by the release before R1-12 has no PolicyDecisions / PolicySnapshots tables.
+        // A database migrated by an older release lacks the tables of every release after its own.
         var srcPath = NewDbPath();
         var dstPath = NewDbPath();
         await using (var src = NewDb(srcPath))
@@ -39,7 +41,7 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
             src.ScheduledTasks.Add(new ScheduledTaskEntity { TaskId = "task-abc", Name = "nightly", CronExpression = "0 2 * * *",
                 TaskType = ScheduledTaskType.DbBackup, CreatedBy = "admin" });
             await src.SaveChangesAsync();
-            await src.Database.ExecuteSqlRawAsync("DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;");
+            await src.Database.ExecuteSqlRawAsync(drop);
         }
 
         int rc;
@@ -49,14 +51,16 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
             rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, log);
 
         Assert.Equal(0, rc);
-        Assert.Contains("no 'PolicyDecisions' table", log.ToString());
+        Assert.Contains($"no '{absent}' table", log.ToString());
         await using var check = NewDb(dstPath);
         Assert.Equal(1, await check.ScheduledTasks.CountAsync());
         Assert.Equal(0, await check.PolicyDecisions.CountAsync());
+        Assert.Equal(0, await check.Approvals.CountAsync());
     }
 
     [Theory]
     [InlineData("DROP TABLE PolicySnapshots;")]                       // a decision table without its versions
+    [InlineData("DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;")]   // R1-12's tables gone, R1-14's there
     [InlineData("DROP TABLE ScheduledTasks;")]                        // a table every supported release has
     public async Task A_source_missing_other_tables_is_refused_before_anything_is_copied(string drop)
     {

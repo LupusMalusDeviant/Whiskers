@@ -9,36 +9,40 @@ namespace Whiskers.Tests;
 /// exactly the call a human saw, once, and within its lifetime.</summary>
 public class ApprovalGateTests
 {
+    /// <summary>The binding the gateway computes for these calls (R1-14); the gate only compares it.</summary>
+    private const string Bound = "binding-1";
+
     private static Dictionary<string, JsonElement> Args(string container) =>
         new() { ["containerId"] = JsonSerializer.SerializeToElement(container) };
 
     /// <summary>The approval an agent session raises through ApprovalCoordinator for one call.</summary>
-    private static Approval RaiseForSession(ApprovalStore store, string session, string operation, string container) =>
-        store.Create(new ApprovalRequest(session, "call-1", "ops@example.com", "agent-web", "restart_container",
+    private static Task<Approval> RaiseForSession(ApprovalStore store, string session, string operation, string container) =>
+        store.CreateAsync(new ApprovalRequest(session, "call-1", "ops@example.com", "agent-web", "restart_container",
             McpPermissionLevels.Write, null, "needs a human", CorrelationId: operation,
-            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(container))), _ => Task.CompletedTask);
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(container)), Binding: Bound, Interactive: true),
+            _ => Task.CompletedTask);
 
     private static ApprovalSubject SessionCall(string session, string operation, string container) =>
         new("restart_container", McpPermissionLevels.Write, "Agent:agent:ops", "agent:ops", "agent", Args(container),
-            operation, session);
+            operation, session) { Binding = Bound };
 
     [Fact]
     public async Task A_session_approval_lets_its_own_operation_run_exactly_once()
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        var approval = await RaiseForSession(store, "s1", "op-1", "web-1");
         Assert.True(await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin));
 
         var first = await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", []);
-        var consumed = gate.TryConsume(first.ApprovalId!);
+        var consumed = await gate.TryConsumeAsync(first.ApprovalId!, "op");
         var second = await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", []);
 
         Assert.True(first.Approved);
         Assert.Equal(approval.Id, first.ApprovalId);
         Assert.Equal("admin@example.com", first.ApprovedBy);
         Assert.True(consumed);
-        Assert.False(gate.TryConsume(approval.Id));
+        Assert.False(await gate.TryConsumeAsync(approval.Id, "op"));
         Assert.False(second.Approved);
         Assert.Contains("already used", second.Message);
     }
@@ -48,7 +52,7 @@ public class ApprovalGateTests
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        var approval = await RaiseForSession(store, "s1", "op-1", "web-1");
         await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
 
         // A refusal between the check and the run (a failed audit intent) must leave the approval usable.
@@ -57,18 +61,18 @@ public class ApprovalGateTests
 
         Assert.True(first.Approved);
         Assert.True(second.Approved);
-        Assert.True(gate.TryConsume(approval.Id));
+        Assert.True(await gate.TryConsumeAsync(approval.Id, "op"));
     }
 
     [Fact]
-    public void An_undecided_or_unknown_approval_cannot_be_consumed()
+    public async Task An_undecided_or_unknown_approval_cannot_be_consumed()
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var pending = RaiseForSession(store, "s1", "op-1", "web-1");
+        var pending = await RaiseForSession(store, "s1", "op-1", "web-1");
 
-        Assert.False(gate.TryConsume(pending.Id));
-        Assert.False(gate.TryConsume("no-such-approval"));
+        Assert.False(await gate.TryConsumeAsync(pending.Id, "op"));
+        Assert.False(await gate.TryConsumeAsync("no-such-approval", "op"));
     }
 
     [Fact]
@@ -77,7 +81,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
-            "mcp-direct", Args("web-1"));
+            "mcp-direct", Args("web-1")) { Binding = Bound };
 
         var results = await Task.WhenAll(Enumerable.Range(0, 16)
             .Select(_ => Task.Run(() => gate.CheckAsync(direct, "needs a human", []))));
@@ -93,12 +97,12 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
-            "mcp-direct", Args("web-1"));
+            "mcp-direct", Args("web-1")) { Binding = Bound };
 
         var raised = await gate.CheckAsync(direct, "needs a human", []);
         await store.ResolveAsync(raised.ApprovalId!, true, "admin@example.com", McpPermissionLevels.Admin);
         var retry = await gate.CheckAsync(direct, "needs a human", []);
-        var used = gate.TryConsume(retry.ApprovalId!);
+        var used = await gate.TryConsumeAsync(retry.ApprovalId!, "op");
         var next = await gate.CheckAsync(direct, "needs a human", []);
 
         Assert.True(retry.Approved);
@@ -115,7 +119,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var direct = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "key:k1", "key:k1",
-            "mcp-direct", Args("web-1"));
+            "mcp-direct", Args("web-1")) { Binding = Bound };
 
         var raised = await gate.CheckAsync(direct, "needs a human", []);
         await store.ResolveAsync(raised.ApprovalId!, false, "admin@example.com", McpPermissionLevels.Admin);
@@ -130,7 +134,7 @@ public class ApprovalGateTests
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        var approval = await RaiseForSession(store, "s1", "op-1", "web-1");
         await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
 
         var result = await gate.CheckAsync(SessionCall("s1", "op-1", "db-1"), "needs a human", []);
@@ -146,7 +150,7 @@ public class ApprovalGateTests
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        var approval = await RaiseForSession(store, "s1", "op-1", "web-1");
         if (reject) await store.ResolveAsync(approval.Id, false, "admin@example.com", McpPermissionLevels.Admin);
 
         var result = await gate.CheckAsync(SessionCall("s1", "op-1", "web-1"), "needs a human", []);
@@ -161,7 +165,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var clock = new ShiftedClock();
         var gate = new ApprovalGate(store, time: clock);
-        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        var approval = await RaiseForSession(store, "s1", "op-1", "web-1");
         await store.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
 
         clock.Shift = ApprovalGate.GrantLifetime + TimeSpan.FromSeconds(1);
@@ -176,7 +180,7 @@ public class ApprovalGateTests
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
         var subject = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "ApiKey:key:k1", "ci",
-            "mcp-direct", Args("web-1"));
+            "mcp-direct", Args("web-1")) { Binding = Bound };
 
         var result = await gate.CheckAsync(subject, "needs a human", ["confirm"]);
 
@@ -220,7 +224,7 @@ public class ApprovalGateTests
         // R1-05: raised at Write (the outer tool's level) and approved by an Operator, but the gateway now needs Admin.
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var approval = RaiseForSession(store, "s1", "op-1", "web-1");
+        var approval = await RaiseForSession(store, "s1", "op-1", "web-1");
         Assert.True(await store.ResolveAsync(approval.Id, approved: true, "operator@x", McpPermissionLevels.Write));
 
         var admin = SessionCall("s1", "op-1", "web-1") with { Level = McpPermissionLevels.Admin };
@@ -237,7 +241,7 @@ public class ApprovalGateTests
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store);
-        var write = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "k", "k", "mcp", Args("web-1"));
+        var write = new ApprovalSubject("restart_container", McpPermissionLevels.Write, "k", "k", "mcp", Args("web-1")) { Binding = Bound };
         var first = await gate.CheckAsync(write, "needs a human", []);
         Assert.True(await store.ResolveAsync(first.ApprovalId!, approved: true, "operator@x", McpPermissionLevels.Write));
 

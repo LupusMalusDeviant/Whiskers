@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
@@ -29,6 +28,11 @@ public sealed record ApprovalSubject(
 
     /// <summary>The preset that decision was made under (a trigger's pinned one, or the active one).</summary>
     public string? Preset { get; init; }
+
+    /// <summary>What the call is bound to (R1-14, <see cref="ApprovalBinding"/>): principal, credential, capability
+    /// and level, normalized arguments, resolved target and policy version. An approval is usable only for a call
+    /// with the same binding; a subject without one can never use an approval.</summary>
+    public string? Binding { get; init; }
 }
 
 public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
@@ -42,13 +46,14 @@ public sealed record ApprovalGateResult(bool Approved, string Message, string? A
 public interface IApprovalGate
 {
     /// <summary>Finds a usable approval for this call, or raises one. Does not use it up: the caller does that with
-    /// <see cref="TryConsume"/> right before it runs the call, so a refusal in between leaves the approval valid.</summary>
+    /// <see cref="TryConsumeAsync"/> right before it runs the call, so a refusal in between leaves the approval valid.</summary>
     Task<ApprovalGateResult> CheckAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
         CancellationToken ct = default);
 
-    /// <summary>Uses the approval once. <c>false</c> when it was used already, is no longer approved or has outlived
-    /// its lifetime — the caller must then not run the call.</summary>
-    bool TryConsume(string approvalId);
+    /// <summary>Uses the approval once, for operation <paramref name="operationId"/>. <c>false</c> when it was used
+    /// already (also before a restart), is no longer approved or has outlived its lifetime — the caller must then not
+    /// run the call.</summary>
+    Task<bool> TryConsumeAsync(string approvalId, string operationId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -57,13 +62,15 @@ public interface IApprovalGate
 /// <item>An interactive caller raised the approval itself (the agent session through <c>ApprovalCoordinator</c>)
 /// and passes its operation id; the approval with that correlation id, session and tool is used.</item>
 /// <item>Approve-then-retry for callers that cannot wait (an HTTP request): the first call raises an approval and is
-/// refused; once a human approved it, the identical call (same caller, tool and arguments) runs once.</item>
+/// refused; once a human approved it, the identical call (same binding) runs once.</item>
 /// </list>
+/// Either way the approval must carry the call's <see cref="ApprovalSubject.Binding"/> (R1-14): a different caller,
+/// credential, argument, target or policy version never inherits it. Approvals, their decisions and their single
+/// use are persisted by <see cref="IApprovalStore"/>, so they survive a restart.
 /// </summary>
 public sealed class ApprovalGate : IApprovalGate
 {
-    internal static readonly TimeSpan GrantLifetime = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan ConsumedRetention = TimeSpan.FromHours(1);
+    internal static TimeSpan GrantLifetime => ApprovalStore.GrantLifetime;
     private const string DirectSessionId = "mcp-direct";
     private const int MaxParamChars = 4000;
 
@@ -73,11 +80,8 @@ public sealed class ApprovalGate : IApprovalGate
     private readonly ILogger<ApprovalGate>? _logger;
     private readonly TimeProvider _time;
 
-    // call fingerprint → approval raised for it; approval id → when it was used (single use).
-    private readonly ConcurrentDictionary<string, string> _raised = new();
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _consumed = new();
     // Two concurrent first calls must raise one approval, not two (only one of which could ever be used).
-    private readonly object _raiseLock = new();
+    private readonly SemaphoreSlim _raiseLock = new(1, 1);
 
     public ApprovalGate(IApprovalStore approvals, IGuardrailStore? policy = null, INotificationService? notify = null,
         ILogger<ApprovalGate>? logger = null, TimeProvider? time = null)
@@ -95,7 +99,10 @@ public sealed class ApprovalGate : IApprovalGate
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(subject.Arguments);
         ArgumentNullException.ThrowIfNull(matchedRules);
-        Sweep();
+        // Fail closed: a call whose binding is unknown can neither raise nor use an approval.
+        if (string.IsNullOrWhiteSpace(subject.Binding))
+            return new ApprovalGateResult(false,
+                $"'{subject.ToolName}' needs a human approval, but the call could not be bound to one; it was not executed.");
         var argumentsHash = ApprovalFingerprint.OfArguments(subject.Arguments);
 
         // 1. The approval an interactive caller raised for this very operation.
@@ -113,39 +120,39 @@ public sealed class ApprovalGate : IApprovalGate
                 if (own.ArgumentsHash != argumentsHash)
                     return new ApprovalGateResult(false,
                         $"Approval {own.Id} was given for different arguments; the call was not executed.", own.Id);
-                return Usable(own) ?? new ApprovalGateResult(false, _consumed.ContainsKey(own.Id)
+                // R1-14: the same caller, credential, target and policy version as when it was decided.
+                if (own.Binding != subject.Binding)
+                    return new ApprovalGateResult(false,
+                        $"Approval {own.Id} was given for a different caller, target or policy version; the call was not executed.",
+                        own.Id);
+                return Usable(own) ?? new ApprovalGateResult(false, own.ConsumedAt is not null
                         ? $"Approval {own.Id} for '{subject.ToolName}' was already used; the call was not executed."
                         : $"Approval {own.Id} for '{subject.ToolName}' is {own.Status.ToString().ToLowerInvariant()}; the call was not executed.",
                     own.Id);
             }
         }
 
-        // 2–3. Approve-then-retry: use the approval raised for this call, or raise one. Checked and raised under one
-        // lock, so concurrent identical calls share a single approval.
-        var fingerprint = ApprovalFingerprint.Of(subject.ActorKey, subject.ToolName, subject.Arguments);
+        // 2–3. Approve-then-retry: use the approval raised for this binding, or raise one. Checked and raised under
+        // one lock, so concurrent identical calls share a single approval.
         Approval approval;
-        lock (_raiseLock)
+        await _raiseLock.WaitAsync(ct);
+        try
         {
-            if (_raised.TryGetValue(fingerprint, out var raisedId) && _approvals.Get(raisedId) is { } raised)
+            if (_approvals.FindOpen(subject.Binding) is { } raised && LevelCovers(raised, subject))
             {
-                if (!LevelCovers(raised, subject))
-                {
-                    // Raised below what the operation now needs (a level was raised meanwhile): ask again.
-                    _raised.TryRemove(fingerprint, out _);
-                }
-                else if (raised.Status == ApprovalStatus.Pending && !raised.IsExpired)
+                if (raised.Status == ApprovalStatus.Pending)
                     return new ApprovalGateResult(false,
                         $"Approval {raised.Id} for '{subject.ToolName}' is still pending. Repeat this exact call once a human has approved it.",
                         raised.Id);
-                else if (raised.ArgumentsHash == argumentsHash && Usable(raised) is { } granted)
+                if (raised.ArgumentsHash == argumentsHash && Usable(raised) is { } granted)
                     return granted;
-                else
-                    // Rejected, expired or used: this call needs a new decision.
-                    _raised.TryRemove(fingerprint, out _);
             }
-
-            approval = Raise(subject, reason, matchedRules, argumentsHash);
-            _raised[fingerprint] = approval.Id;
+            // None, or raised below what the operation now needs (a level was raised meanwhile): ask again.
+            approval = await RaiseAsync(subject, reason, matchedRules, argumentsHash, ct);
+        }
+        finally
+        {
+            _raiseLock.Release();
         }
 
         await NotifyAsync(subject);
@@ -155,42 +162,31 @@ public sealed class ApprovalGate : IApprovalGate
             approval.Id);
     }
 
-    public bool TryConsume(string approvalId)
+    public Task<bool> TryConsumeAsync(string approvalId, string operationId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
-        if (_approvals.Get(approvalId) is not { } approval || Usable(approval) is null)
-            return false;
-        if (!_consumed.TryAdd(approvalId, _time.GetUtcNow()))
-            return false;
-        // A used approval answers no further retry; the next identical call raises a new one.
-        foreach (var (fingerprint, id) in _raised)
-            if (id == approvalId) _raised.TryRemove(fingerprint, out _);
-        return true;
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+        return _approvals.TryConsumeAsync(approvalId, operationId, _time.GetUtcNow().UtcDateTime, ct);
     }
 
-    /// <summary>Approved, within its lifetime and not used yet → a grant. Otherwise null. Uses nothing up.</summary>
     /// <summary>Fail closed: an approval without a readable level, or below the subject's level, does not count.</summary>
     private static bool LevelCovers(Approval approval, ApprovalSubject subject) =>
         !string.IsNullOrWhiteSpace(approval.Level)
         && McpPermissionLevels.HasAccess(McpPermissionLevels.Normalize(approval.Level), McpPermissionLevels.Normalize(subject.Level));
 
-    private ApprovalGateResult? Usable(Approval approval)
-    {
-        if (!IsLive(approval) || _consumed.ContainsKey(approval.Id))
-            return null;
-        return new ApprovalGateResult(true, "Approved.", approval.Id, approval.ResolvedBy);
-    }
+    /// <summary>Approved, within its lifetime and not used yet → a grant. Otherwise null. Uses nothing up.</summary>
+    private ApprovalGateResult? Usable(Approval approval) =>
+        approval.Status == ApprovalStatus.Approved && approval.ConsumedAt is null
+        && approval.GrantExpiresAt is { } until && until > _time.GetUtcNow().UtcDateTime
+            ? new ApprovalGateResult(true, "Approved.", approval.Id, approval.ResolvedBy)
+            : null;
 
-    private bool IsLive(Approval approval) =>
-        approval.Status == ApprovalStatus.Approved && approval.ResolvedAt is { } decidedAt
-        && DateTime.SpecifyKind(decidedAt, DateTimeKind.Utc) + GrantLifetime > _time.GetUtcNow().UtcDateTime;
-
-    private Approval Raise(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
-        string argumentsHash)
+    private Task<Approval> RaiseAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
+        string argumentsHash, CancellationToken ct)
     {
         var argsJson = JsonSerializer.Serialize(subject.Arguments);
         var (server, workload) = ApprovalDisplay.ExtractTarget(argsJson);
-        var approval = _approvals.Create(new ApprovalRequest(
+        return _approvals.CreateAsync(new ApprovalRequest(
             SessionId: subject.SessionId ?? DirectSessionId,
             ToolCallId: Guid.NewGuid().ToString("N"),
             Actor: subject.ActorDisplay,
@@ -207,10 +203,10 @@ public sealed class ApprovalGate : IApprovalGate
             GuardrailPreset: subject.Preset ?? _policy?.Config.ActivePreset,
             GuardrailRule: matchedRules.Count > 0 ? string.Join(", ", matchedRules) : null,
             ArgumentsHash: argumentsHash,
-            DecisionId: subject.DecisionId),
+            DecisionId: subject.DecisionId,
+            Binding: subject.Binding),
             // The decision is read back from the store on the retry; nothing waits on it here.
-            _ => Task.CompletedTask);
-        return approval;
+            _ => Task.CompletedTask, ct);
     }
 
     private async Task NotifyAsync(ApprovalSubject subject)
@@ -228,26 +224,6 @@ public sealed class ApprovalGate : IApprovalGate
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Approval notification for {Tool} failed", subject.ToolName);
-        }
-    }
-
-    /// <summary>Forgets used approvals after <see cref="ConsumedRetention"/>, and retry entries whose approval can no
-    /// longer answer a retry (gone, rejected, expired, or approved longer ago than its lifetime).</summary>
-    private void Sweep()
-    {
-        var cutoff = _time.GetUtcNow() - ConsumedRetention;
-        foreach (var (id, at) in _consumed)
-            if (at < cutoff) _consumed.TryRemove(id, out _);
-
-        lock (_raiseLock)
-        {
-            foreach (var (fingerprint, id) in _raised)
-            {
-                var approval = _approvals.Get(id);
-                var open = approval is not null
-                           && (approval.Status == ApprovalStatus.Pending ? !approval.IsExpired : IsLive(approval));
-                if (!open) _raised.TryRemove(fingerprint, out _);
-            }
         }
     }
 

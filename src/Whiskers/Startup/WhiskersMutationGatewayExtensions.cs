@@ -34,7 +34,10 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IAgentGuardrailEngine>(GuardrailEngine.CreateDefault());
         services.AddSingletonWithInterface<GuardrailStore, IGuardrailStore>();
         services.AddSingleton<IGuardrailRuleCatalog, GuardrailRuleCatalog>();
-        services.AddSingleton<IApprovalStore, ApprovalStore>();
+        // R1-14: approvals live in the database; the store loads the open ones after the schema is migrated.
+        services.AddSingleton<IApprovalPersistence, DbApprovalPersistence>();
+        services.AddSingleton<IApprovalStore>(sp => new ApprovalStore(sp.GetService<ILogger<ApprovalStore>>(),
+            persistence: sp.GetRequiredService<IApprovalPersistence>()));
         services.AddSingleton<IApprovalGate, ApprovalGate>();
         services.AddSingleton<IDirectMcpCallGuard, DirectMcpCallGuard>();
         services.AddSingleton<IAgentPrincipalResolver, AgentPrincipalResolver>();

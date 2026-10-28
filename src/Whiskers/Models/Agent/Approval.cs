@@ -34,11 +34,15 @@ public sealed record ApprovalRequest(
     // mutation only when its arguments hash to the same value.
     string? ArgumentsHash = null,
     // R1-12: the recorded policy decision that asked for this approval.
-    string? DecisionId = null);
+    string? DecisionId = null,
+    // R1-14: what the approval is bound to (ApprovalBinding); null binds it to nothing, so it can never be used.
+    string? Binding = null,
+    // R1-14: a live agent session waits on it (the resolver reaches back to that session).
+    bool Interactive = false);
 
-/// <summary>A pending (or resolved) request for a human to approve/reject a single agent tool call.
-/// Lives in-memory only: resolving it must reach the live <see cref="Services.Agent.IAgentSession"/>
-/// that is awaiting the decision, so it cannot survive a process restart (the session wouldn't either).</summary>
+/// <summary>A pending (or resolved) request for a human to approve/reject a single call. Persisted from the moment it
+/// is raised (R1-14), with its decision and its single use; an <see cref="Interactive"/> one, whose resolver reaches a
+/// live agent session, is cancelled by a restart (the session does not survive it).</summary>
 public sealed class Approval
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
@@ -84,6 +88,14 @@ public sealed class Approval
     /// row of the execution names its own decision and this approval.</summary>
     public string? DecisionId { get; init; }
 
+    /// <summary>What the approval is bound to (R1-14, <c>ApprovalBinding</c>): principal, credential, capability and
+    /// level, normalized arguments, resolved target and policy version. Only a call with the same binding can use it;
+    /// an approval without one can never be used.</summary>
+    public string? Binding { get; init; }
+
+    /// <summary>A live agent session waits on this approval.</summary>
+    public bool Interactive { get; init; }
+
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; init; } = DateTime.UtcNow.AddMinutes(15);
@@ -91,6 +103,13 @@ public sealed class Approval
     public DateTime? ResolvedAt { get; set; }
     /// <summary>Who decided (web user email), or "system" for an expiry/cancel.</summary>
     public string? ResolvedBy { get; set; }
+
+    /// <summary>Until when an approved approval can be used (set when it is approved).</summary>
+    public DateTime? GrantExpiresAt { get; set; }
+
+    /// <summary>When the approval was used, and by which operation. A used approval is spent.</summary>
+    public DateTime? ConsumedAt { get; set; }
+    public string? ConsumedBy { get; set; }
 
     public bool IsPending => Status == ApprovalStatus.Pending;
     public bool IsExpired => Status == ApprovalStatus.Pending && DateTime.UtcNow >= ExpiresAt;

@@ -35,7 +35,12 @@ public sealed record MutationDecisionResult(
     IReadOnlyList<string> MatchedRules,
     string? DecisionId,
     string? Preset,
-    MutationStatus? Refused);
+    MutationStatus? Refused)
+{
+    /// <summary>What an approval for this call must be bound to (R1-14, <see cref="ApprovalBinding"/>); set for a
+    /// call the policy decided.</summary>
+    public string? Binding { get; init; }
+}
 
 /// <summary>Step 7 of the pipeline: checks that a capability actually took effect (INV-43).</summary>
 public interface IMutationVerifier
@@ -49,8 +54,8 @@ public interface IMutationVerifier
 /// Since WP2 step 2.1 every MCP tool call and every agent tool call that maps to a capability runs through here
 /// (<c>McpGuardrailFilter</c>, <c>AgentToolInvoker</c>). UI handlers, jobs, webhooks and terminals follow in steps
 /// 2.2–2.5. A <c>Confirm</c> verdict goes to <see cref="IApprovalGate"/>: the mutation runs only with an approval a
-/// human gave for exactly this call; otherwise the outcome is <see cref="MutationStatus.PendingApproval"/>. Approvals
-/// stay in memory until WP3 persists them.
+/// human gave for exactly this call (its <see cref="ApprovalBinding"/>, R1-14); otherwise the outcome is
+/// <see cref="MutationStatus.PendingApproval"/>. Approvals and their single use are persisted.
 /// </summary>
 public sealed class MutationGateway : IMutationGateway
 {
@@ -118,7 +123,10 @@ public sealed class MutationGateway : IMutationGateway
                 refusal.MatchedRules, refusal.DecisionId, prepared.Preset, refusal.Status);
         var decision = prepared.Decision!;
         return new MutationDecisionResult(prepared.Request!.OperationId!, decision.Verdict, decision.Reason,
-            decision.MatchedRules, prepared.Request.DecisionId, decision.Policy?.Preset, null);
+            decision.MatchedRules, prepared.Request.DecisionId, decision.Policy?.Preset, null)
+        {
+            Binding = ApprovalBinding.Of(prepared.Request, prepared.Capability!, decision.Policy?.VersionHash),
+        };
     }
 
     /// <summary>Steps 1–5: capability, tool settings, effective requirement, level, target, policy and the decision
@@ -336,7 +344,7 @@ public sealed class MutationGateway : IMutationGateway
                     with { MatchedRules = decision.MatchedRules };
             try
             {
-                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId, decision.Policy?.Preset),
+                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId, decision.Policy),
                     decision.Reason, decision.MatchedRules, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -368,7 +376,7 @@ public sealed class MutationGateway : IMutationGateway
         // The approval is used only now, after the intent is on record: a refusal before this point leaves it valid.
         // Losing the race against a concurrent identical call (or the approval lapsing meanwhile) turns this attempt's
         // intent row into a refusal.
-        if (approval?.ApprovalId is { } approvalId && !_approvals!.TryConsume(approvalId))
+        if (approval?.ApprovalId is { } approvalId && !await TryConsumeAsync(approvalId, operationId))
         {
             var reason = $"Approval {approvalId} is no longer usable (used by another call, revoked or expired); the mutation was refused.";
             try
@@ -464,9 +472,24 @@ public sealed class MutationGateway : IMutationGateway
 
     /// <summary>The approval subject carries the MCP tool name when there is one: that is the name on the approval card
     /// and in the agent's own approval.</summary>
-    private static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? callerOperationId,
-        string? decisionPreset)
+    /// <summary>Uses the approval; a failure to record the use is a refusal, never a run.</summary>
+    private async Task<bool> TryConsumeAsync(string approvalId, string operationId)
     {
+        try
+        {
+            return await _approvals!.TryConsumeAsync(approvalId, operationId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Approval {ApprovalId} could not be used for operation {OperationId}", approvalId, operationId);
+            return false;
+        }
+    }
+
+    private static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? callerOperationId,
+        PolicySnapshot? policy)
+    {
+        var decisionPreset = policy?.Preset;
         var p = request.Principal;
         var actorKey = $"{p.Kind}:{p.Id}:{p.CredentialId}:{p.OnBehalfOf?.Id}";
         var actorType = request.Surface switch
@@ -480,6 +503,9 @@ public sealed class MutationGateway : IMutationGateway
         {
             DecisionId = request.DecisionId,
             Preset = request.DecisionId is null ? null : decisionPreset,
+            // R1-14: who, with which credential, what, at which level, with which arguments, on which resolved target,
+            // under which policy version.
+            Binding = ApprovalBinding.Of(request, capability, policy?.VersionHash),
         };
     }
 

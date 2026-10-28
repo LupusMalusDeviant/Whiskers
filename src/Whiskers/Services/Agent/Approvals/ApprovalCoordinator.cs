@@ -94,10 +94,13 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             // Binds the approval to these exact arguments: the Mutation Gateway runs the call only if they match.
             ArgumentsHash: ApprovalFingerprint.OfArguments(arguments),
             // R1-12: the recorded gateway decision that asked for this approval.
-            DecisionId: decision.DecisionId);
+            DecisionId: decision.DecisionId,
+            // R1-14: the gateway runs the call only for the caller, target and policy version decided here.
+            Binding: decision.Binding,
+            Interactive: true);
 
         // The resolver reaches back to the still-running session that is awaiting the decision.
-        var approval = _store.Create(request, approved => session.ResolveConfirmationAsync(call.Id, approved));
+        var approval = await _store.CreateAsync(request, approved => session.ResolveConfirmationAsync(call.Id, approved));
 
         // Push to the in-app bell (+ external channels if active). Never let a push failure block the flow.
         try
