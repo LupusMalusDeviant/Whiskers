@@ -75,6 +75,35 @@ public class ApprovalBindingTests
         Assert.DoesNotContain(marker, text);
     }
 
+    [Theory]
+    [InlineData(AgentOrigin.WebUi, false, "agent-web", true)]
+    [InlineData(AgentOrigin.WebUi, true, "agent-web", false)]
+    [InlineData(AgentOrigin.Trigger, false, "trigger", false)]
+    [InlineData(AgentOrigin.McpTool, false, "agent-mcp", false)]
+    [InlineData(null, false, "agent", false)]
+    public async Task A_gateway_approval_for_the_web_chat_is_interactive(AgentOrigin? origin, bool secondApprover,
+        string kind, bool selfDecides)
+    {
+        // R1-15 (PC-D4): an approval the gateway raises for an agent call — e.g. after the effective level rose above
+        // what the session checked — is interactive only when Whiskers says the call came from the web chat.
+        var user = new AgentPrincipal(AgentPrincipalKind.WebUser, "alice", McpPermissionLevels.Admin, null,
+            UserEmail: "alice@example.com");
+        var policy = Policy();
+        policy.RequireSecondApprover = secondApprover;
+        var guardrails = new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        var approvals = new ApprovalStore(policy: guardrails);
+        var request = Call(MutationPrincipals.Agent(user, "chat-1")) with { Surface = MutationSurface.Agent, AgentOrigin = origin };
+
+        var raised = await Gateway(approvals, policy).ExecuteAsync(request, (_, _) => Task.FromResult(0));
+
+        Assert.Equal(MutationStatus.PendingApproval, raised.Status);
+        var approval = approvals.Get(raised.ApprovalId!)!;
+        Assert.Equal(kind, approval.ActorType);
+        Assert.Contains("user:alice@example.com", approval.Requesters);
+        var result = await approvals.DecideAsync(approval.Id, true, ApprovalResolver.User("alice@example.com", AppRole.Admin));
+        Assert.Equal(selfDecides ? ApprovalDecisionResult.Decided : ApprovalDecisionResult.RequesterCannotDecide, result);
+    }
+
     [Fact]
     public void Only_a_target_found_in_the_inventory_may_be_named()
     {

@@ -441,4 +441,49 @@ public class OrphanedApprovalTests
         AssertEveryCallAnswered(provider.Requests[^1].Messages);
         Assert.Equal(0, invoker.Calls);
     }
+
+    /// <summary>A coordinator whose approval is stored only when the test lets it.</summary>
+    private sealed class SlowCoordinator(IApprovalCoordinator inner) : IApprovalCoordinator
+    {
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context,
+            string reason, GuardrailDecision decision)
+        {
+            Entered.TrySetResult();
+            await Release.Task;
+            return await inner.RaiseAsync(session, call, context, reason, decision);
+        }
+    }
+
+    [Fact]
+    public async Task Clearing_the_chat_while_an_approval_is_being_stored_leaves_nothing_pending()
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        var coordinator = new SlowCoordinator(new ApprovalCoordinator(store, new Notify(), new Policy()));
+        var run = lifetime.BeginRun();
+        lifetime.Attach(session, run);
+
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        AgentEvent.ConfirmationRequired? asked = null;
+        while (asked is null && await events.MoveNextAsync()) asked = events.Current as AgentEvent.ConfirmationRequired;
+
+        // The page starts storing the approval; Clear ends the run and scans the store before it is stored, and the
+        // page drops its session — the raise still finishes against the run's own session.
+        var raising = lifetime.RaiseAsync(coordinator, session, Context, asked!, run);
+        await coordinator.Entered.Task;
+        await lifetime.EndAsync();
+        Assert.Empty(store.GetPending());
+        coordinator.Release.SetResult();
+        var approval = await raising;
+
+        Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
+        Assert.Empty(store.GetPending());
+        await DrainAsync(events);
+        Assert.Equal(0, invoker.Calls);
+    }
 }

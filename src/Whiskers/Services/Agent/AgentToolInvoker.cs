@@ -211,6 +211,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             // INV-23: a pinned run (an AI trigger's) is decided against its own preset, not the live active one.
             PinnedPolicy = context.Pinned,
+            // R1-15: an approval the gateway raises for this call knows whether a human is present in the chat.
+            AgentOrigin = context.Origin,
         };
 
     internal static MutationPrincipal PrincipalOf(AgentContext ctx) =>

@@ -148,16 +148,19 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
     {
         var requesters = (request.Requesters ?? Array.Empty<string>())
             .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
-        // C-19: one principal cannot flood the list (and the bell). Counted against the requesting principal, or the
-        // displayed actor for a caller that names none.
-        var counted = requesters.Count > 0 ? requesters[0] : request.Actor;
+        // C-19: one principal cannot flood the list (and the bell). An approval counts against everyone in its
+        // requester chain — the agent session and the user or key it acts for — so a user cannot get past the bound
+        // by opening more chats. A caller that names no requester is counted under its displayed actor.
+        var counted = requesters.Count > 0 ? requesters : [request.Actor];
         SweepExpired();
-        if (_entries.Values.Count(e => e.Approval.Status == ApprovalStatus.Pending
-                                       && RequesterOf(e.Approval) == counted) >= ApprovalEligibility.MaxPendingPerPrincipal)
+        var pending = _entries.Values.Where(e => e.Approval.Status == ApprovalStatus.Pending).ToList();
+        foreach (var id in counted)
         {
+            if (pending.Count(e => CountedAgainst(e.Approval).Contains(id, StringComparer.Ordinal))
+                < ApprovalEligibility.MaxPendingPerPrincipal) continue;
             _logger?.LogWarning("Approval for {Tool} not raised: {Requester} has too many pending approvals",
-                request.ToolName, counted);
-            throw new ApprovalLimitException(counted);
+                request.ToolName, id);
+            throw new ApprovalLimitException(id);
         }
 
         var now = Now;
@@ -194,8 +197,8 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         return approval;
     }
 
-    private static string RequesterOf(Approval approval) =>
-        approval.Requesters.Count > 0 ? approval.Requesters[0] : approval.Actor;
+    private static IReadOnlyList<string> CountedAgainst(Approval approval) =>
+        approval.Requesters.Count > 0 ? approval.Requesters : [approval.Actor];
 
     public IReadOnlyList<Approval> GetPending()
     {

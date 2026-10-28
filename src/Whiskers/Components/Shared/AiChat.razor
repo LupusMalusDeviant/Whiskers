@@ -271,9 +271,13 @@
         }
         // Every run is tied to the chat: a run after closing the widget or a dropped connection is a new run.
         Lifetime.Attach(_session, run);
+        // This run's session and context: Clear may swap the fields while an approval is being raised, and the
+        // approval must still be checked against the run it belongs to.
+        var session = _session;
+        var context = _context;
 
         _streaming = null;
-        await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg", run))
+        await foreach (var ev in session.SendAsync(prompt, shot, "image/jpeg", run))
         {
             switch (ev)
             {
@@ -300,10 +304,10 @@
                 case AgentEvent.ConfirmationRequired c:
                     _pendingConfirm = c;
                     _pendingReason = c.Reason;
-                    if (_session is not null && _context is not null)
+                    if (context is not null)
                     {
-                        _pendingApprovalId = (await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason, c.Decision)).Id;
-                        await Lifetime.AfterRaiseAsync(_session, run);
+                        var approval = await Lifetime.RaiseAsync(ApprovalCoordinator, session, context, c, run);
+                        if (ReferenceEquals(_session, session)) _pendingApprovalId = approval.Id;
                     }
                     StateHasChanged();
                     await ScrollToBottom();

@@ -384,8 +384,12 @@
             }
             // Every run is tied to the chat: a run after a dropped connection is a new run of this chat.
             Lifetime.Attach(_session, run);
+            // This run's session and context: Clear may swap the fields while an approval is being raised, and the
+            // approval must still be checked against the run it belongs to.
+            var session = _session;
+            var context = _context;
 
-            await foreach (var ev in _session.SendAsync(message, ct: run))
+            await foreach (var ev in session.SendAsync(message, ct: run))
             {
                 switch (ev)
                 {
@@ -399,11 +403,10 @@
                         _pendingConfirm = c.Call;
                         _pendingReason = c.Reason;
                         // Register centrally so the bell + "Freigaben" page can also decide.
-                        if (_session is not null && _context is not null)
+                        if (context is not null)
                         {
-                            var approval = await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason, c.Decision);
-                            await Lifetime.AfterRaiseAsync(_session, run);
-                            _pendingApprovalId = approval.Id;
+                            var approval = await Lifetime.RaiseAsync(ApprovalCoordinator, session, context, c, run);
+                            if (ReferenceEquals(_session, session)) _pendingApprovalId = approval.Id;
                         }
                         break;
                     case AgentEvent.Failed f:

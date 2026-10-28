@@ -103,6 +103,10 @@ public sealed record MutationRequest(
     /// <summary>The AI trigger the mutation is made for (R1-13): the trigger itself, an agent on its behalf, or a
     /// mutation nested in one of theirs. Set by the gateway; the audit keeps <c>trigger:&lt;id&gt;</c> with it.</summary>
     public string? TriggerId { get; init; }
+
+    /// <summary>Where an agent mutation came from (R1-15), set by Whiskers from the agent session, never from the
+    /// caller: an approval the gateway raises for it is interactive only for the web chat. Null: not interactive.</summary>
+    public Whiskers.Models.Agent.AgentOrigin? AgentOrigin { get; init; }
 }
 
 public enum MutationStatus

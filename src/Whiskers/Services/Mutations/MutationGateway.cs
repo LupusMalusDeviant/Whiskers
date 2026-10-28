@@ -501,6 +501,14 @@ public sealed class MutationGateway : IMutationGateway
         {
             MutationSurface.Mcp => "mcp-direct",
             MutationSurface.Ui => "web",
+            // The same kinds the agent's own approvals use; only the web chat is a human who is present (PC-D4).
+            MutationSurface.Agent => request.AgentOrigin switch
+            {
+                Whiskers.Models.Agent.AgentOrigin.WebUi => "agent-web",
+                Whiskers.Models.Agent.AgentOrigin.McpTool => "agent-mcp",
+                Whiskers.Models.Agent.AgentOrigin.Trigger => "trigger",
+                _ => "agent",
+            },
             _ => request.Surface.ToString().ToLowerInvariant(),
         };
         return new ApprovalSubject(capability.McpTool ?? capability.Id, capability.RequiredLevel, actorKey,

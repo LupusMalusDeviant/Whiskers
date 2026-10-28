@@ -62,7 +62,8 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
 - **Separation of duties (INV-33, PC-D4).** An approval records who asked (`Approval.Requesters`: the caller, then
   everyone it acts for — an agent's user, an automation's owner); an approval that names nobody (raised before
   R1-15) is decided by nobody, and `LoadAsync` cancels it so the caller asks again. None of them decides a non-interactive request
-  (direct MCP, AI trigger, scheduled task, webhook; any unknown kind). An interactive request (agent chat `agent-web`,
+  (direct MCP, AI trigger, scheduled task, webhook; any unknown kind). An interactive request (agent chat `agent-web` —
+  also an approval the gateway raises for a chat call, from the trusted `MutationRequest.AgentOrigin`,
   a UI click `web`, the web terminal) may be decided by its requester unless the active guardrail policy sets
   `RequireSecondApprover`; such a decision is recorded as `SelfApproved`. An unreadable policy requires a second
   approver.
@@ -70,7 +71,8 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
   conditional database update. A timer (`ApprovalStore.SweepInterval`) expires overdue approvals even when nobody
   opens the list, so a waiting session is released. A grant is usable only until `GrantExpiresAt`.
 - **Bounded (C-19).** One principal has at most `ApprovalEligibility.MaxPendingPerPrincipal` approvals waiting;
-  beyond that `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
+  an approval counts against everyone in its requester chain (an agent session and the user it acts for), so more
+  chats do not raise the bound. Beyond it `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
 
 A raised approval is announced with its id, its risk and the target **the resolver found in the inventory**
 (`ApprovalDisplay.NotifiableTarget`: canonical id and server of a `Resolved` target, carried as

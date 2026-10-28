@@ -122,7 +122,7 @@ public partial class ApprovalStoreTests
     public async Task Pending_approvals_are_bounded_per_requesting_principal()
     {
         var store = new ApprovalStore();
-        ApprovalRequest From(string requester, int n) => Req(toolCallId: $"c{n}") with { Requesters = [requester, "user:owner@example.com"] };
+        ApprovalRequest From(string requester, int n) => Req(toolCallId: $"c{n}") with { Requesters = [requester, $"user:owner-of-{requester}"] };
 
         var first = await store.CreateAsync(From("key:k1", 0), _ => Task.CompletedTask);
         for (var i = 1; i < ApprovalEligibility.MaxPendingPerPrincipal; i++)
@@ -137,6 +137,26 @@ public partial class ApprovalStoreTests
         await store.CreateAsync(From("key:k2", 0), _ => Task.CompletedTask);
         Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(first.Id, false, Admin()));
         await store.CreateAsync(From("key:k1", 100), _ => Task.CompletedTask);
+    }
+
+    [Fact]
+    public async Task One_user_cannot_get_past_the_bound_by_opening_more_chats()
+    {
+        // An agent session's approvals count against the user it acts for too, not only against the session.
+        var store = new ApprovalStore();
+        ApprovalRequest InChat(string session, int n) =>
+            Req(toolCallId: $"{session}-{n}") with { Requesters = [$"agent:{session}", "user:alice@example.com"] };
+
+        for (var i = 0; i < ApprovalEligibility.MaxPendingPerPrincipal; i++)
+            await store.CreateAsync(InChat($"chat-{i % 5}", i), _ => Task.CompletedTask);
+
+        var refused = await Assert.ThrowsAsync<ApprovalLimitException>(
+            () => store.CreateAsync(InChat("chat-new", 0), _ => Task.CompletedTask));
+        Assert.Equal("user:alice@example.com", refused.Requester);
+        Assert.Equal(ApprovalEligibility.MaxPendingPerPrincipal, store.GetPending().Count);
+        // Another user's chat is not affected.
+        await store.CreateAsync(Req(toolCallId: "b") with { Requesters = ["agent:chat-b", "user:bob@example.com"] },
+            _ => Task.CompletedTask);
     }
 
     [Fact]

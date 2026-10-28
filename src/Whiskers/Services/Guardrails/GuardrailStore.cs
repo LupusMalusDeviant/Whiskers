@@ -303,6 +303,10 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         nameof(GuardrailPolicy.ForbiddenArgPatterns), nameof(GuardrailPolicy.MaxActionsPerSession),
     ];
 
+    /// <summary>Policy fields a file may leave out (added after the format was fixed); when present they are kept,
+    /// never dropped — a legacy file that turns one on must not lose it in the migration.</summary>
+    private static readonly string[] OptionalPolicyFields = [nameof(GuardrailPolicy.RequireSecondApprover)];
+
     private static JsonNode? Field(JsonObject obj, string name, out bool present)
     {
         foreach (var (key, value) in obj)
@@ -382,7 +386,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         try
         {
             var merged = JsonSerializer.SerializeToNode(GuardrailPolicy.SafeDefault())!.AsObject();
-            foreach (var field in PolicyFields)
+            foreach (var field in PolicyFields.Concat(OptionalPolicyFields))
             {
                 var value = Field(root, field, out var present);
                 if (present) merged[field] = value?.DeepClone();

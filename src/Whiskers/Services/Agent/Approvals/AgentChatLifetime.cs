@@ -1,4 +1,5 @@
 using Whiskers.Services.Approvals;
+using Whiskers.Models.Agent;
 
 namespace Whiskers.Services.Agent.Approvals;
 
@@ -58,6 +59,20 @@ public sealed class AgentChatLifetime : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
         if (run.IsCancellationRequested) await _approvals.CancelForSessionAsync(session.SessionId);
+    }
+
+    /// <summary>Raises the approval for a confirmation the run <paramref name="run"/> of <paramref name="session"/>
+    /// asked for, then <see cref="AfterRaiseAsync"/> for that same session — not whichever session the chat holds
+    /// once the approval is stored: clearing the chat meanwhile must not leave it pending.</summary>
+    public async Task<Approval> RaiseAsync(IApprovalCoordinator coordinator, IAgentSession session, AgentContext context,
+        AgentEvent.ConfirmationRequired confirmation, CancellationToken run)
+    {
+        ArgumentNullException.ThrowIfNull(coordinator);
+        ArgumentNullException.ThrowIfNull(confirmation);
+        var approval = await coordinator.RaiseAsync(session, confirmation.Call, context, confirmation.Reason,
+            confirmation.Decision);
+        await AfterRaiseAsync(session, run);
+        return approval;
     }
 
     /// <summary>Ends the current run and cancels the attached session's pending approvals. The chat can go on

@@ -12,11 +12,11 @@ All notable changes to Whiskers are documented here. The format follows
   AI trigger, scheduled task, webhook (PC-D4). The agent chat and UI clicks may still be confirmed by the person who
   made them, recorded as a self-approval on the Approvals page, unless the new guardrail option **Require a second
   approver** is on (off by default; left out of the stored policy while off, so existing policy versions stay the
-  same). An expired approval can no longer be decided (checked by the store and the database update), overdue
+  same; a legacy single-policy file that sets it keeps it when migrated). An expired approval can no longer be decided (checked by the store and the database update), overdue
   approvals are expired every 30 seconds so a waiting chat is released, and a grant is usable only within its
   lifetime. Clearing or closing a chat, leaving the page or losing the browser connection stops its run and cancels
   its pending approvals, so approving one elsewhere can no longer resume it unattended (calls it left open are recorded as not completed, so the chat can go on); sessions wait on unique operation ids instead of provider tool-call ids. One
-  principal has at most 25 approvals waiting. Approval notifications name the approval, risk, target and a link to
+  principal has at most 25 approvals waiting, counted for the user behind every chat too. Approval notifications name the approval, risk, target and a link to
   it (the target only as the gateway resolved it; the bell opens the approval's card), never the arguments or a
   value read from them; Viewers no longer see an approval's
   arguments. Additive migrations (SQLite + PostgreSQL)
