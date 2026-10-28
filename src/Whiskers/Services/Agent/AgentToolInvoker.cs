@@ -197,8 +197,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             DecisionId = decided.DecisionId,
             Preset = decided.Preset,
             Binding = decided.Binding,
-            ResolvedServer = decided.Target?.ServerId,
-            ResolvedResource = decided.Target is { } target ? target.Name ?? target.Id : null,
+            ResolvedServer = Whiskers.Services.Approvals.ApprovalDisplay.NotifiableTarget(decided.Target).Server,
+            ResolvedResource = Whiskers.Services.Approvals.ApprovalDisplay.NotifiableTarget(decided.Target).Resource,
         };
     }
 

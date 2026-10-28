@@ -55,14 +55,40 @@ public class ApprovalBindingTests
     }
 
     [Fact]
-    public async Task A_gateway_approval_records_who_asked_and_the_resolved_target()
+    public async Task A_gateway_approval_records_who_asked_and_announces_no_target_the_caller_named()
     {
-        // R1-15: the requester (for separation of duties) and the target as resolved, not as read from the arguments.
+        // R1-15: the requester (for separation of duties); a target the resolver did not find in the inventory keeps
+        // what the caller sent, so the notification does not name it.
+        const string marker = "caller-named-7f3c";
         var approvals = new ApprovalStore();
-        var raised = await Gateway(approvals).ExecuteAsync(Call(), (_, _) => Task.FromResult(0));
-        var approval = approvals.Get(raised.ApprovalId!)!;
-        Assert.Equal(["key:k1"], approval.Requesters);
-        Assert.Equal(("srv1", "web-1"), (approval.TargetServer, approval.TargetWorkload));
+        var notify = new NotifyRecorder();
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(Policy());
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], NullLogger<MutationGateway>.Instance,
+            approvals: new ApprovalGate(approvals, store, notify));
+
+        var raised = await gateway.ExecuteAsync(Call(container: marker, server: marker), (_, _) => Task.FromResult(0));
+
+        Assert.Equal(["key:k1"], approvals.Get(raised.ApprovalId!)!.Requesters);
+        var text = Assert.Single(notify.Sent).ImageInfo!;
+        Assert.Contains("target —", text);
+        Assert.DoesNotContain(marker, text);
+    }
+
+    [Fact]
+    public void Only_a_target_found_in_the_inventory_may_be_named()
+    {
+        var found = new MutationTarget("container", "3f2a9c", "web", "srv1") { Resolved = true };
+        Assert.Equal(("srv1", "3f2a9c"), ApprovalDisplay.NotifiableTarget(found));
+        Assert.Equal((null, null), ApprovalDisplay.NotifiableTarget(found with { Resolved = false }));
+        Assert.Equal((null, null), ApprovalDisplay.NotifiableTarget(null));
+    }
+
+    private sealed class NotifyRecorder : Whiskers.Services.Notifications.INotificationService
+    {
+        public List<NotificationEvent> Sent { get; } = [];
+        public Task SendAsync(NotificationEvent evt) { Sent.Add(evt); return Task.CompletedTask; }
+        public Task SendTestAsync() => Task.CompletedTask;
     }
 
     public static TheoryData<string> Differences() =>

@@ -15,6 +15,12 @@ public static class ApprovalDisplay
         _ => "low",
     };
 
+    /// <summary>What a notification may name of a gateway target: its canonical id and server — only when the resolver
+    /// found it in the inventory (<see cref="Whiskers.Services.Mutations.MutationTarget.Resolved"/>). A target that is
+    /// created by the operation or passed through keeps what the caller sent, and is named not at all.</summary>
+    public static (string? Server, string? Resource) NotifiableTarget(Whiskers.Services.Mutations.MutationTarget? target) =>
+        target is { Resolved: true } ? (target.ServerId, target.Id) : (null, null);
+
     /// <summary>Where the approval is decided: its card on the Approvals page (relative, path-base-safe).</summary>
     public static string LinkOf(string approvalId) => $"approvals#{Uri.EscapeDataString(approvalId)}";
 

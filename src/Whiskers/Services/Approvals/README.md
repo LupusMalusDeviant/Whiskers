@@ -72,9 +72,10 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
 - **Bounded (C-19).** One principal has at most `ApprovalEligibility.MaxPendingPerPrincipal` approvals waiting;
   beyond that `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
 
-A raised approval is announced with its id, its risk and the target **the gateway resolved**
-(`ApprovalDisplay.NotificationText`; `ApprovalSubject.TargetServer`/`TargetWorkload`, or the agent decision's
-`ResolvedServer`/`ResolvedResource`) — never with its arguments or a value read from them, since the bell may forward
+A raised approval is announced with its id, its risk and the target **the resolver found in the inventory**
+(`ApprovalDisplay.NotifiableTarget`: canonical id and server of a `Resolved` target, carried as
+`ApprovalSubject.TargetServer`/`TargetWorkload` or the agent decision's `ResolvedServer`/`ResolvedResource`) — never
+with its arguments, a value read from them, or a target created by the operation or passed through as named, since the bell may forward
 it to external channels; without a resolved target it names none, and a resolved name that is not a plain identifier
 reads `(withheld)`. The event carries `ApprovalId`, so the bell opens the approval's card (`approvals#<id>`).
 External channels get the id and "Whiskers → Approvals", not a URL: Whiskers has no configured public origin.

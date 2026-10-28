@@ -20,11 +20,13 @@ public class OrphanedApprovalTests
     {
         private readonly Queue<List<AgentStreamDelta>> _turns = new(turns);
         public string Id => "fake";
+        public List<AgentCompletionRequest> Requests { get; } = [];
 
         public async IAsyncEnumerable<AgentStreamDelta> StreamAsync(
             AgentCompletionRequest request, [EnumeratorCancellation] CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
+            Requests.Add(request);
             var turn = _turns.Count > 0 ? _turns.Dequeue() : [new(Final: AgentStopReason.Stop)];
             foreach (var d in turn) yield return d;
             await Task.CompletedTask;
@@ -390,6 +392,53 @@ public class OrphanedApprovalTests
         Assert.Equal(ApprovalStatus.Cancelled, approval.Status);
         Assert.Equal(ApprovalDecisionResult.NotPending, await store.DecideAsync(approval.Id, true, Approver));
         await DrainAsync(events);
+        Assert.Equal(0, invoker.Calls);
+    }
+
+    /// <summary>Every tool call the assistant made has a result in the history (what a provider requires).</summary>
+    private static void AssertEveryCallAnswered(IReadOnlyList<AgentMessage> history)
+    {
+        var asked = history.Where(m => m.Role == AgentRole.Assistant).SelectMany(m => m.ToolCalls ?? []).Select(c => c.Id).ToList();
+        var answered = history.Where(m => m.Role == AgentRole.Tool).Select(m => m.ToolCallId!).ToList();
+        Assert.Equal(asked, answered);
+    }
+
+    [Theory]
+    [InlineData("closed")]
+    [InlineData("connection")]
+    public async Task The_next_message_after_an_ended_run_sends_a_complete_conversation(string how)
+    {
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        // Two calls in one turn: the run ends at the first, the second never comes up.
+        var provider = new Provider(
+            [new(ToolCallDelta: new AgentToolCall("call_0", "stop_container", "{}")),
+             new(ToolCallDelta: new AgentToolCall("call_1", "stop_container", "{}")),
+             new(Final: AgentStopReason.ToolCalls)],
+            TextTurn("fine"));
+        var session = new AgentSession(Context, provider, new Catalog(), invoker, new ConfirmEverything(),
+            AgentToolTestHelpers.DefaultRegistry(), new AgentSettings { Model = "x", MaxToolIterations = 4 }, "system");
+        var connection = new ChatConnectionWatcher();
+        await using var lifetime = new AgentChatLifetime(store, connection);
+        var coordinator = new ApprovalCoordinator(store, new Notify(), new Policy());
+
+        var first = lifetime.BeginRun();
+        lifetime.Attach(session, first);
+        await using (var run = session.SendAsync("stop both", ct: first).GetAsyncEnumerator())
+        {
+            await RunToApprovalAsync(run, session, coordinator);
+            if (how == "closed") await lifetime.EndAsync();
+            else await connection.OnConnectionDownAsync(null!, CancellationToken.None);
+            await DrainAsync(run);
+        }
+        AssertEveryCallAnswered(session.History);
+
+        var next = lifetime.BeginRun();
+        lifetime.Attach(session, next);
+        var events = await DrainAsync(session.SendAsync("anything else?", ct: next).GetAsyncEnumerator());
+
+        Assert.Contains(events, e => e is AgentEvent.AssistantDelta { Text: "fine" });
+        AssertEveryCallAnswered(provider.Requests[^1].Messages);
         Assert.Equal(0, invoker.Calls);
     }
 }

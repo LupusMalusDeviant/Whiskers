@@ -128,66 +128,79 @@ public sealed class AgentSession : IAgentSession
             }
 
             State = AgentRunState.Running;
-            foreach (var call in calls)
+            // Every tool call of the turn ends up with a result in the history, also when the run ends half-way (the
+            // chat was closed, the connection dropped): the next run sends that history to the provider, which
+            // requires a result for each call.
+            var answered = new HashSet<AgentToolCall>(ReferenceEqualityComparer.Instance);
+            try
             {
-                // An ended run (the chat was closed or cleared) takes no further step, not even the next call of
-                // this turn (INV-36).
-                if (ct.IsCancellationRequested) yield break;
-                var decision = Evaluate(call);
-                // INV-22 (R1-12): a block or an approval request rests on a decision the gateway recorded, so the
-                // approval names it and the block is on record. An allowed call is decided and recorded when it runs.
-                if (decision.Verdict != GuardrailVerdict.Allow)
-                    decision = await RecordedAsync(call, decision, ct);
-                yield return new AgentEvent.ToolProposed(call, decision);
-
-                if (decision.Verdict == GuardrailVerdict.Deny)
+                foreach (var call in calls)
                 {
-                    yield return RecordResult(call, new AgentToolResult(call.Id, $"Blockiert: {decision.Reason}", true, decision));
-                    continue;
-                }
+                    // An ended run (the chat was closed or cleared) takes no further step, not even the next call of
+                    // this turn (INV-36).
+                    if (ct.IsCancellationRequested) yield break;
+                    var decision = Evaluate(call);
+                    // INV-22 (R1-12): a block or an approval request rests on a decision the gateway recorded, so the
+                    // approval names it and the block is on record. An allowed call is decided and recorded when it runs.
+                    if (decision.Verdict != GuardrailVerdict.Allow)
+                        decision = await RecordedAsync(call, decision, ct);
+                    yield return new AgentEvent.ToolProposed(call, decision);
 
-                if (decision.Verdict == GuardrailVerdict.Confirm)
-                {
-                    // Register tcs BEFORE the yield so an immediate Resolve finds it. Keyed by the call's operation
-                    // id (unique per call): a provider's tool-call id can repeat across turns (C-18), and a stale
-                    // decision must never answer a later call.
-                    State = AgentRunState.AwaitingConfirmation;
-                    var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _pending[call.CorrelationId] = tcs;
-
-                    bool? approved;
-                    try
+                    if (decision.Verdict == GuardrailVerdict.Deny)
                     {
-                        yield return new AgentEvent.ConfirmationRequired(call, decision.Reason, decision);
-                        try { approved = await tcs.Task.WaitAsync(ct); }
-                        catch (OperationCanceledException) { approved = null; }
-                    }
-                    finally
-                    {
-                        // Runs even if the enumerator is disposed mid-confirmation → no leaked _pending entry.
-                        _pending.TryRemove(call.CorrelationId, out _);
-                    }
-                    State = AgentRunState.Running;
-
-                    // Aborted — also when a decision arrived after the run was ended: an ended run never resumes.
-                    if (approved is null || ct.IsCancellationRequested) yield break;
-                    if (approved == false)
-                    {
-                        yield return RecordResult(call, new AgentToolResult(call.Id, "Vom Benutzer abgelehnt.", true, decision));
+                        yield return RecordResult(answered, call, new AgentToolResult(call.Id, $"Blockiert: {decision.Reason}", true, decision));
                         continue;
                     }
-                }
 
-                if (_actionCount >= LivePolicy.MaxActionsPerSession)
-                {
-                    yield return RecordResult(call, new AgentToolResult(call.Id,
-                        $"Aktions-Limit dieser Session erreicht ({LivePolicy.MaxActionsPerSession}).", true, decision));
-                    continue;
-                }
+                    if (decision.Verdict == GuardrailVerdict.Confirm)
+                    {
+                        // Register tcs BEFORE the yield so an immediate Resolve finds it. Keyed by the call's operation
+                        // id (unique per call): a provider's tool-call id can repeat across turns (C-18), and a stale
+                        // decision must never answer a later call.
+                        State = AgentRunState.AwaitingConfirmation;
+                        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        _pending[call.CorrelationId] = tcs;
 
-                var result = await _invoker.InvokeAsync(call, LiveContext, ct);
-                _actionCount++;
-                yield return RecordResult(call, result);
+                        bool? approved;
+                        try
+                        {
+                            yield return new AgentEvent.ConfirmationRequired(call, decision.Reason, decision);
+                            try { approved = await tcs.Task.WaitAsync(ct); }
+                            catch (OperationCanceledException) { approved = null; }
+                        }
+                        finally
+                        {
+                            // Runs even if the enumerator is disposed mid-confirmation → no leaked _pending entry.
+                            _pending.TryRemove(call.CorrelationId, out _);
+                        }
+                        State = AgentRunState.Running;
+
+                        // Aborted — also when a decision arrived after the run was ended: an ended run never resumes.
+                        if (approved is null || ct.IsCancellationRequested) yield break;
+                        if (approved == false)
+                        {
+                            yield return RecordResult(answered, call, new AgentToolResult(call.Id, "Vom Benutzer abgelehnt.", true, decision));
+                            continue;
+                        }
+                    }
+
+                    if (_actionCount >= LivePolicy.MaxActionsPerSession)
+                    {
+                        yield return RecordResult(answered, call, new AgentToolResult(call.Id,
+                            $"Aktions-Limit dieser Session erreicht ({LivePolicy.MaxActionsPerSession}).", true, decision));
+                        continue;
+                    }
+
+                    var result = await _invoker.InvokeAsync(call, LiveContext, ct);
+                    _actionCount++;
+                    yield return RecordResult(answered, call, result);
+                }
+            }
+            finally
+            {
+                foreach (var call in calls.Where(c => !answered.Contains(c)))
+                    AddHistory(new AgentMessage(AgentRole.Tool, "Not completed: the run ended (the chat was closed or its connection dropped).",
+                        ToolCallId: call.Id, IsError: true, ToolName: call.Name));
             }
         }
 
@@ -195,8 +208,9 @@ public sealed class AgentSession : IAgentSession
         yield return new AgentEvent.TurnCompleted(AgentStopReason.Length, new AgentUsage(0, 0));
     }
 
-    private AgentEvent RecordResult(AgentToolCall call, AgentToolResult result)
+    private AgentEvent RecordResult(ISet<AgentToolCall> answered, AgentToolCall call, AgentToolResult result)
     {
+        answered.Add(call);
         AddHistory(new AgentMessage(AgentRole.Tool, result.Content,
             ToolCallId: call.Id, IsError: result.IsError, ToolName: call.Name));
         return new AgentEvent.ToolExecuted(result);
