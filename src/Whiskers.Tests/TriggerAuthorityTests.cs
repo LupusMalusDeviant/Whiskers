@@ -710,7 +710,8 @@ public sealed class TriggerAuthorityTests : IDisposable
             throw new InvalidOperationException("an unattended Confirm must never reach the approval gate");
         }
 
-        public bool TryConsume(string approvalId) => false;
+        public Task<bool> TryConsumeAsync(string approvalId, string operationId, CancellationToken ct = default) =>
+            Task.FromResult(false);
     }
 
     private sealed class Audit : IMutationAuditSink

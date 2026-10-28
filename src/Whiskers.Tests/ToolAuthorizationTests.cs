@@ -166,9 +166,10 @@ public class ToolAuthorizationTests
         Assert.Equal(0, runs);
 
         // The session's own approval for this operation (what ApprovalCoordinator raises), decided by a human.
-        var approval = approvals.Create(new ApprovalRequest("s1", "call-1", "ops@example.com", "agent-web",
+        var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ops@example.com", "agent-web",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
-            ArgumentsHash: ApprovalFingerprint.OfArguments(Args("web-1"))), _ => Task.CompletedTask);
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args("web-1")),
+            Binding: await BindingOf(gateway)), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
 
         var executed = await gateway.ExecuteAsync(Request(Agent, MutationSurface.Agent, operationId: "op-1", sessionId: "s1"), Run);
@@ -182,11 +183,17 @@ public class ToolAuthorizationTests
     }
 
     /// <summary>The session's own approval for operation <paramref name="operation"/>, decided by a human.</summary>
-    private static async Task<Approval> ApprovedSessionApproval(ApprovalStore approvals, string operation)
+    /// <summary>What the gateway binds an approval for the agent's restart call to (what the session gets from
+    /// DecideAsync and hands the coordinator).</summary>
+    private static async Task<string?> BindingOf(IMutationGateway gateway) =>
+        (await gateway.DecideAsync(Request(Agent, MutationSurface.Agent, operationId: "op-decide", sessionId: "s1")))!.Binding;
+
+    private static async Task<Approval> ApprovedSessionApproval(ApprovalStore approvals, string operation, IMutationGateway gateway)
     {
-        var approval = approvals.Create(new ApprovalRequest("s1", "call-1", "ops@example.com", "agent-web",
+        var approval = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "ops@example.com", "agent-web",
             "restart_container", McpPermissionLevels.Write, null, "needs a human", CorrelationId: operation,
-            ArgumentsHash: ApprovalFingerprint.OfArguments(Args("web-1"))), _ => Task.CompletedTask);
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args("web-1")),
+            Binding: await BindingOf(gateway)), _ => Task.CompletedTask);
         await approvals.ResolveAsync(approval.Id, true, "admin@example.com", McpPermissionLevels.Admin);
         return approval;
     }
@@ -197,7 +204,7 @@ public class ToolAuthorizationTests
         var approvals = new ApprovalStore();
         var audit = new AgentToolTestHelpers.NullMutationAudit { FailNextBegin = true };
         var gateway = Gateway(policy: GuardrailPolicy.SafeDefault(), approvals: approvals, audit: audit);
-        var approval = await ApprovedSessionApproval(approvals, "op-1");
+        var approval = await ApprovedSessionApproval(approvals, "op-1", gateway);
         var runs = 0;
         Task<int> Run(MutationContext _, CancellationToken __) => Task.FromResult(++runs);
 
@@ -216,7 +223,7 @@ public class ToolAuthorizationTests
         var approvals = new ApprovalStore();
         var audit = new AgentToolTestHelpers.NullMutationAudit();
         var gateway = Gateway(policy: GuardrailPolicy.SafeDefault(), approvals: approvals, audit: audit);
-        await ApprovedSessionApproval(approvals, "op-1");
+        await ApprovedSessionApproval(approvals, "op-1", gateway);
         var runs = 0;
         Task<int> Run(MutationContext _, CancellationToken __) => Task.FromResult(Interlocked.Increment(ref runs));
 

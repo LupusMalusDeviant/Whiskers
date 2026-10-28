@@ -16,13 +16,13 @@ public class ApprovalStoreTests
         Reason: "Schreibender Zugriff erfordert Freigabe.");
 
     [Fact]
-    public void Create_adds_a_pending_approval_and_fires_Changed()
+    public async Task Create_adds_a_pending_approval_and_fires_Changed()
     {
         var store = new ApprovalStore();
         var fired = 0;
         store.Changed += () => fired++;
 
-        var a = store.Create(Req(), _ => Task.CompletedTask);
+        var a = await store.CreateAsync(Req(), _ => Task.CompletedTask);
 
         Assert.Equal(ApprovalStatus.Pending, a.Status);
         Assert.Single(store.GetPending());
@@ -34,7 +34,7 @@ public class ApprovalStoreTests
     {
         var store = new ApprovalStore();
         bool? decision = null;
-        var a = store.Create(Req(), approved => { decision = approved; return Task.CompletedTask; });
+        var a = await store.CreateAsync(Req(), approved => { decision = approved; return Task.CompletedTask; });
 
         var ok = await store.ResolveAsync(a.Id, approved: true, resolvedBy: "bob@example.com");
 
@@ -50,7 +50,7 @@ public class ApprovalStoreTests
     {
         var store = new ApprovalStore();
         bool? decision = null;
-        var a = store.Create(Req(), approved => { decision = approved; return Task.CompletedTask; });
+        var a = await store.CreateAsync(Req(), approved => { decision = approved; return Task.CompletedTask; });
 
         await store.ResolveAsync(a.Id, approved: false, resolvedBy: "bob");
 
@@ -63,7 +63,7 @@ public class ApprovalStoreTests
     {
         var store = new ApprovalStore();
         var calls = 0;
-        var a = store.Create(Req(), _ => { calls++; return Task.CompletedTask; });
+        var a = await store.CreateAsync(Req(), _ => { calls++; return Task.CompletedTask; });
 
         Assert.True(await store.ResolveAsync(a.Id, true, "x"));
         Assert.False(await store.ResolveAsync(a.Id, true, "x"));
@@ -83,8 +83,8 @@ public class ApprovalStoreTests
         var store = new ApprovalStore();
         var d1 = (bool?)null;
         var d2 = (bool?)null;
-        var a1 = store.Create(Req(session: "s1", toolCallId: "a"), v => { d1 = v; return Task.CompletedTask; });
-        var a2 = store.Create(Req(session: "s2", toolCallId: "b"), v => { d2 = v; return Task.CompletedTask; });
+        var a1 = await store.CreateAsync(Req(session: "s1", toolCallId: "a"), v => { d1 = v; return Task.CompletedTask; });
+        var a2 = await store.CreateAsync(Req(session: "s2", toolCallId: "b"), v => { d2 = v; return Task.CompletedTask; });
 
         await store.CancelForSessionAsync("s1");
 

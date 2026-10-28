@@ -37,6 +37,9 @@ public sealed record GuardrailDecision(
 
     /// <summary>The preset that decision was made under (a pinned run's own, or the active one).</summary>
     public string? Preset { get; init; }
+
+    /// <summary>What an approval for this call is bound to (R1-14); set when the gateway decided it.</summary>
+    public string? Binding { get; init; }
 }
 
 public enum GuardrailVerdict { Allow, Confirm, Deny }

@@ -196,6 +196,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             DecisionId = decided.DecisionId,
             Preset = decided.Preset,
+            Binding = decided.Binding,
         };
     }
 

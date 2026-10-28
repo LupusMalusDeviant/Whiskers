@@ -91,6 +91,9 @@ public class MetricsDbContext : DbContext
     /// <summary>Immutable policy versions the decisions were made under, keyed by content hash (R1-12).</summary>
     public DbSet<PolicySnapshotEntity> PolicySnapshots => Set<PolicySnapshotEntity>();
 
+    /// <summary>Human-in-the-Loop approvals with their decision and single use, never deleted (R1-14).</summary>
+    public DbSet<ApprovalRecordEntity> Approvals => Set<ApprovalRecordEntity>();
+
     public MetricsDbContext(DbContextOptions<MetricsDbContext> options) : base(options) { }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -211,6 +214,16 @@ public class MetricsDbContext : DbContext
         modelBuilder.Entity<PolicySnapshotEntity>(e =>
         {
             e.HasKey(x => x.VersionHash);
+        });
+
+        modelBuilder.Entity<ApprovalRecordEntity>(e =>
+        {
+            e.ToTable("Approvals");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => x.Binding);
+            e.HasIndex(x => x.CorrelationId);
         });
     }
 }

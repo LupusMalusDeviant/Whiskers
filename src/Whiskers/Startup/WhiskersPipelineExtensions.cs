@@ -475,6 +475,11 @@ public static class WhiskersPipelineExtensions
             await Whiskers.Services.Persistence.DatabaseInitializer.InitializeAsync(db, dbLogger);
         }
 
+        // R1-14: the approvals live in the metrics database, so they load only once its schema is current. Pending
+        // agent approvals are cancelled here (their sessions are gone); approve-then-retry approvals and unused
+        // grants carry on.
+        await app.Services.GetRequiredService<Whiskers.Services.Approvals.IApprovalStore>().LoadAsync(CancellationToken.None);
+
         // Local-auth (F1): migrate the Identity schema in its OWN __IdentityMigrationsHistory table (kept off
         // the metrics legacy-baseline path), then seed the unattended admin if configured. Brand-new tables →
         // a straight MigrateAsync (Npgsql retry handles transient connects). Skip the seed when auth is

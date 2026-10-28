@@ -6,6 +6,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
 @inject IStringLocalizer<SharedResource> L
+@inject ILogger<ApprovalsView> Logger
 
 <PageTitle>@L["ApprovalsView_PageTitle"]</PageTitle>
 
@@ -146,21 +147,30 @@ else
     private IReadOnlyList<Approval> _recent = Array.Empty<Approval>();
     private readonly HashSet<string> _busy = new();
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         ApprovalStore.Changed += OnChanged;
-        Refresh();
+        await RefreshAsync();
     }
 
-    private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
+    private void OnChanged() => InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
 
-    private void Refresh()
+    private async Task RefreshAsync()
     {
         _pending = ApprovalStore.GetPending();
-        _recent = ApprovalStore.GetAll()
-            .Where(a => a.Status != ApprovalStatus.Pending)
-            .Take(15)
-            .ToList();
+        // R1-14: the decided ones come from the persisted history, so they survive a restart.
+        try
+        {
+            _recent = (await ApprovalStore.GetHistoryAsync(0, 50))
+                .Where(a => a.Status != ApprovalStatus.Pending)
+                .Take(15)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Approval history could not be read; showing the approvals in memory");
+            _recent = ApprovalStore.GetAll().Where(a => a.Status != ApprovalStatus.Pending).Take(15).ToList();
+        }
     }
 
     private async Task Resolve(string approvalId, bool approved)

@@ -6,6 +6,19 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-14: **approvals are durable and fully bound.** Every approval is written to the new `Approvals` table (additive
+  migrations for SQLite and PostgreSQL; the SQLite → PostgreSQL migrator copies it) before it is shown, decided or
+  used, so a restart no longer loses a decision or lets an approval run twice, and the history on the Approvals page
+  is no longer cut at 200 entries. An approval is now bound to the principal, the credential it authenticated with,
+  the capability and its level, the normalized arguments, the **resolved target** and the **policy version** it was
+  decided under, and stays usable for ten minutes after the approval: a call that differs in any of them — another
+  key, another target, a changed preset — needs a new approval. Using an approval is a single conditional update in
+  the database, so of concurrent calls (also across a restart) exactly one runs; an approval that cannot be recorded
+  is not raised and the call is refused. **Upgrade notes:** the migration runs on the first start. Approvals that
+  were pending in memory before the upgrade are gone (as on any restart before); after the upgrade a restart keeps
+  open approve-then-retry approvals and unused grants, while a pending agent-chat approval is cancelled (its chat
+  session ended with the restart) — ask the agent again. To go back, start the previous image: it ignores the new
+  table.
 - R1-13: **AI triggers are read-only unless an Admin grants them writes** (PC-D6, PC-D7). A trigger may change
   something only when an Admin lists both the **capabilities** it may perform and the **targets** (names or ids, `*`
   and `?` as wildcards) it may act on; saving such a grant makes that Admin the trigger's **owner**. The run then

@@ -70,13 +70,19 @@ public sealed class DirectMcpCallGuard : IDirectMcpCallGuard
         }
 
         var actor = ActorOf(principal);
+        var (preset, policy) = _policy.Active;
         var gate = await _approvals.CheckAsync(
-            new ApprovalSubject(toolName, level, actor, actor, DirectSessionId, arguments),
+            new ApprovalSubject(toolName, level, actor, actor, DirectSessionId, arguments)
+            {
+                // R1-14: this caller and credential, these arguments, this policy version.
+                Binding = ApprovalBinding.OfDirectCall(principal, toolName, level, arguments,
+                    Mutations.PolicySnapshot.Of(preset, policy).VersionHash),
+            },
             decision.Reason, decision.MatchedRuleIds, ct);
         if (!gate.Approved)
             return new DirectCallVerdict(false, GuardrailVerdict.Confirm, gate.Message);
         // A read has no audit intent to wait for: the approval is used now.
-        return _approvals.TryConsume(gate.ApprovalId!)
+        return await _approvals.TryConsumeAsync(gate.ApprovalId!, Guid.NewGuid().ToString("N"), ct)
             ? new DirectCallVerdict(true, GuardrailVerdict.Confirm, null)
             : new DirectCallVerdict(false, GuardrailVerdict.Confirm,
                 $"Approval {gate.ApprovalId} is no longer usable (used by another call or expired); repeat the call to raise a new one.");
