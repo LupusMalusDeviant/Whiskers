@@ -150,6 +150,45 @@ public sealed class PolicyDecisionRecordTests : IDisposable
     }
 
     [Fact]
+    public async Task A_rule_quoting_a_resolved_repository_url_never_stores_its_token()
+    {
+        // The production policy: a protected pattern matches the resolved repository URL and its reason quotes it.
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ProtectedResources.Add("*github.com*");
+        var guardrails = new PresetStore("Day", new GuardrailPreset { Name = "Day", Policy = policy });
+        var resolved = new MutationTarget("container", "c1", "web", "srv1")
+        {
+            Related = ["https://ghp_example123@github.com/acme/shop"],
+            Resolved = true,
+        };
+        var gateway = Gateway(AgentToolTestHelpers.Policy(guardrails), new RecordingAudit(), targets: new FixedResolver(resolved));
+
+        var outcome = await gateway.ExecuteAsync(Request(), (_, _) => Task.FromResult(0));
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        var row = Assert.Single(Decisions());
+        Assert.Contains("github.com", row.Reason);          // the rule did quote it
+        Assert.DoesNotContain("ghp_example123", row.Reason + row.TargetRelated);
+    }
+
+    [Theory]
+    [InlineData("db-prod")]
+    [InlineData("db-primary")]
+    [InlineData("api -p 8080")]
+    public async Task Ordinary_target_identities_are_stored_exactly(string identity)
+    {
+        var resolved = new MutationTarget("volume", identity, identity, "srv1") { Related = [identity], Resolved = true };
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), new RecordingAudit(),
+            targets: new FixedResolver(resolved));
+
+        await gateway.ExecuteAsync(Request(), (_, _) => Task.FromResult(0));
+
+        var row = Assert.Single(Decisions());
+        Assert.Equal((identity, identity), (row.TargetId, row.TargetName));
+        Assert.Equal(JsonSerializer.Serialize(new[] { identity }), row.TargetRelated);
+    }
+
+    [Fact]
     public async Task A_decision_that_cannot_be_recorded_is_refused_with_a_localized_code()
     {
         var outcome = await Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), new RecordingAudit(), new FailingDecisions())

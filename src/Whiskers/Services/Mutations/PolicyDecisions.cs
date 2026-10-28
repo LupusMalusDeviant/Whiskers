@@ -182,17 +182,18 @@ public sealed class DbPolicyDecisionStore : IPolicyDecisionStore
             CapabilityId = record.Capability.Id,
             RequiredLevel = record.Capability.RequiredLevel,
             TargetKind = target.Kind,
-            TargetId = Clean(target.Id)!,
-            TargetName = Clean(target.Name),
+            TargetId = WithoutUrlCredentials(target.Id)!,
+            TargetName = WithoutUrlCredentials(target.Name),
             TargetServerId = target.ServerId,
             // A related resource can be a repository URL with credentials in it (a Git app): never stored as such.
-            TargetRelated = target.Related.Count == 0 ? null : JsonSerializer.Serialize(target.Related.Select(Clean)),
+            TargetRelated = target.Related.Count == 0 ? null : JsonSerializer.Serialize(target.Related.Select(WithoutUrlCredentials)),
             InputHash = PolicyCanonicalJson.InputHash(request.Arguments),
             PolicyVersion = record.Policy.VersionHash,
             Preset = record.Policy.Preset,
             MatchedRules = JsonSerializer.Serialize(record.Decision.MatchedRules),
             Verdict = record.Decision.Verdict.ToString(),
-            Reason = reason is null ? null : Cap(SecretRedactor.Redact(reason)),
+            // A rule's reason can quote a resolved value, such as a repository URL with a token in it.
+            Reason = reason is null ? null : Cap(SecretRedactor.Redact(WithoutUrlCredentials(reason)!)),
         });
         try
         {
@@ -220,11 +221,20 @@ public sealed class DbPolicyDecisionStore : IPolicyDecisionStore
 
     private static string Cap(string s) => s.Length > MaxReasonChars ? s[..MaxReasonChars] + "…" : s;
 
+    /// <summary>The text with the user info of every URL in it replaced by <c>***</c> — and nothing else changed, so a
+    /// resource identity (<c>db-prod</c>) stays exactly what it is. The general redactor is for free text only: its
+    /// command patterns would rewrite ordinary names.</summary>
+    internal static string? WithoutUrlCredentials(string? value) => PolicyDecisions.WithoutUrlCredentials(value);
+}
+
+/// <summary>What decisions and audit rows may hold of a value that came from outside.</summary>
+internal static class PolicyDecisions
+{
     // scheme://anything@host → scheme://***@host: a user name alone can be a token (https://<token>@github.com).
     private static readonly System.Text.RegularExpressions.Regex UrlUserInfo =
         new(@"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    /// <summary>A target field as it may be stored: URL credentials removed, known secret shapes redacted.</summary>
-    internal static string? Clean(string? value) =>
-        value is null ? null : SecretRedactor.Redact(UrlUserInfo.Replace(value, "$1***@"));
+    /// <summary>The text with the user info of every URL in it replaced by <c>***</c>, nothing else changed.</summary>
+    public static string? WithoutUrlCredentials(string? value) =>
+        value is null ? null : UrlUserInfo.Replace(value, "$1***@");
 }

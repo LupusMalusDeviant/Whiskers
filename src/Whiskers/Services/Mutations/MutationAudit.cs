@@ -146,7 +146,10 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             budget >= MaxReasonChars ? MaxArgumentChars : budget),
     }));
 
-    private static string? Redact(string? text) => text is null ? null : SecretRedactor.Redact(text);
+    // URL user info first: a token alone in front of the host (https://<token>@github.com) is no pattern the
+    // redactor knows, and a reason can quote a resolved repository URL.
+    private static string? Redact(string? text) =>
+        text is null ? null : SecretRedactor.Redact(PolicyDecisions.WithoutUrlCredentials(text)!);
 
     /// <summary>Argument names whose value is free text that can carry credentials in any syntax (SQL
     /// <c>PASSWORD '…'</c>, a shell command, a file body). The pattern-based redactor cannot recognise all of them, so
