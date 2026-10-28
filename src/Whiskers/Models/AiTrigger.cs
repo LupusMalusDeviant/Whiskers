@@ -21,13 +21,30 @@ public class AiTrigger
     /// <summary>Name of the guardrail preset that governs the autonomous run.</summary>
     public string GuardrailPreset { get; set; } = "Standard";
 
-    /// <summary>Permission ceiling for the autonomous run (read/write/admin). The agent principal is
-    /// built with this level so the PrincipalCeilingRule caps trigger runs; it must never be silently
-    /// elevated to admin. Defaults to write — admin requires an explicit, deliberate choice.</summary>
-    public string MaxLevel { get; set; } = McpPermissionLevels.Write;
+    /// <summary>The capabilities (catalog ids such as <c>container.restart</c>) the trigger may perform (PC-D7, R1-13).
+    /// Empty — the default, and every trigger saved before R1-13 — means the trigger is read-only. An Admin assigns
+    /// them explicitly; nothing else ever widens them.</summary>
+    public List<string> WriteCapabilities { get; set; } = new();
+
+    /// <summary>Globs on the resolved target's id or name (<c>web</c>, <c>shop-*</c>) a granted capability may act on.
+    /// Empty means no target, so the trigger is read-only as well.</summary>
+    public List<string> WriteTargets { get; set; } = new();
+
+    /// <summary>The Admin who assigned the write grant (<c>user:&lt;email&gt;</c>), set by the store, never by the
+    /// caller (PC-D6). Writes run on this owner's authority, re-checked for every mutation.</summary>
+    public string? OwnerId { get; set; }
+
+    /// <summary>Why the trigger was switched off because its owner lost their authority; cleared when an Admin
+    /// switches it on again, which makes that Admin its owner.</summary>
+    public string? SuspendedReason { get; set; }
 
     /// <summary>Minimum seconds between runs of this trigger (per container) — avoids storms.</summary>
     public int CooldownSeconds { get; set; } = 300;
+
+    /// <summary>Whether the trigger may write at all: it has capabilities, targets and an owner.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasWriteGrant =>
+        WriteCapabilities.Count > 0 && WriteTargets.Count > 0 && !string.IsNullOrWhiteSpace(OwnerId);
 }
 
 /// <summary>The known event types a trigger can react to, with a German label for the UI.</summary>

@@ -193,7 +193,7 @@ mutating tools do for their own error texts).
 |---|---|---|---|---|---|---|---|---|---|---|
 | A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling + tool switch (INV-15) | ✅ | ⚠️ self-confirm, in memory, orphan risk; gateway runs only an approval bound to the operation and arguments | invoker → gateway → tool | ❌ | gateway AL + per tool (as in 7.1) | INV-31, 32, 36 |
 | A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling + tool switch | ✅ | Confirm → auto-deny ✅ | invoker → gateway → tool | ❌ | gateway AL + per tool | INV-08 |
-| A-03 | AI trigger | Automation (`trigger:<id>`, own principal per trigger since R1-03) | n/a | ⚠️ `MaxLevel`, no owner; tool switch ✅ | ✅ pinned to the trigger's preset with the global kill switch; missing preset → no run (R1-12) | Confirm → auto-deny ✅; Allow runs unattended | invoker → gateway → tool | ❌ | gateway AL + per tool + `agent.run` | INV-04, 06, 27, 40 |
+| A-03 | AI trigger | Automation (`trigger:<id>`, own principal per trigger since R1-03) | n/a | ✅ read-only unless an Admin granted capabilities + targets; writes on the grant's owner, re-checked per mutation, lost authority → suspended + Admin notified (R1-13); tool switch ✅ | ✅ pinned to the trigger's preset with the global kill switch; missing preset → no run (R1-12) | Confirm → Deny in the gateway, nested mutations included, no approval raised ✅ (R1-13); Allow runs unattended within the grant | invoker → gateway → tool | ❌ | gateway AL + per tool + `agent.run` | INV-04, 06, 27, 40 |
 | A-04 | Claude Code CLI runtime (dead code) | fixed key | ✅ key | ⚠️ fail-open rights check | GR? | approve-then-retry | MCP | ❌ | per tool | remove or fix (C-20); INV-02 |
 
 ### 7.3 Background services, scheduler, webhooks
@@ -259,7 +259,7 @@ Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW sta
 | U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | — | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09) + AL | INV-04, 19 (test fires the real action at Operator) |
 | U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | ✅ gateway (stored app, revision pinned; save records the owner — R1-08) | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |
-| U-31 | AI triggers save (prompt, preset, MaxLevel) | Admin | — | ❌ ILogger only | INV-23, 27, 28, 46 |
+| U-31 | AI triggers save (prompt, preset, write grant) | Admin | — | ❌ ILogger only | INV-23, 27, 28, 46 |
 | U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | — | GW ✅ | INV-28 |
 | U-33 | Approvals approve / reject | approve: level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); reject: anyone | — | ❌ | INV-31, 32, 33, 34, 37 |
 | U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | — | AL ✅ GW ✅ | INV-15, 16 |

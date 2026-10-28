@@ -24,7 +24,7 @@ Plain data models, DTOs, records and enums passed between services, the UI, and 
 | `McpPermission.cs` | MCP permission levels + the tool > level map (`DefaultToolLevels`): read tools as declared by `[McpToolLevel]`; mutating tools take their level from the capability catalog ([`../Services/Mutations/CapabilityCatalog.cs`](../Services/Mutations/CapabilityCatalog.cs), R1-05), which is the one table to change. |
 | `UserRole.cs` / `WhitelistData.cs` | Roles and the email whitelist. |
 | `VaultEntry.cs` | An encrypted vault entry. |
-| `AiTrigger.cs` | An AI trigger (events, name filter, prompt, guardrail preset, cooldown) + the `AiTriggerEvents` catalog of event types. |
+| `AiTrigger.cs` | An AI trigger (events, name filter, prompt, guardrail preset, cooldown, and since R1-13 its write grant — `WriteCapabilities` + `WriteTargets` — with `OwnerId` and `SuspendedReason`, which only the store sets; no grant = read-only) + the `AiTriggerEvents` catalog of event types. |
 | `InAppNotification.cs` | A notification shown in the in-app bell/feed (title, detail, severity). |
 
 ## Subfolders

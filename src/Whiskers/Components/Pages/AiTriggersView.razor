@@ -4,7 +4,9 @@
 @using Whiskers.Services.Agent.Triggers
 @using Whiskers.Services.Auth
 @using Whiskers.Services.LogMonitor
+@using Whiskers.Services.Mutations
 @inject IAiTriggerStore Store
+@inject ICapabilityCatalog Capabilities
 @inject IGuardrailStore GuardrailStore
 @inject ILogMonitorService LogMonitor
 @inject ICurrentUserService CurrentUser
@@ -67,10 +69,23 @@
                     <MudSwitch @bind-Value="t.Enabled" Color="Color.Success" />
                     <MudTextField @bind-Value="t.Name" Label="@L["AiTriggersView_Name_Label"]" Margin="Margin.Dense" Variant="Variant.Outlined"
                                   Style="min-width:220px;" />
+                    @if (t.WriteCapabilities.Count == 0 || t.WriteTargets.Count == 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Visibility">@L["AiTriggersView_ReadOnly_Chip"]</MudChip>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(t.OwnerId))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.Edit">@L["AiTriggersView_Owner_Chip", t.OwnerId]</MudChip>
+                    }
                     <MudSpacer />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                    OnClick="@(() => _triggers.Remove(t))" title="@L["AiTriggersView_DeleteTrigger_Tooltip"]" />
                 </div>
+
+                @if (t.SuspendedReason is { } suspended)
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@L["AiTriggersView_Suspended_Alert", suspended]</MudAlert>
+                }
 
                 <MudGrid>
                     <MudItem xs="12" md="6">
@@ -104,6 +119,24 @@
                         <MudNumericField @bind-Value="t.CooldownSeconds" Label="@L["AiTriggersView_Cooldown_Label"]"
                                          Min="0" Margin="Margin.Dense" Variant="Variant.Outlined" />
                     </MudItem>
+                    @* PC-D7 (R1-13): read-only unless capabilities AND targets are granted; saving a grant makes you its owner. *@
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="string" Label="@L["AiTriggersView_WriteCapabilities_Label"]" MultiSelection="true"
+                                   SelectedValues="t.WriteCapabilities" SelectedValuesChanged="@(v => t.WriteCapabilities = v.ToList())"
+                                   HelperText="@L["AiTriggersView_WriteCapabilities_Helper"]"
+                                   Margin="Margin.Dense" Variant="Variant.Outlined" Clearable="true"
+                                   MultiSelectionTextFunc="@(s => L["AiTriggersView_CapabilitiesCount", s.Count].Value)">
+                            @foreach (var c in _capabilities)
+                            {
+                                <MudSelectItem T="string" Value="@c.Id">@(c.McpTool ?? c.Id) (@c.RequiredLevel)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Value="@string.Join(", ", t.WriteTargets)" ValueChanged="@(v => t.WriteTargets = SplitTargets(v))"
+                                      Label="@L["AiTriggersView_WriteTargets_Label"]" HelperText="@L["AiTriggersView_WriteTargets_Helper"]"
+                                      Placeholder="web, shop-*" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    </MudItem>
                     <MudItem xs="12">
                         <MudTextField @bind-Value="t.Prompt" Label="@L["AiTriggersView_Prompt_Label"]"
                                       Lines="4" Margin="Margin.Dense" Variant="Variant.Outlined"
@@ -119,6 +152,7 @@
     private bool _isAdmin;
     private List<AiTrigger> _triggers = new();
     private List<string> _presets = new();
+    private List<Capability> _capabilities = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -127,6 +161,7 @@
 
         _triggers = Store.Triggers.Select(Clone).ToList();
         _presets = GuardrailStore.Config.Presets.Select(p => p.Name).ToList();
+        _capabilities = Capabilities.All.OrderBy(c => c.McpTool ?? c.Id, StringComparer.Ordinal).ToList();
         if (_presets.Count == 0) _presets.Add("Standard");
     }
 
@@ -196,6 +231,8 @@
             await Mutations.RunAsync("aitrigger.save", new { count = _triggers.Count },
                 _ => Store.SaveAsync(_triggers, principal));
             Snackbar.Add(L["AiTriggersView_Saved_Snackbar", _triggers.Count].Value, Severity.Success);
+            // The store decides owner and suspension; show what it saved.
+            _triggers = Store.Triggers.Select(Clone).ToList();
         }
         catch (Exception ex)
         {
@@ -225,6 +262,14 @@
         NameFilter = s.NameFilter,
         Prompt = s.Prompt,
         GuardrailPreset = s.GuardrailPreset,
+        WriteCapabilities = new(s.WriteCapabilities),
+        WriteTargets = new(s.WriteTargets),
+        OwnerId = s.OwnerId,
+        SuspendedReason = s.SuspendedReason,
         CooldownSeconds = s.CooldownSeconds,
     };
+
+    private static List<string> SplitTargets(string? value) =>
+        (value ?? "").Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal).ToList();
 }

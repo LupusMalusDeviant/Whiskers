@@ -2478,7 +2478,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Events</value>
   </data>
   <data name="AiTriggersView_Intro" xml:space="preserve">
-    <value>Events that launch the agent &lt;b&gt;autonomously&lt;/b&gt;. Per trigger: event type(s), an optional name filter, a dedicated task/workflow, and the guardrail preset that constrains the run. In an autonomous run, confirmations up to the preset level are approved automatically. Admins only.</value>
+    <value>Events that launch the agent &lt;b&gt;autonomously&lt;/b&gt;. Per trigger: event type(s), an optional name filter, a dedicated task/workflow, and the guardrail preset that constrains the run. A trigger is read-only until you grant it capabilities and targets; it then writes on your behalf, only that, and only while you still hold the right. Nobody can confirm an autonomous run, so anything that would need a confirmation is refused. Admins only.</value>
   </data>
   <data name="AiTriggersView_LogRuleCreated_Snackbar" xml:space="preserve">
     <value>Log alert rule 'Fehler/Errors' created — fires on errors in container logs.</value>
@@ -4888,5 +4888,35 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="WebhooksView_Snackbar_Adopted" xml:space="preserve">
     <value>You now own '{0}'.</value>
+  </data>
+  <data name="AiTriggersView_ReadOnly_Chip" xml:space="preserve">
+    <value>Read-only</value>
+  </data>
+  <data name="AiTriggersView_Owner_Chip" xml:space="preserve">
+    <value>Writes on behalf of {0}</value>
+  </data>
+  <data name="AiTriggersView_Suspended_Alert" xml:space="preserve">
+    <value>Suspended: {0}. Switch it on again and save to take it over; you become its owner.</value>
+  </data>
+  <data name="AiTriggersView_WriteCapabilities_Label" xml:space="preserve">
+    <value>May change (capabilities)</value>
+  </data>
+  <data name="AiTriggersView_WriteCapabilities_Helper" xml:space="preserve">
+    <value>Empty = read-only. A run may only perform what is listed here, on the targets on the right, and only while you (the owner) still hold that right.</value>
+  </data>
+  <data name="AiTriggersView_CapabilitiesCount" xml:space="preserve">
+    <value>{0} capabilities</value>
+  </data>
+  <data name="AiTriggersView_WriteTargets_Label" xml:space="preserve">
+    <value>On these targets</value>
+  </data>
+  <data name="AiTriggersView_WriteTargets_Helper" xml:space="preserve">
+    <value>Names or ids, comma-separated; * and ? as wildcards. Empty = read-only.</value>
+  </data>
+  <data name="Mutation_Refused_TriggerNotAllowed" xml:space="preserve">
+    <value>Refused for the AI trigger: {0}.</value>
+  </data>
+  <data name="Mutation_Refused_UnattendedConfirm" xml:space="preserve">
+    <value>Refused: this unattended run needs a confirmation nobody can give ({0}).</value>
   </data>
 </root>

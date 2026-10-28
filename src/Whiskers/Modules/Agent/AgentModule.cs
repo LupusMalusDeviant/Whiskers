@@ -83,6 +83,12 @@ public sealed class AgentModule : IWhiskersModule
         services.AddSingletonWithInterface<Whiskers.Services.Agent.Triggers.AiTriggerStore, Whiskers.Services.Agent.Triggers.IAiTriggerStore>();
         services.AddSingleton<Whiskers.Services.Agent.Triggers.IAiTriggerDispatcher,
             Whiskers.Services.Agent.Triggers.AiTriggerDispatcher>();
+        // R1-13: what a trigger may change, asked by the gateway for each of its mutations (PC-D6, PC-D7).
+        services.AddSingleton<Whiskers.Services.Agent.Triggers.AiTriggerAuthority>();
+        services.AddSingleton<Whiskers.Services.Agent.Triggers.IAiTriggerAuthority>(sp =>
+            sp.GetRequiredService<Whiskers.Services.Agent.Triggers.AiTriggerAuthority>());
+        services.AddSingleton<Whiskers.Services.Mutations.ITriggerAuthority>(sp =>
+            sp.GetRequiredService<Whiskers.Services.Agent.Triggers.AiTriggerAuthority>());
 
         // Startup warm-up (only when the module is enabled). Order 90. The GuardrailStore warm-up (80) is core.
         services.AddInitializable<Whiskers.Services.Agent.Triggers.AiTriggerStore>();

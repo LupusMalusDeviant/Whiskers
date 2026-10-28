@@ -90,6 +90,10 @@ public sealed record MutationRequest(
 
     /// <summary>Set by the gateway once the policy decision is recorded (INV-22); the audit names it.</summary>
     public string? DecisionId { get; init; }
+
+    /// <summary>The AI trigger the mutation is made for (R1-13): the trigger itself, an agent on its behalf, or a
+    /// mutation nested in one of theirs. Set by the gateway; the audit keeps <c>trigger:&lt;id&gt;</c> with it.</summary>
+    public string? TriggerId { get; init; }
 }
 
 public enum MutationStatus
@@ -153,9 +157,16 @@ public static class MutationReasonCodes
     /// <summary>The policy decision could not be recorded (INV-22, R1-12).</summary>
     public const string DecisionNotRecorded = "DecisionNotRecorded";
 
+    /// <summary>An AI trigger may not do this: {0} is why — no grant for the capability or target, the trigger is off,
+    /// or its owner lost the authority (PC-D6, PC-D7, R1-13).</summary>
+    public const string TriggerNotAllowed = "TriggerNotAllowed";
+
+    /// <summary>An unattended run needs a confirmation nobody can give: {0} is the rule's reason (INV-04, PC-D7).</summary>
+    public const string UnattendedConfirm = "UnattendedConfirm";
+
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
-            DecisionNotRecorded];
+            DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

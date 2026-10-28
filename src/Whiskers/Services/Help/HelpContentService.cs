@@ -395,8 +395,14 @@ public sealed class HelpContentService : IHelpContentService
                     ein ungesunder Container) mit einem autonomen Agent-Lauf. Du legst fest, **wann** er feuert und
                     **welche Anweisung** der Agent dann bekommt.
 
-                    Auch hier gilt: Der autonome Lauf ist durch **Guardrails** und **Freigaben** begrenzt, 
-                    heikle Schritte landen weiterhin zur Bestätigung bei dir.
+                    Ein neuer Trigger ist **nur lesend**: Er darf untersuchen und berichten, mehr nicht. Damit er
+                    etwas ändern darf, gibt ihm ein Admin **Fähigkeiten** (z. B. einen Container neu starten) und
+                    **Ziele** (Namen oder IDs, `*` als Platzhalter) frei. Dann handelt er im Auftrag dieses
+                    Admins, nur im Rahmen der Freigabe und nur, solange der Admin das Recht noch hat; sonst wird
+                    er ausgesetzt und die Admins werden benachrichtigt. Einen autonomen Lauf kann niemand
+                    bestätigen, deshalb wird ein Schritt, der eine Bestätigung bräuchte, **abgelehnt**. Zusätzlich
+                    begrenzt das **Guardrail-Preset** des Triggers den Lauf, und der Ereignistext geht als Daten an
+                    den Agenten, nie als Anweisung.
                     """,
                     Shot("AI-Trigger-Liste mit Auslöser und Anweisung")),
             }),

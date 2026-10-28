@@ -126,7 +126,8 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. Its `MutationPolicyDecision.Policy` names the preset and policy version the verdict came from (R1-12). For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`, `__resolvedRelated<n>`), so a protected container is caught by id prefix, as a container attached to a removed network, and a workload by its live controller. Without engine or store it refuses everything. |
 | `PolicyDecisions.cs` | R1-12 (INV-22/23): `PolicySnapshot` (preset + the exact policy in canonical JSON + its SHA-256 = the policy version), `PolicyCanonicalJson` (keys sorted at every level; `InputHash` of a call's arguments), `EffectivePolicy` (live active preset, or a pinned preset with the global kill switch; a fail-closed store → fail-closed), `PolicyDecisionRecord`, `IPolicyDecisionStore` + `DbPolicyDecisionStore` (decision and, once per version, its snapshot in one save; versions are never rewritten). `PinnedPolicy` itself lives with `AgentContext` in `Models/Agent`. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
-| `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. `Covers(serverId, identities)` says whether this or an enclosing decision saw a resource (target, related resources, argument values) on that server — used by `ComposePlan.EnsureDecided` (R1-07). |
+| `TriggerAuthority.cs` | R1-13: `ITriggerAuthority` (the gateway's per-mutation question "may this AI trigger do this now?", implemented by the Agent module's `AiTriggerAuthority`) and `TriggerAuthority` (`TriggerOf(principal)`, `GlobMatch`). |
+| `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. `Covers(serverId, identities)` says whether this or an enclosing decision saw a resource (target, related resources, argument values) on that server — used by `ComposePlan.EnsureDecided` (R1-07). `PinnedPolicy` and `TriggerId` (R1-13) are inherited by nested scopes. |
 | `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Report mode:** a call outside a scope still runs; the first sighting per capability is logged at Information. The guard implements only the guarded interface; `IMutationScopeProxy.Inner` gives the instance behind it (used by `AddInitializable` for startup warm-up). |
 
 Registration: [`../../Startup/WhiskersMutationGatewayExtensions.cs`](../../Startup/WhiskersMutationGatewayExtensions.cs)
@@ -139,6 +140,11 @@ registrations are wrapped too.
 2. Tool switched off in Settings → MCP → **Denied**. A stricter stored level raises the requirement.
 3. Principal level below the capability level → **Denied**.
 4. Target cannot be resolved (unknown or ambiguous server, container, network, cloud server, task, zone or workload) → **Denied**. From here on `MutationContext.Request.Target` is canonical; the MCP and agent adapters run the tool with `MutationTargets.CanonicalArguments`, which also passes the resolved `serverId` to every tool that takes one (`McpToolParameters.TakesServerId`, the agent entry's parameters). The refusal carries `MutationReasonCodes.TargetUnknown` / `TargetAmbiguous` / `TargetNotResolved`.
+   An AI trigger (R1-13): the gateway notes the trigger behind the call (`MutationRequest.TriggerId`: the trigger
+   itself, an agent on its behalf, or — through `MutationScope.TriggerId` — a mutation nested in theirs). For a call
+   made as or for the trigger, `ITriggerAuthority` checks the trigger's grant (capability and resolved target) and
+   its owner's current authority; a refusal, an error or no registered authority → **Denied**
+   (`MutationReasonCodes.TriggerNotAllowed`).
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**. The policy is the live
    active preset, or for a pinned run (an AI trigger's, `MutationRequest.PinnedPolicy`) that run's preset with the
    global kill switch (`EffectivePolicy`, INV-23); a call nested in a pinned run's mutation without a pin of its own
@@ -150,8 +156,9 @@ registrations are wrapped too.
    steps 1–5 without executing: an agent session uses it before it pauses for an approval or reports a block, so
    both rest on a recorded decision. A snapshot that cannot be stored fails the record — a decision is stored alone
    only when the exact version is verifiably there already.
-6. Policy `Confirm` on the `Automation` surface (scheduler, AutoUpdate, AutoPatch) → **Denied**, before the approval
-   gate: nobody can confirm an unattended run, and no approval is raised (R1-01).
+6. Policy `Confirm` on the `Automation` surface (scheduler, AutoUpdate, AutoPatch) or for an AI trigger (R1-13, nested
+   mutations included) → **Denied** (`UnattendedConfirm`), before the approval gate and also for `DecideAsync`: nobody
+   can confirm an unattended run, and no approval is raised (R1-01).
    Policy `Confirm` otherwise → [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
    (the agent session's own approval for this operation, or approve-then-retry for a direct MCP call); otherwise
    **PendingApproval**.

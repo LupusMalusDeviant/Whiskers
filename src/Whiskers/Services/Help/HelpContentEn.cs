@@ -392,8 +392,14 @@ internal static class HelpContentEn
                     container) to an autonomous agent run. You define **when** it fires and **which
                     instruction** the agent then receives.
 
-                    The same rule applies here: the autonomous run is bounded by **guardrails** and
-                    **approvals** — sensitive steps still land on your desk for confirmation.
+                    A new trigger is **read-only**: it may investigate and report, nothing more. To let it
+                    change something, an admin grants it **capabilities** (e.g. restart a container) and
+                    **targets** (names or ids, `*` as wildcard). It then acts on that admin's behalf, only
+                    within the grant and only while the admin still holds the right; otherwise it is
+                    suspended and the admins are notified. Nobody can confirm an autonomous run, so a step
+                    that would need a confirmation is **refused**. The run is bounded by the trigger's
+                    **guardrail preset** as well, and the event text is handed to the agent as data, never as
+                    instructions.
                     """,
                     Shot("AI trigger list with trigger condition and instruction")),
             }),

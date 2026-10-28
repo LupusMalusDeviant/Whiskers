@@ -2478,7 +2478,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Ereignisse</value>
   </data>
   <data name="AiTriggersView_Intro" xml:space="preserve">
-    <value>Ereignisse, die den Agenten &lt;b&gt;autonom&lt;/b&gt; auslösen. Pro Trigger: Ereignistyp(en), optionaler Namensfilter, ein eigener Auftrag/Workflow und das Guardrail-Preset, das den Lauf begrenzt. Bestätigungen werden im autonomen Lauf bis zum Preset-Level automatisch freigegeben. Nur Admins.</value>
+    <value>Ereignisse, die den Agenten &lt;b&gt;autonom&lt;/b&gt; auslösen. Pro Trigger: Ereignistyp(en), optionaler Namensfilter, ein eigener Auftrag/Workflow und das Guardrail-Preset, das den Lauf begrenzt. Ein Trigger ist nur lesend, bis du ihm Fähigkeiten und Ziele freigibst; dann schreibt er in deinem Auftrag, nur das und nur, solange du das Recht noch hast. Einen autonomen Lauf kann niemand bestätigen, deshalb wird alles abgelehnt, was eine Bestätigung bräuchte. Nur Admins.</value>
   </data>
   <data name="AiTriggersView_LogRuleCreated_Snackbar" xml:space="preserve">
     <value>Log-Alert-Regel 'Fehler/Errors' angelegt — feuert bei Fehlern in Container-Logs.</value>
@@ -4888,5 +4888,35 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="WebhooksView_Snackbar_Adopted" xml:space="preserve">
     <value>„{0}“ gehört jetzt dir.</value>
+  </data>
+  <data name="AiTriggersView_ReadOnly_Chip" xml:space="preserve">
+    <value>Nur lesend</value>
+  </data>
+  <data name="AiTriggersView_Owner_Chip" xml:space="preserve">
+    <value>Schreibt im Auftrag von {0}</value>
+  </data>
+  <data name="AiTriggersView_Suspended_Alert" xml:space="preserve">
+    <value>Ausgesetzt: {0}. Wieder einschalten und speichern, um ihn zu übernehmen; du wirst sein Besitzer.</value>
+  </data>
+  <data name="AiTriggersView_WriteCapabilities_Label" xml:space="preserve">
+    <value>Darf ändern (Fähigkeiten)</value>
+  </data>
+  <data name="AiTriggersView_WriteCapabilities_Helper" xml:space="preserve">
+    <value>Leer = nur lesend. Ein Lauf darf nur das hier Aufgeführte tun, nur an den Zielen rechts und nur, solange du (der Besitzer) das Recht noch hast.</value>
+  </data>
+  <data name="AiTriggersView_CapabilitiesCount" xml:space="preserve">
+    <value>{0} Fähigkeiten</value>
+  </data>
+  <data name="AiTriggersView_WriteTargets_Label" xml:space="preserve">
+    <value>An diesen Zielen</value>
+  </data>
+  <data name="AiTriggersView_WriteTargets_Helper" xml:space="preserve">
+    <value>Namen oder IDs, durch Komma getrennt; * und ? als Platzhalter. Leer = nur lesend.</value>
+  </data>
+  <data name="Mutation_Refused_TriggerNotAllowed" xml:space="preserve">
+    <value>Für den KI-Trigger abgelehnt: {0}.</value>
+  </data>
+  <data name="Mutation_Refused_UnattendedConfirm" xml:space="preserve">
+    <value>Abgelehnt: Dieser unbeaufsichtigte Lauf bräuchte eine Bestätigung, die niemand geben kann ({0}).</value>
   </data>
 </root>

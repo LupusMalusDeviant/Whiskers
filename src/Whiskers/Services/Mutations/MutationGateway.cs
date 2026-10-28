@@ -65,12 +65,15 @@ public sealed class MutationGateway : IMutationGateway
     private readonly IApprovalGate? _approvals;
     private readonly IEffectiveRequirementResolver? _requirements;
     private readonly IPolicyDecisionStore? _decisions;
+    private readonly ITriggerAuthority? _triggers;
 
     /// <param name="overrides">Tool switches and stricter stored levels (INV-15); none = catalog levels only.</param>
     /// <param name="targets">Target resolution (INV-57); none = targets are taken as given.</param>
     /// <param name="approvals">Where a <c>Confirm</c> verdict is decided; none = every <c>Confirm</c> waits.</param>
     /// <param name="decisions">Where every policy decision is recorded before it is acted on (INV-22). The app always
     /// registers one; a gateway built without it (unit tests of other steps) records nothing.</param>
+    /// <param name="triggers">What an AI trigger may change (R1-13). Without it every mutation a trigger asks for is
+    /// refused; the Agent module, which runs triggers, registers it.</param>
     public MutationGateway(
         ICapabilityCatalog catalog,
         IMutationPolicy policy,
@@ -82,7 +85,8 @@ public sealed class MutationGateway : IMutationGateway
         IMutationTargetResolver? targets = null,
         IApprovalGate? approvals = null,
         IEffectiveRequirementResolver? requirements = null,
-        IPolicyDecisionStore? decisions = null)
+        IPolicyDecisionStore? decisions = null,
+        ITriggerAuthority? triggers = null)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
@@ -96,6 +100,7 @@ public sealed class MutationGateway : IMutationGateway
         _approvals = approvals;
         _requirements = requirements;
         _decisions = decisions;
+        _triggers = triggers;
     }
 
     /// <inheritdoc />
@@ -128,6 +133,10 @@ public sealed class MutationGateway : IMutationGateway
         // against the run's preset too; the global kill switch still reaches it (EffectivePolicy).
         if (request.PinnedPolicy is null && MutationScope.Current?.PinnedPolicy is { } inherited)
             request = request with { PinnedPolicy = inherited };
+        // R1-13: the trigger the mutation is made for, directly or because it is nested in a trigger's mutation.
+        var directTrigger = TriggerAuthority.TriggerOf(request.Principal);
+        if ((directTrigger ?? MutationScope.Current?.TriggerId) is { } triggerId)
+            request = request with { TriggerId = triggerId };
 
         // 1–2: the capability must exist, be switched on, and the principal must hold its level. Unknown means Deny.
         var capability = _catalog.Find(request.CapabilityId);
@@ -217,6 +226,29 @@ public sealed class MutationGateway : IMutationGateway
             request = request with { Target = resolution.Target };
         }
 
+        // PC-D6 / PC-D7 (R1-13): an AI trigger writes only what an Admin granted it (capability and target) and only
+        // while the owner of that grant still holds the authority, re-read for this mutation. No answer is a Deny.
+        if (directTrigger is not null)
+        {
+            string? refusal;
+            try
+            {
+                refusal = _triggers is null
+                    ? "AI trigger grants cannot be checked (the Agent module is off)"
+                    : await _triggers.RefusalAsync(directTrigger, capability, request.Target, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "AI trigger grant for {Capability} could not be checked (operation {OperationId})",
+                    capability.Id, operationId);
+                refusal = "the AI trigger's grant could not be checked";
+            }
+            if (refusal is not null)
+                return Prepared.Refused(await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied,
+                    $"Refused for the AI trigger: {refusal}", ct)
+                    with { ReasonCode = MutationReasonCodes.TriggerNotAllowed, ReasonArgs = [refusal] });
+        }
+
         // 3: policy. Any exception here is a Deny, never an Allow.
         MutationPolicyDecision decision;
         try
@@ -256,6 +288,20 @@ public sealed class MutationGateway : IMutationGateway
                 $"Blocked by guardrails: {decision.Reason}", ct) with { MatchedRules = decision.MatchedRules },
                 decision.Policy?.Preset);
 
+        // An unattended run (scheduler, AutoUpdate, AutoPatch, an AI trigger and whatever it sets off) has nobody who
+        // could confirm it, and the next occurrence of the same item is a new run, not a retry: it must never reach the
+        // approval gate, which would raise an approval and later match an identical occurrence against the grant.
+        // Terminal refusal, audited, also when only asked for the decision (an agent session's check).
+        if (decision.Verdict == MutationVerdict.Confirm && Unattended(request))
+            return Prepared.Refused(await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied,
+                $"Unattended run refused: it needs a confirmation nobody can give ({decision.Reason}).", ct)
+                with
+                {
+                    MatchedRules = decision.MatchedRules,
+                    ReasonCode = MutationReasonCodes.UnattendedConfirm,
+                    ReasonArgs = [decision.Reason],
+                }, decision.Policy?.Preset);
+
         return new Prepared(null, request, capability, decision, callerOperationId, decision.Policy?.Preset);
     }
 
@@ -281,13 +327,7 @@ public sealed class MutationGateway : IMutationGateway
 
         // 4: Confirm runs only with a human approval for exactly this call.
         ApprovalGateResult? approval = null;
-        // An unattended run (scheduler, AutoUpdate, AutoPatch) has nobody who could confirm it, and the next occurrence
-        // of the same task is a new run, not a retry: it must never reach the approval gate, which would raise an
-        // approval and later match an identical occurrence against the grant. Terminal refusal, audited.
-        if (decision.Verdict == MutationVerdict.Confirm && request.Surface == MutationSurface.Automation)
-            return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
-                $"Unattended run refused: it needs a confirmation nobody can give ({decision.Reason}).", ct)
-                with { MatchedRules = decision.MatchedRules };
+        // An unattended Confirm never gets here: PrepareAsync refuses it.
         if (decision.Verdict == MutationVerdict.Confirm)
         {
             if (_approvals is null)
@@ -464,6 +504,10 @@ public sealed class MutationGateway : IMutationGateway
             DecisionId = request.DecisionId,
         };
     }
+
+    /// <summary>Nobody is there to confirm: an automation run, or anything made for an AI trigger (R1-13).</summary>
+    private static bool Unattended(MutationRequest request) =>
+        request.Surface == MutationSurface.Automation || request.TriggerId is not null;
 
     /// <summary>Result of steps 1–5: a refusal (already audited), or the decided request.</summary>
     private sealed record Prepared(MutationOutcome<object?>? Refusal, MutationRequest? Request, Capability? Capability,

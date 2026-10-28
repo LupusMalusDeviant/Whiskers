@@ -155,7 +155,7 @@ public class TriggerPolicyPinningTests
         var decisions = new MemoryDecisions();
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
             new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
-            decisions: decisions);
+            decisions: decisions, triggers: AgentToolTestHelpers.GrantAll.Instance);
         var invoker = new AgentToolInvoker(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault(),
             new NoScopes(), gateway: gateway);
         var pinned = PinnedPolicy.Of("Repair", store.Config.Presets.Single(p => p.Name == "Repair").Policy);
@@ -204,7 +204,7 @@ public class TriggerPolicyPinningTests
         var decisions = new MemoryDecisions();
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
             new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
-            decisions: decisions);
+            decisions: decisions, triggers: AgentToolTestHelpers.GrantAll.Instance);
         var outer = TriggerCall(PinnedPolicy.Of("Guarded", guarded)) with
         {
             Target = new MutationTarget("container", "c2", "worker", "srv1"),
@@ -247,7 +247,8 @@ public class TriggerPolicyPinningTests
         noRestart.ToolDenyList.Add(new CapabilityCatalog().Find("container.restart")!.McpTool!);
         var store = new PresetStore("Live", new GuardrailPreset { Name = "Live", Policy = Open() });
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
-            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance);
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
+            triggers: AgentToolTestHelpers.GrantAll.Instance);
         var nested = PersonsTask("container.restart", "web");
         MutationOutcome<int>? inner = null;
 
@@ -278,7 +279,8 @@ public class TriggerPolicyPinningTests
             CreatedBy = "user:ops@example.com", Config = "{}",
         };
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
-            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance);
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
+            triggers: AgentToolTestHelpers.GrantAll.Instance);
         (bool Success, string Message) inRun = default;
 
         await gateway.ExecuteAsync(OuterCall(PinnedPolicy.Of("Guarded", guarded)), async (_, _) =>
