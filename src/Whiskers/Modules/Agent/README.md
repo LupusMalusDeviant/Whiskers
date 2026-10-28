@@ -16,7 +16,9 @@ direct MCP calls too and must not switch off with this module.
 - **Not here (core):** the guardrail engine, `IGuardrailStore`, `IGuardrailRuleCatalog`, `IAgentToolRegistry` (tool
   metadata for the guardrail editor), `IAgentPrincipalResolver`, `IApprovalStore`, `IApprovalGate`,
   `IDirectMcpCallGuard` — see `AddGuardrailPolicy` in [`Startup/WhiskersMutationGatewayExtensions.cs`](../../Startup/WhiskersMutationGatewayExtensions.cs).
-- **AI triggers:** `AiTriggerStore`/`IAiTriggerStore`, `IAiTriggerDispatcher`.
+- **AI triggers:** `AiTriggerStore`/`IAiTriggerStore`, `IAiTriggerDispatcher`, and `AiTriggerAuthority` as
+  `IAiTriggerAuthority` and as the gateway's `ITriggerAuthority` (R1-13). With the module off no authority is
+  registered, so the gateway refuses any mutation made for a trigger.
 - **Warm-up:** the `AiTriggerStore` `IInitializable` (order 90), run only when the module is enabled. The
   `GuardrailStore` warm-up (order 80) is core.
 

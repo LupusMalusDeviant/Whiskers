@@ -134,6 +134,35 @@ public class TriggerPolicyPinningTests
     }
 
     [Fact]
+    public async Task A_run_starts_at_the_level_its_authority_returns()
+    {
+        var (dispatcher, agents, _) = Dispatcher(Store(active: "Strict"), preset: "Repair",
+            start: new TriggerRunAuthority(McpPermissionLevels.Write, null));
+
+        await dispatcher.OnEventAsync(Event());
+        var context = await agents.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(McpPermissionLevels.Write, context.Principal.PermissionLevel);
+        Assert.Equal("t1", context.Principal.TriggerId);
+    }
+
+    [Theory]
+    [InlineData(true)]     // the authority refuses (owner lost authority, no owner)
+    [InlineData(false)]    // no authority registered at all
+    public async Task A_run_its_authority_refuses_or_cannot_check_does_not_start(bool withAuthority)
+    {
+        var (dispatcher, agents, audit) = Dispatcher(Store(active: "Strict"), preset: "Repair",
+            start: new TriggerRunAuthority(McpPermissionLevels.Read, "its owner has no authority left"),
+            withAuthority: withAuthority);
+
+        await dispatcher.OnEventAsync(Event());
+        var refusal = await audit.Refused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Contains(withAuthority ? "no authority left" : "no trigger authority", refusal);
+        Assert.False(agents.Started.Task.IsCompleted);
+    }
+
+    [Fact]
     public async Task A_trigger_whose_preset_is_gone_does_not_run()
     {
         var store = Store(active: "Strict");
@@ -155,7 +184,7 @@ public class TriggerPolicyPinningTests
         var decisions = new MemoryDecisions();
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
             new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
-            decisions: decisions);
+            decisions: decisions, triggers: AgentToolTestHelpers.GrantAll.Instance);
         var invoker = new AgentToolInvoker(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault(),
             new NoScopes(), gateway: gateway);
         var pinned = PinnedPolicy.Of("Repair", store.Config.Presets.Single(p => p.Name == "Repair").Policy);
@@ -204,7 +233,7 @@ public class TriggerPolicyPinningTests
         var decisions = new MemoryDecisions();
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
             new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
-            decisions: decisions);
+            decisions: decisions, triggers: AgentToolTestHelpers.GrantAll.Instance);
         var outer = TriggerCall(PinnedPolicy.Of("Guarded", guarded)) with
         {
             Target = new MutationTarget("container", "c2", "worker", "srv1"),
@@ -247,7 +276,8 @@ public class TriggerPolicyPinningTests
         noRestart.ToolDenyList.Add(new CapabilityCatalog().Find("container.restart")!.McpTool!);
         var store = new PresetStore("Live", new GuardrailPreset { Name = "Live", Policy = Open() });
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
-            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance);
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
+            triggers: AgentToolTestHelpers.GrantAll.Instance);
         var nested = PersonsTask("container.restart", "web");
         MutationOutcome<int>? inner = null;
 
@@ -278,7 +308,8 @@ public class TriggerPolicyPinningTests
             CreatedBy = "user:ops@example.com", Config = "{}",
         };
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
-            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance);
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
+            triggers: AgentToolTestHelpers.GrantAll.Instance);
         (bool Success, string Message) inRun = default;
 
         await gateway.ExecuteAsync(OuterCall(PinnedPolicy.Of("Guarded", guarded)), async (_, _) =>
@@ -330,22 +361,35 @@ public class TriggerPolicyPinningTests
         EventType = "unhealthy", ContainerId = "c1", ContainerName = "web", ServerId = "srv1",
     };
 
-    private static (AiTriggerDispatcher, CapturingAgents, CapturingAudit) Dispatcher(IGuardrailStore store, string preset)
+    private static (AiTriggerDispatcher, CapturingAgents, CapturingAudit) Dispatcher(IGuardrailStore store, string preset,
+        TriggerRunAuthority? start = null, bool withAuthority = true)
     {
         var agents = new CapturingAgents();
         var audit = new CapturingAudit();
-        var sp = new ServiceCollection()
+        var services = new ServiceCollection()
             .AddSingleton<IAgentService>(agents)
             .AddSingleton(store)
             .AddSingleton<IAuditLogService>(audit)
             .AddSingleton<INotificationService>(new NullNotify())
-            .BuildServiceProvider();
+            ;
+        if (withAuthority)
+            services.AddSingleton<IAiTriggerAuthority>(new FixedRuns(start ?? new TriggerRunAuthority(McpPermissionLevels.Read, null)));
+        var sp = services.BuildServiceProvider();
         var triggers = new TriggerList(new AiTrigger
         {
             Id = "t1", Name = "restart", EventTypes = ["unhealthy"], GuardrailPreset = preset,
         });
         var settings = new StaticSettings(new AgentSettings { Enabled = true });
         return (new AiTriggerDispatcher(triggers, sp, settings), agents, audit);
+    }
+
+    /// <summary>Starts every run with the given authority (read-only unless a test says otherwise).</summary>
+    private sealed class FixedRuns(TriggerRunAuthority start) : IAiTriggerAuthority
+    {
+        public Task<TriggerRunAuthority> BeginRunAsync(AiTrigger trigger, CancellationToken ct = default) =>
+            Task.FromResult(start);
+        public Task<string?> RefusalAsync(string triggerId, Capability capability, MutationTarget target, CancellationToken ct) =>
+            Task.FromResult<string?>("read-only");
     }
 
     private sealed class MemoryDecisions : IPolicyDecisionStore
@@ -435,7 +479,8 @@ public class TriggerPolicyPinningTests
     {
         public IReadOnlyList<AiTrigger> Triggers { get; } = triggers;
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor) => Task.CompletedTask;
+        public long Revision => 0;
+        public Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor, long readAtRevision) => Task.CompletedTask;
         public event Action? Changed { add { } remove { } }
     }
 

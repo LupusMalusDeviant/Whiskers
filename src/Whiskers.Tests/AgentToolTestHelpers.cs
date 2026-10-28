@@ -85,4 +85,13 @@ internal static class AgentToolTestHelpers
             return Task.CompletedTask;
         }
     }
+
+    /// <summary>Grants an AI trigger every capability on every target (R1-13), for tests about other steps.</summary>
+    public sealed class GrantAll : Whiskers.Services.Mutations.ITriggerAuthority
+    {
+        public static readonly GrantAll Instance = new();
+
+        public Task<string?> RefusalAsync(string triggerId, Whiskers.Services.Mutations.Capability capability,
+            Whiskers.Services.Mutations.MutationTarget target, CancellationToken ct) => Task.FromResult<string?>(null);
+    }
 }

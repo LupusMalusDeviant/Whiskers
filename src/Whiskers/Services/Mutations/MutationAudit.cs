@@ -77,6 +77,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             operationId,
             decisionId = DecisionIdOf(intent),
+            // Top level like the decision id: a shortened intent must not lose it.
+            trigger = StringOf(intent, "trigger"),
             phase = "outcome",
             status = status.ToString(),
             verification = verification.ToString(),
@@ -124,6 +126,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         operationId,
         // INV-22: the recorded policy decision this row is about (null when refused before the policy step).
         decisionId = request.DecisionId,
+        // R1-13: the AI trigger behind the call, on every row of its run, nested mutations included.
+        trigger = request.TriggerId is { } triggerId ? PrincipalIds.Trigger(triggerId) : null,
         phase,
         status,
         verification,
@@ -205,8 +209,10 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         return null;
     }
 
-    private static string? DecisionIdOf(object? intent) =>
-        intent is JsonElement { ValueKind: JsonValueKind.Object } e && e.TryGetProperty("decisionId", out var id)
-            && id.ValueKind == JsonValueKind.String ? id.GetString() : null;
+    private static string? DecisionIdOf(object? intent) => StringOf(intent, "decisionId");
+
+    private static string? StringOf(object? intent, string name) =>
+        intent is JsonElement { ValueKind: JsonValueKind.Object } e && e.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
 }

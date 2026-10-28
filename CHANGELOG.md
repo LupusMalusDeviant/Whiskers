@@ -6,6 +6,31 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-13: **AI triggers are read-only unless an Admin grants them writes** (PC-D6, PC-D7). A trigger may change
+  something only when an Admin lists both the **capabilities** it may perform and the **targets** (names or ids, `*`
+  and `?` as wildcards) it may act on; saving such a grant makes that Admin the trigger's **owner**. The run then
+  starts with the owner's current level, and the Mutation Gateway checks **every** mutation made for the run — also
+  one nested in it, such as the actions of a scheduled task the trigger runs, and every resource an operation also
+  touches, such as the containers a network removal cuts off — against the grant and the owner's current authority:
+  anything outside the grant is refused. Targets are matched on what Whiskers resolved (an id, or a name from its
+  inventory), never on a name the call supplied, and a touched resource counts as granted by any one of its names
+  or ids. Deleting a Hetzner snapshot can no longer be granted to a trigger at all (the grant could not bound which
+  snapshot); a saved grant for it is dropped. Saving the trigger page after another admin saved or a trigger was suspended is refused with a hint to reload, so a stale page cannot lift a suspension or widen a grant again. **Every trigger now has an owner** (the Admin who created it, changed its
+  grant or switched it on again), re-checked before each run; an owner who lost the right (demoted below a granted
+  capability, removed from the whitelist, account deleted) suspends the trigger and notifies the Admins
+  (`automation_suspended`); switching it on again makes the Admin who does it the owner. Every Confirm of a trigger
+  run — also for mutations nested in it — is refused in the gateway instead of raising an approval, and every audit
+  row of the run (nested ones included) carries `trigger:<id>`. The event that starts a run (container, image and
+  server names, the log line) is handed to the agent as delimited JSON data with a random marker per run, never as
+  part of its task. The AI triggers page shows the grant, the owner and a suspension, and its help text no longer
+  claims that confirmations reach you. **Behaviour change / upgrade notes:** every existing trigger is **read-only**
+  after the upgrade, whatever `MaxLevel` it had (the field is gone and ignored when read): a trigger that used to
+  restart or update containers now only investigates and reports. Existing triggers also have **no owner**, so each
+  is suspended (with a notification) the first time it fires; to keep one, open AI triggers, switch it on again
+  (or off and on for one that never fired), grant the capabilities and targets it needs and save — you become its
+  owner. Operations that also touch other resources need those granted too. Nothing in `ai-triggers.json`
+  needs to be edited by hand; to go back, start the previous image (it ignores the new fields, and its triggers
+  fall back to `MaxLevel=write`).
 - R1-12: every policy decision of the Mutation Gateway is **persisted before anything acts on it** (new tables
   `PolicyDecisions` and `PolicySnapshots`, additive migrations for SQLite and PostgreSQL; the SQLite → PostgreSQL
   migrator copies both). A record holds the principal, surface, capability and required level, the resolved target,

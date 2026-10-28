@@ -25,6 +25,7 @@ public sealed class MutationScope : IDisposable
         Principal = principal;
         _parent = parent;
         PinnedPolicy = request?.PinnedPolicy ?? parent?.PinnedPolicy;
+        TriggerId = request?.TriggerId ?? parent?.TriggerId;
         _serverId = request?.Target.ServerId;
         // What policy saw for this decision: the resolved target, what it also touches, and the string arguments.
         _decided = new HashSet<string>(StringComparer.Ordinal);
@@ -66,6 +67,10 @@ public sealed class MutationScope : IDisposable
     /// one. A gateway call made inside the scope without a pin of its own is decided against it — a scheduled task an
     /// AI trigger runs stays under the trigger's preset.</summary>
     public Whiskers.Models.Agent.PinnedPolicy? PinnedPolicy { get; }
+
+    /// <summary>The AI trigger whose run this scope belongs to (R1-13), from this scope or an enclosing one: a mutation
+    /// nested in it is unattended as well, and its audit row names the trigger.</summary>
+    public string? TriggerId { get; }
 
     /// <summary>The failure the delegate reported with <see cref="Fail"/>, or <c>null</c>. The first report wins.</summary>
     public string? FailureReason { get; private set; }

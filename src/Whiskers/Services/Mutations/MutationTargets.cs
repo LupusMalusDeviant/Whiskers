@@ -200,7 +200,11 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         try
         {
             var made = await plan(planner);
-            return Done(target with { Related = target.Related.Concat(made.DecidedIdentities()).Distinct(StringComparer.Ordinal).ToList() });
+            return Done(target with
+            {
+                Related = target.Related.Concat(made.DecidedIdentities()).Distinct(StringComparer.Ordinal).ToList(),
+                RelatedResources = target.RelatedResources.Concat(made.DecidedResources()).ToList(),
+            });
         }
         catch (ComposePlanException ex)
         {
@@ -250,12 +254,19 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Refuse($"Ambiguous network '{target.Id}' — matches {matches.Count} networks; use the full id.", target.Id);
         var network = matches[0];
 
-        // What the operation also touches: for connect / disconnect the container named in the call, resolved on
-        // the same server; otherwise (removal) every attached container, which the removal cuts off.
+        // What the operation also touches, decided by the capability, never by which arguments the call happens to
+        // carry: for connect / disconnect the container named in the call, resolved on the same server; for anything
+        // else (removal) every attached container, which the removal cuts off.
         var related = new List<string>();
+        var resources = new List<IReadOnlyList<string>>();
         string? relatedContainerId = null;
-        if (MutationTargets.String(request.Arguments, "containerId") is not { } containerArg)
+        if (!ContainerScoped.Contains(capability.Id))
+        {
             related.AddRange(network.Containers.SelectMany(c => new[] { c.ContainerId, c.Name }));
+            resources.AddRange(network.Containers.Select(c => Aliases(c.ContainerId, c.Name)));
+        }
+        else if (MutationTargets.String(request.Arguments, "containerId") is not { } containerArg)
+            return Refuse("Container ID or name is required.");
         else
         {
             var containers = await docker.ListContainersAsync(all: true, serverId: server.Id, ct);
@@ -263,15 +274,23 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             if (container is null) return Refuse(notFound ?? $"Container not found: {containerArg}", containerArg);
             related.Add(container.Id);
             related.Add(container.Name);
+            resources.Add(Aliases(container.Id, container.Name));
             relatedContainerId = container.Id;
         }
         return Done(target with
         {
             Id = network.Id, Name = network.Name, ServerId = server.Id,
             Related = related.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
+            RelatedResources = resources.Where(g => g.Count > 0).ToList(),
             RelatedContainerId = relatedContainerId,
         });
     }
+
+    /// <summary>Network capabilities that act on one container named in the call.</summary>
+    private static readonly HashSet<string> ContainerScoped = new(StringComparer.Ordinal)
+    {
+        "network.connect", "network.disconnect",
+    };
 
     private TargetResolution CloudServer(MutationTarget target)
     {
@@ -344,6 +363,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = pod.Id, Name = controller, ServerId = server.Id,
             Related = new[] { pod.Id, pod.Name }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
+            Aliases = Aliases(pod.Name),
         });
     }
 
@@ -363,7 +383,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
                 var resolved = await ContainerAsync(request, capability,
                     new MutationTarget("container", containerArg, null, target.ServerId), ct);
                 return resolved.Target is { } c
-                    ? Done(target with { Id = c.Id, Name = c.Name, ServerId = c.ServerId, Related = [c.Id, c.Name!] })
+                    ? Done(target with
+                    {
+                        Id = c.Id, Name = c.Name, ServerId = c.ServerId, Related = [c.Id, c.Name!],
+                    })
                     : resolved;
             }
             if (capability.Id != "gitdeploy.save")
@@ -394,6 +417,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = app.Id, Name = capability.Id == "gitdeploy.save" ? target.Name ?? app.Name : app.Name,
             ServerId = server.Id, Related = [app.Name, app.RepoUrl],
+            // The stored name and the repository are the app's own, not another resource it acts on.
+            Aliases = Aliases(app.Name, app.RepoUrl),
         });
     }
 
@@ -425,6 +450,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         {
             Id = webhook.WebhookId, Name = webhook.Name, ServerId = server?.Id ?? serverId,
             Related = new[] { webhook.Name, webhook.TargetId }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
+            Aliases = Aliases(webhook.Name),
+            RelatedResources = new[] { Aliases(webhook.TargetId) }.Where(g => g.Count > 0).ToList(),
         });
     }
 
@@ -459,6 +486,11 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static TargetResolution Done(MutationTarget target) => new(target with { Resolved = true }, null);
+
+    /// <summary>One resource's aliases, empty ones left out.</summary>
+    private static IReadOnlyList<string> Aliases(params string?[] aliases) =>
+        aliases.Where(a => !string.IsNullOrEmpty(a)).Select(a => a!).Distinct(StringComparer.Ordinal).ToList();
+
     private static TargetResolution Pass(MutationTarget target) => new(target, null);
     /// <summary>A refusal with its reason code: unknown or ambiguous <paramref name="named"/> where the message says
     /// so, otherwise the English detail as the argument of <see cref="MutationReasonCodes.TargetNotResolved"/>.</summary>
