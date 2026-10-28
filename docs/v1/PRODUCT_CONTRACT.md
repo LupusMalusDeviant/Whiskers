@@ -137,9 +137,9 @@ Common to all M rows since WP2 step 2.1: Actor = API key or web user · AuthN �
 Mutation Gateway: catalog level, tool switch and stricter stored level for every principal (INV-15), `AllowedTools`
 cannot widen (INV-16); the scope check inside the tool still runs · Target: containers resolved before policy
 (INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26), but protected resources still match the
-raw argument (INV-24) · Approval ⚠️ approve-then-retry bound to principal, credential, capability, normalized
-arguments, resolved target and policy version, single use, persisted (INV-30/31/35 ✅ since R1-14; eligibility
-INV-32–34 open) · Execution = inside the gateway scope with a deadline · Audit: one gateway AuditLog row (decision,
+raw argument (INV-24) · Approval ✅ approve-then-retry bound to principal, credential, capability, normalized
+arguments, resolved target and policy version, single use, persisted (INV-30/31/35 ✅ since R1-14); never decided by
+its requester, expiry and approver level checked at decision time (INV-32–34/37 ✅ since R1-15) · Execution = inside the gateway scope with a deadline · Audit: one gateway AuditLog row (decision,
 approval, intent, outcome) **plus** the tool's own row shown in the Audit column below (INV-45 ⚠️ two rows). A
 tool's error answer is recorded `Failed` by the gateway when the tool marks it (`MutationScope.Fail`; all 25
 mutating tools do for their own error texts).
@@ -192,7 +192,7 @@ mutating tools do for their own error texts).
 
 | ID | Path | Actor | AuthN | AuthZ | Policy | Approval | Execution | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|---|---|---|
-| A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling + tool switch (INV-15) | ✅ | ⚠️ self-confirm, orphan risk; persisted, and the gateway runs only an approval bound to the operation, arguments, target and policy version (R1-14) | invoker → gateway → tool | ❌ | gateway AL + per tool (as in 7.1) | INV-32, 36 |
+| A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling + tool switch (INV-15) | ✅ | ✅ self-confirm allowed and recorded unless `RequireSecondApprover` (PC-D4); ends with the chat (R1-15); persisted, and the gateway runs only an approval bound to the operation, arguments, target and policy version (R1-14) | invoker → gateway → tool | ❌ | gateway AL + per tool (as in 7.1) | INV-32, 36 |
 | A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling + tool switch | ✅ | Confirm → auto-deny ✅ | invoker → gateway → tool | ❌ | gateway AL + per tool | INV-08 |
 | A-03 | AI trigger | Automation (`trigger:<id>`, own principal per trigger since R1-03) | n/a | ✅ read-only unless an Admin granted capabilities + targets; every trigger has an owner, re-checked before each run and per mutation (nested included), lost authority or no owner → suspended + Admin notified (R1-13); tool switch ✅ | ✅ pinned to the trigger's preset with the global kill switch; missing preset → no run (R1-12) | Confirm → Deny in the gateway, nested mutations included, no approval raised ✅ (R1-13); Allow runs unattended within the grant | invoker → gateway → tool | ❌ | gateway AL + per tool + `agent.run` | INV-04, 06, 27, 40 |
 | A-04 | Claude Code CLI runtime (dead code) | fixed key | ✅ key | ⚠️ fail-open rights check | GR? | approve-then-retry | MCP | ❌ | per tool | remove or fix (C-20); INV-02 |

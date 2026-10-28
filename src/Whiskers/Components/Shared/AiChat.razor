@@ -1,3 +1,4 @@
+@implements IAsyncDisposable
 @using Microsoft.Extensions.Options
 @using Whiskers.Configuration
 @using Whiskers.Models
@@ -144,6 +145,9 @@
     private AgentEvent.ConfirmationRequired? _pendingConfirm;
     private string _pendingReason = "";
     private string? _pendingApprovalId;
+    // R1-15: the session's run and its pending approvals end with this chat (INV-36).
+    private AgentChatLifetime? _lifetime;
+    private AgentChatLifetime Lifetime => _lifetime ??= new AgentChatLifetime(ApprovalStore);
     private Whiskers.Services.AiChat.ChatMessage? _streaming;
 
     private bool AgentMode => AgentSettings.CurrentValue.Enabled;
@@ -194,6 +198,10 @@
         {
             if (AgentMode) await SendAgentAsync(userMsg);
             else await SendAdvisorAsync(userMsg);
+        }
+        catch (OperationCanceledException)
+        {
+            // The chat was cleared or closed: the run was stopped on purpose.
         }
         catch (Exception ex)
         {
@@ -256,10 +264,11 @@
         {
             _context = await BuildContextAsync();
             _session = await AgentService.StartSessionAsync(_context);
+            Lifetime.Attach(_session);
         }
 
         _streaming = null;
-        await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg"))
+        await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg", Lifetime.Token))
         {
             switch (ev)
             {
@@ -302,14 +311,36 @@
     {
         var id = _pendingApprovalId;
         var confirm = _pendingConfirm;
-        _pendingConfirm = null;
-        _pendingApprovalId = null;
+
+        // Without a recorded approval nothing can be approved: the call is only ever rejected (else the chat would
+        // hang until expiry).
+        if (id is null)
+        {
+            _pendingConfirm = null;
+            StateHasChanged();
+            if (_session is not null && confirm is not null)
+                await _session.ResolveConfirmationAsync(confirm.Call.CorrelationId, false);
+            return;
+        }
+
+        // Through the central store, as the person signed in now at their current role (R1-15).
+        var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
+        var result = resolver is null
+            ? ApprovalDecisionResult.InsufficientLevel
+            : await ApprovalStore.DecideAsync(id, approved, resolver);
+        if (ApprovalDecisionMessages.EndsTheCard(result))
+        {
+            _pendingConfirm = null;
+            _pendingApprovalId = null;
+        }
+        if (result != ApprovalDecisionResult.Decided)
+            _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "error", Content = L[ApprovalDecisionMessages.Key(result)].Value });
         StateHasChanged();
-        if (id is not null)
-            await ApprovalStore.ResolveAsync(id, approved, _userEmail);
-        else if (_session is not null && confirm is not null)
-            // Fallback: resolve the session confirmation directly, else the chat hangs until expiry.
-            await _session.ResolveConfirmationAsync(confirm.Call.Id, approved);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_lifetime is not null) await _lifetime.DisposeAsync();
     }
 
     private async Task<AgentContext> BuildContextAsync()
@@ -333,7 +364,7 @@
 
     private async Task ClearChat()
     {
-        if (_session is not null) await ApprovalStore.CancelForSessionAsync(_session.SessionId);
+        await Lifetime.EndAsync();
         _messages.Clear();
         _session = null;
         _context = null;

@@ -60,7 +60,7 @@ public class AgentTools
                     // A Confirm verdict marks an action above the caller's autonomous level. There is no
                     // interactive human on the MCP path, so it is denied — never auto-approved. The caller
                     // must perform the action explicitly (e.g. via the web UI) if it is intended.
-                    await session.ResolveConfirmationAsync(c.Call.Id, false);
+                    await session.ResolveConfirmationAsync(c.Call.CorrelationId, false);
                     sb.AppendLine($"[Bestätigung erforderlich, nicht autonom ausgeführt: {c.Call.Name}]");
                     break;
                 case AgentEvent.Failed f:

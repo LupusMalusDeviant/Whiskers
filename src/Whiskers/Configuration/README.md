@@ -22,7 +22,7 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | `TerminalSettings.cs` | Web-terminal settings. |
 | `AiChatSettings.cs` | Read-only advisor chat (provider, model, key). |
 | `AgentSettings.cs` | Acting-agent provider access + system prompt (UI-editable, reload-on-change). |
-| `GuardrailPolicy.cs` | A single guardrail policy (restrictive-by-default), incl. the per-policy tool mode (deny/allow). |
+| `GuardrailPolicy.cs` | A single guardrail policy (restrictive-by-default), incl. the per-policy tool mode (deny/allow) and `RequireSecondApprover` (R1-15, PC-D4: nobody decides their own request, not even in the chat; optional in `guardrails.json`, off by default and left out of the stored policy while off). |
 | `GuardrailConfig.cs` | The multi-preset wrapper: several named `GuardrailPreset`s + the active one (persisted in admin-only `guardrails.json`). `ActivePolicy()` never falls back to another preset: an active preset that does not exist yields `GuardrailPolicy.FailClosed()` (R1-12). |
 | `MetricAlertSettings.cs` | Thresholds for `high_cpu` / `high_memory` / `metric_anomaly` events (drive AI triggers). |
 

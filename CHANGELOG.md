@@ -6,6 +6,20 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and
+  rejecting follow the same rules: the approver holds the action's effective level (Viewers decide nothing, and the
+  chat now passes the approver's current role), and nobody decides their own non-interactive request — direct MCP,
+  AI trigger, scheduled task, webhook (PC-D4). The agent chat and UI clicks may still be confirmed by the person who
+  made them, recorded as a self-approval on the Approvals page, unless the new guardrail option **Require a second
+  approver** is on (off by default; left out of the stored policy while off, so existing policy versions stay the
+  same). An expired approval can no longer be decided (checked by the store and the database update), overdue
+  approvals are expired every 30 seconds so a waiting chat is released, and a grant is usable only within its
+  lifetime. Clearing or closing a chat stops its run and cancels its pending approvals, so approving one elsewhere
+  can no longer resume it unattended; sessions wait on unique operation ids instead of provider tool-call ids. One
+  principal has at most 25 approvals waiting. Approval notifications name the approval, risk, target and a link to
+  it, never the arguments; Viewers no longer see an approval's arguments. Additive migrations (SQLite + PostgreSQL)
+  add `RequesterIds` and `SelfApproved` to `Approvals`. **Upgrade note:** an approval raised before the upgrade has
+  no recorded requester; the level rules apply to it, the requester rule does not.
 - R1-14: **approvals are durable and fully bound.** Every approval is written to the new `Approvals` table (additive
   migrations for SQLite and PostgreSQL; the SQLite → PostgreSQL migrator copies it) before it is shown, decided or
   used, so a restart no longer loses a decision or lets an approval run twice, and the history on the Approvals page

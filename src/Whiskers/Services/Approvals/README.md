@@ -51,16 +51,40 @@ closed approvals from memory, never an open one. Overdue approvals (default 15 m
 lapses ten minutes after the approval (`GrantExpiresAt`). A host without a database (unit tests) uses
 `InMemoryApprovalPersistence` with the same conditional semantics.
 
+## Who decides (R1-15)
+
+A human decides through `IApprovalStore.DecideAsync` with an `ApprovalResolver` — their principal id
+(`user:<email>`) and the level their role grants **now** (`ApprovalResolver.CurrentAsync`); the chat, the Approvals
+page and the bell all go through it. `ApprovalEligibility` holds approving and rejecting to the same rules (INV-37):
+
+- **Level (INV-34).** The resolver holds at least the approval's level — the effective level of the action. An
+  approval without a readable level asks for Admin. A Viewer decides nothing.
+- **Separation of duties (INV-33, PC-D4).** An approval records who asked (`Approval.Requesters`: the caller, then
+  everyone it acts for — an agent's user, an automation's owner). None of them decides a non-interactive request
+  (direct MCP, AI trigger, scheduled task, webhook; any unknown kind). An interactive request (agent chat `agent-web`,
+  a UI click `web`, the web terminal) may be decided by its requester unless the active guardrail policy sets
+  `RequireSecondApprover`; such a decision is recorded as `SelfApproved`. An unreadable policy requires a second
+  approver.
+- **Expiry (INV-32).** An approval past `ExpiresAt` is expired, not decided — checked by the store and again by the
+  conditional database update. A timer (`ApprovalStore.SweepInterval`) expires overdue approvals even when nobody
+  opens the list, so a waiting session is released. A grant is usable only until `GrantExpiresAt`.
+- **Bounded (C-19).** One principal has at most `ApprovalEligibility.MaxPendingPerPrincipal` approvals waiting;
+  beyond that `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
+
+A raised approval is announced with its id, risk, target and a link to `/approvals#<id>`
+(`ApprovalDisplay.NotificationText`), never with its arguments: the bell may forward it to external channels.
+
 ## Files
 
 | File | Purpose |
 |---|---|
-| `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore`: create / list / resolve / use / cancel approvals, the persisted history, a `Changed` event for the bell + page, automatic expiry, `LoadAsync` after a restart. A resolver may only approve what its own level could do. |
+| `ApprovalStore.cs` | `IApprovalStore` + `ApprovalStore`: create / list / decide / use / cancel approvals, the persisted history, a `Changed` event for the bell + page, expiry at decision time and on a timer, the per-principal bound, `LoadAsync` after a restart. |
+| `ApprovalEligibility.cs` | `ApprovalResolver`, `ApprovalDecisionResult`, `ApprovalEligibility` (who may decide: level, requester, interactive kinds, `RequestersOf`), `ApprovalLimitException`, `ApprovalDecisionMessages` (UI resource keys). |
 | `ApprovalPersistence.cs` | `IApprovalPersistence`: `DbApprovalPersistence` (table `Approvals`, conditional decide/use) and `InMemoryApprovalPersistence` (hosts without a database). |
 | `ApprovalBinding.cs` | `ApprovalBinding.Of` (gateway calls) and `OfDirectCall` (direct MCP reads): the hash an approval is bound to. |
-| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject`, `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsumeAsync`). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
+| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject` (with its `Requesters`), `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsumeAsync`). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
 | `ApprovalFingerprint.cs` | The hashes that bind an approval: arguments (keys sorted, raw JSON values) and caller + tool + arguments. |
-| `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. |
+| `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. `NotificationText`: the notification of a raised approval (id, risk, target, link; no arguments). |
 
 The agent-specific bridge, [`ApprovalCoordinator`](../Agent/Approvals/), stays in the Agent module.
 

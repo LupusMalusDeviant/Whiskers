@@ -37,7 +37,9 @@ public static class WhiskersMutationGatewayExtensions
         // R1-14: approvals live in the database; the store loads the open ones after the schema is migrated.
         services.AddSingleton<IApprovalPersistence, DbApprovalPersistence>();
         services.AddSingleton<IApprovalStore>(sp => new ApprovalStore(sp.GetService<ILogger<ApprovalStore>>(),
-            persistence: sp.GetRequiredService<IApprovalPersistence>()));
+            persistence: sp.GetRequiredService<IApprovalPersistence>(),
+            // R1-15: RequireSecondApprover is read from the active policy at each decision.
+            policy: sp.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>()));
         services.AddSingleton<IApprovalGate, ApprovalGate>();
         services.AddSingleton<IDirectMcpCallGuard, DirectMcpCallGuard>();
         services.AddSingleton<IAgentPrincipalResolver, AgentPrincipalResolver>();

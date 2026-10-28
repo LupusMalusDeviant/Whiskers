@@ -97,10 +97,14 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             DecisionId: decision.DecisionId,
             // R1-14: the gateway runs the call only for the caller, target and policy version decided here.
             Binding: decision.Binding,
-            Interactive: true);
+            Interactive: true,
+            // R1-15: the person chatting asks; they may decide it themselves unless a second approver is required.
+            Requesters: [actor]);
 
-        // The resolver reaches back to the still-running session that is awaiting the decision.
-        var approval = await _store.CreateAsync(request, approved => session.ResolveConfirmationAsync(call.Id, approved));
+        // The resolver reaches back to the still-running session that is awaiting the decision — by the call's
+        // operation id, which is unique, not by the provider's tool-call id, which a provider may reuse (C-18).
+        var approval = await _store.CreateAsync(request,
+            approved => session.ResolveConfirmationAsync(call.CorrelationId, approved));
 
         // Push to the in-app bell (+ external channels if active). Never let a push failure block the flow.
         try
@@ -108,7 +112,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = "agent_approval",
-                ImageInfo = $"Agent \"{actor}\" wants to run \"{call.Name}\" — approval required.",
+                ImageInfo = ApprovalDisplay.NotificationText(approval),
                 CorrelationId = call.CorrelationId,
             });
         }

@@ -185,7 +185,7 @@ public sealed class ApprovalPersistenceTests : IDisposable
             FailInsert ? throw new InvalidOperationException("database unavailable") : _inner.InsertAsync(approval, ct);
 
         public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-            DateTime? grantExpiresAt, CancellationToken ct = default) =>
+            DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
 
         public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>

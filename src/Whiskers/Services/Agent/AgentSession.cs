@@ -59,9 +59,9 @@ public sealed class AgentSession : IAgentSession
     private void AddHistory(AgentMessage m) { lock (_historyLock) { _history.Add(m); } }
     private List<AgentMessage> HistorySnapshot() { lock (_historyLock) { return _history.ToList(); } }
 
-    public Task ResolveConfirmationAsync(string toolCallId, bool approved, CancellationToken ct = default)
+    public Task ResolveConfirmationAsync(string operationId, bool approved, CancellationToken ct = default)
     {
-        if (_pending.TryGetValue(toolCallId, out var tcs))
+        if (_pending.TryGetValue(operationId, out var tcs))
             tcs.TrySetResult(approved);
         return Task.CompletedTask;
     }
@@ -130,6 +130,9 @@ public sealed class AgentSession : IAgentSession
             State = AgentRunState.Running;
             foreach (var call in calls)
             {
+                // An ended run (the chat was closed or cleared) takes no further step, not even the next call of
+                // this turn (INV-36).
+                if (ct.IsCancellationRequested) yield break;
                 var decision = Evaluate(call);
                 // INV-22 (R1-12): a block or an approval request rests on a decision the gateway recorded, so the
                 // approval names it and the block is on record. An allowed call is decided and recorded when it runs.
@@ -145,10 +148,12 @@ public sealed class AgentSession : IAgentSession
 
                 if (decision.Verdict == GuardrailVerdict.Confirm)
                 {
-                    // Register tcs BEFORE the yield so an immediate Resolve finds it.
+                    // Register tcs BEFORE the yield so an immediate Resolve finds it. Keyed by the call's operation
+                    // id (unique per call): a provider's tool-call id can repeat across turns (C-18), and a stale
+                    // decision must never answer a later call.
                     State = AgentRunState.AwaitingConfirmation;
                     var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _pending[call.Id] = tcs;
+                    _pending[call.CorrelationId] = tcs;
 
                     bool? approved;
                     try
@@ -160,11 +165,12 @@ public sealed class AgentSession : IAgentSession
                     finally
                     {
                         // Runs even if the enumerator is disposed mid-confirmation → no leaked _pending entry.
-                        _pending.TryRemove(call.Id, out _);
+                        _pending.TryRemove(call.CorrelationId, out _);
                     }
                     State = AgentRunState.Running;
 
-                    if (approved is null) yield break;             // abgebrochen
+                    // Aborted — also when a decision arrived after the run was ended: an ended run never resumes.
+                    if (approved is null || ct.IsCancellationRequested) yield break;
                     if (approved == false)
                     {
                         yield return RecordResult(call, new AgentToolResult(call.Id, "Vom Benutzer abgelehnt.", true, decision));

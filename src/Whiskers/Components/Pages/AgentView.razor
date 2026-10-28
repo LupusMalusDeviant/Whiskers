@@ -1,3 +1,4 @@
+@implements IAsyncDisposable
 @using Markdig
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
@@ -263,6 +264,9 @@
     private AgentToolCall? _pendingConfirm;
     private string _pendingReason = "";
     private string? _pendingApprovalId;
+    // R1-15: the session's run and its pending approvals end with this page (INV-36).
+    private AgentChatLifetime? _lifetime;
+    private AgentChatLifetime Lifetime => _lifetime ??= new AgentChatLifetime(ApprovalStore);
 
     private string _email = "local@serverwatch.local";
     private IReadOnlyList<AgentMessage> _seedHistory = Array.Empty<AgentMessage>();
@@ -374,9 +378,10 @@
             {
                 _context = await BuildContextAsync();
                 _session = await AgentService.StartSessionAsync(_context, _seedHistory);
+                Lifetime.Attach(_session);
             }
 
-            await foreach (var ev in _session.SendAsync(message))
+            await foreach (var ev in _session.SendAsync(message, ct: Lifetime.Token))
             {
                 switch (ev)
                 {
@@ -405,6 +410,10 @@
                 StateHasChanged();
             }
         }
+        catch (OperationCanceledException)
+        {
+            // The chat was cleared or the page left: the run was stopped on purpose.
+        }
         catch (Exception ex)
         {
             _lines.Add(new Line("error", L["AgentView_Chat_Error", ex.Message].Value));
@@ -423,7 +432,7 @@
 
     private async Task ClearChat()
     {
-        if (_session is not null) await ApprovalStore.CancelForSessionAsync(_session.SessionId);
+        await Lifetime.EndAsync();
         _lines.Clear();
         _session = null;
         _context = null;
@@ -437,16 +446,36 @@
     {
         var call = _pendingConfirm;
         var approvalId = _pendingApprovalId;
-        _pendingConfirm = null;
-        _pendingApprovalId = null;
-        StateHasChanged();
 
-        // Route through the central store so the bell + "Freigaben" page stay consistent (idempotent:
-        // whoever resolves first wins). Fall back to the session directly if no approval was registered.
-        if (approvalId is not null)
-            await ApprovalStore.ResolveAsync(approvalId, approved, _email);
-        else if (_session is not null && call is not null)
-            await _session.ResolveConfirmationAsync(call.Id, approved);
+        // Without a recorded approval nothing can be approved: the call is only ever rejected.
+        if (approvalId is null)
+        {
+            _pendingConfirm = null;
+            StateHasChanged();
+            if (_session is not null && call is not null)
+                await _session.ResolveConfirmationAsync(call.CorrelationId, false);
+            return;
+        }
+
+        // Through the central store, as the person signed in now at their current role (R1-15): the same rules as
+        // the Approvals page, and whoever decides first wins.
+        var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
+        var result = resolver is null
+            ? ApprovalDecisionResult.InsufficientLevel
+            : await ApprovalStore.DecideAsync(approvalId, approved, resolver);
+        if (ApprovalDecisionMessages.EndsTheCard(result))
+        {
+            _pendingConfirm = null;
+            _pendingApprovalId = null;
+        }
+        if (result != ApprovalDecisionResult.Decided)
+            Snackbar.Add(L[ApprovalDecisionMessages.Key(result)].Value, ApprovalDecisionMessages.EndsTheCard(result) ? Severity.Warning : Severity.Error);
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_lifetime is not null) await _lifetime.DisposeAsync();
     }
 
     private void AppendAssistant(string text)

@@ -3,7 +3,7 @@ using Whiskers.Services.Approvals;
 
 namespace Whiskers.Tests;
 
-public class ApprovalStoreTests
+public partial class ApprovalStoreTests
 {
     private static ApprovalRequest Req(string session = "s1", string toolCallId = "tc1") => new(
         SessionId: session,
@@ -36,7 +36,7 @@ public class ApprovalStoreTests
         bool? decision = null;
         var a = await store.CreateAsync(Req(), approved => { decision = approved; return Task.CompletedTask; });
 
-        var ok = await store.ResolveAsync(a.Id, approved: true, resolvedBy: "bob@example.com");
+        var ok = await store.ResolveAsync(a.Id, approved: true, resolvedBy: "bob@example.com", resolverLevel: "write");
 
         Assert.True(ok);
         Assert.True(decision);
@@ -52,7 +52,7 @@ public class ApprovalStoreTests
         bool? decision = null;
         var a = await store.CreateAsync(Req(), approved => { decision = approved; return Task.CompletedTask; });
 
-        await store.ResolveAsync(a.Id, approved: false, resolvedBy: "bob");
+        await store.ResolveAsync(a.Id, approved: false, resolvedBy: "bob", resolverLevel: "write");
 
         Assert.False(decision);
         Assert.Equal(ApprovalStatus.Rejected, a.Status);
@@ -65,8 +65,8 @@ public class ApprovalStoreTests
         var calls = 0;
         var a = await store.CreateAsync(Req(), _ => { calls++; return Task.CompletedTask; });
 
-        Assert.True(await store.ResolveAsync(a.Id, true, "x"));
-        Assert.False(await store.ResolveAsync(a.Id, true, "x"));
+        Assert.True(await store.ResolveAsync(a.Id, true, "x", "write"));
+        Assert.False(await store.ResolveAsync(a.Id, true, "x", "write"));
         Assert.Equal(1, calls);
     }
 

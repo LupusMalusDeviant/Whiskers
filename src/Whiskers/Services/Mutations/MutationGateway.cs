@@ -506,6 +506,8 @@ public sealed class MutationGateway : IMutationGateway
             // R1-14: who, with which credential, what, at which level, with which arguments, on which resolved target,
             // under which policy version.
             Binding = ApprovalBinding.Of(request, capability, policy?.VersionHash),
+            // R1-15: the caller and everyone it acts for; none of them decides a non-interactive request.
+            Requesters = ApprovalEligibility.RequestersOf(p),
         };
     }
 

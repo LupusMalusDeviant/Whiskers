@@ -33,6 +33,10 @@ public sealed record ApprovalSubject(
     /// and level, normalized arguments, resolved target and policy version. An approval is usable only for a call
     /// with the same binding; a subject without one can never use an approval.</summary>
     public string? Binding { get; init; }
+
+    /// <summary>The principal ids that ask (R1-15): the caller first, then whoever it acts for. None of them may decide
+    /// the approval unless the request is interactive (<see cref="ApprovalEligibility"/>).</summary>
+    public IReadOnlyList<string> Requesters { get; init; } = Array.Empty<string>();
 }
 
 public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
@@ -150,12 +154,17 @@ public sealed class ApprovalGate : IApprovalGate
             // None, or raised below what the operation now needs (a level was raised meanwhile): ask again.
             approval = await RaiseAsync(subject, reason, matchedRules, argumentsHash, ct);
         }
+        catch (ApprovalLimitException ex)
+        {
+            // C-19: refused, not queued — the caller has enough approvals waiting already.
+            return new ApprovalGateResult(false, $"{ex.Message} '{subject.ToolName}' was not executed.");
+        }
         finally
         {
             _raiseLock.Release();
         }
 
-        await NotifyAsync(subject);
+        await NotifyAsync(subject, approval);
         return new ApprovalGateResult(false,
             $"Human approval required: {reason} Approval {approval.Id} was raised (Whiskers → Approvals). " +
             $"After it is approved, repeat this exact call within {GrantLifetime.TotalMinutes:0} minutes; it then runs once.",
@@ -204,12 +213,13 @@ public sealed class ApprovalGate : IApprovalGate
             GuardrailRule: matchedRules.Count > 0 ? string.Join(", ", matchedRules) : null,
             ArgumentsHash: argumentsHash,
             DecisionId: subject.DecisionId,
-            Binding: subject.Binding),
+            Binding: subject.Binding,
+            Requesters: subject.Requesters),
             // The decision is read back from the store on the retry; nothing waits on it here.
             _ => Task.CompletedTask, ct);
     }
 
-    private async Task NotifyAsync(ApprovalSubject subject)
+    private async Task NotifyAsync(ApprovalSubject subject, Approval approval)
     {
         try
         {
@@ -217,7 +227,7 @@ public sealed class ApprovalGate : IApprovalGate
                 await _notify.SendAsync(new NotificationEvent
                 {
                     EventType = "agent_approval",
-                    ImageInfo = $"\"{subject.ActorDisplay}\" wants to run \"{subject.ToolName}\" — approval required.",
+                    ImageInfo = ApprovalDisplay.NotificationText(approval),
                     CorrelationId = subject.OperationId,
                 });
         }

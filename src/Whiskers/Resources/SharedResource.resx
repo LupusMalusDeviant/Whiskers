@@ -2576,9 +2576,6 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ApprovalsView_ExpiresAt_Tooltip" xml:space="preserve">
     <value>Expires at {0}</value>
   </data>
-  <data name="ApprovalsView_NoPermission_Snackbar" xml:space="preserve">
-    <value>No permission to approve this action — your role is lower than the requested permission level.</value>
-  </data>
   <data name="ApprovalsView_PageTitle" xml:space="preserve">
     <value>Approvals - Whiskers</value>
   </data>
@@ -4682,14 +4679,8 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Layout_ThemeTooltip" xml:space="preserve">
     <value>Theme</value>
   </data>
-  <data name="ApprovalsView_NotFound_Snackbar" xml:space="preserve">
-    <value>This approval no longer exists (session ended or app restarted).</value>
-  </data>
   <data name="ApprovalsView_AlreadyResolved_Snackbar" xml:space="preserve">
     <value>This approval is no longer pending (status: {0}).</value>
-  </data>
-  <data name="ApprovalsView_ResolveFailed_Snackbar" xml:space="preserve">
-    <value>The approval could not be resolved — it was probably decided at the same moment.</value>
   </data>
   <data name="ApprovalsView_ResolveError_Snackbar" xml:space="preserve">
     <value>Error resolving the approval: {0}</value>
@@ -4924,5 +4915,35 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="AiTriggersView_NoOwner_Chip" xml:space="preserve">
     <value>No owner: it is suspended at its next run. Switch it off, save, switch it on and save again to take it over.</value>
+  </data>
+  <data name="Approval_Result_Decided" xml:space="preserve">
+    <value>Decided.</value>
+  </data>
+  <data name="Approval_Result_NotFound" xml:space="preserve">
+    <value>This approval no longer exists.</value>
+  </data>
+  <data name="Approval_Result_NotPending" xml:space="preserve">
+    <value>This approval was already decided or cancelled.</value>
+  </data>
+  <data name="Approval_Result_Expired" xml:space="preserve">
+    <value>This approval has expired and can no longer be decided.</value>
+  </data>
+  <data name="Approval_Result_InsufficientLevel" xml:space="preserve">
+    <value>Your role is below the level this action requires; someone with that level has to decide it.</value>
+  </data>
+  <data name="Approval_Result_RequesterCannotDecide" xml:space="preserve">
+    <value>You asked for this action; another approver has to decide it.</value>
+  </data>
+  <data name="Approval_Result_NotRecorded" xml:space="preserve">
+    <value>The decision could not be saved; nothing was decided.</value>
+  </data>
+  <data name="ApprovalsView_SelfApproved" xml:space="preserve">
+    <value>own request</value>
+  </data>
+  <data name="GuardrailsView_RequireSecondApprover_Label" xml:space="preserve">
+    <value>Require a second approver</value>
+  </data>
+  <data name="GuardrailsView_RequireSecondApprover_Helper" xml:space="preserve">
+    <value>Nobody approves or rejects their own request, not even in the agent chat. Leave this off on a single-admin install. Requests from MCP clients, AI triggers and scheduled tasks are never decided by their requester.</value>
   </data>
 </root>

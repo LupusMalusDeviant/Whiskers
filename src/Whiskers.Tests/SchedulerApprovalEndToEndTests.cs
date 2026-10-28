@@ -100,7 +100,8 @@ public class SchedulerApprovalEndToEndTests
 
         var pending = await gateway.ExecuteAsync(Request(capabilityId, args, "op-1"), Run);
         Assert.Equal(0, runs);
-        Assert.True(await approvals.ResolveAsync(pending.ApprovalId!, approved: true, "admin@example.com", McpPermissionLevels.Admin));
+        // Another admin: the agent asked on behalf of admin@example.com, who may not decide it (PC-D4, R1-15).
+        Assert.True(await approvals.ResolveAsync(pending.ApprovalId!, approved: true, "second-admin@example.com", McpPermissionLevels.Admin));
 
         var executed = await gateway.ExecuteAsync(Request(capabilityId, args, "op-1"), Run);
         var again = await gateway.ExecuteAsync(Request(capabilityId, args, "op-1"), Run);

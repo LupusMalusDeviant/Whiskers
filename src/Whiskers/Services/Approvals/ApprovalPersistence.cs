@@ -15,9 +15,10 @@ public interface IApprovalPersistence
 {
     Task InsertAsync(Approval approval, CancellationToken ct = default);
 
-    /// <summary>Pending → <paramref name="status"/>. <c>false</c> when the approval is not pending (any more).</summary>
+    /// <summary>Pending → <paramref name="status"/>. <c>false</c> when the approval is not pending (any more), or —
+    /// for a human decision (approved, rejected) — when it expired before <paramref name="at"/> (INV-32).</summary>
     Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by, DateTime? grantExpiresAt,
-        CancellationToken ct = default);
+        bool selfApproved = false, CancellationToken ct = default);
 
     /// <summary>Uses the approval once. <c>false</c> unless it is approved, unused and its grant has not lapsed at
     /// <paramref name="now"/>.</summary>
@@ -48,18 +49,20 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
     }
 
     public async Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-        DateTime? grantExpiresAt, CancellationToken ct = default)
+        DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var pending = nameof(ApprovalStatus.Pending);
+        var decision = ApprovalRecords.IsDecision(status);
         var updated = await db.Approvals
-            .Where(a => a.Id == approvalId && a.Status == pending)
+            .Where(a => a.Id == approvalId && a.Status == pending && (!decision || a.ExpiresAt > at))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(a => a.Status, status.ToString())
                 .SetProperty(a => a.ResolvedAt, at)
                 .SetProperty(a => a.ResolvedBy, by)
-                .SetProperty(a => a.GrantExpiresAt, grantExpiresAt), ct);
+                .SetProperty(a => a.GrantExpiresAt, grantExpiresAt)
+                .SetProperty(a => a.SelfApproved, selfApproved), ct);
         return updated == 1;
     }
 
@@ -119,16 +122,18 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
     }
 
     public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-        DateTime? grantExpiresAt, CancellationToken ct = default)
+        DateTime? grantExpiresAt, bool selfApproved = false, CancellationToken ct = default)
     {
         lock (_lock)
         {
-            if (!_rows.TryGetValue(approvalId, out var row) || row.Status != nameof(ApprovalStatus.Pending))
+            if (!_rows.TryGetValue(approvalId, out var row) || row.Status != nameof(ApprovalStatus.Pending)
+                || (ApprovalRecords.IsDecision(status) && row.ExpiresAt <= at))
                 return Task.FromResult(false);
             row.Status = status.ToString();
             row.ResolvedAt = at;
             row.ResolvedBy = by;
             row.GrantExpiresAt = grantExpiresAt;
+            row.SelfApproved = selfApproved;
             return Task.FromResult(true);
         }
     }
@@ -167,6 +172,20 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
 
 internal static class ApprovalRecords
 {
+    /// <summary>A human decision, as opposed to the system expiring or cancelling an approval.</summary>
+    public static bool IsDecision(ApprovalStatus status) => status is ApprovalStatus.Approved or ApprovalStatus.Rejected;
+
+    // Principal ids never contain a line break (user:, key:, trigger:, agent:, task: ids).
+    private const char RequesterSeparator = '\n';
+
+    private static string? JoinRequesters(IReadOnlyList<string> ids) =>
+        ids.Count == 0 ? null : string.Join(RequesterSeparator, ids);
+
+    private static IReadOnlyList<string> SplitRequesters(string? value) =>
+        string.IsNullOrEmpty(value)
+            ? Array.Empty<string>()
+            : value.Split(RequesterSeparator, StringSplitOptions.RemoveEmptyEntries);
+
     public static ApprovalRecordEntity ToEntity(Approval a) => new()
     {
         Id = a.Id,
@@ -189,6 +208,8 @@ internal static class ApprovalRecords
         DecisionId = a.DecisionId,
         Binding = a.Binding,
         Interactive = a.Interactive,
+        RequesterIds = JoinRequesters(a.Requesters),
+        SelfApproved = a.SelfApproved,
         Status = a.Status.ToString(),
         CreatedAt = a.CreatedAt,
         ExpiresAt = a.ExpiresAt,
@@ -221,6 +242,8 @@ internal static class ApprovalRecords
         DecisionId = e.DecisionId,
         Binding = e.Binding,
         Interactive = e.Interactive,
+        Requesters = SplitRequesters(e.RequesterIds),
+        SelfApproved = e.SelfApproved,
         // An unreadable status is never a usable one.
         Status = Enum.TryParse<ApprovalStatus>(e.Status, out var status) ? status : ApprovalStatus.Cancelled,
         CreatedAt = DateTime.SpecifyKind(e.CreatedAt, DateTimeKind.Utc),

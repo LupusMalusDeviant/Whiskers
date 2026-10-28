@@ -288,10 +288,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `ApprovalSeparationOfDutyTests` enforces PC-D4, effective approver level and equal rejection eligibility.
-- [ ] `ApprovalStoreTests` checks expiry at resolution and consumption.
-- [ ] `OrphanedApprovalTests` proves closed/disconnected sessions cannot resume unattended; use globally unique operation/approval IDs.
-- [ ] Pending approvals are bounded per principal; notifications include safe target/risk/approval links.
+- [x] `ApprovalSeparationOfDutyTests` enforces PC-D4, effective approver level and equal rejection eligibility.
+- [x] `ApprovalStoreTests` checks expiry at resolution and consumption.
+- [x] `OrphanedApprovalTests` proves closed/disconnected sessions cannot resume unattended; use globally unique operation/approval IDs.
+- [x] Pending approvals are bounded per principal; notifications include safe target/risk/approval links.
 
 **Out of scope:** Strict four-eyes for ordinary interactive chat; that decision is already settled.
 

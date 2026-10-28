@@ -402,7 +402,7 @@ public sealed class PolicyDecisionRecordTests : IDisposable
             if (ev is AgentEvent.ConfirmationRequired c)
             {
                 raised = await coordinator.RaiseAsync(session, c.Call, context, c.Reason, c.Decision);
-                await session.ResolveConfirmationAsync(c.Call.Id, false);   // the human rejects: nothing runs
+                await session.ResolveConfirmationAsync(c.Call.CorrelationId, false);   // the human rejects: nothing runs
             }
 
         var decision = Assert.Single(Decisions());
