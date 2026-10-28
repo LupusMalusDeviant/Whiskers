@@ -28,10 +28,12 @@ public static class TriggerAuthority
     public static bool GlobMatch(string glob, string? value)
     {
         if (string.IsNullOrWhiteSpace(glob) || string.IsNullOrEmpty(value)) return false;
-        var pattern = "^" + System.Text.RegularExpressions.Regex.Escape(glob.Trim())
-            .Replace("\\*", ".*").Replace("\\?", ".") + "$";
+        // \A … \z: "$" would also match before a final line break, so "web" would grant "web\n".
+        var pattern = @"\A" + System.Text.RegularExpressions.Regex.Escape(glob.Trim())
+            .Replace("\\*", ".*").Replace("\\?", ".") + @"\z";
         return System.Text.RegularExpressions.Regex.IsMatch(value, pattern,
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+            | System.Text.RegularExpressions.RegexOptions.Singleline,
             TimeSpan.FromMilliseconds(100));
     }
 }

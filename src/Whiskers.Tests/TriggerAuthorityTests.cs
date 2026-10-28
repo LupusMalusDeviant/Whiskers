@@ -287,6 +287,36 @@ public sealed class TriggerAuthorityTests : IDisposable
         Assert.Equal(MutationStatus.Executed, granted.Status);
     }
 
+    [Fact]
+    public async Task A_related_resource_sharing_a_name_with_the_target_still_needs_its_own_grant()
+    {
+        // The network "web" is granted by its id only; the container it would cut off is also called "web".
+        var disconnect = new CapabilityCatalog().Find("network.disconnect")!;
+        var trigger = Granted();
+        trigger.WriteCapabilities.Add(disconnect.Id);
+        trigger.WriteTargets.Clear();
+        trigger.WriteTargets.Add("net-1");
+        var request = AgentCall(disconnect, "web") with
+        {
+            Target = new MutationTarget("network", "net-1", "web", "srv1")
+            {
+                Related = ["cid-db", "web"], RelatedResources = [["cid-db", "web"]], Resolved = true,
+            },
+        };
+
+        var outcome = await Gateway(new MemoryTriggers(trigger), new Owners()).ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Contains("also touches", outcome.Reason);
+    }
+
+    [Theory]
+    [InlineData("web\n")]
+    [InlineData("web\r\n")]
+    [InlineData("web2")]
+    public void A_grant_matches_the_whole_name_only(string name) =>
+        Assert.False(TriggerAuthority.GlobMatch("web", name));
+
     [Theory]
     [InlineData("dns-zone", "other.example", "allowed.example")]   // a record name is not the zone
     [InlineData("host", "srv2", "allowed-project")]                // a project name is not the host

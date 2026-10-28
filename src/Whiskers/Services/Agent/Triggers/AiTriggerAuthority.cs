@@ -93,7 +93,9 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
         var resources = target.RelatedResources.Count > 0
             ? target.RelatedResources
             : target.Related.Select(r => (IReadOnlyList<string>)[r]).ToList();
-        if (resources.FirstOrDefault(g => !g.Any(own.Contains) && !g.Any(a => Granted(trigger, a))) is { } outside)
+        // Only the target itself (its group holds its resolved id) is skipped; any other resource needs a granted alias
+        // of its own, even when it shares a name with the target.
+        if (resources.FirstOrDefault(g => !g.Contains(target.Id) && !g.Any(a => Granted(trigger, a))) is { } outside)
             return $"the operation also touches '{string.Join(" / ", outside)}', which is not among the targets granted to the AI trigger";
 
         // PC-D6: the owner's authority as it is now, for this capability at its effective level.
