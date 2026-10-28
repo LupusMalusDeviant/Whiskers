@@ -404,6 +404,7 @@
                     case AgentEvent.ConfirmationRequired c:
                         _pendingConfirm = c.Call;
                         _pendingReason = c.Reason;
+                        _pendingApprovalId = null;   // a new card: no earlier approval's id may decide it
                         // Register centrally so the bell + "Freigaben" page can also decide.
                         if (context is not null)
                         {
@@ -478,7 +479,8 @@
         var result = resolver is null
             ? ApprovalDecisionResult.InsufficientLevel
             : await ApprovalStore.DecideAsync(approvalId, approved, resolver);
-        if (ApprovalDecisionMessages.EndsTheCard(result))
+        // Only this decision's own card ends: while it was being recorded the chat may have moved on to a newer one.
+        if (ApprovalDecisionMessages.EndsTheCard(result) && _pendingApprovalId == approvalId)
         {
             _pendingConfirm = null;
             _pendingApprovalId = null;

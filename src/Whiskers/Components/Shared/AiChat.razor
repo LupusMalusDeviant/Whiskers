@@ -306,6 +306,7 @@
                 case AgentEvent.ConfirmationRequired c:
                     _pendingConfirm = c;
                     _pendingReason = c.Reason;
+                    _pendingApprovalId = null;   // a new card: no earlier approval's id may decide it
                     if (context is not null)
                     {
                         var approval = await Lifetime.RaiseAsync(ApprovalCoordinator, session, context, c, run);
@@ -334,7 +335,8 @@
         var result = resolver is null
             ? ApprovalDecisionResult.InsufficientLevel
             : await ApprovalStore.DecideAsync(id, approved, resolver);
-        if (ApprovalDecisionMessages.EndsTheCard(result))
+        // Only this decision's own card ends: while it was being recorded the chat may have moved on to a newer one.
+        if (ApprovalDecisionMessages.EndsTheCard(result) && _pendingApprovalId == id)
         {
             _pendingConfirm = null;
             _pendingApprovalId = null;
