@@ -30,6 +30,13 @@ public sealed record GuardrailRequest(
 public sealed record GuardrailDecision(
     GuardrailVerdict Verdict,
     string Reason,
-    IReadOnlyList<string> MatchedRuleIds);
+    IReadOnlyList<string> MatchedRuleIds)
+{
+    /// <summary>The recorded gateway decision this verdict comes from (INV-22, R1-12), when one was recorded.</summary>
+    public string? DecisionId { get; init; }
+
+    /// <summary>The preset that decision was made under (a pinned run's own, or the active one).</summary>
+    public string? Preset { get; init; }
+}
 
 public enum GuardrailVerdict { Allow, Confirm, Deny }

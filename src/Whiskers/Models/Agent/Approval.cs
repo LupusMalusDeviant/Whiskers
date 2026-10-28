@@ -79,10 +79,10 @@ public sealed class Approval
     /// a call whose arguments produce the same hash. Null for approvals raised before ADR-0005.</summary>
     public string? ArgumentsHash { get; init; }
 
-    /// <summary>The recorded policy decision (INV-22) that asked for this approval: set when the gateway raised it,
-    /// or — for an approval an agent session raised itself — by the first gateway decision that checked it. Each
-    /// execution's audit row names its own decision and this approval.</summary>
-    public string? DecisionId { get; set; }
+    /// <summary>The recorded policy decision (INV-22) that asked for this approval — the gateway's decision when it
+    /// raised the approval, or the one an agent session had the gateway record before it paused (R1-12). The audit
+    /// row of the execution names its own decision and this approval.</summary>
+    public string? DecisionId { get; init; }
 
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;

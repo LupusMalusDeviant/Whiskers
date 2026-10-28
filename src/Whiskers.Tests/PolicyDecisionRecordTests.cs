@@ -234,6 +234,150 @@ public sealed class PolicyDecisionRecordTests : IDisposable
         Assert.Equal(PolicySnapshot.Of("Day", GuardrailPolicy.SafeDefault()).VersionHash, decision.Policy.VersionHash);
     }
 
+    [Fact]
+    public async Task A_version_that_cannot_be_stored_is_a_failure_not_an_orphan_decision()
+    {
+        using (var scope = _sp.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.ExecuteSqlRawAsync(
+                "CREATE TRIGGER no_snapshots BEFORE INSERT ON PolicySnapshots BEGIN SELECT RAISE(ABORT, 'read-only'); END;");
+        var store = new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>());
+        var ran = false;
+
+        var outcome = await Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), new RecordingAudit(), store)
+            .ExecuteAsync(Request(), (_, _) => { ran = true; return Task.FromResult(0); });
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.False(ran);
+        Assert.Empty(Decisions());
+    }
+
+    [Fact]
+    public async Task Concurrent_decisions_under_a_new_version_store_it_once()
+    {
+        var store = new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>());
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.MaxActionsPerSession = 7;
+
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => Task.Run(() =>
+            Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", [], "Standard", policy), new RecordingAudit(), store)
+                .ExecuteAsync(Request(), (_, _) => Task.FromResult(0)))));
+
+        Assert.All(outcomes, o => Assert.Equal(MutationStatus.Executed, o.Status));
+        Assert.Single(Snapshots());
+        Assert.Equal(12, Decisions().Count);
+    }
+
+    [Fact]
+    public async Task The_audit_outcome_keeps_the_decision_id_and_stays_valid_json_with_a_long_reason()
+    {
+        var audit = new AuditLogMutationSink(_sp.GetRequiredService<IServiceScopeFactory>());
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), audit);
+
+        var outcome = await gateway.ExecuteAsync<int>(Request(), (_, _) => throw new InvalidOperationException(new string('x', 9000)));
+
+        Assert.Equal(MutationStatus.Failed, outcome.Status);
+        using var scope = _sp.CreateScope();
+        var row = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().Single();
+        using var json = JsonDocument.Parse(row.Details!);   // valid JSON
+        Assert.Equal(outcome.DecisionId, json.RootElement.GetProperty("decisionId").GetString());
+        Assert.Equal(outcome.DecisionId, json.RootElement.GetProperty("intent").GetProperty("decisionId").GetString());
+        Assert.True(row.Details!.Length <= 4001);
+    }
+
+    [Fact]
+    public async Task An_agent_approval_names_the_decision_recorded_before_the_session_paused()
+    {
+        var store = new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>());
+        var guardrails = new PresetStore("Day", new GuardrailPreset { Name = "Day", Policy = GuardrailPolicy.SafeDefault() });
+        var approvals = new ApprovalStore();
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(guardrails),
+            new RecordingAudit(), [], NullLogger<MutationGateway>.Instance,
+            approvals: new ApprovalGate(approvals, guardrails), decisions: store);
+        var (session, context) = Session(gateway, guardrails, GuardrailPolicy.SafeDefault());
+        var coordinator = new Whiskers.Services.Agent.Approvals.ApprovalCoordinator(approvals, new NullNotify(), guardrails);
+
+        Approval? raised = null;
+        await foreach (var ev in session.SendAsync("start web"))
+            if (ev is AgentEvent.ConfirmationRequired c)
+            {
+                raised = await coordinator.RaiseAsync(session, c.Call, context, c.Reason, c.Decision);
+                await session.ResolveConfirmationAsync(c.Call.Id, false);   // the human rejects: nothing runs
+            }
+
+        var decision = Assert.Single(Decisions());
+        Assert.Equal("Confirm", decision.Verdict);
+        Assert.Equal(decision.Id, raised!.DecisionId);
+        Assert.Equal("Day", raised.GuardrailPreset);
+    }
+
+    [Fact]
+    public async Task A_block_in_an_agent_session_is_on_record()
+    {
+        var store = new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>());
+        var killed = GuardrailPolicy.SafeDefault();
+        killed.ReadOnlyMode = true;
+        var guardrails = new PresetStore("Day", new GuardrailPreset { Name = "Day", Policy = killed });
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(guardrails),
+            new RecordingAudit(), [], NullLogger<MutationGateway>.Instance, decisions: store);
+        var (session, _) = Session(gateway, guardrails, killed);
+
+        string? decisionId = null;
+        await foreach (var ev in session.SendAsync("start web"))
+            if (ev is AgentEvent.ToolProposed p) decisionId = p.Decision.DecisionId;
+
+        var decision = Assert.Single(Decisions());
+        Assert.Equal(("Deny", decision.Id), (decision.Verdict, decisionId));
+    }
+
+    private (Whiskers.Services.Agent.AgentSession, AgentContext) Session(MutationGateway gateway, IGuardrailStore guardrails,
+        GuardrailPolicy policy)
+    {
+        var invoker = new Whiskers.Services.Agent.AgentToolInvoker(AgentToolTestHelpers.DefaultRegistry(),
+            GuardrailEngine.CreateDefault(), _sp.GetRequiredService<IServiceScopeFactory>(), gateway: gateway);
+        var context = new AgentContext("s1",
+            new AgentPrincipal(AgentPrincipalKind.WebUser, "ops", McpPermissionLevels.Write, null, UserEmail: "ops@example.com"),
+            AgentOrigin.WebUi, policy);
+        var session = new Whiskers.Services.Agent.AgentSession(context, new OneCall("start_container", "{\"containerId\":\"web\",\"serverId\":\"srv1\"}"),
+            new NoTools(), invoker, GuardrailEngine.CreateDefault(), AgentToolTestHelpers.DefaultRegistry(),
+            new AgentSettings { Model = "m", MaxToolIterations = 3 }, "system", guardrailStore: guardrails);
+        return (session, context);
+    }
+
+    // ---- Fakes -------------------------------------------------------------
+
+    private sealed class OneCall(string tool, string args) : Whiskers.Services.Agent.Providers.IAgentLlmProvider
+    {
+        private bool _done;
+        public string Id => "one";
+
+        public async IAsyncEnumerable<AgentStreamDelta> StreamAsync(AgentCompletionRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            if (!_done)
+            {
+                _done = true;
+                yield return new AgentStreamDelta(ToolCallDelta: new AgentToolCall("c1", tool, args));
+                yield return new AgentStreamDelta(Final: AgentStopReason.ToolCalls);
+            }
+            else yield return new AgentStreamDelta(Final: AgentStopReason.Stop);
+            await Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    }
+
+    private sealed class NoTools : Whiskers.Services.Agent.IAgentToolCatalog
+    {
+        public IReadOnlyList<AgentToolDefinition> GetVisibleTools(AgentContext context) => Array.Empty<AgentToolDefinition>();
+    }
+
+    private sealed class NullNotify : Whiskers.Services.Notifications.INotificationService
+    {
+        public Task SendAsync(NotificationEvent evt) => Task.CompletedTask;
+        public Task SendTestAsync() => Task.CompletedTask;
+    }
+
     // ---- Fakes -------------------------------------------------------------
 
     private sealed class FixedPolicy(MutationVerdict verdict, string reason, IReadOnlyList<string> rules,

@@ -33,6 +33,8 @@ public interface IMutationAuditSink
 public sealed class AuditLogMutationSink : IMutationAuditSink
 {
     private const int MaxDetailChars = 4000;
+    private const int MaxReasonChars = 1000;
+    private const int MaxArgumentChars = 1500;
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
 
@@ -66,16 +68,27 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         var entity = await db.AuditLog.FindAsync([auditId], ct)
                      ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
         entity.Success = status == MutationStatus.Executed && verification != VerificationStatus.Failed;
-        entity.Details = Cap(JsonSerializer.Serialize(new
+        var intent = ParseOrRaw(entity.Details);
+        // INV-22: the decision id is kept at the top of the outcome, before any variable-length text, and the row stays
+        // valid JSON: a long reason is shortened in its own field, and an intent that no longer fits is kept as text.
+        string Outcome(object? intentValue) => JsonSerializer.Serialize(new
         {
             operationId,
+            decisionId = DecisionIdOf(intent),
             phase = "outcome",
             status = status.ToString(),
             verification = verification.ToString(),
-            reason = Redact(reason),
+            reason = Field(Redact(reason), MaxReasonChars),
             durationMs = (long)duration.TotalMilliseconds,
-            intent = ParseOrRaw(entity.Details),
-        }));
+            intent = intentValue,
+        });
+        var details = Outcome(intent);
+        if (details.Length > MaxDetailChars)
+        {
+            var room = Math.Max(0, entity.Details!.Length - (details.Length - MaxDetailChars) - 64);
+            details = Outcome(Field(entity.Details, room));
+        }
+        entity.Details = Cap(details);
         await db.SaveChangesAsync(ct);
     }
 
@@ -118,7 +131,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         status,
         verification,
         // A rule's reason can quote the argument it matched (e.g. a protected name inside SQL text).
-        reason = Redact(WithoutPayloadValues(reason, request.Arguments)),
+        reason = Field(Redact(WithoutPayloadValues(reason, request.Arguments)), MaxReasonChars),
         durationMs,
         approval = approval is null ? null : new { id = approval.ApprovalId, approvedBy = approval.ApprovedBy },
         principal = new
@@ -132,7 +145,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             delegatedBy = request.Principal.DelegatedBy,
         },
         sessionId = request.SessionId,
-        arguments = Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
+        arguments = Field(Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))), MaxArgumentChars),
     }));
 
     private static string? Redact(string? text) => text is null ? null : SecretRedactor.Redact(text);
@@ -172,6 +185,14 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         try { return JsonDocument.Parse(json).RootElement.Clone(); }
         catch (JsonException) { return json; }
     }
+
+    /// <summary>Shortens one text field, so the document around it stays valid JSON.</summary>
+    private static string? Field(string? text, int max) =>
+        text is null || text.Length <= max ? text : text[..Math.Max(0, max - 1)] + "…";
+
+    private static string? DecisionIdOf(object? intent) =>
+        intent is JsonElement { ValueKind: JsonValueKind.Object } e && e.TryGetProperty("decisionId", out var id)
+            && id.ValueKind == JsonValueKind.String ? id.GetString() : null;
 
     private static string Cap(string s) => s.Length > MaxDetailChars ? s[..MaxDetailChars] + "…" : s;
 }

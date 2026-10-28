@@ -105,8 +105,6 @@ public sealed class ApprovalGate : IApprovalGate
                 a.CorrelationId == operationId && a.SessionId == sessionId && a.ToolName == subject.ToolName);
             if (own is not null)
             {
-                // R1-12: an approval the session raised itself names the first recorded decision that checked it.
-                if (own.DecisionId is null && subject.DecisionId is not null) own.DecisionId = subject.DecisionId;
                 // R1-05: the approval must have been raised (and so approved) at the operation's effective level.
                 if (!LevelCovers(own, subject))
                     return new ApprovalGateResult(false,

@@ -199,10 +199,22 @@ public sealed class DbPolicyDecisionStore : IPolicyDecisionStore
         }
         catch (DbUpdateException) when (db.ChangeTracker.Entries<PolicySnapshotEntity>().Any(e => e.State == EntityState.Added))
         {
-            // Another decision stored the same version meanwhile: keep that row, store only the decision.
+            // Possibly another decision stored the same version meanwhile. Only then is the decision stored alone —
+            // checked, not assumed: any other failure leaves the version unstored and is a failure (no record, no
+            // mutation), never a decision that names a version nobody can read.
+            if (!await SnapshotStoredAsync(record.Policy, ct)) throw;
             foreach (var entry in db.ChangeTracker.Entries<PolicySnapshotEntity>().ToList()) entry.State = EntityState.Detached;
             await db.SaveChangesAsync(ct);
         }
+    }
+
+    /// <summary>Whether exactly this version is stored (same hash and the same policy), read in a fresh context.</summary>
+    private async Task<bool> SnapshotStoredAsync(PolicySnapshot snapshot, CancellationToken ct)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var stored = await db.PolicySnapshots.AsNoTracking().FirstOrDefaultAsync(s => s.VersionHash == snapshot.VersionHash, ct);
+        return stored is not null && stored.PolicyJson == snapshot.Json;
     }
 
     private static string Cap(string s) => s.Length > MaxReasonChars ? s[..MaxReasonChars] + "…" : s;

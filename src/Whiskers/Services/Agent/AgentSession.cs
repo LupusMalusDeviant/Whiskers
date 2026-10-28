@@ -131,6 +131,10 @@ public sealed class AgentSession : IAgentSession
             foreach (var call in calls)
             {
                 var decision = Evaluate(call);
+                // INV-22 (R1-12): a block or an approval request rests on a decision the gateway recorded, so the
+                // approval names it and the block is on record. An allowed call is decided and recorded when it runs.
+                if (decision.Verdict != GuardrailVerdict.Allow)
+                    decision = await RecordedAsync(call, decision, ct);
                 yield return new AgentEvent.ToolProposed(call, decision);
 
                 if (decision.Verdict == GuardrailVerdict.Deny)
@@ -199,6 +203,26 @@ public sealed class AgentSession : IAgentSession
         ? _context.Policy
         : Whiskers.Services.Mutations.EffectivePolicy.Of(_context.Pinned, _guardrailStore).Policy;
     private AgentContext LiveContext => _context with { Policy = LivePolicy };
+
+    /// <summary>The gateway's recorded decision for a call the session is about to block or pause on, combined most
+    /// restrictively with the session's own verdict. A gateway that cannot decide leaves the session's verdict.</summary>
+    private async Task<GuardrailDecision> RecordedAsync(AgentToolCall call, GuardrailDecision local, CancellationToken ct)
+    {
+        GuardrailDecision? recorded;
+        try
+        {
+            recorded = await _invoker.DecideAsync(call, LiveContext, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new GuardrailDecision(GuardrailVerdict.Deny, "The call could not be decided; it was not executed.",
+                Array.Empty<string>());
+        }
+        if (recorded is null) return local;
+        return recorded.Verdict >= local.Verdict
+            ? recorded
+            : local with { DecisionId = recorded.DecisionId, Preset = recorded.Preset };
+    }
 
     private GuardrailDecision Evaluate(AgentToolCall call)
     {

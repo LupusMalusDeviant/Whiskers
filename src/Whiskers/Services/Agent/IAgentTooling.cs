@@ -23,6 +23,12 @@ public interface IAgentToolCatalog
 public interface IAgentToolInvoker
 {
     Task<AgentToolResult> InvokeAsync(AgentToolCall call, AgentContext context, CancellationToken ct = default);
+
+    /// <summary>Has the Mutation Gateway decide a mutating call without running it and record the decision (INV-22,
+    /// R1-12) — before the session pauses for an approval or reports a block. Null for a call that is not a mutation
+    /// (or from a test double): the session's own evaluation stands.</summary>
+    Task<Guardrails.GuardrailDecision?> DecideAsync(AgentToolCall call, AgentContext context, CancellationToken ct = default) =>
+        Task.FromResult<Guardrails.GuardrailDecision?>(null);
 }
 
 /// <summary>Derives the AgentPrincipal from the current HTTP context — web cookie user OR

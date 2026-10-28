@@ -6,6 +6,7 @@ using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.AuditLog;
 using Whiskers.Services.Agent;
+using Whiskers.Services.Agent.Providers;
 using Whiskers.Services.Agent.Triggers;
 using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mutations;
@@ -144,6 +145,50 @@ public class TriggerPolicyPinningTests
         Assert.False(agents.Started.Task.IsCompleted);
     }
 
+    [Fact]
+    public async Task A_whole_run_keeps_its_preset_through_switches_and_edits_until_the_kill_switch_stops_it()
+    {
+        // A real session, invoker and gateway: every call of the run is decided (and recorded) against the pinned
+        // preset, while the operator switches and edits presets between the calls and finally pulls the kill switch.
+        var store = Store(active: "Strict");
+        var decisions = new MemoryDecisions();
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance,
+            decisions: decisions);
+        var invoker = new AgentToolInvoker(AgentToolTestHelpers.DefaultRegistry(), GuardrailEngine.CreateDefault(),
+            new NoScopes(), gateway: gateway);
+        var pinned = PinnedPolicy.Of("Repair", store.Config.Presets.Single(p => p.Name == "Repair").Policy);
+        var trigger = new AgentPrincipal(AgentPrincipalKind.Trigger, "AI trigger 'restart'", McpPermissionLevels.Write,
+            null, TriggerId: "t1");
+        var context = new AgentContext("run-1", trigger, AgentOrigin.Trigger, pinned.Policy.Clone(), pinned);
+        const string args = "{\"containerId\":\"web\",\"serverId\":\"srv1\"}";
+        var provider = new ScriptedProvider(
+            (null, new AgentToolCall("c1", Start.McpTool!, args)),
+            // Between the calls: the active preset switches to "Repair", which is then tightened to forbid starts.
+            (() => { store.ActiveName = "Repair"; store.Presets.Single(p => p.Name == "Repair").Policy = NoStart(); },
+                new AgentToolCall("c2", Start.McpTool!, args)),
+            // Then the kill switch goes on (it lives in the active preset).
+            (() => store.Presets.Single(p => p.Name == "Repair").Policy.ReadOnlyMode = true,
+                new AgentToolCall("c3", Start.McpTool!, args)));
+        var session = new AgentSession(context, provider, new NoTools(), invoker, GuardrailEngine.CreateDefault(),
+            AgentToolTestHelpers.DefaultRegistry(), new AgentSettings { Model = "m", MaxToolIterations = 6 }, "system",
+            guardrailStore: store);
+
+        var proposed = new List<GuardrailVerdict>();
+        await foreach (var ev in session.SendAsync("go"))
+            if (ev is AgentEvent.ToolProposed p) proposed.Add(p.Decision.Verdict);
+
+        Assert.Equal([GuardrailVerdict.Allow, GuardrailVerdict.Allow, GuardrailVerdict.Deny], proposed);
+        var recorded = decisions.Records;
+        Assert.Equal(3, recorded.Count);
+        Assert.All(recorded, r => Assert.Equal("Repair", r.Policy.Preset));
+        Assert.Equal([MutationVerdict.Allow, MutationVerdict.Allow, MutationVerdict.Deny], recorded.Select(r => r.Decision.Verdict));
+        var started = PolicySnapshot.Of("Repair", Open()).VersionHash;
+        Assert.Equal(started, recorded[0].Policy.VersionHash);
+        Assert.Equal(started, recorded[1].Policy.VersionHash);     // the edit of "Repair" did not reach the run
+        Assert.NotEqual(started, recorded[2].Policy.VersionHash);  // the kill switch did
+    }
+
     // ---- Helpers -----------------------------------------------------------
 
     private static NotificationEvent Event() => new()
@@ -167,6 +212,52 @@ public class TriggerPolicyPinningTests
         });
         var settings = new StaticSettings(new AgentSettings { Enabled = true });
         return (new AiTriggerDispatcher(triggers, sp, settings), agents, audit);
+    }
+
+    private sealed class MemoryDecisions : IPolicyDecisionStore
+    {
+        public List<PolicyDecisionRecord> Records { get; } = [];
+
+        public Task RecordAsync(PolicyDecisionRecord record, CancellationToken ct)
+        {
+            lock (Records) Records.Add(record);
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>One tool call per turn; the hook runs before the turn is streamed (between two calls of the run).</summary>
+    private sealed class ScriptedProvider(params (Action? Before, AgentToolCall Call)[] turns) : IAgentLlmProvider
+    {
+        private int _turn;
+        public string Id => "scripted";
+
+        public async IAsyncEnumerable<AgentStreamDelta> StreamAsync(AgentCompletionRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            if (_turn < turns.Length)
+            {
+                var (before, call) = turns[_turn++];
+                before?.Invoke();
+                yield return new AgentStreamDelta(ToolCallDelta: call);
+                yield return new AgentStreamDelta(Final: AgentStopReason.ToolCalls);
+            }
+            else yield return new AgentStreamDelta(Final: AgentStopReason.Stop);
+            await Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    }
+
+    private sealed class NoTools : IAgentToolCatalog
+    {
+        public IReadOnlyList<AgentToolDefinition> GetVisibleTools(AgentContext context) => Array.Empty<AgentToolDefinition>();
+    }
+
+    /// <summary>The tool itself never runs here; only the decisions are under test.</summary>
+    private sealed class NoScopes : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => throw new InvalidOperationException("the tool does not run in this test");
     }
 
     private sealed class CapturingAgents : IAgentService

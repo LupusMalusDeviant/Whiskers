@@ -144,7 +144,10 @@ registrations are wrapped too.
    global kill switch (`EffectivePolicy`, INV-23). Every verdict — Allow, Confirm and Deny — is then **recorded**
    (`IPolicyDecisionStore`, INV-22, R1-12) before anything acts on it; a failed write → **Denied**. From here on
    `MutationRequest.DecisionId` names the record, the audit rows carry it as `decisionId`, the outcome as
-   `MutationOutcome.DecisionId`, and an approval raised for the call as `Approval.DecisionId`.
+   `MutationOutcome.DecisionId`, and an approval raised for the call as `Approval.DecisionId`. `DecideAsync` runs
+   steps 1–5 without executing: an agent session uses it before it pauses for an approval or reports a block, so
+   both rest on a recorded decision. A snapshot that cannot be stored fails the record — a decision is stored alone
+   only when the exact version is verifiably there already.
 6. Policy `Confirm` on the `Automation` surface (scheduler, AutoUpdate, AutoPatch) → **Denied**, before the approval
    gate: nobody can confirm an unattended run, and no approval is raised (R1-01).
    Policy `Confirm` otherwise → [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
