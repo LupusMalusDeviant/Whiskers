@@ -303,10 +303,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `ProtectedResourceResolutionTests` covers commands, SQL, Compose, network disconnect, bulk prune and alternate IDs/names.
-- [ ] Unanalyzable free-text operations with protected effects are refused or follow the required explicit approval path.
-- [ ] `SelfProtectionTests` covers the app, database, data volume, proxy and mTLS material on every surface.
-- [ ] Only the invariant’s interactive Admin exception can authorize protected control-plane changes; it is approved and audited.
+- [x] `ProtectedResourceResolutionTests` covers commands, SQL, Compose, network disconnect, bulk prune and alternate IDs/names.
+- [x] Unanalyzable free-text operations with protected effects are refused or follow the required explicit approval path.
+- [x] `SelfProtectionTests` covers the app, database, data volume, proxy and mTLS material on every surface.
+- [x] Only the invariant’s interactive Admin exception can authorize protected control-plane changes; it is approved and audited.
 
 **Out of scope:** Reintroducing general confirmation for ordinary human UI actions.
 

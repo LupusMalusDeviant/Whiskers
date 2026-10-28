@@ -131,7 +131,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (target.Kind != capability.TargetKind)
             return Refuse($"The target is a '{target.Kind}', but '{capability.Id}' acts on a '{capability.TargetKind}'.");
 
-        return capability.TargetKind switch
+        var resolution = capability.TargetKind switch
         {
             "container" => await ContainerAsync(request, capability, target, ct),
             "host" => await HostAsync(request, capability, target, ct),
@@ -145,6 +145,56 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             "git-deploy-app" => await GitAppAsync(request, capability, target, ct),
             "webhook" => await WebhookAsync(capability, target),
             _ => Pass(target),
+        };
+        return await WithMentionedContainersAsync(request, resolution, ct);
+    }
+
+    /// <summary>Shortest word of free text that is looked up as a container id prefix (Docker's short ids have 12).</summary>
+    internal const int MinimumMentionedIdLength = 6;
+
+    /// <summary>
+    /// R1-16 (INV-24): free text — a command, SQL, a compose file — can name a container by its id or a unique id
+    /// prefix, which no name pattern matches. Every such word is looked up among the containers of the resolved
+    /// server, and the containers it names are added to what the operation touches (with their names), so the
+    /// protected-resource check sees them. The lookup fails closed: if the server's containers cannot be listed, the
+    /// operation is refused.
+    /// </summary>
+    private async Task<TargetResolution> WithMentionedContainersAsync(MutationRequest request, TargetResolution resolution,
+        CancellationToken ct)
+    {
+        if (resolution.Target is not { ServerId: { Length: > 0 } serverId } target) return resolution;
+        var words = request.Arguments
+            .Where(a => Whiskers.Services.Guardrails.ProtectedResourceMatcher.FreeTextArguments.Contains(a.Key)
+                        && a.Value.ValueKind == JsonValueKind.String)
+            .SelectMany(a => Whiskers.Services.Guardrails.ProtectedResourceMatcher.Words(a.Value.GetString() ?? ""))
+            .Where(w => w.Length >= MinimumMentionedIdLength && w.All(Uri.IsHexDigit))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (words.Count == 0) return resolution;
+        if (_services.GetService<IDockerService>() is not { } docker)
+            return Refuse("The containers the operation names could not be checked: no container runtime is available.");
+        IList<ContainerInfo> containers;
+        try
+        {
+            containers = await docker.ListContainersAsync(all: true, serverId: serverId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Refuse("The containers the operation names could not be checked: the server's containers could not be listed.");
+        }
+        var mentioned = containers
+            .Where(c => words.Any(w => c.Id.StartsWith(w, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        if (mentioned.Count == 0) return resolution;
+        return resolution with
+        {
+            Target = target with
+            {
+                Related = target.Related.Concat(mentioned.SelectMany(c => new[] { c.Id, c.Name }))
+                    .Where(n => n.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
+                RelatedResources = target.RelatedResources
+                    .Concat(mentioned.Select(c => (IReadOnlyList<string>)Aliases(c.Id, c.Name))).ToList(),
+            },
         };
     }
 
@@ -175,11 +225,15 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
 
     /// <summary>A host-level operation: its server. A compose deployment that brings its file along (the MCP
     /// <c>deploy_compose</c> tool) is planned here, and every container the plan touches is decided with it (R1-07).
-    /// Without the file (a UI deploy, which decides the plan's containers itself) only the server is resolved.</summary>
+    /// Without the file (a UI deploy, which decides the plan's containers itself) only the server is resolved. A
+    /// cleanup (<c>docker system prune</c>) removes every stopped container of the server, so each of them is decided
+    /// with it (R1-16); if they cannot be listed the cleanup is refused.</summary>
     private async Task<TargetResolution> HostAsync(MutationRequest request, Capability capability, MutationTarget target,
         CancellationToken ct)
     {
         var resolution = Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true);
+        if (resolution.Target is { } pruned && capability.Id == "host.prune")
+            return await WithStoppedContainersAsync(pruned, ct);
         if (resolution.Target is not { } host || capability.Id != "compose.deploy"
             || MutationTargets.String(request.Arguments, "composeContent") is not { } content)
             return resolution;
@@ -188,6 +242,28 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Refuse("A compose deployment needs a valid project name.");
         return await WithPlanAsync(host, planner => planner.PlanAsync(
             ComposeDeployment.FromContent(host.ServerId!, ComposeDeployment.DeploymentDirectory(project), content), ct));
+    }
+
+    private async Task<TargetResolution> WithStoppedContainersAsync(MutationTarget host, CancellationToken ct)
+    {
+        if (_services.GetService<IDockerService>() is not { } docker)
+            return Refuse("The containers a cleanup removes could not be checked: no container runtime is available.");
+        IList<ContainerInfo> containers;
+        try
+        {
+            containers = await docker.ListContainersAsync(all: true, serverId: host.ServerId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Refuse("The containers a cleanup removes could not be checked: the server's containers could not be listed.");
+        }
+        var stopped = containers.Where(c => !string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase)).ToList();
+        return Done(host with
+        {
+            Related = host.Related.Concat(stopped.SelectMany(c => new[] { c.Id, c.Name }))
+                .Where(n => n.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
+            RelatedResources = host.RelatedResources.Concat(stopped.Select(c => (IReadOnlyList<string>)Aliases(c.Id, c.Name))).ToList(),
+        });
     }
 
     /// <summary>The target with every container of the plan as related resource, or a refusal when the plan cannot

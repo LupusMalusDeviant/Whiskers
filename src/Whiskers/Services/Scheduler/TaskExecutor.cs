@@ -241,7 +241,8 @@ public class TaskExecutor : ITaskExecutor
         // The policy the run is decided under (INV-23): an AI trigger's pinned preset when the task runs inside its
         // call, else the live active one — the same one the gateway applies to this run's mutations.
         var patterns = Whiskers.Services.Mutations.EffectivePolicy
-            .Of(Whiskers.Services.Mutations.MutationScope.Current?.PinnedPolicy, _guardrails).Policy.ProtectedResources;
+            .Of(Whiskers.Services.Mutations.MutationScope.Current?.PinnedPolicy, _guardrails).Policy.ProtectedResources
+            .Concat(Whiskers.Services.Guardrails.ControlPlaneResources.NamePatterns).ToList();
         return stopped
             .Where(c => patterns.Any(p => Whiskers.Services.Guardrails.GuardrailRuleHelpers.GlobMatch(p, c.Name)
                                           || Whiskers.Services.Guardrails.GuardrailRuleHelpers.GlobMatch(p, c.Id)))

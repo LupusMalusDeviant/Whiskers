@@ -75,6 +75,9 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
                 level = McpPermissionLevels.Admin;
             }
         }
+        // INV-59 (R1-16): touching a protected resource is the interactive Admin's exception — only an Admin approves it.
+        if (decision.MatchedRuleIds.Contains(Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId))
+            level = McpPermissionLevels.Admin;
         // The gateway's resolved target when it decided the call; else the card reads it from the arguments (the
         // notification then names none).
         var resolved = decision.ResolvedServer is not null || decision.ResolvedResource is not null;

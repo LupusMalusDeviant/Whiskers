@@ -314,7 +314,9 @@
             var colliding = ComposeModel.Impact("", services, removeOrphans: false,
                 await DockerService.ListContainersAsync(all: true, serverId: sid)).Select(i => i.Container).ToList();
             var ids = await Mutations.RunForEachAsync("compose.deploy", colliding, sid,
-                () => Mutations.RunAsync("compose.deploy", new { serverId = sid },
+                // The file goes along (as `yaml`, which the audit withholds) so the gateway checks what it names —
+                // images, volumes, bind mounts — for protected resources (R1-16).
+                () => Mutations.RunAsync("compose.deploy", new { serverId = sid, yaml },
                     _ => DeploymentService.DeployFromComposeAsync(yaml, progress, sid)));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: $"{ids.Count} Container", serverId: _serverId);

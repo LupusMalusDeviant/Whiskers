@@ -161,6 +161,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     internal static readonly HashSet<string> PayloadArguments = new(StringComparer.OrdinalIgnoreCase)
     {
         "query", "sql", "command", "script", "content", "body", "env", "compose", "yaml", "password", "secret", "token",
+        // R1-16: free text the gateway now sees for protected-resource checks — never stored in the audit either.
+        "composeContent", "envVars",
     };
 
     /// <summary>Removes the values of payload arguments from free text such as a refusal reason.</summary>

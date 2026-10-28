@@ -131,9 +131,14 @@ internal sealed class FakeDocker : IDockerService
     /// <summary>The server a call without a server id lists, like the configured default server.</summary>
     public string DefaultServerId { get; set; } = "local";
 
+    /// <summary>Whether listing one server's containers throws, as the real service does when the host is unreachable.</summary>
+    public bool ListContainersThrows { get; set; }
+
     public Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
-        => Task.FromResult<IList<ContainerInfo>>(
-            _containers.Where(c => c.ServerId == (serverId ?? DefaultServerId)).ToList());
+        => ListContainersThrows
+            ? Task.FromException<IList<ContainerInfo>>(new InvalidOperationException("The host is unreachable."))
+            : Task.FromResult<IList<ContainerInfo>>(
+                _containers.Where(c => c.ServerId == (serverId ?? DefaultServerId)).ToList());
 
     /// <summary>How long a log fetch takes. Zero (the default) keeps every existing test synchronous; a value
     /// longer than the monitor's fetch timeout reproduces the wedged host from the 2026-08-26 incident.</summary>

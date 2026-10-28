@@ -6,6 +6,23 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-16: **Whiskers protects its own control plane, and free text no longer slips past protected resources.** A
+  built-in list — containers named `whiskers*`, `serverwatch*`, `socket-proxy*`, `docker-socket-proxy*`,
+  `ghostunnel*`, `step-ca*`, `nginx-proxy-manager*` and those in `WHISKERS_SELF_CONTAINERS`, plus the data directory
+  `/app/data`, mTLS / step-ca / ghostunnel directories and the Docker socket — is protected on every surface for
+  every change, whatever the guardrail policy lists. Touching it (or a resource the policy protects) is refused for
+  API keys, agents instructed over MCP, automations and Operators; an Admin in the web UI or the web chat gets an
+  approval at Admin level instead, single-use and audited (with *Require a second approver* on, another Admin must
+  give it). Protected names are now also found in commands, SQL and compose files (word by word, with path
+  segments), by a container id or id prefix written in a command, by a container's other names, and among the
+  stopped containers a cleanup (`docker system prune`) removes; free text that builds its target at run time
+  (`$(…)`, backticks, `eval`, base64, dynamic SQL, `COPY … PROGRAM`, …) counts as touching a protected resource.
+  The SQL console, SQL import and seed, Artisan migrations and the raw compose deploy now hand their payload to the
+  policy (the audit still keeps only its length). **Upgrade notes:** calls that used to pass are now refused or need
+  an Admin approval — an MCP key or a scheduled task restarting the Whiskers container or its proxy, a command or
+  query that merely mentions a protected name (also inside a domain such as `whiskers.example.com`), or any
+  `$(…)`-style command from MCP or automation. Rename a container that only shares the prefix, or run the action
+  from the web UI as an Admin.
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and
   rejecting follow the same rules: the approver holds the action's effective level (Viewers decide nothing, and the
   chat now passes the approver's current role), and nobody decides their own non-interactive request — direct MCP,

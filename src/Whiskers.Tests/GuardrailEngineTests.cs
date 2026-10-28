@@ -108,7 +108,7 @@ public class GuardrailEngineTests
         var policy = Permissive();
         policy.ProtectedResources.Add("serverwatch*");
         var d = Engine.Evaluate(Request("stop_container", McpPermissionLevels.Write,
-            policy, Principal(McpPermissionLevels.Admin), ("containerId", "serverwatch-app-1")));
+            policy, Principal(McpPermissionLevels.Write), ("containerId", "serverwatch-app-1")));
         Assert.Equal(GuardrailVerdict.Deny, d.Verdict);
         Assert.Contains("protected-resource", d.MatchedRuleIds);
     }

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Whiskers.Models;
+using Whiskers.Models.Agent;
 
 namespace Whiskers.Services.Guardrails;
 
@@ -125,31 +126,52 @@ public sealed class ToolAllowListRule : IGuardrailRule
     }
 }
 
-/// <summary>Protected resources (glob): if a matching argument appears → Deny.</summary>
+/// <summary>
+/// Protected resources (INV-24, INV-59, R1-16): the policy's patterns, and for every change Whiskers' own control
+/// plane (<see cref="ControlPlaneResources"/>), whatever the policy says. Matched against every argument value whole,
+/// against the resolved target the gateway adds, and against every word of a free-text argument (a command, SQL, a
+/// compose file); free text that cannot be analysed counts as touching a protected resource.
+/// A hit is refused — except for an interactive Admin (the web UI or the web chat, as an Admin): their action needs an
+/// explicit approval at Admin level (<see cref="Id"/> among the matched rules), which the approval gate raises,
+/// binds to the call and audits.
+/// </summary>
 public sealed class ProtectedResourceRule : IGuardrailRule
 {
-    public string Id => "protected-resource";
+    public const string RuleId = "protected-resource";
+
+    public string Id => RuleId;
 
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
     {
-        var globs = request.Context.Policy.ProtectedResources;
-        if (globs.Count > 0)
+        var policy = request.Context.Policy.ProtectedResources;
+        // A read changes nothing: the control plane is protected from changes, the policy's patterns as before.
+        var change = !string.Equals(McpPermissionLevels.Normalize(request.RequiredLevel), McpPermissionLevels.Read,
+            StringComparison.Ordinal);
+        var patterns = change ? policy.Concat(ControlPlaneResources.NamePatterns).ToList() : policy;
+        var paths = change ? ControlPlaneResources.PathPatterns : [];
+        if (ProtectedResourceMatcher.FirstHit(request.Arguments, patterns, paths, analyseFreeText: change) is not { } hit)
         {
-            foreach (var value in GuardrailRuleHelpers.ArgumentValues(request))
-            {
-                foreach (var glob in globs)
-                {
-                    if (GuardrailRuleHelpers.GlobMatch(glob, value))
-                    {
-                        reason = $"'{value}' is a protected resource (pattern '{glob}').";
-                        return GuardrailVerdict.Deny;
-                    }
-                }
-            }
+            reason = "";
+            return GuardrailVerdict.Allow;
         }
-        reason = "";
-        return GuardrailVerdict.Allow;
+        reason = hit.UnanalyzableArgument is { } argument
+            ? $"The '{argument}' cannot be checked for protected resources (it builds what it acts on at run time)."
+            : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";
+        if (IsInteractiveAdmin(request.Context))
+        {
+            reason += " An Admin may approve it explicitly.";
+            return GuardrailVerdict.Confirm;
+        }
+        return GuardrailVerdict.Deny;
     }
+
+    /// <summary>INV-59's one exception: a person acting interactively — in the web UI or the web chat — as an Admin.
+    /// Not a key, not an automation, not an AI trigger, not an agent instructed over MCP.</summary>
+    public static bool IsInteractiveAdmin(AgentContext context) =>
+        context.Origin == AgentOrigin.WebUi
+        && context.Principal.Kind == AgentPrincipalKind.WebUser
+        && string.Equals(McpPermissionLevels.Normalize(context.Principal.PermissionLevel), McpPermissionLevels.Admin,
+            StringComparison.Ordinal);
 }
 
 /// <summary>Forbidden argument patterns (regex) against destructive shell/SQL — match → Deny.</summary>

@@ -349,7 +349,7 @@ public sealed class MutationGateway : IMutationGateway
                     with { MatchedRules = decision.MatchedRules };
             try
             {
-                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId, decision.Policy),
+                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId, decision.Policy, decision.MatchedRules),
                     decision.Reason, decision.MatchedRules, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -492,7 +492,7 @@ public sealed class MutationGateway : IMutationGateway
     }
 
     private static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? callerOperationId,
-        PolicySnapshot? policy)
+        PolicySnapshot? policy, IReadOnlyList<string>? matchedRules = null)
     {
         var decisionPreset = policy?.Preset;
         var p = request.Principal;
@@ -511,7 +511,11 @@ public sealed class MutationGateway : IMutationGateway
             },
             _ => request.Surface.ToString().ToLowerInvariant(),
         };
-        return new ApprovalSubject(capability.McpTool ?? capability.Id, capability.RequiredLevel, actorKey,
+        // INV-59 (R1-16): touching a protected resource is the interactive Admin's exception — only an Admin approves it.
+        var level = matchedRules?.Contains(Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId) == true
+            ? McpPermissionLevels.Admin
+            : capability.RequiredLevel;
+        return new ApprovalSubject(capability.McpTool ?? capability.Id, level, actorKey,
             p.DisplayName, actorType, request.Arguments, callerOperationId, request.SessionId)
         {
             DecisionId = request.DecisionId,

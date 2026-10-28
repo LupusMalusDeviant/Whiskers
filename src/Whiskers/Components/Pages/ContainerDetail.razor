@@ -1676,10 +1676,13 @@ else
                 new { containerId = services[index].Id, name = services[index].Name, serverId },
                 _ => ForEachServiceAsync(services, serverId, index + 1, action));
 
-    // A changing command runs through the gateway under <paramref name="capability"/> (container target; the
-    // command text, which can carry credentials, stays in the delegate); a read-only one passes null.
+    // A changing command runs through the gateway under <paramref name="capability"/> (container target); a
+    // read-only one passes null. What it does — the command, or the SQL it feeds the database — goes along as
+    // <paramref name="command"/> / <paramref name="query"/> so the gateway can check it for protected resources
+    // (R1-16); the shell line itself, which carries the database password, stays in the delegate, and the audit
+    // keeps only the length of both.
     private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string? capability,
-        string[] cmd, TimeSpan timeout)
+        string[] cmd, TimeSpan timeout, string? command = null, string? query = null)
     {
         var dockerCmd = "docker exec " + Whiskers.Utils.ShellUtils.Quote(ContainerId) + " " +
                         string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
@@ -1690,7 +1693,7 @@ else
             return (read.Output, read.Error, read.ExitCode);
         }
         var r = await Mutations.RunAsync(capability,
-            new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId },
+            new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, command, query },
             async _ =>
             {
                 var result = await HostCommandExecutor.ExecuteAsync(sid, dockerCmd, timeout);
@@ -1713,7 +1716,8 @@ else
         try
         {
             // Try artisan migrate (Laravel)
-            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2),
+                command: "php artisan migrate --force");
             if (!result.StdOut.Contains("NO_ARTISAN"))
             {
                 _migrationOutput = result.StdOut; _migrationSuccess = result.ExitCode == 0;
@@ -1741,7 +1745,8 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2),
+                command: "php artisan migrate:rollback --force");
             _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
@@ -1792,7 +1797,8 @@ else
                 DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
                 _ => "echo 'Not supported'"
             };
-            var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
+            var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
+                query: System.Text.Encoding.UTF8.GetString(_migrationFileData));
             _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0;
             if (_migrationSuccess) await LoadDatabaseInfo();
@@ -1832,7 +1838,8 @@ else
                 (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
             };
-            var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5));
+            var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
+                query: System.Text.Encoding.UTF8.GetString(_seedFileData));
             _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
             _seedSuccess = result.ExitCode == 0;
             if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }
@@ -1865,8 +1872,9 @@ else
             var query = _dbQuery;
             var dbType = _container.DatabaseType;
             var sid = _resolvedServerId;
-            // The SQL text stays in the delegate: it can carry credentials (ALTER ROLE … PASSWORD '…').
-            _dbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, queryLength = query.Length },
+            // The SQL goes to the gateway, which checks it for protected resources (R1-16); the audit keeps only its
+            // length, since it can carry credentials (ALTER ROLE … PASSWORD '…').
+            _dbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, query },
                 _ => DatabaseService.ExecuteQueryAsync(containerId, query, dbType, creds, sid));
         }
         catch (MutationRefusedException ex)

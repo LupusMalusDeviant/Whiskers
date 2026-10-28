@@ -110,20 +110,24 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         && (string.IsNullOrWhiteSpace(principal.DelegatedBy)
             || principal.DelegatedBy.StartsWith(PrincipalIds.AgentPrefix, StringComparison.Ordinal));
 
-    /// <summary>The rules match argument values, so the resolved target (full id and name, and what the
-    /// operation also touches, R1-06) is added for evaluation only: a unique id prefix of a protected container, a
-    /// protected container attached to a network that is removed, or a workload's live controller is then caught as
-    /// well. The approval hash and the audit keep the caller's original arguments.</summary>
+    /// <summary>The rules match argument values, so the resolved target (full id and name, its other names, and
+    /// what the operation also touches with all their names, R1-06/R1-13) is added for evaluation only: a unique id
+    /// prefix of a protected container, a protected container attached to a network that is removed, a workload's
+    /// live controller or pod, or a planned container known by another name is then caught as well (R1-16). The
+    /// approval hash and the audit keep the caller's original arguments.</summary>
     internal static IReadOnlyDictionary<string, JsonElement> WithResolvedTarget(MutationRequest request)
     {
         var t = request.Target;
-        if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && t.Related.Count == 0)
+        var names = t.Related.Concat(t.Aliases).Concat(t.RelatedResources.SelectMany(r => r))
+            .Append(t.RelatedContainerId ?? "")
+            .Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal).ToList();
+        if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && names.Count == 0)
             return request.Arguments;
         var args = new Dictionary<string, JsonElement>(request.Arguments);
         if (!string.IsNullOrEmpty(t.Id)) args["__resolvedTargetId"] = JsonSerializer.SerializeToElement(t.Id);
         if (!string.IsNullOrEmpty(t.Name)) args["__resolvedTargetName"] = JsonSerializer.SerializeToElement(t.Name);
-        for (var i = 0; i < t.Related.Count; i++)
-            args[$"__resolvedRelated{i}"] = JsonSerializer.SerializeToElement(t.Related[i]);
+        for (var i = 0; i < names.Count; i++)
+            args[$"__resolvedRelated{i}"] = JsonSerializer.SerializeToElement(names[i]);
         return args;
     }
 

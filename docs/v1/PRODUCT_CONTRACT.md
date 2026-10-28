@@ -136,8 +136,8 @@ INV-48 (audit after the fact, fail-open), INV-49 (no tamper evidence). Rows belo
 Common to all M rows since WP2 step 2.1: Actor = API key or web user · AuthN ✅ (Bearer / cookie) · AuthZ ✅ in the
 Mutation Gateway: catalog level, tool switch and stricter stored level for every principal (INV-15), `AllowedTools`
 cannot widen (INV-16); the scope check inside the tool still runs · Target: containers resolved before policy
-(INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26), but protected resources still match the
-raw argument (INV-24) · Approval ✅ approve-then-retry bound to principal, credential, capability, normalized
+(INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26); protected resources and the built-in
+control plane are matched against the resolved target and the words of free text (INV-24/59 ✅ since R1-16) · Approval ✅ approve-then-retry bound to principal, credential, capability, normalized
 arguments, resolved target and policy version, single use, persisted (INV-30/31/35 ✅ since R1-14); never decided by
 its requester, expiry and approver level checked at decision time (INV-32–34/37 ✅ since R1-15) · Execution = inside the gateway scope with a deadline · Audit: one gateway AuditLog row (decision,
 approval, intent, outcome) **plus** the tool's own row shown in the Audit column below (INV-45 ⚠️ two rows). A
@@ -153,7 +153,7 @@ mutating tools do for their own error texts).
 | M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43, 24 (YAML free text) |
 | M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | AL ✅ | INV-43, 51 |
 | M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43, 24 |
-| M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text), 43 |
+| M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
 | M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
 | M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
 | M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ⚠️ `nginx -t` pre-check | AL ✅ | 41 (E-03) |

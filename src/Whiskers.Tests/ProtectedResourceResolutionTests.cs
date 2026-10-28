@@ -17,7 +17,7 @@ namespace Whiskers.Tests;
 /// container it recreates, removes as an orphan or collides with by name — and each of those is decided, on every
 /// surface. A plan that cannot be made refuses the deployment; execution runs exactly the planned project and files.
 /// </summary>
-public sealed class ProtectedResourceResolutionTests
+public sealed partial class ProtectedResourceResolutionTests
 {
     private static readonly MutationPrincipal Admin =
         new(MutationPrincipalKind.Human, "admin@example.com", "admin@example.com", McpPermissionLevels.Admin);

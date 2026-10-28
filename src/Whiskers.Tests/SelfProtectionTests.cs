@@ -1,0 +1,213 @@
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Configuration;
+using Whiskers.Models;
+using Whiskers.Models.Agent;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Mutations;
+
+namespace Whiskers.Tests;
+
+/// <summary>A gateway on the real target resolver and policy, over one server that runs Whiskers' control plane next
+/// to an ordinary app (R1-16). The active policy protects nothing of its own: what holds, holds by default.</summary>
+internal sealed class ProtectionHarness
+{
+    public static readonly ServerConfig Local = new() { Id = "local", Name = "Local", IsDefault = true };
+
+    public static readonly MutationPrincipal UiAdmin =
+        new(MutationPrincipalKind.Human, "user:admin@example.com", "admin@example.com", McpPermissionLevels.Admin);
+    public static readonly MutationPrincipal UiOperator =
+        new(MutationPrincipalKind.Human, "user:op@example.com", "op@example.com", McpPermissionLevels.Write);
+    public static readonly MutationPrincipal AdminKey =
+        new(MutationPrincipalKind.ApiKey, "key:k1", "ci", McpPermissionLevels.Admin, CredentialId: "k1");
+
+    public ContainerInfo[] Containers { get; } =
+    [
+        new() { Id = "c0ffee123456whiskers", Name = "whiskers", ServerId = "local", State = "running" },
+        new() { Id = "d0d0d0123456db", Name = "whiskers-db", ServerId = "local", State = "running" },
+        new() { Id = "eeee11223344proxy", Name = "nginx-proxy-manager", ServerId = "local", State = "running" },
+        new() { Id = "ffff55667788tunnel", Name = "ghostunnel", ServerId = "local", State = "running" },
+        new() { Id = "aaaa99887766web", Name = "web", ServerId = "local", State = "running" },
+    ];
+
+    public FakeDocker Docker { get; }
+
+    public GuardrailPolicy Policy { get; }
+    public ApprovalStore Approvals { get; }
+    public AgentToolTestHelpers.NullMutationAudit Audit { get; } = new();
+    public MutationGateway Gateway { get; }
+    public int Runs { get; private set; }
+
+    public ProtectionHarness(Action<GuardrailPolicy>? configure = null)
+    {
+        Docker = new FakeDocker(Containers) { DefaultServerId = "local" };
+        Policy = GuardrailPolicy.SafeDefault();
+        Policy.ProtectedResources = [];
+        // The preset's forbidden arguments (rm -rf, DROP …) would refuse some cases for agents on their own.
+        Policy.ForbiddenArgPatterns = [];
+        Policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+        Policy.RequireConfirmationForWrites = false;
+        configure?.Invoke(Policy);
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(Policy);
+        Approvals = new ApprovalStore(policy: store);
+        Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Audit, [],
+            NullLogger<MutationGateway>.Instance,
+            targets: new MutationTargetResolver(new TestServices(Docker, new FakeServerConfig(Local))),
+            approvals: new ApprovalGate(Approvals, store));
+    }
+
+    public static Dictionary<string, JsonElement> Args(object value) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(value))!;
+
+    public static MutationPrincipal ChatAgent(string level = McpPermissionLevels.Admin) => MutationPrincipals.Agent(
+        new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", level, null, UserEmail: "admin@example.com"), "chat-1");
+
+    public static MutationPrincipal InstructedAgent() => MutationPrincipals.Agent(
+        new AgentPrincipal(AgentPrincipalKind.McpKey, "ci", McpPermissionLevels.Admin, null, McpKeyId: "k1"), "mcp-1");
+
+    public static MutationPrincipal AdminsTask() =>
+        new(MutationPrincipalKind.Automation, "task:t1", "nightly", McpPermissionLevels.Admin, OnBehalfOf: UiAdmin);
+
+    /// <summary>Runs <paramref name="capabilityId"/> as <paramref name="who"/> on <paramref name="surface"/>.</summary>
+    public async Task<MutationOutcome<int>> RunAsync(string capabilityId, object arguments, MutationPrincipal who,
+        MutationSurface surface, AgentOrigin? origin = null)
+    {
+        var catalog = new CapabilityCatalog();
+        var capability = catalog.Find(capabilityId)!;
+        var args = Args(arguments);
+        var request = new MutationRequest(capabilityId, who, surface, MutationTargets.FromArguments(capability, args), args)
+        {
+            AgentOrigin = origin,
+        };
+        return await Gateway.ExecuteAsync(request, (_, _) => Task.FromResult(++Runs));
+    }
+}
+
+/// <summary>
+/// R1-16 (INV-59): Whiskers' own control plane — its container, its database, its data volume, the proxy in front of
+/// it and the mTLS material — is protected on every surface, even under a policy that protects nothing. The one
+/// exception is an interactive Admin (web UI or web chat): the action then needs an explicit Admin approval, is bound
+/// to that call and audited. A key, an agent instructed over MCP, an automation and an Operator are refused.
+/// </summary>
+public class SelfProtectionTests
+{
+    public static TheoryData<string, string> ControlPlane => new()
+    {
+        { "container.restart", """{"containerId":"whiskers","serverId":"local"}""" },               // the app
+        { "container.restart", """{"containerId":"c0ffee","serverId":"local"}""" },                 // by a unique id prefix
+        { "db.query", """{"containerId":"whiskers-db","serverId":"local","query":"select 1"}""" },  // the database
+        { "volume.backup_delete", """{"volumeName":"serverwatch-data","serverId":"local"}""" },     // the data volume
+        { "container.stop", """{"containerId":"nginx-proxy-manager","serverId":"local"}""" },       // the proxy
+        { "container.restart", """{"containerId":"ghostunnel","serverId":"local"}""" },             // the mTLS tunnel
+        { "host.exec", """{"serverId":"local","command":"cat /app/data/mtls/client.key"}""" },      // mTLS material
+        { "host.exec", """{"serverId":"local","command":"rm -rf /opt/step-ca/secrets"}""" },        // the CA's keys
+        { "host.exec", """{"serverId":"local","command":"docker stop whiskers"}""" },               // named in a command
+        { "host.exec", """{"serverId":"local","command":"docker rm -f c0ffee123456"}""" },          // by id in a command
+        { "db.query", """{"containerId":"web","serverId":"local","query":"DROP DATABASE whiskers"}""" },
+        { "compose.deploy", """{"serverId":"local","yaml":"services:\n  x:\n    volumes:\n      - serverwatch-data:/d"}""" },
+    };
+
+    private static object Parse(string json) => JsonSerializer.Deserialize<JsonElement>(json);
+
+    [Theory]
+    [MemberData(nameof(ControlPlane))]
+    public async Task Keys_agents_over_MCP_automations_and_operators_are_refused(string capability, string arguments)
+    {
+        var h = new ProtectionHarness();
+        var args = Parse(arguments);
+
+        var outcomes = new[]
+        {
+            await h.RunAsync(capability, args, ProtectionHarness.AdminKey, MutationSurface.Mcp),
+            await h.RunAsync(capability, args, ProtectionHarness.InstructedAgent(), MutationSurface.Agent, AgentOrigin.McpTool),
+            await h.RunAsync(capability, args, ProtectionHarness.AdminsTask(), MutationSurface.Automation),
+            await h.RunAsync(capability, args, ProtectionHarness.UiOperator, MutationSurface.Ui),
+            await h.RunAsync(capability, args, ProtectionHarness.ChatAgent(McpPermissionLevels.Write), MutationSurface.Agent,
+                AgentOrigin.WebUi),
+        };
+
+        Assert.All(outcomes, o => Assert.Equal(MutationStatus.Denied, o.Status));
+        Assert.Equal(0, h.Runs);
+        Assert.Empty(h.Approvals.GetPending());
+    }
+
+    [Theory]
+    [MemberData(nameof(ControlPlane))]
+    public async Task An_interactive_Admin_needs_an_explicit_Admin_approval(string capability, string arguments)
+    {
+        var h = new ProtectionHarness();
+        var args = Parse(arguments);
+
+        var ui = await h.RunAsync(capability, args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        var chat = await h.RunAsync(capability, args, ProtectionHarness.ChatAgent(), MutationSurface.Agent, AgentOrigin.WebUi);
+
+        Assert.Equal(MutationStatus.PendingApproval, ui.Status);
+        Assert.Equal(MutationStatus.PendingApproval, chat.Status);
+        Assert.All(h.Approvals.GetPending(), a => Assert.Equal(McpPermissionLevels.Admin, a.Level));
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Fact]
+    public async Task The_approved_exception_runs_once_and_is_audited_with_its_approval()
+    {
+        var h = new ProtectionHarness();
+        var args = new { containerId = "whiskers", serverId = "local" };
+
+        var asked = await h.RunAsync("container.restart", args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        // An Operator cannot approve it; an Admin can (here the Admin who asked — an interactive request, PC-D4).
+        Assert.Equal(ApprovalDecisionResult.InsufficientLevel, await h.Approvals.DecideAsync(asked.ApprovalId!, true,
+            ApprovalResolver.User("op@example.com", AppRole.Operator)));
+        Assert.Equal(ApprovalDecisionResult.Decided, await h.Approvals.DecideAsync(asked.ApprovalId!, true,
+            ApprovalResolver.User("admin@example.com", AppRole.Admin)));
+
+        var ran = await h.RunAsync("container.restart", args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        var again = await h.RunAsync("container.restart", args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MutationStatus.Executed, ran.Status);
+        Assert.Equal(1, h.Runs);
+        Assert.Contains($"begin:container.restart:{asked.ApprovalId}", h.Audit.Events);
+        Assert.Equal(MutationStatus.PendingApproval, again.Status);   // single use
+    }
+
+    [Fact]
+    public async Task A_second_approver_policy_makes_the_exception_four_eyes()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        var asked = await h.RunAsync("container.restart", new { containerId = "whiskers", serverId = "local" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(ApprovalDecisionResult.RequesterCannotDecide, await h.Approvals.DecideAsync(asked.ApprovalId!, true,
+            ApprovalResolver.User("admin@example.com", AppRole.Admin)));
+    }
+
+    [Theory]
+    [InlineData("container.restart", """{"containerId":"web","serverId":"local"}""")]
+    [InlineData("host.exec", """{"serverId":"local","command":"df -h /var/lib/docker"}""")]
+    [InlineData("db.query", """{"containerId":"web","serverId":"local","query":"select * from orders"}""")]
+    public async Task Everything_else_runs_unhindered_on_every_surface(string capability, string arguments)
+    {
+        var h = new ProtectionHarness();
+        var args = Parse(arguments);
+
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync(capability, args, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync(capability, args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
+        Assert.Equal(MutationStatus.Executed,
+            (await h.RunAsync(capability, args, ProtectionHarness.AdminsTask(), MutationSurface.Automation)).Status);
+    }
+
+    [Fact]
+    public async Task Reading_the_control_plane_stays_possible()
+    {
+        // A read changes nothing; the control plane is protected from changes only.
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ProtectedResources = [];
+        var engine = Whiskers.Services.Guardrails.GuardrailEngine.CreateDefault();
+        var context = new AgentContext("s", new AgentPrincipal(AgentPrincipalKind.McpKey, "ci", McpPermissionLevels.Admin,
+            null, McpKeyId: "k1"), AgentOrigin.McpDirect, policy);
+
+        var read = engine.Evaluate(new Whiskers.Services.Guardrails.GuardrailRequest("get_container_logs",
+            McpPermissionLevels.Read, ProtectionHarness.Args(new { containerId = "whiskers" }), context));
+
+        Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, read.Verdict);
+    }
+}
