@@ -63,14 +63,24 @@ public sealed class AgentChatLifetime : IAsyncDisposable
 
     /// <summary>Raises the approval for a confirmation the run <paramref name="run"/> of <paramref name="session"/>
     /// asked for, then <see cref="AfterRaiseAsync"/> for that same session — not whichever session the chat holds
-    /// once the approval is stored: clearing the chat meanwhile must not leave it pending.</summary>
+    /// once the approval is stored: clearing the chat meanwhile must not leave it pending. If no approval could be
+    /// raised (e.g. too many pending), the run ends: the chat offers no other way to decide the call.</summary>
     public async Task<Approval> RaiseAsync(IApprovalCoordinator coordinator, IAgentSession session, AgentContext context,
         AgentEvent.ConfirmationRequired confirmation, CancellationToken run)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         ArgumentNullException.ThrowIfNull(confirmation);
-        var approval = await coordinator.RaiseAsync(session, confirmation.Call, context, confirmation.Reason,
-            confirmation.Decision);
+        Approval approval;
+        try
+        {
+            approval = await coordinator.RaiseAsync(session, confirmation.Call, context, confirmation.Reason,
+                confirmation.Decision);
+        }
+        catch
+        {
+            await EndAsync();
+            throw;
+        }
         await AfterRaiseAsync(session, run);
         return approval;
     }

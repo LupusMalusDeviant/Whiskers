@@ -486,4 +486,35 @@ public class OrphanedApprovalTests
         await DrainAsync(events);
         Assert.Equal(0, invoker.Calls);
     }
+
+    private sealed class FailingCoordinator : IApprovalCoordinator
+    {
+        public Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context,
+            string reason, GuardrailDecision decision) => throw new ApprovalLimitException("user:alice@example.com");
+    }
+
+    [Fact]
+    public async Task A_run_whose_approval_could_not_be_raised_ends_and_runs_nothing()
+    {
+        // The chat decides only through a recorded approval; without one the call cannot be decided, so the run ends.
+        var store = new ApprovalStore();
+        var invoker = new Invoker();
+        var session = Session(invoker, ToolTurn("call_0"), TextTurn("done"));
+        await using var lifetime = new AgentChatLifetime(store);
+        var run = lifetime.BeginRun();
+        lifetime.Attach(session, run);
+
+        await using var events = session.SendAsync("stop web", ct: run).GetAsyncEnumerator();
+        AgentEvent.ConfirmationRequired? asked = null;
+        while (asked is null && await events.MoveNextAsync()) asked = events.Current as AgentEvent.ConfirmationRequired;
+
+        await Assert.ThrowsAsync<ApprovalLimitException>(
+            () => lifetime.RaiseAsync(new FailingCoordinator(), session, Context, asked!, run));
+
+        Assert.True(run.IsCancellationRequested);
+        var rest = await DrainAsync(events);
+        Assert.DoesNotContain(rest, e => e is AgentEvent.ToolExecuted { Result.IsError: false });
+        Assert.Equal(0, invoker.Calls);
+        AssertEveryCallAnswered(session.History);
+    }
 }

@@ -104,9 +104,10 @@
                             <MudText Typo="Typo.body2" Class="mb-2">
                                 <b>@L["AgentView_Confirm_Label"]</b> @_pendingConfirm.Name — @_pendingReason
                             </MudText>
-                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled"
+                            @* Decided only through the recorded approval: no button before it exists (R1-15, INV-37). *@
+                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Disabled="@(_pendingApprovalId is null)"
                                        OnClick="@(() => Resolve(true))" Class="mr-2">@L["AgentView_Confirm_Approve"]</MudButton>
-                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" Disabled="@(_pendingApprovalId is null)"
                                        OnClick="@(() => Resolve(false))">@L["AgentView_Confirm_Deny"]</MudButton>
                         </MudPaper>
                     }
@@ -452,18 +453,11 @@
 
     private async Task Resolve(bool approved)
     {
-        var call = _pendingConfirm;
         var approvalId = _pendingApprovalId;
 
-        // Without a recorded approval nothing can be approved: the call is only ever rejected.
-        if (approvalId is null)
-        {
-            _pendingConfirm = null;
-            StateHasChanged();
-            if (_session is not null && call is not null)
-                await _session.ResolveConfirmationAsync(call.CorrelationId, false);
-            return;
-        }
+        // Every decision — approve or reject — goes through the recorded approval and its eligibility rules
+        // (INV-37); while it is still being raised there is nothing to decide yet (the buttons are disabled).
+        if (approvalId is null) return;
 
         // Through the central store, as the person signed in now at their current role (R1-15): the same rules as
         // the Approvals page, and whoever decides first wins.

@@ -95,8 +95,9 @@
                 {
                     <div style="align-self:stretch; padding:8px 10px; border-radius:8px; background:var(--sw-accent-primary-soft); border:1px solid var(--sw-accent-primary);">
                         <div style="font-size:0.8rem; margin-bottom:6px; overflow-wrap:anywhere;"><b>@L["AiChat_Approval_Required"]</b> <code>@_pendingConfirm.Call.Name</code> — @_pendingReason</div>
-                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="@(() => Resolve(true))" Class="mr-2">@L["AiChat_Button_Approve"]</MudButton>
-                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" OnClick="@(() => Resolve(false))">@L["AiChat_Button_Reject"]</MudButton>
+                        @* Decided only through the recorded approval: no button before it exists (R1-15, INV-37). *@
+                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Disabled="@(_pendingApprovalId is null)" OnClick="@(() => Resolve(true))" Class="mr-2">@L["AiChat_Button_Approve"]</MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" Disabled="@(_pendingApprovalId is null)" OnClick="@(() => Resolve(false))">@L["AiChat_Button_Reject"]</MudButton>
                     </div>
                 }
                 @if (_thinking && _pendingConfirm is null)
@@ -322,18 +323,10 @@
     private async Task Resolve(bool approved)
     {
         var id = _pendingApprovalId;
-        var confirm = _pendingConfirm;
 
-        // Without a recorded approval nothing can be approved: the call is only ever rejected (else the chat would
-        // hang until expiry).
-        if (id is null)
-        {
-            _pendingConfirm = null;
-            StateHasChanged();
-            if (_session is not null && confirm is not null)
-                await _session.ResolveConfirmationAsync(confirm.Call.CorrelationId, false);
-            return;
-        }
+        // Every decision — approve or reject — goes through the recorded approval and its eligibility rules
+        // (INV-37); while it is still being raised there is nothing to decide yet (the buttons are disabled).
+        if (id is null) return;
 
         // Through the central store, as the person signed in now at their current role (R1-15).
         var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
