@@ -19,11 +19,16 @@ public interface IAiTriggerStore
     IReadOnlyList<AiTrigger> Triggers { get; }
     Task InitializeAsync(CancellationToken ct = default);
 
+    /// <summary>Changes with every write (a save, a suspension, a reload). A save names the revision its list was
+    /// read at, so an Admin's stale copy never undoes a suspension or a narrowed grant made meanwhile.</summary>
+    long Revision { get; }
+
     /// <summary>Replaces every trigger. The owner and the suspension are the store's (PC-D6, R1-13): whatever the
     /// caller sent for them is ignored. <paramref name="editor"/> becomes the owner of a trigger it creates, of one
     /// whose write grant it changes, and of one it switches on again after a suspension or without an owner (a
-    /// takeover). Every other trigger keeps its owner.</summary>
-    Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor);
+    /// takeover). Every other trigger keeps its owner. Throws <see cref="AiTriggersChangedException"/> when the
+    /// triggers changed since <paramref name="readAtRevision"/>.</summary>
+    Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor, long readAtRevision);
 
     /// <summary>Switches trigger <paramref name="triggerId"/> off because its owner lost their authority (or it has
     /// none: <paramref name="expectedOwnerId"/> <c>null</c>) — only while its owner is still that one and it is on.
@@ -32,6 +37,10 @@ public interface IAiTriggerStore
 
     event Action? Changed;
 }
+
+/// <summary>The AI triggers changed since the list being saved was read: nothing was saved.</summary>
+public sealed class AiTriggersChangedException()
+    : InvalidOperationException("The AI triggers were changed meanwhile; nothing was saved. Reload and apply the change again.");
 
 public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
 {
@@ -46,6 +55,9 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
 
     public IReadOnlyList<AiTrigger> Triggers => _triggers;
 
+    public long Revision => Interlocked.Read(ref _revision);
+    private long _revision;
+
     public int Order => 90;
 
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -55,7 +67,10 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
         {
             // A trigger saved before R1-13 has no write grant, so it is read-only now (PC-D7) — whatever MaxLevel it had.
             if (_store.Exists())
+            {
                 _triggers = ((await _store.LoadAsync()).Triggers ?? new()).Where(t => t is not null).Select(Normalized).ToList();
+                Interlocked.Increment(ref _revision);
+            }
         }
         finally
         {
@@ -63,7 +78,7 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
         }
     }
 
-    public async Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor)
+    public async Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor, long readAtRevision)
     {
         if (editor.PermissionLevel != McpPermissionLevels.Admin)
             throw new UnauthorizedAccessException(
@@ -74,6 +89,7 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
         await _lock.WaitAsync();
         try
         {
+            if (readAtRevision != Revision) throw new AiTriggersChangedException();
             var previous = _triggers.ToDictionary(t => t.Id, StringComparer.Ordinal);
             var saved = new List<AiTrigger>(triggers.Count);
             foreach (var incoming in triggers)
@@ -102,6 +118,7 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
             }
             await _store.SaveAsync(new AiTriggerData { Triggers = saved });
             _triggers = saved;
+            Interlocked.Increment(ref _revision);
         }
         finally
         {
@@ -127,6 +144,7 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
             var saved = _triggers.Select(t => t.Id == triggerId ? suspended : t).ToList();
             await _store.SaveAsync(new AiTriggerData { Triggers = saved });
             _triggers = saved;
+            Interlocked.Increment(ref _revision);
         }
         finally
         {

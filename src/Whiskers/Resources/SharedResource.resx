@@ -2513,6 +2513,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AiTriggersView_Save_Button" xml:space="preserve">
     <value>Save</value>
   </data>
+  <data name="AiTriggersView_Stale_Snackbar" xml:space="preserve">
+    <value>The AI triggers were changed meanwhile (by another admin or a suspension). Nothing was saved; the current state is shown — apply your change again.</value>
+  </data>
   <data name="AiTriggersView_Saved_Snackbar" xml:space="preserve">
     <value>{0} trigger(s) saved.</value>
   </data>

@@ -155,6 +155,7 @@
 @code {
     private bool _isAdmin;
     private List<AiTrigger> _triggers = new();
+    private long _readAt;
     private List<string> _presets = new();
     private List<Capability> _capabilities = new();
 
@@ -163,7 +164,7 @@
         _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
         if (!_isAdmin) return;
 
-        _triggers = Store.Triggers.Select(Clone).ToList();
+        Reload();
         _presets = GuardrailStore.Config.Presets.Select(p => p.Name).ToList();
         _capabilities = Capabilities.All.Where(c => !AiTriggerAuthority.NotGrantable.Contains(c.Id)).OrderBy(c => c.McpTool ?? c.Id, StringComparer.Ordinal).ToList();
         if (_presets.Count == 0) _presets.Add("Standard");
@@ -233,15 +234,28 @@
         {
             var principal = await BuildPrincipalAsync();
             await Mutations.RunAsync("aitrigger.save", new { count = _triggers.Count },
-                _ => Store.SaveAsync(_triggers, principal));
+                _ => Store.SaveAsync(_triggers, principal, _readAt));
             Snackbar.Add(L["AiTriggersView_Saved_Snackbar", _triggers.Count].Value, Severity.Success);
             // The store decides owner and suspension; show what it saved.
-            _triggers = Store.Triggers.Select(Clone).ToList();
+            Reload();
+        }
+        catch (AiTriggersChangedException)
+        {
+            // Someone else saved, or a trigger was suspended, after this page read the list: show the current state
+            // rather than overwrite it with this copy.
+            Snackbar.Add(L["AiTriggersView_Stale_Snackbar"].Value, Severity.Warning);
+            Reload();
         }
         catch (Exception ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }
+    }
+
+    private void Reload()
+    {
+        _readAt = Store.Revision;
+        _triggers = Store.Triggers.Select(Clone).ToList();
     }
 
     private async Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync()

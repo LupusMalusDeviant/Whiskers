@@ -130,19 +130,45 @@ public sealed class TriggerAuthorityTests : IDisposable
         forged.OwnerId = "user:someone-else@example.com";
         forged.SuspendedReason = null;
 
-        await store.SaveAsync([forged], Editor("admin@example.com"));
+        await store.SaveAsync([forged], Editor("admin@example.com"), store.Revision);
         Assert.Equal(Admin, Assert.Single(store.Triggers).OwnerId);
 
         // Another admin saves without touching the grant: the owner stays.
-        await store.SaveAsync([Copy(store.Triggers[0], t => t.Prompt = "changed")], Editor("other@example.com"));
+        await store.SaveAsync([Copy(store.Triggers[0], t => t.Prompt = "changed")], Editor("other@example.com"), store.Revision);
         Assert.Equal(Admin, store.Triggers[0].OwnerId);
 
         // Changing the grant makes the editor the owner; a read-only trigger keeps an owner too (PC-D6).
-        await store.SaveAsync([Copy(store.Triggers[0], t => t.WriteTargets = ["web", "api"])], Editor("other@example.com"));
+        await store.SaveAsync([Copy(store.Triggers[0], t => t.WriteTargets = ["web", "api"])], Editor("other@example.com"), store.Revision);
         Assert.Equal("user:other@example.com", store.Triggers[0].OwnerId);
-        await store.SaveAsync([Copy(store.Triggers[0], t => t.WriteCapabilities = [])], Editor("admin@example.com"));
+        await store.SaveAsync([Copy(store.Triggers[0], t => t.WriteCapabilities = [])], Editor("admin@example.com"), store.Revision);
         Assert.Equal(Admin, store.Triggers[0].OwnerId);
         Assert.False(store.Triggers[0].HasWriteGrant);
+    }
+
+    [Fact]
+    public async Task A_stale_copy_cannot_undo_a_suspension_or_a_narrowed_grant()
+    {
+        var store = new AiTriggerStore(Path.Combine(_dir, "ai-triggers.json"));
+        await store.SaveAsync([Granted()], Editor("admin@example.com"), store.Revision);
+        var readAt = store.Revision;
+        var staleCopy = store.Triggers.Select(AiTriggerStore.Normalized).ToList();
+
+        // Meanwhile the trigger is suspended; the stale copy still shows it on.
+        Assert.True(await store.SuspendAsync("t1", Admin, "owner demoted"));
+
+        await Assert.ThrowsAsync<AiTriggersChangedException>(
+            () => store.SaveAsync(staleCopy, Editor("other@example.com"), readAt));
+        Assert.False(store.Triggers[0].Enabled);
+        Assert.Equal("owner demoted", store.Triggers[0].SuspendedReason);
+        Assert.Equal(Admin, store.Triggers[0].OwnerId);
+
+        // Meanwhile another admin narrows the grant; a stale wide copy cannot bring it back.
+        readAt = store.Revision;
+        var wide = store.Triggers.Select(AiTriggerStore.Normalized).ToList();
+        await store.SaveAsync([Copy(store.Triggers[0], c => c.WriteTargets = ["web"])], Editor("admin@example.com"), store.Revision);
+        await Assert.ThrowsAsync<AiTriggersChangedException>(
+            () => store.SaveAsync(wide, Editor("other@example.com"), readAt));
+        Assert.Equal(["web"], store.Triggers[0].WriteTargets);
     }
 
     [Fact]
@@ -152,7 +178,7 @@ public sealed class TriggerAuthorityTests : IDisposable
         var trigger = Granted();
         trigger.WriteCapabilities.Add("hetzner.snapshot_delete");
 
-        await store.SaveAsync([trigger], Editor("admin@example.com"));
+        await store.SaveAsync([trigger], Editor("admin@example.com"), store.Revision);
 
         Assert.DoesNotContain("hetzner.snapshot_delete", store.Triggers[0].WriteCapabilities);
     }
@@ -168,15 +194,15 @@ public sealed class TriggerAuthorityTests : IDisposable
         await store.InitializeAsync();
 
         // Saving the page leaves them ownerless: nobody took them over.
-        await store.SaveAsync(store.Triggers.Select(AiTriggerStore.Normalized).ToList(), Editor("admin@example.com"));
+        await store.SaveAsync(store.Triggers.Select(AiTriggerStore.Normalized).ToList(), Editor("admin@example.com"), store.Revision);
         Assert.All(store.Triggers, t => Assert.Null(t.OwnerId));
 
         // Switching the disabled one on takes it over; the enabled one is taken over once its first run suspended it.
-        await store.SaveAsync(store.Triggers.Select(t => Copy(t, c => c.Enabled = true)).ToList(), Editor("admin@example.com"));
+        await store.SaveAsync(store.Triggers.Select(t => Copy(t, c => c.Enabled = true)).ToList(), Editor("admin@example.com"), store.Revision);
         Assert.Null(store.Triggers.Single(t => t.Id == "t1").OwnerId);
         Assert.Equal(Admin, store.Triggers.Single(t => t.Id == "t2").OwnerId);
         Assert.True(await store.SuspendAsync("t1", null, "it has no owner"));
-        await store.SaveAsync(store.Triggers.Select(t => Copy(t, c => c.Enabled = true)).ToList(), Editor("admin@example.com"));
+        await store.SaveAsync(store.Triggers.Select(t => Copy(t, c => c.Enabled = true)).ToList(), Editor("admin@example.com"), store.Revision);
         Assert.Equal(Admin, store.Triggers.Single(t => t.Id == "t1").OwnerId);
     }
 
@@ -184,17 +210,17 @@ public sealed class TriggerAuthorityTests : IDisposable
     public async Task Switching_a_suspended_trigger_on_again_is_a_takeover()
     {
         var store = new AiTriggerStore(Path.Combine(_dir, "ai-triggers.json"));
-        await store.SaveAsync([Granted()], Editor("admin@example.com"));
+        await store.SaveAsync([Granted()], Editor("admin@example.com"), store.Revision);
         Assert.True(await store.SuspendAsync("t1", Admin, "its owner has no authority left"));
         Assert.False(store.Triggers[0].Enabled);
         Assert.Equal("its owner has no authority left", store.Triggers[0].SuspendedReason);
 
         // A save that leaves it off keeps the suspension (and the owner).
-        await store.SaveAsync([Copy(store.Triggers[0], t => t.SuspendedReason = null)], Editor("other@example.com"));
+        await store.SaveAsync([Copy(store.Triggers[0], t => t.SuspendedReason = null)], Editor("other@example.com"), store.Revision);
         Assert.NotNull(store.Triggers[0].SuspendedReason);
         Assert.Equal(Admin, store.Triggers[0].OwnerId);
 
-        await store.SaveAsync([Copy(store.Triggers[0], t => t.Enabled = true)], Editor("other@example.com"));
+        await store.SaveAsync([Copy(store.Triggers[0], t => t.Enabled = true)], Editor("other@example.com"), store.Revision);
         Assert.Null(store.Triggers[0].SuspendedReason);
         Assert.Equal("user:other@example.com", store.Triggers[0].OwnerId);
     }
@@ -203,7 +229,7 @@ public sealed class TriggerAuthorityTests : IDisposable
     public async Task A_suspension_for_an_owner_who_was_replaced_meanwhile_does_nothing()
     {
         var store = new AiTriggerStore(Path.Combine(_dir, "ai-triggers.json"));
-        await store.SaveAsync([Granted()], Editor("other@example.com"));
+        await store.SaveAsync([Granted()], Editor("other@example.com"), store.Revision);
 
         Assert.False(await store.SuspendAsync("t1", Admin, "lost"));
         Assert.True(store.Triggers[0].Enabled);
@@ -622,7 +648,8 @@ public sealed class TriggerAuthorityTests : IDisposable
         public IReadOnlyList<AiTrigger> Triggers => Items;
         public event Action? Changed { add { } remove { } }
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor) => throw new NotSupportedException();
+        public long Revision => 0;
+        public Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor, long readAtRevision) => throw new NotSupportedException();
 
         public Task<bool> SuspendAsync(string triggerId, string? expectedOwnerId, string reason)
         {

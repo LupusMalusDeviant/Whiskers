@@ -341,6 +341,7 @@ public class TriggerPolicyPinningTests
             .AddSingleton(store)
             .AddSingleton<IAuditLogService>(audit)
             .AddSingleton<INotificationService>(new NullNotify())
+            .AddSingleton<IAiTriggerAuthority>(new ReadOnlyRuns())
             .BuildServiceProvider();
         var triggers = new TriggerList(new AiTrigger
         {
@@ -348,6 +349,15 @@ public class TriggerPolicyPinningTests
         });
         var settings = new StaticSettings(new AgentSettings { Enabled = true });
         return (new AiTriggerDispatcher(triggers, sp, settings), agents, audit);
+    }
+
+    /// <summary>Lets every run start read-only; these tests are about the pinned preset, not the owner.</summary>
+    private sealed class ReadOnlyRuns : IAiTriggerAuthority
+    {
+        public Task<TriggerRunAuthority> BeginRunAsync(AiTrigger trigger, CancellationToken ct = default) =>
+            Task.FromResult(new TriggerRunAuthority(McpPermissionLevels.Read, null));
+        public Task<string?> RefusalAsync(string triggerId, Capability capability, MutationTarget target, CancellationToken ct) =>
+            Task.FromResult<string?>("read-only");
     }
 
     private sealed class MemoryDecisions : IPolicyDecisionStore
@@ -437,7 +447,8 @@ public class TriggerPolicyPinningTests
     {
         public IReadOnlyList<AiTrigger> Triggers { get; } = triggers;
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor) => Task.CompletedTask;
+        public long Revision => 0;
+        public Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor, long readAtRevision) => Task.CompletedTask;
         public event Action? Changed { add { } remove { } }
     }
 

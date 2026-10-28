@@ -2513,6 +2513,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AiTriggersView_Save_Button" xml:space="preserve">
     <value>Speichern</value>
   </data>
+  <data name="AiTriggersView_Stale_Snackbar" xml:space="preserve">
+    <value>Die KI-Trigger wurden inzwischen geändert (von einem anderen Admin oder durch eine Sperre). Nichts wurde gespeichert; der aktuelle Stand wird angezeigt – bitte die Änderung erneut vornehmen.</value>
+  </data>
   <data name="AiTriggersView_Saved_Snackbar" xml:space="preserve">
     <value>{0} Trigger gespeichert.</value>
   </data>

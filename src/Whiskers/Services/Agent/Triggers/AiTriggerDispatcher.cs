@@ -120,8 +120,9 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             // PC-D7 (R1-13): read-only unless an Admin granted capabilities and targets; with a grant, no more than the
             // owner holds right now (PC-D6) — never a synthetic admin. An owner who lost it suspends the trigger.
             var authority = _sp.GetService<IAiTriggerAuthority>();
+            // Without the authority nobody can check the owner: refuse the run rather than start it unchecked.
             var start = authority is null
-                ? new TriggerRunAuthority(McpPermissionLevels.Read, null)
+                ? new TriggerRunAuthority(McpPermissionLevels.Read, "no trigger authority is registered to check its owner")
                 : await authority.BeginRunAsync(t);
             if (start.Refusal is not null)
             {
