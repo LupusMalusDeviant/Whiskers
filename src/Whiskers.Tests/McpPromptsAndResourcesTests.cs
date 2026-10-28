@@ -24,12 +24,12 @@ public class McpPromptsAndResourcesTests
 
         try
         {
+            using var bootSettings = BootSettings.Apply(BootSettings.AuthDisabled);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>()
                 .WithWebHostBuilder(b =>
                 {
                     b.UseEnvironment("Development");
-                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(
-                        new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") }));
+                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(BootSettings.AuthDisabled));
                 });
             using var client = factory.CreateClient();
 

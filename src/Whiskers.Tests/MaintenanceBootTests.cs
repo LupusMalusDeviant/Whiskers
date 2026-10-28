@@ -29,6 +29,7 @@ public sealed class MaintenanceBootTests
 
         try
         {
+            using var bootSettings = BootSettings.Apply(config);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Development");

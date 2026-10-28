@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Modules;
 
 namespace Whiskers.Tests;
@@ -37,6 +38,7 @@ public class BootMatrixTests
 
         try
         {
+            using var bootSettings = BootSettings.Apply(config);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>()
                 .WithWebHostBuilder(b =>
                 {
@@ -48,6 +50,16 @@ public class BootMatrixTests
             using var client = factory.CreateClient();
             var resp = await client.GetAsync("/healthz");
             Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+            // The boot must really be the configuration it claims: a flag Program never saw would leave this a
+            // full boot under a "lean" name and pass anyway.
+            var registry = factory.Services.GetRequiredService<IModuleRegistry>();
+            foreach (var (key, value) in featureSettings)
+            {
+                var id = key.Split(':')[1];
+                Assert.True(registry.IsEnabled(id) == bool.Parse(value),
+                    $"Module '{id}' is {(registry.IsEnabled(id) ? "on" : "off")}, but the boot set {key}={value}.");
+            }
         }
         finally
         {

@@ -30,16 +30,17 @@ public class SelfMetricsEndpointTests
 
         try
         {
+            var settings = new List<KeyValuePair<string, string?>>
+            {
+                new("Auth:Disabled", "true"),
+                new("Metrics:ScrapeToken", ScrapeToken),
+            };
+            using var bootSettings = BootSettings.Apply(settings);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>()
                 .WithWebHostBuilder(b =>
                 {
                     b.UseEnvironment("Development");
-                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(
-                        new List<KeyValuePair<string, string?>>
-                        {
-                            new("Auth:Disabled", "true"),
-                            new("Metrics:ScrapeToken", ScrapeToken)
-                        }));
+                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(settings));
                 });
 
             using var client = factory.CreateClient();
