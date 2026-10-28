@@ -60,22 +60,47 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var pending = nameof(ApprovalStatus.Pending);
+        var target = status.ToString();
         var decision = ApprovalRecords.IsDecision(status);
         // One transaction: the update holds the row (it waits here for any lock), then the decision is checked once
         // more against the clock before it is committed. Not committed (refused, or the process stops) = not decided.
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var updated = await db.Approvals
-            .Where(a => a.Id == approvalId && a.Status == pending && (!decision || a.ExpiresAt > at))
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(a => a.Status, status.ToString())
-                .SetProperty(a => a.ResolvedAt, at)
-                .SetProperty(a => a.ResolvedBy, by)
-                .SetProperty(a => a.GrantExpiresAt, grantExpiresAt)
-                .SetProperty(a => a.SelfApproved, selfApproved), ct);
-        if (updated != 1) return false;
-        if (decision && stillDecidable is not null && !stillDecidable()) return false;   // rolled back on dispose
-        await tx.CommitAsync(ct);
-        return true;
+        // It runs inside the provider's execution strategy (PostgreSQL retries transient failures and refuses a
+        // transaction opened outside it); a retry after a commit whose answer was lost finds the row already decided
+        // by this very call.
+        return await InTransactionAsync(db, async () =>
+        {
+            var updated = await db.Approvals
+                .Where(a => a.Id == approvalId && a.Status == pending && (!decision || a.ExpiresAt > at))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(a => a.Status, target)
+                    .SetProperty(a => a.ResolvedAt, at)
+                    .SetProperty(a => a.ResolvedBy, by)
+                    .SetProperty(a => a.GrantExpiresAt, grantExpiresAt)
+                    .SetProperty(a => a.SelfApproved, selfApproved), ct);
+            return updated == 1 && (!decision || stillDecidable is null || stillDecidable());
+        }, () => db.Approvals.AsNoTracking().AnyAsync(a => a.Id == approvalId && a.Status == target
+            && a.ResolvedAt == at && a.ResolvedBy == by, ct), ct);
+    }
+
+    /// <summary>Runs <paramref name="change"/> in a transaction through the provider's execution strategy and commits
+    /// only when it returns <c>true</c>. A retry (the connection broke) first asks <paramref name="alreadyDone"/>
+    /// whether the commit before it got through.</summary>
+    private static async Task<bool> InTransactionAsync(MetricsDbContext db, Func<Task<bool>> change,
+        Func<Task<bool>> alreadyDone, CancellationToken ct)
+    {
+        var attempt = 0;
+        return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0)
+            {
+                db.ChangeTracker.Clear();
+                if (await alreadyDone()) return true;
+            }
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            if (!await change()) return false;   // rolled back on dispose
+            await tx.CommitAsync(ct);
+            return true;
+        });
     }
 
     public async Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now,
@@ -85,17 +110,16 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var approved = nameof(ApprovalStatus.Approved);
         // As for a decision: one transaction, the grant checked again once the row is held, then committed.
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var updated = await db.Approvals
-            .Where(a => a.Id == approvalId && a.Status == approved && a.ConsumedAt == null
-                        && a.GrantExpiresAt != null && a.GrantExpiresAt > now)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(a => a.ConsumedAt, now)
-                .SetProperty(a => a.ConsumedBy, operationId), ct);
-        if (updated != 1) return false;
-        if (stillUsable is not null && !stillUsable()) return false;   // rolled back on dispose
-        await tx.CommitAsync(ct);
-        return true;
+        return await InTransactionAsync(db, async () =>
+        {
+            var updated = await db.Approvals
+                .Where(a => a.Id == approvalId && a.Status == approved && a.ConsumedAt == null
+                            && a.GrantExpiresAt != null && a.GrantExpiresAt > now)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(a => a.ConsumedAt, now)
+                    .SetProperty(a => a.ConsumedBy, operationId), ct);
+            return updated == 1 && (stillUsable is null || stillUsable());
+        }, () => db.Approvals.AsNoTracking().AnyAsync(a => a.Id == approvalId && a.ConsumedBy == operationId, ct), ct);
     }
 
     public async Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
@@ -14,10 +15,22 @@ public sealed class ApprovalDatabase : IDisposable
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"sw-approvals-{Guid.NewGuid():N}.db");
     private readonly ServiceProvider _sp;
 
-    public ApprovalDatabase()
+    /// <summary>An execution strategy that retries, as PostgreSQL's <c>EnableRetryOnFailure</c> does: EF then refuses
+    /// a transaction opened outside the strategy.</summary>
+    private sealed class Retrying(ExecutionStrategyDependencies dependencies)
+        : ExecutionStrategy(dependencies, maxRetryCount: 3, maxRetryDelay: TimeSpan.FromMilliseconds(10))
+    {
+        protected override bool ShouldRetryOn(Exception exception) => false;
+    }
+
+    /// <param name="retrying">Use a retrying execution strategy, like the PostgreSQL registration.</param>
+    public ApprovalDatabase(bool retrying = false)
     {
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_path}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_path}", sqlite =>
+        {
+            if (retrying) sqlite.ExecutionStrategy(d => new Retrying(d));
+        }));
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
         scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
@@ -191,6 +204,22 @@ public sealed class ApprovalPersistenceTests : IDisposable
         Assert.Null((await _db.RowAsync(approval.Id))!.ConsumedAt);
         Assert.True(await persistence.ConsumeAsync(approval.Id, "op-2", DateTime.UtcNow, stillUsable: () => true));
         Assert.Equal("op-2", (await _db.RowAsync(approval.Id))!.ConsumedBy);
+    }
+
+    [Fact]
+    public async Task Decisions_and_uses_work_under_a_retrying_execution_strategy()
+    {
+        // PostgreSQL runs with EnableRetryOnFailure; a transaction opened outside the strategy would be refused there.
+        using var db = new ApprovalDatabase(retrying: true);
+        var store = await db.StartAsync();
+        var approval = await store.CreateAsync(Request("c-retry"), _ => Task.CompletedTask);
+
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true,
+            new ApprovalResolver("user:bob@example.com", McpPermissionLevels.Admin, "bob@example.com")));
+        Assert.True(await store.TryConsumeAsync(approval.Id, "op-1", DateTime.UtcNow));
+
+        var row = await db.RowAsync(approval.Id);
+        Assert.Equal((nameof(ApprovalStatus.Approved), "op-1"), (row!.Status, row.ConsumedBy));
     }
 
     [Fact]

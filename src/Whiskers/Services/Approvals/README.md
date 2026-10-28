@@ -77,12 +77,14 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
   an approval counts against everyone in its requester chain (an agent session and the user it acts for), so more
   chats do not raise the bound. Beyond it `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
 
-A raised approval is announced with its id, its risk and the **kind** of its target (`ApprovalSubject.TargetKind` /
-the agent decision's `TargetKind`: the capability's — `container`, `dns-zone`, …) — never a server, a resource name,
-the arguments or any other value a caller can put into the call, since the bell may forward it to external channels
-(even a resolved target may carry a caller-passed server id: a DNS zone has none). The concrete target the resolver
-found (`ApprovalDisplay.NotifiableTarget`, `TargetServer`/`TargetWorkload`) is shown only on the approval's card in
-the app. The event carries `ApprovalId`, so the bell opens the approval's card (`approvals#<id>`).
+A raised approval is announced with its id, its risk and its target as `ApprovalDisplay.NotifiedTarget` names it
+(`ApprovalSubject.NotifiedTarget` / the agent decision's `NotifiedTarget`): the kind (`container`, `dns-zone`, …),
+and — only for a target the resolver found, of a kind whose id it takes from the inventory (container, network, pod,
+Git app, server, cloud server, scheduled task, webhook) — that id, plus the server where that comes from the
+inventory too (container, network, pod, Git app); each only as a plain identifier the secret redactor leaves alone.
+Never the arguments or any other value a caller can put into the call — a DNS zone, a host or a scheduled task's
+server may be the caller's — since the bell may forward it to external channels. The approval's card in the app
+shows the resolved target (`NotifiableTarget`, `TargetServer`/`TargetWorkload`). The event carries `ApprovalId`, so the bell opens the approval's card (`approvals#<id>`).
 External channels get the absolute link (`<public url>/approvals#<id>`) only when the admin configured the public
 address (`WhiskersPublicUrl`, `Whiskers:PublicUrl`; never a request's host) — otherwise the id and
 "Whiskers → Approvals".

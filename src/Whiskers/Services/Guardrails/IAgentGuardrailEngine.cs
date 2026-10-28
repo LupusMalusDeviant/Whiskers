@@ -46,8 +46,9 @@ public sealed record GuardrailDecision(
     public string? ResolvedServer { get; init; }
     public string? ResolvedResource { get; init; }
 
-    /// <summary>The kind of the call's target (the capability's, R1-15): all an approval notification names of it.</summary>
-    public string? TargetKind { get; init; }
+    /// <summary>What an approval notification names of the call's target (R1-15, <c>ApprovalDisplay.NotifiedTarget</c>):
+    /// its kind, and its inventory id and server where the resolver took them from the inventory.</summary>
+    public string? NotifiedTarget { get; init; }
 }
 
 public enum GuardrailVerdict { Allow, Confirm, Deny }

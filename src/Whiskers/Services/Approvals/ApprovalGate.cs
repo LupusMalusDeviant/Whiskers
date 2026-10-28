@@ -44,8 +44,8 @@ public sealed record ApprovalSubject(
     public string? TargetServer { get; init; }
     public string? TargetWorkload { get; init; }
 
-    /// <summary>The kind of the target (the capability's, R1-15): all the notification names of it.</summary>
-    public string? TargetKind { get; init; }
+    /// <summary>What the notification names of the target (R1-15, <see cref="ApprovalDisplay.NotifiedTarget"/>).</summary>
+    public string? NotifiedTarget { get; init; }
 }
 
 public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
@@ -241,7 +241,7 @@ public sealed class ApprovalGate : IApprovalGate
                 await _notify.SendAsync(new NotificationEvent
                 {
                     EventType = "agent_approval",
-                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.TargetKind, _publicUrl),
+                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.NotifiedTarget, _publicUrl),
                     CorrelationId = subject.OperationId,
                     ApprovalId = approval.Id,
                 });

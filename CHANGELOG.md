@@ -14,14 +14,14 @@ All notable changes to Whiskers are documented here. The format follows
   approver** is on (off by default; left out of the stored policy while off, so existing policy versions stay the
   same; a legacy single-policy file that sets it keeps it when migrated). An expired approval can no longer be decided (checked by the store and the database update; a decision whose write waited past the expiry is not committed), overdue
   approvals are expired every 30 seconds so a waiting chat is released, and a grant is usable only within its
-  lifetime (checked again when its use is committed). Clearing or closing a chat, leaving the page or losing the browser connection stops its run and cancels
+  lifetime (checked again when its use is committed; on PostgreSQL inside its retrying execution strategy). Clearing or closing a chat, leaving the page or losing the browser connection stops its run and cancels
   its pending approvals, so approving one elsewhere can no longer resume it unattended (calls it left open are recorded as not completed, so the chat can go on); sessions wait on unique operation ids instead of provider tool-call ids. One
   principal has at most 25 approvals waiting, counted for the user behind every chat too. The chat's Approve and
   Reject buttons stay disabled until the approval is recorded, and both decide only through it. New optional setting
   `WHISKERS_PUBLIC_URL` (`Whiskers:PublicUrl`): the address people open Whiskers at; when set, approval
-  notifications sent by e-mail, Telegram, ntfy and other channels carry a direct link to the approval. Approval notifications name the approval, risk, the kind of target and a link to
-  it (the concrete target only on the approval's card in the app; the bell opens the card), never the arguments or a
-  value a caller can put into the call; Viewers no longer see an approval's
+  notifications sent by e-mail, Telegram, ntfy and other channels carry a direct link to the approval. Approval notifications name the approval, risk, target and a link to
+  it (the target's kind, and its id and server only where Whiskers took them from its inventory; the bell opens the
+  card), never the arguments or a value a caller can put into the call; Viewers no longer see an approval's
   arguments. Additive migrations (SQLite + PostgreSQL)
   add `RequesterIds` and `SelfApproved` to `Approvals`. **Upgrade note:** a pending approval raised before the
   upgrade records no requester and is cancelled at startup — the caller asks again; approved, unused ones keep their

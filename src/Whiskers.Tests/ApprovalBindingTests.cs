@@ -71,7 +71,7 @@ public class ApprovalBindingTests
 
         Assert.Equal(["key:k1"], approvals.Get(raised.ApprovalId!)!.Requesters);
         var text = Assert.Single(notify.Sent).ImageInfo!;
-        Assert.Contains("target container", text);
+        Assert.Contains("target container ", text);   // the kind, and nothing the caller named
         Assert.DoesNotContain(marker, text);
     }
 

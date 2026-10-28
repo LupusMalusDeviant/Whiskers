@@ -22,20 +22,42 @@ public static class ApprovalDisplay
     public static (string? Server, string? Resource) NotifiableTarget(Whiskers.Services.Mutations.MutationTarget? target) =>
         target is { Resolved: true } ? (target.ServerId, target.Id) : (null, null);
 
+    // Target kinds whose resolver replaces the id with the one it found in the inventory (container, network, pod,
+    // Git app, server, cloud server, scheduled task, webhook) — and of those, the ones whose server comes from the
+    // inventory too. Not a DNS zone (checked against a list that may be empty), not a host, nothing created.
+    private static readonly HashSet<string> InventoryIdKinds = new(StringComparer.Ordinal)
+        { "container", "network", "workload", "git-deploy-app", "server", "cloud-server", "scheduled-task", "webhook" };
+    private static readonly HashSet<string> InventoryServerKinds = new(StringComparer.Ordinal)
+        { "container", "network", "workload", "git-deploy-app" };
+
+    /// <summary>What an approval notification names of the target (C-22): its kind, and — only for a target the
+    /// resolver found in the inventory, of a kind whose id (and server) the resolver takes from there — that id and
+    /// server, each only if it is a plain identifier the secret redactor leaves alone. Never a value the caller could
+    /// have put into the call. <c>null</c> without a kind.</summary>
+    public static string? NotifiedTarget(string? kind, Whiskers.Services.Mutations.MutationTarget? target)
+    {
+        if (Short(kind) is not { } shownKind) return null;
+        if (target is not { Resolved: true } || target.Kind != kind || !InventoryIdKinds.Contains(kind!))
+            return shownKind;
+        var id = string.IsNullOrWhiteSpace(target.Id) ? null : Short(target.Id);
+        if (id is null) return shownKind;
+        var server = InventoryServerKinds.Contains(kind!) ? Short(target.ServerId) : null;
+        return server is null ? $"{shownKind} {id}" : $"{shownKind} {id} @ {server}";
+    }
+
     /// <summary>Where the approval is decided: its card on the Approvals page (relative, path-base-safe).</summary>
     public static string LinkOf(string approvalId) => $"approvals#{Uri.EscapeDataString(approvalId)}";
 
     /// <summary>The notification for a raised approval (C-22): who wants to run what, the approval id, the risk and
-    /// the kind of its target (<paramref name="targetKind"/>, the capability's — <c>container</c>, <c>dns-zone</c>, …)
-    /// — never a server, a resource name or any other value a caller can put into the call, and never the arguments:
-    /// the bell may forward this to external channels. The concrete target is on the approval's card. The in-app link to the card travels as <c>NotificationEvent.ApprovalId</c>; with a
+    /// the target as <see cref="NotifiedTarget"/> names it (<paramref name="notifiedTarget"/>) — never a value a caller
+    /// can put into the call, and never the arguments: the bell may forward this to external channels. The in-app link to the card travels as <c>NotificationEvent.ApprovalId</c>; with a
     /// configured public address (<paramref name="publicUrl"/>) the text carries the absolute link too, so e-mail and
     /// chat channels open the card.</summary>
-    public static string NotificationText(Whiskers.Models.Agent.Approval approval, string? targetKind,
+    public static string NotificationText(Whiskers.Models.Agent.Approval approval, string? notifiedTarget,
         Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null)
     {
         ArgumentNullException.ThrowIfNull(approval);
-        var target = Short(targetKind) ?? "—";
+        var target = string.IsNullOrWhiteSpace(notifiedTarget) ? "—" : notifiedTarget;
         return $"\"{Short(approval.Actor)}\" wants to run \"{approval.ToolName}\" — approval required. " +
                $"Approval {approval.Id} · risk {approval.RiskLevel ?? RiskOf(approval.Level)} · target {target} " +
                (publicUrl?.Link(LinkOf(approval.Id)) is { } link ? $"— {link}" : "(Whiskers → Approvals)");

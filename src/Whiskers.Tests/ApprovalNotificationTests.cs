@@ -57,7 +57,8 @@ public class ApprovalNotificationTests
             Requesters = [requester],
             TargetServer = server,
             TargetWorkload = resource,
-            TargetKind = "container",
+            NotifiedTarget = ApprovalDisplay.NotifiedTarget("container", server is null && resource is null ? null
+                : new Whiskers.Services.Mutations.MutationTarget("container", resource ?? "", null, server) { Resolved = true }),
         };
 
     private static void AssertSafe(NotificationEvent sent, Approval approval, string risk, string target)
@@ -83,9 +84,8 @@ public class ApprovalNotificationTests
         var result = await gate.CheckAsync(Call("key:k1", server: "srv-1", resource: "web"), "needs a human", []);
 
         var approval = store.Get(result.ApprovalId!)!;
-        AssertSafe(Assert.Single(notify.Sent), approval, "high", "container");
-        // A resolved server or name never leaves the app: the card shows them, the notification does not.
-        Assert.DoesNotContain("srv-1", notify.Sent[0].ImageInfo);
+        // Found in the inventory: the notification tells this container from any other.
+        AssertSafe(Assert.Single(notify.Sent), approval, "high", "container web @ srv-1");
         Assert.Equal(["key:k1"], approval.Requesters);
         Assert.Equal(("srv-1", "web"), (approval.TargetServer, approval.TargetWorkload));
     }
@@ -122,11 +122,11 @@ public class ApprovalNotificationTests
             {
                 ResolvedServer = "srv-2",
                 ResolvedResource = "web",
-                TargetKind = "container",
+                NotifiedTarget = ApprovalDisplay.NotifiedTarget("container",
+                    new Whiskers.Services.Mutations.MutationTarget("container", "web", null, "srv-2") { Resolved = true }),
             });
 
-        AssertSafe(Assert.Single(notify.Sent), approval, approval.RiskLevel!, "container");
-        Assert.DoesNotContain("srv-2", notify.Sent[0].ImageInfo);
+        AssertSafe(Assert.Single(notify.Sent), approval, approval.RiskLevel!, "container web @ srv-2");
         Assert.Equal(["user:alice@example.com"], approval.Requesters);
         Assert.Equal(call.CorrelationId, approval.CorrelationId);
     }
@@ -150,24 +150,42 @@ public class ApprovalNotificationTests
         Level = McpPermissionLevels.Write,
     };
 
+    private static Whiskers.Services.Mutations.MutationTarget Found(string kind, string id, string? server) =>
+        new(kind, id, null, server) { Resolved = true };
+
     [Theory]
     [InlineData("srv\nInjected: line")]
     [InlineData("password=only-in-the-arguments")]
     [InlineData("token:abc123")]
-    [InlineData("kind with spaces")]
-    public void A_target_kind_that_is_not_a_plain_identifier_is_withheld(string kind)
+    [InlineData("db name with spaces")]
+    public void An_inventory_id_that_is_not_a_plain_identifier_is_withheld(string value)
     {
-        var text = ApprovalDisplay.NotificationText(Plain(), kind);
-        Assert.Contains("target (withheld)", text);
-        Assert.DoesNotContain(kind, text);
+        var named = ApprovalDisplay.NotifiedTarget("container", Found("container", value, value));
+        Assert.Equal("container (withheld) @ (withheld)", named);
+        Assert.DoesNotContain(value, ApprovalDisplay.NotificationText(Plain(), named));
     }
 
     [Theory]
-    [InlineData("container")]
-    [InlineData("dns-zone")]
-    [InlineData("scheduled-task")]
-    public void A_target_kind_is_shown(string kind) =>
-        Assert.Contains($"target {kind}", ApprovalDisplay.NotificationText(Plain(), kind));
+    // Ids and servers the resolver took from the inventory: named.
+    [InlineData("container", "3f2a9c", "srv-1", "container 3f2a9c @ srv-1")]
+    [InlineData("workload", "pod-7", "k3s", "workload pod-7 @ k3s")]
+    [InlineData("scheduled-task", "t-42", "srv-1", "scheduled-task t-42")]      // its server may be the caller's
+    [InlineData("webhook", "wh-1", "srv-1", "webhook wh-1")]
+    [InlineData("server", "srv-1", "srv-1", "server srv-1")]
+    // A DNS zone is checked against a list that may be empty, a host is not looked up: only the kind.
+    [InlineData("dns-zone", "example.com", "caller-named-7f3c", "dns-zone")]
+    [InlineData("host", "caller-named-7f3c", "caller-named-7f3c", "host")]
+    public void Only_ids_the_resolver_took_from_the_inventory_are_named(string kind, string id, string server, string expected) =>
+        Assert.Equal(expected, ApprovalDisplay.NotifiedTarget(kind, Found(kind, id, server)));
+
+    [Fact]
+    public void A_target_not_found_in_the_inventory_is_named_by_its_kind_only()
+    {
+        Assert.Equal("container", ApprovalDisplay.NotifiedTarget("container",
+            new Whiskers.Services.Mutations.MutationTarget("container", "caller-named-7f3c", null, "caller-named-7f3c")));
+        Assert.Equal("container", ApprovalDisplay.NotifiedTarget("container", null));
+        Assert.Null(ApprovalDisplay.NotifiedTarget(null, null));
+    }
 
     [Theory]
     [InlineData("https://whiskers.example.com", "https://whiskers.example.com/approvals#")]

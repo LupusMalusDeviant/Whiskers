@@ -35,6 +35,44 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
             .Options);
 
     [SkippableFact]
+    public async Task Approval_decisions_and_uses_commit_on_real_postgres_with_retries_on()
+    {
+        Skip.IfNot(_up, "Docker daemon not available");
+        // R1-15: the production registration enables retries; a decision runs in a transaction inside the strategy.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions.AddDbContext<MetricsDbContext>(
+            services, o => o.UseNpgsql(_pg.GetConnectionString(), npg =>
+            {
+                npg.EnableRetryOnFailure(3);
+                npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
+            }), Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient);
+        await using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions
+            .BuildServiceProvider(services);
+        await using (var db = Pg()) await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        var persistence = new Whiskers.Services.Approvals.DbApprovalPersistence(
+            Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp));
+        var store = new Whiskers.Services.Approvals.ApprovalStore(persistence: persistence);
+        await store.LoadAsync();
+        var approval = await store.CreateAsync(new Whiskers.Models.Agent.ApprovalRequest(
+            "s1", "c1", "ops@example.com", "agent-web", "restart_container", McpPermissionLevels.Write, null,
+            "needs a human", Binding: "binding-c1", Requesters: ["user:ops@example.com"]), _ => Task.CompletedTask);
+
+        Assert.Equal(Whiskers.Services.Approvals.ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true,
+            new Whiskers.Services.Approvals.ApprovalResolver("user:bob@example.com", McpPermissionLevels.Admin, "bob")));
+        Assert.True(await store.TryConsumeAsync(approval.Id, "op-1", DateTime.UtcNow));
+        // A refused commit leaves nothing behind.
+        var second = await store.CreateAsync(new Whiskers.Models.Agent.ApprovalRequest(
+            "s1", "c2", "ops@example.com", "agent-web", "restart_container", McpPermissionLevels.Write, null,
+            "needs a human", Binding: "binding-c2", Requesters: ["user:ops@example.com"]), _ => Task.CompletedTask);
+        Assert.False(await persistence.ResolveAsync(second.Id, Whiskers.Models.Agent.ApprovalStatus.Approved,
+            DateTime.UtcNow, "bob", DateTime.UtcNow.AddMinutes(10), stillDecidable: () => false));
+        await using var check = Pg();
+        Assert.Equal("Pending", (await check.Approvals.AsNoTracking().SingleAsync(a => a.Id == second.Id)).Status);
+    }
+
+    [SkippableFact]
     public async Task Migrate_crud_retention_and_markread_on_real_postgres()
     {
         Skip.IfNot(_up, "Docker daemon not available");
