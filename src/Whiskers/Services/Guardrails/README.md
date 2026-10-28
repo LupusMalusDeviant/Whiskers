@@ -11,7 +11,12 @@ Who asks the engine:
   ([`McpGuardrailFilter`](../../Mcp/McpGuardrailFilter.cs)) and the agent ([`AgentToolInvoker`](../Agent/AgentToolInvoker.cs)).
 - **Reads** over MCP: `DirectMcpCallGuard`. Reads by the agent: `AgentToolInvoker`.
 - The agent session evaluates each call before it runs, to pause for a human on `Confirm`
-  ([`AgentSession`](../Agent/AgentSession.cs)).
+  ([`AgentSession`](../Agent/AgentSession.cs)); before it pauses or blocks, the gateway decides and records the call.
+
+**Which policy (INV-23, R1-12).** Every asker uses the live active preset — except a pinned run (an AI trigger's):
+its own preset, copied at the start, combined with the global kill switch (`EffectivePolicy`). Everything the run
+sets off is decided under that preset with the agent rule set, also a scheduled task a person created and the
+cleanup task's own protected-container check (`TaskExecutor`). A fail-closed store refuses pinned runs too.
 
 The key's scope (`McpPermissionCheck`) is checked inside each tool on top.
 Aggregation is **most-restrictive-wins**: any `Deny` beats everything, otherwise a `Confirm` wins, otherwise `Allow`.

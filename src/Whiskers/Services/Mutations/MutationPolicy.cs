@@ -80,10 +80,14 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         // action into one the user authorised by hand. An owned item whose provenance was never recorded (created
         // before R1-03) may have come from an agent, so it gets the agent's rules too until an admin takes it over,
         // which records the admin as its provenance. An item without an owner keeps the grace rules.
-        var engine = (request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
-                     || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation
-                         && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human
-                         && !CreatedByAgent(request.Principal))
+        // A pinned run is an AI trigger's (R1-12): whatever it sets off — a scheduled task a person created included —
+        // keeps the agent's rules of the pinned preset (tool lists, forbidden arguments, confirmation), so running a
+        // task is not a way around them.
+        var engine = request.PinnedPolicy is null
+                     && ((request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
+                         || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation
+                             && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human
+                             && !CreatedByAgent(request.Principal)))
             ? HumanEngine
             : _engine;
         var decision = engine.Evaluate(new GuardrailRequest(

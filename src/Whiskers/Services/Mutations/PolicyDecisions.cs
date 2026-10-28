@@ -182,10 +182,11 @@ public sealed class DbPolicyDecisionStore : IPolicyDecisionStore
             CapabilityId = record.Capability.Id,
             RequiredLevel = record.Capability.RequiredLevel,
             TargetKind = target.Kind,
-            TargetId = target.Id,
-            TargetName = target.Name,
+            TargetId = Clean(target.Id)!,
+            TargetName = Clean(target.Name),
             TargetServerId = target.ServerId,
-            TargetRelated = target.Related.Count == 0 ? null : JsonSerializer.Serialize(target.Related),
+            // A related resource can be a repository URL with credentials in it (a Git app): never stored as such.
+            TargetRelated = target.Related.Count == 0 ? null : JsonSerializer.Serialize(target.Related.Select(Clean)),
             InputHash = PolicyCanonicalJson.InputHash(request.Arguments),
             PolicyVersion = record.Policy.VersionHash,
             Preset = record.Policy.Preset,
@@ -218,4 +219,12 @@ public sealed class DbPolicyDecisionStore : IPolicyDecisionStore
     }
 
     private static string Cap(string s) => s.Length > MaxReasonChars ? s[..MaxReasonChars] + "…" : s;
+
+    // scheme://anything@host → scheme://***@host: a user name alone can be a token (https://<token>@github.com).
+    private static readonly System.Text.RegularExpressions.Regex UrlUserInfo =
+        new(@"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>A target field as it may be stored: URL credentials removed, known secret shapes redacted.</summary>
+    internal static string? Clean(string? value) =>
+        value is null ? null : SecretRedactor.Redact(UrlUserInfo.Replace(value, "$1***@"));
 }

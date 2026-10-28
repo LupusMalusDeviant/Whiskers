@@ -142,7 +142,8 @@ registrations are wrapped too.
 5. Policy: `Deny` → **Denied** ("Blocked by guardrails: …"); an exception → **Denied**. The policy is the live
    active preset, or for a pinned run (an AI trigger's, `MutationRequest.PinnedPolicy`) that run's preset with the
    global kill switch (`EffectivePolicy`, INV-23); a call nested in a pinned run's mutation without a pin of its own
-   inherits it from `MutationScope.PinnedPolicy`. Every verdict — Allow, Confirm and Deny — is then **recorded**
+   inherits it from `MutationScope.PinnedPolicy`, and a pinned request is always decided with the agent rule set
+   (also an owner-authorised scheduled task). Target fields are stored without URL credentials. Every verdict — Allow, Confirm and Deny — is then **recorded**
    (`IPolicyDecisionStore`, INV-22, R1-12) before anything acts on it; a failed write → **Denied**. From here on
    `MutationRequest.DecisionId` names the record, the audit rows carry it as `decisionId`, the outcome as
    `MutationOutcome.DecisionId`, and an approval raised for the call as `Approval.DecisionId`. `DecideAsync` runs

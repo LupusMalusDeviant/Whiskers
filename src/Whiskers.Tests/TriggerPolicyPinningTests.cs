@@ -11,6 +11,7 @@ using Whiskers.Services.Agent.Triggers;
 using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Notifications;
+using Whiskers.Services.Scheduler;
 using PresetStore = Whiskers.Tests.PolicyDecisionRecordTests.PresetStore;
 
 namespace Whiskers.Tests;
@@ -235,6 +236,91 @@ public class TriggerPolicyPinningTests
         var alone = await gateway.ExecuteAsync(nested, (_, _) => Task.FromResult(1));
         Assert.Equal(killSwitch ? MutationStatus.Denied : MutationStatus.Executed, alone.Status);
         Assert.Equal("Live", decisions.Records.Last().Policy.Preset);
+    }
+
+    [Fact]
+    public async Task A_task_a_person_created_keeps_the_pinned_presets_agent_rules_inside_a_trigger_run()
+    {
+        // The trigger's preset denies restarting containers. A person created a restart task (owner authority, which
+        // alone would be decided by the person's rules); run from inside the trigger's call it is the trigger acting.
+        var noRestart = Open();
+        noRestart.ToolDenyList.Add(new CapabilityCatalog().Find("container.restart")!.McpTool!);
+        var store = new PresetStore("Live", new GuardrailPreset { Name = "Live", Policy = Open() });
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance);
+        var nested = PersonsTask("container.restart", "web");
+        MutationOutcome<int>? inner = null;
+
+        await gateway.ExecuteAsync(OuterCall(PinnedPolicy.Of("NoRestart", noRestart)), async (_, ct) =>
+        {
+            inner = await gateway.ExecuteAsync(nested, (_, _) => Task.FromResult(1), ct);
+            return 0;
+        });
+
+        Assert.Equal(MutationStatus.Denied, inner!.Status);
+        Assert.Equal(MutationStatus.Executed, (await gateway.ExecuteAsync(nested, (_, _) => Task.FromResult(1))).Status);
+    }
+
+    [Fact]
+    public async Task A_cleanup_task_inside_a_trigger_run_protects_what_the_pinned_preset_protects()
+    {
+        // The live preset protects nothing; the trigger's protects "web", which is stopped: a prune would remove it.
+        var guarded = Open();
+        guarded.ProtectedResources.Add("web");
+        var store = new PresetStore("Live", new GuardrailPreset { Name = "Live", Policy = Open() });
+        var docker = new FakeDocker(new ContainerInfo { Id = "c1", Name = "web", State = "exited", ServerId = "srv1" });
+        var runner = new CountingRunner();
+        var executor = new TaskExecutor(docker, null!, null!, null!, null!, runner,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<TaskExecutor>.Instance, guardrails: store);
+        var task = new ScheduledTaskEntity
+        {
+            TaskId = "t1", Name = "prune", TaskType = ScheduledTaskType.Cleanup, ServerId = "srv1",
+            CreatedBy = "user:ops@example.com", Config = "{}",
+        };
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationGateway>.Instance);
+        (bool Success, string Message) inRun = default;
+
+        await gateway.ExecuteAsync(OuterCall(PinnedPolicy.Of("Guarded", guarded)), async (_, _) =>
+        {
+            inRun = await executor.ExecuteAsync(task);
+            return 0;
+        });
+
+        Assert.False(inRun.Success);
+        Assert.Contains("web", inRun.Message);
+        Assert.Equal(0, runner.Calls);
+        await executor.ExecuteAsync(task);    // outside the run the live preset applies: the prune is attempted
+        Assert.Equal(1, runner.Calls);
+    }
+
+    private static MutationRequest OuterCall(PinnedPolicy pinned) => TriggerCall(pinned) with
+    {
+        Target = new MutationTarget("container", "c2", "worker", "srv1"),
+        Arguments = new Dictionary<string, JsonElement> { ["containerId"] = JsonSerializer.SerializeToElement("worker") },
+    };
+
+    private static MutationRequest PersonsTask(string capability, string container) => new(capability,
+        new MutationPrincipal(MutationPrincipalKind.Automation, "task:t1", "Scheduled task", McpPermissionLevels.Admin,
+            OnBehalfOf: new MutationPrincipal(MutationPrincipalKind.Human, "user:ops@example.com", "ops@example.com",
+                McpPermissionLevels.Admin)),
+        MutationSurface.Automation, new MutationTarget("container", "c1", container, "srv1"),
+        new Dictionary<string, JsonElement> { ["containerId"] = JsonSerializer.SerializeToElement(container) });
+
+    private sealed class CountingRunner : IAutomationMutationRunner
+    {
+        public int Calls;
+
+        public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult(new MutationOutcome<T>("op", MutationStatus.Denied, default, "test", VerificationStatus.NotRun));
+        }
+
+        public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task> action, CancellationToken ct = default) =>
+            RunAsync<bool>(actor, capabilityId, arguments, async t => { await action(t); return true; }, ct);
     }
 
     // ---- Helpers -----------------------------------------------------------

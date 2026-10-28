@@ -16,7 +16,9 @@ All notable changes to Whiskers are documented here. The format follows
   stored versions never change. **AI trigger runs are pinned** to the trigger's preset for the whole run (the agent
   session and the gateway both decide against it); switching or editing the active preset no longer reaches a running
   trigger, the global kill switch still does, and a fail-closed guardrail store stops it. Mutations nested in a
-  trigger's call (a scheduled task it runs) are decided against the trigger's preset as well. **Behaviour change:** a
+  trigger's call (a scheduled task it runs, also one a person created) are decided against the trigger's preset with
+  the agent rules (tool lists, forbidden arguments, confirmation), and a cleanup task run there protects what that
+  preset protects. Decision records never store URL credentials (a Git app's repository URL). **Behaviour change:** a
   trigger whose preset no longer exists does **not run** any more (it used to fall back to the first preset); the
   refusal is audited (`agent.run`, unsuccessful) and the AI triggers page marks the missing preset. Likewise an active
   preset that does not exist yields the fail-closed policy instead of the first preset. An agent session has the

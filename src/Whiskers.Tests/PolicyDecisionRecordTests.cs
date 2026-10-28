@@ -130,6 +130,26 @@ public sealed class PolicyDecisionRecordTests : IDisposable
     }
 
     [Fact]
+    public async Task Credentials_in_a_resolved_target_are_never_stored()
+    {
+        var resolved = new MutationTarget("gitapp", "app-1", "https://deploy:hunter2@git.example.com/shop.git", "srv1")
+        {
+            Related = ["shop", "https://deploy:hunter2@git.example.com/shop.git", "https://ghp_tok3n0nly@github.com/acme/shop"],
+            Resolved = true,
+        };
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Deny, "no", []), new RecordingAudit(),
+            targets: new FixedResolver(resolved));
+
+        await gateway.ExecuteAsync(Request() with { Target = new MutationTarget("gitapp", "app-1") }, (_, _) => Task.FromResult(0));
+
+        var row = Assert.Single(Decisions());
+        var stored = row.TargetId + row.TargetName + row.TargetRelated;
+        Assert.DoesNotContain("hunter2", stored);
+        Assert.DoesNotContain("ghp_tok3n0nly", stored);
+        Assert.Contains("git.example.com/shop.git", row.TargetRelated);   // the repository itself stays readable
+    }
+
+    [Fact]
     public async Task A_decision_that_cannot_be_recorded_is_refused_with_a_localized_code()
     {
         var outcome = await Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), new RecordingAudit(), new FailingDecisions())
