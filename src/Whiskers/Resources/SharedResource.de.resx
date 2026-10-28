@@ -2498,6 +2498,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AiTriggersView_NewTrigger_Button" xml:space="preserve">
     <value>Neuer Trigger</value>
   </data>
+  <data name="AiTriggersView_Preset_Missing" xml:space="preserve">
+    <value>Das Preset '{0}' existiert nicht; dieser Trigger läuft erst wieder, wenn du ein vorhandenes wählst.</value>
+  </data>
   <data name="AiTriggersView_Preset_Label" xml:space="preserve">
     <value>Guardrail-Preset</value>
   </data>

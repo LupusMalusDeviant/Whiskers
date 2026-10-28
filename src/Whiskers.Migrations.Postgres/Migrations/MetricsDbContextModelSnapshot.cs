@@ -291,6 +291,118 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.ToTable("McpToolCalls");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.PolicyDecisionEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CapabilityId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("CredentialId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("InputHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MatchedRules")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("OnBehalfOfId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PolicyVersion")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Preset")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PrincipalId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PrincipalKind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequiredLevel")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Surface")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TargetId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TargetKind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TargetName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("TargetRelated")
+                        .HasColumnType("text");
+
+                    b.Property<string>("TargetServerId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("PolicyVersion");
+
+                    b.HasIndex("Timestamp");
+
+                    b.HasIndex("PrincipalId", "Timestamp");
+
+                    b.ToTable("PolicyDecisions");
+                });
+
+            modelBuilder.Entity("Whiskers.Models.PolicySnapshotEntity", b =>
+                {
+                    b.Property<string>("VersionHash")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PolicyJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Preset")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("VersionHash");
+
+                    b.ToTable("PolicySnapshots");
+                });
+
             modelBuilder.Entity("Whiskers.Models.ScheduledTaskEntity", b =>
                 {
                     b.Property<long>("Id")

@@ -22,7 +22,11 @@ their `Confirm` outright, since nobody could approve it and a later run of the s
 3. **Checking is not using.** `CheckAsync` only finds (or raises) the approval. The caller uses it with
    `TryConsume` right before the call runs: the gateway after its audit intent is written, `DirectMcpCallGuard`
    immediately. A refusal in between leaves the approval valid; of two concurrent calls only one consumes it.
-4. The notification bell and the **Freigaben** page read `GetPending()` and call `ResolveAsync(id, approved, resolvedBy)`.
+4. **Which decision.** An approval names the recorded policy decision that asked for it (`Approval.DecisionId`,
+   INV-22) and that decision's preset (`GuardrailPreset` — a trigger's pinned one, not whichever is active by then).
+   An approval the agent session raised itself gets the id of the first gateway decision that checked it. Binding
+   the approval to that decision's policy version is WP3 (R1-14).
+5. The notification bell and the **Freigaben** page read `GetPending()` and call `ResolveAsync(id, approved, resolvedBy)`.
 
 There is no way to grant a call without an approval decided in `IApprovalStore`.
 

@@ -1,0 +1,299 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Configuration;
+using Whiskers.Models;
+using Whiskers.Models.Agent;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Guardrails;
+using Whiskers.Services.Mutations;
+using Whiskers.Services.Persistence;
+
+namespace Whiskers.Tests;
+
+/// <summary>INV-22 (R1-12): every policy decision is persisted — with its principal, capability, resolved target,
+/// normalized input hash, policy version, preset, matched rules and verdict — before the mutation runs; approvals and
+/// audit rows name it; policy changes are new versions that leave stored ones untouched.</summary>
+public sealed class PolicyDecisionRecordTests : IDisposable
+{
+    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"sw-decisions-{Guid.NewGuid():N}.db");
+    private readonly ServiceProvider _sp;
+
+    public PolicyDecisionRecordTests()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        _sp = services.BuildServiceProvider();
+        using var scope = _sp.CreateScope();
+        scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
+    }
+
+    public void Dispose()
+    {
+        _sp.Dispose();
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        try { File.Delete(_dbPath); } catch (IOException) { }
+    }
+
+    private static readonly MutationTarget Target = new("container", "c1", "web", "srv1") { Related = ["db"] };
+
+    private static Dictionary<string, JsonElement> Args(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
+
+    private static MutationRequest Request(string argsJson = """{"containerId":"web","serverId":"srv1"}""") =>
+        new("container.start", new MutationPrincipal(MutationPrincipalKind.Human, "user:ops@example.com", "ops@example.com",
+                McpPermissionLevels.Write), MutationSurface.Ui, Target, Args(argsJson), OperationId: "op-1");
+
+    private MutationGateway Gateway(IMutationPolicy policy, IMutationAuditSink audit, IPolicyDecisionStore? decisions = null,
+        IApprovalGate? approvals = null) =>
+        new(new CapabilityCatalog(), policy, audit, [], NullLogger<MutationGateway>.Instance, approvals: approvals,
+            decisions: decisions ?? new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>()));
+
+    private List<PolicyDecisionEntity> Decisions()
+    {
+        using var scope = _sp.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<MetricsDbContext>().PolicyDecisions.AsNoTracking().ToList();
+    }
+
+    private List<PolicySnapshotEntity> Snapshots()
+    {
+        using var scope = _sp.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<MetricsDbContext>().PolicySnapshots.AsNoTracking().ToList();
+    }
+
+    [Fact]
+    public async Task The_decision_is_stored_with_every_field_before_the_mutation_runs()
+    {
+        var audit = new RecordingAudit();
+        var policy = GuardrailPolicy.SafeDefault();
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Allow, "fine", ["rule-a"], "Standard", policy), audit);
+        List<PolicyDecisionEntity>? seenDuringExecution = null;
+
+        var outcome = await gateway.ExecuteAsync(Request(), (_, _) =>
+        {
+            seenDuringExecution = Decisions();
+            return Task.FromResult(1);
+        });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        var row = Assert.Single(seenDuringExecution!);
+        Assert.Equal(outcome.DecisionId, row.Id);
+        Assert.Equal("op-1", row.OperationId);
+        Assert.Equal("user:ops@example.com", row.PrincipalId);
+        Assert.Equal("Human", row.PrincipalKind);
+        Assert.Equal("Ui", row.Surface);
+        Assert.Equal("container.start", row.CapabilityId);
+        Assert.Equal(McpPermissionLevels.Write, row.RequiredLevel);
+        Assert.Equal(("container", "c1", "web", "srv1"), (row.TargetKind, row.TargetId, row.TargetName, row.TargetServerId));
+        Assert.Equal("""["db"]""", row.TargetRelated);
+        Assert.Equal(PolicyCanonicalJson.InputHash(Request().Arguments), row.InputHash);
+        Assert.Equal(PolicySnapshot.Of("Standard", policy).VersionHash, row.PolicyVersion);
+        Assert.Equal("Standard", row.Preset);
+        Assert.Equal("""["rule-a"]""", row.MatchedRules);
+        Assert.Equal("Allow", row.Verdict);
+        Assert.Equal("fine", row.Reason);
+        Assert.True(row.Timestamp > DateTime.UtcNow.AddMinutes(-1));
+        // The policy version it names is stored too, in the canonical form it was hashed in.
+        var snapshot = Assert.Single(Snapshots());
+        Assert.Equal(row.PolicyVersion, snapshot.VersionHash);
+        Assert.Equal(PolicyCanonicalJson.Hash(snapshot.PolicyJson), snapshot.VersionHash);
+        // The audit intent and outcome name the decision.
+        Assert.Equal([row.Id, row.Id], audit.DecisionIds);
+    }
+
+    [Fact]
+    public void The_input_hash_is_normalized()
+    {
+        var a = PolicyCanonicalJson.InputHash(Args("""{"b":{"y":2,"x":[1,{"q":1,"p":2}]},"a":"v"}"""));
+        var b = PolicyCanonicalJson.InputHash(Args("""{ "a" : "v", "b" : { "x" : [ 1, { "p":2, "q":1 } ], "y" : 2 } }"""));
+        var c = PolicyCanonicalJson.InputHash(Args("""{"a":"v","b":{"x":[{"p":2,"q":1},1],"y":2}}"""));
+
+        Assert.Equal(a, b);          // key order and whitespace do not matter
+        Assert.NotEqual(a, c);       // array order does
+        Assert.Matches("^[0-9a-f]{64}$", a);
+    }
+
+    [Fact]
+    public async Task A_refusal_is_recorded_and_names_its_decision()
+    {
+        var audit = new RecordingAudit();
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Deny, "protected", ["protected-resource"]), audit);
+        var ran = false;
+
+        var outcome = await gateway.ExecuteAsync(Request(), (_, _) => { ran = true; return Task.FromResult(0); });
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.False(ran);
+        var row = Assert.Single(Decisions());
+        Assert.Equal(("Deny", outcome.DecisionId), (row.Verdict, (string?)row.Id));
+        Assert.Equal([row.Id], audit.DecisionIds);
+    }
+
+    [Fact]
+    public async Task No_record_no_mutation()
+    {
+        var audit = new RecordingAudit();
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Allow, "fine", []), audit, new FailingDecisions());
+        var ran = false;
+
+        var outcome = await gateway.ExecuteAsync(Request(), (_, _) => { ran = true; return Task.FromResult(0); });
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Contains("could not be recorded", outcome.Reason);
+        Assert.False(ran);
+        Assert.Empty(audit.Begun);
+        Assert.Null(outcome.DecisionId);
+    }
+
+    [Fact]
+    public async Task An_approval_names_the_decision_and_preset_that_asked_for_it()
+    {
+        var approvals = new ApprovalStore();
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Confirm, "writes need approval", ["confirm-writes"], "Night"),
+            new RecordingAudit(), approvals: new ApprovalGate(approvals, new PresetStore("Day")));
+
+        var outcome = await gateway.ExecuteAsync(Request(), (_, _) => Task.FromResult(0));
+
+        Assert.Equal(MutationStatus.PendingApproval, outcome.Status);
+        var approval = Assert.Single(approvals.GetAll());
+        Assert.Equal(outcome.DecisionId, approval.DecisionId);
+        Assert.Equal("Night", approval.GuardrailPreset);   // the decision's preset, not the active one
+        Assert.Equal(Assert.Single(Decisions()).Id, approval.DecisionId);
+    }
+
+    [Fact]
+    public async Task A_policy_change_is_a_new_version_and_leaves_the_stored_one_unchanged()
+    {
+        var store = new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>());
+        var policy = GuardrailPolicy.SafeDefault();
+        await Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", [], "Standard", policy), new RecordingAudit(), store)
+            .ExecuteAsync(Request(), (_, _) => Task.FromResult(0));
+        var first = Assert.Single(Snapshots());
+
+        policy.MaxActionsPerSession = 5;   // the operator edits the preset
+        await Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", [], "Standard", policy), new RecordingAudit(), store)
+            .ExecuteAsync(Request(), (_, _) => Task.FromResult(0));
+        // The same version again adds no row.
+        await Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", [], "Standard", policy), new RecordingAudit(), store)
+            .ExecuteAsync(Request(), (_, _) => Task.FromResult(0));
+
+        var snapshots = Snapshots();
+        Assert.Equal(2, snapshots.Count);
+        var kept = Assert.Single(snapshots, s => s.VersionHash == first.VersionHash);
+        Assert.Equal(first.PolicyJson, kept.PolicyJson);
+        Assert.Equal(first.CreatedAt, kept.CreatedAt);
+        var decisions = Decisions().OrderBy(d => d.Timestamp).ToList();
+        Assert.Equal(3, decisions.Count);
+        Assert.Equal(first.VersionHash, decisions[0].PolicyVersion);
+        Assert.NotEqual(first.VersionHash, decisions[1].PolicyVersion);
+        Assert.Equal(decisions[1].PolicyVersion, decisions[2].PolicyVersion);
+    }
+
+    [Fact]
+    public void A_snapshot_does_not_follow_later_edits_of_the_policy()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        var snapshot = PolicySnapshot.Of("Standard", policy);
+        var pinned = PinnedPolicy.Of("Standard", policy);
+        var json = snapshot.Json;
+
+        policy.ToolDenyList.Add("stop_container");
+        policy.ReadOnlyMode = true;
+
+        Assert.Equal(json, snapshot.Json);
+        Assert.Empty(pinned.Policy.ToolDenyList);
+        Assert.False(pinned.Policy.ReadOnlyMode);
+    }
+
+    [Fact]
+    public void A_missing_active_preset_never_selects_the_first_preset()
+    {
+        var config = new GuardrailConfig
+        {
+            ActivePreset = "Gone",
+            Presets = { new GuardrailPreset { Name = "Open", Policy = new GuardrailPolicy { MaxAutonomousLevel = "admin" } } },
+        };
+
+        var policy = config.ActivePolicy();
+
+        Assert.True(policy.ReadOnlyMode);
+        Assert.Equal("read", policy.MaxAutonomousLevel);
+        Assert.Contains("*", policy.ProtectedResources);
+    }
+
+    [Fact]
+    public async Task The_production_policy_reports_the_active_preset_and_its_version()
+    {
+        var store = new PresetStore("Day", new GuardrailPreset { Name = "Day", Policy = GuardrailPolicy.SafeDefault() });
+        var policy = AgentToolTestHelpers.Policy(store);
+
+        var decision = policy.Evaluate(Request(), new CapabilityCatalog().Find("container.start")!);
+
+        Assert.Equal("Day", decision.Policy!.Preset);
+        Assert.Equal(PolicySnapshot.Of("Day", GuardrailPolicy.SafeDefault()).VersionHash, decision.Policy.VersionHash);
+    }
+
+    // ---- Fakes -------------------------------------------------------------
+
+    private sealed class FixedPolicy(MutationVerdict verdict, string reason, IReadOnlyList<string> rules,
+        string preset = "Standard", GuardrailPolicy? policy = null) : IMutationPolicy
+    {
+        public MutationPolicyDecision Evaluate(MutationRequest request, Capability capability) =>
+            new(verdict, reason, rules) { Policy = PolicySnapshot.Of(preset, policy ?? GuardrailPolicy.SafeDefault()) };
+    }
+
+    private sealed class FailingDecisions : IPolicyDecisionStore
+    {
+        public Task RecordAsync(PolicyDecisionRecord record, CancellationToken ct) =>
+            throw new IOException("database unavailable");
+    }
+
+    internal sealed class RecordingAudit : IMutationAuditSink
+    {
+        public List<string?> DecisionIds { get; } = [];
+        public List<string> Begun { get; } = [];
+        private readonly Dictionary<long, string?> _intents = [];
+
+        public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
+            ApprovalGateResult? approval, CancellationToken ct)
+        {
+            Begun.Add(capability.Id);
+            DecisionIds.Add(request.DecisionId);
+            var id = (long)Begun.Count;
+            _intents[id] = request.DecisionId;
+            return Task.FromResult(id);
+        }
+
+        public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
+            string? reason, TimeSpan duration, CancellationToken ct)
+        {
+            DecisionIds.Add(_intents[auditId]);
+            return Task.CompletedTask;
+        }
+
+        public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
+            MutationStatus status, string reason, CancellationToken ct)
+        {
+            DecisionIds.Add(request.DecisionId);
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>A guardrail store with named presets, one of them active.</summary>
+    internal sealed class PresetStore(string active, params GuardrailPreset[] presets) : IGuardrailStore
+    {
+        public string ActiveName { get; set; } = active;
+        public List<GuardrailPreset> Presets { get; } = [.. presets];
+        public string? Error { get; set; }
+
+        public GuardrailPolicy Current => Error is not null
+            ? GuardrailPolicy.FailClosed()
+            : Config.ActivePolicy().Clone();
+        public GuardrailConfig Config => new GuardrailConfig { ActivePreset = ActiveName, Presets = Presets }.Clone();
+        public string? LoadError => Error;
+        public Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SaveAsync(GuardrailPolicy policy, AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public event Action? Changed { add { } remove { } }
+    }
+}

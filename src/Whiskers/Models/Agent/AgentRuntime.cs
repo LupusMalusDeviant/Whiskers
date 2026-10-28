@@ -28,11 +28,28 @@ public enum AgentOrigin
 }
 
 /// <summary>Full execution context of a tool call — flows into the gate and the audit.</summary>
+/// <param name="Pinned">The preset the run is pinned to (INV-23, an AI trigger's run): it governs the whole run,
+/// only the global kill switch reaches into it. Null: the live active preset governs every call.</param>
 public sealed record AgentContext(
     string SessionId,
     AgentPrincipal Principal,
     AgentOrigin Origin,
-    GuardrailPolicy Policy);
+    GuardrailPolicy Policy,
+    PinnedPolicy? Pinned = null);
+
+/// <summary>A trigger's preset, fixed when its run starts (INV-23). Only the global kill switch reaches into it.</summary>
+/// <param name="Preset">The preset's name.</param>
+/// <param name="Policy">A private copy of the preset's policy at the start of the run.</param>
+public sealed record PinnedPolicy(string Preset, GuardrailPolicy Policy)
+{
+    /// <summary>Copies the policy, so a later edit of the preset does not reach a run that already started.</summary>
+    public static PinnedPolicy Of(string preset, GuardrailPolicy policy)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(preset);
+        ArgumentNullException.ThrowIfNull(policy);
+        return new PinnedPolicy(preset, policy.Clone());
+    }
+}
 
 /// <summary>Result of exactly one tool call. A Deny is also a result (IsError=true),
 /// fed back into the loop so the model "sees" the boundary.</summary>

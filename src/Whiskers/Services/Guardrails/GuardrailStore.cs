@@ -67,6 +67,18 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     /// <summary>Why the stored configuration is not enforced (the fail-closed policy is), or <c>null</c>.</summary>
     public string? LoadError => _state.LoadError;
 
+    /// <inheritdoc />
+    public (string Preset, GuardrailPolicy Policy) Active
+    {
+        get
+        {
+            var state = _state;
+            return state.LoadError is null
+                ? (state.Config.ActivePreset, state.Config.ActivePolicy().Clone())
+                : (FailClosedPreset, GuardrailPolicy.FailClosed());
+        }
+    }
+
     /// <summary>Loads the config from disk; creates the SafeDefault on first run and migrates a
     /// legacy single-policy file into a "Standard" preset.</summary>
     public int Order => 80;

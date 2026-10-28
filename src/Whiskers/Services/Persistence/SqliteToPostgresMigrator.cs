@@ -56,6 +56,9 @@ public static class SqliteToPostgresMigrator
         T("Notifications",     c => c.Notifications,     e => e.Id = 0),
         T("SelfMetricSamples", c => c.SelfMetricSamples, e => e.Id = 0),
         T("ActionOutcomes",    c => c.ActionOutcomes,    e => e.Id = 0),
+        // R1-12: string keys that approvals and audit rows name — copied as they are.
+        T("PolicySnapshots",   c => c.PolicySnapshots,   _ => { }),
+        T("PolicyDecisions",   c => c.PolicyDecisions,   _ => { }),
     ];
 
     /// <summary>CLI entry point: builds the SQLite source + PostgreSQL target contexts, migrates the target

@@ -52,6 +52,8 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IMutationTargetResolver, MutationTargetResolver>();
         services.AddSingleton<IMutationPolicy, GuardrailMutationPolicy>();
         services.AddSingleton<IMutationAuditSink, AuditLogMutationSink>();
+        // INV-22 (R1-12): every policy decision is recorded before it is acted on; a failed write refuses the call.
+        services.AddSingleton<IPolicyDecisionStore, DbPolicyDecisionStore>();
         services.AddSingleton<IMutationScopeMonitor, MutationScopeMonitor>();
         services.AddSingleton<IEffectiveRequirementResolver, SchedulerRequirementResolver>();
         services.AddSingleton<IMutationGateway, MutationGateway>();

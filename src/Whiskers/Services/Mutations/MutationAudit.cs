@@ -112,6 +112,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         string? verification, string? reason, long? durationMs, ApprovalGateResult? approval = null) => Cap(JsonSerializer.Serialize(new
     {
         operationId,
+        // INV-22: the recorded policy decision this row is about (null when refused before the policy step).
+        decisionId = request.DecisionId,
         phase,
         status,
         verification,

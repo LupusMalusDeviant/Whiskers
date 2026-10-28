@@ -82,6 +82,7 @@ public sealed class ApprovalStore : IApprovalStore
             GuardrailPreset = request.GuardrailPreset,
             GuardrailRule = request.GuardrailRule,
             ArgumentsHash = request.ArgumentsHash,
+            DecisionId = request.DecisionId,
         };
         _entries[approval.Id] = new Entry(approval, resolver);
         TrimResolved();

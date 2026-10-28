@@ -135,7 +135,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         var request = new MutationRequest(capability.Id, PrincipalOf(context), MutationSurface.Agent,
             MutationTargets.FromArguments(capability, args), args,
             // The session's approval for this call carries the same correlation id (ApprovalCoordinator).
-            OperationId: call.CorrelationId, SessionId: context.SessionId);
+            OperationId: call.CorrelationId, SessionId: context.SessionId)
+        {
+            // INV-23: a pinned run (an AI trigger's) is decided against its own preset, not the live active one.
+            PinnedPolicy = context.Pinned,
+        };
         // The gateway's token carries the capability deadline and the session's cancellation into the tool.
         // The tool runs on the identity the gateway resolved and decided on (R1-06), not on the raw arguments.
         var outcome = await _gateway.ExecuteAsync(request, (decided, token) =>

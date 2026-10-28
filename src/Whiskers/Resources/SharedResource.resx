@@ -2498,6 +2498,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AiTriggersView_NewTrigger_Button" xml:space="preserve">
     <value>New trigger</value>
   </data>
+  <data name="AiTriggersView_Preset_Missing" xml:space="preserve">
+    <value>The preset '{0}' does not exist; this trigger does not run until you choose an existing one.</value>
+  </data>
   <data name="AiTriggersView_Preset_Label" xml:space="preserve">
     <value>Guardrail preset</value>
   </data>

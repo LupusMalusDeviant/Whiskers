@@ -44,10 +44,13 @@ public sealed class MutationGateway : IMutationGateway
     private readonly IMutationTargetResolver? _targets;
     private readonly IApprovalGate? _approvals;
     private readonly IEffectiveRequirementResolver? _requirements;
+    private readonly IPolicyDecisionStore? _decisions;
 
     /// <param name="overrides">Tool switches and stricter stored levels (INV-15); none = catalog levels only.</param>
     /// <param name="targets">Target resolution (INV-57); none = targets are taken as given.</param>
     /// <param name="approvals">Where a <c>Confirm</c> verdict is decided; none = every <c>Confirm</c> waits.</param>
+    /// <param name="decisions">Where every policy decision is recorded before it is acted on (INV-22). The app always
+    /// registers one; a gateway built without it (unit tests of other steps) records nothing.</param>
     public MutationGateway(
         ICapabilityCatalog catalog,
         IMutationPolicy policy,
@@ -58,7 +61,8 @@ public sealed class MutationGateway : IMutationGateway
         ICapabilityOverrides? overrides = null,
         IMutationTargetResolver? targets = null,
         IApprovalGate? approvals = null,
-        IEffectiveRequirementResolver? requirements = null)
+        IEffectiveRequirementResolver? requirements = null,
+        IPolicyDecisionStore? decisions = null)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
@@ -71,6 +75,7 @@ public sealed class MutationGateway : IMutationGateway
         _targets = targets;
         _approvals = approvals;
         _requirements = requirements;
+        _decisions = decisions;
     }
 
     public async Task<MutationOutcome<T>> ExecuteAsync<T>(
@@ -190,6 +195,27 @@ public sealed class MutationGateway : IMutationGateway
             decision = new MutationPolicyDecision(MutationVerdict.Deny, "Policy evaluation failed; the mutation was refused.", []);
         }
 
+        // INV-22: the decision is on record before anything acts on it — a refusal, an approval request or the
+        // mutation. No record, no mutation: a failed write is a Deny.
+        if (_decisions is not null)
+        {
+            var decisionId = Guid.NewGuid().ToString("N");
+            try
+            {
+                await _decisions.RecordAsync(new PolicyDecisionRecord(decisionId, _time.GetUtcNow().UtcDateTime,
+                    operationId, request, capability, decision,
+                    decision.Policy ?? PolicySnapshot.Of(NoPolicyPreset, Whiskers.Configuration.GuardrailPolicy.FailClosed())), ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Policy decision for {Capability} could not be recorded; operation {OperationId} refused",
+                    capability.Id, operationId);
+                return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
+                    "The policy decision could not be recorded; the mutation was refused.", ct);
+            }
+            request = request with { DecisionId = decisionId };
+        }
+
         if (decision.Verdict == MutationVerdict.Deny)
             return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
                 $"Blocked by guardrails: {decision.Reason}", ct) with { MatchedRules = decision.MatchedRules };
@@ -210,7 +236,7 @@ public sealed class MutationGateway : IMutationGateway
                     with { MatchedRules = decision.MatchedRules };
             try
             {
-                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId),
+                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId, decision.Policy?.Preset),
                     decision.Reason, decision.MatchedRules, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -235,7 +261,8 @@ public sealed class MutationGateway : IMutationGateway
             _logger.LogError(ex, "Audit intent for {Capability} could not be written; operation {OperationId} refused",
                 capability.Id, operationId);
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default,
-                "The audit record could not be written; the mutation was refused.", VerificationStatus.NotRun, ex);
+                "The audit record could not be written; the mutation was refused.", VerificationStatus.NotRun, ex)
+                { DecisionId = request.DecisionId };
         }
 
         // The approval is used only now, after the intent is on record: a refusal before this point leaves it valid.
@@ -255,7 +282,7 @@ public sealed class MutationGateway : IMutationGateway
                     capability.Id, operationId);
             }
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default, reason, VerificationStatus.NotRun,
-                ApprovalId: approvalId) { MatchedRules = decision.MatchedRules };
+                ApprovalId: approvalId) { MatchedRules = decision.MatchedRules, DecisionId = request.DecisionId };
         }
 
         // 6–7: execute inside the scope and under the deadline, then verify.
@@ -316,7 +343,7 @@ public sealed class MutationGateway : IMutationGateway
             _logger.LogError(ex, "Audit outcome for {Capability} (operation {OperationId}, status {Status}) could not be written",
                 capability.Id, operationId, outcome.Status);
         }
-        return outcome;
+        return outcome with { DecisionId = request.DecisionId };
     }
 
     private async Task<VerificationStatus> VerifyAsync(MutationContext context, object? result, CancellationToken ct)
@@ -337,7 +364,8 @@ public sealed class MutationGateway : IMutationGateway
 
     /// <summary>The approval subject carries the MCP tool name when there is one: that is the name on the approval card
     /// and in the agent's own approval.</summary>
-    private static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? callerOperationId)
+    private static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? callerOperationId,
+        string? decisionPreset)
     {
         var p = request.Principal;
         var actorKey = $"{p.Kind}:{p.Id}:{p.CredentialId}:{p.OnBehalfOf?.Id}";
@@ -348,7 +376,11 @@ public sealed class MutationGateway : IMutationGateway
             _ => request.Surface.ToString().ToLowerInvariant(),
         };
         return new ApprovalSubject(capability.McpTool ?? capability.Id, capability.RequiredLevel, actorKey,
-            p.DisplayName, actorType, request.Arguments, callerOperationId, request.SessionId);
+            p.DisplayName, actorType, request.Arguments, callerOperationId, request.SessionId)
+        {
+            DecisionId = request.DecisionId,
+            Preset = request.DecisionId is null ? null : decisionPreset,
+        };
     }
 
     private async Task<MutationOutcome<T>> RefuseAsync<T>(string operationId, MutationRequest request,
@@ -368,6 +400,12 @@ public sealed class MutationGateway : IMutationGateway
             _logger.LogError(ex, "Audit record for refused {Capability} (operation {OperationId}) could not be written",
                 request.CapabilityId, operationId);
         }
-        return new MutationOutcome<T>(operationId, status, default, reason, VerificationStatus.NotRun, ApprovalId: approvalId);
+        return new MutationOutcome<T>(operationId, status, default, reason, VerificationStatus.NotRun, ApprovalId: approvalId)
+        {
+            DecisionId = request.DecisionId,
+        };
     }
+
+    /// <summary>The preset a decision records when no policy could be consulted (no engine, evaluation failed).</summary>
+    internal const string NoPolicyPreset = "(no policy)";
 }

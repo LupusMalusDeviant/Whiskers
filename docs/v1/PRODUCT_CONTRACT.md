@@ -128,7 +128,7 @@ Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR
 (INV-26; fixed for every path in WP2 step 2.1 — guardrails are core) · **AL** AuditLog row · **AH** Agent History row only.
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
-INV-22 (no decision record), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-39 (no operation id), INV-45 (no complete audit event),
+INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-39 (no operation id), INV-45 (no complete audit event),
 INV-48 (audit after the fact, fail-open), INV-49 (no tamper evidence). Rows below list only the path-specific gaps.
 
 ### 7.1 MCP tools (direct `/mcp` calls; the in-process agent invokes the same methods)
@@ -193,7 +193,7 @@ mutating tools do for their own error texts).
 |---|---|---|---|---|---|---|---|---|---|---|
 | A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling + tool switch (INV-15) | ✅ | ⚠️ self-confirm, in memory, orphan risk; gateway runs only an approval bound to the operation and arguments | invoker → gateway → tool | ❌ | gateway AL + per tool (as in 7.1) | INV-31, 32, 36 |
 | A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling + tool switch | ✅ | Confirm → auto-deny ✅ | invoker → gateway → tool | ❌ | gateway AL + per tool | INV-08 |
-| A-03 | AI trigger | Automation (`trigger:<id>`, own principal per trigger since R1-03) | n/a | ⚠️ `MaxLevel`, no owner; tool switch ✅ | ❌ global preset, not pinned | Confirm → auto-deny ✅; Allow runs unattended | invoker → gateway → tool | ❌ | gateway AL + per tool + `agent.run` | INV-04, 06, 23, 27, 40 |
+| A-03 | AI trigger | Automation (`trigger:<id>`, own principal per trigger since R1-03) | n/a | ⚠️ `MaxLevel`, no owner; tool switch ✅ | ✅ pinned to the trigger's preset with the global kill switch; missing preset → no run (R1-12) | Confirm → auto-deny ✅; Allow runs unattended | invoker → gateway → tool | ❌ | gateway AL + per tool + `agent.run` | INV-04, 06, 27, 40 |
 | A-04 | Claude Code CLI runtime (dead code) | fixed key | ✅ key | ⚠️ fail-open rights check | GR? | approve-then-retry | MCP | ❌ | per tool | remove or fix (C-20); INV-02 |
 
 ### 7.3 Background services, scheduler, webhooks

@@ -192,9 +192,12 @@ public sealed class AgentSession : IAgentSession
         return new AgentEvent.ToolExecuted(result);
     }
 
-    // The guardrail policy in effect right now: the live store (so a Read-only kill-switch reaches an
-    // already-open session) or — absent a store (pinned-preset trigger runs / tests) — the session context.
-    private GuardrailPolicy LivePolicy => _guardrailStore?.Current ?? _context.Policy;
+    // The guardrail policy in effect right now, as the gateway will decide it: the live active preset (so a switch
+    // or the kill switch reaches an already-open session), or for a pinned run its own preset with the global kill
+    // switch (INV-23). Absent a store (tests) the session context.
+    private GuardrailPolicy LivePolicy => _guardrailStore is null
+        ? _context.Policy
+        : Whiskers.Services.Mutations.EffectivePolicy.Of(_context.Pinned, _guardrailStore).Policy;
     private AgentContext LiveContext => _context with { Policy = LivePolicy };
 
     private GuardrailDecision Evaluate(AgentToolCall call)
