@@ -19,8 +19,9 @@ All notable changes to Whiskers are documented here. The format follows
   trigger whose preset no longer exists does **not run** any more (it used to fall back to the first preset); the
   refusal is audited (`agent.run`, unsuccessful) and the AI triggers page marks the missing preset. Likewise an active
   preset that does not exist yields the fail-closed policy instead of the first preset. An agent session has the
-  gateway decide (and record) a call before it pauses for an approval or reports a block, so the approval names that
-  decision. **Upgrade notes:** check that every AI trigger names an existing preset. The migration only adds the two
+  gateway decide (and record) a call before it pauses for an approval or reports a block, and follows exactly that
+  recorded verdict, so the approval names the decision that asked for it. A decision that cannot be recorded is
+  refused with a localized message. **Upgrade notes:** check that every AI trigger names an existing preset. The migration only adds the two
   tables and runs at start; if it fails, Whiskers does not start and nothing else has changed — restore `/app/data`
   from the backup taken before the upgrade (or a Whiskers self-backup) or start the previous image again, which
   ignores the new tables. Decision rows are not pruned yet.

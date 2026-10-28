@@ -241,7 +241,8 @@ public sealed class MutationGateway : IMutationGateway
                 _logger.LogError(ex, "Policy decision for {Capability} could not be recorded; operation {OperationId} refused",
                     capability.Id, operationId);
                 return Prepared.Refused(await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied,
-                    "The policy decision could not be recorded; the mutation was refused.", ct));
+                    "The policy decision could not be recorded; the mutation was refused.", ct)
+                    with { ReasonCode = MutationReasonCodes.DecisionNotRecorded });
             }
             request = request with { DecisionId = decisionId };
         }

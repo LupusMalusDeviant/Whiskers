@@ -204,8 +204,10 @@ public sealed class AgentSession : IAgentSession
         : Whiskers.Services.Mutations.EffectivePolicy.Of(_context.Pinned, _guardrailStore).Policy;
     private AgentContext LiveContext => _context with { Policy = LivePolicy };
 
-    /// <summary>The gateway's recorded decision for a call the session is about to block or pause on, combined most
-    /// restrictively with the session's own verdict. A gateway that cannot decide leaves the session's verdict.</summary>
+    /// <summary>The gateway's recorded decision for a call the session is about to block or pause on. It is the one
+    /// authority: what the session pauses or blocks on is exactly the recorded verdict, so an approval or a block
+    /// always names the decision that produced it — an Allow simply runs (and is decided again when it does). A
+    /// gateway that cannot decide (no mutation, test doubles) leaves the session's own verdict.</summary>
     private async Task<GuardrailDecision> RecordedAsync(AgentToolCall call, GuardrailDecision local, CancellationToken ct)
     {
         GuardrailDecision? recorded;
@@ -218,10 +220,7 @@ public sealed class AgentSession : IAgentSession
             return new GuardrailDecision(GuardrailVerdict.Deny, "The call could not be decided; it was not executed.",
                 Array.Empty<string>());
         }
-        if (recorded is null) return local;
-        return recorded.Verdict >= local.Verdict
-            ? recorded
-            : local with { DecisionId = recorded.DecisionId, Preset = recorded.Preset };
+        return recorded ?? local;
     }
 
     private GuardrailDecision Evaluate(AgentToolCall call)

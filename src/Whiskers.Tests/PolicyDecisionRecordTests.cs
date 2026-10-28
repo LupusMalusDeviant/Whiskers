@@ -46,8 +46,9 @@ public sealed class PolicyDecisionRecordTests : IDisposable
                 McpPermissionLevels.Write), MutationSurface.Ui, Target, Args(argsJson), OperationId: "op-1");
 
     private MutationGateway Gateway(IMutationPolicy policy, IMutationAuditSink audit, IPolicyDecisionStore? decisions = null,
-        IApprovalGate? approvals = null) =>
-        new(new CapabilityCatalog(), policy, audit, [], NullLogger<MutationGateway>.Instance, approvals: approvals,
+        IApprovalGate? approvals = null, IMutationTargetResolver? targets = null) =>
+        new(new CapabilityCatalog(), policy, audit, [], NullLogger<MutationGateway>.Instance, targets: targets,
+            approvals: approvals,
             decisions: decisions ?? new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>()));
 
     private List<PolicyDecisionEntity> Decisions()
@@ -100,6 +101,41 @@ public sealed class PolicyDecisionRecordTests : IDisposable
         Assert.Equal(PolicyCanonicalJson.Hash(snapshot.PolicyJson), snapshot.VersionHash);
         // The audit intent and outcome name the decision.
         Assert.Equal([row.Id, row.Id], audit.DecisionIds);
+    }
+
+    [Fact]
+    public async Task The_record_holds_the_resolved_target_not_the_one_the_caller_named()
+    {
+        // The caller names a prefix; the resolver finds the canonical container, its server and what it touches.
+        var named = new MutationTarget("container", "ab", "ab", null);
+        var resolved = new MutationTarget("container", "abcdef0123456789", "web-1", "srv-9")
+        {
+            Related = ["db-1", "cache-1"],
+            Resolved = true,
+        };
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), new RecordingAudit(),
+            targets: new FixedResolver(resolved));
+        List<PolicyDecisionEntity>? seen = null;
+
+        var outcome = await gateway.ExecuteAsync(Request() with { Target = named }, (_, _) =>
+        {
+            seen = Decisions();
+            return Task.FromResult(0);
+        });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        var row = Assert.Single(seen!);
+        Assert.Equal(("abcdef0123456789", "web-1", "srv-9"), (row.TargetId, row.TargetName, row.TargetServerId));
+        Assert.Equal("""["db-1","cache-1"]""", row.TargetRelated);
+    }
+
+    [Fact]
+    public async Task A_decision_that_cannot_be_recorded_is_refused_with_a_localized_code()
+    {
+        var outcome = await Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), new RecordingAudit(), new FailingDecisions())
+            .ExecuteAsync(Request(), (_, _) => Task.FromResult(0));
+
+        Assert.Equal(MutationReasonCodes.DecisionNotRecorded, outcome.ReasonCode);
     }
 
     [Fact]
@@ -317,6 +353,39 @@ public sealed class PolicyDecisionRecordTests : IDisposable
     }
 
     [Fact]
+    public async Task The_session_pauses_or_blocks_only_on_what_the_gateway_recorded()
+    {
+        // The session's own evaluation asks for a confirmation, but by the time the gateway decides the policy allows
+        // the call (an admin relaxed it meanwhile): the recorded Allow governs — no approval naming an Allow record.
+        var store = new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>());
+        var guardrails = new PresetStore("Day", new GuardrailPreset { Name = "Day", Policy = GuardrailPolicy.SafeDefault() });
+        var gateway = new MutationGateway(new CapabilityCatalog(),
+            new FixedPolicy(MutationVerdict.Allow, "relaxed meanwhile", [], "Day"), new RecordingAudit(), [],
+            NullLogger<MutationGateway>.Instance, decisions: store);
+        var invoker = new Whiskers.Services.Agent.AgentToolInvoker(AgentToolTestHelpers.DefaultRegistry(),
+            GuardrailEngine.CreateDefault(), _sp.GetRequiredService<IServiceScopeFactory>(), gateway: gateway);
+        var context = new AgentContext("s1",
+            new AgentPrincipal(AgentPrincipalKind.WebUser, "ops", McpPermissionLevels.Write, null, UserEmail: "ops@example.com"),
+            AgentOrigin.WebUi, GuardrailPolicy.SafeDefault());
+        var session = new Whiskers.Services.Agent.AgentSession(context, new OneCall("start_container", "{\"containerId\":\"web\",\"serverId\":\"srv1\"}"),
+            new NoTools(), invoker, new AlwaysConfirm(), AgentToolTestHelpers.DefaultRegistry(),
+            new AgentSettings { Model = "m", MaxToolIterations = 3 }, "system", guardrailStore: guardrails);
+
+        GuardrailDecision? proposed = null;
+        var paused = false;
+        await foreach (var ev in session.SendAsync("start web"))
+        {
+            if (ev is AgentEvent.ToolProposed p) proposed ??= p.Decision;
+            if (ev is AgentEvent.ConfirmationRequired) paused = true;
+        }
+
+        Assert.False(paused);
+        Assert.Equal(GuardrailVerdict.Allow, proposed!.Verdict);
+        var first = Decisions().OrderBy(d => d.Timestamp).First();
+        Assert.Equal(("Allow", first.Id), (first.Verdict, proposed.DecisionId));
+    }
+
+    [Fact]
     public async Task A_block_in_an_agent_session_is_on_record()
     {
         var store = new DbPolicyDecisionStore(_sp.GetRequiredService<IServiceScopeFactory>());
@@ -373,6 +442,12 @@ public sealed class PolicyDecisionRecordTests : IDisposable
             Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
+    private sealed class AlwaysConfirm : IAgentGuardrailEngine
+    {
+        public GuardrailDecision Evaluate(GuardrailRequest request) =>
+            new(GuardrailVerdict.Confirm, "confirm", Array.Empty<string>());
+    }
+
     private sealed class NoTools : Whiskers.Services.Agent.IAgentToolCatalog
     {
         public IReadOnlyList<AgentToolDefinition> GetVisibleTools(AgentContext context) => Array.Empty<AgentToolDefinition>();
@@ -391,6 +466,12 @@ public sealed class PolicyDecisionRecordTests : IDisposable
     {
         public MutationPolicyDecision Evaluate(MutationRequest request, Capability capability) =>
             new(verdict, reason, rules) { Policy = PolicySnapshot.Of(preset, policy ?? GuardrailPolicy.SafeDefault()) };
+    }
+
+    private sealed class FixedResolver(MutationTarget target) : IMutationTargetResolver
+    {
+        public Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct) =>
+            Task.FromResult(new TargetResolution(target, null));
     }
 
     private sealed class FailingDecisions : IPolicyDecisionStore

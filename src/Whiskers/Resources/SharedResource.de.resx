@@ -4853,6 +4853,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Mutation_Refused_TargetAmbiguous" xml:space="preserve">
     <value>„{0}“ passt auf mehr als ein Ziel; verwende die ID.</value>
   </data>
+  <data name="Mutation_Refused_DecisionNotRecorded" xml:space="preserve">
+    <value>Die Richtlinien-Entscheidung konnte nicht gespeichert werden; es wurde nichts geändert.</value>
+  </data>
   <data name="Mutation_Refused_TargetNotResolved" xml:space="preserve">
     <value>Das Ziel konnte nicht aufgelöst werden: {0}</value>
   </data>

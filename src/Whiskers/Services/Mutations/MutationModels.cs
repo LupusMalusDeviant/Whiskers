@@ -150,8 +150,12 @@ public static class MutationReasonCodes
     /// <summary>The target could not be resolved; {0} is the detail (R1-06).</summary>
     public const string TargetNotResolved = "TargetNotResolved";
 
+    /// <summary>The policy decision could not be recorded (INV-22, R1-12).</summary>
+    public const string DecisionNotRecorded = "DecisionNotRecorded";
+
     public static readonly IReadOnlyList<string> All =
-        [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved];
+        [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
+            DecisionNotRecorded];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

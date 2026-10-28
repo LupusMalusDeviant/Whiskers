@@ -4853,6 +4853,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Mutation_Refused_TargetAmbiguous" xml:space="preserve">
     <value>'{0}' fits more than one target; use its id.</value>
   </data>
+  <data name="Mutation_Refused_DecisionNotRecorded" xml:space="preserve">
+    <value>The policy decision could not be recorded; nothing was changed.</value>
+  </data>
   <data name="Mutation_Refused_TargetNotResolved" xml:space="preserve">
     <value>The target could not be resolved: {0}</value>
   </data>
