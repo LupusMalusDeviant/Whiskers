@@ -49,6 +49,7 @@ public class McpServedSurfaceTests
                 });
 
             using var client = factory.CreateClient();
+            BootSettings.AssertBoot(factory.Services, BootSettings.AuthDisabled);
 
             var sessionId = await InitializeAsync(client);
             var served = await ListToolsAsync(client, sessionId);

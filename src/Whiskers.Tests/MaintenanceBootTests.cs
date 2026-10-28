@@ -23,8 +23,7 @@ public sealed class MaintenanceBootTests
         Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
 
         var config = new List<KeyValuePair<string, string?>>();
-        foreach (var m in ModuleCatalog.DiscoverEnabled(new ConfigurationBuilder().Build()).Where(m => m.Id != "all-in-one"))
-            config.Add(new($"Features:{m.Id}:Enabled", "false"));   // lean boot
+        config.AddRange(BootSettings.OnlyCore());   // lean boot
         config.Add(new("Auth:Disabled", "true"));                   // focus on maintenance, not login
 
         try
@@ -36,6 +35,7 @@ public sealed class MaintenanceBootTests
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(config));
             });
             using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            BootSettings.AssertBoot(factory.Services, config);
 
             var beforeHealth = await client.GetAsync("/healthz");
             Assert.Equal(HttpStatusCode.OK, beforeHealth.StatusCode);

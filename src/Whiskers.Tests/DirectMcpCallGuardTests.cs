@@ -153,6 +153,7 @@ public class DirectMcpCallGuardWireTests
                     });
                 });
             using var client = factory.CreateClient();
+            BootSettings.AssertBoot(factory.Services, BootSettings.AuthDisabled);
             var session = await McpServedSurfaceTests.InitializeAsync(client);
 
             // Protected resource (safe default protects whiskers*) → denied before the tool runs.

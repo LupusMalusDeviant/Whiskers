@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Whiskers.Modules;
 
 namespace Whiskers.Tests;
 
@@ -18,6 +19,15 @@ internal sealed class BootSettings : IDisposable
 {
     /// <summary>The setting most boot tests need: no login in front of the endpoints they call.</summary>
     public static IReadOnlyList<KeyValuePair<string, string?>> AuthDisabled { get; } = [new("Auth:Disabled", "true")];
+
+    /// <summary>A lean boot: every module switched off explicitly — default-off ones too, so a flag inherited from the
+    /// environment cannot switch one on — except <c>all-in-one</c>, which carries the Core surface.</summary>
+    public static IEnumerable<KeyValuePair<string, string?>> OnlyCore() =>
+        ModuleCatalog.All().Where(m => m.Id != CoreModuleId)
+            .Select(m => new KeyValuePair<string, string?>($"Features:{m.Id}:Enabled", "false"));
+
+    /// <summary>The pseudo-module that carries the Core surface and has no flag of its own.</summary>
+    public const string CoreModuleId = "all-in-one";
 
     private readonly List<(string Name, string? Previous)> _previous = [];
 
@@ -54,6 +64,28 @@ internal sealed class BootSettings : IDisposable
         for (var i = _previous.Count - 1; i >= 0; i--)
             Environment.SetEnvironmentVariable(_previous[i].Name, _previous[i].Previous);
         _previous.Clear();
+    }
+
+    /// <summary>Asserts that a booted app is the configuration <paramref name="settings"/> asked for: every module of
+    /// the catalog on exactly when its flag says so (its own default when the settings leave it out), and the
+    /// authentication setup <c>Auth:Disabled</c> selects. The expectation is read from the settings themselves, not
+    /// through the app's flag reader.</summary>
+    public static void AssertBoot(IServiceProvider services, IEnumerable<KeyValuePair<string, string?>> settings)
+    {
+        var given = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in settings) given[key] = value;
+        var registry = services.GetRequiredService<IModuleRegistry>();
+        foreach (var module in ModuleCatalog.All())
+        {
+            var expected = given.TryGetValue($"Features:{module.Id}:Enabled", out var flag) && flag is not null
+                ? bool.Parse(flag)
+                : module.EnabledByDefault;
+            Assert.True(registry.IsEnabled(module.Id) == expected,
+                $"Module '{module.Id}' is {(registry.IsEnabled(module.Id) ? "on" : "off")}, but this boot asked for it " +
+                $"{(expected ? "on" : "off")}.");
+        }
+        AssertAuthenticationSetup(services,
+            disabled: given.TryGetValue("Auth:Disabled", out var auth) && auth is not null && bool.Parse(auth));
     }
 
     /// <summary>Asserts which authentication setup the booted app registered. The two branches of

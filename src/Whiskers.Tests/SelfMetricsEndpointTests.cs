@@ -44,6 +44,7 @@ public class SelfMetricsEndpointTests
                 });
 
             using var client = factory.CreateClient();
+            BootSettings.AssertBoot(factory.Services, settings);
             await body(client, factory.Services);
         }
         finally

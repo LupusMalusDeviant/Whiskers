@@ -32,6 +32,7 @@ public class McpPromptsAndResourcesTests
                     b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(BootSettings.AuthDisabled));
                 });
             using var client = factory.CreateClient();
+            BootSettings.AssertBoot(factory.Services, BootSettings.AuthDisabled);
 
             // serverInfo is what MCP clients and directories (LobeHub, Glama) display for this server.
             using (var init = await McpServedSurfaceTests.PostAsync(client, null, """
