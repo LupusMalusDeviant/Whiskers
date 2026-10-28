@@ -58,4 +58,19 @@ public class AgentSettingsStoreTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.SaveAsync(new AgentSettings(), Viewer));
         await store.SaveAsync(new AgentSettings { Provider = "ollama" }, Admin); // admin succeeds, no throw
     }
+
+    [Fact] // R1-11: concurrent saves never move each other's document; each save leaves exactly its own file behind
+    public async Task Concurrent_saves_are_isolated()
+    {
+        var path = TempPath();
+        var store = new AgentSettingsStore(path);
+        var saves = Enumerable.Range(0, 32)
+            .Select(i => Task.Run(() => store.SaveAsync(new AgentSettings { Provider = "p" + i }, Admin)));
+        await Task.WhenAll(saves);   // none fails
+
+        var config = new ConfigurationBuilder().AddJsonFile(path, optional: false).Build();
+        var bound = config.GetSection(AgentSettings.SectionName).Get<AgentSettings>()!;
+        Assert.StartsWith("p", bound.Provider);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + ".*.tmp"));
+    }
 }

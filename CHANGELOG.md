@@ -16,7 +16,8 @@ All notable changes to Whiskers are documented here. The format follows
   is on it refuses all of them; the one exception is the new **Switch kill switch off** button on the Guardrails page
   (`guardrails.kill_switch_off`: Admin, a person in the UI only, audited, changes nothing but `ReadOnlyMode` of the
   active preset). A fail-closed guardrail store (unreadable `guardrails.json`) refuses every save too, also of the
-  guardrails. MCP
+  guardrails — **upgrade note:** to recover, fix or remove `guardrails.json` on the host and restart Whiskers
+  (removing it recreates the SafeDefault preset). Agent provider saves are serialized as well. MCP
   permissions, the vault and registries now publish a change only after it is written, a Settings save of several
   sections (notifications, channels) is one file replacement, and a registry credential is stored under a new vault
   key per change that only takes effect with the registry entry naming it (a pull during the change reads the new one);
