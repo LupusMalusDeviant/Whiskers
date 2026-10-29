@@ -45,6 +45,7 @@ public sealed class WebhookReplayTests : IDisposable
 
     public void Dispose()
     {
+        _faults.Unlock();
         _runner.Release();
         _sp.Dispose();
         try { File.Delete(_dbPath); } catch (IOException) { }
@@ -637,6 +638,30 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
     }
 
+    [Fact]
+    public async Task A_real_database_lock_does_not_hold_a_worker_past_its_deadline()
+    {
+        _options.MaxConcurrentRuns = 1;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        // Another connection holds SQLite's write lock when the run starts; SQLite waits for it synchronously (up to
+        // its own 30 s timeout) and does not cancel.
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true);
+
+        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The worker came back within the deadline, not the database's timeout; once the lock is gone the start
+        // that landed late is recorded as failed — the run never ran.
+        Assert.False(success);
+        _faults.Unlock();
+        string runId;
+        using (var scope = _sp.CreateScope())
+            runId = (await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.SingleAsync()).RunId;
+        Assert.Equal("Failed", (await Finished(runId)).State);
+        Assert.Equal(0, _runner.Runs);
+    }
+
     private static async Task<WebhookAcceptance> Eventually(Func<Task<WebhookAcceptance>> attempt,
         Func<WebhookAcceptance, bool> done)
     {
@@ -921,7 +946,7 @@ public sealed class WebhookReplayTests : IDisposable
             CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    private enum Fault { Fail, LoseAnswer, Stall, Replay, HoldAnswer, Steal }
+    private enum Fault { Fail, LoseAnswer, Stall, Replay, HoldAnswer, Steal, LockDatabase }
 
     /// <summary>Breaks the next database command whose text contains a fragment — with <c>runsOnly</c>, only one of
     /// a run (the worker's commands carry the run's deadline; a delivery's own lookups have none): fails it, executes
@@ -939,6 +964,11 @@ public sealed class WebhookReplayTests : IDisposable
         public Task Holding => _holding.Task;
 
         public void Resume() => _resume.TrySetResult();
+
+        private Microsoft.Data.Sqlite.SqliteConnection? _locker;
+
+        /// <summary>Ends a <see cref="Fault.LockDatabase"/> lock (closing the connection rolls it back).</summary>
+        public void Unlock() => Interlocked.Exchange(ref _locker, null)?.Dispose();
 
         public void Arm(string fragment, Fault fault, bool runsOnly = false)
         {
@@ -988,6 +1018,19 @@ public sealed class WebhookReplayTests : IDisposable
                     _holding.TrySetResult();
                     await _resume.Task;
                     throw new OperationCanceledException("The answer was lost.");
+                case Fault.LockDatabase:
+                {
+                    // Another connection takes the database's write lock just before this command.
+                    var locker = new Microsoft.Data.Sqlite.SqliteConnection(command.Connection!.ConnectionString);
+                    locker.Open();
+                    using (var begin = locker.CreateCommand())
+                    {
+                        begin.CommandText = "BEGIN IMMEDIATE";
+                        begin.ExecuteNonQuery();
+                    }
+                    _locker = locker;
+                    break;
+                }
                 case Fault.Steal:
                     // Another claim (one that is no longer held) took the row just before this command.
                     await using (var steal = command.Connection!.CreateCommand())

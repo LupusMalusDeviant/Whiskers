@@ -15,8 +15,8 @@ All notable changes to Whiskers are documented here. The format follows
   was running when Whiskers stopped is reported `interrupted` and not run again. The endpoint now answers at once —
   202 with a `runId` (the run's operation id), 200 `duplicate` with the first run's id and state, the same 400 for
   every invalid request, 429 / 503 with `Retry-After` — and runs the action in a bounded queue, one run per target at a
-  time — container actions one at a time per server, a compose deployment by its project whatever directory
-  names it — and re-reads the webhook before it runs, so one switched
+  time — container actions and deployments (also Git deployments, from their checkout) one at a time per server —
+  and re-reads the webhook before it runs, so one switched
   off while its delivery waited does not run. New settings under `Webhooks` (body size, request rates, queue,
   concurrency, timestamp window, retention, run timeout). The SQLite → PostgreSQL migrator copies webhooks of a
   database from before this release as `github`.

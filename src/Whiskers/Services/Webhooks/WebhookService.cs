@@ -309,26 +309,25 @@ public class WebhookService : IWebhookService
             {
                 try
                 {
-                    // A deployment from a Git workspace holds the workspace first: a Git deployment writes it.
-                    gate = target.Workspace is { } workspace ? await _locks.AcquireAsync(workspace, ct) : null;
-                    var resource = await _locks.AcquireAsync(target.Key, ct);
-                    gate = gate is null ? resource : ResourceLocks.Both(gate, resource);
-                    // A deployment recreates and removes containers: it holds its server's containers too, after its
-                    // project (the one order everywhere). It is planned again below, after the waits.
-                    if (target.Plan is { } planned)
-                        gate = ResourceLocks.Both(gate, await _locks.AcquireAsync(ResourceLocks.Containers(planned.ServerId), ct));
+                    gate = await _locks.AcquireAsync(target.Key, ct);
                 }
                 catch (OperationCanceledException)
                 {
                     message = new("Webhook_Run_NoTurn", "Failed: the delivery did not get its turn on its target in time.", []);
+                    result = (false, message.English);
+                    var noTurn = result;
                     using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
-                    if (await _deliveries.StartAsync(run.RunId, run.Claim, bookkeeping.Token))
-                        result = await FinishAsync(run, queued, (false, message.English), WebhookDeliveryStore.Failed);
+                    await Bounded(async t =>
+                    {
+                        if (await _deliveries.StartAsync(run.RunId, run.Claim, t))
+                            await FinishAsync(run, queued, noTurn, WebhookDeliveryStore.Failed);
+                        return true;
+                    }, bookkeeping.Token);
                     return;
                 }
-                // The lock holds a resource, not a name: resolved again while it is held, the target must still be
-                // the resource locked — a run before may have rebuilt the container under a new id. Otherwise the
-                // run waits for the lock of what it would act on now. Nothing runs on a resource it has not locked.
+                // What the run acts on is resolved again while its lock is held — a run before may have rebuilt the
+                // container under a new id, or changed the compose files — and the action gets exactly that. A
+                // target whose lock is another now (another server) waits for that lock instead.
                 if (queued is null || !target.Resolved) break;
                 var now = await TargetAsync(queued, ct);
                 if (now.Key == target.Key)
@@ -341,7 +340,7 @@ public class WebhookService : IWebhookService
                 target = now;
             }
 
-            if (!await _deliveries.StartAsync(run.RunId, run.Claim, ct)) return;
+            if (!await StartAsync(run, ct)) return;
             var webhook = await ReadWebhookAsync(run.WebhookId, ct);
             if (webhook is null || !webhook.Enabled || queued is null || !SameTarget(queued, webhook))
             {
@@ -401,10 +400,10 @@ public class WebhookService : IWebhookService
         }
         catch (Exception ex) when (!handedOver)
         {
-            // Given up, while it still holds its claim: running, it failed; queued, the next delivery takes it over
-            // once the claim is released below — never before its failure is recorded.
+            // Given up: running, it failed; queued, the next delivery takes it over once the claim is released
+            // below. Recorded beside the worker — the database may be what failed — and fenced by the claim.
             _logger.LogError(ex, "Webhook run {RunId} failed outside its action", run.RunId);
-            await AbandonAsync(run);
+            _ = Task.Run(() => AbandonAsync(run));
         }
         finally
         {
@@ -434,7 +433,7 @@ public class WebhookService : IWebhookService
     /// <see cref="Container"/>, for a compose deployment <see cref="Plan"/>, is what the key was made from (or
     /// <see cref="Error"/> says why there is none).</summary>
     private sealed record RunTarget(string Key, ContainerInfo? Container = null, ComposePlan? Plan = null,
-        string? Error = null, string? Workspace = null)
+        string? Error = null)
     {
         /// <summary>Resolved from what the name points to now — which can change (a rebuild, an edited compose file),
         /// so it is checked again under its lock.</summary>
@@ -466,13 +465,49 @@ public class WebhookService : IWebhookService
             ? (work.Result.Success, work.Result.Output)
             : (false, work.Exception?.GetBaseException().Message ?? Cancelled);
 
+    /// <summary>Starts the run within its deadline. The database may not answer in time (SQLite runs its commands
+    /// synchronously and does not cancel them): the worker goes on, and a start that still lands later is recorded
+    /// as failed — the run never runs.</summary>
+    private async Task<bool> StartAsync(QueuedRun run, CancellationToken ct)
+    {
+        var start = Task.Run(() => _deliveries.StartAsync(run.RunId, run.Claim, ct), CancellationToken.None);
+        try
+        {
+            return await start.WaitAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested && !start.IsCompleted)
+        {
+            _ = start.ContinueWith(t => t.IsCompletedSuccessfully && t.Result ? AbandonAsync(run) : Task.CompletedTask,
+                CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Database work of a run, on the thread pool and waited for at most until <paramref name="ct"/>: SQLite runs its
+    /// commands synchronously and does not cancel them, so awaiting them directly could hold a worker past its
+    /// deadline. Work given up goes on in the background; its failure is logged. Claims fence it: what it writes
+    /// applies only to the run it was started for.
+    /// </summary>
+    private Task<T> Bounded<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct)
+    {
+        var task = Task.Run(() => work(ct), CancellationToken.None);
+        _ = task.ContinueWith(t => _logger.LogWarning(t.Exception, "Webhook database work given up failed"),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        return task.WaitAsync(ct);
+    }
+
     /// <summary>A run its worker gave up: running, it failed (a queued one is taken over by its next delivery).</summary>
     private async Task AbandonAsync(QueuedRun run)
     {
         try
         {
             using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
-            await _deliveries.FinishAsync(run.RunId, run.Claim, WebhookDeliveryStore.Failed, bookkeeping.Token);
+            await Bounded(async t =>
+            {
+                await _deliveries.FinishAsync(run.RunId, run.Claim, WebhookDeliveryStore.Failed, t);
+                return true;
+            }, bookkeeping.Token);
         }
         catch (Exception ex)
         {
@@ -492,7 +527,20 @@ public class WebhookService : IWebhookService
         string state)
     {
         using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
-        var ct = bookkeeping.Token;
+        try
+        {
+            return await Bounded(ct => RecordOutcomeAsync(run, webhook, result, state, ct), bookkeeping.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogError("Webhook run {RunId}: its outcome could not be recorded in time", run.RunId);
+            return result;
+        }
+    }
+
+    private async Task<(bool, string)> RecordOutcomeAsync(QueuedRun run, WebhookEntity? webhook,
+        (bool Success, string Output) result, string state, CancellationToken ct)
+    {
         try
         {
             await _deliveries.FinishAsync(run.RunId, run.Claim, state, ct);
@@ -528,23 +576,23 @@ public class WebhookService : IWebhookService
         return result;
     }
 
-    private async Task<WebhookEntity?> ReadWebhookAsync(string webhookId, CancellationToken ct)
+    private Task<WebhookEntity?> ReadWebhookAsync(string webhookId, CancellationToken ct) => Bounded(async t =>
     {
         using var scope = _scopeFactory.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Webhooks.AsNoTracking()
-            .FirstOrDefaultAsync(w => w.WebhookId == webhookId, ct);
-    }
+            .FirstOrDefaultAsync(w => w.WebhookId == webhookId, t);
+    }, ct);
 
     private static bool SameTarget(WebhookEntity queued, WebhookEntity now) =>
         queued.Action == now.Action && queued.TargetId == now.TargetId && queued.ServerId == now.ServerId;
 
     /// <summary>
-    /// The resource a run locks, by its identity rather than its spelling: the containers of its server — one
-    /// container action per server at a time, since a rebuild starts the replacement under a new id (and renames the
-    /// old one) before it ends, so no name or id names the container throughout; a compose deployment by its planned project on its server
-    /// (compose's own identity: symlinked or different directories of one project are one lock), a Git app by its id.
-    /// A container or compose action acts on exactly the container or plan resolved here. A target that cannot be
-    /// resolved locks its spelling; its run is refused anyway.
+    /// The resource a run locks. A container action and a compose deployment hold their server (one at a time per
+    /// server): a rebuild starts the replacement under a new id and renames the old container before it ends, and a
+    /// deployment's files can lie anywhere (a symlinked directory, a compose file elsewhere, a Git checkout), so no
+    /// name, id or path is one resource throughout — the server is. A Git deployment is locked by its app here and
+    /// holds the server itself, from its checkout to `up`. A container or compose action acts on exactly the container
+    /// or plan resolved under the lock; one that cannot be resolved is refused.
     /// </summary>
     private async Task<RunTarget> TargetAsync(WebhookEntity webhook, CancellationToken ct)
     {
@@ -555,18 +603,14 @@ public class WebhookService : IWebhookService
                 return new RunTarget("git:" + webhook.TargetId);
             case "deploy":
             {
-                var directory = NormalizeDirectory(webhook.TargetId);
-                var workspace = GitDeployCommands.WorkDirOf(directory) is { } dir ? ResourceLocks.Workspace(server, dir) : null;
                 var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook, ct), ct);
-                return plan is not null
-                    ? new RunTarget(ResourceLocks.ComposeProject(server, plan.ProjectName), Plan: plan, Workspace: workspace)
-                    : new RunTarget($"compose-dir:{server}|{directory}", Error: error, Workspace: workspace);
+                return new RunTarget(ResourceLocks.Server(server), Plan: plan, Error: plan is null ? error : null);
             }
             case "restart" or "rebuild":
             {
                 var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
                 return container is not null
-                    ? new RunTarget(ResourceLocks.Containers(server), container)
+                    ? new RunTarget(ResourceLocks.Server(server), container)
                     : new RunTarget($"container:{server}|{webhook.TargetId}", Error: error);
             }
             default:

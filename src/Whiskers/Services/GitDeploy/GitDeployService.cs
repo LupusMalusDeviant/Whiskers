@@ -40,33 +40,6 @@ public class GitDeployService : IGitDeployService
 
     private static string TokenVaultKey(string appId) => $"git-token:{appId}";
 
-    /// <summary>The lock of the compose project <paramref name="plan"/> deploys, held while its plan — made again
-    /// under it — still names that project; <paramref name="replanned"/> receives the plan made under the lock.</summary>
-    private async Task<ResourceLocks.Lease> LockProjectAsync(ComposeDeployment deployment, ComposePlan plan,
-        Action<ComposePlan> replanned, CancellationToken ct)
-    {
-        while (true)
-        {
-            var key = ResourceLocks.ComposeProject(plan.ServerId, plan.ProjectName);
-            var lease = await _locks.AcquireAsync(key, ct);
-            try
-            {
-                // Its server's containers too, after the project (the one order everywhere): no webhook restart or
-                // rebuild acts on a container this deployment recreates or removes. Planned again after both waits.
-                lease = ResourceLocks.Both(lease, await _locks.AcquireAsync(ResourceLocks.Containers(plan.ServerId), ct));
-                plan = await _planner.PlanAsync(deployment, ct);
-            }
-            catch
-            {
-                lease.Dispose();
-                throw;
-            }
-            replanned(plan);
-            if (ResourceLocks.ComposeProject(plan.ServerId, plan.ProjectName) == key) return lease;
-            lease.Dispose();
-        }
-    }
-
     // App IDs flow into remote paths UNQUOTED by design (fixed hex alphabet) — enforce that here
     // so a hand-edited store file can never smuggle shell metacharacters into a path.
     private static void ValidateId(string appId)
@@ -253,11 +226,10 @@ public class GitDeployService : IGitDeployService
 
         try
         {
-            // The workspace is written (credentials, checkout) and read (the compose files) by this deployment from
-            // here to `up` (R1-10): no other deployment of the app, nor a compose webhook on its checkout, meanwhile.
-            // Taken before the project and server locks, as everywhere.
-            using var workspace = await _locks.AcquireAsync(
-                ResourceLocks.Workspace(app.ServerId, GitDeployCommands.WorkDir(appId)), ct);
+            // The server, from the checkout to `up` (R1-10): the deployment writes its workspace (credentials,
+            // checkout) and compose reads it — no other deployment, compose webhook or webhook container action on
+            // the server meanwhile, whatever path or alias it uses. The app is checked once the wait is over.
+            using var server = await _locks.AcquireAsync(ResourceLocks.Server(app.ServerId), ct);
             await EnsureUnchangedAsync(app);
 
             // 1) Credentials (private repos): refresh the askpass pair from the vault every run,
@@ -288,14 +260,9 @@ public class GitDeployService : IGitDeployService
             async Task BuildAndUp()
             {
                 // Decided by the gate: the app is unchanged, planned again right before the first write, and nothing
-                // undecided may run. The writes hold the compose project's lock (R1-10): no other deployment of that
-                // project — another app, a compose webhook — runs at the same time. The plan is made again under it;
-                // one that now names another project waits for that project's lock instead.
+                // undecided may run.
                 await EnsureUnchangedAsync(app);
                 plan = await _planner.PlanAsync(deployment, ct);
-                using var project = await LockProjectAsync(deployment, plan, p => plan = p, ct);
-                // The wait for the project can be long: the app must still be the one decided on.
-                await EnsureUnchangedAsync(app);
                 plan.EnsureDecided(MutationScope.Current);
                 // 4) Build
                 Report("③ docker compose build…");

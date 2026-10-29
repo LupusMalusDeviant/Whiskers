@@ -23,24 +23,22 @@ recorded only once its slot is reserved, so every answer naming a queued run is 
 delivery is still answered with its run and a new one is `Busy` and not recorded. A new delivery is answered at once
 with its run id; a repeat (concurrent, later, after a restart) with the first run's id and state. Workers
 (`MaxConcurrentRuns`, started with the first delivery without the caller's execution context — no mutation scope,
-culture or user travels to later deliveries — and stopped with the app) run each delivery once, holding a lock per
-resource (`TargetAsync`: a container action holds the containers of its server — one at a time per server, because
-a rebuild starts the replacement under a new id and renames the old container before it ends, so no name or id is one
-container throughout —, a compose deployment by its planned project on its server — compose's own identity, so a symlinked directory
-or another directory declaring the same project is one lock —, a Git app by its id), so runs on one resource never
-overlap whichever webhook fires them. The locks are the process-wide `ResourceLocks` (reference-counted: a lock nothing holds or awaits is not kept), shared with Git deployments, which hold their compose project's lock while
-they build and run `up`. A compose webhook deploying from a Git app's checkout first holds that workspace, so a Git deployment never rewrites the files it reads. A deployment (compose webhook or Git) also holds its server's containers, taken after its
-project's lock (one order everywhere) and planned again after both waits, so no restart or rebuild acts on a container
-it recreates or removes. A container or plan is resolved again once its lock is held, and the action acts on what it finds then; if a plan now
-names another project (the compose file changed it), the run
-waits for that lock instead, and the action gets exactly the container or plan it locked (a compose deployment whose
-project changes again before it writes is refused). The webhook is read again once the run holds its resource: switched off, removed or
+culture or user travels to later deliveries — and stopped with the app) run each delivery once, holding a lock
+(`TargetAsync`, the process-wide `ResourceLocks`, reference-counted so a lock nothing holds or awaits is not kept). A
+container action and a compose deployment hold their **server** — one at a time per server, together with Git
+deployments, which hold it from their checkout to `up`: a rebuild starts the replacement under a new id and renames the
+old container before it ends, and a deployment's files can lie anywhere (a symlinked directory, a `COMPOSE_FILE`
+elsewhere, a Git checkout), so no name, id or path is one resource throughout — the server is. A Git webhook is held by
+its app, and its deployment then holds the server. The container or plan is resolved again once the lock is held, and
+the action gets exactly what was found then (a compose deployment whose project changes again before it writes is
+refused). The webhook is read again once the run holds its resource: switched off, removed or
 pointed elsewhere meanwhile → refused; taken over → it runs on the new owner. `RunTimeout` bounds the run: a run that
-cannot get its resource in time fails; lookups are abandoned at the deadline (they only read), and the run's database
-reads and its start honour it too (a run given up that way is taken over by its next delivery, or failed if it had
-started); recording its outcome (only under the run's own claim, so a run a later delivery took over is never touched) and the hourly retention pass get a bounded time of their own, and pruning runs on the thread pool, never on a worker
-(SQLite executes commands synchronously and does not cancel them: a database step is bounded by the provider's command
-timeout, 30 s by default, so a `RunTimeout` shorter than that can be overrun by at most that much); the action gets the
+cannot get its resource in time fails; lookups are abandoned at the deadline (they only read); the run's database work
+(its reads and its start) runs on the thread pool and is waited for only until the deadline — SQLite executes commands
+synchronously and does not cancel them — so a locked database never holds a worker past it: the run is given up
+(taken over by its next delivery), and a start that still lands later is recorded as failed (it never runs). Recording
+its outcome (only under the run's own claim, so a run a later delivery took over is never touched) and the hourly
+retention pass get a bounded time of their own the same way, and pruning runs beside the workers; the action gets the
 cancellation (the gateway, the planner and the host executor honour it); an action that still does not stop keeps its
 resource until it ends — nothing overlaps it — but gives its worker back, at most `MaxConcurrentRuns` such runs at once;
 beyond that it keeps its worker as well until it ends. With the queue full, a delivery left queued without a live claim is

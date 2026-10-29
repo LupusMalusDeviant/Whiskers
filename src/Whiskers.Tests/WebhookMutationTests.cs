@@ -426,7 +426,7 @@ public sealed class WebhookMutationTests : IDisposable
     {
         var webhook = Seed("git-deploy", AppId);
         // Another deployment of the app's compose project ("payments") — a compose webhook, another app — holds it.
-        var held = await _locks.AcquireAsync(ResourceLocks.ComposeProject("local", "payments"));
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
         await Task.Delay(500);
@@ -446,7 +446,7 @@ public sealed class WebhookMutationTests : IDisposable
     {
         var webhook = Seed(action, target);
         // A webhook restart or rebuild on the server is running.
-        var held = await _locks.AcquireAsync(ResourceLocks.Containers("local"));
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
         await Task.Delay(500);
@@ -465,7 +465,7 @@ public sealed class WebhookMutationTests : IDisposable
         var webhook = Seed("git-deploy", AppId);
         var workDir = GitDeployCommands.WorkDir(AppId);
         // A compose webhook deploying from the app's checkout holds the workspace.
-        var held = await _locks.AcquireAsync(ResourceLocks.Workspace("local", workDir));
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
         await Task.Delay(500);
@@ -478,10 +478,33 @@ public sealed class WebhookMutationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_compose_webhook_on_a_symlink_or_an_outside_compose_file_waits_while_a_git_deployment_holds_the_server()
+    {
+        // A directory that is a symlink to a checkout, or whose .env points COMPOSE_FILE into it: no path tells.
+        _host.Files["/srv/shop/docker-compose.yml"] = "name: payments\nservices:\n  web:\n    image: nginx\n";
+        var compose = Seed("deploy", "/srv/shop");
+        var git = Seed("git-deploy", AppId);
+        var service = Service();
+        // The Git deployment is in its checkout: it holds the server.
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
+
+        var test = service.TriggerSignedTestAsync(compose.WebhookId);
+        await Task.Delay(500);
+        Assert.False(Ran("deploy"));
+
+        held.Dispose();
+        var (success, output) = await test;
+        Assert.True(success, output);
+        Assert.True(Ran("deploy"));
+        Assert.True((await service.TriggerSignedTestAsync(git.WebhookId)).Success);
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
     public async Task A_compose_webhook_on_a_git_checkout_waits_for_its_workspace()
     {
         var compose = Seed("deploy", $"{GitDeployCommands.WorkDir(AppId)}/repo");
-        var held = await _locks.AcquireAsync(ResourceLocks.Workspace("local", GitDeployCommands.WorkDir(AppId)));
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(compose.WebhookId);
         await Task.Delay(500);
@@ -498,7 +521,7 @@ public sealed class WebhookMutationTests : IDisposable
     public async Task A_git_app_changed_while_its_deployment_waited_for_the_project_does_not_deploy()
     {
         var webhook = Seed("git-deploy", AppId);
-        var held = await _locks.AcquireAsync(ResourceLocks.ComposeProject("local", "payments"));
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
         var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
         await Task.Delay(500);
 
@@ -519,7 +542,7 @@ public sealed class WebhookMutationTests : IDisposable
         _host.Files["/opt/payments/docker-compose.yml"] = "name: payments\nservices:\n  web:\n    image: nginx\n";
         var compose = Seed("deploy", "/opt/payments");
         var service = Service();
-        var held = await _locks.AcquireAsync(ResourceLocks.ComposeProject("local", "payments"));
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = service.TriggerSignedTestAsync(compose.WebhookId);
         await Task.Delay(500);
