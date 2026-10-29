@@ -48,6 +48,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     private readonly AuditOutbox? _outbox;
     // The events whose intent this process has written and not yet completed (by EventId): recovery leaves them alone.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _inFlight = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, string> _eventOf = new();
 
     /// <param name="outbox">Where a refusal whose insert failed is kept until it is written (R1-19); the app always
     /// registers it.</param>
@@ -75,7 +76,9 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            return await InsertOnceAsync(db, entity, ct);
+            var id = await InsertOnceAsync(db, entity, ct);
+            _eventOf[id] = entity.EventId!;
+            return id;
         }
         catch (Exception)
         {
@@ -122,14 +125,22 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     public async Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
         string? reason, TimeSpan duration, CancellationToken ct)
     {
-        using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var entity = await db.AuditLog.FindAsync([auditId], ct)
-                     ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
-        // Whether or not this write lands, the gateway is done with it: a failed outcome is AuditRecovery's.
-        if (entity.EventId is { } eventId) _inFlight.TryRemove(eventId, out _);
-        Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var entity = await db.AuditLog.FindAsync([auditId], ct)
+                         ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
+            Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds);
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            // Written or not, the gateway is done with it — only now, so recovery never sees it as abandoned while
+            // its outcome is being written. A failed outcome is AuditRecovery's from here (kept, or settled from the
+            // journal), also when the row could not even be read.
+            if (_eventOf.TryRemove(auditId, out var eventId)) _inFlight.TryRemove(eventId, out _);
+        }
     }
 
     /// <summary>Turns an intent row into its outcome: the typed fields, and the details as one document.
@@ -223,6 +234,10 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         PrincipalId = request.Principal.Id,
         CredentialId = request.Principal.CredentialId,
         OnBehalfOfId = request.Principal.OnBehalfOf?.Id,
+        OnBehalfOfKind = request.Principal.OnBehalfOf?.Kind.ToString(),
+        PrincipalSessionId = request.Principal.SessionId,
+        DelegatedBy = request.Principal.DelegatedBy,
+        SessionId = request.SessionId,
         Arguments = RedactedArguments(request.Arguments),
     };
 

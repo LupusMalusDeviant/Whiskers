@@ -66,7 +66,7 @@ public static class SqliteToPostgresMigrator
     internal const string AuditLogWithoutTypedFieldsSql =
         "SELECT *, NULL AS \"EventId\", NULL AS \"Arguments\", NULL AS \"OperationId\", NULL AS \"ParentOperationId\", NULL AS \"DecisionId\", NULL AS \"TriggerId\", " +
         "NULL AS \"Surface\", NULL AS \"PrincipalKind\", NULL AS \"PrincipalId\", NULL AS \"CredentialId\", " +
-        "NULL AS \"OnBehalfOfId\", NULL AS \"ApprovalId\", NULL AS \"ApprovedBy\", NULL AS \"Phase\", NULL AS \"Outcome\", " +
+        "NULL AS \"OnBehalfOfId\", NULL AS \"OnBehalfOfKind\", NULL AS \"PrincipalSessionId\", NULL AS \"DelegatedBy\", NULL AS \"SessionId\", NULL AS \"ApprovalId\", NULL AS \"ApprovedBy\", NULL AS \"Phase\", NULL AS \"Outcome\", " +
         "NULL AS \"Verification\", NULL AS \"DurationMs\" FROM \"AuditLog\"";
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack

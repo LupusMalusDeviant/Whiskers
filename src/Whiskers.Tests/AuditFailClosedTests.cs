@@ -26,6 +26,7 @@ public sealed class AuditFailClosedTests : IDisposable
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"sw-audit-{Guid.NewGuid():N}");
     private readonly AuditWrites _writes = new();
+    private readonly OperationReads _reads = new();
     private readonly ServiceProvider _sp;
     private readonly IServiceScopeFactory _scopes;
     private readonly AuditOutbox _outbox;
@@ -39,7 +40,7 @@ public sealed class AuditFailClosedTests : IDisposable
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o
             .UseSqlite($"Data Source={Path.Combine(_root, "metrics.db")};Pooling=False")
-            .AddInterceptors(_writes));
+            .AddInterceptors(_writes, _reads));
         _sp = services.BuildServiceProvider();
         _scopes = _sp.GetRequiredService<IServiceScopeFactory>();
         using (var scope = _scopes.CreateScope())
@@ -81,6 +82,24 @@ public sealed class AuditFailClosedTests : IDisposable
             FailAfter && eventData.Context?.ChangeTracker.Entries<AuditLogEntity>().Any() == true
                 ? throw new InvalidOperationException("connection reset after commit")
                 : base.SavedChangesAsync(eventData, result, cancellationToken);
+    }
+
+    /// <summary>Runs <see cref="Before"/> once, right before the next read of the operation journal.</summary>
+    private sealed class OperationReads : DbCommandInterceptor
+    {
+        public Func<Task>? Before { get; set; }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM \"Operations\"", StringComparison.Ordinal)
+                && Interlocked.Exchange(ref _before, null) is { } before)
+                await before();
+            return result;
+        }
+
+        private Func<Task>? _before;
+        public void Once(Func<Task> before) => _before = before;
     }
 
     /// <summary>The system clock, moved forward by the test.</summary>
@@ -414,6 +433,35 @@ public sealed class AuditFailClosedTests : IDisposable
     public async Task An_audit_state_that_cannot_be_read_is_degraded_not_unhealthy()
     {
         Assert.Equal(HealthStatus.Degraded, await Status(new BrokenRecovery()));
+    }
+
+    [Fact]
+    public async Task Recovery_never_overwrites_an_outcome_written_while_it_was_looking()
+    {
+        // An intent this process is writing; the pass reads it, then — before it reads the journal — the gateway
+        // completes it. The pass's picture ("no claim, not in flight") is stale and must not win.
+        var sink = Sink();
+        var request = Restart("op-race");
+        var auditId = await sink.BeginAsync("op-race", request, new CapabilityCatalog().Find("container.restart")!, null, default);
+        _reads.Once(() => sink.CompleteAsync(auditId, "op-race", MutationStatus.Executed, VerificationStatus.NotVerifiable,
+            null, TimeSpan.FromMilliseconds(5), default));
+
+        await Recovery().RecoverAsync();
+
+        var row = Assert.Single(await Events());
+        Assert.Equal("Executed", row.Outcome);
+        Assert.DoesNotContain("Recovered", row.Details);
+    }
+
+    [Fact]
+    public async Task An_outbox_that_cannot_be_listed_is_not_empty()
+    {
+        var outbox = new AuditOutbox(new DataPathOptions(Path.Combine(_root, "bad dir")));
+        Assert.Equal(1, outbox.Count);
+        var recovery = new AuditRecovery(Sink(), _scopes, NullLogger<AuditRecovery>.Instance,
+            new DbOperationJournal(_scopes), _time, outbox);
+        await Assert.ThrowsAnyAsync<Exception>(() => recovery.RecoverAsync());
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
     }
 
     [Fact]

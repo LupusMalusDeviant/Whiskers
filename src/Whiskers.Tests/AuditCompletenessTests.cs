@@ -82,6 +82,9 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.Equal(principal.Id, row.PrincipalId);
         Assert.Equal(principal.CredentialId, row.CredentialId);
         Assert.Equal(principal.OnBehalfOf?.Id, row.OnBehalfOfId);
+        Assert.Equal(principal.OnBehalfOf?.Kind.ToString(), row.OnBehalfOfKind);
+        Assert.Equal(principal.SessionId, row.PrincipalSessionId);
+        Assert.Equal(principal.DelegatedBy, row.DelegatedBy);
         Assert.NotNull(row.EventId);
         Assert.Equal("container", row.TargetType);
         Assert.Equal("web", row.TargetId);
@@ -182,6 +185,22 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.False(row.Success);
     }
 
+    [Theory]
+    [InlineData("mysql -uroot -phunter2 -e 'select 1'")]
+    [InlineData("mysql \"-phunter2\" -e 'select 1'")]
+    [InlineData("mysql '-phunter2' -e 'select 1'")]
+    public void A_password_flag_is_masked_bare_or_quoted(string command)
+    {
+        Assert.DoesNotContain("hunter2", Whiskers.Utils.SecretRedactor.Redact(command));
+        Assert.DoesNotContain("hunter2", Whiskers.Utils.SecretRedactor.RedactJson(JsonSerializer.Serialize(new { command })));
+    }
+
+    [Theory]
+    [InlineData("web-prod")]
+    [InlineData("api-proxy-1")]
+    public void A_hyphenated_name_is_no_password_flag(string name) =>
+        Assert.Equal(name, Whiskers.Utils.SecretRedactor.Redact(name));
+
     [Fact]
     public async Task Arguments_are_redacted_value_by_value_and_keep_everything_after_a_redaction()
     {
@@ -216,17 +235,24 @@ public sealed class AuditCompletenessTests : IDisposable
     {
         // A long argument before the others and a long failure text — plain words, which no redaction rule shortens:
         // the details are cut to their cap, the security fields and the arguments are not.
-        var principal = Admin with { CredentialId = "key-reporting" };
-        var note = string.Concat(Enumerable.Repeat("please restart the web container after the deploy ", 400));
-        var request = Restart("op-big", principal: principal) with
+        var principal = Admin with
         {
+            CredentialId = "key-reporting", SessionId = "login-42", DelegatedBy = "user:owner@example.com",
+            OnBehalfOf = new MutationPrincipal(MutationPrincipalKind.Human, "user:owner@example.com", "owner", McpPermissionLevels.Admin),
+        };
+        var note = string.Concat(Enumerable.Repeat("please restart the web container after the deploy ", 400));
+        // A caller-chosen operation id far longer than the details' budget: repeated in them, it forces the fallback.
+        var operationId = "op-big-" + new string('o', 3000);
+        var request = Restart(operationId, principal: principal) with
+        {
+            SessionId = "chat-7",
             Arguments = Args(new { aNote = note, containerId = "web", serverId = "local", command = "secret-cmd --password hunter2" }),
         };
 
         var outcome = await Gateway().ExecuteAsync<int>(request,
             (_, _) => throw new InvalidOperationException(string.Concat(Enumerable.Repeat("the daemon did not answer ", 2000))));
 
-        var row = await EventOf("op-big");
+        var row = await EventOf(operationId);
         Assert.True(row.Details!.Length <= 4000);
         using var details = JsonDocument.Parse(row.Details);
         Assert.DoesNotContain("containerId", row.Details[^200..]);   // the details really were shortened
@@ -235,6 +261,11 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.NotNull(row.DecisionId);
         Assert.Equal(principal.Id, row.PrincipalId);
         Assert.Equal("key-reporting", row.CredentialId);
+        Assert.Equal("login-42", row.PrincipalSessionId);
+        Assert.Equal("user:owner@example.com", row.DelegatedBy);
+        Assert.Equal("user:owner@example.com", row.OnBehalfOfId);
+        Assert.Equal("Human", row.OnBehalfOfKind);
+        Assert.Equal("chat-7", row.SessionId);
         Assert.Equal("Ui", row.Surface);
         Assert.Equal("NotRun", row.Verification);
         Assert.NotNull(row.DurationMs);

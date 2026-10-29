@@ -98,7 +98,7 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
             var columns = new[]
             {
                 "EventId", "Arguments", "OperationId", "ParentOperationId", "DecisionId", "TriggerId", "Surface", "PrincipalKind", "PrincipalId",
-                "CredentialId", "OnBehalfOfId", "ApprovalId", "ApprovedBy", "Phase", "Outcome", "Verification", "DurationMs",
+                "CredentialId", "OnBehalfOfId", "OnBehalfOfKind", "PrincipalSessionId", "DelegatedBy", "SessionId", "ApprovalId", "ApprovedBy", "Phase", "Outcome", "Verification", "DurationMs",
             };
             await src.Database.ExecuteSqlRawAsync("DROP INDEX IX_AuditLog_OperationId; DROP INDEX IX_AuditLog_EventId; DROP INDEX IX_AuditLog_Phase_Timestamp; " +
                 string.Concat(columns.Select(c => $"ALTER TABLE AuditLog DROP COLUMN {c}; ")));

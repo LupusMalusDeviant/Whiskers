@@ -11,7 +11,7 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Migrations
 {
     [DbContext(typeof(MetricsDbContext))]
-    [Migration("20261029184940_AuditTypedFields")]
+    [Migration("20261029191109_AuditTypedFields")]
     partial class AuditTypedFields
     {
         /// <inheritdoc />
@@ -222,6 +222,9 @@ namespace Whiskers.Migrations
                     b.Property<string>("DecisionId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DelegatedBy")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Details")
                         .HasColumnType("TEXT");
 
@@ -232,6 +235,9 @@ namespace Whiskers.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("OnBehalfOfId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OnBehalfOfKind")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("OperationId")
@@ -252,7 +258,13 @@ namespace Whiskers.Migrations
                     b.Property<string>("PrincipalKind")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PrincipalSessionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ServerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("Success")

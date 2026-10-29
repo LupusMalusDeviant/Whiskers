@@ -46,9 +46,12 @@ public sealed class AuditOutbox
     /// <summary>The kept events, oldest first. A file that cannot be read is left where it is and still counts.</summary>
     public IReadOnlyList<(string Path, AuditLogEntity? Row)> Load()
     {
-        if (!Directory.Exists(_dir)) return [];
-        // Listing the directory may fail (permissions, I/O): the caller's pass fails and Count keeps it visible.
-        return Directory.EnumerateFiles(_dir, "*.json")
+        // Only a directory that is really not there is empty; any other failure (permissions, I/O) reaches the
+        // caller's pass, and Count keeps it visible.
+        List<string> files;
+        try { files = Directory.EnumerateFiles(_dir, "*.json").ToList(); }
+        catch (DirectoryNotFoundException) { return []; }
+        return files
             .OrderBy(File.GetLastWriteTimeUtc)
             .Select(path =>
             {
@@ -63,7 +66,9 @@ public sealed class AuditOutbox
     {
         get
         {
-            try { return Directory.Exists(_dir) ? Directory.EnumerateFiles(_dir, "*.json").Count() : 0; }
+            // Directory.Exists says "no" for a directory it may not read: only a missing directory counts as empty.
+            try { return Directory.EnumerateFiles(_dir, "*.json").Count(); }
+            catch (DirectoryNotFoundException) { return 0; }
             catch (Exception) { return 1; }
         }
     }

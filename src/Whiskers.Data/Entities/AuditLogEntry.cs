@@ -33,8 +33,15 @@ public class AuditLogEntity
     public string? PrincipalKind { get; set; }
     public string? PrincipalId { get; set; }
     public string? CredentialId { get; set; }
-    /// <summary>Whom the principal acts for (an automation's owner, an agent's user).</summary>
+    /// <summary>The principal's own session (a web login, an agent session).</summary>
+    public string? PrincipalSessionId { get; set; }
+    /// <summary>Whom the principal acts for (an automation's owner, an agent's user), and what kind of principal that is.</summary>
     public string? OnBehalfOfId { get; set; }
+    public string? OnBehalfOfKind { get; set; }
+    /// <summary>Who delegated the authority the principal acts with (R1-04).</summary>
+    public string? DelegatedBy { get; set; }
+    /// <summary>The session the request came from (an agent chat, an MCP session).</summary>
+    public string? SessionId { get; set; }
     /// <summary>The approval the mutation ran under, or the one it waits for (pending).</summary>
     public string? ApprovalId { get; set; }
     /// <summary>Who gave that approval; null while it is pending.</summary>

@@ -228,6 +228,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.Property<string>("DecisionId")
                         .HasColumnType("text");
 
+                    b.Property<string>("DelegatedBy")
+                        .HasColumnType("text");
+
                     b.Property<string>("Details")
                         .HasColumnType("text");
 
@@ -238,6 +241,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("OnBehalfOfId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OnBehalfOfKind")
                         .HasColumnType("text");
 
                     b.Property<string>("OperationId")
@@ -258,7 +264,13 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.Property<string>("PrincipalKind")
                         .HasColumnType("text");
 
+                    b.Property<string>("PrincipalSessionId")
+                        .HasColumnType("text");
+
                     b.Property<string>("ServerId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SessionId")
                         .HasColumnType("text");
 
                     b.Property<bool>("Success")

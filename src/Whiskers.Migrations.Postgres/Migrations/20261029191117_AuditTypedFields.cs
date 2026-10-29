@@ -2,7 +2,7 @@
 
 #nullable disable
 
-namespace Whiskers.Migrations
+namespace Whiskers.Migrations.Postgres.Migrations
 {
     /// <inheritdoc />
     public partial class AuditTypedFields : Migration
@@ -13,103 +13,127 @@ namespace Whiskers.Migrations
             migrationBuilder.AddColumn<string>(
                 name: "ApprovalId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "ApprovedBy",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "Arguments",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "CredentialId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "DecisionId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "DelegatedBy",
+                table: "AuditLog",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<long>(
                 name: "DurationMs",
                 table: "AuditLog",
-                type: "INTEGER",
+                type: "bigint",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "EventId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "OnBehalfOfId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "OnBehalfOfKind",
+                table: "AuditLog",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "OperationId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "Outcome",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "ParentOperationId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "Phase",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "PrincipalId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "PrincipalKind",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "PrincipalSessionId",
+                table: "AuditLog",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "SessionId",
+                table: "AuditLog",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "Surface",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "TriggerId",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "Verification",
                 table: "AuditLog",
-                type: "TEXT",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.CreateIndex(
@@ -165,6 +189,10 @@ namespace Whiskers.Migrations
                 table: "AuditLog");
 
             migrationBuilder.DropColumn(
+                name: "DelegatedBy",
+                table: "AuditLog");
+
+            migrationBuilder.DropColumn(
                 name: "DurationMs",
                 table: "AuditLog");
 
@@ -174,6 +202,10 @@ namespace Whiskers.Migrations
 
             migrationBuilder.DropColumn(
                 name: "OnBehalfOfId",
+                table: "AuditLog");
+
+            migrationBuilder.DropColumn(
+                name: "OnBehalfOfKind",
                 table: "AuditLog");
 
             migrationBuilder.DropColumn(
@@ -198,6 +230,14 @@ namespace Whiskers.Migrations
 
             migrationBuilder.DropColumn(
                 name: "PrincipalKind",
+                table: "AuditLog");
+
+            migrationBuilder.DropColumn(
+                name: "PrincipalSessionId",
+                table: "AuditLog");
+
+            migrationBuilder.DropColumn(
+                name: "SessionId",
                 table: "AuditLog");
 
             migrationBuilder.DropColumn(

@@ -186,7 +186,7 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
         long after = 0;
         while (true)
         {
-            var rows = await db.AuditLog
+            var rows = await db.AuditLog.AsNoTracking()
                 .Where(a => a.Phase == "intent" && a.Id > after)
                 .OrderBy(a => a.Id).Take(BatchSize).ToListAsync(ct);
             if (rows.Count == 0) return left;
@@ -195,7 +195,6 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
             var operations = await db.Operations.AsNoTracking()
                 .Where(o => o.AuditId != null && ids.Contains(o.AuditId.Value))
                 .ToDictionaryAsync(o => o.AuditId!.Value, ct);
-            var settling = 0;
             foreach (var row in rows)
             {
                 // Kept in memory with its exact outcome: written by the first half of the pass, counted as pending.
@@ -234,18 +233,25 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                                 : null);
                         break;
                 }
-                settling++;
-            }
-            if (settling == 0) continue;
-            try
-            {
-                await db.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException ex)
-            {
-                _logger.LogWarning(ex, "Audit intents could not be settled");
-                db.ChangeTracker.Clear();
-                left += settling;
+                // Only while it is still the intent: the gateway may have completed it since this pass read it, and
+                // its outcome is never overwritten.
+                try
+                {
+                    await db.AuditLog.Where(a => a.Id == row.Id && a.Phase == "intent")
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(a => a.Phase, row.Phase)
+                            .SetProperty(a => a.Outcome, row.Outcome)
+                            .SetProperty(a => a.Verification, row.Verification)
+                            .SetProperty(a => a.DurationMs, row.DurationMs)
+                            .SetProperty(a => a.Success, row.Success)
+                            .SetProperty(a => a.OperationId, row.OperationId)
+                            .SetProperty(a => a.Details, row.Details), ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex, "Audit intent {AuditId} could not be settled", row.Id);
+                    left++;
+                }
             }
         }
     }

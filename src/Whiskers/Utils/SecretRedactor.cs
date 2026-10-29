@@ -12,9 +12,9 @@ public static class SecretRedactor
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(100);
 
-    // mysql -p<secret>  →  -p***  — a flag, so only at the start or after a space: "web-prod" is a name, not a password.
+    // mysql -p<secret>, "-p<secret>", '-p<secret>'  →  -p***  — a flag, so not inside a word: "web-prod" is a name.
     private static readonly Regex MysqlPwFlag = new(
-        @"(?<!\S)-p\S+", RegexOptions.Compiled, Timeout);
+        @"(?<![\w-])-p\S+", RegexOptions.Compiled, Timeout);
 
     // redis-cli -a <secret>  →  -a ***
     private static readonly Regex RedisAuthFlag = new(
