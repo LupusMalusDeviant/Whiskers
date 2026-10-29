@@ -54,7 +54,7 @@ waits for its run (`TestRunTimeout`).
 
 This is the opt-in **Webhooks module** ([`../../Modules/Webhooks/`](../../Modules/Webhooks/), toggle
 `Features:webhooks:Enabled`): its `ConfigureServices` registers `IWebhookService` and owns the `webhooks` nav
-entry. The inbound `POST /api/webhooks/{id}` endpoint stays in Core (`Program.cs`) and resolves the service per
+entry. The inbound `POST /api/webhooks/{id}` endpoint stays in Core (`Startup/WhiskersPipelineExtensions.cs`) and resolves the service per
 request, so Core keeps the `NoopWebhookService` default above for when the module is off.
 
 ## Security notes

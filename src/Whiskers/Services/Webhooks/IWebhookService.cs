@@ -5,7 +5,7 @@ namespace Whiskers.Services.Webhooks;
 /// <summary>Manages CI/CD webhooks and processes incoming webhook triggers.
 ///
 /// Secrets are mandatory (HOCH-12 part 2): <see cref="CreateWebhookAsync"/> generates a strong HMAC
-/// secret when none is supplied, and <see cref="TriggerAsync"/> rejects webhooks without one
+/// secret when none is supplied, and <see cref="AcceptAsync"/> rejects webhooks without one
 /// fail-closed. The secret is returned exactly once (on create / regenerate) and never displayed
 /// again — callers show it one-time and discard it.</summary>
 public interface IWebhookService

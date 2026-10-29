@@ -16,7 +16,7 @@ a target. The `/webhooks` management page, the `IWebhookService`, and (in Core) 
 When **disabled**: the `webhooks` nav entry disappears, `/webhooks` shows a "module disabled" notice, and an
 inbound `POST /api/webhooks/{id}` answers **400** (`{"status":"rejected"}`) instead of triggering anything.
 
-**Why a no-op:** the inbound `POST /api/webhooks/{id}` endpoint lives in `Program.cs` (an app route, not a
+**Why a no-op:** the inbound `POST /api/webhooks/{id}` endpoint lives in `Startup/WhiskersPipelineExtensions.cs` (an app route, not a
 service) and resolves `IWebhookService` per request, so it can't be gated by the module the way a page is. A
 `NoopWebhookService` default keeps that resolution working when the module is off — its `AcceptAsync` rejects
 every delivery (400, not a 500 from an unresolved service).
