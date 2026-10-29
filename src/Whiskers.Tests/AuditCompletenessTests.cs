@@ -264,6 +264,27 @@ public sealed class AuditCompletenessTests : IDisposable
     }
 
     [Fact]
+    public async Task Long_tool_reports_stay_within_the_details_cap()
+    {
+        // A tool that names its target by a whole command (execute_command does), ten times over (R1-20).
+        var command = string.Concat(Enumerable.Repeat("echo restart the web container please; ", 200));
+
+        await Gateway().ExecuteAsync(Restart("op-reports"), (_, _) =>
+        {
+            for (var i = 0; i < 12; i++)
+                MutationScope.Record(new MutationDomainResult("command.execute" + new string('x', 500), "command",
+                    command, command, command, "local" + new string('l', 500), true));
+            return Task.FromResult(1);
+        });
+
+        var row = await EventOf("op-reports");
+        Assert.Equal("Executed", row.Outcome);
+        Assert.True(row.Details!.Length <= 4000, $"{row.Details.Length} chars");
+        using var details = JsonDocument.Parse(row.Details);
+        Assert.Equal(10, details.RootElement.GetProperty("results").GetArrayLength());
+    }
+
+    [Fact]
     public async Task Required_fields_survive_when_the_details_are_shortened()
     {
         // A long argument before the others and a long failure text — plain words, which no redaction rule shortens:

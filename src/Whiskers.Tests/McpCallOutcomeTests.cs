@@ -239,6 +239,30 @@ public sealed class McpCallOutcomeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_number_id_is_read_as_the_mcp_server_reads_it()
+    {
+        // The SDK reads -0 as the integer 0; the string "0" stays another call.
+        Assert.Equal(McpCallOutcomes.KeyOf(new RequestId(0)), McpCallOutcomes.KeyOf(JsonDocument.Parse("-0").RootElement));
+        var store = new RecordingCallLog();
+        var http = Post(store, """
+            [{"jsonrpc":"2.0","id":-0,"method":"tools/call","params":{"name":"restart_container","arguments":{"containerId":"web"}}},
+             {"jsonrpc":"2.0","id":"0","method":"tools/call","params":{"name":"restart_container","arguments":{"containerId":"db"}}}]
+            """);
+
+        await new McpCallLogMiddleware(ctx =>
+        {
+            McpCallOutcomes.Add(ctx, new(McpCallOutcomes.KeyOf(new RequestId("0")), "restart_container",
+                McpCallResult.Denied, "deny", "op-db", "protected"));
+            McpCallOutcomes.Add(ctx, new(McpCallOutcomes.KeyOf(new RequestId(0)), "restart_container",
+                McpCallResult.Executed, "allow", "op-web", null));
+            return Task.CompletedTask;
+        }).InvokeAsync(http);
+
+        Assert.Equal("op-web", Assert.Single(store.Entries, e => e.ParamsJson!.Contains("web")).CorrelationId);
+        Assert.Equal("op-db", Assert.Single(store.Entries, e => e.ParamsJson!.Contains("db")).CorrelationId);
+    }
+
+    [Fact]
     public async Task The_filter_reports_under_the_id_the_middleware_reads()
     {
         // The MCP server hands the filter a RequestId; its key must be what the middleware reads from the body.

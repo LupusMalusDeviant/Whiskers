@@ -52,7 +52,10 @@ public static class McpCallOutcomes
     public static string? KeyOf(System.Text.Json.JsonElement id) => id.ValueKind switch
     {
         System.Text.Json.JsonValueKind.String => "s:" + id.GetString(),
-        System.Text.Json.JsonValueKind.Number => "n:" + id.GetRawText(),
+        // As the MCP server reads it: an integer (so -0 and 0 are the same id), else its spelling.
+        System.Text.Json.JsonValueKind.Number => "n:" + (id.TryGetInt64(out var n)
+            ? n.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : id.GetRawText()),
         _ => null,
     };
 

@@ -50,6 +50,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     private const int MaxReasonChars = 1000;
     private const int MaxArgumentChars = 1500;
     private const int MaxResultDetailChars = 300;
+    private const int MaxResultNameChars = 120;
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
     private readonly AuditOutbox? _outbox;
@@ -202,11 +203,12 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             results = results is { Count: > 0 }
                 ? results.Select(r => new
                 {
-                    action = r.Action,
-                    targetType = r.TargetType,
-                    targetId = r.TargetId,
-                    targetName = r.TargetName,
-                    serverId = r.ServerId,
+                    // Every text shrinks with the budget: a tool may name its target by a whole command.
+                    action = Field(r.Action, Math.Min(budget, MaxResultNameChars)),
+                    targetType = Field(r.TargetType, Math.Min(budget, MaxResultNameChars)),
+                    targetId = Field(Redact(r.TargetId), Math.Min(budget, MaxResultNameChars)),
+                    targetName = Field(Redact(r.TargetName), Math.Min(budget, MaxResultNameChars)),
+                    serverId = Field(r.ServerId, Math.Min(budget, MaxResultNameChars)),
                     success = r.Success,
                     details = Field(Redact(r.Details), Math.Min(budget, MaxResultDetailChars)),
                 }).ToList()
