@@ -70,7 +70,11 @@ public static class ProtectedResourceMatcher
             var keyPatterns = nameKeys is null || nameKeys(key) ? patterns : [];
             // A whole payload (SQL, a command) that matches is never quoted either: it can carry a credential.
             if (Match(value, keyPatterns) is { } whole)
-                return new Hit(value, whole) { Argument = key, InFreeText = PayloadArguments.Contains(key) };
+                return new Hit(value, whole)
+                {
+                    Argument = key,
+                    InFreeText = PayloadArguments.Contains(key) || key.StartsWith(ResolvedWithheldPrefix, StringComparison.Ordinal),
+                };
             if (value.Length == 0) continue;
             var freeText = analyseFreeText && FreeTextArguments.Contains(key);
             var reference = analyseFreeText && (ReferenceArguments.Contains(key) || key.StartsWith(ResolvedRelatedPrefix, StringComparison.Ordinal));
@@ -251,6 +255,19 @@ public static class ProtectedResourceMatcher
 
     /// <summary>The prefix of the resolved target's related resources the policy adapter adds (R1-06, R1-16).</summary>
     public const string ResolvedRelatedPrefix = "__resolvedRelated";
+
+    /// <summary>The prefix of a related resource that is decided but never quoted (a mount from an <c>.env</c> value,
+    /// <see cref="Whiskers.Services.Mutations.MutationTarget.Withheld"/>); it starts with
+    /// <see cref="ResolvedRelatedPrefix"/>, so it is matched like the others.</summary>
+    public const string ResolvedWithheldPrefix = "__resolvedRelatedWithheld";
+
+    /// <summary>The first free-text argument that cannot be analysed (a command or SQL completed at run time, a
+    /// compose file that is no YAML), found whatever else the arguments name; <c>null</c> when there is none.</summary>
+    public static Hit? FirstUnanalyzable(IReadOnlyDictionary<string, JsonElement> arguments) =>
+        FirstHit(arguments, [NoName], [], analyseFreeText: true) is { UnanalyzableArgument: not null } hit ? hit : null;
+
+    // A pattern no word matches: FirstHit then finds only what cannot be analysed.
+    private const string NoName = "\u0000";
 
     // The source side of each entry of a mount list ("src:dst[:mode]", comma- or line-separated).
     private static IEnumerable<string> Sources(string value)

@@ -298,9 +298,16 @@ public class SelfProtectionTests
         Assert.Empty(h.Approvals.GetPending());
 
         // Free text that cannot be analysed could name what only the policy covers: refused, no approval.
-        var unanalysable = await h.RunAsync("host.exec", new { serverId = "local", command = "eval \"$CMD\"" },
+        foreach (var command in new[] { "eval \"$CMD\"", "echo whiskers serverwatch; eval \"$CMD\"" })
+        {
+            var unanalysable = await h.RunAsync("host.exec", new { serverId = "local", command },
+                ProtectionHarness.UiAdmin, MutationSurface.Ui);
+            Assert.Equal(MutationStatus.Denied, unanalysable.Status);
+        }
+        var sql = await h.RunAsync("db.query",
+            new { containerId = "whiskers-db", serverId = "local", query = "DROP TABLE whiskers; EXECUTE 'DROP ' || t;" },
             ProtectionHarness.UiAdmin, MutationSurface.Ui);
-        Assert.Equal(MutationStatus.Denied, unanalysable.Status);
+        Assert.Equal(MutationStatus.Denied, sql.Status);
         Assert.Empty(h.Approvals.GetPending());
 
         // The same pattern on the Whiskers container is the control plane: an Admin may approve it.
@@ -445,6 +452,26 @@ public class SelfProtectionTests
             ProtectionHarness.UiAdmin, MutationSurface.Ui);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(h.Approvals.GetPending());
+    }
+
+    [Fact]
+    public async Task A_refused_mount_from_an_env_value_is_never_quoted()
+    {
+        var host = new ProtectedResourceResolutionTests.FakeHost();
+        host.Files["/opt/deployments/tools/.env"] = "DATA_ROOT=/srv/canary-secret\n";
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["/srv/*"], planner: d => new ComposePlanner(d, host));
+
+        // The text alone mounts "/x"; only the planned mount, with the .env value, is protected.
+        var outcome = await h.RunAsync("compose.deploy", new
+        {
+            serverId = "local", projectName = "tools",
+            composeContent = "services:\n  a:\n    image: x\n    volumes:\n      - ${DATA_ROOT}/x:/data\n",
+        }, ProtectionHarness.AdminKey, MutationSurface.Mcp);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Contains(Whiskers.Services.Guardrails.ProtectedResourceMatcher.ResolvedWithheldPrefix, outcome.Reason);
+        Assert.DoesNotContain("canary", outcome.Reason);
+        Assert.DoesNotContain(h.Audit.Events, e => e.Contains("canary"));
     }
 
     [Fact]

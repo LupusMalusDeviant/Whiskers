@@ -155,6 +155,12 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         // approvable. A policy pattern that is also a control-plane pattern counts as the control plane only where
         // the control plane's own check finds something in the same argument (not a server named whiskers-vps).
         // Free text that cannot be analysed could name such a resource, so it is refused too.
+        // Looked for on its own, before any name: a protected word elsewhere in the text must not hide it.
+        if (change && policy.Count > 0 && ProtectedResourceMatcher.FirstUnanalyzable(request.Arguments) is { } dynamicText)
+        {
+            reason = Describe(dynamicText);
+            return GuardrailVerdict.Deny;
+        }
         foreach (var pattern in policy)
         {
             if (ProtectedResourceMatcher.FirstHit(request.Arguments, [pattern], [], analyseFreeText: change) is not { } policyHit)

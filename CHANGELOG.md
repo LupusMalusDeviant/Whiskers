@@ -32,7 +32,8 @@ All notable changes to Whiskers are documented here. The format follows
   decides what the project mounts too, and a SQL import or seed decides the database it runs in. A mount whose source
   comes from an `.env` value is decided but never recorded (the audit keeps the length of `mounts`, the decision
   record `(withheld)`). A policy pattern that equals a control-plane pattern makes a hit approvable only where the
-  control plane's own check finds it too (not a server named `whiskers-vps`, not text that cannot be analysed). The
+  control plane's own check finds it too (not a server named `whiskers-vps`); text that cannot be analysed is
+  refused first, whatever names stand beside it. A withheld mount is never quoted in a refusal either. The
   SQL console, SQL import and seed and the raw compose deploy now hand their payload to the policy (Artisan
   migrations carry no free text: their command is fixed); the audit keeps only its length, and an approval raised from the web UI shows only the length of a
   command, SQL or compose file (refusal reasons never quote words of it); a card that shows the text (an agent's

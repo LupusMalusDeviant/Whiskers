@@ -129,8 +129,11 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
             return args;
         if (!string.IsNullOrEmpty(t.Id)) args["__resolvedTargetId"] = JsonSerializer.SerializeToElement(t.Id);
         if (!string.IsNullOrEmpty(t.Name)) args["__resolvedTargetName"] = JsonSerializer.SerializeToElement(t.Name);
+        // A withheld value (a mount from an .env value) is matched like the others but never quoted in a reason.
         for (var i = 0; i < names.Count; i++)
-            args[$"__resolvedRelated{i}"] = JsonSerializer.SerializeToElement(names[i]);
+            args[t.Withheld.Contains(names[i])
+                ? $"{ProtectedResourceMatcher.ResolvedWithheldPrefix}{i}"
+                : $"{ProtectedResourceMatcher.ResolvedRelatedPrefix}{i}"] = JsonSerializer.SerializeToElement(names[i]);
         return args;
     }
 
