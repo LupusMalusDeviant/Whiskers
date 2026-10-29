@@ -69,11 +69,10 @@
             // R1-17: opened through the gateway (Admin, kill switch, protected resources, audited open). The local
             // server gets a host shell, an SSH or Tailscale SSH server a shell on the remote host.
             var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
-            var owner = await Whiskers.Services.Terminal.TerminalOwner.OfAsync(CurrentUser);
             _session = await Mutations.RunAsync("terminal.host_open",
-                new { serverId = server.Id, terminalSession = sessionId },
+                new { serverId = server.Id },
                 ct => SessionManager.OpenHostShellAsync(
-                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, owner, server.Id), ct));
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, server.Id), ct));
 
             _ = PumpStreamsAsync(_session.Output, _session.Errors, _cts.Token);
         }

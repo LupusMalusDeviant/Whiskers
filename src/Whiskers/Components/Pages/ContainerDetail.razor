@@ -1121,12 +1121,11 @@ else
 
             // R1-17: opened through the gateway (Admin, kill switch, protected resources, audited open).
             var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
-            var owner = await Whiskers.Services.Terminal.TerminalOwner.OfAsync(CurrentUser);
             var sid = _resolvedServerId;
             _termSession = await Mutations.RunAsync("terminal.container_open",
-                new { containerId = ContainerId, serverId = sid, terminalSession = sessionId },
+                new { containerId = ContainerId, serverId = sid },
                 ct => SessionManager.OpenContainerShellAsync(
-                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, owner, sid, ContainerId), ct));
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, sid, ContainerId), ct));
 
             _ = ReadTermStreamAsync(_termSession.Output, _termCts.Token);
             _ = ReadTermStreamAsync(_termSession.Errors, _termCts.Token);
@@ -1147,6 +1146,8 @@ else
             {
                 var bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length);
                 if (bytesRead == 0) break;
+                // Streaming output is activity too — keep the session from being idle-closed mid-output.
+                _termSession?.Touch();
                 var text = new string(buffer, 0, bytesRead);
                 await InvokeAsync(async () =>
                 {

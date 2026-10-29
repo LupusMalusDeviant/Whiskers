@@ -2,10 +2,11 @@ using Whiskers.Services.Mutations;
 
 namespace Whiskers.Services.Terminal;
 
-/// <summary>A session to open: the id the gateway's open event carries, who opens it, and where.</summary>
+/// <summary>A session to open, and where. Who opens it is the principal the gateway decided on (the open runs inside
+/// its <see cref="MutationScope"/>), never a value the caller supplies.</summary>
 /// <param name="ServerId">The server; empty means the default server, as the gateway resolves it. One that is not
 /// configured never falls back to a local shell.</param>
-public sealed record TerminalOpenRequest(string SessionId, TerminalOwner Owner, string? ServerId, string? ContainerId = null);
+public sealed record TerminalOpenRequest(string SessionId, string? ServerId, string? ContainerId = null);
 
 /// <summary>
 /// The web terminal's sessions (R1-17, PC-D2, INV-47). A session is opened only through the Mutation Gateway — the
@@ -15,11 +16,13 @@ public sealed record TerminalOpenRequest(string SessionId, TerminalOwner Owner, 
 /// </summary>
 public interface ITerminalSessionManager
 {
-    /// <summary>A shell inside a container. Throws for an unknown server, a disabled terminal or the session cap.</summary>
+    /// <summary>A shell inside a container. Throws outside the gateway's decision for it, for an unknown server, a
+    /// disabled terminal or the session cap.</summary>
     [MutatingOperation("terminal.container_open")]
     Task<TerminalSession> OpenContainerShellAsync(TerminalOpenRequest request, CancellationToken ct = default);
 
-    /// <summary>A shell on a server's host. Throws for an unknown server, a disabled terminal or the session cap.</summary>
+    /// <summary>A shell on a server's host. Throws outside the gateway's decision for it, for an unknown server, a
+    /// disabled terminal or the session cap.</summary>
     [MutatingOperation("terminal.host_open")]
     Task<TerminalSession> OpenHostShellAsync(TerminalOpenRequest request, CancellationToken ct = default);
 

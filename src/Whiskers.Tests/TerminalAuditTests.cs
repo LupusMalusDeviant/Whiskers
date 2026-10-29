@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Text.Json;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -36,7 +37,7 @@ public class TerminalAuditTests
     [InlineData("terminal.host_open")]
     public async Task An_authorized_open_is_audited_and_an_operator_or_the_kill_switch_opens_nothing(string capability)
     {
-        var args = new { serverId = "local", containerId = "web", terminalSession = "s1" };
+        var args = new { serverId = "local", containerId = "web" };
 
         var h = new ProtectionHarness();
         var admin = await h.RunAsync(capability, args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
@@ -55,14 +56,55 @@ public class TerminalAuditTests
     }
 
     [Fact]
-    public async Task A_shell_in_the_control_plane_needs_an_explicit_admin_approval()
+    public async Task A_shell_in_the_control_plane_opens_once_after_an_explicit_admin_approval()
     {
+        // As the page asks: the same arguments each time (the session id stays out of them), so the approval given
+        // after the first attempt binds the next one.
         var h = new ProtectionHarness();
-        var outcome = await h.RunAsync("terminal.container_open",
-            new { serverId = "local", containerId = "whiskers", terminalSession = "s1" }, ProtectionHarness.UiAdmin,
-            MutationSurface.Ui);
-        Assert.Equal(MutationStatus.PendingApproval, outcome.Status);
+        var args = new { containerId = "whiskers", serverId = "local" };
+        var asked = await h.RunAsync("terminal.container_open", args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.PendingApproval, asked.Status);
         Assert.Equal(0, h.Runs);
+
+        Assert.Equal(Whiskers.Services.Approvals.ApprovalDecisionResult.Decided, await h.Approvals.DecideAsync(
+            asked.ApprovalId!, true, Whiskers.Services.Approvals.ApprovalResolver.User("admin@example.com", AppRole.Admin)));
+        var opened = await h.RunAsync("terminal.container_open", args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        var again = await h.RunAsync("terminal.container_open", args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MutationStatus.Executed, opened.Status);
+        Assert.Equal(MutationStatus.PendingApproval, again.Status);    // single use
+        Assert.Equal(1, h.Runs);
+    }
+
+    [Fact]
+    public async Task Outside_the_gateways_decision_for_it_no_shell_opens()
+    {
+        var launcher = new FakeLauncher();
+        using var manager = Manager(launcher, new RecordingAudit());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            manager.OpenHostShellAsync(new TerminalOpenRequest("s1", "local")));
+        using (MutationScope.Begin("container.restart", "op-x", AdminPrincipal))   // another capability's decision
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                manager.OpenContainerShellAsync(new TerminalOpenRequest("s2", "local", "c1")));
+        using (MutationScope.Begin("terminal.host_open", "op-y"))                  // no principal
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                manager.OpenHostShellAsync(new TerminalOpenRequest("s3", "local")));
+        Assert.Empty(launcher.Started);
+    }
+
+    [Fact]
+    public async Task The_owner_is_the_principal_the_gateway_decided_on()
+    {
+        var audit = new RecordingAudit();
+        using var manager = Manager(new FakeLauncher(), audit);
+        var other = new MutationPrincipal(MutationPrincipalKind.Human, "user:other@example.com", "other@example.com",
+            McpPermissionLevels.Admin);
+        using (MutationScope.Begin("terminal.host_open", "op-o", other))
+            await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", "local"));
+        await manager.CloseAsync("s1");
+
+        Assert.Equal("other@example.com", Assert.Single(audit.Rows).Actor);
     }
 
     // ---------------------------------------------------------------- the close
@@ -75,7 +117,7 @@ public class TerminalAuditTests
         var audit = new RecordingAudit();
         using var manager = Manager(launcher, audit, time: time);
 
-        var session = await manager.OpenContainerShellAsync(new TerminalOpenRequest("s1", Admin, "local", "c0ffee"));
+        var session = await OpenContainer(manager, "s1", "local", "c0ffee");
         await session.WriteAsync("echo canary-secret\n");
         time.Now = T0.AddMinutes(7);
         await manager.CloseAsync("s1");
@@ -91,6 +133,7 @@ public class TerminalAuditTests
         using var details = JsonDocument.Parse(row.Details!);
         Assert.Equal("s1", details.RootElement.GetProperty("sessionId").GetString());
         Assert.Equal("user:admin@example.com", details.RootElement.GetProperty("principal").GetString());
+        Assert.Equal("op-s1", details.RootElement.GetProperty("operationId").GetString());   // the open's operation
         Assert.Equal(7 * 60_000, details.RootElement.GetProperty("durationMs").GetInt64());
         Assert.Equal("Closed", details.RootElement.GetProperty("reason").GetString());
         // No keystroke transcript (PC-D2): what was typed reached the shell, never the audit.
@@ -105,7 +148,7 @@ public class TerminalAuditTests
     {
         var audit = new RecordingAudit();
         using var manager = Manager(new FakeLauncher(), audit);
-        await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", Admin, "local"));
+        await OpenHost(manager, "s1", "local");
         await manager.CloseAsync("s1");
 
         var row = Assert.Single(audit.Rows);
@@ -120,7 +163,7 @@ public class TerminalAuditTests
         var launcher = new FakeLauncher();
         var audit = new RecordingAudit();
         using var manager = Manager(launcher, audit);
-        await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", Admin, "local"));
+        await OpenHost(manager, "s1", "local");
         launcher.Processes.Single().HasExited = true;
 
         await manager.SweepAsync();
@@ -133,7 +176,7 @@ public class TerminalAuditTests
     {
         var audit = new RecordingAudit();
         using var manager = Manager(new FakeLauncher(), audit);
-        await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", Admin, "local"));
+        await OpenHost(manager, "s1", "local");
 
         await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => manager.CloseAsync("s1"))));
 
@@ -154,7 +197,7 @@ public class TerminalAuditTests
         var launcher = new FakeLauncher();
         var audit = new RecordingAudit();
         using var manager = Manager(launcher, audit, new TerminalAuthority(store, owners));
-        await manager.OpenContainerShellAsync(new TerminalOpenRequest("s1", Admin, "local", "c1"));
+        await OpenContainer(manager, "s1", "local", "c1");
 
         await manager.SweepAsync();
         Assert.Empty(audit.Rows);                                // still Admin: goes on
@@ -174,8 +217,8 @@ public class TerminalAuditTests
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         var audit = new RecordingAudit();
         using var manager = Manager(new FakeLauncher(), audit, new TerminalAuthority(store, new Owners(McpPermissionLevels.Admin)));
-        await manager.OpenContainerShellAsync(new TerminalOpenRequest("s1", Admin, "local", "c1"));
-        await manager.OpenHostShellAsync(new TerminalOpenRequest("s2", Admin, "local"));
+        await OpenContainer(manager, "s1", "local", "c1");
+        await OpenHost(manager, "s2", "local");
 
         policy.ReadOnlyMode = true;
         await manager.SweepAsync();
@@ -185,11 +228,38 @@ public class TerminalAuditTests
     }
 
     [Fact]
+    public async Task With_auth_disabled_the_local_user_keeps_its_shell()
+    {
+        // Auth:Disabled signs every request in as the synthetic local user, Admin by that mode, not by a role.
+        var local = new MutationPrincipal(MutationPrincipalKind.Human,
+            PrincipalIds.User(Whiskers.Services.Auth.CurrentUserService.AuthDisabledEmail), "local", McpPermissionLevels.Admin);
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
+        var viewer = new Owners(McpPermissionLevels.Read);   // what the role store says about it
+        var disabled = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Disabled"] = "true" }).Build();
+
+        var audit = new RecordingAudit();
+        using var manager = Manager(new FakeLauncher(), audit, new TerminalAuthority(store, viewer, disabled));
+        using (MutationScope.Begin("terminal.host_open", "op-l", local))
+            await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", "local"));
+        await manager.SweepAsync();
+        Assert.Empty(audit.Rows);
+
+        // Without that mode the same identity holds no role: its shell ends.
+        var audit2 = new RecordingAudit();
+        using var strict = Manager(new FakeLauncher(), audit2, new TerminalAuthority(store, viewer));
+        using (MutationScope.Begin("terminal.host_open", "op-m", local))
+            await strict.OpenHostShellAsync(new TerminalOpenRequest("s2", "local"));
+        await strict.SweepAsync();
+        Assert.Equal("Revoked", Reason(Assert.Single(audit2.Rows)));
+    }
+
+    [Fact]
     public async Task An_authority_that_cannot_tell_ends_the_session()
     {
         var audit = new RecordingAudit();
         using var manager = Manager(new FakeLauncher(), audit, new ThrowingAuthority());
-        await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", Admin, "local"));
+        await OpenHost(manager, "s1", "local");
 
         await manager.SweepAsync();
 
@@ -203,14 +273,14 @@ public class TerminalAuditTests
         var launcher = new FakeLauncher();
         var audit = new RecordingAudit();
         using var manager = Manager(launcher, audit, settings: settings);
-        await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", Admin, "local"));
+        await OpenHost(manager, "s1", "local");
 
         settings.Enabled = false;
         await manager.SweepAsync();
 
         Assert.Equal("Disabled", Reason(Assert.Single(audit.Rows)));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            manager.OpenHostShellAsync(new TerminalOpenRequest("s2", Admin, "local")));
+            OpenHost(manager, "s2", "local"));
         Assert.Single(launcher.Started);
     }
 
@@ -218,9 +288,9 @@ public class TerminalAuditTests
     public async Task A_session_id_is_used_once()
     {
         using var manager = Manager(new FakeLauncher(), new RecordingAudit());
-        await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", Admin, "local"));
+        await OpenHost(manager, "s1", "local");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            manager.OpenHostShellAsync(new TerminalOpenRequest("s1", Admin, "local")));
+            OpenHost(manager, "s1", "local"));
     }
 
     private static string? Reason(AuditRow row)

@@ -33,6 +33,25 @@ internal static class TerminalDoubles
     public static TerminalSession Session(DateTime openedAt) =>
         new(TerminalSession.NewId(), Admin, new TerminalTarget("local", "c1", "c1"), new FakeProcess(), openedAt);
 
+    public static readonly Whiskers.Services.Mutations.MutationPrincipal AdminPrincipal =
+        new(Whiskers.Services.Mutations.MutationPrincipalKind.Human, Admin.Id, Admin.DisplayName,
+            Whiskers.Models.McpPermissionLevels.Admin);
+
+    /// <summary>Opens a container shell inside the gateway's decision for it, as the pages do.</summary>
+    public static Task<TerminalSession> OpenContainer(ITerminalSessionManager manager, string sessionId, string? serverId,
+        string containerId)
+    {
+        using var _ = Whiskers.Services.Mutations.MutationScope.Begin("terminal.container_open", "op-" + sessionId, AdminPrincipal);
+        return manager.OpenContainerShellAsync(new TerminalOpenRequest(sessionId, serverId, containerId));
+    }
+
+    /// <summary>Opens a host shell inside the gateway's decision for it, as the pages do.</summary>
+    public static Task<TerminalSession> OpenHost(ITerminalSessionManager manager, string sessionId, string? serverId)
+    {
+        using var _ = Whiskers.Services.Mutations.MutationScope.Begin("terminal.host_open", "op-" + sessionId, AdminPrincipal);
+        return manager.OpenHostShellAsync(new TerminalOpenRequest(sessionId, serverId));
+    }
+
     public static TerminalSessionManager Manager(FakeLauncher launcher, RecordingAudit audit,
         ITerminalAuthority? authority = null, ManualTime? time = null, TerminalSettings? settings = null,
         params ServerConfig[] servers) =>

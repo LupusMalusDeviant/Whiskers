@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.AuditLog;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.ServerConfig;
 
 namespace Whiskers.Services.Terminal;
@@ -52,6 +53,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
     public Task<TerminalSession> OpenContainerShellAsync(TerminalOpenRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var scope = DecidedScope("terminal.container_open");
         if (string.IsNullOrWhiteSpace(request.ContainerId))
             throw new InvalidOperationException("A container shell needs a container.");
         var server = ServerOf(request);
@@ -73,12 +75,13 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
             throw new InvalidOperationException(MtlsUnavailable);
         else
             throw new InvalidOperationException($"Terminal not supported for connection type {server.ConnectionType}");
-        return Task.FromResult(Start(request, new TerminalTarget(server.Id, containerId, containerId), launch));
+        return Task.FromResult(Start(request, scope, new TerminalTarget(server.Id, containerId, containerId), launch));
     }
 
     public Task<TerminalSession> OpenHostShellAsync(TerminalOpenRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var scope = DecidedScope("terminal.host_open");
         var server = ServerOf(request);
         TerminalLaunch launch;
         // Keyless tailnet-identity shell first: the primary path for the SSH-free TCP/mTLS hosts (root, ACL-gated).
@@ -94,7 +97,17 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
             throw new InvalidOperationException(MtlsUnavailable);
         else
             throw new InvalidOperationException($"Terminal not supported for connection type {server.ConnectionType}");
-        return Task.FromResult(Start(request, new TerminalTarget(server.Id, null, server.Name), launch));
+        return Task.FromResult(Start(request, scope, new TerminalTarget(server.Id, null, server.Name), launch));
+    }
+
+    /// <summary>The gateway's decision this open runs in: its principal owns the session and its operation id links the
+    /// open to the close. Outside one — a caller that bypassed the gateway — nothing opens (fail closed).</summary>
+    private static MutationScope DecidedScope(string capabilityId)
+    {
+        var scope = MutationScope.Current;
+        if (scope is null || scope.CapabilityId != capabilityId || scope.Principal is null)
+            throw new InvalidOperationException("A terminal opens only through the gateway's decision for it.");
+        return scope;
     }
 
     /// <summary>The configured server the session runs on. An id that names none is refused — never a local shell
@@ -121,10 +134,12 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
             : host;
     }
 
-    private TerminalSession Start(TerminalOpenRequest request, TerminalTarget target, TerminalLaunch launch)
+    private TerminalSession Start(TerminalOpenRequest request, MutationScope scope, TerminalTarget target,
+        TerminalLaunch launch)
     {
-        var session = new TerminalSession(request.SessionId, request.Owner, target, _launcher.Start(launch),
-            _time.GetUtcNow().UtcDateTime);
+        var owner = new TerminalOwner(scope.Principal!.Id, scope.Principal.DisplayName);
+        var session = new TerminalSession(request.SessionId, owner, target, _launcher.Start(launch),
+            _time.GetUtcNow().UtcDateTime, scope.OperationId);
         RegisterSession(session);
         _logger.LogInformation("Terminal session {SessionId} opened ({Kind} {Target} on {ServerId})",
             session.SessionId, target.Kind, target.Name, target.ServerId);
@@ -175,6 +190,8 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         var details = JsonSerializer.Serialize(new
         {
             sessionId = session.SessionId,
+            // The open's audit row carries the same operation id.
+            operationId = session.OperationId,
             principal = session.Owner.Id,
             reason = reason.ToString(),
             openedAt = session.CreatedAt,

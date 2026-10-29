@@ -5,17 +5,7 @@ namespace Whiskers.Services.Terminal;
 
 /// <summary>Who opened a terminal session: the principal id the gateway decided on (<c>user:&lt;email&gt;</c>) and the
 /// name the audit shows.</summary>
-public sealed record TerminalOwner(string Id, string DisplayName)
-{
-    /// <summary>The signed-in user, as the gateway names them (the same principal id the open is decided for).</summary>
-    public static async Task<TerminalOwner> OfAsync(Whiskers.Services.Auth.ICurrentUserService user)
-    {
-        var email = await user.GetEmailAsync();
-        return string.IsNullOrWhiteSpace(email)
-            ? new(Whiskers.Services.Mutations.PrincipalIds.Anonymous, "unknown")
-            : new(Whiskers.Services.Mutations.PrincipalIds.User(email), email);
-    }
-}
+public sealed record TerminalOwner(string Id, string DisplayName);
 
 /// <summary>What a session is a shell of: a host (<see cref="ContainerId"/> null) or a container on a server.</summary>
 public sealed record TerminalTarget(string ServerId, string? ContainerId, string Name)
@@ -158,9 +148,10 @@ public sealed class TerminalSession : IAsyncDisposable
     private readonly ITerminalProcess _process;
 
     internal TerminalSession(string sessionId, TerminalOwner owner, TerminalTarget target, ITerminalProcess process,
-        DateTime openedAt)
+        DateTime openedAt, string? operationId = null)
     {
         SessionId = sessionId;
+        OperationId = operationId;
         Owner = owner;
         Target = target;
         _process = process;
@@ -168,10 +159,13 @@ public sealed class TerminalSession : IAsyncDisposable
         LastActivityAt = openedAt;
     }
 
-    /// <summary>A new session id; the page hands it to the gateway so the open and the close event carry it.</summary>
+    /// <summary>A new session id.</summary>
     public static string NewId() => Guid.NewGuid().ToString("N");
 
     public string SessionId { get; }
+
+    /// <summary>The gateway operation that opened the session: its audit row and the close row carry the same id.</summary>
+    public string? OperationId { get; }
     public TerminalOwner Owner { get; }
     public TerminalTarget Target { get; }
     public string? ContainerId => Target.ContainerId;

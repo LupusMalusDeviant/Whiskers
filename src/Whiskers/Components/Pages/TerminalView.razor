@@ -64,11 +64,10 @@
 
             // R1-17: opened through the gateway (Admin, kill switch, protected resources, audited open).
             var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
-            var owner = await Whiskers.Services.Terminal.TerminalOwner.OfAsync(CurrentUser);
             _session = await Mutations.RunAsync("terminal.container_open",
-                new { containerId = ContainerId, serverId = ServerId, terminalSession = sessionId },
+                new { containerId = ContainerId, serverId = ServerId },
                 ct => SessionManager.OpenContainerShellAsync(
-                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, owner, ServerId, ContainerId), ct));
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, ServerId, ContainerId), ct));
 
             _ = PumpStreamsAsync(_session.Output, _session.Errors, _cts.Token);
         }

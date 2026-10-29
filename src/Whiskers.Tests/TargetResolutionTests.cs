@@ -429,19 +429,15 @@ public sealed class TargetResolutionTests : IDisposable
         // itself — instead of falling through to a shell on Whiskers' own host.
         var launcher = new TerminalDoubles.FakeLauncher();
         using var manager = TerminalDoubles.Manager(launcher, new TerminalDoubles.RecordingAudit());
-        var owner = TerminalDoubles.Admin;
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            manager.OpenHostShellAsync(new Whiskers.Services.Terminal.TerminalOpenRequest("s1", owner, "ghost")));
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            manager.OpenContainerShellAsync(new Whiskers.Services.Terminal.TerminalOpenRequest("s2", owner, "ghost", "web")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => TerminalDoubles.OpenHost(manager, "s1", "ghost"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => TerminalDoubles.OpenContainer(manager, "s2", "ghost", "web"));
         Assert.Empty(launcher.Started);
 
         var h = new ProtectionHarness();
-        var host = await h.RunAsync("terminal.host_open", new { serverId = "ghost", terminalSession = "s3" },
+        var host = await h.RunAsync("terminal.host_open", new { serverId = "ghost" },
             ProtectionHarness.UiAdmin, MutationSurface.Ui);
         var container = await h.RunAsync("terminal.container_open",
-            new { serverId = "ghost", containerId = "web", terminalSession = "s4" }, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+            new { serverId = "ghost", containerId = "web" }, ProtectionHarness.UiAdmin, MutationSurface.Ui);
         Assert.NotEqual(MutationStatus.Executed, host.Status);
         Assert.NotEqual(MutationStatus.Executed, container.Status);
         Assert.Equal(0, h.Runs);
