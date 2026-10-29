@@ -11,8 +11,10 @@ All notable changes to Whiskers are documented here. The format follows
   own next to the gateway's: each attempt is exactly the gateway's event — also when the page's role check refuses
   it before its confirmation dialog (recorded as **Denied**), and when the service answers a failure without throwing
   (a result whose `Success` is false, a missing migration framework, an unsupported import file → **Failed** instead
-  of Executed). What the page knows about the result — the backup file, the deployment output, the template or
-  registry deployed, the previous owner on a takeover — is part of that event. The old page-level action names
+  of Executed; a Hetzner action Hetzner answers with status `error` now fails instead of reporting "Action: error" as
+  success). What the page knows about the result — the created container(s), network or Git-deploy app, the backup
+  file, the deployment output, the template or registry deployed, the previous owner on a takeover — is part of that
+  event. The old page-level action names
   (`deploy.app`, `backup.create`, `task.adopt`, …) are no longer written for these pages; filter the audit by the
   capability instead (`app.deploy`, `volume.backup`, `scheduler.update`, …). No migration.
 

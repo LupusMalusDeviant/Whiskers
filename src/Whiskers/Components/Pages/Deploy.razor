@@ -272,7 +272,13 @@
             var deployName = string.IsNullOrWhiteSpace(request.ContainerName) ? request.Image : request.ContainerName;
             var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image,
                     volumes = string.Join(",", request.Volumes) },
-                _ => DeploymentService.DeployFromFormAsync(request, progress, sid));
+                async _ =>
+                {
+                    var created = await DeploymentService.DeployFromFormAsync(request, progress, sid);
+                    // The created container is part of the gateway's event (R1-21).
+                    MutationScope.Note($"Container {created}");
+                    return created;
+                });
             Snackbar.Add(L["Deploy_Snackbar_Deployed", id[..12]].Value, Severity.Success);
             _deployProgress = L["Deploy_Progress_Success", id[..12]].Value;
         }
@@ -322,7 +328,12 @@
                 // The file goes along (as `yaml`, which the audit withholds) so the gateway checks what it names —
                 // images, volumes, bind mounts — for protected resources (R1-16).
                 () => Mutations.RunAsync("compose.deploy", new { serverId = sid, yaml },
-                    _ => DeploymentService.DeployFromComposeAsync(yaml, progress, sid)));
+                    async _ =>
+                    {
+                        var created = await DeploymentService.DeployFromComposeAsync(yaml, progress, sid);
+                        MutationScope.Note($"{created.Count} container(s): {string.Join(", ", created)}");
+                        return created;
+                    }));
             Snackbar.Add(L["Deploy_Snackbar_ComposeDeployed", ids.Count].Value, Severity.Success);
             _deployProgress = L["Deploy_Progress_ComposeSuccess", ids.Count].Value;
         }

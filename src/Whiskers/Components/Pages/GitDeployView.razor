@@ -238,7 +238,13 @@ else
             var owner = _me ?? throw new InvalidOperationException("No signed-in user.");
             await Mutations.RunAsync("gitdeploy.save",
                 new { appId, name = form.Name, serverId = form.ServerId, branch = form.Branch, revision = form.Revision },
-                _ => GitDeploy.SaveAppAsync(form, token, owner));
+                async _ =>
+                {
+                    var saved = await GitDeploy.SaveAppAsync(form, token, owner);
+                    // The saved app's id (new on create) is part of the gateway's event (R1-21).
+                    MutationScope.Note($"App {saved.Id}");
+                    return saved;
+                });
             Snackbar.Add(L["GitDeployView_Snackbar_Saved", _form.Name].Value, Severity.Success);
             _showDialog = false;
             _apps = await GitDeploy.GetAppsAsync();

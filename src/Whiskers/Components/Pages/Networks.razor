@@ -183,7 +183,13 @@ else
             var name = _newNetworkName;
             var driver = _newNetworkDriver;
             var id = await Mutations.RunAsync("network.create", new { name, driver, serverId = sid },
-                _ => DockerService.CreateNetworkAsync(name, driver, sid));
+                async _ =>
+                {
+                    var created = await DockerService.CreateNetworkAsync(name, driver, sid);
+                    // The created network is part of the gateway's event (R1-21).
+                    MutationScope.Note($"Network {created}");
+                    return created;
+                });
             Snackbar.Add(L["Networks_Snackbar_Created", _newNetworkName].Value, Severity.Success);
             _showCreateDialog = false;
             await LoadNetworks();
