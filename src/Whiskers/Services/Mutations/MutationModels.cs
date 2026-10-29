@@ -177,6 +177,10 @@ public static class MutationReasonCodes
     /// <summary>An unattended run needs a confirmation nobody can give: {0} is the rule's reason (INV-04, PC-D7).</summary>
     public const string UnattendedConfirm = "UnattendedConfirm";
 
+    /// <summary>The action touches Whiskers' control plane or a protected resource: an Admin must approve it; {0} is
+    /// the approval's id (INV-59, R1-16).</summary>
+    public const string ProtectedNeedsAdminApproval = "ProtectedNeedsAdminApproval";
+
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
             DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm];

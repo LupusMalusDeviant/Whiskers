@@ -121,9 +121,12 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         var names = t.Related.Concat(t.Aliases).Concat(t.RelatedResources.SelectMany(r => r))
             .Append(t.RelatedContainerId ?? "")
             .Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal).ToList();
+        // A caller's own "__resolved…" keys never reach the rules: they describe what the gateway resolved (R1-16).
+        var args = request.Arguments.Where(a => !a.Key.StartsWith("__", StringComparison.Ordinal))
+            .ToDictionary(a => a.Key, a => a.Value);
+        args["__resolvedKind"] = JsonSerializer.SerializeToElement(t.Kind);
         if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && names.Count == 0)
-            return request.Arguments;
-        var args = new Dictionary<string, JsonElement>(request.Arguments);
+            return args;
         if (!string.IsNullOrEmpty(t.Id)) args["__resolvedTargetId"] = JsonSerializer.SerializeToElement(t.Id);
         if (!string.IsNullOrEmpty(t.Name)) args["__resolvedTargetName"] = JsonSerializer.SerializeToElement(t.Name);
         for (var i = 0; i < names.Count; i++)

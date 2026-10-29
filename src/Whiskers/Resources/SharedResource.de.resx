@@ -4910,6 +4910,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Mutation_Refused_TriggerNotAllowed" xml:space="preserve">
     <value>Für den KI-Trigger abgelehnt: {0}.</value>
   </data>
+  <data name="Mutation_Refused_ProtectedNeedsAdminApproval" xml:space="preserve">
+    <value>Wartet auf Freigabe: Das betrifft Whiskers' eigene Steuerebene oder eine geschützte Ressource. Ein Admin muss es auf der Seite „Freigaben“ freigeben (Freigabe {0}); danach erneut ausführen.</value>
+  </data>
   <data name="Mutation_Refused_UnattendedConfirm" xml:space="preserve">
     <value>Abgelehnt: Dieser unbeaufsichtigte Lauf bräuchte eine Bestätigung, die niemand geben kann ({0}).</value>
   </data>

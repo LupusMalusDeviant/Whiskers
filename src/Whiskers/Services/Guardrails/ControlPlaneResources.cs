@@ -13,16 +13,51 @@ public static class ControlPlaneResources
     /// against the resolved target, every argument value and every word of a free-text argument.</summary>
     public static IReadOnlyList<string> NamePatterns { get; } = BuildNames();
 
-    /// <summary>Paths (glob) of the control plane's data and mTLS material, matched against every path-like word of
-    /// a free-text argument (a command, SQL, a compose file).</summary>
+    /// <summary>Paths (glob) of the control plane's data and mTLS material on a host, matched against every
+    /// path-like word of every argument (normalised), and as a mount source also against the directories above
+    /// them.</summary>
     public static IReadOnlyList<string> PathPatterns { get; } =
     [
-        "/app/data", "/app/data/*",                 // Whiskers' data directory (database, keys, vault, mTLS)
+        // Whiskers' data volume on the host (database, keys, vault, mTLS), wherever Docker keeps it by default
+        "/var/lib/docker/volumes/whiskers*", "/var/lib/docker/volumes/serverwatch*",
         "*/mtls", "*/mtls/*",                       // client certificates and keys of the mTLS tunnels
         "*/step-ca", "*/step-ca/*",                 // the certificate authority's keys
         "*/ghostunnel", "*/ghostunnel/*",
         "/var/run/docker.sock", "/run/docker.sock", // the socket the control plane drives Docker through
     ];
+
+    /// <summary>Arguments that name a container, volume or network directly (the agent's own calls carry them raw).</summary>
+    private static readonly HashSet<string> IdentityArguments = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "containerId", "containerName", "container", "volumeName", "volume", "networkId", "networkName", "network",
+        "serviceName",
+    };
+
+    /// <summary>Target kinds whose resolved id and name can be part of the control plane.</summary>
+    private static readonly HashSet<string> ResourceKinds = new(StringComparer.Ordinal)
+    {
+        "container", "volume", "network", "workload",
+    };
+
+    /// <summary>
+    /// Which arguments of a request the control plane's names are matched against (R1-16): what names a container,
+    /// volume or network — identity arguments, free text, mount lists, what the operation also touches, and the
+    /// resolved target when it is such a resource. A server, a DNS record, a task or an image namespace that shares
+    /// the prefix is not the control plane.
+    /// </summary>
+    public static Func<string, bool> NamesApplyTo(IReadOnlyDictionary<string, System.Text.Json.JsonElement> arguments)
+    {
+        var resolvedKind = arguments.TryGetValue("__resolvedKind", out var k) && k.ValueKind == System.Text.Json.JsonValueKind.String
+            ? k.GetString()
+            : null;
+        var targetIsResource = resolvedKind is not null && ResourceKinds.Contains(resolvedKind);
+        return key =>
+            IdentityArguments.Contains(key)
+            || ProtectedResourceMatcher.FreeTextArguments.Contains(key)
+            || ProtectedResourceMatcher.ReferenceArguments.Contains(key)
+            || key.StartsWith(ProtectedResourceMatcher.ResolvedRelatedPrefix, StringComparison.Ordinal)
+            || (targetIsResource && key is "__resolvedTargetId" or "__resolvedTargetName");
+    }
 
     private static IReadOnlyList<string> BuildNames()
     {

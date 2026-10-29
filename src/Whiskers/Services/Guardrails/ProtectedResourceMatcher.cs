@@ -56,31 +56,48 @@ public static class ProtectedResourceMatcher
 
     /// <summary>The first protected resource the request touches, or <c>null</c>. <paramref name="patterns"/> are
     /// matched against names, <paramref name="pathPatterns"/> against path-like words.</summary>
+    /// <param name="nameKeys">The arguments <paramref name="patterns"/> apply to; all when <c>null</c>. Paths and
+    /// unanalysable free text are checked in every argument.</param>
     public static Hit? FirstHit(IReadOnlyDictionary<string, JsonElement> arguments, IReadOnlyList<string> patterns,
-        IReadOnlyList<string> pathPatterns, bool analyseFreeText)
+        IReadOnlyList<string> pathPatterns, bool analyseFreeText, Func<string, bool>? nameKeys = null)
     {
         if (patterns.Count == 0 && pathPatterns.Count == 0) return null;
         foreach (var (key, element) in arguments)
         {
             var value = element.ValueKind == JsonValueKind.String ? element.GetString() ?? "" : element.GetRawText();
-            if (Match(value, patterns) is { } whole) return new Hit(value, whole) { Argument = key };
+            var keyPatterns = nameKeys is null || nameKeys(key) ? patterns : [];
+            if (Match(value, keyPatterns) is { } whole) return new Hit(value, whole) { Argument = key };
             if (value.Length == 0) continue;
             var freeText = analyseFreeText && FreeTextArguments.Contains(key);
-            var named = freeText || (analyseFreeText && ReferenceArguments.Contains(key));
+            var reference = analyseFreeText && (ReferenceArguments.Contains(key) || key.StartsWith(ResolvedRelatedPrefix, StringComparison.Ordinal));
+            var named = freeText || reference;
+            if (reference)
+            {
+                // A mount names what it reads on its source side only ('/srv/app:/app/data' mounts /srv/app); a
+                // directory above a protected path (/, /var/run, /var/lib/docker) reaches into it.
+                foreach (var source in Sources(value))
+                {
+                    if (AncestorHit(source, pathPatterns) is { } above) return above with { Argument = key };
+                    foreach (var word in Words(source))
+                        if (WordHit(word, keyPatterns, pathPatterns, names: true) is { } hit)
+                            return hit with { Argument = key };
+                }
+                continue;
+            }
             if (freeText && ShellArguments.Contains(key))
             {
                 var shell = AnalyseShell(value);
                 foreach (var word in shell.Words.SelectMany(Words))
-                    if (WordHit(word, patterns, pathPatterns, names: true) is { } hit)
+                    if (WordHit(word, keyPatterns, pathPatterns, names: true) is { } hit)
                         return hit with { Argument = key, InFreeText = true };
                 foreach (var glob in shell.Globs)
-                    if (GlobHit(glob, patterns, pathPatterns) is { } hit)
+                    if (GlobHit(glob, keyPatterns, pathPatterns) is { } hit)
                         return hit with { Argument = key, InFreeText = true };
                 if (shell.Unanalyzable) return new Hit("", null, key) { Argument = key, InFreeText = true };
                 continue;
             }
             foreach (var word in Words(value))
-                if (WordHit(word, patterns, pathPatterns, named) is { } hit)
+                if (WordHit(word, keyPatterns, pathPatterns, named) is { } hit)
                     return hit with { Argument = key, InFreeText = freeText };
             if (freeText && SqlArguments.Contains(key) && IsUnanalyzableSql(value))
                 return new Hit("", null, key) { Argument = key, InFreeText = true };
@@ -88,10 +105,54 @@ public static class ProtectedResourceMatcher
         return null;
     }
 
+    /// <summary>The prefix of the resolved target's related resources the policy adapter adds (R1-06, R1-16).</summary>
+    public const string ResolvedRelatedPrefix = "__resolvedRelated";
+
+    // The source side of each entry of a mount list ("src:dst[:mode]", comma- or line-separated).
+    private static IEnumerable<string> Sources(string value)
+    {
+        foreach (var entry in value.Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var colon = entry.IndexOf(':');
+            yield return colon > 0 ? entry[..colon] : entry;
+        }
+    }
+
+    // A mount of a directory that contains a protected path: the root for any of them, and every parent of an
+    // absolute one (/var/run for the Docker socket, /var/lib/docker for Whiskers' volume).
+    private static Hit? AncestorHit(string source, IReadOnlyList<string> pathPatterns)
+    {
+        if (!source.StartsWith('/')) return null;
+        var path = NormalizePath(source);
+        foreach (var pattern in pathPatterns)
+        {
+            if (path == "/") return new Hit(source, pattern);
+            if (pattern.StartsWith('*')) continue;
+            var literal = pattern.TrimEnd('*').TrimEnd('/');
+            if (literal.StartsWith(path + "/", StringComparison.Ordinal)) return new Hit(source, pattern);
+        }
+        return null;
+    }
+
+    /// <summary>A path as the kernel resolves it: repeated slashes and <c>.</c> collapsed, <c>..</c> applied.</summary>
+    public static string NormalizePath(string path)
+    {
+        var absolute = path.StartsWith('/');
+        var parts = new List<string>();
+        foreach (var part in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part == ".") continue;
+            if (part == "..") { if (parts.Count > 0) parts.RemoveAt(parts.Count - 1); continue; }
+            parts.Add(part);
+        }
+        var joined = string.Join('/', parts);
+        return absolute ? "/" + joined : joined;
+    }
+
     private static Hit? WordHit(string word, IReadOnlyList<string> patterns, IReadOnlyList<string> pathPatterns, bool names)
     {
         if (names && Match(word, patterns) is { } named) return new Hit(word, named);
-        if (word.Contains('/') && Match(word.TrimEnd('/'), pathPatterns) is { } path) return new Hit(word, path);
+        if (word.Contains('/') && Match(NormalizePath(word), pathPatterns) is { } path) return new Hit(word, path);
         return null;
     }
 
@@ -341,7 +402,11 @@ public static class ProtectedResourceMatcher
     private static readonly Regex UnanalyzableSql = new(
         @"\bexecute\b|\bexec\s*\(|\bexec\s+(sp_|xp_)|\bprepare\b|\bcopy\b[^;]*\bprogram\b|\bpg_read_(binary_)?file\b"
         + @"|\blo_(import|export)\b|\bdblink|\bchr\s*\(|\bconvert_from\b|\bdecode\s*\(|\bxp_cmdshell\b|\bload_file\b"
-        + @"|\binto\s+(out|dump)file\b|\bunhex\s*\(|\bfrom_base64\s*\(",
+        + @"|\binto\s+(out|dump)file\b|\bunhex\s*\(|\bfrom_base64\s*\("
+        // PostgreSQL unicode-escaped identifiers and strings, untrusted procedural languages, routines defined inline
+        + @"|\bu&[""']|\\[0-9a-f]{4,6}|\blanguage\s+'?pl\w*u\b|\bcreate\s+(or\s+replace\s+)?(function|procedure)\b"
+        // a document database's query language: strings joined or decoded at run time, server-side JavaScript
+        + @"|[""']\s*\+|\+\s*[""']|\bfromCharCode\b|\$where\b|\beval\s*\(|\$function\b|\bconcat\s*\(\s*[""']",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     /// <summary>Whether SQL builds what it acts on at run time. A pattern that takes too long counts as unanalysable

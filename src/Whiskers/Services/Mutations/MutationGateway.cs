@@ -359,8 +359,18 @@ public sealed class MutationGateway : IMutationGateway
                     "The approval could not be checked; the mutation was refused.", ct);
             }
             if (!approval.Approved)
-                return await RefuseAsync<T>(operationId, request, capability, MutationStatus.PendingApproval,
+            {
+                var pending = await RefuseAsync<T>(operationId, request, capability, MutationStatus.PendingApproval,
                     approval.Message, ct, approval.ApprovalId) with { MatchedRules = decision.MatchedRules };
+                // INV-59 (R1-16): say in the person's language that an Admin must approve it on the Approvals page.
+                return decision.MatchedRules.Contains(Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId)
+                    ? pending with
+                    {
+                        ReasonCode = MutationReasonCodes.ProtectedNeedsAdminApproval,
+                        ReasonArgs = [approval.ApprovalId ?? "?"],
+                    }
+                    : pending;
+            }
         }
 
         // 5: no intent record, no mutation (PC-D5).

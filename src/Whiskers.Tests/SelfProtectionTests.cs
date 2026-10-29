@@ -14,6 +14,8 @@ internal sealed class ProtectionHarness
 {
     public static readonly ServerConfig Local = new() { Id = "local", Name = "Local", IsDefault = true };
 
+    private static ServerConfig Server(string name) => new() { Id = "local", Name = name, IsDefault = true };
+
     public static readonly MutationPrincipal UiAdmin =
         new(MutationPrincipalKind.Human, "user:admin@example.com", "admin@example.com", McpPermissionLevels.Admin);
     public static readonly MutationPrincipal UiOperator =
@@ -40,7 +42,8 @@ internal sealed class ProtectionHarness
     public MutationGateway Gateway { get; }
     public int Runs { get; private set; }
 
-    public ProtectionHarness(Action<GuardrailPolicy>? configure = null, Func<FakeDocker, IComposePlanner>? planner = null)
+    public ProtectionHarness(Action<GuardrailPolicy>? configure = null, Func<FakeDocker, IComposePlanner>? planner = null,
+        string serverName = "Local")
     {
         Docker = new FakeDocker(Containers) { DefaultServerId = "local" };
         Policy = GuardrailPolicy.SafeDefault();
@@ -55,8 +58,8 @@ internal sealed class ProtectionHarness
         Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Audit, [],
             NullLogger<MutationGateway>.Instance,
             targets: new MutationTargetResolver(planner is null
-                ? new TestServices(Docker, new FakeServerConfig(Local))
-                : new TestServices(Docker, new FakeServerConfig(Local), planner(Docker))),
+                ? new TestServices(Docker, new FakeServerConfig(Server(serverName)))
+                : new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker))),
             approvals: new ApprovalGate(Approvals, store));
     }
 
@@ -219,6 +222,56 @@ public class SelfProtectionTests
         Assert.Equal(MutationStatus.Executed, (await h.RunAsync(capability, args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
         Assert.Equal(MutationStatus.Executed,
             (await h.RunAsync(capability, args, ProtectionHarness.AdminsTask(), MutationSurface.Automation)).Status);
+    }
+
+    [Fact]
+    public async Task An_operator_and_an_admin_run_ordinary_actions()
+    {
+        var h = new ProtectionHarness();
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync("db.query",
+            new { containerId = "web", serverId = "local", query = "update orders set state = 'paid' where id = 7" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync("container.restart",
+            new { containerId = "web", serverId = "local" }, ProtectionHarness.UiOperator, MutationSurface.Ui)).Status);
+    }
+
+    [Fact]
+    public async Task A_server_or_other_name_sharing_the_prefix_is_not_the_control_plane()
+    {
+        var h = new ProtectionHarness(serverName: "whiskers-vps");
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync("host.exec",
+            new { serverId = "local", command = "df -h" }, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+    }
+
+    [Fact]
+    public async Task A_callers_own_resolved_keys_do_not_reach_the_rules()
+    {
+        var h = new ProtectionHarness();
+        // Pretending the target is a server would take the container's name out of the control plane's reach.
+        var outcome = await h.RunAsync("container.restart",
+            new { containerId = "whiskers", serverId = "local", __resolvedKind = "server", __resolvedTargetName = "x" },
+            ProtectionHarness.AdminKey, MutationSurface.Mcp);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+    }
+
+    [Fact]
+    public async Task A_short_number_in_a_docker_command_is_not_taken_for_an_id()
+    {
+        var h = new ProtectionHarness();
+        h.Containers[0].Id = "100abc0000whiskers";   // the app's id starts with 100
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync("host.exec",
+            new { serverId = "local", command = "docker logs --tail 100 web" }, ProtectionHarness.AdminKey,
+            MutationSurface.Mcp)).Status);
+    }
+
+    [Fact]
+    public async Task A_pending_control_plane_action_says_an_Admin_must_approve_it()
+    {
+        var h = new ProtectionHarness();
+        var outcome = await h.RunAsync("container.restart", new { containerId = "whiskers", serverId = "local" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationReasonCodes.ProtectedNeedsAdminApproval, outcome.ReasonCode);
+        Assert.Equal([outcome.ApprovalId!], outcome.ReasonArgs);
     }
 
     [Fact]

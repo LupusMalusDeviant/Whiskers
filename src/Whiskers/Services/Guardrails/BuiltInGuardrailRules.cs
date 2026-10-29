@@ -147,9 +147,15 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         // A read changes nothing: the control plane is protected from changes, the policy's patterns as before.
         var change = !string.Equals(McpPermissionLevels.Normalize(request.RequiredLevel), McpPermissionLevels.Read,
             StringComparison.Ordinal);
-        var patterns = change ? policy.Concat(ControlPlaneResources.NamePatterns).ToList() : policy;
         var paths = change ? ControlPlaneResources.PathPatterns : [];
-        if (ProtectedResourceMatcher.FirstHit(request.Arguments, patterns, paths, analyseFreeText: change) is not { } hit)
+        // The policy's own patterns apply to every argument, as before. The control plane's names apply only where a
+        // container, volume or network can be named — not to a server, a DNS record or a task that shares the prefix.
+        var hit = ProtectedResourceMatcher.FirstHit(request.Arguments, policy, paths, analyseFreeText: change)
+                  ?? (change
+                      ? ProtectedResourceMatcher.FirstHit(request.Arguments, ControlPlaneResources.NamePatterns, [],
+                          analyseFreeText: true, ControlPlaneResources.NamesApplyTo(request.Arguments))
+                      : null);
+        if (hit is null)
         {
             reason = "";
             return GuardrailVerdict.Allow;

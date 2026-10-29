@@ -113,6 +113,56 @@ public class ProtectedResourceMatcherTests
         Assert.False(Hit("containerId", "whiskers")!.InFreeText);
     }
 
+    private static ProtectedResourceMatcher.Hit? ControlPlane(string key, string value) =>
+        ProtectedResourceMatcher.FirstHit(
+            new Dictionary<string, JsonElement> { [key] = JsonSerializer.SerializeToElement(value) },
+            [], ControlPlaneResources.PathPatterns, true);
+
+    [Theory]
+    [InlineData("volumes", "/:/rootfs:ro")]                                     // a directory above everything
+    [InlineData("volumes", "/var/lib/docker:/var/lib/docker:ro")]             // above Whiskers' volume
+    [InlineData("volumes", "/var/run:/var/run")]                              // above the socket
+    [InlineData("mounts", "/srv/a\n/run")]
+    [InlineData("volumes", "//var/run/docker.sock:/s")]                       // unnormalised paths
+    [InlineData("command", "curl --unix-socket /var/run/../run/docker.sock http://x/containers/json")]
+    [InlineData("command", "cat /var/lib/docker/volumes/serverwatch-data/_data/mtls/client.key")]
+    public void Paths_reaching_the_control_plane_are_found_however_they_are_written(string key, string value) =>
+        Assert.NotNull(ControlPlane(key, value));
+
+    [Theory]
+    [InlineData("volumes", "/data/myapp:/app/data")]                          // deploy_app's own example
+    [InlineData("volumes", "./data:/app/data,/srv/certs:/etc/mtls")]          // the container side does not count
+    [InlineData("envVars", "DATA_DIR=/app/data")]
+    [InlineData("volumes", "/var/log:/host-logs:ro")]
+    public void Ordinary_mounts_stay_allowed(string key, string value) => Assert.Null(ControlPlane(key, value));
+
+    [Theory]
+    [InlineData("DROP DATABASE U&\"s\\0068op\"")]                             // PostgreSQL unicode escapes
+    [InlineData("CREATE FUNCTION f() RETURNS void AS $$ import os $$ LANGUAGE plpython3u")]
+    [InlineData("db.getSiblingDB(\"whis\" + \"kers\").dropDatabase()")]          // a document database's query language
+    [InlineData("db.c.find({ $where: \"this.a\" })")]
+    public void Sql_and_queries_built_at_run_time_are_unanalysable(string query) =>
+        Assert.Equal("query", Hit("query", query)?.UnanalyzableArgument);
+
+    [Fact]
+    public void The_control_planes_names_apply_to_resources_not_to_servers_or_other_names()
+    {
+        var applies = ControlPlaneResources.NamesApplyTo(new Dictionary<string, JsonElement>
+        {
+            ["__resolvedKind"] = JsonSerializer.SerializeToElement("server"),
+        });
+        Assert.False(applies("__resolvedTargetName"));
+        Assert.False(applies("serverId"));
+        Assert.False(applies("recordName"));
+        Assert.True(applies("containerId"));
+        Assert.True(applies("command"));
+        Assert.True(applies("__resolvedRelated0"));
+        Assert.True(ControlPlaneResources.NamesApplyTo(new Dictionary<string, JsonElement>
+        {
+            ["__resolvedKind"] = JsonSerializer.SerializeToElement("volume"),
+        })("__resolvedTargetName"));
+    }
+
     [Fact]
     public void Nothing_is_protected_without_patterns() =>
         Assert.Null(ProtectedResourceMatcher.FirstHit(
@@ -132,7 +182,7 @@ public class ProtectedResourceMatcherTests
     {
         Assert.Contains("whiskers*", ControlPlaneResources.NamePatterns);
         Assert.Contains("ghostunnel*", ControlPlaneResources.NamePatterns);
-        Assert.Contains("/app/data/*", ControlPlaneResources.PathPatterns);
+        Assert.Contains("/var/lib/docker/volumes/serverwatch*", ControlPlaneResources.PathPatterns);
         Assert.Contains("/var/run/docker.sock", ControlPlaneResources.PathPatterns);
     }
 }

@@ -4910,6 +4910,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Mutation_Refused_TriggerNotAllowed" xml:space="preserve">
     <value>Refused for the AI trigger: {0}.</value>
   </data>
+  <data name="Mutation_Refused_ProtectedNeedsAdminApproval" xml:space="preserve">
+    <value>Waiting for approval: this touches Whiskers' own control plane or a protected resource. An Admin must approve it on the Approvals page (approval {0}); then run it again.</value>
+  </data>
   <data name="Mutation_Refused_UnattendedConfirm" xml:space="preserve">
     <value>Refused: this unattended run needs a confirmation nobody can give ({0}).</value>
   </data>

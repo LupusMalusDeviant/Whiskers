@@ -9,7 +9,8 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-16: **Whiskers protects its own control plane, and free text no longer slips past protected resources.** A
   built-in list — containers named `whiskers*`, `serverwatch*`, `socket-proxy*`, `docker-socket-proxy*`,
   `ghostunnel*`, `step-ca*`, `nginx-proxy-manager*` and those in `WHISKERS_SELF_CONTAINERS`, plus the data directory
-  `/app/data`, mTLS / step-ca / ghostunnel directories and the Docker socket — is protected on every surface for
+  data volume's directory under `/var/lib/docker/volumes/`, mTLS / step-ca / ghostunnel directories and the Docker
+  socket (also as a mount of a directory above them, such as `/` or `/var/run`) — is protected on every surface for
   every change, whatever the guardrail policy lists. Touching it (or a resource the policy protects) is refused for
   API keys, agents instructed over MCP, automations and Operators; an Admin in the web UI or the web chat gets an
   approval at Admin level instead, single-use and audited (with *Require a second approver* on, another Admin must
@@ -17,10 +18,12 @@ All notable changes to Whiskers are documented here. The format follows
   segments; a command is read as the shell reads it, so quoting tricks such as `whis""kers` do not hide a name), by
   a container id or id prefix written in a command, by a container's other names, among the stopped containers a
   cleanup (`docker system prune`) removes, and in what a deployment mounts — `deploy_app` volumes and every host
-  path and volume of a compose deployment (the Docker socket and `/app/data` are part of the control plane). Free
+  path and volume of a compose deployment (the Docker socket and the data volume are part of the control plane);
+  the control plane's names apply to containers, volumes and networks, not to a server called `whiskers-vps`. Free
   text that is completed at run time counts as touching a protected resource: in a command anything the shell
   expands (`$VAR`, `$(…)`, backticks, `{a,b}`), `eval`, `xargs`, decoding, or inline code of another interpreter
-  (`python -c`, `perl -e`, `awk … system(`); in SQL dynamic SQL, `COPY … PROGRAM` and file-reading functions. The
+  (`python -c`, `perl -e`, `awk … system(`); in SQL dynamic SQL, `COPY … PROGRAM`, file-reading functions,
+  `U&"…"` escapes, inline functions and untrusted languages (`plpython3u`). The
   SQL console, SQL import and seed, Artisan migrations and the raw compose deploy now hand their payload to the
   policy; the audit keeps only its length, and an approval raised from the web UI shows only the length of a
   command, SQL or compose file (refusal reasons never quote words of it). **Upgrade notes:** calls that used to
@@ -28,7 +31,9 @@ All notable changes to Whiskers are documented here. The format follows
   or its proxy; a command or query that merely mentions a protected name (also inside a domain such as
   `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a
   scheduled CustomCommand with `$(date +%F)`), `xargs`, `awk '{print $1}'` or `python -c`; a compose deployment
-  that mounts the Docker socket or a volume whose source uses a variable the project's `.env` does not set. Rename a
+  that mounts the Docker socket, `/`, `/var/run` or `/var/lib/docker` (cAdvisor, node-exporter, Portainer) or a volume
+  whose source uses a variable the project's `.env` does not set; a scheduled `volume.backup` of the
+  `serverwatch-data` volume run by a task (refused — back Whiskers up with its own self-backup instead). Rename a
   container that only shares the prefix, put the command into a script file on the host, or run the action from
   the web UI as an Admin.
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and

@@ -149,8 +149,9 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         return await WithMentionedContainersAsync(request, resolution, ct);
     }
 
-    /// <summary>Shortest word of free text that is looked up as a container id prefix (Docker's short ids have 12).</summary>
-    internal const int MinimumMentionedIdLength = 6;
+    /// <summary>Shortest word of free text that is looked up as a container id (Docker's short ids have 12), so
+    /// ordinary hex-looking words (<c>facade</c>, a date) do not count.</summary>
+    internal const int MinimumMentionedIdLength = 12;
 
     /// <summary>Shortest id prefix looked up in a command that runs a container runtime (<c>docker rm -f c0f</c>):
     /// Docker accepts any unique prefix; one or two hex digits would name most containers of a server.</summary>
@@ -176,8 +177,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
                 var shortest = Whiskers.Services.Guardrails.ProtectedResourceMatcher.InvokesContainerRuntime(a.Key, text)
                     ? MinimumRuntimeIdLength
                     : MinimumMentionedIdLength;
+                // In a runtime command a short number is a flag's value (--tail 100), not an id.
                 return Whiskers.Services.Guardrails.ProtectedResourceMatcher.MentionWords(a.Key, text)
-                    .Where(w => w.Length >= shortest && w.All(Uri.IsHexDigit));
+                    .Where(w => w.Length >= shortest && w.All(Uri.IsHexDigit)
+                                && (w.Length >= MinimumMentionedIdLength || !w.All(char.IsAsciiDigit)));
             })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -248,6 +251,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         // The mounts of a planned deployment, decided before its containers (ComposeImpact, R1-16): each is
         // something the deployment touches.
         if (resolution.Target is { } mounting && capability.Id == "compose.deploy"
+            && MutationTargets.String(request.Arguments, "composeContent") is null
             && MutationTargets.String(request.Arguments, "mounts") is { } mountList)
             return Done(mounting with
             {
