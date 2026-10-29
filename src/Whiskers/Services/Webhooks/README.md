@@ -24,13 +24,13 @@ delivery is still answered with its run and a new one is `Busy` and not recorded
 with its run id; a repeat (concurrent, later, after a restart) with the first run's id and state. Workers
 (`MaxConcurrentRuns`, started with the first delivery without the caller's execution context — no mutation scope,
 culture or user travels to later deliveries — and stopped with the app) run each delivery once, holding a lock per
-resource (`TargetAsync`: a container by its resolved id on its server — name, full id and unique prefix are one
-lock —, a compose deployment by its planned project on its server — compose's own identity, so a symlinked directory
+resource (`TargetAsync`: a container action holds the containers of its server — one at a time per server, because
+a rebuild starts the replacement under a new id and renames the old container before it ends, so no name or id is one
+container throughout —, a compose deployment by its planned project on its server — compose's own identity, so a symlinked directory
 or another directory declaring the same project is one lock —, a Git app by its id), so runs on one resource never
-overlap whichever webhook fires them. The locks are the process-wide `ResourceLocks` (reference-counted: a lock for a
-container id that is gone is not kept), shared with Git deployments, which hold their compose project's lock while
-they build and run `up`. A container or plan is resolved again once its lock is held; if it now names
-another resource (a run before rebuilt the container under a new id, the compose file changed the project), the run
+overlap whichever webhook fires them. The locks are the process-wide `ResourceLocks` (reference-counted: a lock nothing holds or awaits is not kept), shared with Git deployments, which hold their compose project's lock while
+they build and run `up`. A container or plan is resolved again once its lock is held, and the action acts on what it finds then; if a plan now
+names another project (the compose file changed it), the run
 waits for that lock instead, and the action gets exactly the container or plan it locked (a compose deployment whose
 project changes again before it writes is refused). The webhook is read again once the run holds its resource: switched off, removed or
 pointed elsewhere meanwhile → refused; taken over → it runs on the new owner. `RunTimeout` bounds the run: a run that

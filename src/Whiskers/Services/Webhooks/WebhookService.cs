@@ -523,8 +523,9 @@ public class WebhookService : IWebhookService
         queued.Action == now.Action && queued.TargetId == now.TargetId && queued.ServerId == now.ServerId;
 
     /// <summary>
-    /// The resource a run locks, by its identity rather than its spelling: a container by its id on its server
-    /// (name, full id and unique prefix are one container), a compose deployment by its planned project on its server
+    /// The resource a run locks, by its identity rather than its spelling: the containers of its server — one
+    /// container action per server at a time, since a rebuild starts the replacement under a new id (and renames the
+    /// old one) before it ends, so no name or id names the container throughout; a compose deployment by its planned project on its server
     /// (compose's own identity: symlinked or different directories of one project are one lock), a Git app by its id.
     /// A container or compose action acts on exactly the container or plan resolved here. A target that cannot be
     /// resolved locks its spelling; its run is refused anyway.
@@ -547,7 +548,7 @@ public class WebhookService : IWebhookService
             {
                 var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
                 return container is not null
-                    ? new RunTarget($"container:{server}|{container.Id}", container)
+                    ? new RunTarget($"containers:{server}", container)
                     : new RunTarget($"container:{server}|{webhook.TargetId}", Error: error);
             }
             default:

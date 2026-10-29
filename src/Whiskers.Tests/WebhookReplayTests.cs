@@ -311,38 +311,31 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
-    public async Task A_run_acts_only_on_the_container_it_locked_also_after_a_rebuild_changed_its_id()
+    public async Task A_rebuild_holds_off_every_run_on_its_replacement_until_it_ends()
     {
         _options.MaxConcurrentRuns = 4;
         var container = new ContainerInfo { Id = "aaa111bbb222ccc333", Name = "web-1", ServerId = "local" };
         var docker = new FakeDocker(container);
-        var waiter = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var byName = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var byNewId = Seed(WebhookSignatures.Whiskers, target: "ddd444eee555fff666");
         var service = Service(docker);
         _runner.Hold();
-        var first = await service.AcceptAsync(waiter.WebhookId, Signed(waiter, "delivery-0114"));
+        var first = await service.AcceptAsync(byName.WebhookId, Signed(byName, "delivery-0114"));
         await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        var waiting = await service.AcceptAsync(waiter.WebhookId, Signed(waiter, "delivery-0115"));
-        await Task.Delay(100);   // it waits for the lock of aaa111…
 
-        // The container is rebuilt under a new id; a later delivery locks that one and runs (held).
+        // The rebuild has started the replacement under a new id but has not ended: runs on the replacement — by
+        // its name or by its new id — wait for it.
         container.Id = "ddd444eee555fff666";
-        _runner.Hold();
-        var later = await service.AcceptAsync(waiter.WebhookId, Signed(waiter, "delivery-0116"));
-        await WaitFor(() => _runner.Runs == 2);
-
-        // The first run ends: the waiting one gets the old lock, finds the container under the new id, and waits
-        // for that lock instead of running beside the later run.
-        _runner.ReleaseFirst();
-        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
+        var again = await service.AcceptAsync(byName.WebhookId, Signed(byName, "delivery-0115"));
+        var direct = await service.AcceptAsync(byNewId.WebhookId, Signed(byNewId, "delivery-0116"));
         await Task.Delay(300);
-        Assert.Equal(2, _runner.Runs);
-        Assert.Equal("Queued", (await Delivery(waiting.RunId!)).State);
+        Assert.Equal(1, _runner.Runs);
 
         _runner.Release();
-        Assert.Equal("Succeeded", (await Finished(later.RunId!)).State);
-        Assert.Equal("Succeeded", (await Finished(waiting.RunId!)).State);
+        foreach (var r in new[] { first, again, direct }) Assert.Equal("Succeeded", (await Finished(r.RunId!)).State);
+        Assert.Equal(1, _runner.MaxConcurrent);
+        // Each acted on the container it held the lock for: the replacement, once it was the one there.
         Assert.Equal(["aaa111bbb222ccc333", "ddd444eee555fff666", "ddd444eee555fff666"], _runner.ContainerIds);
-        // No lock is kept for the container id that is gone (nor for the current one, once nothing holds it).
         await WaitFor(() => service.LockedResources == 0);
     }
 
