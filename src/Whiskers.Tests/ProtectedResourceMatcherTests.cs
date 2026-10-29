@@ -74,6 +74,15 @@ public class ProtectedResourceMatcherTests
     [InlineData("docker stop whis{k,}ers")]
     [InlineData("docker stop 'unterminated")]
     [InlineData("sh -c 'docker stop $1' x whiskers")]
+    [InlineData("docker ps -aq | /usr/bin/xargs docker rm -f")]                  // by path
+    [InlineData("python3 -B -c 'import subprocess; subprocess.run([\"docker\",\"stop\",\"w\"+\"hiskers\"])'")]
+    [InlineData("node --print \"1\"")]
+    [InlineData("perl -w -e 'print 1'")]
+    [InlineData("bash --norc /tmp/x.sh")]
+    [InlineData("echo w hiskers | tr -d ' ' | /usr/bin/xargs docker stop")]
+    [InlineData("sudo -u root env X=1 python3 x.py")]
+    [InlineData("find / -name 'whisk*' -exec docker rm -f {} +")]
+    [InlineData("su root")]
     [InlineData("./deploy.sh")]                                                 // a script run by its path
     [InlineData("cd /srv && sudo /opt/x/run.sh")]
     [InlineData("python3 stop.py")]
@@ -99,6 +108,10 @@ public class ProtectedResourceMatcherTests
     [InlineData("query", "UPDATE t SET name = concat('Mr ', name)")]
     [InlineData("query", "select 'a' + name from t")]
     [InlineData("command", "/usr/bin/docker ps")]
+    [InlineData("command", "sudo docker logs --tail 50 web | grep -i error | sort | uniq -c")]
+    [InlineData("command", "find /var/log/nginx -name '*.gz' -mtime +7 -delete")]
+    [InlineData("command", "sh -c 'docker ps'")]
+    [InlineData("command", "TZ=UTC date")]
     [InlineData("command", "apt-get install -y make")]
     [InlineData("yaml", "services:\n  web:\n    ports: [\"${PORT:-8080}:80\"]\n")]
     [InlineData("command", @"find /var/log -name '*.gz' -exec rm {} \;")]
@@ -139,6 +152,8 @@ public class ProtectedResourceMatcherTests
     [InlineData("mounts", "/srv/a\n/run")]
     [InlineData("volumes", "//var/run/docker.sock:/s")]                       // unnormalised paths
     [InlineData("command", "curl --unix-socket /var/run/../run/docker.sock http://x/containers/json")]
+    [InlineData("command", "cp /tmp/evil-ca.crt /opt/dockerproxy/certs/ca.crt")]  // a managed host's mTLS material
+    [InlineData("volumes", "/opt:/x")]                                          // above it
     [InlineData("command", "rm -rf /var/lib/docker/volumes")]                  // removing a directory above it
     [InlineData("command", "mv /var/lib/docker /tmp/x")]
     [InlineData("yaml", "services:\n  t:\n    volumes:\n      - ${UNSET:-/var/run/docker.sock}:/sock\n")]

@@ -22,6 +22,9 @@ public static class ControlPlaneResources
         "/var/lib/docker/volumes/whiskers*", "/var/lib/docker/volumes/serverwatch*",
         "*/mtls", "*/mtls/*",                       // client certificates and keys of the mTLS tunnels
         "*/step-ca", "*/step-ca/*",                 // the certificate authority's keys
+        "/opt/step-ca", "/opt/step-ca/*",           // … where onboarding puts it (literal, so /opt counts as above it)
+        "*/dockerproxy", "*/dockerproxy/*",         // every managed host's ghostunnel key, certificate and CA
+        "/opt/dockerproxy", "/opt/dockerproxy/*",
         "*/ghostunnel", "*/ghostunnel/*",
         "/var/run/docker.sock", "/run/docker.sock", // the socket the control plane drives Docker through
     ];

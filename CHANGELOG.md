@@ -9,7 +9,8 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-16: **Whiskers protects its own control plane, and free text no longer slips past protected resources.** A
   built-in list — containers named `whiskers*`, `serverwatch*`, `socket-proxy*`, `docker-socket-proxy*`,
   `ghostunnel*`, `step-ca*`, `nginx-proxy-manager*` and those in `WHISKERS_SELF_CONTAINERS`, plus the data
-  volume's directory under `/var/lib/docker/volumes/`, mTLS / step-ca / ghostunnel directories and the Docker
+  volume's directory under `/var/lib/docker/volumes/`, mTLS / step-ca / ghostunnel directories (also every
+  managed host's `/opt/dockerproxy`, which holds its tunnel key and CA) and the Docker
   socket (also as a mount of a directory above them, such as `/` or `/var/run`) — is protected on every surface for
   every change, whatever the guardrail policy lists. Touching it (or a resource the policy protects) is refused for
   API keys, agents instructed over MCP, automations and Operators; an Admin in the web UI or the web chat gets an
@@ -32,7 +33,8 @@ All notable changes to Whiskers are documented here. The format follows
   `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a
   scheduled CustomCommand with `$(date +%F)`), `xargs`, `awk '{print $1}'`, `python -c`, a pipe into a shell or an
   interpreter (`curl … | sh`), a script (`bash deploy.sh`, `./deploy.sh`, `/opt/x/run.sh`, `python3 x.py`), `make` or
-  `npm`, or `rm`/`mv`/`chmod` on `/var/lib/docker`; renewing or issuing mTLS certificates and restoring a self-backup
+  `npm`, any interpreter (`python3 …`, `node …`), `xargs` by any path, `find -exec` from `/`, or `rm`/`mv`/`chmod`
+  on `/var/lib/docker`; renewing or issuing mTLS certificates and restoring a self-backup
   (an Admin approval in the web UI, refused for keys);
   editing an nginx site that proxies to Whiskers; deploying your own `step-ca` or `ghostunnel`; SQL with dynamic
   statements or inline functions (`EXECUTE`, `PREPARE`, `CREATE FUNCTION`, typical in migrations and `pg_dump`
@@ -41,7 +43,10 @@ All notable changes to Whiskers are documented here. The format follows
   server's containers cannot be listed; a compose deployment
   that mounts the Docker socket, `/`, `/var/run` or `/var/lib/docker` (cAdvisor, node-exporter, Portainer) or a volume
   whose source uses a variable the project's `.env` does not set; a scheduled `volume.backup` of the
-  `serverwatch-data` volume run by a task (refused — back Whiskers up with its own self-backup instead). Rename a
+  `serverwatch-data` volume run by a task (refused — back Whiskers up with its own self-backup instead); AutoUpdate
+  and AutoPatch of the Whiskers container itself (refused each cycle with an `automation_refused` notification —
+  update Whiskers from the web UI); a raw compose file in the UI deploy that uses a variable without a default
+  (Admin approval, since the target directory's `.env` is not read). Rename a
   container that only shares the prefix, put the command into a script file on the host, or run the action from
   the web UI as an Admin.
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and

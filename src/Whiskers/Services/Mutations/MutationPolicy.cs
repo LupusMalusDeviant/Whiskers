@@ -147,6 +147,9 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     {
         MutationSurface.Mcp => AgentOrigin.McpDirect,
         MutationSurface.Automation or MutationSurface.Webhook => AgentOrigin.Trigger,
+        // The origin the agent's run recorded wins (an agent instructed over /mcp with a session cookie is McpTool);
+        // without one it follows whom the agent acts for.
+        MutationSurface.Agent when request.AgentOrigin is { } recorded => recorded,
         MutationSurface.Agent => request.Principal.OnBehalfOf?.Kind switch
         {
             MutationPrincipalKind.Automation => AgentOrigin.Trigger,

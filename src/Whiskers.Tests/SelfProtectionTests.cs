@@ -111,6 +111,7 @@ public class SelfProtectionTests
         { "app.deploy", """{"serverId":"local","appName":"x","image":"alpine","volumes":"/var/run/docker.sock:/s"}""" },
         { "certificate.renew_mtls", """{"serverId":"local"}""" },                                   // re-keys a tunnel
         { "host.exec", """{"serverId":"local","command":"cat /app/data/mtls/client.key"}""" },      // mTLS material
+        { "host.exec", """{"serverId":"local","command":"rm -rf /opt/dockerproxy"}""" },            // a host's tunnel keys
         { "host.exec", """{"serverId":"local","command":"rm -rf /opt/step-ca/secrets"}""" },        // the CA's keys
         { "host.exec", """{"serverId":"local","command":"docker stop whiskers"}""" },               // named in a command
         { "host.exec", """{"serverId":"local","command":"docker rm -f c0ffee123456"}""" },          // by id in a command
@@ -299,6 +300,25 @@ public class SelfProtectionTests
         Assert.Equal(MutationStatus.Executed, (await h.RunAsync("host.exec",
             new { serverId = "local", command = "docker logs --tail 100 web" }, ProtectionHarness.AdminKey,
             MutationSurface.Mcp)).Status);
+    }
+
+    [Fact]
+    public async Task An_all_digit_id_prefix_in_a_docker_command_is_looked_up()
+    {
+        var h = new ProtectionHarness();
+        h.Containers[0].Id = "71abc0000whiskers";
+        Assert.Equal(MutationStatus.Denied, (await h.RunAsync("host.exec",
+            new { serverId = "local", command = "docker rm -f 71" }, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+    }
+
+    [Fact]
+    public async Task An_agent_instructed_over_mcp_with_a_session_cookie_raises_no_approval()
+    {
+        var h = new ProtectionHarness();
+        var outcome = await h.RunAsync("container.restart", new { containerId = "whiskers", serverId = "local" },
+            ProtectionHarness.ChatAgent(), MutationSurface.Agent, AgentOrigin.McpTool);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
     }
 
     [Fact]

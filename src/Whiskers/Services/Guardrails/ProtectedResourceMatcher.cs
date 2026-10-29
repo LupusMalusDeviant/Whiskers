@@ -107,7 +107,10 @@ public static class ProtectedResourceMatcher
             // A compose file is read as compose reads it: ${VAR:-default} becomes its default, an unset variable empty.
             if (freeText && ComposeArguments.Contains(key))
             {
-                if (ExpandComposeVariables(value) is not { } expanded)
+                // The raw file of the UI deploy is not planned: a bare variable may be set by the target directory's
+                // .env, which is not seen here, so its value is unknown.
+                if (ExpandComposeVariables(value) is not { } expanded
+                    || (key.Equals("yaml", StringComparison.OrdinalIgnoreCase) && BareComposeVariable.IsMatch(value)))
                     return new Hit("", null, key) { Argument = key, InFreeText = true };
                 value = expanded;
                 // A bind mount's host side (short "- /src:/dst" or long "source: /src") above a protected path.
@@ -141,6 +144,9 @@ public static class ProtectedResourceMatcher
         "rm", "rmdir", "mv", "chmod", "chown", "chgrp", "chattr", "shred", "truncate", "rsync", "find", "mount",
         "umount", "ln", "unlink", "setfacl",
     };
+
+    private static readonly Regex BareComposeVariable = new(@"(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*\}|(?<!\$)\$[A-Za-z_]",
+        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     private static readonly Regex ComposeMountSource = new(
         @"(?m)^\s*-\s*[""']?(?<src>/[^:""'\s]*)\s*:|^\s*source:\s*[""']?(?<src>/[^""'\s]*)",
@@ -292,6 +298,20 @@ public static class ProtectedResourceMatcher
     public static IEnumerable<string> MentionWords(string argument, string text) =>
         ShellArguments.Contains(argument) ? AnalyseShell(text).Words.SelectMany(Words) : Words(text);
 
+    /// <summary>The words of a command that can be a container id: every word except a number given as an option's
+    /// value (<c>--tail 100</c>, <c>-p 8080:80</c>), which names no container.</summary>
+    public static IEnumerable<string> RuntimeIdWords(string text)
+    {
+        var words = AnalyseShell(text).Words;
+        for (var i = 0; i < words.Count; i++)
+        {
+            var optionValue = i > 0 && NumericOptions.Contains(words[i - 1])
+                              && words[i].All(ch => char.IsAsciiDigit(ch) || ch is ':' or '.' or '/' or '-');
+            if (optionValue) continue;
+            foreach (var w in Words(words[i])) yield return w;
+        }
+    }
+
     /// <summary>Whether a command invokes a container runtime directly, where a short id prefix is meaningful.</summary>
     public static bool InvokesContainerRuntime(string argument, string text) =>
         ShellArguments.Contains(argument)
@@ -303,37 +323,103 @@ public static class ProtectedResourceMatcher
     private static readonly Regex RuntimeApi = new(@"/(containers|volumes|networks|exec)/|:237[56]\b|docker\.sock",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
+    // Container-runtime options that take a number (a count, a duration, a port, a size) — not a container.
+    private static readonly HashSet<string> NumericOptions = new(StringComparer.Ordinal)
+    {
+        "--tail", "-n", "--lines", "--since", "--until", "-t", "--time", "--timeout", "--stop-timeout", "-p",
+        "--publish", "-m", "--memory", "--memory-swap", "--cpus", "--cpu-shares", "-c", "--shm-size", "--limit",
+        "--last", "--pids-limit", "--restart-condition",
+    };
+
     /// <summary>What the shell makes of a command: its literal words (quotes and escapes removed, with the words of
     /// quoted text that is run again), the words it expands as globs, and whether anything is built at run time.</summary>
     public sealed record ShellText(IReadOnlyList<string> Words, IReadOnlyList<string> Globs, bool Unanalyzable);
 
     private const int MaxShellDepth = 4;
 
+    /// <summary>
+    /// Reads a command as the shell does and decides whether it is analysable. Every command word — the first word
+    /// of each command of a list or pipeline, after <c>sudo</c>, <c>env</c>, <c>nohup</c>, … — is judged by its file
+    /// name: a shell or <c>su</c> is analysable only as <c>-c '…'</c> (whose text is read again), any other
+    /// interpreter, a script or program run by a relative path or a script by its path, a build tool, <c>.</c> and
+    /// the commands that build their arguments from data (<c>xargs</c>, <c>eval</c>, <c>parallel</c>, …) are not.
+    /// </summary>
     public static ShellText AnalyseShell(string text)
     {
         var words = new List<string>();
         var globs = new List<string>();
-        var unanalyzable = Tokenize(text, words, globs, 0);
-        if (words.Any(w => ShellRunTime.Contains(w))) unanalyzable = true;
-        // A shell that reads its commands from a pipe, a file or a process substitution runs what this text never
-        // shows; only `sh -c '…'` hands it a command line, which is read again above.
+        var commands = new List<int>();
+        var unanalyzable = Tokenize(text, words, globs, commands, 0);
+        foreach (var i in commands)
+        {
+            if (unanalyzable) break;
+            var word = words[i];
+            var name = Path.GetFileName(word);
+            var next = i + 1 < words.Count ? words[i + 1] : null;
+            if (ShellRunTime.Contains(name) || BuildTools.Contains(name) || name == "."
+                || word.StartsWith("./", StringComparison.Ordinal) || word.StartsWith("../", StringComparison.Ordinal)
+                || word.StartsWith("~/", StringComparison.Ordinal)
+                || (word.StartsWith('/') && ScriptFile.IsMatch(word))
+                || IsInterpreter(name))
+                unanalyzable = true;
+            else if ((Shells.Contains(name) || name == "su") && !IsCommandFlag(next))
+                unanalyzable = true;
+            else if (name == "find" && words.Skip(i + 1).Any(w => w is "-exec" or "-execdir" or "-ok" or "-okdir" or "-delete"))
+            {
+                // What it acts on comes from the file system: analysable only when every starting point is a plain
+                // absolute directory that neither is nor contains a protected path.
+                var roots = words.Skip(i + 1).TakeWhile(w => !w.StartsWith('-') && w is not "(" and not "!").ToList();
+                unanalyzable = roots.Count == 0 || roots.Any(r => !r.StartsWith('/')
+                    || AncestorHit(r, ControlPlaneResources.PathPatterns) is not null
+                    || Match(NormalizePath(r), ControlPlaneResources.PathPatterns) is not null);
+            }
+        }
+        // A shell or an interpreter as an argument (docker exec -i db sh, ssh host python3 x.py) runs what it is fed.
         for (var w = 0; w < words.Count && !unanalyzable; w++)
-            if (Shells.Contains(Path.GetFileName(words[w]))
-                && (w + 1 >= words.Count || !(words[w + 1].StartsWith('-') && words[w + 1].Contains('c'))))
+        {
+            var name = Path.GetFileName(words[w]);
+            var next = w + 1 < words.Count ? words[w + 1] : null;
+            if (ShellRunTime.Contains(name)) unanalyzable = true;
+            else if (Shells.Contains(name) && !IsCommandFlag(next)) unanalyzable = true;
+            else if (IsInterpreter(name) && next is not null && (next.StartsWith('-') || next.Contains('.') || next.Contains('/')))
                 unanalyzable = true;
-        // Inline code of another interpreter builds what it runs from strings the shell never sees.
-        for (var w = 0; w + 1 < words.Count && !unanalyzable; w++)
-            if (Interpreters.Contains(Path.GetFileName(words[w])) && words[w + 1] is "-c" or "-e" or "-E" or "--eval" or "-r" or "-p")
-                unanalyzable = true;
+        }
         try { unanalyzable |= ShellUnanalyzable.IsMatch(text); }
         catch (RegexMatchTimeoutException) { unanalyzable = true; }
         return new ShellText(words, globs, unanalyzable);
     }
 
+    // -c, or single-dash flags that include it (-ec, -lc); never a long option (--norc).
+    private static bool IsCommandFlag(string? word) =>
+        word is { Length: >= 2 } && word[0] == '-' && word[1] != '-' && word.Contains('c') && word[1..].All(char.IsAsciiLetter);
+
+    private static bool IsInterpreter(string name) =>
+        Interpreters.Contains(name) || InterpreterVersion.IsMatch(name);
+
+    private static readonly Regex InterpreterVersion = new(@"^(python|pypy)\d*(\.\d+)?$|^(perl|ruby|php|lua|node)\d+(\.\d+)?$",
+        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    private static readonly Regex ScriptFile = new(@"\.(sh|bash|zsh|ksh|py|pl|rb|js|mjs|cjs|ts|php|lua|ps1)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    // Words before the command word that run it (sudo docker …, env X=1 docker …, nohup …, timeout 10 …).
+    private static readonly HashSet<string> CommandPrefixes = new(StringComparer.Ordinal)
+    {
+        "sudo", "doas", "env", "exec", "nohup", "time", "nice", "ionice", "command", "builtin", "stdbuf", "timeout",
+        "chroot", "setsid", "unbuffer", "watch", "flock",
+    };
+
+    // Programs that run a recipe from a file this text does not show.
+    private static readonly HashSet<string> BuildTools = new(StringComparer.Ordinal)
+    {
+        "make", "gmake", "just", "task", "npm", "npx", "yarn", "pnpm", "ansible", "ansible-playbook", "rake", "invoke",
+        "cron", "crontab", "at", "batch", "systemd-run", "run-parts",
+    };
+
     // Commands that build what they act on from data at run time.
     private static readonly HashSet<string> ShellRunTime = new(StringComparer.Ordinal)
     {
-        "eval", "xargs", "base64", "xxd", "source", "parallel", "envsubst",
+        "eval", "xargs", "base64", "xxd", "source", "parallel", "envsubst", "uudecode", "rev",
     };
 
     private static readonly HashSet<string> Shells = new(StringComparer.Ordinal)
@@ -345,40 +431,51 @@ public static class ProtectedResourceMatcher
     private static readonly HashSet<string> Interpreters = new(StringComparer.Ordinal)
     {
         "python", "python2", "python3", "perl", "ruby", "node", "nodejs", "php", "lua", "tclsh", "pwsh", "powershell",
+        "deno", "bun", "Rscript", "julia", "osascript", "expect", "gawk", "mawk", "nawk",
     };
 
     private static readonly Regex ShellUnanalyzable = new(
         @"\bopenssl\s+(enc|base64)\b|\bprintf\b[^\n]*%b|\\x[0-9a-f]{2}|\\[0-7]{3}|\bsystem\s*\("
-        // an interpreter fed through a pipe; a script sourced with '.'
-        + @"|\|\s*(sudo\s+(-\S+\s+)*)?(\S*/)?(python\d*(\.\d+)?|perl|ruby|node|nodejs|php|lua|tclsh|pwsh)\b"
-        + @"|(^|[;&|(]\s*)\.\s+\S"
-        // a script or program run by its path, a script handed to an interpreter, a build tool's recipe
-        + @"|(^|[;&|(]\s*|\b(sudo|exec|nohup|env|time|nice)\s+)(\./|~/|\.\./)"
-        + @"|(^|[;&|(]\s*|\b(sudo|exec|nohup|env|time|nice)\s+)/\S+\.(sh|bash|zsh|py|pl|rb|js|mjs|php|lua|ps1)\b"
-        + @"|\b(python\d*(\.\d+)?|perl|ruby|node|nodejs|php|lua|tclsh|pwsh|powershell)\s+[^-\s|;&]"
-        + @"|(^|[;&|(]\s*|\b(sudo|exec|nohup|env|time|nice)\s+)(make|just|task|npm|npx|yarn|pnpm|ansible-playbook)\b",
+        // sed's e flag or command runs the pattern space as a command
+        + @"|\bsed\b[^|;&\n]*(/[gIimMp0-9]*e[gIimMp0-9]*['""\s]|['""]\s*e\s)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     /// <summary>Splits <paramref name="text"/> into shell words. Returns true when something in it is expanded at run
     /// time. Quoted text with shell syntax in it is read again as a command (<c>sh -c '…'</c>, <c>ssh host "…"</c>).</summary>
-    private static bool Tokenize(string text, List<string> words, List<string> globs, int depth)
+    private static bool Tokenize(string text, List<string> words, List<string> globs, List<int> commands, int depth)
     {
         if (depth > MaxShellDepth) return true;
         var unanalyzable = false;
         var word = new StringBuilder();
         var quotedPart = new StringBuilder();
         bool inWord = false, glob = false, quoted = false;
+        // Whether the next word is a command word, and whether a prefix (sudo, env …) is still taking its options.
+        bool atCommand = true, inPrefix = false;
         var i = 0;
 
         void End()
         {
             if (!inWord) return;
             var w = word.ToString();
+            if (atCommand)
+            {
+                var prefixArgument = inPrefix && (w.StartsWith('-') || w.All(char.IsAsciiDigit)
+                                                  || (w.Contains('=') && !w.StartsWith('=')));
+                var assignment = !inPrefix && w.Contains('=') && !w.StartsWith('=') && !w.StartsWith('-')
+                                 && w.IndexOf('=') < (w.IndexOf('/') is var slash and >= 0 ? slash : int.MaxValue);
+                if (prefixArgument || assignment) { }
+                else if (CommandPrefixes.Contains(Path.GetFileName(w))) inPrefix = true;
+                else
+                {
+                    commands.Add(words.Count);
+                    atCommand = inPrefix = false;
+                }
+            }
             words.Add(w);
             if (glob) globs.Add(w);
             // Quoted text that looks like a command line is read again: it may be run by sh -c, ssh, docker exec …
             if (quoted && quotedPart.Length > 0 && LooksLikeCommand(quotedPart.ToString()))
-                unanalyzable |= Tokenize(quotedPart.ToString(), words, globs, depth + 1);
+                unanalyzable |= Tokenize(quotedPart.ToString(), words, globs, commands, depth + 1);
             word.Clear();
             quotedPart.Clear();
             inWord = glob = quoted = false;
@@ -389,7 +486,13 @@ public static class ProtectedResourceMatcher
             var c = text[i];
             switch (c)
             {
-                case ' ' or '\t' or '\r' or '\n' or ';' or '|' or '&' or '(' or ')' or '<' or '>':
+                case ';' or '|' or '&' or '(' or ')' or '\n':
+                    End();
+                    atCommand = true;
+                    inPrefix = false;
+                    i++;
+                    continue;
+                case ' ' or '\t' or '\r' or '<' or '>':
                     End();
                     i++;
                     continue;

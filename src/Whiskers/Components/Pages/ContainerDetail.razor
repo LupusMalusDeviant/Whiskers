@@ -1716,8 +1716,7 @@ else
         try
         {
             // Try artisan migrate (Laravel)
-            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2),
-                command: "php artisan migrate --force");
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
             if (!result.StdOut.Contains("NO_ARTISAN"))
             {
                 _migrationOutput = result.StdOut; _migrationSuccess = result.ExitCode == 0;
@@ -1745,8 +1744,7 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2),
-                command: "php artisan migrate:rollback --force");
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
             _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }

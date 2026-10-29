@@ -178,10 +178,12 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
                 var shortest = Whiskers.Services.Guardrails.ProtectedResourceMatcher.InvokesContainerRuntime(a.Key, text)
                     ? MinimumRuntimeIdLength
                     : MinimumMentionedIdLength;
-                // In a runtime command a short number is a flag's value (--tail 100), not an id.
-                return Whiskers.Services.Guardrails.ProtectedResourceMatcher.MentionWords(a.Key, text)
-                    .Where(w => w.Length >= shortest && w.All(Uri.IsHexDigit)
-                                && (w.Length >= MinimumMentionedIdLength || !w.All(char.IsAsciiDigit)));
+                // In a runtime command every hex word counts (an all-digit id prefix included), except a number
+                // given as an option's value (--tail 100).
+                var candidates = shortest == MinimumRuntimeIdLength
+                    ? Whiskers.Services.Guardrails.ProtectedResourceMatcher.RuntimeIdWords(text)
+                    : Whiskers.Services.Guardrails.ProtectedResourceMatcher.MentionWords(a.Key, text);
+                return candidates.Where(w => w.Length >= shortest && w.All(Uri.IsHexDigit));
             })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
