@@ -303,7 +303,7 @@ else
         {
             // The decision and the deployment use the same snapshot of the app (R1-08): an edit in between is refused.
             var snapshot = app.Clone();
-            var (success, output) = await Mutations.RunAsync("gitdeploy.deploy",
+            await Mutations.RunAsync("gitdeploy.deploy",
                 new { appId = snapshot.Id, name = snapshot.Name, serverId = snapshot.ServerId, branch = snapshot.Branch,
                       revision = snapshot.Revision },
                 // Each existing container of the deployment's plan is decided too, before the first build (R1-07).

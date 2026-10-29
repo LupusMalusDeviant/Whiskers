@@ -159,8 +159,9 @@ public sealed class MutationGateway : IMutationGateway
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                _logger.LogWarning(ex, "Target of refused {Capability} could not be resolved (operation {OperationId})",
-                    capability.Id, operationId);
+                // The type only: a resolver's message echoes the raw target from the arguments.
+                _logger.LogWarning("Target of refused {Capability} could not be resolved ({Error}, operation {OperationId})",
+                    capability.Id, ex.GetType().Name, operationId);
             }
         }
         return await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied, reason, ct);

@@ -122,7 +122,7 @@ public sealed class UiMutationRunner : IUiMutationRunner
             await _gateway.RefuseAsync(new MutationRequest(capabilityId, await PrincipalAsync(), MutationSurface.Ui,
                 target, args), reason, ct);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // The refusal stands whether or not it could be recorded. A failure inside the gateway is logged and kept
             // there (R1-19); one before it (principal, arguments) is logged here — the capability only, never arguments.
