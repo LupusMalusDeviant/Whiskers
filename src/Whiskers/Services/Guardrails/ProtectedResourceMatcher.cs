@@ -705,8 +705,11 @@ public static class ProtectedResourceMatcher
         // PostgreSQL unicode-escaped identifiers and strings, untrusted procedural languages, routines defined inline
         + @"|\bu&[""']|\\[0-9a-f]{4,6}|\blanguage\s+'?pl\w*u\b|\bcreate\s+(or\s+replace\s+)?(function|procedure)\b"
         // a document database's query language: strings joined or decoded at run time, server-side JavaScript
-        + @"|\bfromCharCode\b|\$where\b|\$function\b|\bdb\.eval\s*\(",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+        + @"|\bfromCharCode\b|\$where\b|\$function\b|\bdb\.eval\s*\("
+        // client commands the text is fed to: psql \i \ir \gexec \c \! …, mysql source / system / \. , sqlite .read
+        // .shell …, mongosh load() — they run a file, a shell or another database the text does not name
+        + @"|(?:^|[\s;])\\[a-z!.]|^\s*(source|system)\s|^\s*\.(read|shell|system|import|open|load|cd)\b|\bload\s*\(",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline, TimeSpan.FromMilliseconds(200));
 
     // A document database's shell query (db.…): strings joined at run time name what it acts on only then.
     private static readonly Regex MongoShell = new(@"\bdb\.\w", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));

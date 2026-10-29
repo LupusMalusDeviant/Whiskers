@@ -131,13 +131,17 @@ public class ApprovalNotificationTests
         Assert.Equal(call.CorrelationId, approval.CorrelationId);
     }
 
-    [Fact]
-    public async Task An_mcp_approval_stores_the_sql_without_its_password_literal()
+    [Theory]
+    [InlineData("ALTER ROLE whiskers PASSWORD 'canary-secret';")]
+    [InlineData("ALTER ROLE whiskers PASSWORD E'canary-secret';")]
+    [InlineData("ALTER ROLE whiskers PASSWORD 'it'' s canary-secret';")]
+    [InlineData("ALTER ROLE whiskers PASSWORD e'it\\'s canary-secret';")]
+    public async Task An_mcp_approval_stores_the_sql_without_its_password_literal(string query)
     {
         var store = new ApprovalStore();
         var gate = new ApprovalGate(store, new Policy(), new Recorder());
         var subject = new ApprovalSubject("db.query", McpPermissionLevels.Admin, "key:k1", "ci-key", "mcp-direct",
-            Args(new { serverId = "local", containerId = "db", query = "ALTER ROLE whiskers PASSWORD 'canary-secret';" }))
+            Args(new { serverId = "local", containerId = "db", query }))
         {
             Binding = "binding-sql",
             Requesters = ["key:k1"],
@@ -147,7 +151,7 @@ public class ApprovalNotificationTests
 
         var stored = store.Get(result.ApprovalId!)!;
         Assert.DoesNotContain("canary", stored.ParamsJson);
-        Assert.Contains("ALTER ROLE whiskers PASSWORD '***'", stored.ParamsJson);
+        Assert.Contains("ALTER ROLE whiskers PASSWORD '***';", stored.ParamsJson);
     }
 
     [Fact]

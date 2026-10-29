@@ -18,18 +18,22 @@ All notable changes to Whiskers are documented here. The format follows
   give it). Protected names are now also found in commands, SQL and compose files (word by word, with path
   segments; a command is read as the shell reads it, so quoting tricks such as `whis""kers` do not hide a name), by
   a container id or id prefix written in a command, by a container's other names, among the stopped containers a
-  cleanup (`docker system prune`) removes, and in what a deployment mounts — `deploy_app` volumes and every host
-  path and volume of a compose deployment (the Docker socket and the data volume are part of the control plane);
+  cleanup removes, and in what a deployment mounts — `deploy_app` volumes and every host path and volume of a compose
+  deployment, also a local volume that binds a host path through `driver_opts: device:` (the Docker socket and the data volume are part of the control plane);
   the control plane's names apply to containers, volumes and networks, not to a server called `whiskers-vps`. Free
   text that is completed at run time counts as touching a protected resource: in a command anything the shell
   expands (`$VAR`, `$(…)`, backticks, `{a,b}`), `eval`, `xargs`, decoding, or inline code of another interpreter
   (`python -c`, `perl -e`, `awk … system(`); in SQL dynamic SQL, `COPY … PROGRAM`, file-reading functions,
-  `U&"…"` escapes, inline functions and untrusted languages (`plpython3u`). The
+  `U&"…"` escapes, inline functions and untrusted languages (`plpython3u`), and client commands the text is fed to
+  (psql `\i`, `\gexec`, `\c`, `\!`; mysql `source`; sqlite `.read`; mongosh `load()`). A `.env` saved in the web UI
+  decides what the project mounts too. The
   SQL console, SQL import and seed and the raw compose deploy now hand their payload to the policy (Artisan
   migrations carry no free text: their command is fixed); the audit keeps only its length, and an approval raised from the web UI shows only the length of a
   command, SQL or compose file (refusal reasons never quote words of it); a card that shows the text (an agent's
-  chat or MCP call) masks SQL password literals (`PASSWORD '…'`, `IDENTIFIED BY …`) as it masks other secrets, and
-  so do the audit log and the host-command logs. **Upgrade notes:** calls that used to
+  chat or MCP call) masks SQL password literals (`PASSWORD '…'`, `E'…'`, `IDENTIFIED BY …`) as it masks other
+  secrets, value by value, and so do the audit log and the host-command logs. **Upgrade notes:** a scheduled cleanup
+  task no longer removes unused networks (which ones are unused cannot be decided before the prune): it removes
+  stopped containers, dangling images and build cache; calls that used to
   pass are now refused or need an Admin approval — an MCP key or a scheduled task restarting the Whiskers container
   or its proxy; a command or query that merely mentions a protected name (also inside a domain such as
   `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a

@@ -35,7 +35,10 @@ public class SecretHygieneTests
     [InlineData("SET PASSWORD = 'canary pw'")]
     [InlineData("SET PASSWORD FOR 'a'@'%' = PASSWORD('canary-secret')")]
     [InlineData("ALTER LOGIN sa WITH PASSWORD = 'canary-secret'")]
-    [InlineData("ALTER ROLE app PASSWORD 'canary-secret")]                          // unclosed: masked to the end
+    [InlineData("ALTER ROLE app PASSWORD E'canary-secret';")]
+    [InlineData("ALTER ROLE app PASSWORD e'it\\'s canary-secret';")]
+    [InlineData("ALTER ROLE app PASSWORD 'it'' s canary-secret';")]
+    [InlineData("ALTER ROLE app PASSWORD 'canary-secret")]                         // unclosed: masked to the end
     [InlineData("{\"sql\":\"ALTER ROLE app PASSWORD 'canary-secret'\",\"serverId\":\"local\"}")]
     public void Redact_hides_sql_password_literals(string sql)
     {

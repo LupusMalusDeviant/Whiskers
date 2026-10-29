@@ -1453,7 +1453,8 @@ else
             var plan = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
             var affected = new List<ContainerInfo> { _container };
             affected.AddRange(plan.Containers.Where(c => c.Id != _container.Id));
-            var restartResult = await ForEachServiceAsync(affected, sid, 0,
+            // What the project mounts is decided too (R1-16), as for a deployment: compose up recreates it with them.
+            var restartResult = await Mutations.RunMountsAsync(plan, () => ForEachServiceAsync(affected, sid, 0,
                 async () =>
                 {
                     // Planned again right before writing: a container that turned up meanwhile was not decided.
@@ -1463,7 +1464,7 @@ else
                         TimeSpan.FromMinutes(2));
                     if (!restart.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
                     return restart;
-                });
+                }));
 
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             var name = _container?.Name ?? ContainerId;

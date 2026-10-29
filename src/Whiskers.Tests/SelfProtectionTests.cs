@@ -119,6 +119,8 @@ public class SelfProtectionTests
         { "host.exec", """{"serverId":"local","command":"docker rm -f c0ffee123456"}""" },          // by id in a command
         { "db.query", """{"containerId":"web","serverId":"local","query":"DROP DATABASE whiskers"}""" },
         { "compose.deploy", """{"serverId":"local","yaml":"services:\n  x:\n    volumes:\n      - serverwatch-data:/d"}""" },
+        // a local volume that binds a host path through driver_opts
+        { "compose.deploy", """{"serverId":"local","yaml":"services:\n  x:\n    volumes:\n      - host:/h\nvolumes:\n  host:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: /opt/dockerproxy"}""" },
     };
 
     private static object Parse(string json) => JsonSerializer.Deserialize<JsonElement>(json);
@@ -417,6 +419,18 @@ public class SelfProtectionTests
     {
         var h = new ProtectionHarness(p => p.ProtectedResources = ["web"]);
         var outcome = await h.RunAsync("container.restart", new { containerId = "web", serverId = "local" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
+    }
+
+    [Theory]
+    [InlineData("\\i /tmp/wipe.sql")]
+    [InlineData("select 'drop database ' || 'bil' || 'ling' \\gexec")]
+    public async Task A_sql_client_command_is_refused_while_the_policy_protects_resources(string query)
+    {
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["billing"]);
+        var outcome = await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
             ProtectionHarness.UiAdmin, MutationSurface.Ui);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(h.Approvals.GetPending());

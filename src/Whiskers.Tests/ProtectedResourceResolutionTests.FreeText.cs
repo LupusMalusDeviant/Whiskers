@@ -81,6 +81,17 @@ public sealed partial class ProtectedResourceResolutionTests
     }
 
     [Fact]
+    public void A_cleanup_removes_no_network_and_no_volume()
+    {
+        // A network the policy protects could not be decided on before the prune: the cleanup leaves networks alone.
+        var command = Whiskers.Services.Scheduler.TaskExecutor.CleanupCommand;
+        Assert.DoesNotContain("system prune", command);
+        Assert.DoesNotContain("network", command);
+        Assert.DoesNotContain("volume", command);
+        Assert.Contains("docker container prune", command);
+    }
+
+    [Fact]
     public async Task A_cleanup_whose_containers_cannot_be_listed_is_refused()
     {
         var h = new ProtectionHarness();
@@ -147,6 +158,17 @@ public sealed partial class ProtectedResourceResolutionTests
             """));
 
         Assert.Equal(["/app/data", "cache", "m_cache", "serverwatch-data", "/var/run/docker.sock"], plan.Mounts());
+    }
+
+    [Fact]
+    public async Task A_volume_bound_to_a_host_device_is_decided_as_that_path()
+    {
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    volumes:\n      - host:/host\n      - nfs:/n\n" +
+            "volumes:\n  host:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: /\n" +
+            "  nfs:\n    driver_opts:\n      type: nfs\n      device: \":/export\"\n"));
+        Assert.Contains("/", plan.Mounts());
+        Assert.DoesNotContain(":/export", plan.Mounts());
     }
 
     [Fact]

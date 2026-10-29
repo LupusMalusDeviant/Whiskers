@@ -49,6 +49,14 @@ public class ProtectedResourceMatcherTests
     [InlineData("query", "DO $$ BEGIN EXECUTE 'DROP TABLE ' || t; END $$")]
     [InlineData("query", "COPY t TO PROGRAM 'sh'")]
     [InlineData("query", "select pg_read_file('/etc/passwd')")]
+    [InlineData("query", "\\i /tmp/wipe.sql")]                                  // psql runs a file
+    [InlineData("query", "select 1;\n\\ir wipe.sql")]
+    [InlineData("query", "select 'drop database ' || 'bil' || 'ling' \\gexec")]   // runs what the query returns
+    [InlineData("query", "\\c billing\ndrop table t;")]                          // another database
+    [InlineData("query", "\\! rm -rf /")]
+    [InlineData("query", "source /tmp/wipe.sql")]                                // mysql
+    [InlineData("query", ".read /tmp/wipe.sql")]                                 // sqlite
+    [InlineData("query", "load('/tmp/wipe.js')")]                                // mongosh
     public void Text_that_builds_its_target_at_run_time_counts_as_touching_one(string key, string value)
     {
         var hit = Hit(key, value);

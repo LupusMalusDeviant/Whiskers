@@ -261,8 +261,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   page rendered (R1-06). The provider resolves the controller again when it acts; a controller change in between is
   not detected.
 - **Bulk prune** (`host.prune`) is decided on every stopped container of the server, which the prune removes
-  (R1-16; unlistable containers refuse it); the cleanup task keeps its own pre-check. Images and networks it removes
-  are not checked against protected patterns.
+  (R1-16; unlistable containers refuse it); the cleanup task keeps its own pre-check. It runs
+  `TaskExecutor.CleanupCommand` (container, image and builder prune): networks are not pruned, since which ones are
+  unused cannot be decided beforehand; dangling images are not checked against protected patterns.
 - **Free text** (`command`, `query`, `yaml`, …) is checked word by word against protected names and the control
   plane (R1-16, `ProtectedResourceMatcher`; commands as the shell reads them); `MutationTargetResolver` adds every
   container a free-text word of twelve or more hex digits (any hex word in a `docker …` command except options,
@@ -274,7 +275,8 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   is unanalysable.
 - **Compose mounts** (R1-16): `ComposePlan.Mounts()` lists every host path and volume the services mount
   (interpolated; relative bind sources resolved against the project directory; project-scoped volumes also as
-  `<project>_<key>`, explicit `name:` resolved). `ComposeImpact`
+  `<project>_<key>`, explicit `name:` resolved; a volume with `driver_opts: device: <host path>` also as that path).
+  A `.env` saved on the container page decides them the same way (`ComposeImpact.RunMountsAsync`). `ComposeImpact`
   decides them under `compose.deploy` (`mounts`, one per line) before the plan's containers, and
   `ComposePlan.EnsureDecided` refuses a re-plan whose mounts were not decided.
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row

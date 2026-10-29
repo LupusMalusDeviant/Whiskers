@@ -206,16 +206,12 @@ public sealed class ApprovalGate : IApprovalGate
             ? new ApprovalGateResult(true, "Approved.", approval.Id, approval.ResolvedBy)
             : null;
 
-    private static readonly JsonSerializerOptions Relaxed =
-        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-
     private Task<Approval> RaiseAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
         string argumentsHash, CancellationToken ct)
     {
-        // Only the escapes JSON needs, so a quote is a quote when the redactor looks for a SQL password literal.
         var argsJson = subject.WithholdPayloads
-            ? JsonSerializer.Serialize(Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloads(subject.Arguments), Relaxed)
-            : JsonSerializer.Serialize(subject.Arguments, Relaxed);
+            ? JsonSerializer.Serialize(Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloads(subject.Arguments))
+            : JsonSerializer.Serialize(subject.Arguments);
         var resolved = subject.TargetServer is not null || subject.TargetWorkload is not null;
         var (server, workload) = resolved
             ? (subject.TargetServer, subject.TargetWorkload)
@@ -227,7 +223,7 @@ public sealed class ApprovalGate : IApprovalGate
             ActorType: subject.ActorType,
             ToolName: subject.ToolName,
             Level: subject.Level,
-            ParamsJson: Cap(SecretRedactor.Redact(argsJson), MaxParamChars),
+            ParamsJson: Cap(SecretRedactor.RedactJson(argsJson), MaxParamChars),
             // A reason may quote what the caller sent; a UI payload never reaches the stored card (R1-16).
             Reason: subject.WithholdPayloads
                 ? Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloadValues(reason, subject.Arguments) ?? reason

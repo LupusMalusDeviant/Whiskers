@@ -242,6 +242,30 @@ public sealed partial class ProtectedResourceResolutionTests
     }
 
     [Fact]
+    public async Task A_ui_env_save_of_a_project_with_mounts_decides_them_and_runs()
+    {
+        var db = (await _docker.ListContainersAsync(all: true, serverId: "local")).Single(c => c.Name == "payments-db");
+        db.Labels["com.docker.compose.project.config_files"] = "/srv/payments/compose.yaml";
+        _host.Files["/srv/payments/compose.yaml"] = "services:\n  db:\n    container_name: payments-db\n    image: postgres\n" +
+                                                    "    volumes:\n      - ./data:/var/lib/postgresql/data\n      - pgdata:/backup\n";
+        _host.Files["/srv/payments/.env"] = "TAG=1\n";
+        var plan = await Planner().PlanEnvChangeAsync(db, "local", _ => "TAG=2\n");
+        Assert.NotEmpty(plan.Mounts());
+        var runner = ResolvingUiRunner();
+
+        // As the container page saves a .env: mounts, then every container, then the plan checked again.
+        var saved = await runner.RunMountsAsync(plan, () => runner.RunForEachAsync("container.env_file_save",
+            plan.Containers, "local", async () =>
+            {
+                var current = await Planner().PlanEnvChangeAsync(db, "local", _ => "TAG=2\n");
+                current.EnsureDecided(MutationScope.Current);
+                return true;
+            }));
+
+        Assert.True(saved);
+    }
+
+    [Fact]
     public async Task The_ui_runs_the_plan_once_every_container_is_allowed()
     {
         var runner = UiRunner(GuardrailPolicy.SafeDefault());
@@ -494,6 +518,18 @@ public sealed partial class ProtectedResourceResolutionTests
             ["com.docker.compose.project.working_dir"] = dir,
         },
     };
+
+    /// <summary>A UI runner whose gateway resolves targets as in production (a host's mounts become decided).</summary>
+    private UiMutationRunner ResolvingUiRunner()
+    {
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
+        var resolver = new MutationTargetResolver(new TestServices(_docker,
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }), Planner()));
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], NullLogger<MutationGateway>.Instance,
+            targets: resolver, approvals: new ApprovalGate(new ApprovalStore(), store));
+        return new UiMutationRunner(gateway, new CapabilityCatalog(), new AdminUser());
+    }
 
     private static UiMutationRunner UiRunner(GuardrailPolicy policy)
     {

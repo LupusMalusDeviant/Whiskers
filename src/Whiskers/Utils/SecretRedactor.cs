@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace Whiskers.Utils;
@@ -47,12 +49,13 @@ public static class SecretRedactor
         @"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@/]+@",
         RegexOptions.Compiled, Timeout);
 
-    // SQL password literals: PASSWORD 'x', ENCRYPTED PASSWORD $$x$$, SET PASSWORD = 'x', IDENTIFIED BY x,
-    // IDENTIFIED WITH plugin BY|AS 'x'  →  keyword '***'. A quoted literal ends at a quote followed by a
-    // delimiter, so doubled ('') or backslash-escaped quotes stay inside it; an unclosed one is masked to the end.
+    // SQL password literals: PASSWORD 'x', PASSWORD E'x', ENCRYPTED PASSWORD $$x$$, SET PASSWORD = 'x',
+    // IDENTIFIED BY x, IDENTIFIED WITH plugin BY|AS 'x'  →  keyword '***'. Doubled ('') and backslash-escaped
+    // quotes stay inside the literal (a backslash that is no escape only masks more); an unclosed one is masked to
+    // the end. Meant for decoded text: for JSON, use RedactJson.
     private static readonly Regex SqlPassword = new(
         @"(?is)\b(PASSWORD|IDENTIFIED(?:\s+WITH\s+\S+)?\s+(?:BY|AS))(\s*(?:=\s*|\(\s*)?)" +
-        @"(?:'.*?(?:'(?=[\s;,)\\""]|$)|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS)\s*)[^\s;'""\\]+)",
+        @"(?:(?:[EBNX]|U&)?'(?:[^'\\]|''|\\.)*(?:'|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS)\s*)[^\s;'""\\]+)",
         RegexOptions.Compiled, Timeout);
 
     // PEM private keys (certificates are public and stay readable).
@@ -65,6 +68,52 @@ public static class SecretRedactor
     private static readonly Regex LongBase64 = new(
         @"[A-Za-z0-9+/]{200,}={0,2}",
         RegexOptions.Compiled, Timeout);
+
+    private static readonly JsonSerializerOptions Relaxed =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>
+    /// Redacts a JSON document: every string value on its own, decoded (so an escaped quote is a quote again), then
+    /// the re-written text for keyed secrets ("password": "…"). Text that is no JSON is redacted as it is.
+    /// </summary>
+    public static string RedactJson(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+            return json ?? "";
+        JsonNode? node;
+        try { node = JsonNode.Parse(json); }
+        catch (JsonException) { return Redact(json); }
+        if (node is null)
+            return Redact(json);
+        RedactValues(node);
+        return Redact(node.ToJsonString(Relaxed));
+    }
+
+    private static void RedactValues(JsonNode node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var key in obj.Select(p => p.Key).ToList())
+                    if (obj[key] is { } child)
+                    {
+                        if (Redacted(child) is { } text) obj[key] = text;
+                        else RedactValues(child);
+                    }
+                break;
+            case JsonArray arr:
+                for (var i = 0; i < arr.Count; i++)
+                    if (arr[i] is { } child)
+                    {
+                        if (Redacted(child) is { } text) arr[i] = text;
+                        else RedactValues(child);
+                    }
+                break;
+        }
+    }
+
+    private static string? Redacted(JsonNode node) =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) ? Redact(text) : null;
 
     public static string Redact(string? input)
     {

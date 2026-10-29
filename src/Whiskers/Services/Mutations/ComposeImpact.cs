@@ -46,7 +46,7 @@ public static class ComposeImpact
 
     /// <summary>Decides the plan's mounts (if any) before <paramref name="action"/>, so a mount of the Docker socket
     /// or of Whiskers' data is decided like a protected container.</summary>
-    private static Task<T> RunMountsAsync<T>(this IUiMutationRunner runner, ComposePlan plan, Func<Task<T>> action) =>
+    public static Task<T> RunMountsAsync<T>(this IUiMutationRunner runner, ComposePlan plan, Func<Task<T>> action) =>
         plan.Mounts() is { Count: > 0 } mounts
             ? runner.RunAsync(MountsCapability, new { serverId = plan.ServerId, mounts = string.Join('\n', mounts) },
                 _ => action())

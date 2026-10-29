@@ -442,6 +442,7 @@ public static class ComposeModel
         var services = new Dictionary<string, string?>(StringComparer.Ordinal);
         var mounts = new Dictionary<string, List<ComposeMount>>(StringComparer.Ordinal);
         var volumeNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var volumeDevices = new Dictionary<string, string>(StringComparer.Ordinal);
         var order = new List<string>();
         // Compose resolves a relative bind source against the project directory (the first file's directory).
         var projectDirectory = files.Count > 0 ? ComposePaths.DirectoryOf(files[0].Path) : "/";
@@ -455,9 +456,22 @@ public static class ComposeModel
                 (name, nameSource) = (Interpolate(declared, env, "The top-level name"), declared);
             if (root.Children.TryGetValue(new YamlScalarNode("volumes"), out var topVolumes) && topVolumes is YamlMappingNode volumeMap)
                 foreach (var (key, value) in volumeMap.Children)
-                    if ((key as YamlScalarNode)?.Value is { } volume && value is YamlMappingNode volumeDef
-                        && Scalar(volumeDef, "name") is { } explicitName)
-                        volumeNames[volume] = Interpolate(explicitName, env, $"The name of volume '{volume}'");
+                    if ((key as YamlScalarNode)?.Value is { } volume && value is YamlMappingNode volumeDef)
+                    {
+                        if (Scalar(volumeDef, "name") is { } explicitName)
+                            volumeNames[volume] = Interpolate(explicitName, env, $"The name of volume '{volume}'");
+                        // A local volume with driver_opts device: /x (o: bind) is a bind mount of /x in disguise.
+                        if (volumeDef.Children.TryGetValue(new YamlScalarNode("driver_opts"), out var opts)
+                            && opts is YamlMappingNode optMap && Scalar(optMap, "device") is { } device)
+                        {
+                            var hostPath = Interpolate(device, env, $"The device of volume '{volume}'");
+                            if (hostPath.StartsWith('.'))
+                                hostPath = ComposePaths.Join(projectDirectory, hostPath);
+                            if (hostPath.StartsWith('/'))
+                                volumeDevices[volume] =
+                                    Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(hostPath);
+                        }
+                    }
             if (!root.Children.TryGetValue(new YamlScalarNode("services"), out var node)) continue;
             if (node is not YamlMappingNode serviceMap)
                 throw new ComposePlanException($"{path}: 'services' is not a mapping.");
@@ -487,9 +501,14 @@ public static class ComposeModel
         // A volume with an explicit top-level name is created under that name, not under the project's.
         ComposeMount Named(ComposeMount m) =>
             m.ProjectScoped && volumeNames.TryGetValue(m.Source, out var real) ? new ComposeMount(real, false) : m;
+        // A volume backed by a host device also mounts that host path.
+        IEnumerable<ComposeMount> Effects(ComposeMount m) =>
+            m.ProjectScoped && volumeDevices.TryGetValue(m.Source, out var device)
+                ? [Named(m), new ComposeMount(device, false)]
+                : [Named(m)];
         return (name, nameSource, order.Select(s => new ComposeServicePlan(s, services[s])
         {
-            Mounts = mounts.TryGetValue(s, out var m) ? m.Select(Named).Distinct().ToList() : [],
+            Mounts = mounts.TryGetValue(s, out var m) ? m.SelectMany(Effects).Distinct().ToList() : [],
         }).ToList());
     }
 

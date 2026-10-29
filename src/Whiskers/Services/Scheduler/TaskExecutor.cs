@@ -217,15 +217,20 @@ public class TaskExecutor : ITaskExecutor
         if (await StoppedProtectedContainersAsync(sid) is { Count: > 0 } blocked)
             return (false, $"Cleanup refused: it would remove stopped protected container(s) {string.Join(", ", blocked)}.");
 
-        // Docker system prune (remove unused images, containers, networks)
+        // Stopped containers, dangling images and build cache. Not networks (R1-16): which ones are unused cannot be
+        // told before the prune, so a protected network could not be decided on — they stay.
         var outcome = await _automation.RunAsync(ActorOf(task), "host.prune",
             new { serverId = sid, taskId = task.TaskId },
-            _ => _executor.ExecuteAsync(sid, "docker system prune -f --volumes=false 2>&1", TimeSpan.FromMinutes(2)));
+            _ => _executor.ExecuteAsync(sid, CleanupCommand, TimeSpan.FromMinutes(2)));
         if (Problem(outcome, "host.prune") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
         return (result.Success, result.Success ? $"Cleanup done:\n{result.Output}" : result.Error);
     }
+
+    /// <summary>What a cleanup task runs: stopped containers, dangling images, build cache — no networks, no volumes.</summary>
+    public const string CleanupCommand =
+        "docker container prune -f 2>&1 && docker image prune -f 2>&1 && docker builder prune -f 2>&1";
 
     private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
 
