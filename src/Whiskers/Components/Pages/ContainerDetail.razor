@@ -1119,7 +1119,12 @@ else
     private async Task InitTerminal()
     {
         if (!ServerConfigService.SupportsTerminal(_resolvedServerId)) return;
-        if (_role < AppRole.Admin) { _termError = L["ContainerDetail_Terminal_NoPermission"].Value; return; }   // PC-D2: a shell in the container is Admin
+        // PC-D2: a shell in the container is Admin; the refused attempt is the gateway's Denied event (R1-21).
+        if (!await RequireAsync(AppRole.Admin, "terminal.container_open", new { containerId = ContainerId, serverId = _resolvedServerId }))
+        {
+            _termError = L["ContainerDetail_Terminal_NoPermission"].Value;
+            return;
+        }
         try
         {
             _dotNetRef = DotNetObjectReference.Create(this);

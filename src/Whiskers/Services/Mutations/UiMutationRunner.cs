@@ -32,7 +32,8 @@ public interface IUiMutationRunner
     /// <summary>
     /// Records that the page refused <paramref name="capabilityId"/> on <paramref name="arguments"/> itself (its role
     /// check, R1-21): one Denied event of the gateway for the signed-in user, with the target the arguments name.
-    /// Nothing runs. Never throws — the page shows its own message either way.
+    /// Nothing runs. Never throws, except <see cref="OperationCanceledException"/> when <paramref name="ct"/> is
+    /// cancelled — the page shows its own message either way.
     /// </summary>
     Task RefuseAsync(string capabilityId, object arguments, string reason, CancellationToken ct = default);
 }

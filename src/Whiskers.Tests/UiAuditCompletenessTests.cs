@@ -201,6 +201,23 @@ public sealed class UiAuditCompletenessTests : IDisposable
     }
 
     [Fact]
+    public async Task Output_noted_by_a_failed_run_is_not_a_successful_result()
+    {
+        // What GitDeployView does with a deployment that answers (false, output).
+        await Runner(AppRole.Operator).RunAsync("container.restart", Web, _ =>
+        {
+            MutationScope.Note("pull failed: manifest unknown", success: false);
+            return Task.FromResult((false, "pull failed: manifest unknown"));
+        });
+
+        var row = await TheEventAsync();
+        Assert.Equal("Failed", row.Outcome);
+        var results = JsonDocument.Parse(row.Details!).RootElement.GetProperty("results");
+        var noted = Assert.Single(results.EnumerateArray(), r => r.ToString().Contains("manifest unknown"));
+        Assert.False(noted.GetProperty("success").GetBoolean());
+    }
+
+    [Fact]
     public async Task A_service_that_throws_is_one_failed_event()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() => Runner(AppRole.Operator).RunAsync("container.restart",
@@ -259,8 +276,9 @@ public sealed class UiAuditCompletenessTests : IDisposable
         }.GetValueOrDefault(page, []);
         // Every plain Require( call — whatever its argument and wherever it sits in the handler — must be in a read.
         var handlers = System.Text.RegularExpressions.Regex.Matches(source, @"(?:private|protected|public)[^\n(]*?\s(\w+)\(");
+        // An inline role comparison that returns (`if (_role < AppRole.X)`) is a refusal too.
         foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"(?<![\w.])Require\("))
+                     @"(?<![\w.])Require\(|if \(_role < "))
         {
             var handler = handlers.Where(h => h.Index < call.Index).LastOrDefault()?.Groups[1].Value;
             if (handler is "Require" or "RequireAsync") continue;   // the helpers themselves
