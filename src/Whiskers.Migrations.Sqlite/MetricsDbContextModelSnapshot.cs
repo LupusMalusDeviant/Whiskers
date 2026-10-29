@@ -204,7 +204,43 @@ namespace Whiskers.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ApprovalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CredentialId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Details")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OnBehalfOfId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Phase")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrincipalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrincipalKind")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ServerId")
@@ -212,6 +248,9 @@ namespace Whiskers.Migrations
 
                     b.Property<bool>("Success")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Surface")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("TargetId")
                         .IsRequired()
@@ -228,13 +267,23 @@ namespace Whiskers.Migrations
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TriggerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Verification")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Actor");
 
+                    b.HasIndex("OperationId");
+
                     b.HasIndex("Timestamp");
 
                     b.HasIndex("Action", "Timestamp");
+
+                    b.HasIndex("Phase", "Timestamp");
 
                     b.ToTable("AuditLog");
                 });

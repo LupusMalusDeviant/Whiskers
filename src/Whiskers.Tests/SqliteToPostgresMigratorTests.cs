@@ -85,6 +85,38 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal("github", copied.Provider);
     }
 
+    [Fact]
+    public async Task A_source_from_before_typed_audit_fields_copies_its_audit_rows()
+    {
+        // A database of the release before R1-19: AuditLog without the typed security columns.
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.AuditLog.Add(new AuditLogEntity { Actor = "admin", Action = "container.restart", Details = "{\"phase\":\"outcome\"}" });
+            await src.SaveChangesAsync();
+            var columns = new[]
+            {
+                "OperationId", "ParentOperationId", "DecisionId", "TriggerId", "Surface", "PrincipalKind", "PrincipalId",
+                "CredentialId", "OnBehalfOfId", "ApprovalId", "ApprovedBy", "Phase", "Outcome", "Verification", "DurationMs",
+            };
+            await src.Database.ExecuteSqlRawAsync("DROP INDEX IX_AuditLog_OperationId; DROP INDEX IX_AuditLog_Phase_Timestamp; " +
+                string.Concat(columns.Select(c => $"ALTER TABLE AuditLog DROP COLUMN {c}; ")));
+        }
+
+        int rc;
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null);
+
+        Assert.Equal(0, rc);
+        await using var check = NewDb(dstPath);
+        var copied = await check.AuditLog.SingleAsync();
+        Assert.Equal("container.restart", copied.Action);
+        Assert.Null(copied.Phase);
+        Assert.Null(copied.OperationId);
+    }
+
     [Theory]
     [InlineData("DROP TABLE PolicySnapshots;")]                       // a decision table without its versions
     [InlineData("DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;")]   // R1-12's tables gone, R1-14's there

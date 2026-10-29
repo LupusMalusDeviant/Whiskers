@@ -278,7 +278,9 @@ public static class WhiskersHostingExtensions
             .AddCheck<ServerConfigReadyCheck>("serverconfig", tags: new[] { "ready" })
             // F3: drain readiness while a restore is staged and the app is about to restart. "ready" tag only,
             // so /healthz (the container liveness probe) is unaffected.
-            .AddCheck<MaintenanceReadyCheck>("maintenance", tags: new[] { "ready" });
+            .AddCheck<MaintenanceReadyCheck>("maintenance", tags: new[] { "ready" })
+            // R1-19: Degraded (still ready) while an audit event is incomplete.
+            .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" });
         builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
         builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
         builder.Services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore, Whiskers.Services.Persistence.AppSettingsStore>();

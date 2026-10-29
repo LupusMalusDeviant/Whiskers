@@ -23,12 +23,19 @@ public interface IMutationAuditSink
     /// <summary>A refusal before execution (unknown capability, level, policy). Also throws on failure.</summary>
     Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability, MutationStatus status,
         string reason, CancellationToken ct);
+
+    /// <summary><see cref="RecordDeniedAsync(string, MutationRequest, Capability?, MutationStatus, string, CancellationToken)"/>
+    /// with the approval a pending call waits for (R1-19, INV-45).</summary>
+    Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability, MutationStatus status,
+        string reason, string? approvalId, CancellationToken ct) =>
+        RecordDeniedAsync(operationId, request, capability, status, reason, ct);
 }
 
 /// <summary>
 /// Writes to today's <c>AuditLog</c> table. Unlike <c>AuditLogService.LogAsync</c>, which logs and swallows a failed
 /// write, every method here lets the exception escape: a mutation whose intent cannot be recorded does not run.
-/// Arguments are redacted before they are stored (INV-51). The hash chain (INV-49) comes with WP5.
+/// Arguments are redacted before they are stored (INV-51). The hash chain (INV-49) comes with WP5. The security
+/// fields (R1-19, INV-45) are columns of their own; the capped <c>Details</c> only repeats them.
 /// </summary>
 public sealed class AuditLogMutationSink : IMutationAuditSink
 {
@@ -49,9 +56,12 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(capability);
-        var entity = NewEntity(request, capability.Id, success: false,
+        var entity = NewEntity(operationId, request, capability.Id, success: false,
             Details(operationId, request, phase: "intent", status: null, verification: null, reason: null, durationMs: null,
                 approval));
+        entity.Phase = "intent";
+        entity.ApprovalId = approval?.ApprovalId;
+        entity.ApprovedBy = approval?.ApprovedBy;
 
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -67,7 +77,22 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var entity = await db.AuditLog.FindAsync([auditId], ct)
                      ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
-        entity.Success = status == MutationStatus.Executed && verification != VerificationStatus.Failed;
+        Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Turns an intent row into its outcome: the typed fields, and the details as one document.
+    /// <paramref name="outcome"/> is a <see cref="MutationStatus"/> name, or <c>Unknown</c> (recovery: it was running
+    /// when Whiskers stopped).</summary>
+    internal static void Complete(AuditLogEntity entity, string operationId, string outcome, string verification,
+        string? reason, long? durationMs)
+    {
+        entity.Success = outcome == nameof(MutationStatus.Executed) && verification != nameof(VerificationStatus.Failed);
+        entity.Phase = "outcome";
+        entity.Outcome = outcome;
+        entity.Verification = verification;
+        entity.DurationMs = durationMs;
+        entity.OperationId ??= operationId;
         var intent = ParseOrRaw(entity.Details);
         var redactedReason = Redact(reason);
         // INV-22: the decision id is kept at the top of the outcome and the row stays valid JSON: the variable-length
@@ -80,24 +105,33 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             // Top level like the decision id: a shortened intent must not lose it.
             trigger = StringOf(intent, "trigger"),
             phase = "outcome",
-            status = status.ToString(),
-            verification = verification.ToString(),
+            status = outcome,
+            verification,
             reason = Field(redactedReason, budget),
-            durationMs = (long)duration.TotalMilliseconds,
+            durationMs,
             intent = intentValue,
         });
         entity.Details = TryFit(budget => Outcome(budget, intent))
                          ?? Fit(budget => Outcome(budget, Field(entity.Details, budget)));
-        await db.SaveChangesAsync(ct);
     }
 
+    public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
+        MutationStatus status, string reason, CancellationToken ct) =>
+        RecordDeniedAsync(operationId, request, capability, status, reason, approvalId: null, ct);
+
     public async Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
-        MutationStatus status, string reason, CancellationToken ct)
+        MutationStatus status, string reason, string? approvalId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var entity = NewEntity(request, capability?.Id ?? request.CapabilityId, success: false,
+        var entity = NewEntity(operationId, request, capability?.Id ?? request.CapabilityId, success: false,
             Details(operationId, request, phase: "outcome", status: status.ToString(), verification: null,
-                reason: reason, durationMs: 0));
+                reason: reason, durationMs: 0,
+                approval: approvalId is null ? null : new ApprovalGateResult(false, "", approvalId)));
+        entity.Phase = "outcome";
+        entity.Outcome = status.ToString();
+        entity.Verification = nameof(VerificationStatus.NotRun);
+        entity.DurationMs = 0;
+        entity.ApprovalId = approvalId;
 
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -105,7 +139,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         await db.SaveChangesAsync(ct);
     }
 
-    private AuditLogEntity NewEntity(MutationRequest request, string action, bool success, string details) => new()
+    private AuditLogEntity NewEntity(string operationId, MutationRequest request, string action, bool success,
+        string details) => new()
     {
         Timestamp = _time.GetUtcNow().UtcDateTime,
         Actor = request.Principal.DisplayName,
@@ -118,6 +153,15 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         ServerId = request.Target.ServerId,
         Details = details,
         Success = success,
+        OperationId = operationId,
+        ParentOperationId = request.ParentOperationId,
+        DecisionId = request.DecisionId,
+        TriggerId = request.TriggerId is { } triggerId ? PrincipalIds.Trigger(triggerId) : null,
+        Surface = request.Surface.ToString(),
+        PrincipalKind = request.Principal.Kind.ToString(),
+        PrincipalId = request.Principal.Id,
+        CredentialId = request.Principal.CredentialId,
+        OnBehalfOfId = request.Principal.OnBehalfOf?.Id,
     };
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,

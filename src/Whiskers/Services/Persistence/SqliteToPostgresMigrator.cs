@@ -38,6 +38,9 @@ public static class SqliteToPostgresMigrator
         /// <summary>The source's <c>Webhooks</c> table predates R1-10's <c>Provider</c> column: read with it as
         /// <c>github</c>, the scheme those webhooks always had. The source is not changed.</summary>
         public bool WebhooksWithoutProvider { get; init; }
+        /// <summary>The source's <c>AuditLog</c> predates R1-19's typed security columns: read with them empty (its
+        /// rows keep everything in <c>Details</c>). The source is not changed.</summary>
+        public bool AuditLogWithoutTypedFields { get; init; }
         public Dictionary<long, long> AuditIds { get; } = [];
         internal List<(Whiskers.Models.AuditLogEntity Row, long OldId)> Pending { get; } = [];
     }
@@ -49,9 +52,22 @@ public static class SqliteToPostgresMigrator
     private static Table T<TEntity>(string name, Func<MetricsDbContext, DbSet<TEntity>> set,
         Func<CopyRun, Action<TEntity>> resetId, Func<CopyRun, Action>? afterFlush = null)
         where TEntity : class =>
+        T(name, (ctx, _) => set(ctx), resetId, afterFlush);
+
+    /// <summary>A table whose source query depends on the run (an older release's columns).</summary>
+    private static Table T<TEntity>(string name, Func<MetricsDbContext, CopyRun, IQueryable<TEntity>> source,
+        Func<CopyRun, Action<TEntity>> resetId, Func<CopyRun, Action>? afterFlush = null)
+        where TEntity : class =>
         new(name, typeof(TEntity),
-            (ctx, ct) => set(ctx).AnyAsync(ct),
-            (src, dst, run, ct) => CopyAsync(set(src), dst, resetId(run), ct, afterFlush?.Invoke(run)));
+            (ctx, ct) => ctx.Set<TEntity>().AnyAsync(ct),
+            (src, dst, run, ct) => CopyAsync(source(src, run), dst, resetId(run), ct, afterFlush?.Invoke(run)));
+
+    /// <summary>An <c>AuditLog</c> from before R1-19, with the typed security columns as NULL.</summary>
+    internal const string AuditLogWithoutTypedFieldsSql =
+        "SELECT *, NULL AS \"OperationId\", NULL AS \"ParentOperationId\", NULL AS \"DecisionId\", NULL AS \"TriggerId\", " +
+        "NULL AS \"Surface\", NULL AS \"PrincipalKind\", NULL AS \"PrincipalId\", NULL AS \"CredentialId\", " +
+        "NULL AS \"OnBehalfOfId\", NULL AS \"ApprovalId\", NULL AS \"ApprovedBy\", NULL AS \"Phase\", NULL AS \"Outcome\", " +
+        "NULL AS \"Verification\", NULL AS \"DurationMs\" FROM \"AuditLog\"";
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
     /// exactly one of these sets — the tables of every release after its own (R1-10: the webhook deliveries; R1-18: the operations; R1-14: the approvals; R1-12: the
@@ -92,7 +108,9 @@ public static class SqliteToPostgresMigrator
         T("ServerMetrics",     c => c.ServerMetrics,     e => e.Id = 0),
         T("AlertHistory",      c => c.AlertHistory,      e => e.Id = 0),
         // R1-18: an operation names its audit row — the new id of every named row is remembered.
-        T("AuditLog",          c => c.AuditLog,
+        T("AuditLog",          (c, run) => run.AuditLogWithoutTypedFields
+                                   ? c.AuditLog.FromSqlRaw(AuditLogWithoutTypedFieldsSql)
+                                   : c.AuditLog,
             run => e =>
             {
                 if (run.NamedAuditIds.Contains(e.Id)) run.Pending.Add((e, e.Id));
@@ -229,6 +247,7 @@ public static class SqliteToPostgresMigrator
         var run = new CopyRun
         {
             WebhooksWithoutProvider = !await SourceHasColumnAsync(source, "Webhooks", "Provider", ct),
+            AuditLogWithoutTypedFields = !await SourceHasColumnAsync(source, "AuditLog", "Phase", ct),
             NamedAuditIds = missing.Contains("Operations")
                 ? []
                 : (await source.Operations.AsNoTracking().Where(o => o.AuditId != null).Select(o => o.AuditId!.Value)
