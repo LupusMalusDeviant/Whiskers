@@ -307,6 +307,34 @@ public sealed class OperationIdempotencyTests : IDisposable
         Assert.All(decisions, d => Assert.Equal(id, d));
     }
 
+    [Fact]
+    public async Task An_explicit_other_id_never_uses_another_operations_approval()
+    {
+        // Same caller, same inputs, two operation ids: each needs its own approval — pending or granted.
+        _policy.RequireConfirmationForWrites = true;
+        var gateway = Gateway(NewJournal());
+        var a = Restart("op-ea") with { Surface = MutationSurface.Mcp };
+        var b = Restart("op-eb") with { Surface = MutationSurface.Mcp };
+
+        var askedA = await Run(gateway, a);
+        var askedB = await Run(gateway, b);
+        Assert.Equal(MutationStatus.PendingApproval, askedB.Status);
+        Assert.NotEqual(askedA.ApprovalId, askedB.ApprovalId);
+        Assert.Equal("op-eb", _approvals.GetAll().Single(x => x.Id == askedB.ApprovalId).CorrelationId);
+
+        Assert.Equal(ApprovalDecisionResult.Decided, await _approvals.DecideAsync(askedA.ApprovalId!, true,
+            ApprovalResolver.User("other-admin@example.com", AppRole.Admin)));
+        var stillB = await Run(gateway, b);
+        Assert.Equal(MutationStatus.PendingApproval, stillB.Status);
+        Assert.Equal(askedB.ApprovalId, stillB.ApprovalId);
+        Assert.Equal(0, _runs);
+
+        var ranA = await Run(gateway, a);
+        Assert.Equal(MutationStatus.Executed, ranA.Status);
+        Assert.Equal(askedA.ApprovalId, (await Row("op-ea"))!.ApprovalId);
+        Assert.Null(await Row("op-eb"));
+    }
+
     [Theory]
     [InlineData("running", MutationReasonCodes.OperationRunning)]
     [InlineData("executed", MutationReasonCodes.OperationAlreadyRun)]

@@ -17,7 +17,8 @@ All notable changes to Whiskers are documented here. The format follows
   Only the claim that took the id can finish it or give it back (a claim token), so a retried release never frees a
   later claim. Decision, approval, execution, verification and audit carry the same id — also for an approve-then-retry
   call that names no id of its own (a direct MCP call): the retry continues the operation that raised the approval
-  (`IApprovalGate.OpenOperationOf`), and concurrent identical first calls share one id and one approval; a mutation nested in another one's execution gets an id of
+  (`IApprovalGate.OpenOperationOf`), and concurrent identical first calls share one id and one approval; an approval
+  is used only by the operation it was raised for (approvals raised before this release are asked for again); a mutation nested in another one's execution gets an id of
   its own and keeps the link (`parentOperationId` in the audit row, `ParentId` in the journal). A journal that cannot
   be written refuses the mutation. The SQLite → PostgreSQL migrator rewrites an operation's `AuditId` to its audit
   row's new id. **Upgrade notes:** a new table, created on start; nothing to migrate by hand.

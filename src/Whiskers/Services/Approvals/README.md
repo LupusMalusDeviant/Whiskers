@@ -21,7 +21,9 @@ their `Confirm` outright, since nobody could approve it and a later run of the s
    Concurrent identical first calls share one approval (`IApprovalStore.FindOpen` under one lock). An approval that
    was rejected, expired or used answers no retry, so the next call asks again. The approval keeps the operation id
    of the call that raised it (`CorrelationId`); `OpenOperationOf(binding)` hands it to the gateway, so the retry
-   continues that operation under the same id (R1-18, INV-39).
+   continues that operation under the same id (R1-18, INV-39). A retry under another operation id never gets that
+   approval (`FindOpen(binding, operationId)`): it asks for its own. An approval raised before R1-18 (no operation id)
+   is therefore not reused by a gateway call after the upgrade; the call asks again.
 3. **Checking is not using.** `CheckAsync` only finds (or raises) the approval. The caller uses it with
    `TryConsumeAsync` right before the call runs: the gateway after its audit intent is written, `DirectMcpCallGuard`
    immediately. A refusal in between leaves the approval valid. The use is one conditional update in the database

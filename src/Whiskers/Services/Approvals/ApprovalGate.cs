@@ -162,7 +162,9 @@ public sealed class ApprovalGate : IApprovalGate
         await _raiseLock.WaitAsync(ct);
         try
         {
-            if (_approvals.FindOpen(subject.Binding) is { } raised && LevelCovers(raised, subject))
+            // R1-18: only the approval raised for this operation — another operation with the same binding asks for
+            // its own (a call without an id of its own took the id of the approval it retries, MutationGateway).
+            if (_approvals.FindOpen(subject.Binding, subject.OperationId) is { } raised && LevelCovers(raised, subject))
             {
                 if (raised.Status == ApprovalStatus.Pending)
                     return new ApprovalGateResult(false,
