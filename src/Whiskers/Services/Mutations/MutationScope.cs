@@ -1,6 +1,13 @@
 namespace Whiskers.Services.Mutations;
 
 /// <summary>
+/// What a tool reported about its own work inside a gateway scope (R1-20): the record it created, the file it wrote, a
+/// failure it caught. It enriches the gateway's one authoritative event instead of becoming a second security event.
+/// </summary>
+public sealed record MutationDomainResult(string Action, string TargetType, string TargetId, string TargetName,
+    string? Details, string? ServerId, bool Success);
+
+/// <summary>
 /// The ambient marker the Mutation Gateway sets around an execution delegate (ADR-0005). It flows with the async
 /// call chain (<see cref="AsyncLocal{T}"/>), so service calls made inside the delegate — including nested ones such
 /// as stop + recreate inside an update — run "inside" the capability that was decided. Work queued with
@@ -9,6 +16,7 @@ namespace Whiskers.Services.Mutations;
 public sealed class MutationScope : IDisposable
 {
     private const int MaxReasonChars = 500;
+    private const int MaxResults = 10;
     private static readonly AsyncLocal<MutationScope?> CurrentScope = new();
 
     private readonly MutationScope? _parent;
@@ -16,6 +24,7 @@ public sealed class MutationScope : IDisposable
 
     private readonly string? _serverId;
     private readonly HashSet<string> _decided;
+    private readonly List<MutationDomainResult> _results = [];
 
     private MutationScope(string capabilityId, string operationId, MutationPrincipal? principal, MutationScope? parent,
         MutationRequest? request)
@@ -84,10 +93,37 @@ public sealed class MutationScope : IDisposable
     public static string Fail(string reason)
     {
         ArgumentNullException.ThrowIfNull(reason);
-        // The text can be a whole command output; the audit row only needs its start.
-        if (Current is { } scope)
-            scope.FailureReason ??= reason.Length > MaxReasonChars ? reason[..MaxReasonChars] + "…" : reason;
+        // The text can be a whole command output; the audit row only needs its start. Redacted first: a cut can split
+        // a secret from what marks it as one.
+        if (Current is { } scope && scope.FailureReason is null)
+        {
+            var safe = Whiskers.Utils.SecretRedactor.Redact(PolicyDecisions.WithoutUrlCredentials(reason)!);
+            scope.FailureReason = safe.Length > MaxReasonChars ? safe[..MaxReasonChars] + "…" : safe;
+        }
         return reason;
+    }
+
+    /// <summary>What the tool reported with <see cref="Record"/>, oldest first (at most ten).</summary>
+    public IReadOnlyList<MutationDomainResult> Results
+    {
+        get { lock (_results) return _results.ToArray(); }
+    }
+
+    /// <summary>
+    /// Adds what a tool reports about its work to the current scope, so it becomes part of the gateway's event for
+    /// this mutation (R1-20). A result the tool reports as failed also fails the mutation (<see cref="Fail"/>): the
+    /// event must not claim success for what the tool says went wrong. False outside a scope — the caller then
+    /// writes the report on its own.
+    /// </summary>
+    public static bool Record(MutationDomainResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (Current is not { } scope) return false;
+        lock (scope._results)
+            if (scope._results.Count < MaxResults) scope._results.Add(result);
+        if (!result.Success)
+            Fail(string.IsNullOrWhiteSpace(result.Details) ? $"{result.Action} failed." : $"{result.Action} failed: {result.Details}");
+        return true;
     }
 
     /// <summary>Opened by the gateway only. Dispose restores the previous scope.</summary>

@@ -514,6 +514,7 @@ public sealed class MutationGateway : IMutationGateway
         var context = new MutationContext(operationId, request, capability);
         var started = _time.GetTimestamp();
         MutationOutcome<T> outcome;
+        IReadOnlyList<MutationDomainResult> results = [];
         using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
             deadline.CancelAfter(capability.Deadline);
@@ -523,7 +524,15 @@ public sealed class MutationGateway : IMutationGateway
                 string? reported;
                 using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal, context.Request))
                 {
-                    value = await execute(context, deadline.Token);
+                    try
+                    {
+                        value = await execute(context, deadline.Token);
+                    }
+                    finally
+                    {
+                        // What the tool reported belongs to the event also when it then threw.
+                        results = scope.Results;
+                    }
                     reported = scope.FailureReason;
                 }
 
@@ -574,7 +583,7 @@ public sealed class MutationGateway : IMutationGateway
         // already happened at this point, so a failed write must not hide its result from the caller; the intent
         // row stays as evidence that it ran, and the outcome is kept and written again (R1-19).
         await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, outcome.Status, outcome.Verification,
-            outcome.Reason, _time.GetElapsedTime(started)), capability);
+            outcome.Reason, _time.GetElapsedTime(started), results), capability);
         return outcome with { DecisionId = request.DecisionId };
     }
 
@@ -585,7 +594,7 @@ public sealed class MutationGateway : IMutationGateway
         try
         {
             await _audit.CompleteAsync(outcome.AuditId, outcome.OperationId, outcome.Status, outcome.Verification,
-                outcome.Reason, outcome.Duration, CancellationToken.None);
+                outcome.Reason, outcome.Duration, outcome.Results, CancellationToken.None);
         }
         catch (Exception ex)
         {

@@ -23,7 +23,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         Whiskers.Services.Certificates.IMtlsCertificateService certificates,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         CancellationToken cancellationToken = default)
     {
@@ -119,7 +119,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IHostCommandExecutor executor,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         [Description("Shell command to execute")] string command,
         [Description("Timeout in seconds (default 30, max 600)")] int timeoutSeconds = 30)
@@ -182,7 +182,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IFirewallService firewall,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         [Description("Port number or range (e.g. '80', '8000:9000')")] string port,
         [Description("Protocol: tcp, udp, or both")] string protocol = "tcp",
@@ -219,7 +219,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IFirewallService firewall,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         [Description("Rule number to remove")] int ruleNumber)
     {
@@ -280,7 +280,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         INginxService nginx,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         [Description("Site name")] string siteName,
         [Description("New nginx config content")] string content)
@@ -324,7 +324,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISystemdService systemd,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         [Description("Service name (e.g. 'nginx', 'docker')")] string serviceName,
         [Description("Action: start, stop, restart, enable, disable")] string action)
@@ -384,7 +384,7 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISslCertService ssl,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         [Description("Certificate name (from list). Use 'all' to renew all.")] string certName)
     {

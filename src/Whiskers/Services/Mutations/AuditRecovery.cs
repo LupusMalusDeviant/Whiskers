@@ -6,7 +6,8 @@ namespace Whiskers.Services.Mutations;
 
 /// <summary>An outcome the gateway could not write to its intent row; kept and written again.</summary>
 public sealed record PendingAuditOutcome(long AuditId, string OperationId, MutationStatus Status,
-    VerificationStatus Verification, string? Reason, TimeSpan Duration);
+    VerificationStatus Verification, string? Reason, TimeSpan Duration,
+    IReadOnlyList<MutationDomainResult>? Results = null);
 
 /// <summary>Whether the audit trail is complete right now (R1-19, INV-45).</summary>
 /// <param name="PendingEvents">Outcomes of this process and refusals in the outbox still waiting to be written, and
@@ -123,7 +124,7 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                 try
                 {
                     await _sink.CompleteAsync(outcome.AuditId, outcome.OperationId, outcome.Status, outcome.Verification,
-                        outcome.Reason, outcome.Duration, ct);
+                        outcome.Reason, outcome.Duration, outcome.Results, ct);
                     _outcomes.TryRemove(id, out _);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

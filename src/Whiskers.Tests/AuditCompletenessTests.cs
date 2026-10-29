@@ -4,7 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using ModelContextProtocol.Protocol;
+using Whiskers.Mcp;
 using Whiskers.Services.Approvals;
+using Whiskers.Services.AuditLog;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 
@@ -261,6 +264,27 @@ public sealed class AuditCompletenessTests : IDisposable
     }
 
     [Fact]
+    public async Task Long_tool_reports_stay_within_the_details_cap()
+    {
+        // A tool that names its target by a whole command (execute_command does), ten times over (R1-20).
+        var command = string.Concat(Enumerable.Repeat("echo restart the web container please; ", 200));
+
+        await Gateway().ExecuteAsync(Restart("op-reports"), (_, _) =>
+        {
+            for (var i = 0; i < 12; i++)
+                MutationScope.Record(new MutationDomainResult("command.execute" + new string('x', 500), "command",
+                    command, command, command, "local" + new string('l', 500), true));
+            return Task.FromResult(1);
+        });
+
+        var row = await EventOf("op-reports");
+        Assert.Equal("Executed", row.Outcome);
+        Assert.True(row.Details!.Length <= 4000, $"{row.Details.Length} chars");
+        using var details = JsonDocument.Parse(row.Details);
+        Assert.Equal(10, details.RootElement.GetProperty("results").GetArrayLength());
+    }
+
+    [Fact]
     public async Task Required_fields_survive_when_the_details_are_shortened()
     {
         // A long argument before the others and a long failure text — plain words, which no redaction rule shortens:
@@ -306,5 +330,53 @@ public sealed class AuditCompletenessTests : IDisposable
         // A payload keeps only its length, in the column as in the details.
         Assert.DoesNotContain("hunter2", row.Arguments);
         Assert.DoesNotContain("hunter2", row.Details);
+    }
+
+    private static readonly HashSet<string> HardProtected = new(StringComparer.Ordinal) { "renew_mtls_certificate" };
+
+    /// <summary>Every mutating MCP tool — every tool above Read (R1-20).</summary>
+    public static TheoryData<string> MutatingMcpTools()
+    {
+        var data = new TheoryData<string>();
+        foreach (var tool in McpPermissionLevels.DefaultToolLevels
+                     .Where(t => t.Value != McpPermissionLevels.Read).Select(t => t.Key).Order(StringComparer.Ordinal))
+            data.Add(tool);
+        return data;
+    }
+
+    /// <summary>R1-20: a direct MCP call of any mutating tool is one authoritative event, the gateway's; what the tool
+    /// reports about its own work enriches that event instead of becoming a second row.</summary>
+    [Theory]
+    [MemberData(nameof(MutatingMcpTools))]
+    public async Task Every_mutating_mcp_tool_call_is_one_authoritative_event(string tool)
+    {
+        using var mcp = new McpFilterHarness();
+        var legacy = new McpCallOutcomeTests.RecordingAuditLog();
+        var report = new ToolAuditLog(legacy);
+        var ran = false;
+
+        await mcp.CallAsync(tool, async _ =>
+        {
+            ran = true;
+            await report.LogAsync("someone", "mcp", "tool.report", "thing", "t-1", "thing one", "made it", "local");
+            return new CallToolResult { Content = [new TextContentBlock { Text = "done" }] };
+        });
+
+        var row = Assert.Single(await mcp.EventsAsync());
+        Assert.Equal("outcome", row.Phase);
+        Assert.Equal("Mcp", row.Surface);
+        Assert.Equal("key:k1", row.PrincipalId);
+        Assert.NotNull(row.OperationId);
+        Assert.Equal(row.OperationId, Assert.Single(McpCallOutcomes.Get(mcp.Http)).OperationId);
+        Assert.Empty(legacy.Rows);
+        if (!ran)
+        {
+            // Refused by a rule no setting lifts (the control plane is protected): still exactly one event.
+            Assert.True(HardProtected.Contains(tool), $"{tool}: {row.Outcome} — {row.Details}");
+            Assert.Equal("Denied", row.Outcome);
+            return;
+        }
+        Assert.Equal("Executed", row.Outcome);
+        Assert.Contains("made it", row.Details);
     }
 }

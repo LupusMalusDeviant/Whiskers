@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-20: **One outcome per MCP call, one audit event per mutation.** The Agent History of a direct MCP call no longer
+  takes success from the HTTP status: each call records what it came to — executed, denied, failed, waiting for
+  approval, or executed with a failed verification (`ResultSummary`) — with its verdict and, for a mutation, the
+  gateway's operation id (`CorrelationId`, the same id as its audit event); each call of a batch keeps its own. A call
+  no outcome was reported for is recorded as not successful. MCP tools no longer write audit rows of their own next to
+  the gateway's: what they report (the record created, the backup file, a failure) is added to the gateway's event
+  (`results` in its details), and a failure a tool reports makes the mutation **Failed** instead of Executed.
+  No migration.
+
 - R1-19: **Complete, fail-closed audit events.** Every gateway attempt — allowed, denied, waiting for approval, failed —
   is one `AuditLog` event whose security fields are columns of their own (operation, parent operation, decision,
   trigger, surface, principal kind/id/credential/session/on-behalf-of/delegation, request session, approval id and approver, phase, outcome,

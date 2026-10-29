@@ -37,7 +37,7 @@ public class SchedulerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISchedulerService scheduler,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Task name")] string name,
         [Description("Cron expression (e.g., '0 2 * * *' for daily at 2am)")] string cronExpression,
         [Description("Task type: ContainerRestart, DbBackup, VolumeBackup, CustomCommand, Cleanup")] string taskType,
@@ -101,7 +101,7 @@ public class SchedulerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISchedulerService scheduler,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Task ID to delete")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "delete_scheduled_task");
@@ -120,7 +120,7 @@ public class SchedulerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISchedulerService scheduler,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Task ID to run")] string taskId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "run_scheduled_task");

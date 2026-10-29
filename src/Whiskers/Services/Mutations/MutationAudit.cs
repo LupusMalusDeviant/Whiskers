@@ -21,6 +21,12 @@ public interface IMutationAuditSink
     Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
         string? reason, TimeSpan duration, CancellationToken ct);
 
+    /// <summary><see cref="CompleteAsync(long, string, MutationStatus, VerificationStatus, string?, TimeSpan, CancellationToken)"/>
+    /// with what the tool reported about its work (R1-20): part of the same event, never a row of its own.</summary>
+    Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
+        string? reason, TimeSpan duration, IReadOnlyList<MutationDomainResult>? results, CancellationToken ct) =>
+        CompleteAsync(auditId, operationId, status, verification, reason, duration, ct);
+
     /// <summary>A refusal before execution (unknown capability, level, policy). Also throws on failure.</summary>
     Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability, MutationStatus status,
         string reason, CancellationToken ct);
@@ -43,6 +49,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     private const int MaxDetailChars = 4000;
     private const int MaxReasonChars = 1000;
     private const int MaxArgumentChars = 1500;
+    private const int MaxResultDetailChars = 300;
+    private const int MaxResultNameChars = 120;
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
     private readonly AuditOutbox? _outbox;
@@ -137,8 +145,12 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         }
     }
 
+    public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
+        string? reason, TimeSpan duration, CancellationToken ct) =>
+        CompleteAsync(auditId, operationId, status, verification, reason, duration, results: null, ct);
+
     public async Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
-        string? reason, TimeSpan duration, CancellationToken ct)
+        string? reason, TimeSpan duration, IReadOnlyList<MutationDomainResult>? results, CancellationToken ct)
     {
         try
         {
@@ -146,7 +158,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             var entity = await db.AuditLog.FindAsync([auditId], ct)
                          ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
-            Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds);
+            Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds,
+                results);
             await db.SaveChangesAsync(ct);
         }
         finally
@@ -162,7 +175,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     /// <paramref name="outcome"/> is a <see cref="MutationStatus"/> name, or <c>Unknown</c> (recovery: it was running
     /// when Whiskers stopped).</summary>
     internal static void Complete(AuditLogEntity entity, string operationId, string outcome, string verification,
-        string? reason, long? durationMs)
+        string? reason, long? durationMs, IReadOnlyList<MutationDomainResult>? results = null)
     {
         entity.Success = outcome == nameof(MutationStatus.Executed) && verification != nameof(VerificationStatus.Failed);
         entity.Phase = "outcome";
@@ -186,6 +199,20 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             verification,
             reason = Field(redactedReason, budget),
             durationMs,
+            // What the tool reported (R1-20), its free text redacted and shrinking with the rest.
+            results = results is { Count: > 0 }
+                ? results.Select(r => new
+                {
+                    // Every text shrinks with the budget: a tool may name its target by a whole command.
+                    action = Field(r.Action, Math.Min(budget, MaxResultNameChars)),
+                    targetType = Field(r.TargetType, Math.Min(budget, MaxResultNameChars)),
+                    targetId = Field(Redact(r.TargetId), Math.Min(budget, MaxResultNameChars)),
+                    targetName = Field(Redact(r.TargetName), Math.Min(budget, MaxResultNameChars)),
+                    serverId = Field(r.ServerId, Math.Min(budget, MaxResultNameChars)),
+                    success = r.Success,
+                    details = Field(Redact(r.Details), Math.Min(budget, MaxResultDetailChars)),
+                }).ToList()
+                : null,
             intent = intentValue,
         });
         entity.Details = TryFit(budget => Outcome(budget, intent))
