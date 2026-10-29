@@ -114,6 +114,17 @@ public class GuardrailEngineTests
     }
 
     [Fact]
+    public void Protected_resource_asks_an_interactive_Admin_for_an_approval()
+    {
+        var policy = Permissive();
+        policy.ProtectedResources.Add("serverwatch*");
+        var d = Engine.Evaluate(Request("stop_container", McpPermissionLevels.Write,
+            policy, Principal(McpPermissionLevels.Admin), ("containerId", "serverwatch-app-1")));
+        Assert.Equal(GuardrailVerdict.Confirm, d.Verdict);
+        Assert.Contains("protected-resource", d.MatchedRuleIds);
+    }
+
+    [Fact]
     public void Protected_resource_does_not_block_unrelated_argument()
     {
         var policy = Permissive();

@@ -199,6 +199,32 @@ public class SelfProtectionTests
     }
 
     [Fact]
+    public async Task A_whole_payload_matching_a_wildcard_pattern_is_not_quoted_on_the_card_or_in_the_reason()
+    {
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["*role*"]);
+        var query = "ALTER ROLE app PASSWORD 'not-a-real-one'";
+
+        var denied = await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
+            ProtectionHarness.AdminKey, MutationSurface.Mcp);
+        await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+
+        Assert.DoesNotContain("not-a-real-one", denied.Reason);
+        var card = Assert.Single(h.Approvals.GetPending());
+        Assert.DoesNotContain("not-a-real-one", card.Reason);
+        Assert.DoesNotContain("not-a-real-one", card.ParamsJson);
+    }
+
+    [Fact]
+    public async Task An_id_prefix_sent_straight_to_the_Docker_API_is_looked_up()
+    {
+        var h = new ProtectionHarness();
+        Assert.Equal(MutationStatus.Denied, (await h.RunAsync("host.exec",
+            new { serverId = "local", command = "curl -X POST http://172.18.0.5:2375/containers/c0ffee/stop" },
+            ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+    }
+
+    [Fact]
     public async Task A_second_approver_policy_makes_the_exception_four_eyes()
     {
         var h = new ProtectionHarness(p => p.RequireSecondApprover = true);

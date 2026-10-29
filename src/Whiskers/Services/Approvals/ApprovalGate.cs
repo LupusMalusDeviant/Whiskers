@@ -224,7 +224,10 @@ public sealed class ApprovalGate : IApprovalGate
             ToolName: subject.ToolName,
             Level: subject.Level,
             ParamsJson: Cap(SecretRedactor.Redact(argsJson), MaxParamChars),
-            Reason: reason,
+            // A reason may quote what the caller sent; a UI payload never reaches the stored card (R1-16).
+            Reason: subject.WithholdPayloads
+                ? Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloadValues(reason, subject.Arguments) ?? reason
+                : reason,
             CorrelationId: subject.OperationId,
             RiskLevel: ApprovalDisplay.RiskOf(subject.Level),
             TargetServer: server,

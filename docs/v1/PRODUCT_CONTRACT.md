@@ -150,9 +150,9 @@ mutating tools do for their own error texts).
 | M-02 | `stop_container` | write | ❌ | AL ✅ | INV-43, 59 |
 | M-03 | `restart_container` | write | ❌ | AL ✅ | INV-43, 59 |
 | M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | AL ✅ | INV-43, 44, 53 |
-| M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43, 24 (YAML free text) |
+| M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43 (volumes checked since R1-16) |
 | M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | AL ✅ | INV-43, 51 |
-| M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43, 24 |
+| M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43 (plan incl. mounts decided since R1-16) |
 | M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
 | M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
 | M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
@@ -224,17 +224,18 @@ Common to all U rows: Actor = Human (cookie) · AuthN ✅ · AuthZ = `Require(ro
 circuit (INV-09), **and** since WP2 step 2.2 the Mutation Gateway for every marked capability (`IUiMutationRunner`):
 catalog level, tool switch and stricter stored level (INV-15), container target resolved (INV-57) · Policy ✅ for
 humans under PC-D1: kill switch and protected resources (INV-21, 24) — tool lists, argument patterns and
-confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1 · Execution = inside the gateway
+confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1, except an Admin's action on a
+protected resource or Whiskers' control plane, which needs an Admin approval (INV-59, R1-16) · Execution = inside the gateway
 scope with a deadline · Audit: the gateway row plus the page's own row. **Not through the gateway yet:** the
 Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW status is), U-20, U-21, U-25.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
-| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | AL ✅ | INV-43, 59 |
-| U-02 | Dashboard remove (force) | Admin | ❌ | AL ✅ | INV-43, 59 |
+| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | AL ✅ | INV-43 |
+| U-02 | Dashboard remove (force) | Admin | ❌ | AL ✅ | INV-43 |
 | U-03 | Dashboard update | Operator | ❌ | AL ✅ | INV-43, 53 |
 | U-04 | Dashboard rollback | Operator | ❌ | AL ✅ | INV-43, 53 |
-| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | AL ✅ | INV-43, 59 |
+| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | AL ✅ | INV-43 |
 | U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | AL ✅ | INV-51 |
 | U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | ❌ | gateway row | INV-45 |
 | U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | ❌ | INV-45 |

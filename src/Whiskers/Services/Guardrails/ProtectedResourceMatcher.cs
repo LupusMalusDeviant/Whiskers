@@ -66,7 +66,9 @@ public static class ProtectedResourceMatcher
         {
             var value = element.ValueKind == JsonValueKind.String ? element.GetString() ?? "" : element.GetRawText();
             var keyPatterns = nameKeys is null || nameKeys(key) ? patterns : [];
-            if (Match(value, keyPatterns) is { } whole) return new Hit(value, whole) { Argument = key };
+            // A whole payload (SQL, a command) that matches is never quoted either: it can carry a credential.
+            if (Match(value, keyPatterns) is { } whole)
+                return new Hit(value, whole) { Argument = key, InFreeText = PayloadArguments.Contains(key) };
             if (value.Length == 0) continue;
             var freeText = analyseFreeText && FreeTextArguments.Contains(key);
             var reference = analyseFreeText && (ReferenceArguments.Contains(key) || key.StartsWith(ResolvedRelatedPrefix, StringComparison.Ordinal));
@@ -121,6 +123,11 @@ public static class ProtectedResourceMatcher
         }
         return null;
     }
+
+    /// <summary>Arguments whose value is a payload that can carry a credential: free text and secrets. A hit in one
+    /// names the argument, never its value.</summary>
+    public static readonly IReadOnlySet<string> PayloadArguments = new HashSet<string>(
+        FreeTextArguments.Concat(["env", "envVars", "password", "secret", "token"]), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Free text that is a compose file.</summary>
     public static readonly IReadOnlySet<string> ComposeArguments = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -288,8 +295,13 @@ public static class ProtectedResourceMatcher
     /// <summary>Whether a command invokes a container runtime directly, where a short id prefix is meaningful.</summary>
     public static bool InvokesContainerRuntime(string argument, string text) =>
         ShellArguments.Contains(argument)
-        && AnalyseShell(text).Words.Any(w => w is "docker" or "podman" or "nerdctl" or "ctr" or "crictl"
-                                             || w.EndsWith("/docker", StringComparison.Ordinal));
+        && (AnalyseShell(text).Words.Any(w => w is "docker" or "podman" or "nerdctl" or "ctr" or "crictl"
+                                              || w.EndsWith("/docker", StringComparison.Ordinal))
+            // the Docker API reached directly (curl to a socket proxy or a TCP endpoint)
+            || RuntimeApi.IsMatch(text));
+
+    private static readonly Regex RuntimeApi = new(@"/(containers|volumes|networks|exec)/|:237[56]\b|docker\.sock",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     /// <summary>What the shell makes of a command: its literal words (quotes and escapes removed, with the words of
     /// quoted text that is run again), the words it expands as globs, and whether anything is built at run time.</summary>

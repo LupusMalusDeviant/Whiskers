@@ -32,7 +32,9 @@ All notable changes to Whiskers are documented here. The format follows
   `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a
   scheduled CustomCommand with `$(date +%F)`), `xargs`, `awk '{print $1}'`, `python -c`, a pipe into a shell or an
   interpreter (`curl … | sh`) or a script run by its shell (`bash deploy.sh`), or `rm`/`mv`/`chmod` on `/var/lib/docker`;
-  editing an nginx site that proxies to Whiskers; deploying your own `step-ca` or `ghostunnel`; a compose deployment
+  editing an nginx site that proxies to Whiskers; deploying your own `step-ca` or `ghostunnel`; SQL with dynamic
+  statements or inline functions (`EXECUTE`, `PREPARE`, `CREATE FUNCTION`, typical in migrations and `pg_dump`
+  imports — a scheduled SQL task is refused, a UI import needs an Admin approval); a compose deployment
   that mounts the Docker socket, `/`, `/var/run` or `/var/lib/docker` (cAdvisor, node-exporter, Portainer) or a volume
   whose source uses a variable the project's `.env` does not set; a scheduled `volume.backup` of the
   `serverwatch-data` volume run by a task (refused — back Whiskers up with its own self-backup instead). Rename a
