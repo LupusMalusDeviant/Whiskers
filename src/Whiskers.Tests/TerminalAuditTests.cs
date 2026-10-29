@@ -172,6 +172,26 @@ public class TerminalAuditTests
     }
 
     [Fact]
+    public async Task A_session_without_input_or_output_for_the_idle_timeout_is_closed_as_idle()
+    {
+        var time = new ManualTime(T0);
+        var audit = new RecordingAudit();
+        using var manager = Manager(new FakeLauncher(), audit, time: time,
+            settings: new TerminalSettings { IdleTimeoutMinutes = 30 });
+        var session = await OpenHost(manager, "s1", "local");
+
+        time.Now = T0.AddMinutes(20);
+        session.Touch();                                         // output at minute 20
+        time.Now = T0.AddMinutes(45);
+        await manager.SweepAsync();
+        Assert.Empty(audit.Rows);                                // 25 minutes quiet: goes on
+
+        time.Now = T0.AddMinutes(51);
+        await manager.SweepAsync();
+        Assert.Equal("Idle", Reason(Assert.Single(audit.Rows)));
+    }
+
+    [Fact]
     public async Task Concurrent_closes_record_one_event()
     {
         var audit = new RecordingAudit();

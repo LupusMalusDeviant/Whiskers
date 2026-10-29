@@ -146,10 +146,12 @@ public sealed class ProcessTerminalLauncher : ITerminalLauncher
 public sealed class TerminalSession : IAsyncDisposable
 {
     private readonly ITerminalProcess _process;
+    private readonly TimeProvider _time;
 
     internal TerminalSession(string sessionId, TerminalOwner owner, TerminalTarget target, ITerminalProcess process,
-        DateTime openedAt, string? operationId = null)
+        DateTime openedAt, string? operationId = null, TimeProvider? time = null)
     {
+        _time = time ?? TimeProvider.System;
         SessionId = sessionId;
         OperationId = operationId;
         Owner = owner;
@@ -176,7 +178,7 @@ public sealed class TerminalSession : IAsyncDisposable
     public StreamReader Errors => _process.Errors;
 
     /// <summary>Marks the session active now (input OR output) so the idle sweep doesn't reap it.</summary>
-    public void Touch() => LastActivityAt = DateTime.UtcNow;
+    public void Touch() => LastActivityAt = _time.GetUtcNow().UtcDateTime;
 
     public async Task WriteAsync(string data)
     {

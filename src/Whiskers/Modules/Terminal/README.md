@@ -4,7 +4,9 @@ The interactive web terminal (container shell + host/server shell) — the first
 transitional `AllInOnePseudoModule` into its own `IWhiskersModule` (RoadToSAP Phase 1 pilot).
 
 - `TerminalModule.cs` — `Id = "terminal"`, enabled by default. `ConfigureServices` binds `TerminalSettings`
-  and registers `ITerminalSessionManager` (moved **verbatim** from `Program.cs`). No nav entry (the terminal
+  and registers `ITerminalSessionManager` (moved **verbatim** from `Program.cs`), plus since R1-17 the
+  `ITerminalLauncher` that starts a session's process and the `ITerminalAuthority` that ends sessions whose owner
+  lost Admin or that the kill switch stops. No nav entry (the terminal
   is opened contextually from a container/server) and no MCP tools.
 
 **Toggle:** `Features:terminal:Enabled` (`Features__terminal__Enabled=false`), restart-only. When off, the

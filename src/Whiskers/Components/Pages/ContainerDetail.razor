@@ -1127,8 +1127,14 @@ else
                 ct => SessionManager.OpenContainerShellAsync(
                     new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, sid, ContainerId), ct));
 
-            _ = ReadTermStreamAsync(_termSession.Output, _termCts.Token);
-            _ = ReadTermStreamAsync(_termSession.Errors, _termCts.Token);
+            var opened = _termSession;
+            _ = Task.WhenAll(ReadTermStreamAsync(opened.Output, _termCts.Token), ReadTermStreamAsync(opened.Errors, _termCts.Token))
+                .ContinueWith(async _ =>
+                {
+                    // The shell ended (or was ended): its close event is recorded once, whoever gets there first.
+                    if (!opened.IsRunning)
+                        await SessionManager.CloseAsync(opened.SessionId, Whiskers.Services.Terminal.TerminalCloseReason.Exited);
+                }, TaskScheduler.Default).Unwrap();
         }
         catch (Exception ex)
         {

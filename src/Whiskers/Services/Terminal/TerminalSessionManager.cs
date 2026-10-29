@@ -139,7 +139,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
     {
         var owner = new TerminalOwner(scope.Principal!.Id, scope.Principal.DisplayName);
         var session = new TerminalSession(request.SessionId, owner, target, _launcher.Start(launch),
-            _time.GetUtcNow().UtcDateTime, scope.OperationId);
+            _time.GetUtcNow().UtcDateTime, scope.OperationId, _time);
         RegisterSession(session);
         _logger.LogInformation("Terminal session {SessionId} opened ({Kind} {Target} on {ServerId})",
             session.SessionId, target.Kind, target.Name, target.ServerId);
@@ -219,7 +219,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
                 reason = !session.IsRunning ? TerminalCloseReason.Exited
                     : !settings.Enabled ? TerminalCloseReason.Disabled
                     : _authority?.MustEnd(session)
-                      ?? (DateTime.UtcNow - session.LastActivityAt > timeout ? TerminalCloseReason.Idle : null);
+                      ?? (_time.GetUtcNow().UtcDateTime - session.LastActivityAt > timeout ? TerminalCloseReason.Idle : null);
             }
             catch (Exception ex)
             {
