@@ -1,8 +1,10 @@
+using System.Data.Common;
 using System.Globalization;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -29,11 +31,12 @@ public sealed class WebhookReplayTests : IDisposable
     private readonly RecordingRunner _runner = new();
     private readonly ManualTime _time = new(new DateTimeOffset(2026, 10, 29, 12, 0, 0, TimeSpan.Zero));
     private readonly WebhookOptions _options = new();
+    private readonly Faults _faults = new();
 
     public WebhookReplayTests()
     {
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}").AddInterceptors(_faults));
         services.AddSingleton<IAutomationMutationRunner>(_runner);
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
@@ -49,8 +52,9 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     /// <summary>A new service is a new process: what another one queued or ran reads as cut off by a restart.</summary>
-    private WebhookService Service(IDockerService? docker = null, IStringLocalizer<SharedResource>? text = null) =>
-        new(_sp.GetRequiredService<IServiceScopeFactory>(), docker: docker!, executor: null!, planner: null!,
+    private WebhookService Service(IDockerService? docker = null, IStringLocalizer<SharedResource>? text = null,
+        IComposePlanner? planner = null) =>
+        new(_sp.GetRequiredService<IServiceScopeFactory>(), docker: docker!, executor: null!, planner: planner!,
             NullLogger<WebhookService>.Instance, Options.Create(_options), _time, text: text);
 
     private void Update(string webhookId, Action<WebhookEntity> change)
@@ -341,6 +345,28 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task Deployments_of_one_compose_project_never_overlap_whatever_directory_names_it()
+    {
+        _options.MaxConcurrentRuns = 4;
+        // A symlinked directory and another directory declaring the same project name: one compose project.
+        var planner = new ProjectPlanner("shop");
+        var hooks = new[] { "/srv/shop", "/opt/shop", "/opt/shop-copy" }.Select(dir =>
+        {
+            var wh = Seed(WebhookSignatures.Whiskers, target: dir);
+            Update(wh.WebhookId, w => w.Action = "deploy");
+            return wh;
+        }).ToList();
+        var service = Service(planner: planner);
+        _runner.Delay = TimeSpan.FromMilliseconds(100);
+
+        var replies = await Task.WhenAll(hooks.Select((wh, i) => service.AcceptAsync(wh.WebhookId, Signed(wh, $"delivery-016{i}"))));
+        foreach (var r in replies) await Finished(r.RunId!);
+
+        Assert.Equal(3, _runner.Runs);
+        Assert.Equal(1, _runner.MaxConcurrent);
+    }
+
+    [Fact]
     public async Task A_webhook_switched_off_while_its_delivery_waits_does_not_run()
     {
         _options.MaxConcurrentRuns = 2;
@@ -458,6 +484,88 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task The_test_shows_a_cancelled_action_in_the_persons_language()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service(text: new KeyLocalizer());
+        _runner.Cancel = true;
+
+        var (success, output) = await service.TriggerSignedTestAsync(wh.WebhookId);
+
+        Assert.False(success);
+        Assert.Equal("[Webhook_Run_Cancelled]", output);
+    }
+
+    // ---------------------------------------------------------------- database faults
+
+    [Fact]
+    public async Task A_run_its_worker_could_not_start_is_taken_over_by_its_next_delivery()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        var request = Signed(wh, "delivery-0171");
+        // The worker's read of the webhook fails.
+        _faults.Arm("FROM \"Webhooks\"", Fault.Fail, runsOnly: true);
+
+        var first = await service.AcceptAsync(wh.WebhookId, request);
+        Assert.Equal(WebhookReply.Accepted, first.Reply);
+        var again = await Eventually(() => service.AcceptAsync(wh.WebhookId, request), r => r.Reply != WebhookReply.Duplicate);
+
+        // Not "queued" for ever: nothing held it any more, so the next delivery runs it.
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Accepted, first.RunId, "queued"), again);
+        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
+        Assert.Equal(1, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task A_delivery_whose_recording_answer_was_lost_is_taken_over_by_its_next_delivery()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        var request = Signed(wh, "delivery-0172");
+        // The row is written, but the answer never arrives: the delivery is refused as busy.
+        _faults.Arm("INSERT INTO \"WebhookDeliveries\"", Fault.LoseAnswer);
+
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await service.AcceptAsync(wh.WebhookId, request));
+        var again = await service.AcceptAsync(wh.WebhookId, request);
+
+        Assert.Equal(WebhookReply.Accepted, again.Reply);
+        Assert.Equal("Succeeded", (await Finished(again.RunId!)).State);
+        Assert.Equal(1, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task A_database_wait_does_not_outlive_the_run_timeout()
+    {
+        _options.MaxConcurrentRuns = 1;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        var stalled = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var next = Seed(WebhookSignatures.Whiskers, target: "worker");
+        var service = Service();
+        // The worker's read of the webhook hangs (a lock wait) far beyond the run's time.
+        _faults.Arm("FROM \"Webhooks\"", Fault.Stall, runsOnly: true);
+
+        var first = await service.AcceptAsync(stalled.WebhookId, Signed(stalled, "delivery-0173"));
+        var second = await service.AcceptAsync(next.WebhookId, Signed(next, "delivery-0174"));
+
+        // The only worker is free again within the deadline: the next run goes on, the stalled one never started.
+        Assert.Equal("Succeeded", (await Finished(second.RunId!)).State);
+        Assert.Equal("Queued", (await Delivery(first.RunId!)).State);
+        Assert.Equal(1, _runner.Runs);
+    }
+
+    private static async Task<WebhookAcceptance> Eventually(Func<Task<WebhookAcceptance>> attempt,
+        Func<WebhookAcceptance, bool> done)
+    {
+        for (var i = 0; ; i++)
+        {
+            var reply = await attempt();
+            if (done(reply) || i == 200) return reply;
+            await Task.Delay(25);
+        }
+    }
+
+    [Fact]
     public async Task A_worker_carries_nothing_of_the_caller_that_started_it()
     {
         var wh = Seed(WebhookSignatures.Whiskers);
@@ -566,9 +674,11 @@ public sealed class WebhookReplayTests : IDisposable
 
         var known = new List<int?>();
         var unknown = new List<int?>();
-        var service = Service();
-        for (var i = 0; i < 4; i++) known.Add((await Endpoint(service, wh.WebhookId, bad)).Status);
-        for (var i = 0; i < 4; i++) unknown.Add((await Endpoint(service, "no-such-hook-0001", bad)).Status);
+        // A limiter each: in one, the two ids could share a bucket.
+        var forKnown = Service();
+        var forUnknown = Service();
+        for (var i = 0; i < 4; i++) known.Add((await Endpoint(forKnown, wh.WebhookId, bad)).Status);
+        for (var i = 0; i < 4; i++) unknown.Add((await Endpoint(forUnknown, "no-such-hook-0001", bad)).Status);
 
         int?[] expected = [400, 400, 400, 429];
         Assert.Equal(expected, known);
@@ -653,6 +763,64 @@ public sealed class WebhookReplayTests : IDisposable
 
     // ---------------------------------------------------------------- doubles
 
+    /// <summary>Plans every directory as the one compose project <paramref name="project"/>.</summary>
+    private sealed class ProjectPlanner(string project) : IComposePlanner
+    {
+        public Task<ComposePlan> PlanAsync(ComposeDeployment deployment, CancellationToken ct = default) =>
+            Task.FromResult(new ComposePlan(deployment.ServerId, project, deployment.ProjectDirectory ?? "/", [], [], null,
+                HasEnvFile: false, RemoveOrphans: false, [], []));
+
+        public Task<ComposePlan> PlanEnvChangeAsync(ContainerInfo container, string serverId, Func<string?, string> newEnv,
+            CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private enum Fault { Fail, LoseAnswer, Stall }
+
+    /// <summary>Breaks the next database command whose text contains a fragment — with <c>runsOnly</c>, only one of
+    /// a run (the worker's commands carry the run's deadline; a delivery's own lookups have none): fails it, executes
+    /// it but loses its answer, or makes it wait until it is cancelled.</summary>
+    private sealed class Faults : DbCommandInterceptor
+    {
+        private readonly object _lock = new();
+        private string? _fragment;
+        private bool _runsOnly;
+        private Fault _fault;
+
+        public void Arm(string fragment, Fault fault, bool runsOnly = false)
+        {
+            lock (_lock) (_fragment, _fault, _runsOnly) = (fragment, fault, runsOnly);
+        }
+
+        private Fault? Trip(DbCommand command, CancellationToken ct)
+        {
+            lock (_lock)
+            {
+                if (_fragment is null || !command.CommandText.Contains(_fragment, StringComparison.Ordinal)) return null;
+                if (_runsOnly && !ct.CanBeCanceled) return null;
+                _fragment = null;
+                return _fault;
+            }
+        }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken ct = default)
+        {
+            switch (Trip(command, ct))
+            {
+                case Fault.Fail:
+                    throw new InvalidOperationException("The database is unavailable.");
+                case Fault.Stall:
+                    await Task.Delay(Timeout.Infinite, ct);
+                    break;
+                case Fault.LoseAnswer:
+                    // Executed, then the answer is lost: the caller cannot tell whether it was written.
+                    await using (var reader = await command.ExecuteReaderAsync(ct)) { }
+                    throw new OperationCanceledException("The answer was lost.");
+            }
+            return result;
+        }
+    }
+
     /// <summary>Answers every key as "[key]", so a test sees which resource was used.</summary>
     private sealed class KeyLocalizer : IStringLocalizer<SharedResource>
     {
@@ -674,6 +842,8 @@ public sealed class WebhookReplayTests : IDisposable
         public List<string?> ContainerIds { get; } = [];
         private int _held;
         public TimeSpan Delay { get; set; }
+        /// <summary>Every run is cancelled before its action.</summary>
+        public bool Cancel { get; set; }
         public int Runs => Volatile.Read(ref _runs);
         public int MaxConcurrent => Volatile.Read(ref _max);
         public Task Started => _started.Task;
@@ -711,6 +881,7 @@ public sealed class WebhookReplayTests : IDisposable
         public async Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
         {
+            if (Cancel) throw new OperationCanceledException("cancelled");
             Interlocked.Increment(ref _runs);
             lock (OperationIds)
             {

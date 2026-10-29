@@ -5003,4 +5003,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Webhook_Run_Overdue" xml:space="preserve">
     <value>Lauf {0} hat sein Zeitlimit überschritten und läuft noch; sein Ergebnis erscheint im Log.</value>
   </data>
+  <data name="Webhook_Run_Cancelled" xml:space="preserve">
+    <value>Die Aktion wurde abgebrochen.</value>
+  </data>
 </root>

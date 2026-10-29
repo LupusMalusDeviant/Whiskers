@@ -5003,4 +5003,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Webhook_Run_Overdue" xml:space="preserve">
     <value>Run {0} exceeded its time limit and is still running; its outcome will be in the log.</value>
   </data>
+  <data name="Webhook_Run_Cancelled" xml:space="preserve">
+    <value>The action was cancelled.</value>
+  </data>
 </root>

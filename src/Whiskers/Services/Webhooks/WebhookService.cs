@@ -42,7 +42,10 @@ public class WebhookService : IWebhookService
     private int _workersStarted;
     private long _lastPrune;
 
-    private sealed record QueuedRun(string WebhookId, string RunId, string? SourceIp);
+    private sealed record QueuedRun(string WebhookId, string RunId, string Claim, string? SourceIp);
+
+    /// <summary>The time a run's own bookkeeping (its state and log row) gets once its deadline has passed.</summary>
+    private static readonly TimeSpan BookkeepingTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>Request-rate buckets per webhook id: the id as sent, valid or not, so the limit says nothing about
     /// whether a webhook exists — and the table stays bounded whatever ids are sent.</summary>
@@ -218,7 +221,7 @@ public class WebhookService : IWebhookService
         if (completion is not null) _waiting[row.RunId] = completion;
         EnsureWorkers();
         // Unbounded channel, bounded by the slot taken above: the write cannot fail.
-        _queue.Writer.TryWrite(new QueuedRun(webhook.WebhookId, row.RunId, sourceIp));
+        _queue.Writer.TryWrite(new QueuedRun(webhook.WebhookId, row.RunId, row.Instance, sourceIp));
         _logger.LogInformation("Webhook {Name}: delivery accepted as run {RunId}", webhook.Name, row.RunId);
         return new WebhookAcceptance(WebhookReply.Accepted, row.RunId, "queued");
     }
@@ -260,7 +263,9 @@ public class WebhookService : IWebhookService
                 }
                 catch (Exception ex)
                 {
+                    // Given up (its claim is released): queued, the next delivery takes it over; running, it failed.
                     _logger.LogError(ex, "Webhook run {RunId} failed outside its action", run.RunId);
+                    await AbandonAsync(run);
                 }
             }
         }
@@ -287,7 +292,7 @@ public class WebhookService : IWebhookService
         var handedOver = false;
         try
         {
-            var queued = await ReadWebhookAsync(run.WebhookId);
+            var queued = await ReadWebhookAsync(run.WebhookId, ct);
             var target = queued is null ? new RunTarget("missing:" + run.WebhookId) : await TargetAsync(queued, ct);
             while (true)
             {
@@ -300,7 +305,8 @@ public class WebhookService : IWebhookService
                 {
                     gate = null;
                     message = new("Webhook_Run_NoTurn", "Failed: the delivery did not get its turn on its target in time.", []);
-                    if (await _deliveries.StartAsync(run.RunId))
+                    using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
+                    if (await _deliveries.StartAsync(run.RunId, run.Claim, bookkeeping.Token))
                         result = await FinishAsync(run, queued, (false, message.English), WebhookDeliveryStore.Failed);
                     return;
                 }
@@ -319,8 +325,8 @@ public class WebhookService : IWebhookService
                 target = now;
             }
 
-            if (!await _deliveries.StartAsync(run.RunId)) return;
-            var webhook = await ReadWebhookAsync(run.WebhookId);
+            if (!await _deliveries.StartAsync(run.RunId, run.Claim, ct)) return;
+            var webhook = await ReadWebhookAsync(run.WebhookId, ct);
             if (webhook is null || !webhook.Enabled || queued is null || !SameTarget(queued, webhook))
             {
                 // Removed, switched off or pointed elsewhere while it waited: it does not run.
@@ -367,18 +373,23 @@ public class WebhookService : IWebhookService
                         finally
                         {
                             held.Release();
+                            _deliveries.Release(run.Claim);
                             _overdue.Release();
                         }
                     }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
                     return;
                 }
             }
-            message = null;
+            message = work.IsCanceled ? new RunMessage("Webhook_Run_Cancelled", Cancelled, []) : null;
             result = await FinishAsync(run, webhook, Outcome(work), StateOf(work));
         }
         finally
         {
-            if (!handedOver) gate?.Release();
+            if (!handedOver)
+            {
+                gate?.Release();
+                _deliveries.Release(run.Claim);
+            }
             completion?.TrySetResult(new RunEnd(result.Success, result.Output, message));
             await PruneIfDueAsync();
         }
@@ -395,11 +406,14 @@ public class WebhookService : IWebhookService
     }
 
     /// <summary>What a run locks and acts on: <see cref="Key"/> names the resource; for a container action
-    /// <see cref="Container"/> is the container the key was made from (or why there is none).</summary>
-    private sealed record RunTarget(string Key, ContainerInfo? Container = null, string? Error = null)
+    /// <see cref="Container"/>, for a compose deployment <see cref="Plan"/>, is what the key was made from (or
+    /// <see cref="Error"/> says why there is none).</summary>
+    private sealed record RunTarget(string Key, ContainerInfo? Container = null, ComposePlan? Plan = null,
+        string? Error = null)
     {
-        /// <summary>A container resolved by id: what it names can change (a rebuild), so it is checked under its lock.</summary>
-        public bool Resolved => Container is not null;
+        /// <summary>Resolved from what the name points to now — which can change (a rebuild, an edited compose file),
+        /// so it is checked again under its lock.</summary>
+        public bool Resolved => Container is not null || Plan is not null;
     }
 
     /// <summary>Whether the action ended before the run's deadline.</summary>
@@ -420,10 +434,26 @@ public class WebhookService : IWebhookService
         return true;
     }
 
+    private const string Cancelled = "The action was cancelled.";
+
     private static (bool Success, string Output) Outcome(Task<(bool Success, string Output, bool Refused)> work) =>
         work.IsCompletedSuccessfully
             ? (work.Result.Success, work.Result.Output)
-            : (false, work.Exception?.GetBaseException().Message ?? "The action was cancelled.");
+            : (false, work.Exception?.GetBaseException().Message ?? Cancelled);
+
+    /// <summary>A run its worker gave up: running, it failed (a queued one is taken over by its next delivery).</summary>
+    private async Task AbandonAsync(QueuedRun run)
+    {
+        try
+        {
+            using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
+            await _deliveries.FinishAsync(run.RunId, WebhookDeliveryStore.Failed, bookkeeping.Token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Webhook run {RunId}: its failure could not be recorded", run.RunId);
+        }
+    }
 
     private static string StateOf(Task<(bool Success, string Output, bool Refused)> work) =>
         !work.IsCompletedSuccessfully ? WebhookDeliveryStore.Failed
@@ -431,13 +461,16 @@ public class WebhookService : IWebhookService
         : work.Result.Success ? WebhookDeliveryStore.Succeeded
         : WebhookDeliveryStore.Failed;
 
-    /// <summary>Records how the run ended: the delivery's state, the webhook's log and counters.</summary>
+    /// <summary>Records how the run ended: the delivery's state, the webhook's log and counters — within its own
+    /// time, also once the run's deadline has passed.</summary>
     private async Task<(bool, string)> FinishAsync(QueuedRun run, WebhookEntity? webhook, (bool Success, string Output) result,
         string state)
     {
+        using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
+        var ct = bookkeeping.Token;
         try
         {
-            await _deliveries.FinishAsync(run.RunId, state);
+            await _deliveries.FinishAsync(run.RunId, state, ct);
         }
         catch (Exception ex)
         {
@@ -451,7 +484,7 @@ public class WebhookService : IWebhookService
             await db.Webhooks.Where(w => w.WebhookId == webhook.WebhookId)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(w => w.LastTriggered, _time.GetUtcNow().UtcDateTime)
-                    .SetProperty(w => w.TriggerCount, w => w.TriggerCount + 1));
+                    .SetProperty(w => w.TriggerCount, w => w.TriggerCount + 1), ct);
             db.WebhookLogs.Add(new WebhookLogEntity
             {
                 WebhookId = webhook.WebhookId,
@@ -461,7 +494,7 @@ public class WebhookService : IWebhookService
                 Error = result.Success ? null : result.Output,
                 SourceIp = run.SourceIp,
             });
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(ct);
         }
         catch (Exception ex)
         {
@@ -470,11 +503,11 @@ public class WebhookService : IWebhookService
         return result;
     }
 
-    private async Task<WebhookEntity?> ReadWebhookAsync(string webhookId)
+    private async Task<WebhookEntity?> ReadWebhookAsync(string webhookId, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Webhooks.AsNoTracking()
-            .FirstOrDefaultAsync(w => w.WebhookId == webhookId);
+            .FirstOrDefaultAsync(w => w.WebhookId == webhookId, ct);
     }
 
     private static bool SameTarget(WebhookEntity queued, WebhookEntity now) =>
@@ -482,9 +515,10 @@ public class WebhookService : IWebhookService
 
     /// <summary>
     /// The resource a run locks, by its identity rather than its spelling: a container by its id on its server
-    /// (name, full id and unique prefix are one container), a compose project by its normalized directory on its
-    /// server, a Git app by its id. A container action acts on exactly the container resolved here. A target that
-    /// cannot be resolved locks its spelling; its run is refused anyway.
+    /// (name, full id and unique prefix are one container), a compose deployment by its planned project on its server
+    /// (compose's own identity: symlinked or different directories of one project are one lock), a Git app by its id.
+    /// A container or compose action acts on exactly the container or plan resolved here. A target that cannot be
+    /// resolved locks its spelling; its run is refused anyway.
     /// </summary>
     private async Task<RunTarget> TargetAsync(WebhookEntity webhook, CancellationToken ct)
     {
@@ -494,12 +528,19 @@ public class WebhookService : IWebhookService
             case "git-deploy":
                 return new RunTarget("git:" + webhook.TargetId);
             case "deploy":
-                return new RunTarget($"compose:{server}|{NormalizeDirectory(webhook.TargetId)}");
+            {
+                var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook, ct), ct);
+                return plan is not null
+                    ? new RunTarget($"compose-project:{server}|{plan.ProjectName}", Plan: plan)
+                    : new RunTarget($"compose-dir:{server}|{NormalizeDirectory(webhook.TargetId)}", Error: error);
+            }
             case "restart" or "rebuild":
+            {
                 var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
                 return container is not null
                     ? new RunTarget($"container:{server}|{container.Id}", container)
-                    : new RunTarget($"container:{server}|{webhook.TargetId}", null, error);
+                    : new RunTarget($"container:{server}|{webhook.TargetId}", Error: error);
+            }
             default:
                 return new RunTarget($"other:{server}|{webhook.TargetId}");
         }
@@ -604,8 +645,9 @@ public class WebhookService : IWebhookService
             case "deploy":
             {
                 capability = "compose.deploy";
-                // A plan that cannot be made is still decided on the project directory; then nothing runs.
-                var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook, ct), ct);
+                // The plan the run locked. One that cannot be made is still decided on the project directory; then
+                // nothing runs.
+                var (plan, error) = (target.Plan, target.Error);
                 var gate = automation.GateFor(actor, "compose.deploy");
                 outcome = await automation.RunAsync(runActor, "compose.deploy",
                     new { projectName = plan?.ProjectNameForAudit, projectDir = webhook.TargetId, serverId = sid },
@@ -614,7 +656,7 @@ public class WebhookService : IWebhookService
                         EnsureOwned(webhook);
                         if (plan is null) throw Unresolved(error!);
                         (bool, string) result = (false, "The deployment did not run.");
-                        await gate(plan, async () => result = await DeployCompose(webhook, token));
+                        await gate(plan, async () => result = await DeployCompose(webhook, plan.ProjectName, token));
                         return result;
                     }, ct);
                 break;
@@ -752,7 +794,7 @@ public class WebhookService : IWebhookService
         }
     }
 
-    private async Task<(bool, string)> DeployCompose(WebhookEntity webhook, CancellationToken ct)
+    private async Task<(bool, string)> DeployCompose(WebhookEntity webhook, string lockedProject, CancellationToken ct)
     {
         var sid = WebhookTargets.ServerOf(webhook);
         // The plan (R1-07) made again right before writing: the compose files of the directory as compose finds them,
@@ -762,6 +804,10 @@ public class WebhookService : IWebhookService
         // pass that throws (a Docker timeout), whose detail stays in the log.
         var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook, ct), ct);
         if (plan is null) throw Unresolved(error!);
+        // The run holds the lock of the project it planned; another project now (an edited compose file or .env) is
+        // not what it holds. The name is not quoted: it can come from the .env.
+        if (!string.Equals(plan.ProjectName, lockedProject, StringComparison.Ordinal))
+            throw Unresolved($"The compose deployment in '{webhook.TargetId}' now plans another project than the one the run holds; nothing ran.");
         try
         {
             plan.EnsureDecided(MutationScope.Current
