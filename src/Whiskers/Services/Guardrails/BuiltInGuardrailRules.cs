@@ -163,14 +163,21 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         }
         foreach (var pattern in policy)
         {
-            if (ProtectedResourceMatcher.FirstHit(request.Arguments, [pattern], [], analyseFreeText: change) is not { } policyHit)
-                continue;
-            // Free text that cannot be analysed is no evidence of the control plane: refused.
-            if (change && policyHit.UnanalyzableArgument is null && IsControlPlanePattern(pattern)
-                && ControlPlaneFindsIn(request.Arguments, policyHit.Argument))
-                continue;
-            reason = Describe(policyHit);
-            return GuardrailVerdict.Deny;
+            // Every argument the pattern hits counts: one the control plane explains does not hide another.
+            var remaining = request.Arguments;
+            while (ProtectedResourceMatcher.FirstHit(remaining, [pattern], [], analyseFreeText: change) is { } policyHit)
+            {
+                // Free text that cannot be analysed is no evidence of the control plane: refused.
+                if (change && policyHit.UnanalyzableArgument is null && IsControlPlanePattern(pattern)
+                    && policyHit.Argument is { } explained && remaining.ContainsKey(explained)
+                    && ControlPlaneFindsIn(request.Arguments, explained))
+                {
+                    remaining = remaining.Where(a => a.Key != explained).ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal);
+                    continue;
+                }
+                reason = Describe(policyHit);
+                return GuardrailVerdict.Deny;
+            }
         }
         var hit = ProtectedResourceMatcher.FirstHit(request.Arguments, policy, paths, analyseFreeText: change)
                   ?? (change

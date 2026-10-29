@@ -297,6 +297,12 @@ public class SelfProtectionTests
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(h.Approvals.GetPending());
 
+        // The control plane named in the same call does not hide a hit only the policy explains.
+        var both = await h.RunAsync("container.restart", new { serverId = "local", containerId = "whiskers", note = "whiskers-vps" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, both.Status);
+        Assert.Empty(h.Approvals.GetPending());
+
         // Free text that cannot be analysed could name what only the policy covers: refused, no approval.
         foreach (var command in new[] { "eval \"$CMD\"", "echo whiskers serverwatch; eval \"$CMD\"" })
         {

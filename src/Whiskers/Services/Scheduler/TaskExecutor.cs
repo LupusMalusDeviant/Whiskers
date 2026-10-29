@@ -243,10 +243,11 @@ public class TaskExecutor : ITaskExecutor
 
     private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
 
-    // The same explicit server the cleanup runs on: null would list the default server instead.
+    // The same explicit server the cleanup runs on: null would list the default server instead. Only the states
+    // `docker container prune` removes: `docker rm` refuses a paused or restarting one, which would fail every run.
     private async Task<IReadOnlyList<ContainerInfo>> StoppedContainersAsync(string serverId) =>
         (await _docker.ListContainersAsync(all: true, serverId: serverId))
-            .Where(c => !string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase))
+            .Where(c => c.State?.ToLowerInvariant() is "exited" or "created" or "dead")
             .DistinctBy(c => c.Id)
             .ToList();
 

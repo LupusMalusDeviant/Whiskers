@@ -70,7 +70,8 @@ All notable changes to Whiskers are documented here. The format follows
   (an Admin approval in the web UI, refused for keys);
   editing an nginx site that proxies to Whiskers; deploying your own `step-ca` or `ghostunnel`; SQL with dynamic
   statements or inline functions (`EXECUTE`, `PREPARE`, `CREATE FUNCTION`, typical in migrations and `pg_dump`
-  imports — a scheduled SQL task is refused, a UI import needs an Admin approval), also `decode(`, `chr(` and
+  imports — a scheduled SQL task is refused, a UI import needs an Admin approval, and is refused outright while
+  the guardrail policy lists protected resources of its own, as the default policy does), also `decode(`, `chr(` and
   `convert_from(`; a command or compose file with a 12-digit hex word (an image digest, a git SHA) while the
   server's containers cannot be listed; a compose deployment
   that mounts the Docker socket, `/`, `/var/run` or `/var/lib/docker` (cAdvisor, node-exporter, Portainer) or a volume
@@ -78,7 +79,8 @@ All notable changes to Whiskers are documented here. The format follows
   `serverwatch-data` volume run by a task (refused — back Whiskers up with its own self-backup instead); AutoUpdate
   and AutoPatch of the Whiskers container itself (refused each cycle with an `automation_refused` notification —
   update Whiskers from the web UI); a raw compose file in the UI deploy that uses a variable without a default
-  (Admin approval, since the target directory's `.env` is not read). Rename a
+  (Admin approval, since the target directory's `.env` is not read; refused while the policy lists protected
+  resources of its own, as the default policy does). Rename a
   container that only shares the prefix, put the command into a script file on the host, or run the action from
   the web UI as an Admin. The Admin exception covers the control plane only: a resource protected by the policy's
   own pattern stays refused for everyone, as before, wherever in the call it is named — and while the policy lists
