@@ -22,7 +22,7 @@ public sealed class WebhookSecretTests : IDisposable
     public WebhookSecretTests()
     {
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False"));
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
         scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
@@ -31,8 +31,7 @@ public sealed class WebhookSecretTests : IDisposable
     public void Dispose()
     {
         _sp.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        try { File.Delete(_dbPath); } catch (IOException) { /* a detached retention pass may still hold it */ }
     }
 
     /// <summary>Service under test. Docker/executor stay null — every covered path returns before
@@ -82,28 +81,25 @@ public sealed class WebhookSecretTests : IDisposable
     public async Task Trigger_rejects_a_webhook_without_a_secret_fail_closed()
     {
         var wh = Seed(secret: "");
-        var (success, output) = await Service().TriggerAsync(wh.WebhookId, signature: null, body: "{}");
-        Assert.False(success);
-        Assert.Contains("no secret", output, StringComparison.OrdinalIgnoreCase);
+        var reply = await Service().AcceptAsync(wh.WebhookId, new WebhookRequest("{}"u8.ToArray()));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]
     public async Task Trigger_requires_a_signature()
     {
         var wh = Seed(secret: "s3cret");
-        var (success, output) = await Service().TriggerAsync(wh.WebhookId, signature: null, body: "{}");
-        Assert.False(success);
-        Assert.Equal("Signature required", output);
+        var reply = await Service().AcceptAsync(wh.WebhookId, new WebhookRequest("{}"u8.ToArray()));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]
     public async Task Trigger_rejects_an_invalid_signature()
     {
         var wh = Seed(secret: "s3cret");
-        var (success, output) = await Service().TriggerAsync(wh.WebhookId,
-            signature: "sha256=" + new string('0', 64), body: "{}");
-        Assert.False(success);
-        Assert.Equal("Invalid signature", output);
+        var reply = await Service().AcceptAsync(wh.WebhookId,
+            new WebhookRequest("{}"u8.ToArray(), GitHubSignature: "sha256=" + new string('0', 64)));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]
@@ -169,7 +165,7 @@ public sealed class WebhookSecretTests : IDisposable
 
         var notify = new RecordingNotificationService();
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False"));
         services.AddSingleton<INotificationService>(notify);
         using var sp = services.BuildServiceProvider();
 
@@ -190,7 +186,7 @@ public sealed class WebhookSecretTests : IDisposable
         Seed(secret: "s3cret", enabled: true);
         var notify = new RecordingNotificationService();
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False"));
         services.AddSingleton<INotificationService>(notify);
         using var sp = services.BuildServiceProvider();
 

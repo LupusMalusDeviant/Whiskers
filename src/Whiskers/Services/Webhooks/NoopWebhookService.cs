@@ -9,7 +9,7 @@ namespace Whiskers.Services.Webhooks;
 /// <see cref="WebhookService"/> is registered afterwards and wins (last registration). Soft-dependency-via-
 /// no-op-Core-contract pattern (RoadToSAP §2.1).
 ///
-/// <see cref="TriggerAsync"/> returns a graceful failure (the endpoint then answers 400, not 500), reads
+/// <see cref="AcceptAsync"/> rejects every delivery (the endpoint then answers 400, not 500), reads
 /// return empty, and <see cref="CreateWebhookAsync"/> throws rather than pretend a webhook was created.</summary>
 public sealed class NoopWebhookService : IWebhookService
 {
@@ -34,9 +34,12 @@ public sealed class NoopWebhookService : IWebhookService
     public Task SetEnabledAsync(string webhookId, bool enabled)
         => throw new InvalidOperationException(Disabled);
 
-    public Task<(bool Success, string Output)> TriggerAsync(
-        string webhookId, string? signature = null, string? body = null, string? sourceIp = null)
-        => Task.FromResult((false, "Webhooks are disabled."));
+    public Task<WebhookAcceptance> AcceptAsync(string webhookId, WebhookRequest request, CancellationToken ct = default)
+        => Task.FromResult(new WebhookAcceptance(WebhookReply.Rejected));
+
+    /// <summary>Every request is rejected before its body is read: with the module off nothing is accepted, and
+    /// reading bodies only to reject them would be unbounded work for anyone.</summary>
+    public WebhookReply? Admit(string webhookId) => WebhookReply.Rejected;
 
     public Task<(bool Success, string Output)> TriggerSignedTestAsync(string webhookId)
         => Task.FromResult((false, "Webhooks are disabled."));

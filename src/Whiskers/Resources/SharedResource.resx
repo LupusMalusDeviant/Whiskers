@@ -4964,4 +4964,46 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Mutation_Refused_OperationNotRegistered" xml:space="preserve">
     <value>The operation could not be registered; nothing was changed.</value>
   </data>
+  <data name="WebhooksView_Field_Provider" xml:space="preserve">
+    <value>Signature scheme</value>
+  </data>
+  <data name="WebhooksView_Provider_github" xml:space="preserve">
+    <value>GitHub-compatible</value>
+  </data>
+  <data name="WebhooksView_Provider_whiskers" xml:space="preserve">
+    <value>Whiskers (signed timestamp)</value>
+  </data>
+  <data name="WebhooksView_Provider_Hint_github" xml:space="preserve">
+    <value>X-Hub-Signature-256: sha256=HMAC(secret, body). GitHub signs no time: a repeated body is recognised for 90 days, not by its age.</value>
+  </data>
+  <data name="WebhooksView_Provider_Hint_whiskers" xml:space="preserve">
+    <value>Send X-Whiskers-Timestamp (Unix seconds), X-Whiskers-Delivery (unique id) and X-Whiskers-Signature: sha256=HMAC(secret, "timestamp.delivery.body"). Deliveries older than five minutes are rejected.</value>
+  </data>
+  <data name="Webhook_Test_Invalid" xml:space="preserve">
+    <value>The test delivery was not valid: {0}</value>
+  </data>
+  <data name="Webhook_Test_Busy" xml:space="preserve">
+    <value>The delivery queue is full; try again shortly.</value>
+  </data>
+  <data name="Webhook_Test_NotAccepted" xml:space="preserve">
+    <value>The test delivery was not accepted ({0}).</value>
+  </data>
+  <data name="Webhook_Test_StillRunning" xml:space="preserve">
+    <value>Run {0} is still queued or running; its result will appear in the log.</value>
+  </data>
+  <data name="Webhook_Run_NotRun" xml:space="preserve">
+    <value>The delivery did not run.</value>
+  </data>
+  <data name="Webhook_Run_NoTurn" xml:space="preserve">
+    <value>Failed: the delivery did not get its turn on its target in time.</value>
+  </data>
+  <data name="Webhook_Run_Changed" xml:space="preserve">
+    <value>Refused: the webhook was removed, switched off or changed before the delivery ran.</value>
+  </data>
+  <data name="Webhook_Run_Overdue" xml:space="preserve">
+    <value>Run {0} exceeded its time limit and is still running; its outcome will be in the log.</value>
+  </data>
+  <data name="Webhook_Run_Cancelled" xml:space="preserve">
+    <value>The action was cancelled.</value>
+  </data>
 </root>

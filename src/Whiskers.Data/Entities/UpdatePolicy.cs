@@ -61,10 +61,33 @@ public class WebhookEntity
     // R1-09 (INV-04): the principal id (user:<email> / key:<id>) an external trigger runs on, re-checked at each
     // delivery. Null for a webhook saved before owners were recorded: refused until an admin takes it over.
     public string? Owner { get; set; }
+    // R1-10 (INV-42): how a delivery is signed — "github" (HMAC over the body; no signed time) or "whiskers" (HMAC
+    // over a timestamp, a delivery id and the body). A webhook saved before R1-10 is "github", which it always was.
+    public string Provider { get; set; } = "github";
     public bool Enabled { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastTriggered { get; set; }
     public int TriggerCount { get; set; }
+}
+
+/// <summary>
+/// One accepted delivery of a webhook (R1-10, INV-42): the delivery key it was signed with — the signed delivery id,
+/// or for a provider without one the hash of the signed body — and the run it started. A delivery with a key already
+/// on record does not run again, also not after a restart. Rows are pruned after the retention period.
+/// </summary>
+public class WebhookDeliveryEntity
+{
+    public long Id { get; set; }
+    public string WebhookId { get; set; } = "";
+    public string DeliveryKey { get; set; } = "";
+    /// <summary>The run it started; the reply to the caller names it, and the run's operation id carries it.</summary>
+    public string RunId { get; set; } = "";
+    /// <summary>Queued, Running, Succeeded, Failed or Refused.</summary>
+    public string State { get; set; } = "Queued";
+    /// <summary>The process that accepted it: a Queued or Running row of another process was cut off by a restart.</summary>
+    public string Instance { get; set; } = "";
+    public DateTime ReceivedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
 }
 
 public class WebhookLogEntity

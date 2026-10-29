@@ -5,7 +5,7 @@ namespace Whiskers.Services.Webhooks;
 /// <summary>Manages CI/CD webhooks and processes incoming webhook triggers.
 ///
 /// Secrets are mandatory (HOCH-12 part 2): <see cref="CreateWebhookAsync"/> generates a strong HMAC
-/// secret when none is supplied, and <see cref="TriggerAsync"/> rejects webhooks without one
+/// secret when none is supplied, and <see cref="AcceptAsync"/> rejects webhooks without one
 /// fail-closed. The secret is returned exactly once (on create / regenerate) and never displayed
 /// again — callers show it one-time and discard it.</summary>
 public interface IWebhookService
@@ -34,11 +34,19 @@ public interface IWebhookService
     /// (legacy pre-F11 rows) — regenerate its secret first.</summary>
     Task SetEnabledAsync(string webhookId, bool enabled);
 
-    /// <summary>Processes an incoming trigger. Requires a valid <c>X-Hub-Signature-256</c>-style HMAC
-    /// signature over the raw body; webhooks without a secret are rejected fail-closed. The action then runs through
-    /// the Mutation Gateway on the webhook owner's authority, re-checked now (R1-09): a webhook without an owner is
-    /// refused, and one whose owner lost the authority is switched off and an admin is notified.</summary>
-    Task<(bool Success, string Output)> TriggerAsync(string webhookId, string? signature = null, string? body = null, string? sourceIp = null);
+    /// <summary>Takes an incoming delivery (R1-10, INV-42). Bounded first (request rates, body size), then checked
+    /// against the webhook's provider rule (<see cref="WebhookSignatures"/>): a valid HMAC is required, and for a
+    /// provider that signs a time, a fresh one; webhooks without a secret are rejected fail-closed. A delivery whose key
+    /// is on record already runs no second time — concurrent, later or after a restart — and gets that run's id and
+    /// state. A new one is queued (bounded) and answered at once with its run id; the run then goes through the Mutation
+    /// Gateway on the webhook owner's authority, re-checked then (R1-09), never at the same time as another run on the
+    /// same target.</summary>
+    Task<WebhookAcceptance> AcceptAsync(string webhookId, WebhookRequest request, CancellationToken ct = default);
+
+    /// <summary>The request-rate admission of an incoming request, before its body is read and before anything is
+    /// looked up (R1-10): <see cref="WebhookReply.RateLimited"/>, or <c>null</c> when it may go on. The per-webhook
+    /// limit counts the id as sent, so a known and an unknown id are limited alike.</summary>
+    WebhookReply? Admit(string webhookId);
 
     /// <summary>Fires a genuine end-to-end test trigger: builds a test payload, signs it with the
     /// stored secret and runs it through the same validation path as an external caller.</summary>

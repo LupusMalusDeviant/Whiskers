@@ -18,6 +18,7 @@ public class GitDeployService : IGitDeployService
     private readonly JsonFileStore<GitDeployData> _store;
     private readonly IHostCommandExecutor _executor;
     private readonly IVaultService _vault;
+    private readonly ResourceLocks _locks;
     private readonly IComposePlanner _planner;
     private readonly ILogger<GitDeployService> _logger;
     private GitDeployData _cached = new();
@@ -25,8 +26,10 @@ public class GitDeployService : IGitDeployService
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public GitDeployService(IHostCommandExecutor executor, IVaultService vault, IComposePlanner planner,
-        ILogger<GitDeployService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
+        ILogger<GitDeployService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
+        ResourceLocks? locks = null)
     {
+        _locks = locks ?? new ResourceLocks();
         _executor = executor;
         _vault = vault;
         _planner = planner;
@@ -183,9 +186,26 @@ public class GitDeployService : IGitDeployService
     public async Task DeleteAppAsync(string appId)
     {
         ValidateId(appId);
-        var data = await LoadAsync();
-        var app = data.Apps.FirstOrDefault(a => a.Id == appId);
-        if (app is null) return;
+        // The teardown removes the checkout: it holds the app's server (R1-10) like every deployment and compose
+        // webhook reading it. The app is read again once the server is held; one moved meanwhile waits for its new one.
+        GitDeployApp? app;
+        ResourceLocks.Lease server;
+        while (true)
+        {
+            app = (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId);
+            if (app is null) return;
+            var key = _locks.ServerKey(app.ServerId);
+            server = await _locks.AcquireAsync(key);
+            var now = (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId);
+            if (now is not null && _locks.ServerKey(now.ServerId) == key)
+            {
+                app = now;
+                break;
+            }
+            server.Dispose();
+            if (now is null) return;
+        }
+        using var held = server;
 
         // Best-effort teardown of the target workspace (the server may be gone — never block delete).
         try
@@ -201,6 +221,7 @@ public class GitDeployService : IGitDeployService
         await _lock.WaitAsync();
         try
         {
+            var data = await LoadAsync();
             data.Apps.RemoveAll(a => a.Id == appId);
             await _store.SaveAsync(data);
         }
@@ -223,6 +244,11 @@ public class GitDeployService : IGitDeployService
 
         try
         {
+            // The server, from the checkout to `up` (R1-10): the deployment writes its workspace (credentials,
+            // checkout) and compose reads it — no other deployment, compose webhook or webhook container action on
+            // the server meanwhile, whatever path or alias it uses. The app is checked once the wait is over.
+            // A webhook delivery already holds it (it waited for it before its webhook was read again).
+            using var server = await _locks.AcquireAsync(_locks.ServerKey(app.ServerId), ct);
             await EnsureUnchangedAsync(app);
 
             // 1) Credentials (private repos): refresh the askpass pair from the vault every run,

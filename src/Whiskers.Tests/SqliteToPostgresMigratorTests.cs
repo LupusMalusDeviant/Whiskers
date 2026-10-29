@@ -29,9 +29,10 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
     }
 
     [Theory]
-    [InlineData("DROP TABLE Operations; DROP TABLE Approvals; DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;", "PolicyDecisions")]  // before R1-12
-    [InlineData("DROP TABLE Operations; DROP TABLE Approvals;", "Approvals")]                                        // before R1-14
-    [InlineData("DROP TABLE Operations;", "Operations")]                                                             // before R1-18
+    [InlineData("DROP TABLE WebhookDeliveries; DROP TABLE Operations; DROP TABLE Approvals; DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;", "PolicyDecisions")]  // before R1-12
+    [InlineData("DROP TABLE WebhookDeliveries; DROP TABLE Operations; DROP TABLE Approvals;", "Approvals")]          // before R1-14
+    [InlineData("DROP TABLE WebhookDeliveries; DROP TABLE Operations;", "Operations")]                               // before R1-18
+    [InlineData("DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]                                               // before R1-10
     public async Task A_source_from_an_older_release_migrates_completely(string drop, string absent)
     {
         // A database migrated by an older release lacks the tables of every release after its own.
@@ -57,6 +58,31 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal(1, await check.ScheduledTasks.CountAsync());
         Assert.Equal(0, await check.PolicyDecisions.CountAsync());
         Assert.Equal(0, await check.Approvals.CountAsync());
+    }
+
+    [Fact]
+    public async Task A_source_from_before_webhook_schemes_copies_its_webhooks_as_github()
+    {
+        // A database of the release before R1-10: no WebhookDeliveries table and no Webhooks.Provider column.
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.Webhooks.Add(new WebhookEntity { WebhookId = "hook-legacy-01", Name = "ci", Secret = "s", TargetId = "web-1" });
+            await src.SaveChangesAsync();
+            await src.Database.ExecuteSqlRawAsync("DROP TABLE WebhookDeliveries; ALTER TABLE Webhooks DROP COLUMN Provider;");
+        }
+
+        int rc;
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null);
+
+        Assert.Equal(0, rc);
+        await using var check = NewDb(dstPath);
+        var copied = await check.Webhooks.SingleAsync();
+        Assert.Equal("hook-legacy-01", copied.WebhookId);
+        Assert.Equal("github", copied.Provider);
     }
 
     [Theory]

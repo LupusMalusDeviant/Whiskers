@@ -35,6 +35,9 @@ public static class SqliteToPostgresMigrator
     internal sealed class CopyRun
     {
         public HashSet<long> NamedAuditIds { get; init; } = [];
+        /// <summary>The source's <c>Webhooks</c> table predates R1-10's <c>Provider</c> column: read with it as
+        /// <c>github</c>, the scheme those webhooks always had. The source is not changed.</summary>
+        public bool WebhooksWithoutProvider { get; init; }
         public Dictionary<long, long> AuditIds { get; } = [];
         internal List<(Whiskers.Models.AuditLogEntity Row, long OldId)> Pending { get; } = [];
     }
@@ -51,13 +54,14 @@ public static class SqliteToPostgresMigrator
             (src, dst, run, ct) => CopyAsync(set(src), dst, resetId(run), ct, afterFlush?.Invoke(run)));
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
-    /// exactly one of these sets — the tables of every release after its own (R1-18: the operations; R1-14: the approvals; R1-12: the
+    /// exactly one of these sets — the tables of every release after its own (R1-10: the webhook deliveries; R1-18: the operations; R1-14: the approvals; R1-12: the
     /// decision tables).</summary>
     internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
     [
-        new(StringComparer.Ordinal) { "Operations" },
-        new(StringComparer.Ordinal) { "Operations", "Approvals" },
-        new(StringComparer.Ordinal) { "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations", "Approvals" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots" },
     ];
 
     /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
@@ -67,6 +71,16 @@ public static class SqliteToPostgresMigrator
         var name = source.Model.FindEntityType(table.EntityType)?.GetTableName() ?? table.Name;
         var count = await source.Database
             .SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM sqlite_master WHERE type = 'table' AND name = {name}")
+            .SingleAsync(ct);
+        return count > 0;
+    }
+
+    /// <summary>Whether the SQLite source's table has the column. Any other provider is assumed to have the full schema.</summary>
+    private static async Task<bool> SourceHasColumnAsync(MetricsDbContext source, string table, string column, CancellationToken ct)
+    {
+        if (!source.Database.IsSqlite()) return true;
+        var count = await source.Database
+            .SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({table}) WHERE name = {column}")
             .SingleAsync(ct);
         return count > 0;
     }
@@ -97,8 +111,13 @@ public static class SqliteToPostgresMigrator
         T("UpdatePolicies",    c => c.UpdatePolicies,    e => e.Id = 0),
         T("UpdateHistory",     c => c.UpdateHistory,     e => e.Id = 0),
         T("UpdateRollbacks",   c => c.UpdateRollbacks,   e => e.Id = 0),
-        T("Webhooks",          c => c.Webhooks,          e => e.Id = 0),
+        new("Webhooks", typeof(Whiskers.Models.WebhookEntity), (ctx, ct) => ctx.Webhooks.AnyAsync(ct),
+            (src, dst, run, ct) => CopyAsync(run.WebhooksWithoutProvider
+                ? src.Webhooks.FromSqlRaw("SELECT *, 'github' AS \"Provider\" FROM \"Webhooks\"")
+                : src.Webhooks, dst, e => e.Id = 0, ct)),
         T("WebhookLogs",       c => c.WebhookLogs,       e => e.Id = 0),
+        // R1-10: accepted deliveries by key — their run ids name audit operations, kept as they are.
+        T("WebhookDeliveries", c => c.WebhookDeliveries, e => e.Id = 0),
         T("CveFirstSeen",      c => c.CveFirstSeen,      e => e.Id = 0),
         T("Notifications",     c => c.Notifications,     e => e.Id = 0),
         T("SelfMetricSamples", c => c.SelfMetricSamples, e => e.Id = 0),
@@ -193,7 +212,7 @@ public static class SqliteToPostgresMigrator
 
         // The source schema is checked before anything is copied: a missing table would otherwise fail half-way,
         // after earlier tables committed. Only a known older release may lack tables, and only all of a release's
-        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations); anything else is not a Whiskers
+        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations, R1-10 WebhookDeliveries); anything else is not a Whiskers
         // database this tool understands (a wrong path, a damaged file).
         var missing = new HashSet<string>(StringComparer.Ordinal);
         foreach (var table in MetricsTables)
@@ -209,6 +228,7 @@ public static class SqliteToPostgresMigrator
         // The audit rows an operation names, read before AuditLog is copied (renumbered) — a handful, not the log.
         var run = new CopyRun
         {
+            WebhooksWithoutProvider = !await SourceHasColumnAsync(source, "Webhooks", "Provider", ct),
             NamedAuditIds = missing.Contains("Operations")
                 ? []
                 : (await source.Operations.AsNoTracking().Where(o => o.AuditId != null).Select(o => o.AuditId!.Value)

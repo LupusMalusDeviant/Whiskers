@@ -919,6 +919,53 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.ToTable("VolumeBackups");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.WebhookDeliveryEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("DeliveryKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Instance")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RunId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("WebhookId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReceivedAt");
+
+                    b.HasIndex("RunId")
+                        .IsUnique();
+
+                    b.HasIndex("WebhookId", "DeliveryKey")
+                        .IsUnique();
+
+                    b.ToTable("WebhookDeliveries", (string)null);
+                });
+
             modelBuilder.Entity("Whiskers.Models.WebhookEntity", b =>
                 {
                     b.Property<long>("Id")
@@ -946,6 +993,12 @@ namespace Whiskers.Migrations.Postgres.Migrations
 
                     b.Property<string>("Owner")
                         .HasColumnType("text");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("github");
 
                     b.Property<string>("Secret")
                         .IsRequired()

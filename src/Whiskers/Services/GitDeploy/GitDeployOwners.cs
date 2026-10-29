@@ -30,13 +30,17 @@ public static class GitDeployOwners
     }
 
     /// <summary><see cref="DeployAsOwnerAsync"/>, also telling a refusal (no owner, the owner's authority, policy, an
-    /// unknown app) from a deployment that ran and failed — a webhook reports a refusal to an admin (R1-09).</summary>
+    /// unknown app) from a deployment that ran and failed — a webhook reports a refusal to an admin (R1-09). With
+    /// <paramref name="revision"/>, only the app at that revision deploys (a webhook delivery holds its server, R1-10);
+    /// one saved since is refused.</summary>
     public static async Task<(bool Success, string Output, bool Refused)> RunAsOwnerAsync(IGitDeployService gitDeploy,
-        IAutomationMutationRunner? automation, string appId, CancellationToken ct = default)
+        IAutomationMutationRunner? automation, string appId, CancellationToken ct = default, int? revision = null)
     {
         ArgumentNullException.ThrowIfNull(gitDeploy);
         var app = await gitDeploy.GetAppAsync(appId);
         if (app is null) return (false, "Git deploy app not found.", true);
+        if (revision is int expected && app.Revision != expected)
+            return (false, $"'{app.Name}' was changed after the delivery got its server; its next delivery deploys it.", true);
         if (string.IsNullOrWhiteSpace(app.Owner))
             return (false, $"'{app.Name}' has no owner: an admin must take it over on the Git deploy page first.", true);
         if (automation is null) return (false, "Automated deployments are not available.", true);

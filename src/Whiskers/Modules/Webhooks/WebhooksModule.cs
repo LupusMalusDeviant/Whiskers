@@ -78,5 +78,7 @@ public sealed class WebhooksModule : IWhiskersModule
         // Moved verbatim from Program.cs (relocation, not a rewrite). Registered after Core's
         // NoopWebhookService (the module loop runs after it), so the real service wins here.
         services.AddSingleton<IWebhookService, WebhookService>();
+        // R1-10: the delivery bounds (body, rates, queue, concurrency, freshness window, retention).
+        services.Configure<WebhookOptions>(config.GetSection(WebhookOptions.Section));
     }
 }

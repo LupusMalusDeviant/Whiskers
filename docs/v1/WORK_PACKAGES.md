@@ -213,10 +213,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `WebhookReplayTests` covers stale timestamps, unsigned metadata, duplicate deliveries across restart and concurrent duplicates.
-- [ ] Provider-specific signature/freshness rules are explicit; deduplication metadata alone cannot authenticate freshness.
-- [ ] Same-target execution is serialized; body, queue, execution and request rates are bounded.
-- [ ] Invalid requests have a generic response; accepted work returns a run ID and an honest status.
+- [x] `WebhookReplayTests` covers stale timestamps, unsigned metadata, duplicate deliveries across restart and concurrent duplicates.
+- [x] Provider-specific signature/freshness rules are explicit; deduplication metadata alone cannot authenticate freshness.
+- [x] Same-target execution is serialized; body, queue, execution and request rates are bounded.
+- [x] Invalid requests have a generic response; accepted work returns a run ID and an honest status.
 
 **Out of scope:** Changing the accepted HMAC requirement.
 
