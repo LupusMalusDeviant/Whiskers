@@ -12,7 +12,16 @@ public sealed class AuditTrailCheck(IAuditRecovery recovery) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
-        var health = recovery.Health;
+        AuditHealth health;
+        try
+        {
+            health = recovery.Health;
+        }
+        catch (Exception)
+        {
+            // Not knowing is not complete — but still only Degraded.
+            return Task.FromResult(HealthCheckResult.Degraded("Audit trail state unknown."));
+        }
         return Task.FromResult(health.Complete
             ? HealthCheckResult.Healthy()
             : HealthCheckResult.Degraded(

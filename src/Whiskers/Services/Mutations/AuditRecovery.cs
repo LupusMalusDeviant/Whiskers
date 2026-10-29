@@ -62,7 +62,6 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
     private readonly SemaphoreSlim _pass = new(1, 1);
     // Unknown until the first pass has looked: not complete.
     private int _unsettled = 1;
-    private int _dropped;
     private long _legacyFailedAt;   // UTC ticks; 0 = never
 
     public AuditRecovery(IMutationAuditSink sink, IServiceScopeFactory scopes, ILogger<AuditRecovery> logger,
@@ -79,16 +78,16 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
     public void OutcomeNotWritten(PendingAuditOutcome outcome)
     {
         ArgumentNullException.ThrowIfNull(outcome);
-        // Beyond the cap the outcome is not kept in memory; its intent row is settled from the journal instead, and
-        // until then the trail counts it as pending.
-        if (_outcomes.Count >= MaxKept) { Interlocked.Increment(ref _dropped); return; }
+        // Beyond the cap the outcome is not kept in memory: its intent row stays, counts as unsettled and is settled
+        // from the journal by the next pass.
+        if (_outcomes.Count >= MaxKept) return;
         _outcomes[outcome.AuditId] = outcome;
     }
 
     public void LegacyWriteFailed() => Interlocked.Exchange(ref _legacyFailedAt, _time.GetUtcNow().UtcTicks);
 
     public AuditHealth Health => new(
-        _outcomes.Count + Volatile.Read(ref _dropped) + (_outbox?.Count ?? 0) + (_outbox?.Lost ?? 0),
+        _outcomes.Count + (_outbox?.Count ?? 0) + (_outbox?.Lost ?? 0),
         Volatile.Read(ref _unsettled),
         Interlocked.Read(ref _legacyFailedAt) is var failed and not 0
             && _time.GetUtcNow().UtcTicks - failed < TimeSpan.TicksPerHour);
@@ -178,6 +177,8 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
         // Without a journal nothing tells a running operation from one that was cut off: leave them.
         if (_journal is null) return 0;
         var self = (_journal as DbOperationJournal)?.ProcessInstance;
+        // The real sink knows the intents this process is writing right now; any other sink gets the grace period.
+        var sink = _sink as AuditLogMutationSink;
         var cutoff = _time.GetUtcNow().UtcDateTime - IntentGrace;
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -199,12 +200,15 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
             {
                 // Kept in memory with its exact outcome: written by the first half of the pass, counted as pending.
                 if (_outcomes.ContainsKey(row.Id)) continue;
+                // This process is running it right now (between its intent and its outcome).
+                if (sink?.InFlight(row.EventId) == true) continue;
                 operations.TryGetValue(row.Id, out var operation);
                 var operationId = row.OperationId ?? operation?.Id ?? "";
                 switch (operation?.State)
                 {
-                    case null or DbOperationJournal.Released when row.Timestamp >= cutoff:
-                        // Possibly between its intent and its claim right now.
+                    case null or DbOperationJournal.Released when sink is null && row.Timestamp >= cutoff:
+                        // Possibly between its intent and its claim right now: not settled yet, but not complete.
+                        left++;
                         continue;
                     case null or DbOperationJournal.Released:
                         // Never claimed, or given back: it did not run.
@@ -213,7 +217,9 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                         break;
                     case DbOperationJournal.Running when self is not null
                                                          && operation.Instance.StartsWith(self + "/", StringComparison.Ordinal):
-                        // Running in this process right now.
+                        // Claimed by this process. Still running (the real sink would know), or its journal entry
+                        // could not be finished — then its outcome is not known here: incomplete, visibly.
+                        if (sink is not null) left++;
                         continue;
                     case DbOperationJournal.Running:
                         AuditLogMutationSink.Complete(row, operationId, "Unknown", nameof(VerificationStatus.NotRun),

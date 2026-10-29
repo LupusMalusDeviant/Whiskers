@@ -46,6 +46,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
     private readonly AuditOutbox? _outbox;
+    // The events whose intent this process has written and not yet completed (by EventId): recovery leaves them alone.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _inFlight = new(StringComparer.Ordinal);
 
     /// <param name="outbox">Where a refusal whose insert failed is kept until it is written (R1-19); the app always
     /// registers it.</param>
@@ -68,10 +70,33 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         entity.ApprovalId = approval?.ApprovalId;
         entity.ApprovedBy = approval?.ApprovedBy;
 
-        using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        return await InsertOnceAsync(db, entity, ct);
+        _inFlight[entity.EventId!] = 0;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            return await InsertOnceAsync(db, entity, ct);
+        }
+        catch (Exception)
+        {
+            _inFlight.TryRemove(entity.EventId!, out _);
+            // No intent, no mutation: the gateway refuses. The attempt is still one event — the refusal, kept in the
+            // outbox under the same event id (if the intent did land after all, the outbox finds it and keeps that).
+            if (_outbox is not null)
+            {
+                Complete(entity, operationId, nameof(MutationStatus.Denied), nameof(VerificationStatus.NotRun),
+                    IntentNotWritten, 0);
+                _outbox.TryKeep(entity);
+            }
+            throw;
+        }
     }
+
+    /// <summary>The gateway's refusal when the intent cannot be written.</summary>
+    internal const string IntentNotWritten = "The audit record could not be written; the mutation was refused.";
+
+    /// <summary>Whether this process wrote the intent with this event id and has not completed it yet.</summary>
+    internal bool InFlight(string? eventId) => eventId is not null && _inFlight.ContainsKey(eventId);
 
     /// <summary>Inserts the event once: when the insert throws but the row is there (its commit answer was lost), that
     /// row is the event. Returns its id.</summary>
@@ -101,6 +126,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var entity = await db.AuditLog.FindAsync([auditId], ct)
                      ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
+        // Whether or not this write lands, the gateway is done with it: a failed outcome is AuditRecovery's.
+        if (entity.EventId is { } eventId) _inFlight.TryRemove(eventId, out _);
         Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds);
         await db.SaveChangesAsync(ct);
     }
@@ -196,7 +223,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         PrincipalId = request.Principal.Id,
         CredentialId = request.Principal.CredentialId,
         OnBehalfOfId = request.Principal.OnBehalfOf?.Id,
-        Arguments = Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
+        Arguments = RedactedArguments(request.Arguments),
     };
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,
@@ -227,7 +254,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             delegatedBy = request.Principal.DelegatedBy,
         },
         sessionId = request.SessionId,
-        arguments = Field(Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
+        arguments = Field(RedactedArguments(request.Arguments),
             budget >= MaxReasonChars ? MaxArgumentChars : budget),
     }));
 
@@ -261,6 +288,43 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         }
         return text;
     }
+
+    /// <summary>The arguments as one JSON object, redacted value by value (R1-19): a payload keeps only its length,
+    /// a secret-named key (at any depth) only <c>***</c>, every other string is redacted on its own — so a pattern can
+    /// never run across the document's quotes and commas and swallow the arguments after it.</summary>
+    internal static string RedactedArguments(IReadOnlyDictionary<string, JsonElement> arguments)
+    {
+        var result = new System.Text.Json.Nodes.JsonObject();
+        foreach (var (key, value) in arguments)
+            result[key] = PayloadArguments.Contains(key)
+                ? $"<withheld: {(value.ValueKind == JsonValueKind.String ? value.GetString()!.Length : value.GetRawText().Length)} chars>"
+                : RedactedValue(key, System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText()));
+        return result.ToJsonString();
+    }
+
+    private static System.Text.Json.Nodes.JsonNode? RedactedValue(string? key, System.Text.Json.Nodes.JsonNode? node)
+    {
+        if (key is not null && SecretKeyName.IsMatch(key) && node is System.Text.Json.Nodes.JsonValue) return "***";
+        switch (node)
+        {
+            case System.Text.Json.Nodes.JsonObject obj:
+                foreach (var name in obj.Select(p => p.Key).ToList())
+                    obj[name] = RedactedValue(name, obj[name]?.DeepClone());
+                return obj;
+            case System.Text.Json.Nodes.JsonArray array:
+                for (var i = 0; i < array.Count; i++)
+                    array[i] = RedactedValue(null, array[i]?.DeepClone());
+                return array;
+            case System.Text.Json.Nodes.JsonValue value when value.TryGetValue<string>(out var text):
+                return Redact(text);
+            default:
+                return node;
+        }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex SecretKeyName = new(
+        "(?i)password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer|credential",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
 
     internal static IReadOnlyDictionary<string, object?> WithoutPayloads(IReadOnlyDictionary<string, JsonElement> arguments) =>
         arguments.ToDictionary(a => a.Key, a => PayloadArguments.Contains(a.Key)

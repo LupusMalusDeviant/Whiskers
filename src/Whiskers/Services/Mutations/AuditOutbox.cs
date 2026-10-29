@@ -47,6 +47,7 @@ public sealed class AuditOutbox
     public IReadOnlyList<(string Path, AuditLogEntity? Row)> Load()
     {
         if (!Directory.Exists(_dir)) return [];
+        // Listing the directory may fail (permissions, I/O): the caller's pass fails and Count keeps it visible.
         return Directory.EnumerateFiles(_dir, "*.json")
             .OrderBy(File.GetLastWriteTimeUtc)
             .Select(path =>
@@ -57,7 +58,15 @@ public sealed class AuditOutbox
             .ToList();
     }
 
-    public int Count => Directory.Exists(_dir) ? Directory.EnumerateFiles(_dir, "*.json").Count() : 0;
+    /// <summary>How many events wait in the outbox; 1 when the directory cannot be read (unknown is not empty).</summary>
+    public int Count
+    {
+        get
+        {
+            try { return Directory.Exists(_dir) ? Directory.EnumerateFiles(_dir, "*.json").Count() : 0; }
+            catch (Exception) { return 1; }
+        }
+    }
 
     public void Remove(string path) => File.Delete(path);
 }

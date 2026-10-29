@@ -183,6 +183,35 @@ public sealed class AuditCompletenessTests : IDisposable
     }
 
     [Fact]
+    public async Task Arguments_are_redacted_value_by_value_and_keep_everything_after_a_redaction()
+    {
+        var request = Restart("op-args", container: "web-prod") with
+        {
+            Arguments = Args(new
+            {
+                containerId = "web-prod",
+                env = new { DB_PASSWORD = "hunter2" },
+                options = new { apiKey = "sk-123456", label = "web-prod" },
+                url = "https://deploy:hunter3@git.example.com/repo.git",
+                serverId = "local",
+            }),
+        };
+
+        await Gateway().ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        var row = await EventOf("op-args");
+        using var arguments = JsonDocument.Parse(row.Arguments!);
+        var root = arguments.RootElement;
+        Assert.Equal("web-prod", root.GetProperty("containerId").GetString());
+        Assert.Equal("local", root.GetProperty("serverId").GetString());
+        Assert.StartsWith("<withheld:", root.GetProperty("env").GetString());
+        Assert.Equal("***", root.GetProperty("options").GetProperty("apiKey").GetString());
+        Assert.Equal("web-prod", root.GetProperty("options").GetProperty("label").GetString());
+        Assert.DoesNotContain("hunter", row.Arguments);
+        Assert.DoesNotContain("sk-123456", row.Arguments);
+    }
+
+    [Fact]
     public async Task Required_fields_survive_when_the_details_are_shortened()
     {
         // A long argument before the others and a long failure text — plain words, which no redaction rule shortens:

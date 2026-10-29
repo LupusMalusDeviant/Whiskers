@@ -91,7 +91,9 @@ public sealed class AuditFailClosedTests : IDisposable
         public override DateTimeOffset GetUtcNow() => base.GetUtcNow() + _shift;
     }
 
-    private AuditLogMutationSink Sink() => new(_scopes, outbox: _outbox);
+    // One sink, as in the app: the gateway's and the recovery's view of the intents in flight is the same.
+    private AuditLogMutationSink? _sink;
+    private AuditLogMutationSink Sink() => _sink ??= new(_scopes, outbox: _outbox);
 
     private MutationGateway Gateway(IAuditRecovery? recovery = null, IOperationJournal? journal = null) =>
         new(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store), Sink(), [],
@@ -302,21 +304,16 @@ public sealed class AuditFailClosedTests : IDisposable
         }
         Assert.Equal(3, (await Events()).Count(e => e.Phase == "intent"));
 
-        // The next process: a new journal instance, memory lost. Not complete before it has looked.
+        // The next process: a new sink and journal, memory lost. Not complete before it has looked.
+        _sink = null;
         var recovery = Recovery(new DbOperationJournal(_scopes));
         Assert.Equal(HealthStatus.Degraded, await Status(recovery));
 
-        // The finished and the cut-off operation are settled at once; the one without a claim may still be between
-        // its intent and its claim, so it waits.
+        // None of them is this process's: all are settled at once.
         await recovery.RecoverAsync();
         var events = (await Events()).ToDictionary(e => e.OperationId!);
         Assert.Equal("Executed", events["op-done"].Outcome);
         Assert.Equal("Unknown", events["op-cut"].Outcome);
-        Assert.Equal("intent", events["op-never"].Phase);
-
-        _time.Advance(AuditRecovery.IntentGrace + TimeSpan.FromMinutes(1));
-        await recovery.RecoverAsync();
-        events = (await Events()).ToDictionary(e => e.OperationId!);
         Assert.Equal("Denied", events["op-never"].Outcome);
         Assert.All(events.Values, e => Assert.Equal("outcome", e.Phase));
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
@@ -340,6 +337,83 @@ public sealed class AuditFailClosedTests : IDisposable
         running.SetResult(1);
         await run;
         Assert.Equal("Executed", Assert.Single(await Events()).Outcome);
+    }
+
+    [Fact]
+    public async Task A_refused_attempt_whose_intent_could_not_be_written_is_still_one_event()
+    {
+        _writes.FailBefore = true;
+        var recovery = Recovery();
+
+        var outcome = await Gateway(recovery).ExecuteAsync(Restart("op-6"), (_, _) => Task.FromResult(Interlocked.Increment(ref _runs)));
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(0, _runs);
+        Assert.Empty(await Events());
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
+
+        _writes.FailBefore = false;
+        await recovery.RecoverAsync();
+        var row = Assert.Single(await Events());
+        Assert.Equal("op-6", row.OperationId);
+        Assert.Equal("Denied", row.Outcome);
+        Assert.Equal("outcome", row.Phase);
+        Assert.Equal(HealthStatus.Healthy, await Status(recovery));
+    }
+
+    [Fact]
+    public async Task An_intent_whose_commit_answer_was_lost_runs_once_and_is_one_event()
+    {
+        // The intent lands, its answer is lost: the sink finds it by its event id, the mutation runs once.
+        _writes.FailAfter = true;
+        var outcome = await Gateway().ExecuteAsync(Restart("op-7"), (_, _) =>
+        {
+            _writes.FailAfter = false;
+            return Task.FromResult(Interlocked.Increment(ref _runs));
+        });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(1, _runs);
+        Assert.Equal("Executed", Assert.Single(await Events()).Outcome);
+        Assert.Equal(0, _outbox.Count);
+    }
+
+    [Fact]
+    public async Task A_claimed_operation_of_this_process_that_is_not_running_any_more_is_not_complete()
+    {
+        // The journal kept it Running (its finish failed) and the outcome write failed beyond what memory keeps: the
+        // trail cannot say how it ended.
+        var journal = new DbOperationJournal(_scopes);
+        await Gateway(journal: journal).ExecuteAsync(Restart("op-8"), async (_, _) =>
+        {
+            using (var scope = _scopes.CreateScope())
+                await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database
+                    .ExecuteSqlRawAsync("CREATE TRIGGER keep_running BEFORE UPDATE ON Operations BEGIN SELECT RAISE(ABORT, 'locked'); END;");
+            _writes.FailBefore = true;
+            return 1;
+        });
+        _writes.FailBefore = false;
+
+        var recovery = Recovery(journal);
+        await recovery.RecoverAsync();
+
+        Assert.Equal("intent", Assert.Single(await Events()).Phase);
+        Assert.False(recovery.Health.Complete);
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
+    }
+
+    private sealed class BrokenRecovery : IAuditRecovery
+    {
+        public void OutcomeNotWritten(PendingAuditOutcome outcome) { }
+        public void LegacyWriteFailed() { }
+        public AuditHealth Health => throw new IOException("audit-outbox: access denied");
+        public Task RecoverAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task An_audit_state_that_cannot_be_read_is_degraded_not_unhealthy()
+    {
+        Assert.Equal(HealthStatus.Degraded, await Status(new BrokenRecovery()));
     }
 
     [Fact]
