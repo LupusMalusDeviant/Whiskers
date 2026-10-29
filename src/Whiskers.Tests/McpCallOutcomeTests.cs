@@ -156,6 +156,24 @@ public sealed class McpCallOutcomeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_reported_failure_is_redacted_before_it_is_shortened()
+    {
+        var secret = string.Concat(Enumerable.Repeat("pw! ", 200));
+        var tool = new ToolAuditLog(new RecordingAuditLog());
+
+        await _mcp.CallAsync("restart_container", async _ =>
+        {
+            await tool.LogAsync("someone", "mcp", "container.restart", "container", "web", "web",
+                "{\"password\":\"" + secret + "\"}", "local", success: false);
+            return new CallToolResult { Content = [new TextContentBlock { Text = "Restarted." }] };
+        });
+
+        var row = Assert.Single(await _mcp.EventsAsync());
+        Assert.DoesNotContain("pw!", row.Details);
+        Assert.DoesNotContain("pw!", Assert.Single(McpCallOutcomes.Get(_mcp.Http)).Error);
+    }
+
+    [Fact]
     public async Task Outside_a_mutation_the_tool_audit_is_an_ordinary_row()
     {
         var legacy = new RecordingAuditLog();

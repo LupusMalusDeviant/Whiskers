@@ -99,7 +99,7 @@ of the third.
 
 | ID | Invariant | Status | Evidence / gap | Test | WP |
 |---|---|---|---|---|---|
-| INV-43 | Every mutating capability declares a verifier. The recorded outcome is `Verified`, `Failed` or `NotVerifiable` and is never inferred from transport status. | ❌ | Verification is absent on most paths; Agent History "success" is the HTTP status. TA-30, B-19, C-13. | `VerificationOutcomeTests` *(planned, WP2)* | WP2 |
+| INV-43 | Every mutating capability declares a verifier. The recorded outcome is `Verified`, `Failed` or `NotVerifiable` and is never inferred from transport status. | ❌ | Verification is absent on most paths. Since R1-20 the Agent History of a direct MCP call records the call's own outcome (a failed verification as `VerificationFailed`), not the HTTP status. TA-30, B-19. | `McpCallOutcomeTests`; `VerificationOutcomeTests` *(planned, WP2)* | WP2 |
 | INV-44 | Every recovery feature the UI or docs offer actually runs. A setting that is not implemented is not shown. | ❌ | `AutoRollback` is persisted (default on) and never executed. TA-29. | `AutoRollbackTests` *(planned, WP9)* | WP9 |
 
 ## 8. Audit

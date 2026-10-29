@@ -93,9 +93,13 @@ public sealed class MutationScope : IDisposable
     public static string Fail(string reason)
     {
         ArgumentNullException.ThrowIfNull(reason);
-        // The text can be a whole command output; the audit row only needs its start.
-        if (Current is { } scope)
-            scope.FailureReason ??= reason.Length > MaxReasonChars ? reason[..MaxReasonChars] + "…" : reason;
+        // The text can be a whole command output; the audit row only needs its start. Redacted first: a cut can split
+        // a secret from what marks it as one.
+        if (Current is { } scope && scope.FailureReason is null)
+        {
+            var safe = Whiskers.Utils.SecretRedactor.Redact(reason);
+            scope.FailureReason = safe.Length > MaxReasonChars ? safe[..MaxReasonChars] + "…" : safe;
+        }
         return reason;
     }
 
