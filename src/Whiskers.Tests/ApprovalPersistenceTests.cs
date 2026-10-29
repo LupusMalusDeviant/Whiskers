@@ -59,7 +59,7 @@ public sealed class ApprovalDatabase : IDisposable
     public void Dispose()
     {
         _sp.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        TestSqlite.ClearPool(_path);
         try { File.Delete(_path); } catch (IOException) { }
     }
 }

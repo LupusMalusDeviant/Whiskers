@@ -311,7 +311,7 @@ else
                 {
                     var deployed = await GitDeploy.DeployAsync(snapshot, Mutations.GateFor("gitdeploy.deploy"), progress);
                     // The deployment's output enriches the gateway's event (redacted there) — R1-21.
-                    if (!string.IsNullOrWhiteSpace(deployed.Item2)) MutationScope.Note(deployed.Item2);
+                    if (!string.IsNullOrWhiteSpace(deployed.Item2)) MutationScope.Note(deployed.Item2, deployed.Item1);
                     return deployed;
                 });
         }

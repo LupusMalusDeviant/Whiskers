@@ -121,6 +121,39 @@ public sealed class UiAuditCompletenessTests : IDisposable
         Assert.Equal("Denied", (await TheEventAsync()).Outcome);   // asserts target "web" on server "local"
     }
 
+    private sealed class BrokenUser : ICurrentUserService
+    {
+        public Task<string?> GetEmailAsync() => throw new InvalidOperationException("secret-user-detail");
+        public Task<AppRole> GetRoleAsync() => throw new InvalidOperationException("secret-user-detail");
+        public Task<bool> HasRoleAsync(AppRole required) => throw new InvalidOperationException("secret-user-detail");
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<UiMutationRunner>
+    {
+        public readonly List<string> Lines = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Lines.Add(formatter(state, exception) + (exception is null ? "" : " | " + exception.Message));
+    }
+
+    [Fact]
+    public async Task A_refusal_that_cannot_be_recorded_is_logged_without_its_arguments()
+    {
+        var log = new CapturingLogger();
+        var runner = new UiMutationRunner(new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store),
+                new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance),
+            new CapabilityCatalog(), new BrokenUser(), logger: log);
+
+        await runner.RefuseAsync("container.restart", new { containerId = "web", password = "hunter2" }, "Requires Operator.");
+
+        var line = Assert.Single(log.Lines);
+        Assert.Contains("container.restart", line);
+        Assert.DoesNotContain("hunter2", line);
+        Assert.DoesNotContain("secret-user-detail", line);
+    }
+
     [Fact]
     public async Task A_policy_refusal_is_one_denied_event()
     {

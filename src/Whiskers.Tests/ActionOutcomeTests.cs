@@ -34,7 +34,7 @@ public sealed class ActionOutcomeTests : IDisposable
     public void Dispose()
     {
         _sp.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        TestSqlite.ClearPool(_dbPath);
         try { File.Delete(_dbPath); } catch { /* best-effort temp cleanup */ }
     }
 
