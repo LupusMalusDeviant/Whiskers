@@ -14,7 +14,6 @@
 @inject Whiskers.Services.Database.IDatabaseService DatabaseService
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IComposePlanner ComposePlanner
 @inject IStringLocalizer<SharedResource> L
@@ -1059,6 +1058,15 @@ else
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
@@ -1233,52 +1241,52 @@ else
 
     private async Task Start()
     {
-        if (!Require(AppRole.Operator)) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
         var containerId = ContainerId;
         var sid = _resolvedServerId;
-        try { await Mutations.RunAsync("container.start", new { containerId, name, serverId = sid }, _ => DockerService.StartContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
+        // The gateway's event is the record of this attempt — refused, failed or done (R1-21).
+        if (!await RequireAsync(AppRole.Operator, "container.start", new { containerId, name, serverId = sid })) return;
+        try { await Mutations.RunAsync("container.start", new { containerId, name, serverId = sid }, _ => DockerService.StartContainerAsync(containerId, sid)); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
-        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.start", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
 
     private async Task Stop()
     {
-        if (!Require(AppRole.Operator)) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
         var containerId = ContainerId;
         var sid = _resolvedServerId;
-        try { await Mutations.RunAsync("container.stop", new { containerId, name, serverId = sid }, _ => DockerService.StopContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
+        // The gateway's event is the record of this attempt — refused, failed or done (R1-21).
+        if (!await RequireAsync(AppRole.Operator, "container.stop", new { containerId, name, serverId = sid })) return;
+        try { await Mutations.RunAsync("container.stop", new { containerId, name, serverId = sid }, _ => DockerService.StopContainerAsync(containerId, sid)); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
-        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.stop", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
 
     private async Task Restart()
     {
-        if (!Require(AppRole.Operator)) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
         var containerId = ContainerId;
         var sid = _resolvedServerId;
-        try { await Mutations.RunAsync("container.restart", new { containerId, name, serverId = sid }, _ => DockerService.RestartContainerAsync(containerId, sid)); await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, serverId: _resolvedServerId); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
+        // The gateway's event is the record of this attempt — refused, failed or done (R1-21).
+        if (!await RequireAsync(AppRole.Operator, "container.restart", new { containerId, name, serverId = sid })) return;
+        try { await Mutations.RunAsync("container.restart", new { containerId, name, serverId = sid }, _ => DockerService.RestartContainerAsync(containerId, sid)); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
-        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.restart", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
     }
 
     private async Task Remove()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "container.remove",
+                new { containerId = ContainerId, name = _container?.Name ?? ContainerId, serverId = _resolvedServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_RemoveTitle"].Value,
             L["ContainerDetail_Dialog_RemoveMessage", _container?.Name ?? ContainerId].Value,
             yesText: L["ContainerDetail_Button_Remove"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         var name = _container?.Name ?? ContainerId;
         var containerId = ContainerId;
         var sid = _resolvedServerId;
@@ -1286,12 +1294,11 @@ else
         {
             await Mutations.RunAsync("container.remove", new { containerId, name, serverId = sid },
                 _ => DockerService.RemoveContainerAsync(containerId, force: true, serverId: sid));
-            await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, serverId: _resolvedServerId);
             Snackbar.Add(L["ContainerDetail_Snackbar_Removed"].Value, Severity.Success);
             Nav.NavigateTo("/");
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
-        catch (Exception ex) { await AuditLog.LogAsync(actor, "web", "container.remove", "container", ContainerId, name, details: ex.Message, serverId: _resolvedServerId, success: false); Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
 
     private static MudBlazor.Color GetStateColor(string state) => state switch
@@ -1438,7 +1445,8 @@ else
 
     private async Task SaveEnvAndRestart()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "container.env_file_save",
+                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId })) return;
         if (_composeWorkingDir == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_SaveEnvTitle"].Value,
@@ -1480,11 +1488,9 @@ else
                     return restart;
                 }));
 
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            var name = _container?.Name ?? ContainerId;
+            // Each affected container's gateway event records the save; a failed restart is Failed there (R1-21).
             if (restartResult.Success)
             {
-                await AuditLog.LogAsync(actor, "web", "env.save", "env", ContainerId, name, serverId: _resolvedServerId);
                 Snackbar.Add(L["ContainerDetail_Env_SaveSuccess"].Value, Severity.Success);
                 // Reload env vars and container state
                 _envLoaded = false;
@@ -1493,7 +1499,6 @@ else
             }
             else
             {
-                await AuditLog.LogAsync(actor, "web", "env.save", "env", ContainerId, name, details: "Neustart fehlgeschlagen", serverId: _resolvedServerId, success: false);
                 Snackbar.Add(L["ContainerDetail_Env_RestartError", restartResult.Output, restartResult.Error].Value, Severity.Error);
             }
         }
@@ -1696,8 +1701,11 @@ else
     // <paramref name="command"/> / <paramref name="query"/> (with the <paramref name="database"/> it runs in) so the
     // gateway can check it for protected resources (R1-16); the shell line itself, which carries the database password, stays in the delegate, and the audit
     // keeps only the length of both.
+    // <paramref name="failedWhen"/> recognises a failure the command reports in its output with exit code 0 (a
+    // missing framework, an unsupported file): the gateway then records it Failed, not Executed (R1-21).
     private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string? capability,
-        string[] cmd, TimeSpan timeout, string? command = null, string? query = null, string? database = null)
+        string[] cmd, TimeSpan timeout, string? command = null, string? query = null, string? database = null,
+        Func<string, string?>? failedWhen = null)
     {
         var dockerCmd = "docker exec " + Whiskers.Utils.ShellUtils.Quote(ContainerId) + " " +
                         string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
@@ -1713,6 +1721,7 @@ else
             {
                 var result = await HostCommandExecutor.ExecuteAsync(sid, dockerCmd, timeout);
                 if (result.ExitCode != 0) MutationScope.Fail($"Command exited with {result.ExitCode}.");
+                else if (failedWhen?.Invoke(result.Output ?? "") is { } failure) MutationScope.Fail(failure);
                 return result;
             });
         return (r.Output, r.Error, r.ExitCode);
@@ -1720,7 +1729,8 @@ else
 
     private async Task RunMigration()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "container.exec",
+                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId })) return;
         if (_container == null || _dbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Db_RunMigration"].Value,
@@ -1731,7 +1741,8 @@ else
         try
         {
             // Try artisan migrate (Laravel)
-            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2),
+                failedWhen: NoMigrationFramework);
             if (!result.StdOut.Contains("NO_ARTISAN"))
             {
                 _migrationOutput = result.StdOut; _migrationSuccess = result.ExitCode == 0;
@@ -1749,7 +1760,8 @@ else
 
     private async Task RollbackMigration()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "container.exec",
+                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId })) return;
         if (_container == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_RollbackTitle"].Value,
@@ -1759,13 +1771,18 @@ else
         _dbMigrating = true; _migrationOutput = null;
         try
         {
-            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2));
+            var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2),
+                failedWhen: NoMigrationFramework);
             _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
         catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
         finally { _dbMigrating = false; }
     }
+
+    /// <summary>The artisan commands answer "NO_ARTISAN" with exit code 0 when there is nothing to migrate with.</summary>
+    private static string? NoMigrationFramework(string output) =>
+        output.Contains("NO_ARTISAN") ? "No migration framework (php artisan) in the container." : null;
 
     private async Task CheckMigrationStatus()
     {
@@ -1792,7 +1809,8 @@ else
 
     private async Task ExecuteMigrationFile()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "db.query",
+                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database })) return;
         if (_migrationFileData == null || _container == null || _dbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_ExecuteSqlFileTitle"].Value,
@@ -1810,8 +1828,10 @@ else
                 DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
                 _ => "echo 'Not supported'"
             };
+            var supported = _container.DatabaseType is DatabaseType.PostgreSQL or DatabaseType.MySQL;
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
-                query: System.Text.Encoding.UTF8.GetString(_migrationFileData), database: db);
+                query: System.Text.Encoding.UTF8.GetString(_migrationFileData), database: db,
+                failedWhen: _ => supported ? null : "This database type does not take SQL files here.");
             _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0;
             if (_migrationSuccess) await LoadDatabaseInfo();
@@ -1830,7 +1850,8 @@ else
 
     private async Task ExecuteSeedFile()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "db.query",
+                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database })) return;
         if (_seedFileData == null || _container == null || _dbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_ImportDataTitle"].Value,
@@ -1851,8 +1872,12 @@ else
                 (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
             };
+            // Only these combinations import; the others (and a CSV without a table) answer with a hint and exit code 0.
+            var imports = (_container.DatabaseType, ext) is (DatabaseType.PostgreSQL, ".sql") or (DatabaseType.MySQL, ".sql")
+                or (DatabaseType.MongoDB, ".json");
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
-                query: System.Text.Encoding.UTF8.GetString(_seedFileData), database: db);
+                query: System.Text.Encoding.UTF8.GetString(_seedFileData), database: db,
+                failedWhen: _ => imports ? null : $"Files of type {ext} are not imported for {_container.DatabaseType}.");
             _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
             _seedSuccess = result.ExitCode == 0;
             if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }
@@ -1863,7 +1888,9 @@ else
 
     private async Task ExecuteQuery()
     {
-        if (!Require(AppRole.Admin)) return;   // PC-D3: a free-form query can write, so Admin like the other DB writes
+        // PC-D3: a free-form query can write, so Admin like the other DB writes.
+        if (!await RequireAsync(AppRole.Admin, "db.query",
+                new { containerId = ContainerId, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database, query = _dbQuery })) return;
         if (_dbCreds == null)
         {
             Snackbar.Add(L["ContainerDetail_Db_NoCredentials"].Value, Severity.Warning);
@@ -1906,7 +1933,8 @@ else
 
     private async Task BackupDatabase()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "db.backup",
+                new { containerId = ContainerId, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database })) return;
         if (_dbCreds == null || _container == null) return;
         _dbBackingUp = true;
 
@@ -1918,7 +1946,12 @@ else
             var creds = _dbCreds;
             var sid = _resolvedServerId;
             var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
-                _ => DatabaseService.BackupDatabaseAsync(containerId, db, dbType, creds, sid));
+                async _ =>
+                {
+                    var backup = await DatabaseService.BackupDatabaseAsync(containerId, db, dbType, creds, sid);
+                    if (backup.Success) MutationScope.Note($"Backup file: {backup.FilePath} ({backup.SizeBytes} bytes)");
+                    return backup;
+                });
 
             if (success)
                 Snackbar.Add(L["ContainerDetail_Db_BackupSuccess", filePath, size / 1024].Value, Severity.Success);

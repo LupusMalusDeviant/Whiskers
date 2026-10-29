@@ -126,6 +126,18 @@ public sealed class MutationScope : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Adds a detail the caller knows about the mutation it runs (R1-21: the template a page deployed, how many
+    /// variables it changed) to the gateway's event, as a successful <see cref="MutationDomainResult"/> of the current
+    /// capability. Outside a scope it does nothing.
+    /// </summary>
+    public static void Note(string details)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(details);
+        if (Current is { } scope)
+            Record(new MutationDomainResult(scope.CapabilityId, "", "", "", details, scope._serverId, true));
+    }
+
     /// <summary>Opened by the gateway only. Dispose restores the previous scope.</summary>
     internal static MutationScope Begin(string capabilityId, string operationId, MutationPrincipal? principal = null,
         MutationRequest? request = null)

@@ -19,8 +19,16 @@ public static class MutationResults
         CommandResult c => c.Success ? null : $"The command failed (exit code {c.ExitCode}).",
         QueryResult q => q.Error is null ? null : "The query failed.",
         ITuple { Length: > 0 } t when t[0] is bool ok => ok ? null : "The action reported a failure.",
-        _ => null,
+        // A result object that says whether it succeeded (a deploy result, a git deploy outcome) is believed (R1-21):
+        // a page must not count "the delegate returned" as success.
+        _ => SuccessOf(value) is false ? "The action reported a failure." : null,
     };
+
+    private static bool? SuccessOf(object value) =>
+        value.GetType().GetProperty("Success", typeof(bool)) is { CanRead: true } p
+        && p.GetIndexParameters().Length == 0
+            ? (bool?)p.GetValue(value)
+            : null;
 
     /// <summary>Marks the current gateway operation failed when <paramref name="value"/> reports a failure.</summary>
     public static T Report<T>(T value)

@@ -6,6 +6,16 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-21: **One audit event per infrastructure action in the UI.** The container, deploy, network, firewall, nginx,
+  systemd, certificate, cloud, Git-deploy, scheduled-task and volume-backup pages no longer write audit rows of their
+  own next to the gateway's: each attempt is exactly the gateway's event — also when the page's role check refuses
+  it before its confirmation dialog (recorded as **Denied**), and when the service answers a failure without throwing
+  (a result whose `Success` is false, a missing migration framework, an unsupported import file → **Failed** instead
+  of Executed). What the page knows about the result — the backup file, the deployment output, the template or
+  registry deployed, the previous owner on a takeover — is part of that event. The old page-level action names
+  (`deploy.app`, `backup.create`, `task.adopt`, …) are no longer written for these pages; filter the audit by the
+  capability instead (`app.deploy`, `volume.backup`, `scheduler.update`, …). No migration.
+
 - R1-20: **One outcome per MCP call, one audit event per mutation.** The Agent History of a direct MCP call no longer
   takes success from the HTTP status: each call records what it came to — executed, denied, failed, waiting for
   approval, or executed with a failed verification (`ResultSummary`) — with its verdict and, for a mutation, the

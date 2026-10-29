@@ -101,7 +101,7 @@ public class CapabilityTableConsistencyTests
         Assert.Contains(ids, x => Catalog.Find(x.Id)!.McpTool is null);
 
         var page = File.ReadAllText(Path.Combine(components, "Pages", "ScheduledTasksView.razor"));
-        Assert.Contains("Require(RoleOf(\"scheduler.delete\"))", page);
+        Assert.Contains("RequireAsync(RoleOf(\"scheduler.delete\"), \"scheduler.delete\"", page);
     }
 
     /// <summary>

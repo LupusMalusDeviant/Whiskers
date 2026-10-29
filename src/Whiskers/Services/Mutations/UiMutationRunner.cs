@@ -28,6 +28,13 @@ public interface IUiMutationRunner
     [MutationEntryPoint]
     Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Records that the page refused <paramref name="capabilityId"/> on <paramref name="arguments"/> itself (its role
+    /// check, R1-21): one Denied event of the gateway for the signed-in user, with the target the arguments name.
+    /// Nothing runs. Never throws — the page shows its own message either way.
+    /// </summary>
+    Task RefuseAsync(string capabilityId, object arguments, string reason, CancellationToken ct = default);
 }
 
 /// <summary>The gateway refused a UI mutation; <see cref="Exception.Message"/> is the reason to show.</summary>
@@ -94,6 +101,26 @@ public sealed class UiMutationRunner : IUiMutationRunner
             default:
                 throw new MutationRefusedException(LocalizedReason(outcome) ?? outcome.Reason ?? "The action was refused.",
                     outcome.Status, outcome.OperationId);
+        }
+    }
+
+    public async Task RefuseAsync(string capabilityId, object arguments, string reason, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
+        ArgumentNullException.ThrowIfNull(arguments);
+        try
+        {
+            var args = ToArguments(arguments);
+            var capability = _catalog.Find(capabilityId);
+            var target = capability is null
+                ? new MutationTarget("unknown", "")
+                : MutationTargets.FromArguments(capability, args);
+            await _gateway.RefuseAsync(new MutationRequest(capabilityId, await PrincipalAsync(), MutationSurface.Ui,
+                target, args), reason, ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            // The refusal stands whether or not it could be recorded; the gateway already logged and kept it (R1-19).
         }
     }
 

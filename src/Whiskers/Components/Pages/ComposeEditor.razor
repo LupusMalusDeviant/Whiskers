@@ -7,7 +7,6 @@
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>Compose Editor - Whiskers</PageTitle>
@@ -167,6 +166,15 @@
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
@@ -250,7 +258,8 @@
 
     private async Task Deploy()
     {
-        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
+        // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
+        if (!await RequireAsync(AppRole.Admin, "compose.deploy", new { projectName = _projectName, serverId = _serverId })) return;
         if (string.IsNullOrWhiteSpace(_projectName)) return;
         if (_projectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_projectName, @"^[a-zA-Z0-9._-]+$"))
         {
@@ -267,8 +276,6 @@
                 new { projectName = _projectName, serverId },
                 ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_projectName), GenerateYaml()));
 
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _projectName, _projectName, serverId: _serverId, success: result.Success);
             if (result.Success)
                 Snackbar.Add(L["ComposeEditor_Snackbar_DeploySuccess", _projectName, result.Output].Value, Severity.Success);
             else

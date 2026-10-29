@@ -5,7 +5,6 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IDockerService DockerService
 @inject IStringLocalizer<SharedResource> L
@@ -216,6 +215,15 @@
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
@@ -227,7 +235,8 @@
 
     private async Task DeployFromForm()
     {
-        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
+        // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
+        if (!await RequireAsync(AppRole.Admin, "app.deploy", new { serverId = _serverId, image = _formRequest.Image })) return;
         if (string.IsNullOrWhiteSpace(_formRequest.Image))
         {
             Snackbar.Add(L["Deploy_Snackbar_ImageRequired"].Value, Severity.Warning);
@@ -264,9 +273,6 @@
             var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image,
                     volumes = string.Join(",", request.Volumes) },
                 _ => DeploymentService.DeployFromFormAsync(request, progress, sid));
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;
-            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", id, appName, details: $"Image: {_formRequest.Image}", serverId: _serverId);
             Snackbar.Add(L["Deploy_Snackbar_Deployed", id[..12]].Value, Severity.Success);
             _deployProgress = L["Deploy_Progress_Success", id[..12]].Value;
         }
@@ -276,9 +282,6 @@
         }
         catch (Exception ex)
         {
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;
-            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", appName, appName, details: $"Image: {_formRequest.Image}; {ex.Message}", serverId: _serverId, success: false);
             Snackbar.Add(L["Deploy_Snackbar_DeployFailed", ex.Message].Value, Severity.Error);
             _deployProgress = L["Deploy_Progress_Error", ex.Message].Value;
         }
@@ -295,7 +298,8 @@
 
     private async Task DeployFromCompose()
     {
-        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
+        // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
+        if (!await RequireAsync(AppRole.Admin, "compose.deploy", new { serverId = _serverId })) return;
         _deploying = true;
         _deployProgress = "";
         try
@@ -319,8 +323,6 @@
                 // images, volumes, bind mounts — for protected resources (R1-16).
                 () => Mutations.RunAsync("compose.deploy", new { serverId = sid, yaml },
                     _ => DeploymentService.DeployFromComposeAsync(yaml, progress, sid)));
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: $"{ids.Count} Container", serverId: _serverId);
             Snackbar.Add(L["Deploy_Snackbar_ComposeDeployed", ids.Count].Value, Severity.Success);
             _deployProgress = L["Deploy_Progress_ComposeSuccess", ids.Count].Value;
         }
@@ -330,8 +332,6 @@
         }
         catch (Exception ex)
         {
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: ex.Message, serverId: _serverId, success: false);
             Snackbar.Add(L["Deploy_Snackbar_DeployFailed", ex.Message].Value, Severity.Error);
             _deployProgress = L["Deploy_Progress_Error", ex.Message].Value;
         }

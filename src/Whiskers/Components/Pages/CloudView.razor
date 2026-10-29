@@ -4,7 +4,6 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
@@ -110,6 +109,15 @@
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
@@ -126,7 +134,7 @@
 
     private async Task Act(CloudServerInfo s, string action)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, CloudCapabilityOf(action), new { server = s.WhiskersId })) return;
 
         // Confirm out-of-band power actions that interrupt the running server.
         var confirmPrompt = action switch
@@ -162,7 +170,6 @@
                     _ => CloudControl.CreateSnapshotAsync(server, description)),
                 _ => L["CloudView_Snackbar_UnknownAction"].Value
             };
-            await AuditCloudActionAsync(s, action, success: true);
             Snackbar.Add(msg, Severity.Success);
             await LoadAll();
         }
@@ -172,23 +179,21 @@
         }
         catch (Exception ex)
         {
-            await AuditCloudActionAsync(s, action, success: false, details: ex.Message);
             Snackbar.Add(L["CloudView_Snackbar_ActionError", action, s.WhiskersName, ex.Message].Value, Severity.Error);
         }
         finally { _busy = false; }
     }
 
-    // Out-of-band power/snapshot actions are destructive — record each attempt like the other admin views do.
-    private async Task AuditCloudActionAsync(CloudServerInfo s, string action, bool success, string? details = null)
+    // Out-of-band power/snapshot actions are destructive: every attempt is the gateway's event (R1-21).
+    private static string CloudCapabilityOf(string action) => action switch
     {
-        try
-        {
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", $"cloud.{action}", "cloud", s.CloudId.ToString(), s.WhiskersName,
-                details: details, serverId: s.WhiskersId, success: success);
-        }
-        catch { /* auditing must never mask the action's own result */ }
-    }
+        "poweron" => "cloud.power_on",
+        "shutdown" => "cloud.shutdown",
+        "reboot" => "cloud.reboot",
+        "reset" => "cloud.hard_reset",
+        "snapshot" => "cloud.snapshot_create",
+        _ => $"cloud.{action}",
+    };
 
     private static Color GetStatusColor(string status) => status?.ToLowerInvariant() switch
     {

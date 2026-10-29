@@ -24,6 +24,15 @@ public interface IMutationGateway
     /// </summary>
     Task<MutationDecisionResult?> DecideAsync(MutationRequest request, CancellationToken ct = default) =>
         Task.FromResult<MutationDecisionResult?>(null);
+
+    /// <summary>
+    /// Records a refusal the surface made before asking the gateway (R1-21) — a page whose role check stops the user
+    /// in front of its confirmation dialog — as the gateway's own Denied event for that capability, so the attempt is
+    /// on record exactly once. Nothing runs.
+    /// </summary>
+    Task<MutationOutcome<object?>> RefuseAsync(MutationRequest request, string reason, CancellationToken ct = default) =>
+        Task.FromResult(new MutationOutcome<object?>(request.OperationId ?? "", MutationStatus.Denied, null, reason,
+            VerificationStatus.NotRun));
 }
 
 /// <summary>What <see cref="IMutationGateway.DecideAsync"/> decided. <see cref="Refused"/> is set when the call was
@@ -126,6 +135,20 @@ public sealed class MutationGateway : IMutationGateway
         _triggers = triggers;
         _journal = journal;
         _recovery = recovery;
+    }
+
+    /// <inheritdoc />
+    public Task<MutationOutcome<object?>> RefuseAsync(MutationRequest request, string reason, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Principal);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        var operationId = string.IsNullOrWhiteSpace(request.OperationId) ? Guid.NewGuid().ToString("N") : request.OperationId;
+        request = request with { OperationId = operationId };
+        if (MutationScope.Current is { } enclosing)
+            request = request with { ParentOperationId = enclosing.OperationId };
+        return RefuseAsync<object?>(operationId, request, _catalog.Find(request.CapabilityId), MutationStatus.Denied,
+            reason, ct);
     }
 
     /// <inheritdoc />

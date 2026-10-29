@@ -228,40 +228,54 @@ catalog level, tool switch and stricter stored level (INV-15), container target 
 humans under PC-D1: kill switch and protected resources (INV-21, 24) — tool lists, argument patterns and
 confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1, except an Admin's action on a
 protected resource or Whiskers' control plane, which needs an Admin approval (INV-59, R1-16) · Execution = inside the gateway
-scope with a deadline · Audit: the gateway row plus the page's own row. **Not through the gateway yet:** the
-Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW status is), U-20, U-21, U-25.
+scope with a deadline · Audit (R1-21): for the infrastructure pages exactly one event per attempt, the gateway's —
+the page writes no row of its own; a role check in front of a confirmation dialog records its refusal as the
+gateway's Denied event (`RequireAsync` → `IUiMutationRunner.RefuseAsync`); a failure the service reports as a value
+(`false`, a failed tuple, a result object with `Success = false`, an output the handler recognises) is `Failed`, not
+`Executed`; what the page knows about the result (backup file, deployment output, template or registry, previous
+owner) is added to the event (`MutationScope.Note`, or as an argument). `GW ✅` below = migrated so. Migrated handlers:
+`Dashboard` Start/Stop/RestartContainer (container and K8s workload), RemoveContainer, UpdateContainer,
+RollbackContainer; `ContainerDetail` Start, Stop, Restart, Remove, SaveEnvAndRestart, RunMigration, RollbackMigration,
+ExecuteMigrationFile, ExecuteSeedFile, ExecuteQuery, BackupDatabase; `Deploy` DeployFromForm, DeployFromCompose;
+`AppStore` DeployTemplate, DeployRegistryImage; `ComposeEditor` Deploy; `Networks` CreateNetwork, DeleteNetwork;
+`Firewall` ToggleFirewall, DeleteRule, OpenAddDialog and the dialog `AddFirewallRuleDialog` Submit; `NginxManager`
+SaveConfig, ToggleSite, ReloadNginx; `SystemdManager` ManageService; `SslCerts` RenewCert, RenewAll; `CloudView` Act;
+`GitDeployView` SaveApp, DeleteApp, StartDeploy, AdoptApp; `ScheduledTasksView` CreateTask, RunNow, ToggleEnabled,
+AdoptTask, AdoptAll, DeleteTask; `VolumeBackupsView` CreateBackup, RestoreBackup, DeleteBackup. The configuration
+pages (U-20–U-22, U-25, U-28, U-30–U-34) follow in R1-22. **Not through the gateway yet:** the unmarked actions of
+U-20, U-21, U-25.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
-| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | AL ✅ | INV-43 |
-| U-02 | Dashboard remove (force) | Admin | ❌ | AL ✅ | INV-43 |
-| U-03 | Dashboard update | Operator | ❌ | AL ✅ | INV-43, 53 |
-| U-04 | Dashboard rollback | Operator | ❌ | AL ✅ | INV-43, 53 |
-| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | AL ✅ | INV-43 |
-| U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | AL ✅ | INV-51 |
-| U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | ❌ | gateway row | INV-45 |
-| U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | ❌ | INV-45 |
-| U-09 | Container detail DB backup | Admin | ❌ | ❌ | INV-45 |
-| U-10 | Deploy form / raw compose | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
-| U-11 | App store template / registry image | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
-| U-12 | Compose editor | **Admin** (WP1) | ❌ | AL ✅ | INV-43 |
-| U-13 | Networks create/remove | Admin | ❌ | AL ✅ | — (MCP admin since R1-05) |
-| U-14 | Firewall enable/disable UFW | Admin | ❌ | ❌ | INV-45 |
-| U-15 | Firewall rule add/remove (dialog submit has no page check; the gateway requires Admin for `firewall.rule_add` since R1-05) | Admin | ❌ | AL ✅ | INV-17 |
-| U-16 | Nginx save/enable/disable site | Admin | ⚠️ `nginx -t` | AL ✅ | INV-41 (E-03) |
-| U-17 | Nginx reload | Admin | ❌ | ❌ | INV-45 |
-| U-18 | Systemd start/stop/restart | Admin | ❌ | AL ✅ | INV-43 |
-| U-19 | SSL certificate renew | Admin | ❌ | AL ✅ | INV-43 |
+| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-02 | Dashboard remove (force) | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-03 | Dashboard update | Operator | ❌ | GW ✅ (R1-21) | INV-43, 53 |
+| U-04 | Dashboard rollback | Operator | ❌ | GW ✅ (R1-21) | INV-43, 53 |
+| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | GW ✅ (R1-21) | INV-51 |
+| U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | ❌ | GW ✅ (R1-21) | — |
+| U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | GW ✅ (R1-21) | — |
+| U-09 | Container detail DB backup | Admin | ❌ | GW ✅ (R1-21) | — |
+| U-10 | Deploy form / raw compose | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-11 | App store template / registry image | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-12 | Compose editor | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-13 | Networks create/remove | Admin | ❌ | GW ✅ (R1-21) | — (MCP admin since R1-05) |
+| U-14 | Firewall enable/disable UFW | Admin | ❌ | GW ✅ (R1-21) | — |
+| U-15 | Firewall rule add/remove (dialog submit has no page check; the gateway requires Admin for `firewall.rule_add` since R1-05) | Admin | ❌ | GW ✅ (R1-21) | INV-17 |
+| U-16 | Nginx save/enable/disable site | Admin | ⚠️ `nginx -t` | GW ✅ (R1-21) | INV-41 (E-03) |
+| U-17 | Nginx reload | Admin | ❌ | GW ✅ (R1-21) | — |
+| U-18 | Systemd start/stop/restart | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-19 | SSL certificate renew | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-20 | Servers add/update/delete (+ vault secrets, SSH keys) | Admin | — | AL ✅ | INV-41 (TA-42 SSH user/host), 52 |
 | U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | ❌ | INV-45 |
 | U-22 | Servers pause/resume checks | **markup only** | — | AL ✅ | INV-17 |
-| U-23 | Cloud power / snapshot | Admin | ❌ | AL ✅ | INV-43, 52 |
-| U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | AL ✅ | INV-43 |
+| U-23 | Cloud power / snapshot | Admin | ❌ | GW ✅ (R1-21) | INV-43, 52 |
+| U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-25 | Self-backup create / delete / restore | Admin | ⚠️ archive validation | AL ✅ | INV-55 |
-| U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | AL ✅ | INV-04 |
-| U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | AL ✅ | INV-43 |
+| U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | GW ✅ (R1-21) | INV-04 |
+| U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | — | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09) + AL | INV-04, 19 (test fires the real action at Operator) |
-| U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | ✅ gateway (stored app, revision pinned; save records the owner — R1-08) | INV-41 (branch), 46 |
+| U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | GW ✅ (R1-21) | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | ❌ | INV-27, 46 |
 | U-31 | AI triggers save (prompt, preset, write grant) | Admin | — | AL ✅ (`aitrigger.save` through the gateway) | INV-23, 27, 28, 46 |
 | U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | — | GW ✅ | INV-28 |

@@ -4,7 +4,6 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<AutomationOptions> AutomationOptions
@@ -359,6 +358,15 @@ else
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
@@ -418,7 +426,8 @@ else
 
     private async Task CreateTask()
     {
-        if (!Require(RoleOf("scheduler.create"))) return;
+        if (!await RequireAsync(RoleOf("scheduler.create"), "scheduler.create",
+                new { name = _formName, taskType = _formType.ToString(), serverId = _formServerId })) return;
         if (!CanCreate) return;
         // The creator owns the task: every run re-checks their authority (PC-D6). Without an email the task would
         // fall into the grace period meant for tasks from before owners were recorded.
@@ -450,8 +459,6 @@ else
             await Mutations.RunAsync("scheduler.create",
                 CreateArgumentsOf(newTask, Math.Max(_formMaxBackups, 0), config.GetValueOrDefault("command")),
                 _ => Scheduler.CreateTaskAsync(newTask));
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                "task.create", "scheduled-task", _formName, _formName, serverId: _formServerId);
             Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskCreated", _formName].Value, Severity.Success);
             _showDialog = false;
             await LoadData();
@@ -521,7 +528,8 @@ else
 
     private async Task RunNow(Whiskers.Models.ScheduledTaskEntity task)
     {
-        if (!Require(RunNowRole(task))) return;
+        if (!await RequireAsync(RunNowRole(task), "scheduler.run",
+                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId })) return;
         Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskRunning", task.Name].Value, Severity.Info);
         bool success;
         string output;
@@ -539,8 +547,6 @@ else
         {
             (success, output) = (false, ex.Message);
         }
-        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-            "task.run-now", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId, success: success);
         Snackbar.Add(success ? L["ScheduledTasksView_Snackbar_RunSuccess", output].Value : L["ScheduledTasksView_Snackbar_Error", output].Value,
             success ? Severity.Success : Severity.Error);
         await LoadData();
@@ -548,15 +554,14 @@ else
 
     private async Task ToggleEnabled(Whiskers.Models.ScheduledTaskEntity task, bool enabled)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "scheduler.update",
+                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, enabled })) return;
         task.Enabled = enabled;
         try
         {
             await Mutations.RunAsync("scheduler.update",
                 new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, enabled },
                 _ => Scheduler.UpdateTaskAsync(task));
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                enabled ? "task.enable" : "task.disable", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
         }
         catch (MutationRefusedException ex)
         {
@@ -574,7 +579,8 @@ else
     /// other; its runs then use this admin's authority. The previous owner goes into the audit row.</summary>
     private async Task AdoptTask(Whiskers.Models.ScheduledTaskEntity task)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "scheduler.update",
+                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId })) return;
         if (await AdoptAsync(task))
         {
             Snackbar.Add(L["ScheduledTasksView_Snackbar_Adopted", task.Name].Value, Severity.Success);
@@ -595,7 +601,7 @@ else
 
     private async Task AdoptAll()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "scheduler.update", new { owner = "adopt-all" })) return;
         foreach (var task in _tasks.Where(t => string.IsNullOrWhiteSpace(t.CreatedBy) || OwnerRevoked(t)
                                                || ProvenanceNeedsAdoption(t)).ToList())
             if (!await AdoptAsync(task)) break;
@@ -615,15 +621,18 @@ else
             var previousAuthority = AutomationOwners.AuthorityOf(OwnerResolver, task.CreatedBy);
             var changed = await Mutations.RunAsync("scheduler.update",
                 new { taskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, owner },
-                _ => Scheduler.SetOwnerAsync(taskId, owner, task.CreatedBy));
+                async _ =>
+                {
+                    var adopted = await Scheduler.SetOwnerAsync(taskId, owner, task.CreatedBy);
+                    if (adopted)
+                        MutationScope.Note($"Owner: previous={previousAuthority}; new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
+                    return adopted;
+                });
             if (!changed)
             {
                 Snackbar.Add(L["ScheduledTasksView_Snackbar_OwnerChanged", task.Name].Value, Severity.Warning);
                 return false;
             }
-            await AuditLog.LogAsync(email, "web", "task.adopt", "scheduled-task", taskId, task.Name,
-                details: $"previous={previousAuthority}; new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}",
-                serverId: task.ServerId);
             return true;
         }
         catch (MutationRefusedException ex)
@@ -640,7 +649,8 @@ else
     private async Task DeleteTask(Whiskers.Models.ScheduledTaskEntity task)
     {
         // The level comes from the capability catalog, the one table the MCP tool uses too (R1-05).
-        if (!Require(RoleOf("scheduler.delete"))) return;
+        if (!await RequireAsync(RoleOf("scheduler.delete"), "scheduler.delete",
+                new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ScheduledTasksView_Dialog_DeleteTitle"].Value,
             L["ScheduledTasksView_Dialog_DeleteMessage", task.Name].Value,
@@ -651,8 +661,6 @@ else
             await Mutations.RunAsync("scheduler.delete",
                 new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId },
                 _ => Scheduler.DeleteTaskAsync(task.TaskId));
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                "task.delete", "scheduled-task", task.TaskId, task.Name, serverId: task.ServerId);
             Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskDeleted", task.Name].Value, Severity.Success);
             await LoadData();
         }
