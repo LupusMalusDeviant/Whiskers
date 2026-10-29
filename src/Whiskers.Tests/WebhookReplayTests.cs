@@ -494,6 +494,13 @@ public sealed class WebhookReplayTests : IDisposable
 
         Assert.False(success);
         Assert.Equal("[Webhook_Run_Cancelled]", output);
+
+        // As the gateway reports it: a failed outcome carrying the cancellation.
+        _runner.Cancel = false;
+        _runner.CancelLikeGateway = true;
+        (success, output) = await service.TriggerSignedTestAsync(wh.WebhookId);
+        Assert.False(success);
+        Assert.Equal("[Webhook_Run_Cancelled]", output);
     }
 
     // ---------------------------------------------------------------- database faults
@@ -552,6 +559,43 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal("Succeeded", (await Finished(second.RunId!)).State);
         Assert.Equal("Queued", (await Delivery(first.RunId!)).State);
         Assert.Equal(1, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task Pruning_never_holds_a_worker()
+    {
+        _options.MaxConcurrentRuns = 1;
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        // The first run's retention pass hangs (a lock wait).
+        _faults.Arm("DELETE FROM \"WebhookDeliveries\"", Fault.Stall, runsOnly: true);
+
+        var first = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0175"));
+        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
+        var second = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0176"));
+
+        Assert.Equal("Succeeded", (await Finished(second.RunId!)).State);
+    }
+
+    [Fact]
+    public async Task A_run_given_up_by_its_worker_never_touches_the_run_that_took_it_over()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        var request = Signed(wh, "delivery-0177");
+        _faults.Arm("FROM \"Webhooks\"", Fault.Fail, runsOnly: true);
+        var first = await service.AcceptAsync(wh.WebhookId, request);
+        _runner.Hold();
+
+        var again = await Eventually(() => service.AcceptAsync(wh.WebhookId, request), r => r.Reply != WebhookReply.Duplicate);
+        Assert.Equal(WebhookReply.Accepted, again.Reply);
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(200);
+
+        // The run that took it over is running; the worker that gave it up did not mark it failed.
+        Assert.Equal("Running", (await Delivery(first.RunId!)).State);
+        _runner.Release();
+        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
     }
 
     private static async Task<WebhookAcceptance> Eventually(Func<Task<WebhookAcceptance>> attempt,
@@ -844,6 +888,8 @@ public sealed class WebhookReplayTests : IDisposable
         public TimeSpan Delay { get; set; }
         /// <summary>Every run is cancelled before its action.</summary>
         public bool Cancel { get; set; }
+        /// <summary>Every run ends as the gateway reports a cancelled action: failed, with the cancellation.</summary>
+        public bool CancelLikeGateway { get; set; }
         public int Runs => Volatile.Read(ref _runs);
         public int MaxConcurrent => Volatile.Read(ref _max);
         public Task Started => _started.Task;
@@ -882,6 +928,9 @@ public sealed class WebhookReplayTests : IDisposable
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
         {
             if (Cancel) throw new OperationCanceledException("cancelled");
+            if (CancelLikeGateway)
+                return new MutationOutcome<T>(actor.OperationId ?? "op", MutationStatus.Failed, default, "cancelled",
+                    VerificationStatus.NotRun, new OperationCanceledException("A task was canceled."));
             Interlocked.Increment(ref _runs);
             lock (OperationIds)
             {

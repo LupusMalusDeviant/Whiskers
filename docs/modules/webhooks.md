@@ -35,7 +35,8 @@ means it was running when Whiskers stopped), **400** `{"status":"rejected"}` for
 with `Retry-After`. Runs on the same target never overlap.
 
 Settings (section `Webhooks`): `MaxBodyBytes`, `RequestsPerMinute`, `RequestsPerMinutePerWebhook`, `QueueCapacity`,
-`MaxConcurrentRuns`, `TimestampTolerance`, `DeliveryRetention`, `TestRunTimeout` — see
+`MaxConcurrentRuns`, `TimestampTolerance`, `DeliveryRetention`, `RunTimeout` (30 min: a run that cannot get its target
+in time fails; an action that does not stop keeps its target until it ends, so nothing overlaps it), `TestRunTimeout` — see
 [`WebhookOptions`](../../src/Whiskers/Services/Webhooks/WebhookOptions.cs). Webhooks themselves are managed on the
 `/webhooks` page.
 

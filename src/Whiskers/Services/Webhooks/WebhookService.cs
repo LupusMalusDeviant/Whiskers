@@ -263,9 +263,7 @@ public class WebhookService : IWebhookService
                 }
                 catch (Exception ex)
                 {
-                    // Given up (its claim is released): queued, the next delivery takes it over; running, it failed.
                     _logger.LogError(ex, "Webhook run {RunId} failed outside its action", run.RunId);
-                    await AbandonAsync(run);
                 }
             }
         }
@@ -383,6 +381,13 @@ public class WebhookService : IWebhookService
             message = work.IsCanceled ? new RunMessage("Webhook_Run_Cancelled", Cancelled, []) : null;
             result = await FinishAsync(run, webhook, Outcome(work), StateOf(work));
         }
+        catch (Exception ex) when (!handedOver)
+        {
+            // Given up, while it still holds its claim: running, it failed; queued, the next delivery takes it over
+            // once the claim is released below — never before its failure is recorded.
+            _logger.LogError(ex, "Webhook run {RunId} failed outside its action", run.RunId);
+            await AbandonAsync(run);
+        }
         finally
         {
             if (!handedOver)
@@ -391,7 +396,8 @@ public class WebhookService : IWebhookService
                 _deliveries.Release(run.Claim);
             }
             completion?.TrySetResult(new RunEnd(result.Success, result.Output, message));
-            await PruneIfDueAsync();
+            // Not on the worker: pruning has its own time and never holds a run's worker.
+            _ = PruneIfDueAsync();
         }
     }
 
@@ -447,7 +453,7 @@ public class WebhookService : IWebhookService
         try
         {
             using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
-            await _deliveries.FinishAsync(run.RunId, WebhookDeliveryStore.Failed, bookkeeping.Token);
+            await _deliveries.FinishAsync(run.RunId, run.Claim, WebhookDeliveryStore.Failed, bookkeeping.Token);
         }
         catch (Exception ex)
         {
@@ -470,7 +476,7 @@ public class WebhookService : IWebhookService
         var ct = bookkeeping.Token;
         try
         {
-            await _deliveries.FinishAsync(run.RunId, state, ct);
+            await _deliveries.FinishAsync(run.RunId, run.Claim, state, ct);
         }
         catch (Exception ex)
         {
@@ -568,7 +574,8 @@ public class WebhookService : IWebhookService
             return;
         try
         {
-            await _deliveries.PruneAsync((now - _options.DeliveryRetention).UtcDateTime);
+            using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
+            await _deliveries.PruneAsync((now - _options.DeliveryRetention).UtcDateTime, bookkeeping.Token);
         }
         catch (Exception ex)
         {
@@ -688,6 +695,10 @@ public class WebhookService : IWebhookService
         }
 
         var refused = outcome.Error as MutationRefusedException;
+        // The gateway reports a cancelled action (the run's deadline, shutdown) as failed with the cancellation: it is
+        // the run's cancellation, not an action's message.
+        if (refused is null && outcome.Error is OperationCanceledException cancelled)
+            throw new OperationCanceledException(cancelled.Message, cancelled, cancelled.CancellationToken);
         if (refused is null && outcome.Status is MutationStatus.Executed or MutationStatus.Failed)
             return outcome.Value.Item2 is not null
                 ? (outcome.Value.Item1, outcome.Value.Item2, false)

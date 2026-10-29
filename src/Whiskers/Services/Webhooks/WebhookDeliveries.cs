@@ -124,15 +124,15 @@ internal sealed class WebhookDeliveryStore
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, Running), ct) == 1;
     }
 
-    /// <summary>Records how the run ended. A failed write leaves it Running: once its claim is released it reads as
-    /// interrupted.</summary>
-    public async Task FinishAsync(string runId, string state, CancellationToken ct)
+    /// <summary>Records how the run ended — only under the claim that ran it: a run a later delivery took over is
+    /// not touched. A failed write leaves it Running: once its claim is released it reads as interrupted.</summary>
+    public async Task FinishAsync(string runId, string claim, string state, CancellationToken ct)
     {
         var now = _time.GetUtcNow().UtcDateTime;
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         await db.WebhookDeliveries
-            .Where(d => d.RunId == runId && d.State == Running)
+            .Where(d => d.RunId == runId && d.State == Running && d.Instance == claim)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, state).SetProperty(d => d.FinishedAt, now), ct);
     }
 
@@ -148,13 +148,13 @@ internal sealed class WebhookDeliveryStore
     }
 
     /// <summary>Removes finished deliveries received before <paramref name="before"/>. A queued or running one stays.</summary>
-    public async Task PruneAsync(DateTime before)
+    public async Task PruneAsync(DateTime before, CancellationToken ct)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         await db.WebhookDeliveries
             .Where(d => d.ReceivedAt < before && d.State != Queued && d.State != Running)
-            .ExecuteDeleteAsync();
+            .ExecuteDeleteAsync(ct);
     }
 
     /// <summary>The run's state for the caller; a run nothing holds any more (its process stopped, or its worker gave
