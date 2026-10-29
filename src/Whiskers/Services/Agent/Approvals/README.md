@@ -15,7 +15,7 @@ the session pauses and a human must approve or reject the call before it runs.
 
 | File | Purpose |
 |---|---|
-| `ApprovalCoordinator.cs` | `IApprovalCoordinator` + `ApprovalCoordinator`: registers the approval (resolver wired to the waiting session by operation id, arguments hash for the gateway, the requester) and pushes a notification with the approval's id, risk, target and link (in-app bell + Mattermost/Matrix if active). Used by [`AgentView.razor`](../../../Components/Pages/AgentView.razor) and the chat widget on `ConfirmationRequired`. |
+| `ApprovalCoordinator.cs` | `IApprovalCoordinator` + `ApprovalCoordinator`: registers the approval (resolver wired to the waiting session by operation id, arguments hash for the gateway, the requester; at Admin level when the protected-resource rule matched, INV-59/R1-16) and pushes a notification with the approval's id, risk, target and link (in-app bell + Mattermost/Matrix if active). Used by [`AgentView.razor`](../../../Components/Pages/AgentView.razor) and the chat widget on `ConfirmationRequired`. |
 | `AgentChatLifetime.cs` | `AgentChatLifetime`: the run token of a chat's session and the end of the chat — stops the run, then cancels the session's pending approvals; also on a dropped connection. The next message starts a new run. |
 | `ChatConnectionWatcher.cs` | `IChatConnectionWatcher` + `ChatConnectionWatcher` (scoped `CircuitHandler`): tells the chats of a circuit that its browser connection dropped. |
 

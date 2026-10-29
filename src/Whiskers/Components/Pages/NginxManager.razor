@@ -158,7 +158,7 @@ else
             var serverId = ServerId;
             var siteName = _editingSite;
             var content = _editContent;
-            var result = await Mutations.RunAsync("nginx.update", new { serverId, siteName, contentLength = content.Length },
+            var result = await Mutations.RunAsync("nginx.update", new { serverId, siteName, content },
                 _ => NginxService.UpdateSiteConfigAsync(serverId, siteName, content));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "nginx.update", "nginx", _editingSite, _editingSite, serverId: ServerId, success: result.Success);

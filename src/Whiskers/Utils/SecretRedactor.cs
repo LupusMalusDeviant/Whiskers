@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace Whiskers.Utils;
@@ -47,6 +49,18 @@ public static class SecretRedactor
         @"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@/]+@",
         RegexOptions.Compiled, Timeout);
 
+    // SQL password literals: PASSWORD 'x', PASSWORD E'x', IDENTIFIED BY "x" (MySQL; after a space, = or ( only, so
+    // a JSON key "password": "x" stays for JsonSecret), ENCRYPTED PASSWORD $$x$$, SET PASSWORD = 'x',
+    // IDENTIFIED BY x, IDENTIFIED WITH plugin BY|AS 'x'  →  keyword '***'. Doubled ('') and backslash-escaped
+    // quotes stay inside the literal (a backslash that is no escape only masks more); an unclosed one is masked to
+    // the end. Comments between the tokens (/* … */, -- …, # …) count as space. Meant for decoded text: for JSON,
+    // use RedactJson.
+    private const string SqlGap = @"(?:\s|/\*.*?(?:\*/|$)|(?:--|\#)[^\n]*(?:\n|$))";
+    private static readonly Regex SqlPassword = new(
+        $@"(?is)\b(PASSWORD|IDENTIFIED(?:{SqlGap}+WITH{SqlGap}+\S+)?{SqlGap}+(?:BY|AS))({SqlGap}*(?:={SqlGap}*|\({SqlGap}*)?)" +
+        $@"(?:(?:[EBNX]|U&)?'(?:[^'\\]|''|\\.)*(?:'|$)|(?<=\s|=|\(|\*/)""(?:[^""\\]|""""|\\.)*(?:""|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS){SqlGap}*)[^\s;'""\\]+)",
+        RegexOptions.Compiled, Timeout);
+
     // PEM private keys (certificates are public and stay readable).
     private static readonly Regex PemPrivateKey = new(
         @"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)",
@@ -57,6 +71,52 @@ public static class SecretRedactor
     private static readonly Regex LongBase64 = new(
         @"[A-Za-z0-9+/]{200,}={0,2}",
         RegexOptions.Compiled, Timeout);
+
+    private static readonly JsonSerializerOptions Relaxed =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>
+    /// Redacts a JSON document: every string value on its own, decoded (so an escaped quote is a quote again), then
+    /// the re-written text for keyed secrets ("password": "…"). Text that is no JSON is redacted as it is.
+    /// </summary>
+    public static string RedactJson(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+            return json ?? "";
+        JsonNode? node;
+        try { node = JsonNode.Parse(json); }
+        catch (JsonException) { return Redact(json); }
+        if (node is null)
+            return Redact(json);
+        RedactValues(node);
+        return Redact(node.ToJsonString(Relaxed));
+    }
+
+    private static void RedactValues(JsonNode node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var key in obj.Select(p => p.Key).ToList())
+                    if (obj[key] is { } child)
+                    {
+                        if (Redacted(child) is { } text) obj[key] = text;
+                        else RedactValues(child);
+                    }
+                break;
+            case JsonArray arr:
+                for (var i = 0; i < arr.Count; i++)
+                    if (arr[i] is { } child)
+                    {
+                        if (Redacted(child) is { } text) arr[i] = text;
+                        else RedactValues(child);
+                    }
+                break;
+        }
+    }
+
+    private static string? Redacted(JsonNode node) =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) ? Redact(text) : null;
 
     public static string Redact(string? input)
     {
@@ -69,6 +129,7 @@ public static class SecretRedactor
             s = EnvPassword.Replace(s, m => $"{m.Groups[1].Value}=***");
             s = MysqlPwFlag.Replace(s, "-p***");
             s = RedisAuthFlag.Replace(s, "-a ***");
+            s = SqlPassword.Replace(s, m => $"{m.Groups[1].Value}{m.Groups[2].Value}'***'");
             s = PemPrivateKey.Replace(s, "[REDACTED PRIVATE KEY]");
             s = LongBase64.Replace(s, "[REDACTED BASE64]");
             s = UrlCredentials.Replace(s, m => $"{m.Groups[1].Value}:***@");

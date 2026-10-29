@@ -120,8 +120,11 @@ fi
 if [ -n "$DATA" ]; then
   mkdir -p "$DATA"
   DATA_MOUNT="$(cd "$DATA" && pwd):/app/data"
+  # Whiskers protects its own data (INV-59): tell it which host directory that is.
+  DATA_ENV="      - WHISKERS_DATA_HOST_DIR=$(cd "$DATA" && pwd)"
 else
   DATA_MOUNT="whiskers-data:/app/data"
+  DATA_ENV=""
 fi
 
 # ── write the compose project ────────────────────────────────────────────────
@@ -150,6 +153,7 @@ services:
       - /proc:/host_proc:ro
     environment:
       - TZ=\${TZ:-Europe/Berlin}
+${DATA_ENV}
     restart: unless-stopped
 EOF
   # Declare the named volume only when we are using one (not a host bind path).

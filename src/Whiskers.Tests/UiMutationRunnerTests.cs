@@ -302,6 +302,28 @@ public class UiMutationRunnerTests
         Assert.Contains("production-db", output);
     }
 
+    [Theory]
+    [InlineData("paused")]
+    [InlineData("restarting")]
+    public async Task A_cleanup_leaves_a_paused_or_restarting_container_alone(string state)
+    {
+        // docker rm refuses those states: they are neither removed nor block the cleanup (as container prune).
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.ProtectedResources.Add("production-*");
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "a1", Name = "production-db", State = state, ServerId = "local" });
+        var executor = new Whiskers.Services.Scheduler.TaskExecutor(docker, null!, null!, null!, null!, null!,
+            NullLogger<Whiskers.Services.Scheduler.TaskExecutor>.Instance,
+            guardrails: new AgentToolTestHelpers.FixedGuardrailStore(policy));
+
+        // Past the pre-check (the null automation runner fails the run afterwards, without naming the container).
+        var (_, output) = await executor.ExecuteAsync(new ScheduledTaskEntity
+        {
+            TaskId = "c3", Name = "cleanup", TaskType = ScheduledTaskType.Cleanup, ServerId = "local",
+        });
+        Assert.DoesNotContain("production-db", output);
+    }
+
     private static ContainerInfo ComposeService(string name, string project, string service) => new()
     {
         Id = name + "-id", Name = name, ServerId = "local", State = "running",

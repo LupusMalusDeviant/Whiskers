@@ -261,7 +261,8 @@
             var request = _formRequest;
             var sid = _serverId;
             var deployName = string.IsNullOrWhiteSpace(request.ContainerName) ? request.Image : request.ContainerName;
-            var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image },
+            var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image,
+                    volumes = string.Join(",", request.Volumes) },
                 _ => DeploymentService.DeployFromFormAsync(request, progress, sid));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;
@@ -314,7 +315,9 @@
             var colliding = ComposeModel.Impact("", services, removeOrphans: false,
                 await DockerService.ListContainersAsync(all: true, serverId: sid)).Select(i => i.Container).ToList();
             var ids = await Mutations.RunForEachAsync("compose.deploy", colliding, sid,
-                () => Mutations.RunAsync("compose.deploy", new { serverId = sid },
+                // The file goes along (as `yaml`, which the audit withholds) so the gateway checks what it names —
+                // images, volumes, bind mounts — for protected resources (R1-16).
+                () => Mutations.RunAsync("compose.deploy", new { serverId = sid, yaml },
                     _ => DeploymentService.DeployFromComposeAsync(yaml, progress, sid)));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             await AuditLog.LogAsync(actor, "web", "deploy.compose", "container", _serverId, "compose", details: $"{ids.Count} Container", serverId: _serverId);

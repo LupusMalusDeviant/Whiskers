@@ -21,7 +21,8 @@ public sealed class GuardrailRuleCatalog : IGuardrailRuleCatalog
         new GuardrailRuleDescriptor("tool-allow-list", "Tool allow list",
             "When set, only the listed tools are allowed.", GuardrailVerdict.Deny, EmptySchema),
         new GuardrailRuleDescriptor("protected-resource", "Protected resources",
-            "Glob patterns for containers/servers/DBs the agent must never touch.",
+            "Glob patterns for containers/servers/DBs (also found in commands, SQL and compose files), plus Whiskers' own " +
+            "control plane on every change. Refused, except for an Admin in the web UI or chat, who must approve it.",
             GuardrailVerdict.Deny, EmptySchema),
         new GuardrailRuleDescriptor("forbidden-argument", "Forbidden argument patterns",
             "Regexes against destructive shell/SQL arguments.", GuardrailVerdict.Deny, EmptySchema),

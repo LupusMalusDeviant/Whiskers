@@ -6,6 +6,86 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-16: **Whiskers protects its own control plane, and free text no longer slips past protected resources.** A
+  built-in list — containers named `whiskers*`, `serverwatch*`, `socket-proxy*`, `docker-socket-proxy*`,
+  `ghostunnel*`, `step-ca*`, `nginx-proxy-manager*` and those in `WHISKERS_SELF_CONTAINERS`, plus the data
+  volume's directory under `/var/lib/docker/volumes/` (or the host directory in `WHISKERS_DATA_HOST_DIR`, which
+  `install.sh --data` now sets), mTLS / step-ca / ghostunnel directories (also every
+  managed host's `/opt/dockerproxy`, which holds its tunnel key and CA) and the Docker
+  socket (also as a mount of a directory above them, such as `/` or `/var/run`) — is protected on every surface for
+  every change, whatever the guardrail policy lists. Touching it (or a resource the policy protects) is refused for
+  API keys, agents instructed over MCP, automations and Operators; an Admin in the web UI or the web chat gets an
+  approval at Admin level instead, single-use and audited (with *Require a second approver* on, another Admin must
+  give it). Protected names are now also found in commands, SQL and compose files (word by word, with path
+  segments; a command is read as the shell reads it, so quoting tricks such as `whis""kers` do not hide a name), by
+  a container id or id prefix written in a command, by a container's other names, among the stopped containers a
+  cleanup removes, and in what a deployment mounts — `deploy_app` volumes and every host path and volume of a compose
+  deployment, also a local volume that binds a host path through `driver_opts: device:` and the volumes a service
+  takes over with `volumes_from` (another service's, or a container's — looked up on the server by id, name or id
+  prefix; one that is not found refuses the deployment); a raw compose file is read as YAML for its mounts and names
+  (flow style, anchors, escapes decoded), and one that is no YAML is refused (the Docker socket and the data volume are part of the control plane);
+  the control plane's names apply to containers, volumes and networks, not to a server called `whiskers-vps`. Free
+  text that is completed at run time counts as touching a protected resource: in a command anything the shell
+  expands (`$VAR`, `$(…)`, backticks, `{a,b}`), `eval`, `xargs`, decoding, or inline code of another interpreter
+  (`python -c`, `perl -e`, `awk … system(`); in SQL dynamic SQL, `COPY … PROGRAM`, file-reading functions,
+  `U&"…"` escapes, inline functions and untrusted languages (`plpython3u`), and client commands the text is fed to
+  (psql `\i`, `\gexec`, `\c`, `\!`; mysql `source`; sqlite `.read`; mongosh `load()`) and string escapes a driver
+  decodes into a name (`b`, `\x62`). A `.env` saved in the web UI
+  decides what the project mounts too (a whole short entry from a variable, `- ${SPEC}`, is expanded before it is
+  read; relative sources — also of a long `type: bind` entry — resolve against the project directory the deployment
+  runs with; mounts merged through any depth of YAML anchors, `volumes_from` a service of another file, and the
+  files of file-backed `secrets` and `configs` count too). Besides its own reading, Whiskers has compose resolve
+  every deployment on the server (`docker compose config`, with the planned files and `.env`) and decides every
+  mount compose reports — `extends`, merges and interpolation as compose itself does them; what only compose found is
+  decided as possibly from an `.env` (withheld); a deployment compose cannot resolve is refused. A container whose
+  volumes a service takes over brings its own mounts along (read with `docker inspect`; unreadable refuses the
+  deployment). The database a request runs in (`database`) counts as a name too, so Whiskers' own database on a
+  shared database server is the control plane, and a qualified SQL name (`billing.orders`, `"billing"."orders"`)
+  names each of its parts. A SQL import or seed decides the database it runs in. A mount whose source
+  comes from an `.env` value is decided but never recorded (the audit keeps the length of `mounts`, the decision
+  record `(withheld)`). A policy pattern that equals a control-plane pattern makes a hit approvable only where the
+  control plane's own check finds it too (not a server named `whiskers-vps`); text that cannot be analysed is
+  refused first, whatever names stand beside it. A withheld mount is never quoted in a refusal either. The
+  SQL console, SQL import and seed and the raw compose deploy now hand their payload to the policy (Artisan
+  migrations carry no free text: their command is fixed); the audit keeps only its length, and an approval raised from the web UI shows only the length of a
+  command, SQL or compose file (refusal reasons never quote words of it); a card that shows the text (an agent's
+  chat or MCP call) masks SQL password literals (`PASSWORD '…'`, `E'…'`, `IDENTIFIED BY …` / `"…"`, also with comments
+  between the tokens) as it masks other
+  secrets, value by value, and so do the audit log and the host-command logs. **Upgrade notes:** a scheduled cleanup
+  task no longer removes unused networks (which ones are unused cannot be decided before the prune): it lists the
+  stopped containers first, decides exactly those and removes them by id (`docker rm`, no `container prune`: one
+  that stops meanwhile stays), then dangling images and build cache; a run needs `docker compose` v2 on the server
+  for compose deployments (it resolves each deployment with `docker compose config`); an install whose data lives in a host directory (not the
+  `whiskers-data` volume) set up before this release should add `WHISKERS_DATA_HOST_DIR=<that directory>` to the
+  container's environment, so Whiskers protects it; calls that used to
+  pass are now refused or need an Admin approval — an MCP key or a scheduled task restarting the Whiskers container
+  or its proxy; a command or query that merely mentions a protected name (also inside a domain such as
+  `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a
+  scheduled CustomCommand with `$(date +%F)`), `xargs`, `awk '{print $1}'`, `python -c`, a pipe into a shell or an
+  interpreter (`curl … | sh`), a script (`bash deploy.sh`, `./deploy.sh`, `/opt/x/run.sh`, `python3 x.py`), `make` or
+  `npm`, any interpreter (`python3 …`, `node …`), `xargs` by any path, `find -exec` from `/`, a changing
+  `docker compose` / `docker-compose` / `docker stack` command (`up`, `down`, `rm`, … — the compose file, not the
+  command, says what it touches), `docker system|container|volume|network prune` (what it removes is named nowhere;
+  `docker image prune` stays allowed), a compose bind mount whose relative source climbs to `/` (`../../..`), or `rm`/`mv`/`chmod` on `/var/lib/docker`; renewing or issuing mTLS certificates and restoring a self-backup
+  (an Admin approval in the web UI, refused for keys);
+  editing an nginx site that proxies to Whiskers; deploying your own `step-ca` or `ghostunnel`; SQL with dynamic
+  statements or inline functions (`EXECUTE`, `PREPARE`, `CREATE FUNCTION`, typical in migrations and `pg_dump`
+  imports — a scheduled SQL task is refused, a UI import needs an Admin approval, and is refused outright while
+  the guardrail policy lists protected resources of its own, as the default policy does), also `decode(`, `chr(` and
+  `convert_from(`; a command or compose file with a 12-digit hex word (an image digest, a git SHA) while the
+  server's containers cannot be listed; a compose deployment
+  that mounts the Docker socket, `/`, `/var/run` or `/var/lib/docker` (cAdvisor, node-exporter, Portainer) or a volume
+  whose source uses a variable the project's `.env` does not set; a scheduled `volume.backup` of the
+  `serverwatch-data` volume run by a task (refused — back Whiskers up with its own self-backup instead); AutoUpdate
+  and AutoPatch of the Whiskers container itself (refused each cycle with an `automation_refused` notification —
+  update Whiskers from the web UI); a raw compose file in the UI deploy that uses a variable without a default
+  (Admin approval, since the target directory's `.env` is not read; refused while the policy lists protected
+  resources of its own, as the default policy does). Rename a
+  container that only shares the prefix, put the command into a script file on the host, or run the action from
+  the web UI as an Admin. The Admin exception covers the control plane only: a resource protected by the policy's
+  own pattern stays refused for everyone, as before, wherever in the call it is named — and while the policy lists
+  patterns of its own, free text that cannot be analysed is refused for everyone too (it could name one). The data
+  volume is recognised under a compose project's prefix as well (`prod_serverwatch-data`).
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and
   rejecting follow the same rules: the approver holds the action's effective level (Viewers decide nothing, and the
   chat now passes the approver's current role), and nobody decides their own non-interactive request — direct MCP,

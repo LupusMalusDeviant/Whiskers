@@ -64,6 +64,10 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// network is connected to, a workload's pod. Policy matches protected resources on these as well.</summary>
     public IReadOnlyList<string> Related { get; init; } = Array.Empty<string>();
 
+    /// <summary>Entries of <see cref="Related"/> that are decided on but never recorded as they are (R1-16): a
+    /// mount whose source came from an <c>.env</c> value, or every mount a caller listed.</summary>
+    public IReadOnlySet<string> Withheld { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
+
     /// <summary>For a network connect / disconnect: the resolved id of the container named in the call.</summary>
     public string? RelatedContainerId { get; init; }
 
@@ -177,9 +181,13 @@ public static class MutationReasonCodes
     /// <summary>An unattended run needs a confirmation nobody can give: {0} is the rule's reason (INV-04, PC-D7).</summary>
     public const string UnattendedConfirm = "UnattendedConfirm";
 
+    /// <summary>The action touches Whiskers' control plane or a protected resource: an Admin must approve it; {0} is
+    /// the approval's id (INV-59, R1-16).</summary>
+    public const string ProtectedNeedsAdminApproval = "ProtectedNeedsAdminApproval";
+
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
-            DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm];
+            DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

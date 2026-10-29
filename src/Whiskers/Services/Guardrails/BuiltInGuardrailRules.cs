@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Whiskers.Models;
+using Whiskers.Models.Agent;
 
 namespace Whiskers.Services.Guardrails;
 
@@ -125,31 +126,112 @@ public sealed class ToolAllowListRule : IGuardrailRule
     }
 }
 
-/// <summary>Protected resources (glob): if a matching argument appears → Deny.</summary>
+/// <summary>
+/// Protected resources (INV-24, INV-59, R1-16): the policy's patterns, and for every change Whiskers' own control
+/// plane (<see cref="ControlPlaneResources"/>), whatever the policy says. Matched against every argument value whole,
+/// against the resolved target the gateway adds, and against every word of a free-text argument (a command, SQL, a
+/// compose file); free text that cannot be analysed counts as touching a protected resource.
+/// A hit is refused — except a control-plane hit for an interactive Admin (the web UI or the web chat, as an Admin): their action needs an
+/// explicit approval at Admin level (<see cref="Id"/> among the matched rules), which the approval gate raises,
+/// binds to the call and audits.
+/// </summary>
 public sealed class ProtectedResourceRule : IGuardrailRule
 {
-    public string Id => "protected-resource";
+    public const string RuleId = "protected-resource";
+
+    public string Id => RuleId;
 
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
     {
-        var globs = request.Context.Policy.ProtectedResources;
-        if (globs.Count > 0)
+        var policy = request.Context.Policy.ProtectedResources;
+        // A read changes nothing: the control plane is protected from changes, the policy's patterns as before.
+        var change = !string.Equals(McpPermissionLevels.Normalize(request.RequiredLevel), McpPermissionLevels.Read,
+            StringComparison.Ordinal);
+        var paths = change ? ControlPlaneResources.PathPatterns : [];
+        // The policy's own patterns apply to every argument, as before. The control plane's names apply only where a
+        // container, volume or network can be named — not to a server, a DNS record or a task that shares the prefix.
+        // A resource protected only by the policy's own pattern is refused for everyone, wherever in the call it is
+        // named — looked for first, pattern by pattern, so a control-plane hit elsewhere in the call cannot make it
+        // approvable. A policy pattern that is also a control-plane pattern counts as the control plane only where
+        // the control plane's own check finds something in the same argument (not a server named whiskers-vps).
+        // Free text that cannot be analysed could name such a resource, so it is refused too.
+        // Looked for on its own, before any name: a protected word elsewhere in the text must not hide it.
+        if (change && policy.Count > 0 && ProtectedResourceMatcher.FirstUnanalyzable(request.Arguments) is { } dynamicText)
         {
-            foreach (var value in GuardrailRuleHelpers.ArgumentValues(request))
+            reason = Describe(dynamicText);
+            return GuardrailVerdict.Deny;
+        }
+        foreach (var pattern in policy)
+        {
+            // Every argument the pattern hits counts: one the control plane explains does not hide another.
+            var remaining = request.Arguments;
+            while (ProtectedResourceMatcher.FirstHit(remaining, [pattern], [], analyseFreeText: change) is { } policyHit)
             {
-                foreach (var glob in globs)
+                // Free text that cannot be analysed is no evidence of the control plane: refused.
+                if (change && policyHit.UnanalyzableArgument is null && IsControlPlanePattern(pattern)
+                    && policyHit.Argument is { } explained && remaining.ContainsKey(explained)
+                    && ControlPlaneFindsIn(request.Arguments, explained))
                 {
-                    if (GuardrailRuleHelpers.GlobMatch(glob, value))
-                    {
-                        reason = $"'{value}' is a protected resource (pattern '{glob}').";
-                        return GuardrailVerdict.Deny;
-                    }
+                    remaining = remaining.Where(a => a.Key != explained).ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal);
+                    continue;
                 }
+                reason = Describe(policyHit);
+                return GuardrailVerdict.Deny;
             }
         }
-        reason = "";
-        return GuardrailVerdict.Allow;
+        var hit = ProtectedResourceMatcher.FirstHit(request.Arguments, policy, paths, analyseFreeText: change)
+                  ?? (change
+                      ? ProtectedResourceMatcher.FirstHit(request.Arguments, ControlPlaneResources.NamePatterns, [],
+                          analyseFreeText: true, ControlPlaneResources.NamesApplyTo(request.Arguments))
+                      : null);
+        // A capability that changes the control plane by what it is, not by what it names (mTLS material, a restore
+        // of Whiskers' own data).
+        if (hit is null && change && ControlPlaneResources.Capabilities.Contains(request.ToolName))
+            hit = new ProtectedResourceMatcher.Hit(request.ToolName, "control plane") { Argument = "capability" };
+        if (hit is null)
+        {
+            reason = "";
+            return GuardrailVerdict.Allow;
+        }
+        // A word of a payload (a command, SQL) is never quoted: it could be part of a credential (R1-16).
+        reason = Describe(hit);
+        // INV-59's exception covers the control plane (its names, its paths, unanalysable free text, the capabilities
+        // that change it). A resource protected only by the policy's own pattern stays refused for everyone, as before.
+        if (IsInteractiveAdmin(request.Context))
+        {
+            reason += " An Admin may approve it explicitly.";
+            return GuardrailVerdict.Confirm;
+        }
+        return GuardrailVerdict.Deny;
     }
+
+    private static bool IsControlPlanePattern(string pattern) =>
+        ControlPlaneResources.NamePatterns.Contains(pattern, StringComparer.OrdinalIgnoreCase)
+        || ControlPlaneResources.PathPatterns.Contains(pattern, StringComparer.Ordinal);
+
+    // Whether the control plane's own check (its names only where a container, volume or network can be named, its
+    // paths) finds something in this one argument.
+    private static bool ControlPlaneFindsIn(IReadOnlyDictionary<string, System.Text.Json.JsonElement> arguments,
+        string? argument) =>
+        argument is not null && arguments.TryGetValue(argument, out var value)
+        && ProtectedResourceMatcher.FirstHit(new Dictionary<string, System.Text.Json.JsonElement> { [argument] = value },
+            ControlPlaneResources.NamePatterns, ControlPlaneResources.PathPatterns, analyseFreeText: true,
+            ControlPlaneResources.NamesApplyTo(arguments)) is not null;
+
+    private static string Describe(ProtectedResourceMatcher.Hit hit) =>
+        hit.UnanalyzableArgument is { } argument
+            ? $"The '{argument}' cannot be checked for protected resources (it builds what it acts on at run time)."
+            : hit.InFreeText
+                ? $"The '{hit.Argument}' touches a protected resource (pattern '{hit.Pattern}')."
+                : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";
+
+    /// <summary>INV-59's one exception: a person acting interactively — in the web UI or the web chat — as an Admin.
+    /// Not a key, not an automation, not an AI trigger, not an agent instructed over MCP.</summary>
+    public static bool IsInteractiveAdmin(AgentContext context) =>
+        context.Origin == AgentOrigin.WebUi
+        && context.Principal.Kind == AgentPrincipalKind.WebUser
+        && string.Equals(McpPermissionLevels.Normalize(context.Principal.PermissionLevel), McpPermissionLevels.Admin,
+            StringComparison.Ordinal);
 }
 
 /// <summary>Forbidden argument patterns (regex) against destructive shell/SQL — match → Deny.</summary>

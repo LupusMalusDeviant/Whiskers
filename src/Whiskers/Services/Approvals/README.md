@@ -97,7 +97,7 @@ address (`WhiskersPublicUrl`, `Whiskers:PublicUrl`; never a request's host) — 
 | `ApprovalEligibility.cs` | `ApprovalResolver`, `ApprovalDecisionResult`, `ApprovalEligibility` (who may decide: level, requester, interactive kinds, `RequestersOf`), `ApprovalLimitException`, `ApprovalDecisionMessages` (UI resource keys). |
 | `ApprovalPersistence.cs` | `IApprovalPersistence`: `DbApprovalPersistence` (table `Approvals`, conditional decide/use) and `InMemoryApprovalPersistence` (hosts without a database). |
 | `ApprovalBinding.cs` | `ApprovalBinding.Of` (gateway calls) and `OfDirectCall` (direct MCP reads): the hash an approval is bound to. |
-| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject` (with its `Requesters`), `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsumeAsync`). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
+| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject` (with its `Requesters`; `WithholdPayloads` keeps a UI call's SQL, command or compose file off the stored card, showing only its length, R1-16), `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsumeAsync`). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
 | `ApprovalFingerprint.cs` | The hashes that bind an approval: arguments (keys sorted, raw JSON values) and caller + tool + arguments. |
 | `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. `NotificationText`: the notification of a raised approval (id, risk, target, link; no arguments). |
 

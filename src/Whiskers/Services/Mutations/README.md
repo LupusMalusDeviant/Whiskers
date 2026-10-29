@@ -123,7 +123,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `ComposePlanner.cs` | `IComposePlanner` + `ComposePlanner` (singleton): reads what the deployment does not bring along from the host (a directory's default compose file + override, the existing `.env`, a container's `config_files` / working directory for a `.env` change) and lists the server's containers. Read-only. |
 | `ComposeImpact.cs` | UI side of a plan: `DeployAsync` (plan, decide the capability, then each planned container nested, plan again and run it), `GateFor` (a `ComposePlanGate` for plans made inside an operation, e.g. Git deploy) and `RunForEachAsync`. |
 | `UiMutationRunner.cs` | `IUiMutationRunner` + `UiMutationRunner` (scoped, per circuit), `MutationRefusedException`, `MutationFailedException`: the UI's entry to the gateway. A refusal with a `ReasonCode` (`MutationReasonCodes`, R1-05) is shown in the user's language (`Mutation_Refused_<code>`); the audit keeps the English `Reason`. |
-| `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. Its `MutationPolicyDecision.Policy` names the preset and policy version the verdict came from (R1-12). For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`, `__resolvedRelated<n>`), so a protected container is caught by id prefix, as a container attached to a removed network, and a workload by its live controller. Without engine or store it refuses everything. |
+| `MutationPolicy.cs` | `IMutationPolicy` + `GuardrailMutationPolicy`, the adapter onto the core guardrail engine. Its `MutationPolicyDecision.Policy` names the preset and policy version the verdict came from (R1-12). For an agent it evaluates the principal the agent acts for, with that key's tool list; for a human in the UI the PC-D1 rule set. The rules also see the resolved target (`__resolvedTargetId`, `__resolvedTargetName`, `__resolvedRelated<n>` — related names, aliases, related resources and a pod's container), so a protected container is caught by id prefix or another name, as a container attached to a removed network, and a workload by its live controller. A protected-resource hit raises its approval at Admin level (R1-16). Without engine or store it refuses everything. |
 | `PolicyDecisions.cs` | R1-12 (INV-22/23): `PolicySnapshot` (preset + the exact policy in canonical JSON + its SHA-256 = the policy version), `PolicyCanonicalJson` (keys sorted at every level; `InputHash` of a call's arguments), `EffectivePolicy` (live active preset, or a pinned preset with the global kill switch; a fail-closed store → fail-closed), `PolicyDecisionRecord`, `IPolicyDecisionStore` + `DbPolicyDecisionStore` (decision and, once per version, its snapshot in one save; versions are never rewritten). `PinnedPolicy` itself lives with `AgentContext` in `Models/Agent`. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
 | `TriggerAuthority.cs` | R1-13: `ITriggerAuthority` (the gateway's per-mutation question "may this AI trigger do this now?", implemented by the Agent module's `AiTriggerAuthority`) and `TriggerAuthority` (`TriggerOf(principal)`, `GlobMatch`). |
@@ -260,11 +260,43 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   controller: the resolver re-reads the pod (`IWorkloadProvider.GetWorkloadAsync`) instead of trusting the name the
   page rendered (R1-06). The provider resolves the controller again when it acts; a controller change in between is
   not detected.
-- **Bulk prune** (`host.prune`) is refused while a stopped protected container exists on the server; images and
-  networks it removes are not checked against protected patterns.
+- **Bulk prune** (`host.prune`) is decided on the stopped containers it removes (R1-16; unlistable containers
+  refuse it): those listed in `containerIds` (one per line; one no longer on the server refuses the run), else every
+  stopped container of the server. The cleanup task lists them once, keeps its own pre-check, and runs
+  `TaskExecutor.CleanupCommandFor(ids)` — `docker rm` of exactly those ids, then image and builder prune — so a
+  container that stops after the decision is not removed; networks are not pruned, since which ones are unused
+  cannot be decided beforehand; dangling images are not checked against protected patterns.
+- **Free text** (`command`, `query`, `yaml`, …) is checked word by word against protected names and the control
+  plane (R1-16, `ProtectedResourceMatcher`; commands as the shell reads them); `MutationTargetResolver` adds every
+  container a free-text word of twelve or more hex digits (any hex word in a `docker …` command except options,
+  their numbers, image references, paths and file names; a single digit only after a subcommand that takes
+  containers; the container of a Docker API path) names by id prefix
+  (unlistable containers refuse the call). UI pages hand their SQL, command or compose file to the gateway for this;
+  the audit keeps only lengths, and an approval raised from the UI stores only lengths too
+  (`ApprovalSubject.WithholdPayloads`). A command that runs a script file or pipes into a shell or an interpreter
+  is unanalysable.
+- **Compose mounts** (R1-16): `ComposePlan.Mounts()` lists every host path and volume the services mount
+  (interpolated; relative bind sources resolved against the project directory; project-scoped volumes also as
+  `<project>_<key>`, explicit `name:` resolved; a volume with `driver_opts: device: <host path>` also as that path;
+  a long `type: bind` entry as a host path even when relative; `<<` merges through any depth; the files of
+  file-backed `secrets` / `configs`; `volumes_from` as the other service's mounts (of any file, resolved after all
+  files are read) or the container's id and name, looked up on the server —
+  `ComposeModel.ResolveContainers`; not found or not unique refuses the plan without quoting the reference — plus
+  that container's own mounts from `docker inspect`, unreadable → refused). `ComposePlanner` also has compose
+  resolve the deployment on the server (`ComposeConfigEffects`: `docker compose config --format json` with the
+  planned files and `.env` written base64 to a temporary directory) and adds every mount compose reports that its own
+  model did not (`ComposeModel.WithEffects`, withheld); a failed or unreadable run, a service the files do not show
+  or an unknown mount kind refuses the plan. A mount whose source came from a variable is
+  decided but listed in `MutationTarget.Withheld`: the decision record stores `(withheld)`, the audit only the length of
+  `mounts`.
+  A `.env` saved on the container page decides them the same way (`ComposeImpact.RunMountsAsync`). `ComposeImpact`
+  decides them under `compose.deploy` (`mounts`, one per line) before the plan's containers, and
+  `ComposePlan.EnsureDecided` refuses a re-plan whose mounts were not decided.
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row
-  (`AuditLogMutationSink.PayloadArguments`, only their length is stored); the policy and the approval card still see
-  them.
+  (`AuditLogMutationSink.PayloadArguments`, only their length is stored); the policy sees them, and so does the
+  approval card of a non-UI request (an agent's chat call, whose approver must read what the agent wants to run),
+  with secrets masked by `SecretRedactor` — including SQL password literals (`PASSWORD '…'`, `IDENTIFIED BY …`) —
+  a UI approval stores only their lengths.
 - **A UI action that outlives its deadline** keeps running when the service call ignores the token (most do); the
   page then shows a timeout while the work continues.
 - **Approval eligibility.** Approvals are persisted and fully bound since R1-14 (`../Approvals/`); who may approve (no self-approval for unattended requests) and requester-session lifetime follow in R1-15.

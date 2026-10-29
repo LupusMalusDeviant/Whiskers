@@ -110,20 +110,30 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         && (string.IsNullOrWhiteSpace(principal.DelegatedBy)
             || principal.DelegatedBy.StartsWith(PrincipalIds.AgentPrefix, StringComparison.Ordinal));
 
-    /// <summary>The rules match argument values, so the resolved target (full id and name, and what the
-    /// operation also touches, R1-06) is added for evaluation only: a unique id prefix of a protected container, a
-    /// protected container attached to a network that is removed, or a workload's live controller is then caught as
-    /// well. The approval hash and the audit keep the caller's original arguments.</summary>
+    /// <summary>The rules match argument values, so the resolved target (full id and name, its other names, and
+    /// what the operation also touches with all their names, R1-06/R1-13) is added for evaluation only: a unique id
+    /// prefix of a protected container, a protected container attached to a network that is removed, a workload's
+    /// live controller or pod, or a planned container known by another name is then caught as well (R1-16). The
+    /// approval hash and the audit keep the caller's original arguments.</summary>
     internal static IReadOnlyDictionary<string, JsonElement> WithResolvedTarget(MutationRequest request)
     {
         var t = request.Target;
-        if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && t.Related.Count == 0)
-            return request.Arguments;
-        var args = new Dictionary<string, JsonElement>(request.Arguments);
+        var names = t.Related.Concat(t.Aliases).Concat(t.RelatedResources.SelectMany(r => r))
+            .Append(t.RelatedContainerId ?? "")
+            .Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal).ToList();
+        // A caller's own "__resolved…" keys never reach the rules: they describe what the gateway resolved (R1-16).
+        var args = request.Arguments.Where(a => !a.Key.StartsWith("__", StringComparison.Ordinal))
+            .ToDictionary(a => a.Key, a => a.Value);
+        args["__resolvedKind"] = JsonSerializer.SerializeToElement(t.Kind);
+        if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && names.Count == 0)
+            return args;
         if (!string.IsNullOrEmpty(t.Id)) args["__resolvedTargetId"] = JsonSerializer.SerializeToElement(t.Id);
         if (!string.IsNullOrEmpty(t.Name)) args["__resolvedTargetName"] = JsonSerializer.SerializeToElement(t.Name);
-        for (var i = 0; i < t.Related.Count; i++)
-            args[$"__resolvedRelated{i}"] = JsonSerializer.SerializeToElement(t.Related[i]);
+        // A withheld value (a mount from an .env value) is matched like the others but never quoted in a reason.
+        for (var i = 0; i < names.Count; i++)
+            args[t.Withheld.Contains(names[i])
+                ? $"{ProtectedResourceMatcher.ResolvedWithheldPrefix}{i}"
+                : $"{ProtectedResourceMatcher.ResolvedRelatedPrefix}{i}"] = JsonSerializer.SerializeToElement(names[i]);
         return args;
     }
 
@@ -140,6 +150,9 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     {
         MutationSurface.Mcp => AgentOrigin.McpDirect,
         MutationSurface.Automation or MutationSurface.Webhook => AgentOrigin.Trigger,
+        // The origin the agent's run recorded wins (an agent instructed over /mcp with a session cookie is McpTool);
+        // without one it follows whom the agent acts for.
+        MutationSurface.Agent when request.AgentOrigin is { } recorded => recorded,
         MutationSurface.Agent => request.Principal.OnBehalfOf?.Kind switch
         {
             MutationPrincipalKind.Automation => AgentOrigin.Trigger,

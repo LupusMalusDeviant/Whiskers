@@ -51,7 +51,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     public async Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context, string reason, GuardrailDecision decision)
     {
         var (actor, actorType) = ActorOf(context);
-        var paramsJson = Cap(SecretRedactor.Redact(call.ArgumentsJson), MaxParamChars);
+        var paramsJson = Cap(SecretRedactor.RedactJson(call.ArgumentsJson), MaxParamChars);
         // Real required level of the tool (was hardcoded "write"), so the card and the resolver-level
         // check reflect what the tool actually needs.
         var level = McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(call.Name, "write");
@@ -75,6 +75,9 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
                 level = McpPermissionLevels.Admin;
             }
         }
+        // INV-59 (R1-16): touching a protected resource is the interactive Admin's exception — only an Admin approves it.
+        if (decision.MatchedRuleIds.Contains(Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId))
+            level = McpPermissionLevels.Admin;
         // The gateway's resolved target when it decided the call; else the card reads it from the arguments (the
         // notification then names none).
         var resolved = decision.ResolvedServer is not null || decision.ResolvedResource is not null;

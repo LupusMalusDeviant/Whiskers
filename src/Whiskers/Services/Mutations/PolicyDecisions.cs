@@ -186,7 +186,8 @@ public sealed class DbPolicyDecisionStore : IPolicyDecisionStore
             TargetName = WithoutUrlCredentials(target.Name),
             TargetServerId = target.ServerId,
             // A related resource can be a repository URL with credentials in it (a Git app): never stored as such.
-            TargetRelated = target.Related.Count == 0 ? null : JsonSerializer.Serialize(target.Related.Select(WithoutUrlCredentials)),
+            TargetRelated = target.Related.Count == 0 ? null
+                : JsonSerializer.Serialize(target.Related.Select(r => target.Withheld.Contains(r) ? "(withheld)" : WithoutUrlCredentials(r))),
             InputHash = PolicyCanonicalJson.InputHash(request.Arguments),
             PolicyVersion = record.Policy.VersionHash,
             Preset = record.Policy.Preset,

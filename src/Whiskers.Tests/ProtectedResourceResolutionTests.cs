@@ -17,7 +17,7 @@ namespace Whiskers.Tests;
 /// container it recreates, removes as an orphan or collides with by name — and each of those is decided, on every
 /// surface. A plan that cannot be made refuses the deployment; execution runs exactly the planned project and files.
 /// </summary>
-public sealed class ProtectedResourceResolutionTests
+public sealed partial class ProtectedResourceResolutionTests
 {
     private static readonly MutationPrincipal Admin =
         new(MutationPrincipalKind.Human, "admin@example.com", "admin@example.com", McpPermissionLevels.Admin);
@@ -239,6 +239,30 @@ public sealed class ProtectedResourceResolutionTests
             runner.DeployAsync(_host, Planner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments));
 
         Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
+    }
+
+    [Fact]
+    public async Task A_ui_env_save_of_a_project_with_mounts_decides_them_and_runs()
+    {
+        var db = (await _docker.ListContainersAsync(all: true, serverId: "local")).Single(c => c.Name == "payments-db");
+        db.Labels["com.docker.compose.project.config_files"] = "/srv/payments/compose.yaml";
+        _host.Files["/srv/payments/compose.yaml"] = "services:\n  db:\n    container_name: payments-db\n    image: postgres\n" +
+                                                    "    volumes:\n      - ./data:/var/lib/postgresql/data\n      - pgdata:/backup\n";
+        _host.Files["/srv/payments/.env"] = "TAG=1\n";
+        var plan = await Planner().PlanEnvChangeAsync(db, "local", _ => "TAG=2\n");
+        Assert.NotEmpty(plan.Mounts());
+        var runner = ResolvingUiRunner();
+
+        // As the container page saves a .env: mounts, then every container, then the plan checked again.
+        var saved = await runner.RunMountsAsync(plan, () => runner.RunForEachAsync("container.env_file_save",
+            plan.Containers, "local", async () =>
+            {
+                var current = await Planner().PlanEnvChangeAsync(db, "local", _ => "TAG=2\n");
+                current.EnsureDecided(MutationScope.Current);
+                return true;
+            }));
+
+        Assert.True(saved);
     }
 
     [Fact]
@@ -495,6 +519,18 @@ public sealed class ProtectedResourceResolutionTests
         },
     };
 
+    /// <summary>A UI runner whose gateway resolves targets as in production (a host's mounts become decided).</summary>
+    private UiMutationRunner ResolvingUiRunner()
+    {
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
+        var resolver = new MutationTargetResolver(new TestServices(_docker,
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }), Planner()));
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AgentToolTestHelpers.NullMutationAudit(), [], NullLogger<MutationGateway>.Instance,
+            targets: resolver, approvals: new ApprovalGate(new ApprovalStore(), store));
+        return new UiMutationRunner(gateway, new CapabilityCatalog(), new AdminUser());
+    }
+
     private static UiMutationRunner UiRunner(GuardrailPolicy policy)
     {
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
@@ -545,9 +581,25 @@ public sealed class ProtectedResourceResolutionTests
         public HashSet<string> Failing { get; } = new(StringComparer.Ordinal);
         public List<string> Executed { get; } = [];
 
+        /// <summary>What <c>docker compose config --format json</c> prints (compose's own resolution); null fails it.</summary>
+        public string? ComposeConfig { get; set; } = """{"services":{}}""";
+
+        /// <summary>The commands that asked compose for its model.</summary>
+        public List<string> ConfigCommands { get; } = [];
+
+        /// <summary><c>docker inspect … .Mounts</c> per container id; a missing id fails the read.</summary>
+        public Dictionary<string, string> Mounts { get; } = new(StringComparer.Ordinal);
+
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)
         {
+            if (command.EndsWith(" config --format json", StringComparison.Ordinal))
+            {
+                ConfigCommands.Add(command);
+                return ComposeConfig is null ? Done("no such file", 1) : Done(ComposeConfig);
+            }
+            if (Regex.Match(command, @"^docker inspect --format '\{\{json \.Mounts\}\}' '([^']*)'$") is { Success: true } inspect)
+                return Mounts.TryGetValue(inspect.Groups[1].Value, out var mounts) ? Done(mounts) : Done("", 1);
             if (Regex.Match(command, @"^if \[ -e '([^']*)' \]") is { Success: true } read)
             {
                 var path = read.Groups[1].Value;

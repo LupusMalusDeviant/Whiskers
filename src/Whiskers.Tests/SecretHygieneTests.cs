@@ -23,6 +23,44 @@ public class SecretHygieneTests
         Assert.Contains("PGPASSWORD=***", pgEnv);
     }
 
+    [Theory]
+    [InlineData("ALTER ROLE whiskers PASSWORD 'canary-secret';")]
+    [InlineData("CREATE USER app WITH ENCRYPTED PASSWORD 'canary pw with spaces'")]
+    [InlineData("ALTER ROLE app PASSWORD $$canary-secret$$")]
+    [InlineData("ALTER ROLE app PASSWORD $q$canary-secret$q$")]
+    [InlineData("CREATE USER 'a'@'%' IDENTIFIED BY 'it''s canary-secret';")]
+    [InlineData("CREATE USER 'a'@'%' IDENTIFIED BY 'it\\'s canary-secret';")]
+    [InlineData("ALTER USER a IDENTIFIED WITH caching_sha2_password BY 'canary-secret'")]
+    [InlineData("CREATE USER scott IDENTIFIED BY canary-secret;")]
+    [InlineData("SET PASSWORD = 'canary pw'")]
+    [InlineData("SET PASSWORD FOR 'a'@'%' = PASSWORD('canary-secret')")]
+    [InlineData("ALTER LOGIN sa WITH PASSWORD = 'canary-secret'")]
+    [InlineData("CREATE USER app IDENTIFIED BY \"canary-secret\";")]                  // MySQL double quotes
+    [InlineData("SET PASSWORD = \"canary \\\"secret\";")]
+    [InlineData("ALTER ROLE app PASSWORD /* rotate */ 'canary-secret';")]         // comments between the tokens
+    [InlineData("ALTER ROLE app PASSWORD -- rotate\n 'canary-secret';")]
+    [InlineData("CREATE USER a IDENTIFIED # note\n BY 'canary-secret';")]
+    [InlineData("CREATE USER scott IDENTIFIED BY /* x */ canary-secret;")]
+    [InlineData("ALTER ROLE app PASSWORD E'canary-secret';")]
+    [InlineData("ALTER ROLE app PASSWORD e'it\\'s canary-secret';")]
+    [InlineData("ALTER ROLE app PASSWORD 'it'' s canary-secret';")]
+    [InlineData("ALTER ROLE app PASSWORD 'canary-secret")]                         // unclosed: masked to the end
+    [InlineData("{\"sql\":\"ALTER ROLE app PASSWORD 'canary-secret'\",\"serverId\":\"local\"}")]
+    public void Redact_hides_sql_password_literals(string sql)
+    {
+        var s = SecretRedactor.Redact(sql);
+        Assert.DoesNotContain("canary", s);
+        Assert.Contains("***", s);
+    }
+
+    [Fact]
+    public void Redact_keeps_the_rest_of_a_sql_statement()
+    {
+        Assert.Equal("{\"sql\":\"ALTER ROLE app PASSWORD '***'\",\"serverId\":\"local\"}",
+            SecretRedactor.Redact("{\"sql\":\"ALTER ROLE app PASSWORD 'canary-secret'\",\"serverId\":\"local\"}"));
+        Assert.Equal("SELECT name FROM users WHERE id = 1", SecretRedactor.Redact("SELECT name FROM users WHERE id = 1"));
+    }
+
     [Fact]
     public void Redact_hides_keyed_secrets()
     {

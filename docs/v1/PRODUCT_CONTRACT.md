@@ -136,8 +136,8 @@ INV-48 (audit after the fact, fail-open), INV-49 (no tamper evidence). Rows belo
 Common to all M rows since WP2 step 2.1: Actor = API key or web user · AuthN ✅ (Bearer / cookie) · AuthZ ✅ in the
 Mutation Gateway: catalog level, tool switch and stricter stored level for every principal (INV-15), `AllowedTools`
 cannot widen (INV-16); the scope check inside the tool still runs · Target: containers resolved before policy
-(INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26), but protected resources still match the
-raw argument (INV-24) · Approval ✅ approve-then-retry bound to principal, credential, capability, normalized
+(INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26); protected resources and the built-in
+control plane are matched against the resolved target and the words of free text (INV-24/59 ✅ since R1-16) · Approval ✅ approve-then-retry bound to principal, credential, capability, normalized
 arguments, resolved target and policy version, single use, persisted (INV-30/31/35 ✅ since R1-14); never decided by
 its requester, expiry and approver level checked at decision time (INV-32–34/37 ✅ since R1-15) · Execution = inside the gateway scope with a deadline · Audit: one gateway AuditLog row (decision,
 approval, intent, outcome) **plus** the tool's own row shown in the Audit column below (INV-45 ⚠️ two rows). A
@@ -147,13 +147,13 @@ mutating tools do for their own error texts).
 | ID | Tool | Level | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
 | M-01 | `start_container` | write | ❌ | AL ✅ | INV-43 |
-| M-02 | `stop_container` | write | ❌ | AL ✅ | INV-43, 59 |
-| M-03 | `restart_container` | write | ❌ | AL ✅ | INV-43, 59 |
+| M-02 | `stop_container` | write | ❌ | AL ✅ | INV-43 |
+| M-03 | `restart_container` | write | ❌ | AL ✅ | INV-43 |
 | M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | AL ✅ | INV-43, 44, 53 |
-| M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43, 24 (YAML free text) |
+| M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43 (volumes checked since R1-16) |
 | M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | AL ✅ | INV-43, 51 |
-| M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43, 24 |
-| M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text), 43 |
+| M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43 (plan incl. mounts decided since R1-16) |
+| M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
 | M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
 | M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
 | M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ⚠️ `nginx -t` pre-check | AL ✅ | 41 (E-03) |
@@ -203,7 +203,7 @@ mutating tools do for their own error texts).
 |---|---|---|---|---|---|---|---|---|---|---|
 | S-01 | Scheduler cron (incl. custom root command, prune, retention `rm -f`) | Automation on behalf of `CreatedBy` (since WP2 step 2.3; typed owner id and `CreatedVia` provenance since R1-03); ownerless tasks refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies; agent-created tasks keep agent rules | n/a | ✅ owner re-checked per run; ⚠️ grace period | ✅ PC-D1 rules (kill switch, protected) | none (owner approved by scheduling); a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `TaskExecutor` (incl. self-backup and retention deletes); key-owned tasks keep the key's rules | ❌ | ✅ gateway AL + `TaskRunHistory` | INV-04 (grace), 43, 45 |
 | S-02 | AutoUpdate | Automation on behalf of the feature owner (Settings); ownerless refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies | n/a | ✅ re-checked per update; ⚠️ grace period (opt-in) | ✅ PC-D1 rules | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `RecreateContainerAsync` | ⚠️ 15 s state check, no rollback | ✅ gateway AL + `UpdateHistory` | INV-04 (grace), 44, 45, 59 |
-| S-03 | AutoPatch nightly | Automation on behalf of the Admin who took it over; **no owner → no run**; authority loss (also mid-cycle) suspends + notifies (R1-04) | n/a | ✅ config opt-in + owner re-checked per cycle | ✅ PC-D1 rules for the cycle; own exclude list per container | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway (`autopatch.run` per night + `container.update` per container) → `img-update.sh` as root | ✅ script verify + rollback | ✅ gateway AL + notification | INV-24, 45, 59 |
+| S-03 | AutoPatch nightly | Automation on behalf of the Admin who took it over; **no owner → no run**; authority loss (also mid-cycle) suspends + notifies (R1-04) | n/a | ✅ config opt-in + owner re-checked per cycle | ✅ PC-D1 rules for the cycle; own exclude list per container | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway (`autopatch.run` per night + `container.update` per container) → `img-update.sh` as root | ✅ script verify + rollback | ✅ gateway AL + notification | INV-45 |
 | S-04 | Webhook `POST /api/webhooks/{id}` | Automation on behalf of the webhook owner (R1-09); ownerless or authority lost → refused, switched off + notified | ⚠️ HMAC, no replay protection | ✅ owner re-checked per delivery | ✅ PC-D1 rules (kill switch, protected, resolved target) | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → restart / recreate / compose up (each planned container decided) / Git deploy (then on the app owner) as root; server = the webhook's, or `local` (R1-06, same as the Test gate) | ❌ | ✅ gateway AL (every delivery) + `WebhookLogs` | INV-42, 45, 57 |
 | S-05 | Git deploy (via S-04 or U-29) | U-29: the person; S-04: the app owner (R1-08) | owner re-checked each run | ✅ gateway (stored app, revision; S-04 via automation runner) | ❌ | ❌ | clone + compose up of the decided snapshot (planned, explicit `-p` / `-f`; every planned container decided — R1-07/08) | ❌ | ✅ gateway | INV-04, 20, 24, 41 (branch), 45 |
 | S-06 | Health / log / CVE / cert monitors | system | — | — | — | — | no direct mutation; emits events → A-03 | — | — | INV-27 (event text → prompt) |
@@ -224,17 +224,18 @@ Common to all U rows: Actor = Human (cookie) · AuthN ✅ · AuthZ = `Require(ro
 circuit (INV-09), **and** since WP2 step 2.2 the Mutation Gateway for every marked capability (`IUiMutationRunner`):
 catalog level, tool switch and stricter stored level (INV-15), container target resolved (INV-57) · Policy ✅ for
 humans under PC-D1: kill switch and protected resources (INV-21, 24) — tool lists, argument patterns and
-confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1 · Execution = inside the gateway
+confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1, except an Admin's action on a
+protected resource or Whiskers' control plane, which needs an Admin approval (INV-59, R1-16) · Execution = inside the gateway
 scope with a deadline · Audit: the gateway row plus the page's own row. **Not through the gateway yet:** the
 Kubernetes branch of U-01, and the unmarked actions of U-06, U-08, U-14 (UFW status is), U-20, U-21, U-25.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
-| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | AL ✅ | INV-43, 59 |
-| U-02 | Dashboard remove (force) | Admin | ❌ | AL ✅ | INV-43, 59 |
+| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | AL ✅ | INV-43 |
+| U-02 | Dashboard remove (force) | Admin | ❌ | AL ✅ | INV-43 |
 | U-03 | Dashboard update | Operator | ❌ | AL ✅ | INV-43, 53 |
 | U-04 | Dashboard rollback | Operator | ❌ | AL ✅ | INV-43, 53 |
-| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | AL ✅ | INV-43, 59 |
+| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | AL ✅ | INV-43 |
 | U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | AL ✅ | INV-51 |
 | U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | ❌ | gateway row | INV-45 |
 | U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | ❌ | INV-45 |

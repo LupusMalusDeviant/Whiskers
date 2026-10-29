@@ -30,25 +30,38 @@ public static class ComposeImpact
         ArgumentNullException.ThrowIfNull(deployment);
         var plan = await planner.PlanAsync(deployment);
         return await runner.RunAsync(capabilityId, arguments,
-            _ => runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
+            _ => runner.RunMountsAsync(plan, () => runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
             {
                 var current = await planner.PlanAsync(deployment);
                 current.EnsureDecided(MutationScope.Current);
                 var r = await executor.ExecuteAsync(current.ServerId, current.DeployScript(pull), TimeSpan.FromMinutes(5));
                 if (!r.Success) MutationScope.Fail("docker compose failed.");
                 return r;
-            }));
+            })));
     }
+
+    /// <summary>The capability a plan's mounts are decided under (R1-16): a deployment on the server, which sees every
+    /// mounted path and volume as something it touches.</summary>
+    public const string MountsCapability = "compose.deploy";
+
+    /// <summary>Decides the plan's mounts (if any) before <paramref name="action"/>, so a mount of the Docker socket
+    /// or of Whiskers' data is decided like a protected container.</summary>
+    public static Task<T> RunMountsAsync<T>(this IUiMutationRunner runner, ComposePlan plan, Func<Task<T>> action) =>
+        plan.Mounts() is { Count: > 0 } mounts
+            ? runner.RunAsync(MountsCapability, new { serverId = plan.ServerId, mounts = string.Join('\n', mounts) },
+                _ => action())
+            : action();
 
     /// <summary>A <see cref="ComposePlanGate"/> that decides each container of the plan under
     /// <paramref name="capabilityId"/> (nested), then runs the deployment, which plans again and checks the result
     /// against these decisions (<see cref="ComposePlan.EnsureDecided"/>).</summary>
     public static ComposePlanGate GateFor(this IUiMutationRunner runner, string capabilityId) =>
-        (plan, proceed) => runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
-        {
-            await proceed();
-            return true;
-        });
+        (plan, proceed) => runner.RunMountsAsync(plan, () => runner.RunForEachAsync(capabilityId, plan.Containers,
+            plan.ServerId, async () =>
+            {
+                await proceed();
+                return true;
+            }));
 
     /// <summary>
     /// A <see cref="ComposePlanGate"/> for a deployment without a person at the keyboard (R1-08): each container of
@@ -59,7 +72,22 @@ public static class ComposeImpact
     {
         ArgumentNullException.ThrowIfNull(runner);
         ArgumentNullException.ThrowIfNull(actor);
-        return (plan, proceed) => NextAutomated(runner, actor, capabilityId, plan, proceed, 0);
+        return async (plan, proceed) =>
+        {
+            if (plan.Mounts() is not { Count: > 0 } mounts)
+            {
+                await NextAutomated(runner, actor, capabilityId, plan, proceed, 0);
+                return;
+            }
+            var outcome = await runner.RunAsync(actor, MountsCapability,
+                new { serverId = plan.ServerId, mounts = string.Join('\n', mounts) },
+                _ => NextAutomated(runner, actor, capabilityId, plan, proceed, 0));
+            if (outcome.Error is { } error)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+            if (outcome.Status != MutationStatus.Executed)
+                throw new MutationRefusedException(outcome.Reason ?? "The deployment's mounts were not allowed.",
+                    outcome.Status, outcome.OperationId);
+        };
     }
 
     private static async Task NextAutomated(IAutomationMutationRunner runner, AutomationActor actor, string capabilityId,

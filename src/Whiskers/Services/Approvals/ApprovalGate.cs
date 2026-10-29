@@ -39,6 +39,11 @@ public sealed record ApprovalSubject(
     /// the approval unless the request is interactive (<see cref="ApprovalEligibility"/>).</summary>
     public IReadOnlyList<string> Requesters { get; init; } = Array.Empty<string>();
 
+    /// <summary>Keep free-text payloads (SQL, a command, a compose file) off the stored card, showing their length
+    /// only (R1-16): a person in the UI typed them — they can carry credentials in any syntax — and the approval row is
+    /// kept like an audit row.</summary>
+    public bool WithholdPayloads { get; init; }
+
     /// <summary>The target as the gateway resolved it (R1-15). Shown on the card; without it the card falls back to
     /// the arguments.</summary>
     public string? TargetServer { get; init; }
@@ -204,7 +209,9 @@ public sealed class ApprovalGate : IApprovalGate
     private Task<Approval> RaiseAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
         string argumentsHash, CancellationToken ct)
     {
-        var argsJson = JsonSerializer.Serialize(subject.Arguments);
+        var argsJson = subject.WithholdPayloads
+            ? JsonSerializer.Serialize(Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloads(subject.Arguments))
+            : JsonSerializer.Serialize(subject.Arguments);
         var resolved = subject.TargetServer is not null || subject.TargetWorkload is not null;
         var (server, workload) = resolved
             ? (subject.TargetServer, subject.TargetWorkload)
@@ -216,8 +223,11 @@ public sealed class ApprovalGate : IApprovalGate
             ActorType: subject.ActorType,
             ToolName: subject.ToolName,
             Level: subject.Level,
-            ParamsJson: Cap(SecretRedactor.Redact(argsJson), MaxParamChars),
-            Reason: reason,
+            ParamsJson: Cap(SecretRedactor.RedactJson(argsJson), MaxParamChars),
+            // A reason may quote what the caller sent; a UI payload never reaches the stored card (R1-16).
+            Reason: subject.WithholdPayloads
+                ? Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloadValues(reason, subject.Arguments) ?? reason
+                : reason,
             CorrelationId: subject.OperationId,
             RiskLevel: ApprovalDisplay.RiskOf(subject.Level),
             TargetServer: server,

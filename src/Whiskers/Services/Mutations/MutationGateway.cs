@@ -349,7 +349,7 @@ public sealed class MutationGateway : IMutationGateway
                     with { MatchedRules = decision.MatchedRules };
             try
             {
-                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId, decision.Policy),
+                approval = await _approvals.CheckAsync(ApprovalSubjectOf(request, capability, callerOperationId, decision.Policy, decision.MatchedRules),
                     decision.Reason, decision.MatchedRules, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -359,8 +359,18 @@ public sealed class MutationGateway : IMutationGateway
                     "The approval could not be checked; the mutation was refused.", ct);
             }
             if (!approval.Approved)
-                return await RefuseAsync<T>(operationId, request, capability, MutationStatus.PendingApproval,
+            {
+                var pending = await RefuseAsync<T>(operationId, request, capability, MutationStatus.PendingApproval,
                     approval.Message, ct, approval.ApprovalId) with { MatchedRules = decision.MatchedRules };
+                // INV-59 (R1-16): say in the person's language that an Admin must approve it on the Approvals page.
+                return decision.MatchedRules.Contains(Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId)
+                    ? pending with
+                    {
+                        ReasonCode = MutationReasonCodes.ProtectedNeedsAdminApproval,
+                        ReasonArgs = [approval.ApprovalId ?? "?"],
+                    }
+                    : pending;
+            }
         }
 
         // 5: no intent record, no mutation (PC-D5).
@@ -492,7 +502,7 @@ public sealed class MutationGateway : IMutationGateway
     }
 
     private static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? callerOperationId,
-        PolicySnapshot? policy)
+        PolicySnapshot? policy, IReadOnlyList<string>? matchedRules = null)
     {
         var decisionPreset = policy?.Preset;
         var p = request.Principal;
@@ -511,7 +521,11 @@ public sealed class MutationGateway : IMutationGateway
             },
             _ => request.Surface.ToString().ToLowerInvariant(),
         };
-        return new ApprovalSubject(capability.McpTool ?? capability.Id, capability.RequiredLevel, actorKey,
+        // INV-59 (R1-16): touching a protected resource is the interactive Admin's exception — only an Admin approves it.
+        var level = matchedRules?.Contains(Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId) == true
+            ? McpPermissionLevels.Admin
+            : capability.RequiredLevel;
+        return new ApprovalSubject(capability.McpTool ?? capability.Id, level, actorKey,
             p.DisplayName, actorType, request.Arguments, callerOperationId, request.SessionId)
         {
             DecisionId = request.DecisionId,
@@ -521,6 +535,7 @@ public sealed class MutationGateway : IMutationGateway
             Binding = ApprovalBinding.Of(request, capability, policy?.VersionHash),
             // R1-15: the caller and everyone it acts for; none of them decides a non-interactive request.
             Requesters = ApprovalEligibility.RequestersOf(p),
+            WithholdPayloads = request.Surface == MutationSurface.Ui,
             // The card shows only a target found in the inventory; the notification only its kind and inventory id.
             TargetServer = ApprovalDisplay.NotifiableTarget(request.Target).Server,
             TargetWorkload = ApprovalDisplay.NotifiableTarget(request.Target).Resource,
