@@ -764,7 +764,9 @@ public class WebhookService : IWebhookService
                     async token =>
                     {
                         EnsureOwned(webhook);
-                        if (app is null) throw Unresolved(error!);
+                        // An app this run found no server for (missing when the run took its lock, maybe saved since)
+                        // is refused: the run holds no server it could deploy on.
+                        if (app is null || target.Revision is null) throw Unresolved(error ?? "Git deploy app not found.");
                         // Only the app at the revision whose server this run holds: an app saved since (moved to
                         // another server) is refused, its next delivery takes the new server.
                         var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(gitDeploy, automation,

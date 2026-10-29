@@ -570,6 +570,31 @@ public sealed class WebhookMutationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_git_webhook_whose_app_was_missing_when_it_took_its_lock_does_not_deploy_an_app_saved_since()
+    {
+        var webhook = Seed("git-deploy", AppId);
+        await _git.DeleteAppAsync(AppId);
+        _host.Executed.Clear();
+        var service = Service();
+        // The run finds no app: it locks the app's id and waits for it.
+        var held = await _locks.AcquireAsync("git:" + AppId);
+
+        var test = service.TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        // Saved again meanwhile: the run holds no server for it.
+        await _git.SaveAppAsync(new GitDeployApp
+        {
+            Id = AppId, Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
+        }, token: null, AdminId);
+        held.Dispose();
+
+        var (success, _) = await test;
+        Assert.False(success);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains("git "));
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
     public async Task A_git_deployment_of_an_app_saved_after_the_delivery_got_its_server_is_refused()
     {
         var revision = (await _git.GetAppAsync(AppId))!.Revision;
