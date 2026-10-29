@@ -46,6 +46,7 @@ public sealed class WebhookReplayTests : IDisposable
     public void Dispose()
     {
         _faults.Unlock();
+        _runner.Unblock();
         _runner.Release();
         _sp.Dispose();
         try { File.Delete(_dbPath); } catch (IOException) { }
@@ -662,6 +663,26 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(0, _runner.Runs);
     }
 
+    [Fact]
+    public async Task Synchronous_work_before_the_action_returns_does_not_hold_a_worker_past_its_deadline()
+    {
+        _options.MaxConcurrentRuns = 1;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service(text: new KeyLocalizer());
+        _runner.BlockSynchronously = true;
+
+        // The run is past its time while its owner's authority is still being looked up: it is handed over (it
+        // keeps its server) and the worker comes back.
+        var (success, output) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(success);
+        Assert.Equal("[Webhook_Run_Overdue]", output);
+        Assert.Equal(1, service.LockedResources);
+        _runner.Unblock();
+        await WaitFor(() => service.LockedResources == 0);
+    }
+
     private static async Task<WebhookAcceptance> Eventually(Func<Task<WebhookAcceptance>> attempt,
         Func<WebhookAcceptance, bool> done)
     {
@@ -1072,6 +1093,11 @@ public sealed class WebhookReplayTests : IDisposable
         public TimeSpan Delay { get; set; }
         /// <summary>Every run is cancelled before its action.</summary>
         public bool Cancel { get; set; }
+        /// <summary>Blocks the calling thread before the run returns a task (synchronous work — an owner lookup in a
+        /// locked database) until <see cref="Unblock"/>.</summary>
+        public bool BlockSynchronously { get; set; }
+        private readonly ManualResetEventSlim _unblock = new(false);
+        public void Unblock() => _unblock.Set();
         /// <summary>Every run ends as the gateway reports a cancelled action: failed, with the cancellation.</summary>
         public bool CancelLikeGateway { get; set; }
         public int Runs => Volatile.Read(ref _runs);
@@ -1111,6 +1137,7 @@ public sealed class WebhookReplayTests : IDisposable
         public async Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
         {
+            if (BlockSynchronously) _unblock.Wait();
             if (Cancel) throw new OperationCanceledException("cancelled");
             if (CancelLikeGateway)
                 return new MutationOutcome<T>(actor.OperationId ?? "op", MutationStatus.Failed, default, "cancelled",

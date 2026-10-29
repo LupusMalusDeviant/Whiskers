@@ -353,7 +353,9 @@ public class WebhookService : IWebhookService
 
             _logger.LogInformation("Webhook triggered: {Name} ({Action} on {Target}), run {RunId}",
                 webhook.Name, webhook.Action, webhook.TargetId, run.RunId);
-            var work = RunAsOwnerAsync(webhook, run.RunId, target, ct);
+            // Started on the thread pool: the owner's authority and the gateway may do synchronous work (an
+            // account lookup in SQLite) before they return a task — the deadline must already be watching then.
+            var work = Task.Run(() => RunAsOwnerAsync(webhook, run.RunId, target, ct), CancellationToken.None);
             if (!await Finished(work, ct))
             {
                 if (!_overdue.Wait(0))

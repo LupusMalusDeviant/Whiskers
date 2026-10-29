@@ -34,7 +34,8 @@ the action gets exactly what was found then (a compose deployment whose project 
 refused). The webhook is read again once the run holds its resource: switched off, removed or
 pointed elsewhere meanwhile → refused; taken over → it runs on the new owner. `RunTimeout` bounds the run: a run that
 cannot get its resource in time fails; lookups are abandoned at the deadline (they only read); the run's database work
-(its reads and its start) runs on the thread pool and is waited for only until the deadline — SQLite executes commands
+(its reads and its start) and the action's own start (the owner's authority is looked up synchronously) run on the
+thread pool and are waited for only until the deadline — SQLite executes commands
 synchronously and does not cancel them — so a locked database never holds a worker past it: the run is given up
 (taken over by its next delivery), and a start that still lands later is recorded as failed (it never runs). Recording
 its outcome (only under the run's own claim, so a run a later delivery took over is never touched) and the hourly
