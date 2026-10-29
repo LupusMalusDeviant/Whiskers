@@ -36,7 +36,7 @@ public sealed class WebhookReplayTests : IDisposable
     public WebhookReplayTests()
     {
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}").AddInterceptors(_faults));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False").AddInterceptors(_faults));
         services.AddSingleton<IAutomationMutationRunner>(_runner);
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
@@ -47,7 +47,6 @@ public sealed class WebhookReplayTests : IDisposable
     {
         _runner.Release();
         _sp.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { File.Delete(_dbPath); } catch (IOException) { }
     }
 
@@ -336,6 +335,30 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(1, _runner.MaxConcurrent);
         // Each acted on the container it held the lock for: the replacement, once it was the one there.
         Assert.Equal(["aaa111bbb222ccc333", "ddd444eee555fff666", "ddd444eee555fff666"], _runner.ContainerIds);
+        await WaitFor(() => service.LockedResources == 0);
+    }
+
+    [Fact]
+    public async Task A_deployment_never_overlaps_a_container_action_on_its_server_even_an_overdue_one()
+    {
+        _options.MaxConcurrentRuns = 4;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(400);
+        var docker = new FakeDocker(new ContainerInfo { Id = "aaa111bbb222ccc333", Name = "shop-web-1", ServerId = "local" });
+        var rebuild = Seed(WebhookSignatures.Whiskers, target: "shop-web-1");
+        var deploy = Seed(WebhookSignatures.Whiskers, target: "/opt/shop");
+        Update(deploy.WebhookId, w => w.Action = "deploy");
+        var service = Service(docker, planner: new ProjectPlanner("shop"));
+        _runner.Hold();
+
+        // The rebuild does not stop at its time limit: it keeps the server's containers until it ends.
+        var first = await service.AcceptAsync(rebuild.WebhookId, Signed(rebuild, "delivery-0164"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var deployment = await service.AcceptAsync(deploy.WebhookId, Signed(deploy, "delivery-0165"));
+
+        Assert.Equal("Failed", (await Finished(deployment.RunId!)).State);   // it never got its turn
+        Assert.Equal(1, _runner.Runs);
+        _runner.Release();
+        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
         await WaitFor(() => service.LockedResources == 0);
     }
 

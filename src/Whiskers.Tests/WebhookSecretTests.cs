@@ -22,7 +22,7 @@ public sealed class WebhookSecretTests : IDisposable
     public WebhookSecretTests()
     {
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False"));
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
         scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
@@ -31,8 +31,7 @@ public sealed class WebhookSecretTests : IDisposable
     public void Dispose()
     {
         _sp.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        try { File.Delete(_dbPath); } catch (IOException) { /* a detached retention pass may still hold it */ }
     }
 
     /// <summary>Service under test. Docker/executor stay null — every covered path returns before
@@ -166,7 +165,7 @@ public sealed class WebhookSecretTests : IDisposable
 
         var notify = new RecordingNotificationService();
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False"));
         services.AddSingleton<INotificationService>(notify);
         using var sp = services.BuildServiceProvider();
 
@@ -187,7 +186,7 @@ public sealed class WebhookSecretTests : IDisposable
         Seed(secret: "s3cret", enabled: true);
         var notify = new RecordingNotificationService();
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False"));
         services.AddSingleton<INotificationService>(notify);
         using var sp = services.BuildServiceProvider();
 

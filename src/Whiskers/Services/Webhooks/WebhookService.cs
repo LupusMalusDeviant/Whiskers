@@ -301,6 +301,10 @@ public class WebhookService : IWebhookService
                 try
                 {
                     gate = await _locks.AcquireAsync(target.Key, ct);
+                    // A deployment recreates and removes containers: it holds its server's containers too, after its
+                    // project (the one order everywhere). It is planned again below, after both waits.
+                    if (target.Plan is { } planned)
+                        gate = ResourceLocks.Both(gate, await _locks.AcquireAsync(ResourceLocks.Containers(planned.ServerId), ct));
                 }
                 catch (OperationCanceledException)
                 {
@@ -548,7 +552,7 @@ public class WebhookService : IWebhookService
             {
                 var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
                 return container is not null
-                    ? new RunTarget($"containers:{server}", container)
+                    ? new RunTarget(ResourceLocks.Containers(server), container)
                     : new RunTarget($"container:{server}|{webhook.TargetId}", Error: error);
             }
             default:

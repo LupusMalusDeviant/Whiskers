@@ -51,6 +51,9 @@ public class GitDeployService : IGitDeployService
             var lease = await _locks.AcquireAsync(key, ct);
             try
             {
+                // Its server's containers too, after the project (the one order everywhere): no webhook restart or
+                // rebuild acts on a container this deployment recreates or removes. Planned again after both waits.
+                lease = ResourceLocks.Both(lease, await _locks.AcquireAsync(ResourceLocks.Containers(plan.ServerId), ct));
                 plan = await _planner.PlanAsync(deployment, ct);
             }
             catch

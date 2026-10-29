@@ -29,7 +29,9 @@ a rebuild starts the replacement under a new id and renames the old container be
 container throughout —, a compose deployment by its planned project on its server — compose's own identity, so a symlinked directory
 or another directory declaring the same project is one lock —, a Git app by its id), so runs on one resource never
 overlap whichever webhook fires them. The locks are the process-wide `ResourceLocks` (reference-counted: a lock nothing holds or awaits is not kept), shared with Git deployments, which hold their compose project's lock while
-they build and run `up`. A container or plan is resolved again once its lock is held, and the action acts on what it finds then; if a plan now
+they build and run `up`. A deployment (compose webhook or Git) also holds its server's containers, taken after its
+project's lock (one order everywhere) and planned again after both waits, so no restart or rebuild acts on a container
+it recreates or removes. A container or plan is resolved again once its lock is held, and the action acts on what it finds then; if a plan now
 names another project (the compose file changed it), the run
 waits for that lock instead, and the action gets exactly the container or plan it locked (a compose deployment whose
 project changes again before it writes is refused). The webhook is read again once the run holds its resource: switched off, removed or

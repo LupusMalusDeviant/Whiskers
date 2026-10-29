@@ -72,7 +72,7 @@ public sealed class WebhookMutationTests : IDisposable
         }, token: null, AdminId).GetAwaiter().GetResult();
 
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False"));
         services.AddSingleton<IAutomationMutationRunner>(_ => Automation());
         services.AddSingleton<INotificationService>(_notify);
         services.AddSingleton<IGitDeployService>(_git);
@@ -436,6 +436,26 @@ public sealed class WebhookMutationTests : IDisposable
         var (success, output) = await test;
         Assert.True(success, output);
         Assert.True(Ran("git-deploy"));
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Theory]
+    [InlineData("git-deploy", AppId)]
+    [InlineData("deploy", "/opt/shop")]
+    public async Task A_deployment_waits_while_a_container_action_holds_its_server(string action, string target)
+    {
+        var webhook = Seed(action, target);
+        // A webhook restart or rebuild on the server is running.
+        var held = await _locks.AcquireAsync(ResourceLocks.Containers("local"));
+
+        var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        Assert.False(Ran(action));
+
+        held.Dispose();
+        var (success, output) = await test;
+        Assert.True(success, output);
+        Assert.True(Ran(action));
         Assert.Equal(0, _locks.Count);
     }
 
@@ -826,7 +846,6 @@ public sealed class WebhookMutationTests : IDisposable
     public void Dispose()
     {
         _sp.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { File.Delete(_dbPath); } catch { /* temp file */ }
         try { Directory.Delete(_root, recursive: true); } catch { /* temp dir */ }
     }
