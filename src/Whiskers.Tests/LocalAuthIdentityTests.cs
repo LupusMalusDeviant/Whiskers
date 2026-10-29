@@ -188,17 +188,18 @@ public sealed class LocalAuthIdentityTests : IDisposable
             new("WHISKERS_ADMIN_PASSWORD_FILE", pwFile),
         };
         // Lean boot: every feature module off (Core carries the auth + login surface).
-        foreach (var m in ModuleCatalog.DiscoverEnabled(new ConfigurationBuilder().Build()).Where(m => m.Id != "all-in-one"))
-            config.Add(new($"Features:{m.Id}:Enabled", "false"));
+        config.AddRange(BootSettings.OnlyCore());
 
         try
         {
+            using var bootSettings = BootSettings.Apply(config);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Development");
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(config));
             });
             using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            BootSettings.AssertBoot(factory.Services, config);
 
             // 1. GET /login → the antiforgery token is rendered (proves it works under interactive render) + the
             //    antiforgery cookie is set (carried by the client's CookieContainer).

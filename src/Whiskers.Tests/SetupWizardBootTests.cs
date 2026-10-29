@@ -27,17 +27,18 @@ public sealed class SetupWizardBootTests
         Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
 
         var config = new List<KeyValuePair<string, string?>>();
-        foreach (var m in ModuleCatalog.DiscoverEnabled(new ConfigurationBuilder().Build()).Where(m => m.Id != "all-in-one"))
-            config.Add(new($"Features:{m.Id}:Enabled", "false"));   // lean boot
+        config.AddRange(BootSettings.OnlyCore());   // lean boot
         config.AddRange(extra);
         try
         {
+            using var bootSettings = BootSettings.Apply(config);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Development");
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(config));
             });
             using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            BootSettings.AssertBoot(factory.Services, config);
             await body(client);
         }
         finally

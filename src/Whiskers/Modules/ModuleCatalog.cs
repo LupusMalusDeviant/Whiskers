@@ -8,8 +8,9 @@ namespace Whiskers.Modules;
 /// one PR at a time, shrinking <see cref="AllInOnePseudoModule"/> as they go.</summary>
 public static class ModuleCatalog
 {
-    /// <summary>Every module the app knows about, in a deterministic order.</summary>
-    private static IReadOnlyList<IWhiskersModule> All() => new IWhiskersModule[]
+    /// <summary>Every module the app knows about, in a deterministic order. Internal for the boot tests, which check
+    /// the complete module set a boot ended up with.</summary>
+    internal static IReadOnlyList<IWhiskersModule> All() => new IWhiskersModule[]
     {
         new AllInOnePseudoModule(),
         new Terminal.TerminalModule(),

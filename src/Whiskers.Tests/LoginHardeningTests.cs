@@ -97,17 +97,18 @@ public sealed class LoginHardeningTests
             new("WHISKERS_ADMIN_EMAIL", Email),
             new("WHISKERS_ADMIN_PASSWORD_FILE", pwFile),
         };
-        foreach (var m in ModuleCatalog.DiscoverEnabled(new ConfigurationBuilder().Build()).Where(m => m.Id != "all-in-one"))
-            config.Add(new($"Features:{m.Id}:Enabled", "false"));
+        config.AddRange(BootSettings.OnlyCore());
 
         try
         {
+            using var bootSettings = BootSettings.Apply(config);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Development");
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(config));
             });
             using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            BootSettings.AssertBoot(factory.Services, config);
             await body(factory, client);
         }
         finally

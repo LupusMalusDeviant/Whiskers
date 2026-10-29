@@ -15,7 +15,9 @@ namespace Whiskers.Tests;
 [Collection("WebAppBoot")] // serialized: the boot needs the process-wide WHISKERS_DATA_DIR env var
 public class GuardrailModuleIndependenceTests
 {
-    private const string AgentFlag = "Features__agent__Enabled";
+    /// <summary>No login, and the agent module off. Both are read while Program sets up the builder.</summary>
+    private static readonly KeyValuePair<string, string?>[] Settings =
+        [.. BootSettings.AuthDisabled, new("Features:agent:Enabled", "false")];
 
     [Fact]
     public async Task Disabling_the_agent_module_leaves_direct_mcp_calls_guarded()
@@ -24,19 +26,15 @@ public class GuardrailModuleIndependenceTests
         Directory.CreateDirectory(dataDir);
         var previousDataDir = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
         Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
-        // Modules are discovered while Program runs, before the factory's in-memory config is layered in, so the
-        // switch has to be a real environment variable too.
-        var previousAgentFlag = Environment.GetEnvironmentVariable(AgentFlag);
-        Environment.SetEnvironmentVariable(AgentFlag, "false");
 
         try
         {
+            using var bootSettings = BootSettings.Apply(Settings);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>()
                 .WithWebHostBuilder(b =>
                 {
                     b.UseEnvironment("Development");
-                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(
-                        new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") }));
+                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(Settings));
                     b.ConfigureTestServices(s =>
                     {
                         s.AddSingleton<Whiskers.Services.Docker.IDockerService>(new FakeDocker(
@@ -48,6 +46,7 @@ public class GuardrailModuleIndependenceTests
                     });
                 });
             using var client = factory.CreateClient();
+            BootSettings.AssertBoot(factory.Services, Settings);
 
             // The policy services are core; the agent itself is gone.
             Assert.NotNull(factory.Services.GetService<IDirectMcpCallGuard>());
@@ -73,7 +72,6 @@ public class GuardrailModuleIndependenceTests
         finally
         {
             Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", previousDataDir);
-            Environment.SetEnvironmentVariable(AgentFlag, previousAgentFlag);
             try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }

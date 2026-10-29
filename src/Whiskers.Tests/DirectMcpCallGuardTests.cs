@@ -135,12 +135,12 @@ public class DirectMcpCallGuardWireTests
 
         try
         {
+            using var bootSettings = BootSettings.Apply(BootSettings.AuthDisabled);   // read eagerly by Program
             await using var factory = new WebApplicationFactory<Program>()
                 .WithWebHostBuilder(b =>
                 {
                     b.UseEnvironment("Development");
-                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(
-                        new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") }));
+                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(BootSettings.AuthDisabled));
                     // The gateway resolves the container before policy runs, so the containers must exist.
                     b.ConfigureTestServices(s =>
                     {
@@ -153,6 +153,7 @@ public class DirectMcpCallGuardWireTests
                     });
                 });
             using var client = factory.CreateClient();
+            BootSettings.AssertBoot(factory.Services, BootSettings.AuthDisabled);
             var session = await McpServedSurfaceTests.InitializeAsync(client);
 
             // Protected resource (safe default protects whiskers*) → denied before the tool runs.
