@@ -12,11 +12,12 @@ All notable changes to Whiskers are documented here. The format follows
   restart cut it off — does not run again: an operation that was running when Whiskers stopped stays "outcome
   unknown" and is never replayed blindly; the same id used for another principal, capability or arguments is
   refused. A call waiting for its approval claims nothing, so the approved retry runs once; a retry of an operation
-  that ran, runs or was cut off is refused as such before the approval gate, so it never raises another approval.
+  that ran, runs or was cut off is refused as such before the approval gate (also in the decision an agent session
+  asks for), so it never raises another approval.
   Only the claim that took the id can finish it or give it back (a claim token), so a retried release never frees a
   later claim. Decision, approval, execution, verification and audit carry the same id — also for an approve-then-retry
   call that names no id of its own (a direct MCP call): the retry continues the operation that raised the approval
-  (`IApprovalGate.OpenOperationOf`); a mutation nested in another one's execution gets an id of
+  (`IApprovalGate.OpenOperationOf`), and concurrent identical first calls share one id and one approval; a mutation nested in another one's execution gets an id of
   its own and keeps the link (`parentOperationId` in the audit row, `ParentId` in the journal). A journal that cannot
   be written refuses the mutation. The SQLite → PostgreSQL migrator rewrites an operation's `AuditId` to its audit
   row's new id. **Upgrade notes:** a new table, created on start; nothing to migrate by hand.

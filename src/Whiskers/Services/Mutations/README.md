@@ -162,9 +162,12 @@ registrations are wrapped too.
    mutations included) → **Denied** (`UnattendedConfirm`), before the approval gate and also for `DecideAsync`: nobody
    can confirm an unattended run, and no approval is raised (R1-01).
    Policy `Confirm` otherwise: an operation id the journal already holds (ran, running, cut off, other inputs) →
-   **Denied** with its reason code (step 7), before any approval is raised or used. A call without an operation id of
-   its own that retries an open approval for exactly this call takes that approval's operation id (R1-18), before the
-   decision is recorded — so the retry's decision, run and audit carry the first call's id. Then
+   **Denied** with its reason code (step 7), before any approval is raised or used — also for `DecideAsync`, so an
+   agent session never pauses for it (`MutationDecisionResult.ReasonCode`). A call without an operation id of its own
+   that retries an open approval for exactly this call takes that approval's operation id (R1-18), before the
+   decision is recorded — so the retry's decision, run and audit carry the first call's id. Choosing the id and the
+   approval gate's answer happen under one admission lock per binding (striped), so concurrent identical first calls
+   share one id and one approval. Then
    [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
    (the agent session's own approval for this operation, or approve-then-retry for a direct MCP call); otherwise
    **PendingApproval**.

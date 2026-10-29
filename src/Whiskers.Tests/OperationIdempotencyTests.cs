@@ -289,6 +289,62 @@ public sealed class OperationIdempotencyTests : IDisposable
     }
 
     [Fact]
+    public async Task Concurrent_first_calls_without_an_id_share_one_operation_and_one_approval()
+    {
+        _policy.RequireConfirmationForWrites = true;
+        var gateway = Gateway(NewJournal());
+        var call = Restart(null) with { Surface = MutationSurface.Mcp };
+
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => Run(gateway, call))));
+
+        Assert.All(outcomes, o => Assert.Equal(MutationStatus.PendingApproval, o.Status));
+        var id = Assert.Single(outcomes.Select(o => o.OperationId).Distinct());
+        var approvalId = Assert.Single(outcomes.Select(o => o.ApprovalId).Distinct());
+        Assert.Equal(id, _approvals.GetAll().Single(a => a.Id == approvalId).CorrelationId);
+        using var scope = _db.Scopes.CreateScope();
+        var decisions = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().PolicyDecisions.AsNoTracking()
+            .Select(d => d.OperationId).ToListAsync();
+        Assert.All(decisions, d => Assert.Equal(id, d));
+    }
+
+    [Theory]
+    [InlineData("running", MutationReasonCodes.OperationRunning)]
+    [InlineData("executed", MutationReasonCodes.OperationAlreadyRun)]
+    [InlineData("interrupted", MutationReasonCodes.OperationOutcomeUnknown)]
+    [InlineData("other-inputs", MutationReasonCodes.OperationIdReused)]
+    public async Task The_decision_for_a_known_operation_is_a_refusal_not_a_confirmation(string state, string code)
+    {
+        // The agent asks for the decision before it pauses for an approval: a known id must not get that far.
+        _policy.RequireConfirmationForWrites = true;
+        var journal = NewJournal();
+        var request = Restart("op-d") with { Surface = MutationSurface.Mcp };
+        var hash = DbOperationJournal.InputHashOf(request);
+        var claim = new OperationClaimRequest("op-d", null, "container.restart", Admin.Id, hash, null, null, null);
+        switch (state)
+        {
+            case "running":
+                await journal.ClaimAsync(claim);
+                break;
+            case "executed":
+                var token = (await journal.ClaimAsync(claim)).Token!;
+                await journal.FinishAsync("op-d", token, MutationStatus.Executed, VerificationStatus.Verified);
+                break;
+            case "interrupted":
+                await NewJournal().ClaimAsync(claim);
+                break;
+            default:
+                await journal.ClaimAsync(claim with { InputHash = "other" });
+                break;
+        }
+
+        var decided = await Gateway(journal).DecideAsync(request);
+
+        Assert.Equal(MutationVerdict.Deny, decided!.Verdict);
+        Assert.Equal(code, decided.ReasonCode);
+        Assert.Empty(_approvals.GetAll());
+    }
+
+    [Fact]
     public async Task A_journal_that_cannot_be_written_refuses_the_call()
     {
         var gateway = Gateway(new BrokenJournal());
