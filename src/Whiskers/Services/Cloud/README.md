@@ -14,6 +14,7 @@ It resolves a Whiskers server's configured provider + per-server API key, finds 
 
 - **Weak-resolution warning:** the VM is matched by public IP; when that fails and only a name-match succeeds (common, since `SshHost` is often a mesh address ≠ the cloud public IP), the result carries a `Note` that power/reset responses surface with ⚠️ — so a destructive op on the wrong VM is visible.
 - **Hostinger has no hard reset:** `cloud_hard_reset` on a Hostinger VM triggers a graceful RESTART and says so explicitly (may be ineffective on a hung system); Hetzner does a real power-cycle.
+- **A failed action is a failure:** a Hetzner action answered with status `error` throws (with Hetzner's error message) instead of returning a message, so the gateway's event is Failed (R1-21); the Hostinger hard-reset fallback is noted in the event.
 
 ## Wiring
 

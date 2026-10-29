@@ -84,6 +84,8 @@ public sealed class HostingerCloudProvider : ICloudProvider
     {
         // Hostinger exposes no hard power-cycle — a graceful restart is the closest, but won't help a hung VM.
         await _hostinger.RestartAsync(token, target.CloudId, ct);
+        // What ran is not what was asked for: the audit event says so (R1-21).
+        Whiskers.Services.Mutations.MutationScope.Note("Hostinger has no hard reset: a restart was triggered instead.");
         return $"{target.Name} ({target.Provider}): no hard reset available — triggered a RESTART instead (may have no effect on a hung system).";
     }
 

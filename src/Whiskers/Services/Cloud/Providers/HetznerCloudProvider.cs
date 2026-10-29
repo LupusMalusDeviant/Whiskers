@@ -68,33 +68,42 @@ public sealed class HetznerCloudProvider : ICloudProvider, IHetznerExtensions
     // Actions — messages byte-identical to the former CloudControlService dispatch.
     public async Task<string> PowerOnAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
-        var a = await _hetzner.PowerOnAsync(token, target.CloudId, ct);
+        var a = Checked(await _hetzner.PowerOnAsync(token, target.CloudId, ct), target, "power on");
         return $"{target.Name} ({target.Provider}): power on. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> ShutdownAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
-        var a = await _hetzner.ShutdownAsync(token, target.CloudId, ct);
+        var a = Checked(await _hetzner.ShutdownAsync(token, target.CloudId, ct), target, "shut down");
         return $"{target.Name} ({target.Provider}): shut down. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> RebootAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
-        var a = await _hetzner.RebootAsync(token, target.CloudId, ct);
+        var a = Checked(await _hetzner.RebootAsync(token, target.CloudId, ct), target, "reboot");
         return $"{target.Name} ({target.Provider}): reboot. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> HardResetAsync(CloudServerInfo target, string token, CancellationToken ct = default)
     {
-        var a = await _hetzner.ResetAsync(token, target.CloudId, ct);
+        var a = Checked(await _hetzner.ResetAsync(token, target.CloudId, ct), target, "hard reset");
         return $"{target.Name} ({target.Provider}): hard reset. (Action: {a?.Status ?? "triggered"})";
     }
 
     public async Task<string> CreateSnapshotAsync(CloudServerInfo target, string token, string? description, CancellationToken ct = default)
     {
         var resp = await _hetzner.CreateSnapshotAsync(token, target.CloudId, description, ct);
+        Checked(resp?.Action, target, "snapshot");
         return $"{target.Name}: snapshot is being created (image #{resp?.Image?.Id}).";
     }
+
+    /// <summary>An action Hetzner answers with status <c>error</c> did not happen: it throws, so neither the audit
+    /// (R1-21) nor the caller reads the answer as success.</summary>
+    private static HetznerAction? Checked(HetznerAction? action, CloudServerInfo target, string verb) =>
+        string.Equals(action?.Status, "error", StringComparison.OrdinalIgnoreCase)
+            ? throw new InvalidOperationException(
+                $"{target.Name} ({target.Provider}): {verb} failed: {action!.Error?.Message ?? action.Error?.Code ?? "Hetzner reported an error"}.")
+            : action;
 
     public async Task<string> MetricsAsync(CloudServerInfo target, string token, string type, CancellationToken ct = default)
     {

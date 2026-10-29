@@ -516,7 +516,7 @@ public sealed class KillSwitchTests : IDisposable
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPool(dbPath);
             try { File.Delete(dbPath); } catch (IOException) { }
             try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { }
         }

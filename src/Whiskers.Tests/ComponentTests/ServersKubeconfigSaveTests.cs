@@ -235,6 +235,9 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
     {
         public Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,
             CancellationToken ct = default) => action(ct);
+        public Task RefuseAsync(string capabilityId, object arguments, string reason, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
         public Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,
             CancellationToken ct = default) => action(ct);
     }
