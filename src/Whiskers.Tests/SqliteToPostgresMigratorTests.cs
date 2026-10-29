@@ -214,6 +214,40 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal("corr-1", (await check.ActionOutcomes.SingleAsync()).CorrelationId);
     }
 
+    [Fact]
+    public async Task An_operation_keeps_naming_its_audit_row_after_the_ids_are_reassigned()
+    {
+        // R1-18: Operations.AuditId names an AuditLog row. The audit ids have gaps (retention), the target renumbers
+        // them — the operation must name the same row afterwards, and a row that is gone stays unnamed.
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.AuditLog.Add(new AuditLogEntity { Id = 17, Actor = "a", Action = "first" });
+            src.AuditLog.Add(new AuditLogEntity { Id = 41, Actor = "a", Action = "restart op-1" });
+            src.AuditLog.Add(new AuditLogEntity { Id = 90, Actor = "a", Action = "restart op-2" });
+            src.Operations.Add(new OperationRecordEntity { Id = "op-1", CapabilityId = "container.restart", PrincipalId = "p",
+                InputHash = "h", State = "Executed", Instance = "i/1", AuditId = 41, ClaimedAt = DateTime.UtcNow });
+            src.Operations.Add(new OperationRecordEntity { Id = "op-2", CapabilityId = "container.restart", PrincipalId = "p",
+                InputHash = "h", State = "Executed", Instance = "i/2", AuditId = 90, ClaimedAt = DateTime.UtcNow });
+            src.Operations.Add(new OperationRecordEntity { Id = "op-gone", CapabilityId = "container.restart", PrincipalId = "p",
+                InputHash = "h", State = "Executed", Instance = "i/3", AuditId = 5, ClaimedAt = DateTime.UtcNow });
+            await src.SaveChangesAsync();
+        }
+
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            Assert.Equal(0, await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null));
+
+        await using var check = NewDb(dstPath);
+        foreach (var (op, action) in new[] { ("op-1", "restart op-1"), ("op-2", "restart op-2") })
+        {
+            var auditId = (await check.Operations.SingleAsync(o => o.Id == op)).AuditId;
+            Assert.Equal(action, (await check.AuditLog.SingleAsync(a => a.Id == auditId)).Action);
+        }
+        Assert.Null((await check.Operations.SingleAsync(o => o.Id == "op-gone")).AuditId);
+    }
+
     private static WhiskersIdentityDbContext NewIdentityDb(string path)
     {
         // Metrics tables first: EnsureCreated does nothing on a file that already has (identity) tables.

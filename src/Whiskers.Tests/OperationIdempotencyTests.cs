@@ -134,8 +134,8 @@ public sealed class OperationIdempotencyTests : IDisposable
     {
         // The process that claimed it stopped before it finished (the row is still Running).
         var before = NewJournal();
-        Assert.Equal(OperationClaimResult.Claimed, await before.ClaimAsync(new OperationClaimRequest("op-r", null,
-            "container.restart", Admin.Id, DbOperationJournal.InputHashOf(Restart("op-r")), null, null, null)));
+        Assert.Equal(OperationClaimResult.Claimed, (await before.ClaimAsync(new OperationClaimRequest("op-r", null,
+            "container.restart", Admin.Id, DbOperationJournal.InputHashOf(Restart("op-r")), null, null, null))).Result);
 
         var afterRestart = Gateway(NewJournal());
         var retry = await Run(afterRestart, Restart("op-r"));
@@ -164,12 +164,35 @@ public sealed class OperationIdempotencyTests : IDisposable
     {
         var journal = NewJournal();
         var claim = new OperationClaimRequest("op-x", null, "container.restart", Admin.Id, "hash", null, null, null);
-        Assert.Equal(OperationClaimResult.Claimed, await journal.ClaimAsync(claim));
-        await journal.ReleaseAsync("op-x");
+        var first = await journal.ClaimAsync(claim);
+        Assert.Equal(OperationClaimResult.Claimed, first.Result);
+        await journal.ReleaseAsync("op-x", first.Token!);
 
         var again = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => journal.ClaimAsync(claim)));
 
-        Assert.Single(again, r => r == OperationClaimResult.Claimed);
+        Assert.Single(again, r => r.Result == OperationClaimResult.Claimed);
+    }
+
+    [Fact]
+    public async Task A_retried_release_never_frees_a_later_claim()
+    {
+        // A's release committed but its answer was lost; B took the id; A's release runs again (a provider retry).
+        var journal = NewJournal();
+        var claim = new OperationClaimRequest("op-t", null, "container.restart", Admin.Id, "hash", null, null, null);
+        var a = await journal.ClaimAsync(claim);
+        await journal.ReleaseAsync("op-t", a.Token!);
+        var b = await journal.ClaimAsync(claim);
+        Assert.Equal(OperationClaimResult.Claimed, b.Result);
+
+        await journal.ReleaseAsync("op-t", a.Token!);
+        await journal.FinishAsync("op-t", a.Token!, MutationStatus.Executed, VerificationStatus.Verified);
+
+        // B still holds it: nobody else can claim it, and only B finishes it.
+        Assert.Equal(OperationClaimResult.AlreadyRunning, (await journal.ClaimAsync(claim)).Result);
+        Assert.Equal("Running", (await Row("op-t"))!.State);
+        await journal.FinishAsync("op-t", b.Token!, MutationStatus.Executed, VerificationStatus.Verified);
+        Assert.Equal("Executed", (await Row("op-t"))!.State);
+        Assert.Equal(OperationClaimResult.AlreadyRun, (await journal.ClaimAsync(claim)).Result);
     }
 
     [Fact]
@@ -197,11 +220,72 @@ public sealed class OperationIdempotencyTests : IDisposable
         var ran = await Run(gateway, agent);
         Assert.Equal(MutationStatus.Executed, ran.Status);
 
-        // The same id once more: its approval is used up, so it does not run again.
+        // The same id once more: refused as an operation that ran — not sent back to the approval gate.
         var again = await Run(gateway, agent);
-        Assert.NotEqual(MutationStatus.Executed, again.Status);
+        Assert.Equal(MutationStatus.Denied, again.Status);
+        Assert.Equal(MutationReasonCodes.OperationAlreadyRun, again.ReasonCode);
+        Assert.Null(again.ApprovalId);
         Assert.Equal(1, _runs);
         Assert.Equal(asked.ApprovalId, (await Row("op-a"))!.ApprovalId);
+    }
+
+    [Fact]
+    public async Task An_interrupted_operation_needing_approval_is_reported_unknown_not_sent_for_approval()
+    {
+        _policy.RequireConfirmationForWrites = true;
+        var request = Restart("op-ia") with { Surface = MutationSurface.Mcp };
+        await NewJournal().ClaimAsync(new OperationClaimRequest("op-ia", null, "container.restart", Admin.Id,
+            DbOperationJournal.InputHashOf(request), null, null, null));
+
+        var retry = await Run(Gateway(NewJournal()), request);
+
+        Assert.Equal(MutationStatus.Denied, retry.Status);
+        Assert.Equal(MutationReasonCodes.OperationOutcomeUnknown, retry.ReasonCode);
+        Assert.Empty(_approvals.GetAll());
+        Assert.Equal(0, _runs);
+    }
+
+    [Fact]
+    public async Task Approve_then_retry_without_an_id_of_its_own_continues_one_operation()
+    {
+        // A direct MCP call names no operation id: the retry after the approval continues the operation that raised
+        // it — decision, approval, run, verification and audit under one id.
+        _policy.RequireConfirmationForWrites = true;
+        var verifier = new RecordingVerifier();
+        var gateway = Gateway(NewJournal(), verifier);
+        var call = Restart(null) with { Surface = MutationSurface.Mcp };
+
+        var asked = await Run(gateway, call);
+        Assert.Equal(MutationStatus.PendingApproval, asked.Status);
+        var id = asked.OperationId;
+        Assert.Equal(id, _approvals.GetAll().Single(a => a.Id == asked.ApprovalId).CorrelationId);
+
+        // Still pending: the same id again, nothing claimed.
+        Assert.Equal(id, (await Run(gateway, call)).OperationId);
+        Assert.Null(await Row(id));
+
+        Assert.Equal(ApprovalDecisionResult.Decided, await _approvals.DecideAsync(asked.ApprovalId!, true,
+            ApprovalResolver.User("other-admin@example.com", AppRole.Admin)));
+        var ran = await Run(gateway, call);
+
+        Assert.Equal(MutationStatus.Executed, ran.Status);
+        Assert.Equal(id, ran.OperationId);
+        Assert.Equal(id, verifier.OperationId);
+        var row = (await Row(id))!;
+        Assert.Equal(asked.ApprovalId, row.ApprovalId);
+        using (var scope = _db.Scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            Assert.Equal(id, (await db.PolicyDecisions.AsNoTracking().SingleAsync(d => d.Id == ran.DecisionId)).OperationId);
+            Assert.Equal(id, (await db.PolicyDecisions.AsNoTracking().SingleAsync(d => d.Id == asked.DecisionId)).OperationId);
+            Assert.Contains($"\"operationId\":\"{id}\"", (await db.AuditLog.AsNoTracking().SingleAsync(a => a.Id == row.AuditId)).Details);
+        }
+
+        // The approval is used: the next identical call is a new operation that asks again.
+        var next = await Run(gateway, call);
+        Assert.Equal(MutationStatus.PendingApproval, next.Status);
+        Assert.NotEqual(id, next.OperationId);
+        Assert.Equal(1, _runs);
     }
 
     [Fact]
@@ -285,10 +369,12 @@ public sealed class OperationIdempotencyTests : IDisposable
 
     private sealed class BrokenJournal : IOperationJournal
     {
-        public Task<OperationClaimResult> ClaimAsync(OperationClaimRequest claim, CancellationToken ct = default) =>
+        public Task<OperationClaim> ClaimAsync(OperationClaimRequest claim, CancellationToken ct = default) =>
             throw new IOException("database unavailable");
-        public Task FinishAsync(string operationId, MutationStatus status, VerificationStatus verification,
+        public Task<OperationClaimResult?> InspectAsync(string operationId, string inputHash, CancellationToken ct = default) =>
+            throw new IOException("database unavailable");
+        public Task FinishAsync(string operationId, string token, MutationStatus status, VerificationStatus verification,
             CancellationToken ct = default) => Task.CompletedTask;
-        public Task ReleaseAsync(string operationId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ReleaseAsync(string operationId, string token, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

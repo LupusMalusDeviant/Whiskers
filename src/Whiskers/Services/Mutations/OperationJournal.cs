@@ -31,6 +31,11 @@ public enum OperationClaimResult
     Mismatch,
 }
 
+/// <summary>The answer to a claim. <paramref name="Token"/> is set only when <see cref="OperationClaimResult.Claimed"/>:
+/// it names this one claim, and only it can finish or give the claim back — a retried release of an earlier claim
+/// never touches a later one.</summary>
+public sealed record OperationClaim(OperationClaimResult Result, string? Token = null);
+
 /// <summary>
 /// The execution claims of mutations (R1-18, INV-39): the gateway claims an operation id right before the mutation
 /// runs and records how it ended. A second attempt under the same id — a concurrent retry, a retry after it ran, a
@@ -39,13 +44,21 @@ public enum OperationClaimResult
 /// </summary>
 public interface IOperationJournal
 {
-    Task<OperationClaimResult> ClaimAsync(OperationClaimRequest claim, CancellationToken ct = default);
+    Task<OperationClaim> ClaimAsync(OperationClaimRequest claim, CancellationToken ct = default);
 
-    /// <summary>The claimed operation ended: <c>Executed</c> or <c>Failed</c>, with its verification.</summary>
-    Task FinishAsync(string operationId, MutationStatus status, VerificationStatus verification, CancellationToken ct = default);
+    /// <summary>Why <paramref name="operationId"/> could not run now, without claiming it; <c>null</c> when it is free
+    /// (unknown, or given back). The gateway asks before an approval is raised or used, so a duplicate is refused as
+    /// one instead of asking for another approval. The claim right before the run still decides.</summary>
+    Task<OperationClaimResult?> InspectAsync(string operationId, string inputHash, CancellationToken ct = default);
 
-    /// <summary>The claimed operation did not run (refused after the claim): the id is free again.</summary>
-    Task ReleaseAsync(string operationId, CancellationToken ct = default);
+    /// <summary>The claimed operation ended: <c>Executed</c> or <c>Failed</c>, with its verification. Only the claim
+    /// named by <paramref name="token"/> is finished.</summary>
+    Task FinishAsync(string operationId, string token, MutationStatus status, VerificationStatus verification,
+        CancellationToken ct = default);
+
+    /// <summary>The claimed operation did not run (refused after the claim): the id is free again. Only the claim
+    /// named by <paramref name="token"/> is given back.</summary>
+    Task ReleaseAsync(string operationId, string token, CancellationToken ct = default);
 }
 
 /// <summary>The journal in the Whiskers database (table <c>Operations</c>).</summary>
@@ -72,7 +85,7 @@ public sealed class DbOperationJournal : IOperationJournal
             request.Arguments.Where(a => !a.Key.StartsWith("__", StringComparison.Ordinal))
                 .ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal));
 
-    public async Task<OperationClaimResult> ClaimAsync(OperationClaimRequest claim, CancellationToken ct = default)
+    public async Task<OperationClaim> ClaimAsync(OperationClaimRequest claim, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(claim);
         // This claim's token: the process, and the claim itself — so a retried insert whose commit answer was lost
@@ -98,7 +111,7 @@ public sealed class DbOperationJournal : IOperationJournal
                 ClaimedAt = now,
             });
             await db.SaveChangesAsync(ct);
-            return OperationClaimResult.Claimed;
+            return new OperationClaim(OperationClaimResult.Claimed, token);
         }
         catch (DbUpdateException)
         {
@@ -108,23 +121,40 @@ public sealed class DbOperationJournal : IOperationJournal
 
         var existing = await db.Operations.AsNoTracking().SingleOrDefaultAsync(o => o.Id == claim.OperationId, ct)
                        ?? throw new InvalidOperationException("The operation could not be claimed.");
-        if (existing.InputHash != claim.InputHash) return OperationClaimResult.Mismatch;
-        if (existing.Instance == token) return OperationClaimResult.Claimed;
+        if (existing.Instance == token) return new OperationClaim(OperationClaimResult.Claimed, token);
+        if (Classify(existing, claim.InputHash) is { } refused) return new OperationClaim(refused);
+        // Given back before it ran: the id is free again, for exactly one of any concurrent claimers.
+        var taken = await db.Operations
+            .Where(o => o.Id == claim.OperationId && o.State == Released && o.InputHash == claim.InputHash)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.State, Running)
+                .SetProperty(o => o.Instance, token)
+                .SetProperty(o => o.ParentId, claim.ParentId)
+                .SetProperty(o => o.DecisionId, claim.DecisionId)
+                .SetProperty(o => o.ApprovalId, claim.ApprovalId)
+                .SetProperty(o => o.AuditId, claim.AuditId)
+                .SetProperty(o => o.ClaimedAt, now), ct);
+        return taken == 1
+            ? new OperationClaim(OperationClaimResult.Claimed, token)
+            : new OperationClaim(OperationClaimResult.AlreadyRunning);
+    }
+
+    public async Task<OperationClaimResult?> InspectAsync(string operationId, string inputHash, CancellationToken ct = default)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var existing = await db.Operations.AsNoTracking().SingleOrDefaultAsync(o => o.Id == operationId, ct);
+        return existing is null ? null : Classify(existing, inputHash);
+    }
+
+    /// <summary>Why an existing row keeps the id from running; <c>null</c> when it was given back.</summary>
+    private OperationClaimResult? Classify(OperationRecordEntity existing, string inputHash)
+    {
+        if (existing.InputHash != inputHash) return OperationClaimResult.Mismatch;
         switch (existing.State)
         {
             case Released:
-                // Given back before it ran: the id is free again, for exactly one of any concurrent claimers.
-                var taken = await db.Operations
-                    .Where(o => o.Id == claim.OperationId && o.State == Released && o.InputHash == claim.InputHash)
-                    .ExecuteUpdateAsync(s => s
-                        .SetProperty(o => o.State, Running)
-                        .SetProperty(o => o.Instance, token)
-                        .SetProperty(o => o.ParentId, claim.ParentId)
-                        .SetProperty(o => o.DecisionId, claim.DecisionId)
-                        .SetProperty(o => o.ApprovalId, claim.ApprovalId)
-                        .SetProperty(o => o.AuditId, claim.AuditId)
-                        .SetProperty(o => o.ClaimedAt, now), ct);
-                return taken == 1 ? OperationClaimResult.Claimed : OperationClaimResult.AlreadyRunning;
+                return null;
             case Running:
                 return existing.Instance.StartsWith(ProcessInstance + "/", StringComparison.Ordinal)
                     ? OperationClaimResult.AlreadyRunning
@@ -134,7 +164,7 @@ public sealed class DbOperationJournal : IOperationJournal
         }
     }
 
-    public async Task FinishAsync(string operationId, MutationStatus status, VerificationStatus verification,
+    public async Task FinishAsync(string operationId, string token, MutationStatus status, VerificationStatus verification,
         CancellationToken ct = default)
     {
         var state = status == MutationStatus.Executed ? Executed : Failed;
@@ -142,19 +172,21 @@ public sealed class DbOperationJournal : IOperationJournal
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         await db.Operations
-            .Where(o => o.Id == operationId && o.State == Running)
+            .Where(o => o.Id == operationId && o.Instance == token && o.State == Running)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.State, state)
                 .SetProperty(o => o.Verification, verification.ToString())
                 .SetProperty(o => o.FinishedAt, now), ct);
     }
 
-    public async Task ReleaseAsync(string operationId, CancellationToken ct = default)
+    public async Task ReleaseAsync(string operationId, string token, CancellationToken ct = default)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         await db.Operations
-            .Where(o => o.Id == operationId && o.State == Running)
+            // Conditional on this claim: a release retried after its first commit (a lost answer, a provider retry)
+            // finds the row taken by a later claim and leaves it alone.
+            .Where(o => o.Id == operationId && o.Instance == token && o.State == Running)
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.State, Released), ct);
     }
 }

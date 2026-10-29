@@ -19,7 +19,9 @@ their `Confirm` outright, since nobody could approve it and a later run of the s
 2. **Direct MCP call** (cannot wait): `ApprovalGate` raises an approval and refuses the call; once a human approved
    it, the identical call (same binding) runs once within ten minutes of the approval (approve-then-retry).
    Concurrent identical first calls share one approval (`IApprovalStore.FindOpen` under one lock). An approval that
-   was rejected, expired or used answers no retry, so the next call asks again.
+   was rejected, expired or used answers no retry, so the next call asks again. The approval keeps the operation id
+   of the call that raised it (`CorrelationId`); `OpenOperationOf(binding)` hands it to the gateway, so the retry
+   continues that operation under the same id (R1-18, INV-39).
 3. **Checking is not using.** `CheckAsync` only finds (or raises) the approval. The caller uses it with
    `TryConsumeAsync` right before the call runs: the gateway after its audit intent is written, `DirectMcpCallGuard`
    immediately. A refusal in between leaves the approval valid. The use is one conditional update in the database
@@ -97,7 +99,7 @@ address (`WhiskersPublicUrl`, `Whiskers:PublicUrl`; never a request's host) — 
 | `ApprovalEligibility.cs` | `ApprovalResolver`, `ApprovalDecisionResult`, `ApprovalEligibility` (who may decide: level, requester, interactive kinds, `RequestersOf`), `ApprovalLimitException`, `ApprovalDecisionMessages` (UI resource keys). |
 | `ApprovalPersistence.cs` | `IApprovalPersistence`: `DbApprovalPersistence` (table `Approvals`, conditional decide/use) and `InMemoryApprovalPersistence` (hosts without a database). |
 | `ApprovalBinding.cs` | `ApprovalBinding.Of` (gateway calls) and `OfDirectCall` (direct MCP reads): the hash an approval is bound to. |
-| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject` (with its `Requesters`; `WithholdPayloads` keeps a UI call's SQL, command or compose file off the stored card, showing only its length, R1-16), `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`) and uses the approval (`TryConsumeAsync`). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
+| `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject` (with its `Requesters`; `WithholdPayloads` keeps a UI call's SQL, command or compose file off the stored card, showing only its length, R1-16), `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`), uses the approval (`TryConsumeAsync`) and names the operation an open approval was raised for (`OpenOperationOf`, R1-18). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
 | `ApprovalFingerprint.cs` | The hashes that bind an approval: arguments (keys sorted, raw JSON values) and caller + tool + arguments. |
 | `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. `NotificationText`: the notification of a raised approval (id, risk, target, link; no arguments). |
 
