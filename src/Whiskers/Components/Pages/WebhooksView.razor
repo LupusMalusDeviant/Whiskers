@@ -79,7 +79,10 @@ else
                     @($"{Nav.BaseUri}api/webhooks/{context.WebhookId}")
                 </code>
             </MudTd>
-            <MudTd><MudChip T="string" Size="Size.Small" Color="@GetActionColor(context.Action)" Variant="Variant.Outlined">@context.Action</MudChip></MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@GetActionColor(context.Action)" Variant="Variant.Outlined">@context.Action</MudChip>
+                <MudText Typo="Typo.caption" title="@L[$"WebhooksView_Provider_Hint_{context.Provider}"]">@L[$"WebhooksView_Provider_{context.Provider}"]</MudText>
+            </MudTd>
             <MudTd><code>@context.TargetId</code></MudTd>
             <MudTd>
                 @if (string.IsNullOrWhiteSpace(context.Owner))
@@ -154,6 +157,12 @@ else
                     <MudSelectItem Value="@srv.Id">@srv.Name</MudSelectItem>
                 }
             </MudSelect>
+            @* R1-10: how deliveries are signed; the hint says what a sender must do and what replay protection it gives. *@
+            <MudSelect T="string" @bind-Value="_formProvider" Label="@L["WebhooksView_Field_Provider"]" Variant="Variant.Outlined"
+                       HelperText="@L[$"WebhooksView_Provider_Hint_{_formProvider}"]" Class="mb-3">
+                <MudSelectItem Value="@Whiskers.Services.Webhooks.WebhookSignatures.GitHub">@L["WebhooksView_Provider_github"]</MudSelectItem>
+                <MudSelectItem Value="@Whiskers.Services.Webhooks.WebhookSignatures.Whiskers">@L["WebhooksView_Provider_whiskers"]</MudSelectItem>
+            </MudSelect>
             <MudSelect T="string" Value="_formAction" ValueChanged="OnFormActionChanged" Label="@L["WebhooksView_Field_Action"]" Variant="Variant.Outlined" Class="mb-3">
                 <MudSelectItem Value="@("restart")">@L["WebhooksView_Action_Restart"]</MudSelectItem>
                 <MudSelectItem Value="@("rebuild")">@L["WebhooksView_Action_Rebuild"]</MudSelectItem>
@@ -206,6 +215,7 @@ else
     private string _shownSecretUrl = "";
     private string _formName = "";
     private string _formAction = "restart";
+    private string _formProvider = Whiskers.Services.Webhooks.WebhookSignatures.GitHub;
     private string _formTarget = "";
     private List<Whiskers.Models.ServerConfig> _servers = new();
     private string _formServerId = "local";
@@ -235,7 +245,7 @@ else
 
     private async Task ShowCreateDialog()
     {
-        _formName = ""; _formAction = "restart"; _formTarget = "";
+        _formName = ""; _formAction = "restart"; _formTarget = ""; _formProvider = Whiskers.Services.Webhooks.WebhookSignatures.GitHub;
         _formServerId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
         await LoadContainersForServer();
         _gitApps = await GitDeploy.GetAppsAsync();   // empty when the GitDeploy module is off (no-op)
@@ -281,9 +291,11 @@ else
                 TargetId = _formTarget,
                 ServerId = _formServerId,
                 Owner = owner,
+                Provider = _formProvider,
             };
             var wh = await Mutations.RunAsync("webhook.save",
-                new { name = entity.Name, action = entity.Action, target = entity.TargetId, serverId = entity.ServerId, owner },
+                new { name = entity.Name, action = entity.Action, target = entity.TargetId, serverId = entity.ServerId, owner,
+                      provider = entity.Provider },
                 _ => WebhookService.CreateWebhookAsync(entity));
             _showDialog = false;
             await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",

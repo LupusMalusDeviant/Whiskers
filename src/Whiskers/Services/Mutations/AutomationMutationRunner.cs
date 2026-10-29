@@ -23,7 +23,12 @@ public sealed class AutomationOptions
 /// <c>autoupdate</c>, <c>autopatch</c>); <paramref name="OwnerId"/> is the recorded owner (an email, or
 /// <c>key:&lt;id&gt;</c> for an MCP key), or <c>null</c> for an item from before owners were recorded.
 /// </summary>
-public sealed record AutomationActor(string RunnerId, string DisplayName, string? OwnerId, string? CreatedVia = null);
+public sealed record AutomationActor(string RunnerId, string DisplayName, string? OwnerId, string? CreatedVia = null)
+{
+    /// <summary>The operation id of the run (R1-18), when the item has one of its own — a webhook delivery's run id.
+    /// Otherwise the gateway assigns one per call.</summary>
+    public string? OperationId { get; init; }
+}
 
 /// <summary>The owner's authority right now. Re-read on every run (INV-04).</summary>
 public interface IAutomationOwnerResolver
@@ -230,7 +235,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             ? new MutationTarget("unknown", "")
             : MutationTargets.FromArguments(capability, args);
         var request = new MutationRequest(capabilityId, PrincipalOf(actor, capability), MutationSurface.Automation,
-            target, args);
+            target, args, OperationId: actor.OperationId);
         // A failure answered as a value (false, a failed command, (false, …)) is recorded as Failed.
         return _gateway.ExecuteAsync(request, async (_, token) => MutationResults.Report(await action(token)), ct);
     }

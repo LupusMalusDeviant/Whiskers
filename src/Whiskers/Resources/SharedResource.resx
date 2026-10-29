@@ -4964,4 +4964,19 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Mutation_Refused_OperationNotRegistered" xml:space="preserve">
     <value>The operation could not be registered; nothing was changed.</value>
   </data>
+  <data name="WebhooksView_Field_Provider" xml:space="preserve">
+    <value>Signature scheme</value>
+  </data>
+  <data name="WebhooksView_Provider_github" xml:space="preserve">
+    <value>GitHub-compatible</value>
+  </data>
+  <data name="WebhooksView_Provider_whiskers" xml:space="preserve">
+    <value>Whiskers (signed timestamp)</value>
+  </data>
+  <data name="WebhooksView_Provider_Hint_github" xml:space="preserve">
+    <value>X-Hub-Signature-256: sha256=HMAC(secret, body). GitHub signs no time: a repeated body is recognised for 90 days, not by its age.</value>
+  </data>
+  <data name="WebhooksView_Provider_Hint_whiskers" xml:space="preserve">
+    <value>Send X-Whiskers-Timestamp (Unix seconds), X-Whiskers-Delivery (unique id) and X-Whiskers-Signature: sha256=HMAC(secret, "timestamp.delivery.body"). Deliveries older than five minutes are rejected.</value>
+  </data>
 </root>

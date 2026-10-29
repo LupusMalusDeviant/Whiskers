@@ -51,13 +51,14 @@ public static class SqliteToPostgresMigrator
             (src, dst, run, ct) => CopyAsync(set(src), dst, resetId(run), ct, afterFlush?.Invoke(run)));
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
-    /// exactly one of these sets — the tables of every release after its own (R1-18: the operations; R1-14: the approvals; R1-12: the
+    /// exactly one of these sets — the tables of every release after its own (R1-10: the webhook deliveries; R1-18: the operations; R1-14: the approvals; R1-12: the
     /// decision tables).</summary>
     internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
     [
-        new(StringComparer.Ordinal) { "Operations" },
-        new(StringComparer.Ordinal) { "Operations", "Approvals" },
-        new(StringComparer.Ordinal) { "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations", "Approvals" },
+        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots" },
     ];
 
     /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
@@ -99,6 +100,8 @@ public static class SqliteToPostgresMigrator
         T("UpdateRollbacks",   c => c.UpdateRollbacks,   e => e.Id = 0),
         T("Webhooks",          c => c.Webhooks,          e => e.Id = 0),
         T("WebhookLogs",       c => c.WebhookLogs,       e => e.Id = 0),
+        // R1-10: accepted deliveries by key — their run ids name audit operations, kept as they are.
+        T("WebhookDeliveries", c => c.WebhookDeliveries, e => e.Id = 0),
         T("CveFirstSeen",      c => c.CveFirstSeen,      e => e.Id = 0),
         T("Notifications",     c => c.Notifications,     e => e.Id = 0),
         T("SelfMetricSamples", c => c.SelfMetricSamples, e => e.Id = 0),
@@ -193,7 +196,7 @@ public static class SqliteToPostgresMigrator
 
         // The source schema is checked before anything is copied: a missing table would otherwise fail half-way,
         // after earlier tables committed. Only a known older release may lack tables, and only all of a release's
-        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations); anything else is not a Whiskers
+        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations, R1-10 WebhookDeliveries); anything else is not a Whiskers
         // database this tool understands (a wrong path, a damaged file).
         var missing = new HashSet<string>(StringComparer.Ordinal);
         foreach (var table in MetricsTables)

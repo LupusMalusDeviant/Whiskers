@@ -14,15 +14,32 @@ a target. The `/webhooks` management page, the `IWebhookService`, and (in Core) 
 | **Services** | `IWebhookService` |
 
 When **disabled**: the `webhooks` nav entry disappears, `/webhooks` shows a "module disabled" notice, and an
-inbound `POST /api/webhooks/{id}` answers **400** ("webhooks are disabled") instead of triggering anything.
+inbound `POST /api/webhooks/{id}` answers **400** (`{"status":"rejected"}`) instead of triggering anything.
 
 **Why a no-op:** the inbound `POST /api/webhooks/{id}` endpoint lives in `Program.cs` (an app route, not a
 service) and resolves `IWebhookService` per request, so it can't be gated by the module the way a page is. A
-`NoopWebhookService` default keeps that resolution working when the module is off — its `TriggerAsync` fails
-gracefully (400, not a 500 from an unresolved service).
+`NoopWebhookService` default keeps that resolution working when the module is off — its `AcceptAsync` rejects
+every delivery (400, not a 500 from an unresolved service).
 
-No settings section (webhooks are created/managed on the `/webhooks` page).
+**Calling a webhook (R1-10).** Each webhook has a signature scheme:
+
+- `github` — `X-Hub-Signature-256: sha256=<HMAC-SHA256(secret, body)>` (GitHub, Gitea). GitHub signs no time, so a
+  repeated body is recognised for the retention period (90 days), not by its age.
+- `whiskers` — `X-Whiskers-Timestamp: <Unix seconds>`, `X-Whiskers-Delivery: <unique id, 8–128 of A-Z a-z 0-9 . _ ->`
+  and `X-Whiskers-Signature: sha256=<HMAC-SHA256(secret, "<timestamp>.<delivery>.<body>")>`; a timestamp more than
+  five minutes off is refused.
+
+Answers: **202** `{"status":"queued","runId":…}` (the action runs in a queue; its result is in the webhook log),
+**200** `{"status":"duplicate","runId":…,"state":…}` for a delivery seen before (it does not run again; `interrupted`
+means it was running when Whiskers stopped), **400** `{"status":"rejected"}` for any invalid request, **429** / **503**
+with `Retry-After`. Runs on the same target never overlap.
+
+Settings (section `Webhooks`): `MaxBodyBytes`, `RequestsPerMinute`, `RequestsPerMinutePerWebhook`, `QueueCapacity`,
+`MaxConcurrentRuns`, `TimestampTolerance`, `DeliveryRetention`, `TestRunTimeout` — see
+[`WebhookOptions`](../../src/Whiskers/Services/Webhooks/WebhookOptions.cs). Webhooks themselves are managed on the
+`/webhooks` page.
 
 Code: [`src/Whiskers/Modules/Webhooks/`](../../src/Whiskers/Modules/Webhooks/) · service in
-[`src/Whiskers/Services/Webhooks/`](../../src/Whiskers/Services/Webhooks/) · inbound endpoint in
-[`src/Whiskers/Program.cs`](../../src/Whiskers/Program.cs).
+[`src/Whiskers/Services/Webhooks/`](../../src/Whiskers/Services/Webhooks/) · inbound endpoint
+[`WebhookEndpoint`](../../src/Whiskers/Services/Webhooks/WebhookEndpoint.cs), mapped in
+[`WhiskersPipelineExtensions`](../../src/Whiskers/Startup/WhiskersPipelineExtensions.cs).

@@ -72,9 +72,8 @@ public class WebhooksModuleTests
     [Fact]
     public async Task Noop_trigger_fails_gracefully_so_the_endpoint_answers_400_not_500()
     {
-        var (success, output) = await new NoopWebhookService().TriggerAsync("some-id", body: "{}");
-        Assert.False(success);
-        Assert.False(string.IsNullOrWhiteSpace(output));
+        var reply = await new NoopWebhookService().AcceptAsync("some-id", new WebhookRequest("{}"u8.ToArray()));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]

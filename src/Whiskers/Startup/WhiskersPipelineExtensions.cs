@@ -317,17 +317,9 @@ public static class WhiskersPipelineExtensions
             return roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin;
         }));
 
-        // Webhook API endpoint (no auth — uses HMAC signature validation)
-        app.MapPost("/api/webhooks/{webhookId}", async (string webhookId, HttpContext ctx) =>
-        {
-            var webhookService = ctx.RequestServices.GetRequiredService<Whiskers.Services.Webhooks.IWebhookService>();
-            var body = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
-            var signature = ctx.Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
-            var sourceIp = ctx.Connection.RemoteIpAddress?.ToString();
-
-            var (success, output) = await webhookService.TriggerAsync(webhookId, signature, body, sourceIp);
-            return success ? Results.Ok(new { status = "ok", output }) : Results.BadRequest(new { status = "error", output });
-        }).AllowAnonymous();
+        // Webhook API endpoint (no auth — uses HMAC signature validation). R1-10: bounded, deduplicated, queued.
+        app.MapPost("/api/webhooks/{webhookId}", (string webhookId, HttpContext ctx) =>
+            Whiskers.Services.Webhooks.WebhookEndpoint.HandleAsync(webhookId, ctx)).AllowAnonymous();
 
         // Prometheus metrics endpoint. Gated by a static scrape token (Metrics:ScrapeToken) because the
         // payload is the full multi-server container inventory. With no token configured the endpoint stays

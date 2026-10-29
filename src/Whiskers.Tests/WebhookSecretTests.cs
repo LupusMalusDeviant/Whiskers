@@ -82,28 +82,25 @@ public sealed class WebhookSecretTests : IDisposable
     public async Task Trigger_rejects_a_webhook_without_a_secret_fail_closed()
     {
         var wh = Seed(secret: "");
-        var (success, output) = await Service().TriggerAsync(wh.WebhookId, signature: null, body: "{}");
-        Assert.False(success);
-        Assert.Contains("no secret", output, StringComparison.OrdinalIgnoreCase);
+        var reply = await Service().AcceptAsync(wh.WebhookId, new WebhookRequest("{}"u8.ToArray()));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]
     public async Task Trigger_requires_a_signature()
     {
         var wh = Seed(secret: "s3cret");
-        var (success, output) = await Service().TriggerAsync(wh.WebhookId, signature: null, body: "{}");
-        Assert.False(success);
-        Assert.Equal("Signature required", output);
+        var reply = await Service().AcceptAsync(wh.WebhookId, new WebhookRequest("{}"u8.ToArray()));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]
     public async Task Trigger_rejects_an_invalid_signature()
     {
         var wh = Seed(secret: "s3cret");
-        var (success, output) = await Service().TriggerAsync(wh.WebhookId,
-            signature: "sha256=" + new string('0', 64), body: "{}");
-        Assert.False(success);
-        Assert.Equal("Invalid signature", output);
+        var reply = await Service().AcceptAsync(wh.WebhookId,
+            new WebhookRequest("{}"u8.ToArray(), GitHubSignature: "sha256=" + new string('0', 64)));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]

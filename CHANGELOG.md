@@ -6,6 +6,18 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-10: **Webhook deliveries are fresh, run once and never overlap on a target.** Each webhook has a signature scheme
+  (`Provider`, new column, existing webhooks keep `github`): `github` checks `X-Hub-Signature-256` over the body as
+  before; the new `whiskers` scheme signs a timestamp, a delivery id and the body (`X-Whiskers-Timestamp`,
+  `X-Whiskers-Delivery`, `X-Whiskers-Signature`) and refuses a delivery more than five minutes off. GitHub signs no
+  time, so for `github` a repeated delivery is recognised by its signed body for 90 days — not by its age. Every
+  accepted delivery is recorded (new table `WebhookDeliveries`) and runs at most once, also across a restart; one that
+  was running when Whiskers stopped is reported `interrupted` and not run again. The endpoint now answers at once —
+  202 with a `runId` (the run's operation id), 200 `duplicate` with the first run's id and state, the same 400 for
+  every invalid request, 429 / 503 with `Retry-After` — and runs the action in a bounded queue, one run per target at a
+  time. New settings under `Webhooks` (body size, request rates, queue, concurrency, timestamp window, retention).
+  **Upgrade notes:** a new table and column, created on start. A CI job that read the action's output from the
+  webhook response gets a run id instead; the result is in the webhook log.
 - R1-18: **One operation id runs at most once.** Every mutation claims its operation id in the new `Operations` table
   (paired SQLite/PostgreSQL migrations, copied by the SQLite → PostgreSQL migrator) right before it runs, and the claim
   records how it ended. A retry under the same id — concurrent, after it ran (also after it failed), or after a

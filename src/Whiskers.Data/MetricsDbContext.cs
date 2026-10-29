@@ -76,6 +76,9 @@ public class MetricsDbContext : DbContext
     public DbSet<UpdateRollbackEntity> UpdateRollbacks => Set<UpdateRollbackEntity>();
     public DbSet<WebhookEntity> Webhooks => Set<WebhookEntity>();
     public DbSet<WebhookLogEntity> WebhookLogs => Set<WebhookLogEntity>();
+
+    /// <summary>Accepted webhook deliveries by delivery key: a delivery runs at most once (R1-10, INV-42).</summary>
+    public DbSet<WebhookDeliveryEntity> WebhookDeliveries => Set<WebhookDeliveryEntity>();
     public DbSet<CveFirstSeenEntity> CveFirstSeen => Set<CveFirstSeenEntity>();
     public DbSet<NotificationEntity> Notifications => Set<NotificationEntity>();
 
@@ -236,6 +239,18 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => x.ParentId);
             e.HasIndex(x => x.State);
             e.HasIndex(x => x.ClaimedAt);
+        });
+
+        modelBuilder.Entity<WebhookEntity>(e =>
+            e.Property(x => x.Provider).HasDefaultValue("github"));
+
+        modelBuilder.Entity<WebhookDeliveryEntity>(e =>
+        {
+            e.ToTable("WebhookDeliveries");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.WebhookId, x.DeliveryKey }).IsUnique();
+            e.HasIndex(x => x.RunId).IsUnique();
+            e.HasIndex(x => x.ReceivedAt);
         });
     }
 }
