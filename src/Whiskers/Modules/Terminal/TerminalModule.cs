@@ -23,6 +23,9 @@ public sealed class TerminalModule : IWhiskersModule
     {
         // Moved verbatim from Program.cs (relocation, not a rewrite).
         services.Configure<TerminalSettings>(config.GetSection(TerminalSettings.SectionName));
+        services.AddSingleton<ITerminalLauncher, ProcessTerminalLauncher>();
+        // R1-17: running sessions end when their owner loses Admin or the kill switch goes on.
+        services.AddSingleton<ITerminalAuthority, TerminalAuthority>();
         services.AddSingleton<ITerminalSessionManager, TerminalSessionManager>();
     }
 }

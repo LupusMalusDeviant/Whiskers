@@ -420,6 +420,33 @@ public sealed class TargetResolutionTests : IDisposable
         Assert.Equal("local", ScheduledTaskServer.Of(new ScheduledTaskEntity()));
     }
 
+    // ---------------------------------------------------------------- terminals
+
+    [Fact]
+    public async Task Unknown_terminal_server_never_opens_a_local_shell()
+    {
+        // R1-17: a server id that names no configured server is refused — by the gateway and by the terminal
+        // itself — instead of falling through to a shell on Whiskers' own host.
+        var launcher = new TerminalDoubles.FakeLauncher();
+        using var manager = TerminalDoubles.Manager(launcher, new TerminalDoubles.RecordingAudit());
+        var owner = TerminalDoubles.Admin;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            manager.OpenHostShellAsync(new Whiskers.Services.Terminal.TerminalOpenRequest("s1", owner, "ghost")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            manager.OpenContainerShellAsync(new Whiskers.Services.Terminal.TerminalOpenRequest("s2", owner, "ghost", "web")));
+        Assert.Empty(launcher.Started);
+
+        var h = new ProtectionHarness();
+        var host = await h.RunAsync("terminal.host_open", new { serverId = "ghost", terminalSession = "s3" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        var container = await h.RunAsync("terminal.container_open",
+            new { serverId = "ghost", containerId = "web", terminalSession = "s4" }, ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.NotEqual(MutationStatus.Executed, host.Status);
+        Assert.NotEqual(MutationStatus.Executed, container.Status);
+        Assert.Equal(0, h.Runs);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private async Task<(MutationOutcome<int> Outcome, MutationTarget? Seen)> RunAsync(string capabilityId, object arguments,

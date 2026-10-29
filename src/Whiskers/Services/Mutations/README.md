@@ -16,7 +16,8 @@ gateway:
   (surface `Automation`, an `Automation` principal acting `OnBehalfOf` the recorded owner).
 
 A tool counts as mutating when the catalog lists it (`ICapabilityCatalog.FindByMcpTool`). Webhooks and Git deploy
-(2.4) run through the gateway since R1-08 / R1-09; terminals (2.5) follow; step 2.6 makes bypassing the gateway fail.
+(2.4) run through the gateway since R1-08 / R1-09, terminal opens (2.5, `terminal.container_open` / `terminal.host_open`)
+since R1-17; step 2.6 makes bypassing the gateway fail.
 
 ### UI handlers
 

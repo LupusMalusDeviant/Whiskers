@@ -214,9 +214,9 @@ mutating tools do for their own error texts).
 
 | ID | Path | AuthZ | Policy | Approval | Execution | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|
-| T-01 | Container terminal `/terminal/{srv}/{ctr}` | **Admin** (PC-D2, WP2) | ❌ | n/a | `docker exec` (remote: SSH as root first) | ❌ | INV-19 (PC-D2: Admin), 21, 47, 59 |
-| T-02 | Embedded terminal in container detail | **Admin** (PC-D2, WP2) | ❌ | n/a | same | ❌ | INV-19, 21, 47, 59 |
-| T-03 | Host shell `/server-terminal/{srv}` | Admin | ❌ | n/a | `nsenter` / SSH root | ❌ | INV-09 (session outlives demotion), 21, 47 |
+| T-01 | Container terminal `/terminal/{srv}/{ctr}` | **Admin** (PC-D2, WP2) | ✅ GW `terminal.container_open` (R1-17) | Control plane only (INV-59) | `docker exec` (remote: SSH as root first) | ✅ open + one close event | — (unknown server refused, no local fallback) |
+| T-02 | Embedded terminal in container detail | **Admin** (PC-D2, WP2) | ✅ GW `terminal.container_open` (R1-17) | Control plane only (INV-59) | same | ✅ open + one close event | — |
+| T-03 | Host shell `/server-terminal/{srv}` | Admin | ✅ GW `terminal.host_open` (R1-17) | n/a | `nsenter` / SSH root | ✅ open + one close event | Session ends ≤ 15 s after demotion or kill switch (R1-17) |
 
 ### 7.5 Web UI handlers
 

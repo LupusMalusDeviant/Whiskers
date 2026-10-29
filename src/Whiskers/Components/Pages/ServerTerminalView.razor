@@ -2,6 +2,7 @@
 @inject ITerminalSessionManager SessionManager
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 @implements IAsyncDisposable
 
@@ -65,19 +66,16 @@
             _dotNetRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("Whiskers.Terminal.create", "server-terminal-container", _dotNetRef);
 
-            // For local server: open bash directly
-            // For SSH servers: open ssh session to the remote host
-            if (server.ConnectionType == Whiskers.Models.ConnectionType.Local)
-            {
-                _session = SessionManager.CreateSession(null); // local shell
-            }
-            else
-            {
-                // Create an SSH session to the remote server
-                _session = SessionManager.CreateSshSession(server);
-            }
+            // R1-17: opened through the gateway (Admin, kill switch, protected resources, audited open). The local
+            // server gets a host shell, an SSH or Tailscale SSH server a shell on the remote host.
+            var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
+            var owner = await Whiskers.Services.Terminal.TerminalOwner.OfAsync(CurrentUser);
+            _session = await Mutations.RunAsync("terminal.host_open",
+                new { serverId = server.Id, terminalSession = sessionId },
+                ct => SessionManager.OpenHostShellAsync(
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, owner, server.Id), ct));
 
-            _ = PumpStreamsAsync(_session.Process!.StandardOutput, _session.Process!.StandardError, _cts.Token);
+            _ = PumpStreamsAsync(_session.Output, _session.Errors, _cts.Token);
         }
         catch (Exception ex)
         {
@@ -113,6 +111,9 @@
     private async Task PumpStreamsAsync(System.IO.StreamReader stdout, System.IO.StreamReader stderr, CancellationToken ct)
     {
         await Task.WhenAll(ReadStreamAsync(stdout, ct), ReadStreamAsync(stderr, ct));
+        // The shell ended (or was ended): its close event is recorded once, whoever gets there first.
+        if (_session is { IsRunning: false } ended)
+            await SessionManager.CloseAsync(ended.SessionId, Whiskers.Services.Terminal.TerminalCloseReason.Exited);
         try
         {
             await InvokeAsync(async () =>
@@ -139,7 +140,7 @@
         try
         {
             if (_session != null)
-                await SessionManager.DestroySession(_session.SessionId);
+                await SessionManager.CloseAsync(_session.SessionId);
             await JS.InvokeVoidAsync("Whiskers.Terminal.dispose", "server-terminal-container");
         }
         catch { }

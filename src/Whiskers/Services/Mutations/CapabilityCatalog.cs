@@ -89,6 +89,10 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("container.env_file_save", A, "container", Root, Normal);
         // Container page: a changing command inside the container (Artisan migrate / rollback).
         yield return Ui("container.exec", A, "container", Root, Normal);
+        // Web terminal (R1-17, PC-D2): opening a shell in a container or on a host; the close is audited by the
+        // terminal manager, what is typed is not recorded.
+        yield return Ui("terminal.container_open", A, "container", Root, Short);
+        yield return Ui("terminal.host_open", A, "host", Root, Short);
         yield return Ui("image.pull", W, "host", Rev, Long);
 
         // Deployments
