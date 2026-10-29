@@ -26,6 +26,14 @@ All notable changes to Whiskers are documented here. The format follows
   add `RequesterIds` and `SelfApproved` to `Approvals`. **Upgrade note:** a pending approval raised before the
   upgrade records no requester and is cancelled at startup — the caller asks again; approved, unused ones keep their
   grant.
+- Tests: the full-app boot tests that switch modules off ("lean boot") or set `Auth:Disabled` now really boot that
+  configuration. Program reads those settings while the builder is set up, before a test's in-memory configuration
+  is layered in, so these tests had been booting every module (and the real authentication setup) while reporting
+  green. `BootSettings` passes the settings as environment variables too (all or nothing, restored afterwards);
+  every boot test that sets one of these now asserts the complete module set and the authentication setup it ended up with
+  (`BootSettings.AssertBoot`, an inherited flag fails it too), lean boots switch default-off modules off explicitly
+  (`BootSettings.OnlyCore`), and `BootMatrixTests` compares against module sets written out per case. The only product
+  change: `ModuleCatalog.All()` is internal instead of private, for that check.
 - R1-14: **approvals are durable and fully bound.** Every approval is written to the new `Approvals` table (additive
   migrations for SQLite and PostgreSQL; the SQLite → PostgreSQL migrator copies it) before it is shown, decided or
   used, so a restart no longer loses a decision or lets an approval run twice, and the history on the Approvals page
