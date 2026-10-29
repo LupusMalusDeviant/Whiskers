@@ -14,15 +14,23 @@ All notable changes to Whiskers are documented here. The format follows
   API keys, agents instructed over MCP, automations and Operators; an Admin in the web UI or the web chat gets an
   approval at Admin level instead, single-use and audited (with *Require a second approver* on, another Admin must
   give it). Protected names are now also found in commands, SQL and compose files (word by word, with path
-  segments), by a container id or id prefix written in a command, by a container's other names, and among the
-  stopped containers a cleanup (`docker system prune`) removes; free text that builds its target at run time
-  (`$(…)`, backticks, `eval`, base64, dynamic SQL, `COPY … PROGRAM`, …) counts as touching a protected resource.
-  The SQL console, SQL import and seed, Artisan migrations and the raw compose deploy now hand their payload to the
-  policy (the audit still keeps only its length). **Upgrade notes:** calls that used to pass are now refused or need
-  an Admin approval — an MCP key or a scheduled task restarting the Whiskers container or its proxy, a command or
-  query that merely mentions a protected name (also inside a domain such as `whiskers.example.com`), or any
-  `$(…)`-style command from MCP or automation. Rename a container that only shares the prefix, or run the action
-  from the web UI as an Admin.
+  segments; a command is read as the shell reads it, so quoting tricks such as `whis""kers` do not hide a name), by
+  a container id or id prefix written in a command, by a container's other names, among the stopped containers a
+  cleanup (`docker system prune`) removes, and in what a deployment mounts — `deploy_app` volumes and every host
+  path and volume of a compose deployment (the Docker socket and `/app/data` are part of the control plane). Free
+  text that is completed at run time counts as touching a protected resource: in a command anything the shell
+  expands (`$VAR`, `$(…)`, backticks, `{a,b}`), `eval`, `xargs`, decoding, or inline code of another interpreter
+  (`python -c`, `perl -e`, `awk … system(`); in SQL dynamic SQL, `COPY … PROGRAM` and file-reading functions. The
+  SQL console, SQL import and seed, Artisan migrations and the raw compose deploy now hand their payload to the
+  policy; the audit keeps only its length, and an approval raised from the web UI shows only the length of a
+  command, SQL or compose file (refusal reasons never quote words of it). **Upgrade notes:** calls that used to
+  pass are now refused or need an Admin approval — an MCP key or a scheduled task restarting the Whiskers container
+  or its proxy; a command or query that merely mentions a protected name (also inside a domain such as
+  `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a
+  scheduled CustomCommand with `$(date +%F)`), `xargs`, `awk '{print $1}'` or `python -c`; a compose deployment
+  that mounts the Docker socket or a volume whose source uses a variable the project's `.env` does not set. Rename a
+  container that only shares the prefix, put the command into a script file on the host, or run the action from
+  the web UI as an Admin.
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and
   rejecting follow the same rules: the approver holds the action's effective level (Viewers decide nothing, and the
   chat now passes the approver's current role), and nobody decides their own non-interactive request — direct MCP,

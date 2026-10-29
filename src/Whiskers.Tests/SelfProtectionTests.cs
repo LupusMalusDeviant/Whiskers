@@ -28,6 +28,8 @@ internal sealed class ProtectionHarness
         new() { Id = "eeee11223344proxy", Name = "nginx-proxy-manager", ServerId = "local", State = "running" },
         new() { Id = "ffff55667788tunnel", Name = "ghostunnel", ServerId = "local", State = "running" },
         new() { Id = "aaaa99887766web", Name = "web", ServerId = "local", State = "running" },
+        new() { Id = "bbbb12341234sock", Name = "socket-proxy", ServerId = "local", State = "running" },
+        new() { Id = "cccc56785678ca", Name = "step-ca", ServerId = "local", State = "running" },
     ];
 
     public FakeDocker Docker { get; }
@@ -38,7 +40,7 @@ internal sealed class ProtectionHarness
     public MutationGateway Gateway { get; }
     public int Runs { get; private set; }
 
-    public ProtectionHarness(Action<GuardrailPolicy>? configure = null)
+    public ProtectionHarness(Action<GuardrailPolicy>? configure = null, Func<FakeDocker, IComposePlanner>? planner = null)
     {
         Docker = new FakeDocker(Containers) { DefaultServerId = "local" };
         Policy = GuardrailPolicy.SafeDefault();
@@ -52,7 +54,9 @@ internal sealed class ProtectionHarness
         Approvals = new ApprovalStore(policy: store);
         Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Audit, [],
             NullLogger<MutationGateway>.Instance,
-            targets: new MutationTargetResolver(new TestServices(Docker, new FakeServerConfig(Local))),
+            targets: new MutationTargetResolver(planner is null
+                ? new TestServices(Docker, new FakeServerConfig(Local))
+                : new TestServices(Docker, new FakeServerConfig(Local), planner(Docker))),
             approvals: new ApprovalGate(Approvals, store));
     }
 
@@ -99,6 +103,9 @@ public class SelfProtectionTests
         { "volume.backup_delete", """{"volumeName":"serverwatch-data","serverId":"local"}""" },     // the data volume
         { "container.stop", """{"containerId":"nginx-proxy-manager","serverId":"local"}""" },       // the proxy
         { "container.restart", """{"containerId":"ghostunnel","serverId":"local"}""" },             // the mTLS tunnel
+        { "container.stop", """{"containerId":"socket-proxy","serverId":"local"}""" },             // the socket proxy
+        { "container.restart", """{"containerId":"step-ca","serverId":"local"}""" },                // the CA
+        { "app.deploy", """{"serverId":"local","appName":"x","image":"alpine","volumes":"/var/run/docker.sock:/s"}""" },
         { "host.exec", """{"serverId":"local","command":"cat /app/data/mtls/client.key"}""" },      // mTLS material
         { "host.exec", """{"serverId":"local","command":"rm -rf /opt/step-ca/secrets"}""" },        // the CA's keys
         { "host.exec", """{"serverId":"local","command":"docker stop whiskers"}""" },               // named in a command
@@ -121,6 +128,7 @@ public class SelfProtectionTests
             await h.RunAsync(capability, args, ProtectionHarness.AdminKey, MutationSurface.Mcp),
             await h.RunAsync(capability, args, ProtectionHarness.InstructedAgent(), MutationSurface.Agent, AgentOrigin.McpTool),
             await h.RunAsync(capability, args, ProtectionHarness.AdminsTask(), MutationSurface.Automation),
+            await h.RunAsync(capability, args, ProtectionHarness.AdminsTask(), MutationSurface.Webhook),
             await h.RunAsync(capability, args, ProtectionHarness.UiOperator, MutationSurface.Ui),
             await h.RunAsync(capability, args, ProtectionHarness.ChatAgent(McpPermissionLevels.Write), MutationSurface.Agent,
                 AgentOrigin.WebUi),
@@ -167,6 +175,24 @@ public class SelfProtectionTests
         Assert.Equal(1, h.Runs);
         Assert.Contains($"begin:container.restart:{asked.ApprovalId}", h.Audit.Events);
         Assert.Equal(MutationStatus.PendingApproval, again.Status);   // single use
+    }
+
+    [Fact]
+    public async Task A_refusal_and_the_approval_card_never_carry_the_payload_a_person_typed()
+    {
+        var h = new ProtectionHarness();
+        var query = "ALTER ROLE whiskers PASSWORD 'not-a-real-one'";
+
+        var denied = await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
+            ProtectionHarness.AdminKey, MutationSurface.Mcp);
+        var asked = await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+
+        Assert.DoesNotContain("not-a-real-one", denied.Reason);
+        Assert.DoesNotContain("whiskers", denied.Reason!.Replace("whiskers*", ""));
+        var card = Assert.Single(h.Approvals.GetPending());
+        Assert.DoesNotContain("not-a-real-one", card.ParamsJson);
+        Assert.Contains("withheld", card.ParamsJson);
     }
 
     [Fact]

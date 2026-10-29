@@ -66,7 +66,15 @@ public enum ComposeImpactKind
 public sealed record ComposeImpactEntry(ContainerInfo Container, ComposeImpactKind Kind);
 
 /// <summary>A service of the merged files with the container name it gets, if one is set.</summary>
-public sealed record ComposeServicePlan(string Name, string? ContainerName);
+public sealed record ComposeServicePlan(string Name, string? ContainerName)
+{
+    /// <summary>What the service mounts (R1-16): host paths and volumes, interpolated from the <c>.env</c>.</summary>
+    public IReadOnlyList<ComposeMount> Mounts { get; init; } = [];
+}
+
+/// <summary>The source of one mount: a host path, or a volume. A volume without an explicit top-level <c>name:</c>
+/// (<see cref="ProjectScoped"/>) is created as <c>&lt;project&gt;_&lt;name&gt;</c>.</summary>
+public sealed record ComposeMount(string Source, bool ProjectScoped);
 
 /// <summary>A compose deployment's impact could not be determined; the deployment does not run (fail closed).</summary>
 public sealed class ComposePlanException(string message) : Exception(message);
@@ -150,11 +158,21 @@ public sealed record ComposePlan(
     public void EnsureDecided(MutationScope? scope)
     {
         var missing = Impact.Where(i => scope is null || !scope.Covers(ServerId, i.Container.Id, i.Container.Name))
-            .Select(i => i.Container.Name).ToList();
+            .Select(i => i.Container.Name)
+            .Concat(Mounts().Where(m => scope is null || !scope.Covers(ServerId, m)).Select(m => $"mount {m}"))
+            .ToList();
         if (missing.Count > 0)
             throw new ComposePlanException(
                 $"The deployment would touch containers that were not decided: {string.Join(", ", missing)}.");
     }
+
+    /// <summary>What the deployment mounts into its containers (R1-16): every host path and volume, a project-scoped
+    /// volume under its key and its real name <c>&lt;project&gt;_&lt;key&gt;</c>. Decided with the deployment, since a
+    /// mount of the Docker socket or of Whiskers' data reaches the control plane without touching a container.</summary>
+    public IReadOnlyList<string> Mounts() =>
+        Services.SelectMany(s => s.Mounts)
+            .SelectMany(m => m.ProjectScoped ? new[] { m.Source, $"{ProjectName}_{m.Source}" } : new[] { m.Source })
+            .Distinct(StringComparer.Ordinal).ToList();
 
     /// <summary>Each impacted container's aliases (id and name), one entry per container.</summary>
     public IReadOnlyList<IReadOnlyList<string>> DecidedResources() =>
@@ -422,6 +440,8 @@ public static class ComposeModel
     {
         string? name = null, nameSource = null;
         var services = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var mounts = new Dictionary<string, List<ComposeMount>>(StringComparer.Ordinal);
+        var volumeNames = new Dictionary<string, string>(StringComparer.Ordinal);
         var order = new List<string>();
         foreach (var (path, content) in files)
         {
@@ -431,6 +451,11 @@ public static class ComposeModel
                 throw new ComposePlanException($"{path}: 'include' is not supported in a planned deployment.");
             if (Scalar(root, "name") is { } declared)
                 (name, nameSource) = (Interpolate(declared, env, "The top-level name"), declared);
+            if (root.Children.TryGetValue(new YamlScalarNode("volumes"), out var topVolumes) && topVolumes is YamlMappingNode volumeMap)
+                foreach (var (key, value) in volumeMap.Children)
+                    if ((key as YamlScalarNode)?.Value is { } volume && value is YamlMappingNode volumeDef
+                        && Scalar(volumeDef, "name") is { } explicitName)
+                        volumeNames[volume] = Interpolate(explicitName, env, $"The name of volume '{volume}'");
             if (!root.Children.TryGetValue(new YamlScalarNode("services"), out var node)) continue;
             if (node is not YamlMappingNode serviceMap)
                 throw new ComposePlanException($"{path}: 'services' is not a mapping.");
@@ -444,6 +469,11 @@ public static class ComposeModel
                     throw new ComposePlanException($"{path}: service '{service}' extends another file, which is not supported.");
                 var containerName = definition is null ? null : ContainerName(definition, serviceMap);
                 if (!services.ContainsKey(service)) order.Add(service);
+                if (definition is not null)
+                {
+                    if (!mounts.TryGetValue(service, out var list)) mounts[service] = list = [];
+                    list.AddRange(MountsOf(definition, serviceMap, env, service));
+                }
                 if (containerName is not null)
                     services[service] = Interpolate(containerName, env, $"The container_name of '{service}'");
                 else
@@ -452,7 +482,13 @@ public static class ComposeModel
         }
         if (order.Count == 0)
             throw new ComposePlanException("The compose files define no services.");
-        return (name, nameSource, order.Select(s => new ComposeServicePlan(s, services[s])).ToList());
+        // A volume with an explicit top-level name is created under that name, not under the project's.
+        ComposeMount Named(ComposeMount m) =>
+            m.ProjectScoped && volumeNames.TryGetValue(m.Source, out var real) ? new ComposeMount(real, false) : m;
+        return (name, nameSource, order.Select(s => new ComposeServicePlan(s, services[s])
+        {
+            Mounts = mounts.TryGetValue(s, out var m) ? m.Select(Named).Distinct().ToList() : [],
+        }).ToList());
     }
 
     private static YamlMappingNode? Root(string path, string content)
@@ -494,6 +530,45 @@ public static class ComposeModel
                 return ContainerName(baseDef, services, depth + 1);
         }
         return null;
+    }
+
+    /// <summary>The sources a service mounts — its own <c>volumes</c>, those of a <c>&lt;&lt;</c> merge key and of a
+    /// service it <c>extends</c> in the same file — interpolated from the <c>.env</c>; a source that uses a variable the
+    /// file does not set refuses the plan (fail closed).</summary>
+    private static IEnumerable<ComposeMount> MountsOf(YamlMappingNode definition, YamlMappingNode services,
+        IReadOnlyDictionary<string, string?> env, string service, int depth = 0)
+    {
+        if (depth > 8) throw new ComposePlanException("Service 'extends' chain is too deep.");
+        var sources = new List<YamlMappingNode> { definition };
+        if (definition.Children.TryGetValue(new YamlScalarNode("<<"), out var merge))
+            sources.AddRange((merge is YamlSequenceNode seq ? seq.Children : [merge]).OfType<YamlMappingNode>());
+        foreach (var source in sources)
+        {
+            if (!source.Children.TryGetValue(new YamlScalarNode("volumes"), out var node)) continue;
+            if (node is not YamlSequenceNode list)
+                throw new ComposePlanException($"The volumes of '{service}' are not a list.");
+            foreach (var entry in list.Children)
+            {
+                var raw = entry switch
+                {
+                    YamlScalarNode s => s.Value is { } v && v.Contains(':') ? v[..v.IndexOf(':')] : null,
+                    YamlMappingNode m => Scalar(m, "source"),
+                    _ => null,
+                };
+                if (string.IsNullOrWhiteSpace(raw)) continue;   // an anonymous volume
+                var path = Interpolate(raw, env, $"A volume of '{service}'");
+                var hostPath = path.StartsWith('/') || path.StartsWith('.') || path.StartsWith('~');
+                yield return new ComposeMount(path, ProjectScoped: !hostPath);
+            }
+        }
+        if (definition.Children.TryGetValue(new YamlScalarNode("extends"), out var ext))
+        {
+            var baseName = ext is YamlScalarNode e ? e.Value : ext is YamlMappingNode em ? Scalar(em, "service") : null;
+            if (baseName is not null && services.Children.TryGetValue(new YamlScalarNode(baseName), out var b)
+                && b is YamlMappingNode baseDef)
+                foreach (var mount in MountsOf(baseDef, services, env, baseName, depth + 1))
+                    yield return mount;
+        }
     }
 
     private static string? Scalar(YamlMappingNode map, string key) =>

@@ -119,4 +119,72 @@ public sealed partial class ProtectedResourceResolutionTests
             (await h.RunAsync("host.exec", args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
         Assert.Equal(McpPermissionLevels.Admin, Assert.Single(h.Approvals.GetPending()).Level);
     }
+
+    // ---------------------------------------------------------------- mounts
+
+    [Fact]
+    public async Task A_plan_lists_what_its_services_mount()
+    {
+        _host.Files["/srv/m/.env"] = "DATA=/app/data\n";
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/srv/m", """
+            name: m
+            services:
+              a:
+                image: x
+                volumes:
+                  - ${DATA}:/d
+                  - cache:/c
+                  - shared:/s
+                  - type: bind
+                    source: /var/run/docker.sock
+                    target: /s.sock
+                  - /anonymous
+            volumes:
+              cache: {}
+              shared:
+                name: serverwatch-data
+                external: true
+            """));
+
+        Assert.Equal(["/app/data", "cache", "m_cache", "serverwatch-data", "/var/run/docker.sock"], plan.Mounts());
+    }
+
+    [Fact]
+    public async Task A_mount_from_a_variable_whiskers_cannot_see_refuses_the_plan() =>
+        await Assert.ThrowsAsync<ComposePlanException>(() => Planner().PlanAsync(ComposeDeployment.FromContent("local",
+            "/srv/n", "services:\n  a:\n    image: x\n    volumes:\n      - ${NOWHERE}:/d\n")));
+
+    [Fact]
+    public async Task A_deployment_mounting_the_control_plane_is_refused_for_a_key_and_needs_an_Admin_approval_in_the_ui()
+    {
+        var h = new ProtectionHarness(planner: docker => new ComposePlanner(docker, _host));
+        var args = new
+        {
+            serverId = "local", projectName = "tools",
+            composeContent = "services:\n  t:\n    image: x\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n",
+        };
+
+        Assert.Equal(MutationStatus.Denied, (await AsKey(h, "compose.deploy", args)).Status);
+        Assert.Equal(MutationStatus.PendingApproval,
+            (await h.RunAsync("compose.deploy", args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
+    }
+
+    [Fact]
+    public async Task The_mounts_decision_of_a_planned_deployment_covers_each_mount()
+    {
+        var h = new ProtectionHarness();
+        var refused = await AsKey(h, "compose.deploy", new { serverId = "local", mounts = "/srv/a\nserverwatch-data" });
+        var allowed = await AsKey(h, "compose.deploy", new { serverId = "local", mounts = "/srv/a\nweb-cache" });
+
+        Assert.Equal(MutationStatus.Denied, refused.Status);
+        Assert.Equal(MutationStatus.Executed, allowed.Status);
+    }
+
+    [Fact]
+    public async Task A_plan_whose_mounts_were_not_decided_does_not_run()
+    {
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/srv/o",
+            "services:\n  a:\n    image: x\n    volumes:\n      - /etc:/e\n"));
+        Assert.Throws<ComposePlanException>(() => plan.EnsureDecided(null));
+    }
 }

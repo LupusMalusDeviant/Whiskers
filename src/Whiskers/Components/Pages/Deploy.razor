@@ -261,7 +261,8 @@
             var request = _formRequest;
             var sid = _serverId;
             var deployName = string.IsNullOrWhiteSpace(request.ContainerName) ? request.Image : request.ContainerName;
-            var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image },
+            var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image,
+                    volumes = string.Join(",", request.Volumes) },
                 _ => DeploymentService.DeployFromFormAsync(request, progress, sid));
             var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
             var appName = string.IsNullOrWhiteSpace(_formRequest.ContainerName) ? _formRequest.Image : _formRequest.ContainerName;

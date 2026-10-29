@@ -264,9 +264,15 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   (R1-16; unlistable containers refuse it); the cleanup task keeps its own pre-check. Images and networks it removes
   are not checked against protected patterns.
 - **Free text** (`command`, `query`, `yaml`, …) is checked word by word against protected names and the control
-  plane (R1-16, `ProtectedResourceMatcher`); `MutationTargetResolver` adds every container a free-text word of six
-  or more hex digits names by id prefix (unlistable containers refuse the call). UI pages hand their SQL, command or
-  compose file to the gateway for this; the audit keeps only lengths.
+  plane (R1-16, `ProtectedResourceMatcher`; commands as the shell reads them); `MutationTargetResolver` adds every
+  container a free-text word of six or more hex digits (three in a `docker …` command) names by id prefix
+  (unlistable containers refuse the call). UI pages hand their SQL, command or compose file to the gateway for this;
+  the audit keeps only lengths, and an approval raised from the UI stores only lengths too
+  (`ApprovalSubject.WithholdPayloads`). What a script file run by a command does is not analysed.
+- **Compose mounts** (R1-16): `ComposePlan.Mounts()` lists every host path and volume the services mount
+  (interpolated; project-scoped volumes also as `<project>_<key>`, explicit `name:` resolved). `ComposeImpact`
+  decides them under `compose.deploy` (`mounts`, one per line) before the plan's containers, and
+  `ComposePlan.EnsureDecided` refuses a re-plan whose mounts were not decided.
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row
   (`AuditLogMutationSink.PayloadArguments`, only their length is stored); the policy and the approval card still see
   them.

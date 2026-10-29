@@ -152,6 +152,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     /// <summary>Shortest word of free text that is looked up as a container id prefix (Docker's short ids have 12).</summary>
     internal const int MinimumMentionedIdLength = 6;
 
+    /// <summary>Shortest id prefix looked up in a command that runs a container runtime (<c>docker rm -f c0f</c>):
+    /// Docker accepts any unique prefix; one or two hex digits would name most containers of a server.</summary>
+    internal const int MinimumRuntimeIdLength = 3;
+
     /// <summary>
     /// R1-16 (INV-24): free text — a command, SQL, a compose file — can name a container by its id or a unique id
     /// prefix, which no name pattern matches. Every such word is looked up among the containers of the resolved
@@ -166,8 +170,15 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         var words = request.Arguments
             .Where(a => Whiskers.Services.Guardrails.ProtectedResourceMatcher.FreeTextArguments.Contains(a.Key)
                         && a.Value.ValueKind == JsonValueKind.String)
-            .SelectMany(a => Whiskers.Services.Guardrails.ProtectedResourceMatcher.Words(a.Value.GetString() ?? ""))
-            .Where(w => w.Length >= MinimumMentionedIdLength && w.All(Uri.IsHexDigit))
+            .SelectMany(a =>
+            {
+                var text = a.Value.GetString() ?? "";
+                var shortest = Whiskers.Services.Guardrails.ProtectedResourceMatcher.InvokesContainerRuntime(a.Key, text)
+                    ? MinimumRuntimeIdLength
+                    : MinimumMentionedIdLength;
+                return Whiskers.Services.Guardrails.ProtectedResourceMatcher.MentionWords(a.Key, text)
+                    .Where(w => w.Length >= shortest && w.All(Uri.IsHexDigit));
+            })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (words.Count == 0) return resolution;
@@ -234,6 +245,15 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         var resolution = Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true);
         if (resolution.Target is { } pruned && capability.Id == "host.prune")
             return await WithStoppedContainersAsync(pruned, ct);
+        // The mounts of a planned deployment, decided before its containers (ComposeImpact, R1-16): each is
+        // something the deployment touches.
+        if (resolution.Target is { } mounting && capability.Id == "compose.deploy"
+            && MutationTargets.String(request.Arguments, "mounts") is { } mountList)
+            return Done(mounting with
+            {
+                Related = mounting.Related.Concat(mountList.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    .Distinct(StringComparer.Ordinal).ToList(),
+            });
         if (resolution.Target is not { } host || capability.Id != "compose.deploy"
             || MutationTargets.String(request.Arguments, "composeContent") is not { } content)
             return resolution;
@@ -278,7 +298,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             var made = await plan(planner);
             return Done(target with
             {
-                Related = target.Related.Concat(made.DecidedIdentities()).Distinct(StringComparer.Ordinal).ToList(),
+                Related = target.Related.Concat(made.DecidedIdentities()).Concat(made.Mounts())
+                    .Distinct(StringComparer.Ordinal).ToList(),
                 RelatedResources = target.RelatedResources.Concat(made.DecidedResources()).ToList(),
             });
         }

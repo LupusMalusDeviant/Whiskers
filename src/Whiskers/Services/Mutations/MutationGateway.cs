@@ -525,6 +525,7 @@ public sealed class MutationGateway : IMutationGateway
             Binding = ApprovalBinding.Of(request, capability, policy?.VersionHash),
             // R1-15: the caller and everyone it acts for; none of them decides a non-interactive request.
             Requesters = ApprovalEligibility.RequestersOf(p),
+            WithholdPayloads = request.Surface == MutationSurface.Ui,
             // The card shows only a target found in the inventory; the notification only its kind and inventory id.
             TargetServer = ApprovalDisplay.NotifiableTarget(request.Target).Server,
             TargetWorkload = ApprovalDisplay.NotifiableTarget(request.Target).Resource,

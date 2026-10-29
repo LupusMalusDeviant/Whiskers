@@ -55,6 +55,64 @@ public class ProtectedResourceMatcherTests
         Assert.Equal(key, hit!.UnanalyzableArgument);
     }
 
+    [Theory]
+    [InlineData("docker stop whis\"\"kers")]                         // joined quotes
+    [InlineData(@"docker stop whis\kers")]                          // an escape
+    [InlineData("docker stop 'whis'kers")]
+    [InlineData("sh -c 'docker stop whis\"\"kers'")]                  // a quoted command run again
+    [InlineData("ssh host \"docker restart 'whiskers'\"")]
+    [InlineData("docker stop whisk*")]                                // a glob that could expand to it
+    [InlineData("rm -rf /opt/*/ca.key")]
+    [InlineData("cat /app/da?a/vault.key")]
+    public void Shell_evasions_are_seen_through(string command) => Assert.NotNull(Hit("command", command));
+
+    [Theory]
+    [InlineData("docker stop ${X}kers")]
+    [InlineData("docker stop wh${E}iskers")]
+    [InlineData("docker stop $NAME")]
+    [InlineData("docker ps -q | xargs docker stop")]
+    [InlineData("docker stop whis{k,}ers")]
+    [InlineData("docker stop 'unterminated")]
+    [InlineData("sh -c 'docker stop $1' x whiskers")]
+    [InlineData("python3 -c \"import os; os.system('docker stop whis' + 'kers')\"")]
+    [InlineData("perl -e 'system(\"docker\", \"stop\", \"whis\" . \"kers\")'")]
+    [InlineData("awk 'BEGIN { system(\"docker stop whis\" \"kers\") }'")]
+    public void Commands_the_shell_completes_at_run_time_are_unanalysable(string command)
+    {
+        var hit = Hit("command", command);
+        Assert.NotNull(hit);
+    }
+
+    [Theory]
+    [InlineData("query", "SHOW CREATE TABLE `users`")]               // MySQL quoted identifiers
+    [InlineData("query", "select concat(a, b) from t")]
+    [InlineData("yaml", "services:\n  web:\n    ports: [\"${PORT:-8080}:80\"]\n")]
+    [InlineData("command", @"find /var/log -name '*.gz' -exec rm {} \;")]
+    [InlineData("command", "psql -c \"select count(*) from orders\"")]
+    [InlineData("command", "docker logs --tail 100 web")]
+    [InlineData("command", "ls /var/log/*.log")]
+    public void Ordinary_text_stays_analysable(string key, string value) => Assert.Null(Hit(key, value));
+
+    [Fact]
+    public void A_path_in_any_argument_is_checked_against_the_protected_paths()
+    {
+        var paths = new[] { "/var/run/docker.sock" };
+        var hit = ProtectedResourceMatcher.FirstHit(new Dictionary<string, JsonElement>
+        {
+            ["volumes"] = JsonSerializer.SerializeToElement("/srv/x:/x,/var/run/docker.sock:/var/run/docker.sock"),
+        }, [], paths, true);
+        Assert.NotNull(hit);
+    }
+
+    [Fact]
+    public void A_hit_in_free_text_is_marked_so_its_word_is_not_quoted()
+    {
+        var hit = Hit("command", "docker restart whiskers")!;
+        Assert.True(hit.InFreeText);
+        Assert.Equal("command", hit.Argument);
+        Assert.False(Hit("containerId", "whiskers")!.InFreeText);
+    }
+
     [Fact]
     public void Nothing_is_protected_without_patterns() =>
         Assert.Null(ProtectedResourceMatcher.FirstHit(

@@ -154,9 +154,12 @@ public sealed class ProtectedResourceRule : IGuardrailRule
             reason = "";
             return GuardrailVerdict.Allow;
         }
+        // A word of a payload (a command, SQL) is never quoted: it could be part of a credential (R1-16).
         reason = hit.UnanalyzableArgument is { } argument
             ? $"The '{argument}' cannot be checked for protected resources (it builds what it acts on at run time)."
-            : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";
+            : hit.InFreeText
+                ? $"The '{hit.Argument}' touches a protected resource (pattern '{hit.Pattern}')."
+                : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";
         if (IsInteractiveAdmin(request.Context))
         {
             reason += " An Admin may approve it explicitly.";
