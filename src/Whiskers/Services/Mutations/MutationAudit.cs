@@ -128,6 +128,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         decisionId = request.DecisionId,
         // R1-13: the AI trigger behind the call, on every row of its run, nested mutations included.
         trigger = request.TriggerId is { } triggerId ? PrincipalIds.Trigger(triggerId) : null,
+        // R1-18: the operation this one runs inside, if it is nested.
+        parentOperationId = request.ParentOperationId,
         phase,
         status,
         verification,

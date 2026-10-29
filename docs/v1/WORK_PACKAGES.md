@@ -333,10 +333,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `OperationIdempotencyTests` covers identical retries, concurrent retries, mismatched inputs and restart.
-- [ ] One operation ID cannot execute twice; uncertain crash outcomes remain explicit rather than being blindly replayed.
-- [ ] Decision, approval, execution, verification and audit share the ID.
-- [ ] Nested child operations retain parent linkage and distinct identities.
+- [x] `OperationIdempotencyTests` covers identical retries, concurrent retries, mismatched inputs and restart.
+- [x] One operation ID cannot execute twice; uncertain crash outcomes remain explicit rather than being blindly replayed.
+- [x] Decision, approval, execution, verification and audit share the ID.
+- [x] Nested child operations retain parent linkage and distinct identities.
 
 **Out of scope:** Reconciliation of each infrastructure operation after a crash.
 

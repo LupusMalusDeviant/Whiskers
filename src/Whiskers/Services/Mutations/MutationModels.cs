@@ -111,6 +111,10 @@ public sealed record MutationRequest(
     /// <summary>Where an agent mutation came from (R1-15), set by Whiskers from the agent session, never from the
     /// caller: an approval the gateway raises for it is interactive only for the web chat. Null: not interactive.</summary>
     public Whiskers.Models.Agent.AgentOrigin? AgentOrigin { get; init; }
+
+    /// <summary>The operation this one runs inside (a mutation nested in another one's execution), set by the gateway
+    /// from the enclosing <see cref="MutationScope"/> (R1-18); the journal and the audit keep the link.</summary>
+    public string? ParentOperationId { get; init; }
 }
 
 public enum MutationStatus
@@ -185,9 +189,25 @@ public static class MutationReasonCodes
     /// the approval's id (INV-59, R1-16).</summary>
     public const string ProtectedNeedsAdminApproval = "ProtectedNeedsAdminApproval";
 
+    /// <summary>The operation id ran already: {0} is the id (INV-39, R1-18).</summary>
+    public const string OperationAlreadyRun = "OperationAlreadyRun";
+
+    /// <summary>The operation id is running right now: {0} is the id.</summary>
+    public const string OperationRunning = "OperationRunning";
+
+    /// <summary>The operation id was running when Whiskers stopped and its effect is unknown: {0} is the id.</summary>
+    public const string OperationOutcomeUnknown = "OperationOutcomeUnknown";
+
+    /// <summary>The operation id was used for another call (principal, capability or arguments): {0} is the id.</summary>
+    public const string OperationIdReused = "OperationIdReused";
+
+    /// <summary>The operation could not be registered before it ran: nothing ran.</summary>
+    public const string OperationNotRegistered = "OperationNotRegistered";
+
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
-            DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval];
+            DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval,
+            OperationAlreadyRun, OperationRunning, OperationOutcomeUnknown, OperationIdReused, OperationNotRegistered];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

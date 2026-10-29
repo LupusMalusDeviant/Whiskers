@@ -389,6 +389,63 @@ namespace Whiskers.Migrations
                     b.ToTable("McpToolCalls");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.OperationRecordEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApprovalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("AuditId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CapabilityId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ClaimedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InputHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Instance")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrincipalId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Verification")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClaimedAt");
+
+                    b.HasIndex("ParentId");
+
+                    b.HasIndex("State");
+
+                    b.ToTable("Operations", (string)null);
+                });
+
             modelBuilder.Entity("Whiskers.Models.PolicyDecisionEntity", b =>
                 {
                     b.Property<string>("Id")

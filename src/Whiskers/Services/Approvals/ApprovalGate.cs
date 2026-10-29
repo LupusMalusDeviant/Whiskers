@@ -72,6 +72,10 @@ public interface IApprovalGate
     /// already (also before a restart), is no longer approved or has outlived its lifetime — the caller must then not
     /// run the call.</summary>
     Task<bool> TryConsumeAsync(string approvalId, string operationId, CancellationToken ct = default);
+
+    /// <summary>The operation id the open approval (pending, or approved and unused) bound to <paramref name="binding"/>
+    /// was raised for; <c>null</c> when there is none (R1-18). An approve-then-retry continues that operation.</summary>
+    string? OpenOperationOf(string binding) => null;
 }
 
 /// <summary>
@@ -158,7 +162,9 @@ public sealed class ApprovalGate : IApprovalGate
         await _raiseLock.WaitAsync(ct);
         try
         {
-            if (_approvals.FindOpen(subject.Binding) is { } raised && LevelCovers(raised, subject))
+            // R1-18: only the approval raised for this operation — another operation with the same binding asks for
+            // its own (a call without an id of its own took the id of the approval it retries, MutationGateway).
+            if (_approvals.FindOpen(subject.Binding, subject.OperationId) is { } raised && LevelCovers(raised, subject))
             {
                 if (raised.Status == ApprovalStatus.Pending)
                     return new ApprovalGateResult(false,
@@ -192,6 +198,12 @@ public sealed class ApprovalGate : IApprovalGate
         ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
         return _approvals.TryConsumeAsync(approvalId, operationId, _time.GetUtcNow().UtcDateTime, ct);
+    }
+
+    public string? OpenOperationOf(string binding)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(binding);
+        return _approvals.FindOpen(binding)?.CorrelationId;
     }
 
     /// <summary>Fail closed: an approval without a readable level, or below the subject's level, does not count.</summary>

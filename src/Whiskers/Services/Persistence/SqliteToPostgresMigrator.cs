@@ -10,7 +10,8 @@ namespace Whiskers.Services.Persistence;
 /// the <b>target must be freshly migrated and empty</b> (the tool aborts on a non-empty target; it never
 /// merges). The metrics tables have surrogate <c>long</c> primary keys and <b>no foreign keys between them</b>,
 /// so rows are re-inserted WITHOUT their old <c>Id</c> and the target assigns fresh identity values (which
-/// also advances the sequence correctly). The meaningful unique business keys (<c>BackupId</c>, <c>TaskId</c>,
+/// also advances the sequence correctly). One column names such a key: <c>Operations.AuditId</c> (R1-18) names its
+/// <c>AuditLog</c> row, so it is rewritten to that row's new id (<see cref="CopyRun"/>). The meaningful unique business keys (<c>BackupId</c>, <c>TaskId</c>,
 /// <c>RuleId</c>, <c>IdentityKey</c>, …) are ordinary columns and copy across unchanged.
 ///
 /// The local-login users live in a second context (<see cref="WhiskersIdentityDbContext"/>) against the same
@@ -27,21 +28,36 @@ public static class SqliteToPostgresMigrator
         string Name,
         Type EntityType,
         Func<MetricsDbContext, CancellationToken, Task<bool>> AnyAsync,
-        Func<MetricsDbContext, MetricsDbContext, CancellationToken, Task<int>> CopyAsync);
+        Func<MetricsDbContext, MetricsDbContext, CopyRun, CancellationToken, Task<int>> CopyAsync);
+
+    /// <summary>What one migration run carries from table to table: the old ids of the audit rows an operation names
+    /// (read before the copy), and the new id each of them got in the target.</summary>
+    internal sealed class CopyRun
+    {
+        public HashSet<long> NamedAuditIds { get; init; } = [];
+        public Dictionary<long, long> AuditIds { get; } = [];
+        internal List<(Whiskers.Models.AuditLogEntity Row, long OldId)> Pending { get; } = [];
+    }
 
     private static Table T<TEntity>(string name, Func<MetricsDbContext, DbSet<TEntity>> set, Action<TEntity> resetId)
         where TEntity : class =>
+        T(name, set, _ => resetId);
+
+    private static Table T<TEntity>(string name, Func<MetricsDbContext, DbSet<TEntity>> set,
+        Func<CopyRun, Action<TEntity>> resetId, Func<CopyRun, Action>? afterFlush = null)
+        where TEntity : class =>
         new(name, typeof(TEntity),
             (ctx, ct) => set(ctx).AnyAsync(ct),
-            (src, dst, ct) => CopyAsync(set(src), dst, resetId, ct));
+            (src, dst, run, ct) => CopyAsync(set(src), dst, resetId(run), ct, afterFlush?.Invoke(run)));
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
-    /// exactly one of these sets — the tables of every release after its own (R1-14: the approvals; R1-12: the
+    /// exactly one of these sets — the tables of every release after its own (R1-18: the operations; R1-14: the approvals; R1-12: the
     /// decision tables).</summary>
     internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
     [
-        new(StringComparer.Ordinal) { "Approvals" },
-        new(StringComparer.Ordinal) { "Approvals", "PolicyDecisions", "PolicySnapshots" },
+        new(StringComparer.Ordinal) { "Operations" },
+        new(StringComparer.Ordinal) { "Operations", "Approvals" },
+        new(StringComparer.Ordinal) { "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots" },
     ];
 
     /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
@@ -61,7 +77,18 @@ public static class SqliteToPostgresMigrator
         T("ContainerMetrics",  c => c.ContainerMetrics,  e => e.Id = 0),
         T("ServerMetrics",     c => c.ServerMetrics,     e => e.Id = 0),
         T("AlertHistory",      c => c.AlertHistory,      e => e.Id = 0),
-        T("AuditLog",          c => c.AuditLog,          e => e.Id = 0),
+        // R1-18: an operation names its audit row — the new id of every named row is remembered.
+        T("AuditLog",          c => c.AuditLog,
+            run => e =>
+            {
+                if (run.NamedAuditIds.Contains(e.Id)) run.Pending.Add((e, e.Id));
+                e.Id = 0;
+            },
+            run => () =>
+            {
+                foreach (var (row, oldId) in run.Pending) run.AuditIds[oldId] = row.Id;
+                run.Pending.Clear();
+            }),
         T("McpToolCalls",      c => c.McpToolCalls,      e => e.Id = 0),
         T("VolumeBackups",     c => c.VolumeBackups,     e => e.Id = 0),
         T("ScheduledTasks",    c => c.ScheduledTasks,    e => e.Id = 0),
@@ -81,6 +108,10 @@ public static class SqliteToPostgresMigrator
         T("PolicyDecisions",   c => c.PolicyDecisions,   _ => { }),
         // R1-14: approvals keep their ids — audit rows and decisions name them.
         T("Approvals",         c => c.Approvals,         _ => { }),
+        // R1-18: execution claims keep their operation ids — audit rows, decisions and approvals name them. Their
+        // AuditId names the audit row by its new id (null when that row is gone, as retention may have removed it).
+        T("Operations",        c => c.Operations,
+            run => o => o.AuditId = o.AuditId is { } old && run.AuditIds.TryGetValue(old, out var renumbered) ? renumbered : null),
     ];
 
     /// <summary>CLI entry point: builds the SQLite source + PostgreSQL target contexts, migrates the target
@@ -162,7 +193,7 @@ public static class SqliteToPostgresMigrator
 
         // The source schema is checked before anything is copied: a missing table would otherwise fail half-way,
         // after earlier tables committed. Only a known older release may lack tables, and only all of a release's
-        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals); anything else is not a Whiskers
+        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations); anything else is not a Whiskers
         // database this tool understands (a wrong path, a damaged file).
         var missing = new HashSet<string>(StringComparer.Ordinal);
         foreach (var table in MetricsTables)
@@ -175,6 +206,14 @@ public static class SqliteToPostgresMigrator
             return 4;
         }
 
+        // The audit rows an operation names, read before AuditLog is copied (renumbered) — a handful, not the log.
+        var run = new CopyRun
+        {
+            NamedAuditIds = missing.Contains("Operations")
+                ? []
+                : (await source.Operations.AsNoTracking().Where(o => o.AuditId != null).Select(o => o.AuditId!.Value)
+                    .ToListAsync(ct)).ToHashSet(),
+        };
         var report = new List<(string Table, int Rows)>();
         foreach (var table in MetricsTables)
         {
@@ -184,7 +223,7 @@ public static class SqliteToPostgresMigrator
                 report.Add((table.Name, 0));
                 continue;
             }
-            report.Add((table.Name, await table.CopyAsync(source, target, ct)));
+            report.Add((table.Name, await table.CopyAsync(source, target, run, ct)));
         }
 
         if (copyIdentity)
@@ -240,7 +279,7 @@ public static class SqliteToPostgresMigrator
     /// <summary>Streams one table from the source (never loading it whole) and inserts it into the target in
     /// batches. <paramref name="resetId"/> zeroes the surrogate PK so the target assigns a fresh identity.</summary>
     private static async Task<int> CopyAsync<T>(IQueryable<T> source, DbContext target,
-        Action<T> resetId, CancellationToken ct) where T : class
+        Action<T> resetId, CancellationToken ct, Action? afterFlush = null) where T : class
     {
         var total = 0;
         var buffer = new List<T>(BatchSize);
@@ -249,10 +288,16 @@ public static class SqliteToPostgresMigrator
             resetId(row);
             buffer.Add(row);
             if (buffer.Count >= BatchSize)
+            {
                 total += await FlushAsync(target, buffer, ct);
+                afterFlush?.Invoke();
+            }
         }
         if (buffer.Count > 0)
+        {
             total += await FlushAsync(target, buffer, ct);
+            afterFlush?.Invoke();
+        }
         return total;
     }
 

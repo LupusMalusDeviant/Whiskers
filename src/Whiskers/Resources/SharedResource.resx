@@ -4949,4 +4949,19 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="GuardrailsView_RequireSecondApprover_Helper" xml:space="preserve">
     <value>Nobody approves or rejects their own request, not even in the agent chat. Leave this off on a single-admin install. Requests from MCP clients, AI triggers and scheduled tasks are never decided by their requester.</value>
   </data>
+  <data name="Mutation_Refused_OperationAlreadyRun" xml:space="preserve">
+    <value>Operation {0} ran already; it does not run again.</value>
+  </data>
+  <data name="Mutation_Refused_OperationRunning" xml:space="preserve">
+    <value>Operation {0} is already running; it does not run twice.</value>
+  </data>
+  <data name="Mutation_Refused_OperationOutcomeUnknown" xml:space="preserve">
+    <value>Operation {0} was running when Whiskers stopped; whether it took effect is unknown. Check the target, then start it again.</value>
+  </data>
+  <data name="Mutation_Refused_OperationIdReused" xml:space="preserve">
+    <value>Operation id {0} was already used for another call; nothing was changed.</value>
+  </data>
+  <data name="Mutation_Refused_OperationNotRegistered" xml:space="preserve">
+    <value>The operation could not be registered; nothing was changed.</value>
+  </data>
 </root>

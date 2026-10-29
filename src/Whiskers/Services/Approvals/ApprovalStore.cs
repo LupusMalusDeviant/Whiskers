@@ -34,6 +34,11 @@ public interface IApprovalStore
     /// used (pending and not expired, or approved and not used yet), newest first; <c>null</c> when there is none.</summary>
     Approval? FindOpen(string binding);
 
+    /// <summary><see cref="FindOpen(string)"/> limited to the approval raised for operation
+    /// <paramref name="operationId"/> (its <see cref="Approval.CorrelationId"/>; <c>null</c> matches an approval raised
+    /// without one). Another operation's approval is never handed to this one (R1-18, INV-39).</summary>
+    Approval? FindOpen(string binding, string? operationId);
+
     /// <summary>A human approves or rejects a pending approval (R1-15). Both are held to the same rules
     /// (<see cref="ApprovalEligibility"/>): the resolver holds at least the approval's level, and a requester never
     /// decides a non-interactive request — nor an interactive one while the policy requires a second approver. An
@@ -225,7 +230,11 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
     public Approval? Get(string approvalId) =>
         _entries.TryGetValue(approvalId, out var e) ? e.Approval : null;
 
-    public Approval? FindOpen(string binding)
+    public Approval? FindOpen(string binding) => FindOpen(binding, null, anyOperation: true);
+
+    public Approval? FindOpen(string binding, string? operationId) => FindOpen(binding, operationId, anyOperation: false);
+
+    private Approval? FindOpen(string binding, string? operationId, bool anyOperation)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(binding);
         SweepExpired();
@@ -233,6 +242,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         return _entries.Values
             .Select(e => e.Approval)
             .Where(a => a.Binding == binding
+                        && (anyOperation || string.Equals(a.CorrelationId, operationId, StringComparison.Ordinal))
                         && (a.Status == ApprovalStatus.Pending
                             || (a.Status == ApprovalStatus.Approved && a.ConsumedAt is null && a.GrantExpiresAt > now)))
             .OrderByDescending(a => a.CreatedAt)
