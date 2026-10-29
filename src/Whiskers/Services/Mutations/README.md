@@ -265,10 +265,12 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   are not checked against protected patterns.
 - **Free text** (`command`, `query`, `yaml`, …) is checked word by word against protected names and the control
   plane (R1-16, `ProtectedResourceMatcher`; commands as the shell reads them); `MutationTargetResolver` adds every
-  container a free-text word of six or more hex digits (three in a `docker …` command) names by id prefix
+  container a free-text word of twelve or more hex digits (any hex word in a `docker …` command, short decimal
+  numbers excepted) names by id prefix
   (unlistable containers refuse the call). UI pages hand their SQL, command or compose file to the gateway for this;
   the audit keeps only lengths, and an approval raised from the UI stores only lengths too
-  (`ApprovalSubject.WithholdPayloads`). What a script file run by a command does is not analysed.
+  (`ApprovalSubject.WithholdPayloads`). A command that runs a script file or pipes into a shell or an interpreter
+  is unanalysable.
 - **Compose mounts** (R1-16): `ComposePlan.Mounts()` lists every host path and volume the services mount
   (interpolated; project-scoped volumes also as `<project>_<key>`, explicit `name:` resolved). `ComposeImpact`
   decides them under `compose.deploy` (`mounts`, one per line) before the plan's containers, and

@@ -153,9 +153,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     /// ordinary hex-looking words (<c>facade</c>, a date) do not count.</summary>
     internal const int MinimumMentionedIdLength = 12;
 
-    /// <summary>Shortest id prefix looked up in a command that runs a container runtime (<c>docker rm -f c0f</c>):
-    /// Docker accepts any unique prefix; one or two hex digits would name most containers of a server.</summary>
-    internal const int MinimumRuntimeIdLength = 3;
+    /// <summary>Shortest id prefix looked up in a command that runs a container runtime (<c>docker rm -f c0</c>):
+    /// Docker accepts any unique prefix, so every hex word there counts — it hits only when it really is a prefix of
+    /// a protected container's id.</summary>
+    internal const int MinimumRuntimeIdLength = 1;
 
     /// <summary>
     /// R1-16 (INV-24): free text — a command, SQL, a compose file — can name a container by its id or a unique id

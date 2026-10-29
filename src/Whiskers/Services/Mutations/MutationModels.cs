@@ -183,7 +183,7 @@ public static class MutationReasonCodes
 
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
-            DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm];
+            DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

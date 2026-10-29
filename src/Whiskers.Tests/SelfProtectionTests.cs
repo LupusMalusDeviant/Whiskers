@@ -265,6 +265,24 @@ public class SelfProtectionTests
     }
 
     [Fact]
+    public async Task A_two_digit_id_prefix_in_a_docker_command_is_looked_up()
+    {
+        var h = new ProtectionHarness();
+        Assert.Equal(MutationStatus.Denied, (await h.RunAsync("host.exec",
+            new { serverId = "local", command = "docker stop c0" }, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+    }
+
+    [Fact]
+    public async Task The_nginx_editor_hands_its_file_to_the_check()
+    {
+        var h = new ProtectionHarness();
+        var outcome = await h.RunAsync("nginx.update",
+            new { serverId = "local", siteName = "default", content = "location / { proxy_pass http://whiskers:8080; }" },
+            ProtectionHarness.AdminKey, MutationSurface.Mcp);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+    }
+
+    [Fact]
     public async Task A_pending_control_plane_action_says_an_Admin_must_approve_it()
     {
         var h = new ProtectionHarness();

@@ -93,8 +93,25 @@ public static class ProtectedResourceMatcher
                 foreach (var glob in shell.Globs)
                     if (GlobHit(glob, keyPatterns, pathPatterns) is { } hit)
                         return hit with { Argument = key, InFreeText = true };
+                // A command that removes, moves or changes permissions of a directory above a protected path
+                // (rm -rf /var/lib/docker) destroys it; merely reading one (df -h /var/lib/docker) does not.
+                if (shell.Words.Any(w => ModifyingCommands.Contains(Path.GetFileName(w))))
+                    foreach (var word in shell.Words.Where(w => w.StartsWith('/')))
+                        if (AncestorHit(word, pathPatterns) is { } above)
+                            return above with { Argument = key, InFreeText = true };
                 if (shell.Unanalyzable) return new Hit("", null, key) { Argument = key, InFreeText = true };
                 continue;
+            }
+            // A compose file is read as compose reads it: ${VAR:-default} becomes its default, an unset variable empty.
+            if (freeText && ComposeArguments.Contains(key))
+            {
+                if (ExpandComposeVariables(value) is not { } expanded)
+                    return new Hit("", null, key) { Argument = key, InFreeText = true };
+                value = expanded;
+                // A bind mount's host side (short "- /src:/dst" or long "source: /src") above a protected path.
+                foreach (Match m in ComposeMountSource.Matches(value))
+                    if (AncestorHit(m.Groups["src"].Value, pathPatterns) is { } above)
+                        return above with { Argument = key, InFreeText = true };
             }
             foreach (var word in Words(value))
                 if (WordHit(word, keyPatterns, pathPatterns, named) is { } hit)
@@ -103,6 +120,45 @@ public static class ProtectedResourceMatcher
                 return new Hit("", null, key) { Argument = key, InFreeText = true };
         }
         return null;
+    }
+
+    /// <summary>Free text that is a compose file.</summary>
+    public static readonly IReadOnlySet<string> ComposeArguments = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "yaml", "compose", "composeContent",
+    };
+
+    // Commands that remove, move or take away a directory tree.
+    private static readonly HashSet<string> ModifyingCommands = new(StringComparer.Ordinal)
+    {
+        "rm", "rmdir", "mv", "chmod", "chown", "chgrp", "chattr", "shred", "truncate", "rsync", "find", "mount",
+        "umount", "ln", "unlink", "setfacl",
+    };
+
+    private static readonly Regex ComposeMountSource = new(
+        @"(?m)^\s*-\s*[""']?(?<src>/[^:""'\s]*)\s*:|^\s*source:\s*[""']?(?<src>/[^""'\s]*)",
+        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    private static readonly Regex ComposeVariable = new(
+        @"\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:(?<op>:?[-?+])(?<word>[^{}$]*))?\}|\$(?<bare>[A-Za-z_][A-Za-z0-9_]*)|\$\$",
+        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    /// <summary>A compose file with its variables replaced the way compose would without an <c>.env</c>: a default
+    /// (<c>:-</c>, <c>-</c>) or alternative (<c>:+</c>, <c>+</c>) by its word, anything else by nothing — both, since
+    /// whether a variable is set is not known here. <c>null</c> when a variable cannot be read (nested, cut off).</summary>
+    public static string? ExpandComposeVariables(string yaml)
+    {
+        try
+        {
+            var expanded = ComposeVariable.Replace(yaml, m =>
+            {
+                if (m.Value == "$$") return "$";
+                var word = m.Groups["word"].Success ? m.Groups["word"].Value : "";
+                return m.Groups["op"].Value.EndsWith('?') ? "" : word;
+            });
+            return expanded.Contains("${", StringComparison.Ordinal) ? null : expanded;
+        }
+        catch (RegexMatchTimeoutException) { return null; }
     }
 
     /// <summary>The prefix of the resolved target's related resources the policy adapter adds (R1-06, R1-16).</summary>
@@ -247,6 +303,12 @@ public static class ProtectedResourceMatcher
         var globs = new List<string>();
         var unanalyzable = Tokenize(text, words, globs, 0);
         if (words.Any(w => ShellRunTime.Contains(w))) unanalyzable = true;
+        // A shell that reads its commands from a pipe, a file or a process substitution runs what this text never
+        // shows; only `sh -c '…'` hands it a command line, which is read again above.
+        for (var w = 0; w < words.Count && !unanalyzable; w++)
+            if (Shells.Contains(Path.GetFileName(words[w]))
+                && (w + 1 >= words.Count || !(words[w + 1].StartsWith('-') && words[w + 1].Contains('c'))))
+                unanalyzable = true;
         // Inline code of another interpreter builds what it runs from strings the shell never sees.
         for (var w = 0; w + 1 < words.Count && !unanalyzable; w++)
             if (Interpreters.Contains(Path.GetFileName(words[w])) && words[w + 1] is "-c" or "-e" or "-E" or "--eval" or "-r" or "-p")
@@ -262,6 +324,11 @@ public static class ProtectedResourceMatcher
         "eval", "xargs", "base64", "xxd", "source", "parallel", "envsubst",
     };
 
+    private static readonly HashSet<string> Shells = new(StringComparer.Ordinal)
+    {
+        "sh", "bash", "dash", "ash", "zsh", "ksh", "mksh", "fish", "busybox",
+    };
+
     // Interpreters whose inline code (-c / -e) is not shell; sh -c '…' is read again instead.
     private static readonly HashSet<string> Interpreters = new(StringComparer.Ordinal)
     {
@@ -269,7 +336,10 @@ public static class ProtectedResourceMatcher
     };
 
     private static readonly Regex ShellUnanalyzable = new(
-        @"\bopenssl\s+(enc|base64)\b|\bprintf\b[^\n]*%b|\\x[0-9a-f]{2}|\\[0-7]{3}|\bsystem\s*\(",
+        @"\bopenssl\s+(enc|base64)\b|\bprintf\b[^\n]*%b|\\x[0-9a-f]{2}|\\[0-7]{3}|\bsystem\s*\("
+        // an interpreter fed through a pipe; a script sourced with '.'
+        + @"|\|\s*(sudo\s+(-\S+\s+)*)?(\S*/)?(python\d*(\.\d+)?|perl|ruby|node|nodejs|php|lua|tclsh|pwsh)\b"
+        + @"|(^|[;&|(]\s*)\.\s+\S",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     /// <summary>Splits <paramref name="text"/> into shell words. Returns true when something in it is expanded at run

