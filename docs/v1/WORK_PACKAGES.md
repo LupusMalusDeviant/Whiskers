@@ -890,7 +890,7 @@ INV-60.
 and by the SMTP connection — for notification channels and outgoing webhooks: the seven client registrations, the
 email channel (`EmailNotificationService.cs` uses `System.Net.Mail.SmtpClient`, which has no connect hook: it moves to
 a client that connects over a socket the guard opened, with the configured name kept as the TLS target — MailKit,
-pinned like every dependency under R1-45/R1-52, rather than a hand-written SMTP/STARTTLS client), the
+pinned like every dependency under R1-52, rather than a hand-written SMTP/STARTTLS client), the
 exception settings with UI and en/de strings, README and tests; approximately 12–16 files.
 
 **Acceptance criteria:**
@@ -899,12 +899,14 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   (`0.0.0.0/8`, `::`), link-local (`169.254.0.0/16`, `fe80::/10`), RFC 1918 (`10/8`, `172.16/12`, `192.168/16`),
   CGNAT/Tailscale (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), IPv6 ULA (`fc00::/7`), deprecated site-local
   (`fec0::/10`), reserved `240.0.0.0/4`, IETF `192.0.0.0/24`, benchmarking `198.18.0.0/15`, documentation
-  (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), discard `100::/64`, multicast and
-  broadcast; local-use NAT64 (`64:ff9b:1::/48`) is judged like `64:ff9b::/96` by its embedded IPv4; 6to4 (`2002::/16`) addresses are judged by the IPv4 address they embed, and Teredo (`2001::/32`) is
-  denied outright (it embeds two IPv4 addresses, one obfuscated). The
-  list is fixed in code (Docker's default bridge and overlay pools fall inside RFC 1918); an empty configuration denies
-  all of them. Addresses are canonicalised first (IPv4-mapped and IPv4-compatible IPv6, NAT64 `64:ff9b::/96`,
-  decimal/octal/hex IPv4 literals).
+  (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), deprecated 6to4 relay anycast
+  (`192.88.99.0/24`), IPv6 benchmarking (`2001:2::/48`), ORCHIDv2 (`2001:20::/28`), discard `100::/64`, multicast and
+  broadcast; local-use NAT64 (`64:ff9b:1::/48`) is judged like `64:ff9b::/96` by its embedded IPv4; 6to4
+  (`2002::/16`) addresses are judged by the IPv4 address they embed, and Teredo (`2001::/32`) is denied outright (it
+  embeds two IPv4 addresses, one obfuscated). The list is fixed in code (Docker's default bridge and overlay pools fall
+  inside RFC 1918); an empty configuration denies all of them. Addresses are canonicalised first (IPv4-mapped and
+  IPv4-compatible IPv6, NAT64 `64:ff9b::/96`, decimal/octal/hex IPv4 literals, zone-scoped literals such as
+  `fe80::1%eth0`, judged without the zone and refused when link-local).
 - [ ] `OutboundTargetGuardTests` check the **address actually connected to** (a `SocketsHttpHandler.ConnectCallback`
   that resolves, filters and connects itself): a name with one public and one internal answer, a name that rebinds
   between check and connect, and each canonical form above are refused.
@@ -920,6 +922,8 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   Mattermost, Matrix, an SMTP relay) is refused from the first start after the upgrade until an Admin adds an
   exception. The CHANGELOG upgrade note names this case; the startup log and the Admin-only notification settings
   page list each configured channel the guard would refuse, with the address that would be refused — tested. The
+  startup listing is best-effort: it never delays `/readyz`, and a host that does not resolve is listed as
+  "unresolved". The
   listing names scheme, host and port only, never the path or query (Slack and Discord carry their secret in the URL
   path; R1-25 applies to this new sink too). The anonymous `/readyz` stays status-only
   (`Startup/WhiskersPipelineExtensions.cs`), so nothing internal leaks there. A guard refusal is final for that
@@ -935,7 +939,8 @@ exception settings with UI and en/de strings, README and tests; approximately 12
 
 **Out of scope:** Inbound webhooks (R1-09/10). The other operator-configured outbound fetchers — those the audit lists
 in `docs/v1/audit/E-exec-injection.md` (registries, image search, DNS, the VPN login server) plus the Prometheus
-endpoint, the cloud provider APIs and Ollama/AI provider endpoints — and the certificate monitor's raw TCP probe
+endpoint, the cloud provider APIs, Ollama/AI provider endpoints, git-deploy remotes
+(`Services/GitDeploy/GitDeployService.cs`) and the Kubernetes API server — and the certificate monitor's raw TCP probe
 (`Services/Certificates/CertificateProbe.cs`): they address infrastructure an Admin configures on purpose, often on
 the LAN; moving them onto the guard is a follow-up package, not part of this one.
 
@@ -1008,7 +1013,8 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   sample count. A reading at or above the threshold starts or continues a breach; a reading inside the hysteresis
   band neither resets nor clears it; a breach ends only after readings stayed below the clear bound (threshold minus
   the documented margin) for the documented clear duration, with a Cleared finding if the breach was reported —
-  as `BreachTracker` does today, so the flapping Plan-0004 WP5 removed does not return (tested). A
+  as `BreachTracker` does today, so the flapping its class comment describes (`Services/Metrics/HostLoad/
+  BreachTracker.cs`) does not return (tested). A
   gap longer than the documented tolerance resets the breach rather than bridging it, and is never silent: a gap
   raises a visible `metrics_gap` finding for the series (a host whose node_exporter is down, a container whose stats
   call fails — `MetricsCollectorService.cs:150–153` only logs a warning today), since `server_unreachable` comes from
@@ -1017,12 +1023,15 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   alerts are migrated to it. Today `high_cpu`, `high_memory` and `high_disk` re-fire after `CooldownMinutes`
   (`MetricsCollectorService.cs`, Settings panel): the package states what replaces that — one raise per breach plus
   a Cleared finding, with `CooldownMinutes` kept as the minimum gap between two breaches of the same series — updates
-  the Settings panel, and carries the change in the CHANGELOG.
+  the Settings panel, and carries the change in the CHANGELOG. `metric_anomaly` (the rolling z-score rule in
+  `MetricsCollectorService`) is a point-in-time outlier, not a threshold breach: it keeps re-firing after
+  `CooldownMinutes` as today and is not migrated to breach semantics.
 - [ ] Quiet hours (per rule or global, IANA time zone explicit) suppress delivery to channels, never evaluation: the
   in-app feed and `AlertHistory` keep recording during quiet hours, and AI-trigger dispatch is not held (a trigger
   decides for itself). Windows crossing midnight, DST changes and an invalid time zone (refused on save) are tested.
-- [ ] Event types come from one registry (`NotificationEventTypes`: constants plus the two runtime patterns
-  `log_alert:<severity>` and `<kind>_recovered`) that `NotificationFormatter.Describe`, `NotificationsLog.razor` and the
+- [ ] Event types come from one registry, created by this package (today the literals are spread across the
+  producers): `NotificationEventTypes`, constants plus the two runtime patterns
+  `log_alert:<severity>` and `<kind>_recovered`, that `NotificationFormatter.Describe`, `NotificationsLog.razor` and the
   suppression rule all read; an architecture test refuses any `EventType` value not drawn from it (variables included,
   `ServerCircuitBreaker`, `WebhookService`, `MetricsCollectorService.Emit`). A type the rule does not know at runtime
   is delivered, never suppressed.
@@ -1032,8 +1041,11 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   (`CveMonitorService` sends one aggregate event per target with severities only in its text): the aggregate gains a
   structured field with the highest CVE severity in the batch, the rule reads that field, and one Critical finding
   makes the whole batch unsuppressible. The set also holds `webhook_disabled` (R1-09's admin notice, INV-04),
-  `agent_approval` (approval requests expire under R1-15, so holding one would silently kill it), `loops_paused_reminder`
-  and `log_scan_suspended`. A test delivers each member during quiet hours, and a classification test requires every
+  `agent_approval` (approval requests expire under R1-15, so holding one would silently kill it), `loops_paused_reminder`,
+  `log_scan_suspended`, `monitoring_stalled` (`Services/Observability/ScanSupervisor.cs`: nothing is being checked, so
+  holding it hides the gap) and `auto_update_failed` (`Services/AutoUpdate/AutoUpdateService.cs`,
+  `Services/AutoPatch/AutoPatchService.cs`: a failed update can leave a container down). A test delivers each member during quiet
+  hours, and a classification test requires every
   registry entry to be assigned to suppressible or never-suppressed, so a new event type cannot land unclassified.
   The set bypasses quiet hours only: the per-container mute keeps its meaning (only `AdministrativeEvents` override
   it, as today, INV-04); a Critical CVE batch for a muted container stays muted. Events
@@ -1089,9 +1101,11 @@ the Local server included — through that executor; Whiskers itself opens no co
   HTTP: `curl -q -s -S --max-time <timeout> --resolve '<name>:<port>:<ip>' --noproxy '*'` (`-q` first, so no
   `.curlrc` changes the check; no `-L`, so a redirect is not followed and a 3xx counts as the check's answer, judged
   against its expected status);
-  TLS: `openssl s_client -connect '<ip>:<port>' -servername '<name>' </dev/null`, bounded by the executor's timeout,
+  TLS expiry: `openssl s_client -connect '<ip>:<port>' -servername '<name>' </dev/null`, bounded by the executor's
+  timeout,
   which ends the process (locally) or the one-shot container (mTLS) on expiry; TCP: `nc -z -w <timeout>
-  '<ip>' '<port>'`. The TLS expiry is read with `… | openssl x509 -noout -enddate` and requires a `notAfter=` line.
+  '<ip>' '<port>'`. The TLS expiry is read with `… | openssl x509 -noout -enddate` and requires a `notAfter=` line;
+  the check parses `notAfter` only — chain and hostname verification are out of scope for it.
   Every template sends stderr into the bounded stream (`2>&1` before the cut) or discards it, and carries the tool's
   exit status inside the bounded stream (`( cmd 2>&1; echo "__rc=$?" ) | head -c N`), since a POSIX `sh` has no
   `pipefail`; a missing or non-zero marker is a failed check. Each parser also requires positive evidence (a parsed
@@ -1100,8 +1114,9 @@ the Local server included — through that executor; Whiskers itself opens no co
   pinned port is the URL's effective port (80/443 when the URL names none); a definition port that disagrees with the
   URL is refused on save, since curl would otherwise fall back to the host's DNS — tested with and without an explicit
   port. When the name answers several addresses, every answer must pass (one denied answer refuses the check, as in
-  R1-54), the first unique allowed address in answer order is used (`getent ahosts` repeats an address per socket
-  type), and the result records it. An IP-literal target skips
+  R1-54); step (3) then tries every unique allowed address in answer order (`getent ahosts` repeats an address per
+  socket type) until one answers, and the result records which address answered, or that none did. An IP-literal
+  target skips
   step (1) and must be a canonical dotted quad or RFC 5952 IPv6 literal; decimal, octal and hex forms are refused. IPv6 addresses are bracketed where
   the tool needs it (`'<name>:<port>:[<ip>]'`, `'[<ip>]:<port>'`) — tested with an IPv6 answer. Tests cover a redirect
   to `169.254.169.254`, a name answering an internal address, IPv4-
@@ -1113,7 +1128,9 @@ the Local server included — through that executor; Whiskers itself opens no co
 - [ ] A missing tool on the host (`getent`, `curl`, `openssl`, `nc`), a non-zero exit or unparsable output is a failed
   check, never a pass — tested.
 - [ ] A check definition is a gated configuration write (R1-11) with audit (R1-22): Viewer/Operator and a demoted
-  Admin are refused, the kill switch refuses, an audit failure refuses before publication.
+  Admin are refused, the kill switch refuses, an audit failure refuses before publication. A check bound to a server
+  without a shell transport (a Kubernetes server without SSH host; `HostCommandExecutor` returns exit code -1 there)
+  is refused on save, tested.
 - [ ] Results feed the alert pipeline with R1-56's duration semantics.
 
 **Out of scope:** Synthetic browser checks; checks from outside the fleet or from Whiskers' own process; changing the
@@ -1134,12 +1151,15 @@ smartctl output); that setup is the operator's, documented in the package, and n
 
 - [ ] `DiskHealthReadingTests` parse SMART/RAID/ZFS states from recorded Prometheus `/api/v1/query` responses
   (fixtures; Whiskers reads the configured `MetricsEndpoint`, never exporter text) into distinct
-  states: Healthy, Degraded/Failing and Unknown/Unsupported. Missing, malformed, partial or stale readings (older than
-  a documented freshness limit) are Unknown — never Healthy — and cannot clear an existing Degraded/Failing state.
+  states: Healthy, Degraded/Failing, Unknown and Unsupported. Unsupported means a host never had a reading (for
+  example a Docker-source server without `MetricsEndpoint`); Unknown means a host had one and it is now missing,
+  malformed, partial or stale (older than a documented freshness limit). Neither is ever Healthy, and neither can
+  clear an existing Degraded/Failing state.
 - [ ] Disabled by default; enabling is a gated configuration write (R1-11) with audit (R1-22) — Viewer/Operator and a
   demoted Admin refused, kill switch and audit failure refuse, a failed save leaves the setting unchanged — and needs
   no new privileged agent and no write path on the host. The panel enforces the existing read role.
 - [ ] A failing disk, a degraded array and a reading that turns Unknown raise alerts through the pipeline (R1-56).
+  Unknown alerts only on a transition out of Healthy or Degraded/Failing; Unsupported never alerts — both tested.
 
 **Out of scope:** Running smartctl or package managers through Whiskers' own command channel; a general package-update
 inventory beyond the existing security-update findings; GPU readings.
