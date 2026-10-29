@@ -67,7 +67,7 @@ Audited checkout: **`3ae84303150e9148d2c8bb2fb6f8bb2b66250c43`**. No files were 
 
 Paths below are relative to `src/Whiskers/`, unless prefixed with `src/Whiskers.Data/`, `src/Whiskers.Tests/`, or another repository-root path.
 
-The invariant table has **49 non-✅ entries**. The named tests for its ten ✅ entries all exist, including `ToolAuthorizationWireTests`, which is declared inside `ToolAuthorizationTests.cs`. Their current passing status still needs execution.
+At the audit (2026-10-27) the invariant table had **49 non-✅ entries** (INV-60 was added later with R1-54). The named tests for its ten ✅ entries all exist, including `ToolAuthorizationWireTests`, which is declared inside `ToolAuthorizationTests.cs`. Their current passing status still needs execution.
 
 **Added after the audit:** R1-54 to R1-58 were added on 2026-10-29 from a code-level comparison with Beszel (henrygd/beszel, MIT): ideas only,
 re-implemented in Whiskers' own model — no Beszel code is copied. See "Learnings from Beszel" below for what was
@@ -889,15 +889,17 @@ INV-60.
 **Scope:** One shared outbound guard — a resolve-filter-connect primitive used by the HTTP handler's `ConnectCallback`
 and by the SMTP connection — for notification channels and outgoing webhooks: the seven client registrations, the
 email channel (`EmailNotificationService.cs` uses `System.Net.Mail.SmtpClient`, which has no connect hook: it moves to
-a client that connects over a socket the guard opened, with the configured name kept as the TLS target), the
+a client that connects over a socket the guard opened, with the configured name kept as the TLS target — MailKit,
+pinned like every dependency under R1-45/R1-52, rather than a hand-written SMTP/STARTTLS client), the
 exception settings with UI and en/de strings, README and tests; approximately 12–16 files.
 
 **Acceptance criteria:**
 
 - [ ] **Default-denied ranges are built in, not configured:** loopback (`127.0.0.0/8`, `::1`), unspecified
   (`0.0.0.0/8`, `::`), link-local (`169.254.0.0/16`, `fe80::/10`), RFC 1918 (`10/8`, `172.16/12`, `192.168/16`),
-  CGNAT/Tailscale (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), IPv6 ULA (`fc00::/7`), reserved `240.0.0.0/4`, multicast
-  and broadcast; 6to4 (`2002::/16`) addresses are judged by the IPv4 address they embed, and Teredo (`2001::/32`) is
+  CGNAT/Tailscale (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), IPv6 ULA (`fc00::/7`), reserved `240.0.0.0/4`, IETF
+  `192.0.0.0/24`, benchmarking `198.18.0.0/15`, documentation `2001:db8::/32`, discard `100::/64`, multicast and
+  broadcast; local-use NAT64 (`64:ff9b:1::/48`) is judged like `64:ff9b::/96` by its embedded IPv4; 6to4 (`2002::/16`) addresses are judged by the IPv4 address they embed, and Teredo (`2001::/32`) is
   denied outright (it embeds two IPv4 addresses, one obfuscated). The
   list is fixed in code (Docker's default bridge and overlay pools fall inside RFC 1918); an empty configuration denies
   all of them. Addresses are canonicalised first (IPv4-mapped and IPv4-compatible IPv6, NAT64 `64:ff9b::/96`,
@@ -915,8 +917,9 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   upgrade note, and such a delivery fails with a reason of its own (not a generic network error).
 - [ ] The upgrade cannot silently cost all alerts: every existing LAN or Tailscale channel (a self-hosted ntfy,
   Mattermost, Matrix, an SMTP relay) is refused from the first start after the upgrade until an Admin adds an
-  exception. The CHANGELOG upgrade note names this case, and startup/readiness and the notification settings list each
-  configured channel the guard would refuse, with the address that would be refused — tested.
+  exception. The CHANGELOG upgrade note names this case; the startup log and the Admin-only notification settings
+  page list each configured channel the guard would refuse, with the address that would be refused — tested. The
+  anonymous `/readyz` stays status-only (`Startup/WhiskersPipelineExtensions.cs`), so nothing internal leaks there.
 - [ ] Exceptions are narrow: an Admin-only list of entries, each either an IP literal plus port, or a name plus port
   plus the address(es) it may resolve to. The guard compares the **connected address** with the entry, so an excepted
   name that rebinds to another address (for example `169.254.169.254`) is refused — tested. Ranges or wildcards are
@@ -962,6 +965,9 @@ settings, SQLite → PostgreSQL migrator (R1-34's transactional transfer); appro
 - [ ] Each tier has its own retention; raw retention can shrink without losing the long view. `AlertHistory`, today
   pruned with the same `RetentionDays` (`MetricsCollectorService.cs:275`), keeps a retention of its own and is not
   shortened by a smaller raw retention. Defaults documented.
+- [ ] Retention is configuration-only today (`Configuration/MetricsSettings.cs`, nothing writes it): this package
+  creates the settings-store write path and its UI, and a value from the environment or `appsettings` stays read-only
+  and is shown as such, so R1-11's coverage test has one write path to enumerate.
 - [ ] Retention settings are gated configuration writes (R1-11) with audit (R1-22): Viewer/Operator and a demoted Admin
   are refused, the kill switch refuses, an audit failure refuses before the setting is published, and a failed save
   leaves the live settings unchanged. Every new query and results path enforces the existing read role.
@@ -1009,8 +1015,11 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   and `cve_finding` notifications whose batch contains a Critical finding. `NotificationEvent` has no severity today
   (`CveMonitorService` sends one aggregate event per target with severities only in its text): the aggregate gains a
   structured field with the highest CVE severity in the batch, the rule reads that field, and one Critical finding
-  makes the whole batch unsuppressible. A test delivers each member during quiet hours to a muted target, and a test
-  pins the set's contents. Events
+  makes the whole batch unsuppressible. The set also holds `webhook_disabled` (R1-09's admin notice, INV-04),
+  `agent_approval` (approval requests expire under R1-15, so holding one would silently kill it), `loops_paused_reminder`
+  and `log_scan_suspended`. A test delivers each member during quiet hours to a muted target, and a classification test
+  enumerates every event type the code emits and requires each to be assigned to suppressible or never-suppressed,
+  so a new event type cannot land unclassified. Events
   for audit failures or the kill switch do not exist today; adding them is not part of this package.
 - [ ] What was suppressed is recorded durably (bounded aggregation per rule and target; past the bound the summary
   carries an "N further events suppressed" count, so overflow is never silent) and delivered as one summary
@@ -1048,6 +1057,8 @@ the Local server included — through that executor; Whiskers itself opens no co
   applies no output cap (`HostCommandExecutor.cs:59–61`); a test sends a large response through the TCP transport.
 - [ ] A check run is a registered gateway capability with an owner principal (INV-04): the owner's authority is
   re-checked on every run, the kill switch and an audit failure refuse the run, and every run is audited.
+- [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
+  a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists
   (R1-42 validators, INV-41) and inserted single-quoted; a test proves that an option-leading operand (`-…`) or one
   containing shell metacharacters, quotes or whitespace is refused **before** anything runs. No new agent, no new
@@ -1057,7 +1068,12 @@ the Local server included — through that executor; Whiskers itself opens no co
   R1-54 default-denied ranges and the check's exceptions; (3) a second fixed command pinned to the chosen address —
   HTTP: `curl -q --resolve '<name>:<port>:<ip>' --max-redirs 0 --noproxy '*'` (`-q` first, so no `.curlrc` changes
   the check); TLS: `openssl s_client -connect '<ip>:<port>' -servername '<name>' </dev/null`; TCP: `nc -z -w <timeout>
-  '<ip>' '<port>'`. Every template sends stderr into the bounded stream (`2>&1` before the cut) or discards it. The
+  '<ip>' '<port>'`. The TLS expiry is read with `… | openssl x509 -noout -enddate` and requires a `notAfter=` line.
+  Every template sends stderr into the bounded stream (`2>&1` before the cut) or discards it, and carries the tool's
+  exit status inside the bounded stream (`( cmd 2>&1; echo "__rc=$?" ) | head -c N`), since a POSIX `sh` has no
+  `pipefail`; a missing or non-zero marker is a failed check. Each parser also requires positive evidence (a parsed
+  3-digit HTTP status, a parsed `notAfter`, the TCP marker 0) — tested with curl exit 28/6/7 and an openssl connect
+  failure. The
   pinned port is the URL's effective port (80/443 when the URL names none); a definition port that disagrees with the
   URL is refused on save, since curl would otherwise fall back to the host's DNS — tested with and without an explicit
   port. When the name answers several addresses, every answer must pass (one denied answer refuses the check, as in
@@ -1067,6 +1083,9 @@ the Local server included — through that executor; Whiskers itself opens no co
   to `169.254.169.254`, a name answering an internal address, IPv4-
   mapped IPv6 forms and a refused destination. Internal targets — the usual case for a LAN service — need an explicit,
   Admin-only exception per check (IP literal or name plus allowed addresses, as in R1-54).
+- [ ] The required tool set per host is documented: `getent`, `curl`, `openssl` and one `nc` flavour (OpenBSD
+  netcat, the Debian/Ubuntu default) for the TCP check; another `nc` variant is reported as unsupported rather than
+  guessed at.
 - [ ] A missing tool on the host (`getent`, `curl`, `openssl`, `nc`), a non-zero exit or unparsable output is a failed
   check, never a pass — tested.
 - [ ] A check definition is a gated configuration write (R1-11) with audit (R1-22): Viewer/Operator and a demoted
