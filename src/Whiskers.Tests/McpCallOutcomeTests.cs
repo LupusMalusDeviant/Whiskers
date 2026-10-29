@@ -174,6 +174,26 @@ public sealed class McpCallOutcomeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_url_credential_in_a_tool_error_reaches_neither_the_event_nor_the_history()
+    {
+        var store = new RecordingCallLog();
+        var http = Post(store, """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"restart_container"}}""");
+
+        await new McpCallLogMiddleware(async ctx =>
+        {
+            _mcp.Http = ctx;
+            await _mcp.CallAsync("restart_container", _ => ValueTask.FromResult(new CallToolResult
+            {
+                IsError = true,
+                Content = [new TextContentBlock { Text = "pull failed: https://ghp_demo-credential@registry.example/x" }],
+            }), requestId: McpCallOutcomes.KeyOf(new RequestId(5)));
+        }).InvokeAsync(http);
+
+        Assert.DoesNotContain("ghp_demo-credential", Assert.Single(store.Entries).Error);
+        Assert.DoesNotContain("ghp_demo-credential", Assert.Single(await _mcp.EventsAsync()).Details);
+    }
+
+    [Fact]
     public async Task Outside_a_mutation_the_tool_audit_is_an_ordinary_row()
     {
         var legacy = new RecordingAuditLog();

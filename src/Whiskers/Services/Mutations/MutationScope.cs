@@ -97,7 +97,7 @@ public sealed class MutationScope : IDisposable
         // a secret from what marks it as one.
         if (Current is { } scope && scope.FailureReason is null)
         {
-            var safe = Whiskers.Utils.SecretRedactor.Redact(reason);
+            var safe = Whiskers.Utils.SecretRedactor.Redact(PolicyDecisions.WithoutUrlCredentials(reason)!);
             scope.FailureReason = safe.Length > MaxReasonChars ? safe[..MaxReasonChars] + "…" : safe;
         }
         return reason;
