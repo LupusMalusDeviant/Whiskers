@@ -509,8 +509,11 @@ public sealed class AuditFailClosedTests : IDisposable
             _writes.FailBefore = false;
         });
 
-        await Recovery(journal).RecoverAsync();
+        var looking = Recovery(journal);
+        await looking.RecoverAsync();
         Assert.Equal("intent", Assert.Single(await Events()).Phase);
+        // Skipped, so still incomplete — and shown as such.
+        Assert.Equal(HealthStatus.Degraded, await Status(looking));
 
         // A restart before anything wrote the outcome again: the next process settles it by the journal.
         _sink = null;

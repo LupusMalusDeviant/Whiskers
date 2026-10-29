@@ -245,7 +245,7 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                     target = state is null
                         ? target.Where(a => !db.Operations.Any(o => o.AuditId == rowId))
                         : target.Where(a => db.Operations.Any(o => o.AuditId == rowId && o.State == state && o.Instance == instance));
-                    await target
+                    var settled = await target
                         .ExecuteUpdateAsync(s => s
                             .SetProperty(a => a.Phase, row.Phase)
                             .SetProperty(a => a.Outcome, row.Outcome)
@@ -254,6 +254,9 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                             .SetProperty(a => a.Success, row.Success)
                             .SetProperty(a => a.OperationId, row.OperationId)
                             .SetProperty(a => a.Details, row.Details), ct);
+                    // Skipped on stale evidence: unless the gateway completed it meanwhile, it is still incomplete.
+                    if (settled == 0 && await db.AuditLog.AnyAsync(a => a.Id == rowId && a.Phase == "intent", ct))
+                        left++;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
