@@ -20,6 +20,8 @@ public static class ControlPlaneResources
     [
         // Whiskers' data volume on the host (database, keys, vault, mTLS), wherever Docker keeps it by default
         "/var/lib/docker/volumes/whiskers*", "/var/lib/docker/volumes/serverwatch*",
+        // … also under a compose project's prefix (prod_serverwatch-data)
+        "/var/lib/docker/volumes/*_whiskers*", "/var/lib/docker/volumes/*_serverwatch*",
         "*/mtls", "*/mtls/*",                       // client certificates and keys of the mTLS tunnels
         "*/step-ca", "*/step-ca/*",                 // the certificate authority's keys
         "/opt/step-ca", "/opt/step-ca/*",           // … where onboarding puts it (literal, so /opt counts as above it)
@@ -74,6 +76,7 @@ public static class ControlPlaneResources
         var names = new List<string>
         {
             "whiskers*", "serverwatch*",            // the app, its database (whiskers-db), its data volume
+            "*_whiskers*", "*_serverwatch*",        // … under a compose project's prefix (prod_serverwatch-data)
             "socket-proxy*", "docker-socket-proxy*",
             "ghostunnel*", "step-ca*",
             "nginx-proxy-manager*",                 // the reverse proxy in front of Whiskers and its MCP gateway

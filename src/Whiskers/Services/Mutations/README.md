@@ -265,19 +265,22 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   are not checked against protected patterns.
 - **Free text** (`command`, `query`, `yaml`, …) is checked word by word against protected names and the control
   plane (R1-16, `ProtectedResourceMatcher`; commands as the shell reads them); `MutationTargetResolver` adds every
-  container a free-text word of twelve or more hex digits (any hex word in a `docker …` command, short decimal
-  numbers excepted) names by id prefix
+  container a free-text word of twelve or more hex digits (any hex word in a `docker …` command except options,
+  their numbers, image references, paths and file names; a single digit only after a subcommand that takes
+  containers; the container of a Docker API path) names by id prefix
   (unlistable containers refuse the call). UI pages hand their SQL, command or compose file to the gateway for this;
   the audit keeps only lengths, and an approval raised from the UI stores only lengths too
   (`ApprovalSubject.WithholdPayloads`). A command that runs a script file or pipes into a shell or an interpreter
   is unanalysable.
 - **Compose mounts** (R1-16): `ComposePlan.Mounts()` lists every host path and volume the services mount
-  (interpolated; project-scoped volumes also as `<project>_<key>`, explicit `name:` resolved). `ComposeImpact`
+  (interpolated; relative bind sources resolved against the project directory; project-scoped volumes also as
+  `<project>_<key>`, explicit `name:` resolved). `ComposeImpact`
   decides them under `compose.deploy` (`mounts`, one per line) before the plan's containers, and
   `ComposePlan.EnsureDecided` refuses a re-plan whose mounts were not decided.
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row
-  (`AuditLogMutationSink.PayloadArguments`, only their length is stored); the policy and the approval card still see
-  them.
+  (`AuditLogMutationSink.PayloadArguments`, only their length is stored); the policy sees them, and so does the
+  approval card of a non-UI request (an agent's chat call, whose approver must read what the agent wants to run) —
+  a UI approval stores only their lengths.
 - **A UI action that outlives its deadline** keeps running when the service call ignores the token (most do); the
   page then shows a timeout while the work continues.
 - **Approval eligibility.** Approvals are persisted and fully bound since R1-14 (`../Approvals/`); who may approve (no self-approval for unattended requests) and requester-session lifetime follow in R1-15.

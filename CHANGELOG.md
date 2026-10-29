@@ -35,7 +35,8 @@ All notable changes to Whiskers are documented here. The format follows
   interpreter (`curl … | sh`), a script (`bash deploy.sh`, `./deploy.sh`, `/opt/x/run.sh`, `python3 x.py`), `make` or
   `npm`, any interpreter (`python3 …`, `node …`), `xargs` by any path, `find -exec` from `/`, a changing
   `docker compose` / `docker-compose` / `docker stack` command (`up`, `down`, `rm`, … — the compose file, not the
-  command, says what it touches), or `rm`/`mv`/`chmod` on `/var/lib/docker`; renewing or issuing mTLS certificates and restoring a self-backup
+  command, says what it touches), `docker system|container|volume|network prune` (what it removes is named nowhere;
+  `docker image prune` stays allowed), a compose bind mount whose relative source climbs to `/` (`../../..`), or `rm`/`mv`/`chmod` on `/var/lib/docker`; renewing or issuing mTLS certificates and restoring a self-backup
   (an Admin approval in the web UI, refused for keys);
   editing an nginx site that proxies to Whiskers; deploying your own `step-ca` or `ghostunnel`; SQL with dynamic
   statements or inline functions (`EXECUTE`, `PREPARE`, `CREATE FUNCTION`, typical in migrations and `pg_dump`
@@ -50,7 +51,9 @@ All notable changes to Whiskers are documented here. The format follows
   (Admin approval, since the target directory's `.env` is not read). Rename a
   container that only shares the prefix, put the command into a script file on the host, or run the action from
   the web UI as an Admin. The Admin exception covers the control plane only: a resource protected by the policy's
-  own pattern stays refused for everyone, as before.
+  own pattern stays refused for everyone, as before, wherever in the call it is named — and while the policy lists
+  patterns of its own, free text that cannot be analysed is refused for everyone too (it could name one). The data
+  volume is recognised under a compose project's prefix as well (`prod_serverwatch-data`).
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and
   rejecting follow the same rules: the approver holds the action's effective level (Viewers decide nothing, and the
   chat now passes the approver's current role), and nobody decides their own non-interactive request — direct MCP,

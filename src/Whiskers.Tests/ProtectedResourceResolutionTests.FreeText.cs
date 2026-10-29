@@ -150,6 +150,14 @@ public sealed partial class ProtectedResourceResolutionTests
     }
 
     [Fact]
+    public async Task A_relative_mount_is_decided_where_it_lands()
+    {
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    volumes:\n      - ../../..:/host\n      - ./conf:/c\n"));
+        Assert.Equal(["/", "/opt/deployments/tools/conf"], plan.Mounts());
+    }
+
+    [Fact]
     public async Task A_mount_from_a_variable_whiskers_cannot_see_refuses_the_plan() =>
         await Assert.ThrowsAsync<ComposePlanException>(() => Planner().PlanAsync(ComposeDeployment.FromContent("local",
             "/srv/n", "services:\n  a:\n    image: x\n    volumes:\n      - ${NOWHERE}:/d\n")));

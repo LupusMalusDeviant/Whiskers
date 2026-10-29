@@ -150,6 +150,17 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         var paths = change ? ControlPlaneResources.PathPatterns : [];
         // The policy's own patterns apply to every argument, as before. The control plane's names apply only where a
         // container, volume or network can be named — not to a server, a DNS record or a task that shares the prefix.
+        // A resource protected only by the policy's own pattern is refused for everyone, wherever in the call it is
+        // named — looked for first, so a control-plane hit earlier in the call cannot make it approvable. Free text
+        // that cannot be analysed could name one, so it is refused too while the policy protects anything of its own.
+        var policyOnly = policy.Where(p => !ControlPlaneResources.NamePatterns.Contains(p, StringComparer.OrdinalIgnoreCase)
+                                           && !ControlPlaneResources.PathPatterns.Contains(p, StringComparer.Ordinal)).ToList();
+        if (policyOnly.Count > 0
+            && ProtectedResourceMatcher.FirstHit(request.Arguments, policyOnly, [], analyseFreeText: change) is { } policyHit)
+        {
+            reason = Describe(policyHit);
+            return GuardrailVerdict.Deny;
+        }
         var hit = ProtectedResourceMatcher.FirstHit(request.Arguments, policy, paths, analyseFreeText: change)
                   ?? (change
                       ? ProtectedResourceMatcher.FirstHit(request.Arguments, ControlPlaneResources.NamePatterns, [],
@@ -165,25 +176,23 @@ public sealed class ProtectedResourceRule : IGuardrailRule
             return GuardrailVerdict.Allow;
         }
         // A word of a payload (a command, SQL) is never quoted: it could be part of a credential (R1-16).
-        reason = hit.UnanalyzableArgument is { } argument
-            ? $"The '{argument}' cannot be checked for protected resources (it builds what it acts on at run time)."
-            : hit.InFreeText
-                ? $"The '{hit.Argument}' touches a protected resource (pattern '{hit.Pattern}')."
-                : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";
+        reason = Describe(hit);
         // INV-59's exception covers the control plane (its names, its paths, unanalysable free text, the capabilities
         // that change it). A resource protected only by the policy's own pattern stays refused for everyone, as before.
-        var controlPlane = hit.Pattern is null
-                           || ControlPlaneResources.NamePatterns.Contains(hit.Pattern, StringComparer.OrdinalIgnoreCase)
-                           || ControlPlaneResources.PathPatterns.Contains(hit.Pattern, StringComparer.Ordinal)
-                           || hit.Pattern == "control plane"
-                           || !policy.Contains(hit.Pattern, StringComparer.Ordinal);
-        if (controlPlane && IsInteractiveAdmin(request.Context))
+        if (IsInteractiveAdmin(request.Context))
         {
             reason += " An Admin may approve it explicitly.";
             return GuardrailVerdict.Confirm;
         }
         return GuardrailVerdict.Deny;
     }
+
+    private static string Describe(ProtectedResourceMatcher.Hit hit) =>
+        hit.UnanalyzableArgument is { } argument
+            ? $"The '{argument}' cannot be checked for protected resources (it builds what it acts on at run time)."
+            : hit.InFreeText
+                ? $"The '{hit.Argument}' touches a protected resource (pattern '{hit.Pattern}')."
+                : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";
 
     /// <summary>INV-59's one exception: a person acting interactively — in the web UI or the web chat — as an Admin.
     /// Not a key, not an automation, not an AI trigger, not an agent instructed over MCP.</summary>

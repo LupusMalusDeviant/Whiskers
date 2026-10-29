@@ -99,6 +99,8 @@ public class ProtectedResourceMatcherTests
     [InlineData("awk 'BEGIN { system(\"docker stop whis\" \"kers\") }'")]
     [InlineData("cd /srv/stack && docker compose down")]                      // a compose file decides the target
     [InlineData("docker-compose -f /srv/x.yml rm -f")]
+    [InlineData("docker container prune -f")]                                  // a cleanup names nothing
+    [InlineData("sudo docker system prune -af")]
     public void Commands_the_shell_completes_at_run_time_are_unanalysable(string command)
     {
         var hit = Hit("command", command);

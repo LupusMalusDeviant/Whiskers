@@ -105,6 +105,7 @@ public class SelfProtectionTests
         { "container.restart", """{"containerId":"c0ffee","serverId":"local"}""" },                 // by a unique id prefix
         { "db.query", """{"containerId":"whiskers-db","serverId":"local","query":"select 1"}""" },  // the database
         { "volume.backup_delete", """{"volumeName":"serverwatch-data","serverId":"local"}""" },     // the data volume
+        { "volume.backup_delete", """{"volumeName":"prod_serverwatch-data","serverId":"local"}""" }, // … of a compose project
         { "container.stop", """{"containerId":"nginx-proxy-manager","serverId":"local"}""" },       // the proxy
         { "container.restart", """{"containerId":"ghostunnel","serverId":"local"}""" },             // the mTLS tunnel
         { "container.stop", """{"containerId":"socket-proxy","serverId":"local"}""" },             // the socket proxy
@@ -388,6 +389,27 @@ public class SelfProtectionTests
         h.Containers[0].Id = idPrefix + "abc0000whiskers";
         Assert.Equal(MutationStatus.Executed, (await h.RunAsync("host.exec",
             new { serverId = "local", command }, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+    }
+
+    [Theory]
+    [InlineData("rm -f /opt/dockerproxy/certs/ca.crt; docker stop web")]
+    [InlineData("docker stop web; rm -f /opt/dockerproxy/certs/ca.crt")]
+    public async Task A_policy_protected_resource_is_refused_whatever_control_plane_hit_comes_first(string command)
+    {
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["web"]);
+        var outcome = await h.RunAsync("host.exec", new { serverId = "local", command }, ProtectionHarness.UiAdmin,
+            MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
+    }
+
+    [Fact]
+    public async Task A_single_digit_id_after_an_option_value_is_looked_up()
+    {
+        var h = new ProtectionHarness();
+        h.Containers[0].Id = "7abc0000whiskers";
+        Assert.Equal(MutationStatus.Denied, (await h.RunAsync("host.exec",
+            new { serverId = "local", command = "docker stop -t 10 7" }, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
     }
 
     [Fact]

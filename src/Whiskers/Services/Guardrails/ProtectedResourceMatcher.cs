@@ -321,31 +321,45 @@ public static class ProtectedResourceMatcher
     public static IEnumerable<string> MentionWords(string argument, string text) =>
         ShellArguments.Contains(argument) ? AnalyseShell(text).Words.SelectMany(Words) : Words(text);
 
-    /// <summary>The words of a command that can be a container id: every word except a number given as an option's
-    /// value (<c>--tail 100</c>, <c>-p 8080:80</c>), which names no container.</summary>
+    /// <summary>The words of a command that can be a container id: every word except an option or a number given to
+    /// one (<c>--tail 100</c>), an image reference, a path, an assignment or a file name, and a single digit before a
+    /// subcommand that takes containers; plus the container of a Docker API path. The command <c>exec</c> runs inside a
+    /// container is read too (its option values cannot be told from the container reliably), so a word there that
+    /// happens to start a protected container's id refuses the call — never the other way round.</summary>
     public static IEnumerable<string> RuntimeIdWords(string text)
     {
         var words = AnalyseShell(text).Words;
+        var takesContainer = false;   // a subcommand that takes containers was seen since the runtime word
         for (var i = 0; i < words.Count; i++)
         {
             var w = words[i];
             var previous = i > 0 ? words[i - 1] : "";
-            // Options, a number given to an option (--tail 100), image references (redis:7), paths, assignments
-            // and file names name no container; `container:/path` (docker cp) does by its first part.
-            if (w.StartsWith('-') || (NumericOptions.Contains(previous) && w.All(ch => char.IsAsciiDigit(ch) || ch is ':' or '.' or '/' or '-')))
-                continue;
             // The Docker API reached directly names its container in the path (/containers/c0ffee/stop).
             if (RuntimeApiTarget.Match(w) is { Success: true } api)
             {
                 yield return api.Groups[1].Value;
                 continue;
             }
+            if (IsRuntimeWord(w))
+            {
+                takesContainer = false;
+                continue;
+            }
+            if (!takesContainer && ContainerSubcommands.Contains(w))
+            {
+                takesContainer = true;
+                continue;
+            }
+            // Options, a number given to an option (--tail 100), image references (redis:7), paths, assignments
+            // and file names name no container; `container:/path` (docker cp) does by its first part.
+            if (w.StartsWith('-') || (NumericOptions.Contains(previous) && w.All(ch => char.IsAsciiDigit(ch) || ch is ':' or '.' or '/' or '-')))
+                continue;
             var candidate = w.Contains(":/", StringComparison.Ordinal) ? w[..w.IndexOf(':')]
                 : w.IndexOfAny([':', '/', '=', '.', '@']) >= 0 ? null
                 : w;
             if (candidate is null) continue;
-            // A single digit is an id prefix only where a command takes a container (docker stop 7).
-            if (candidate.Length < 2 && candidate.All(char.IsAsciiDigit) && !ContainerSubcommands.Contains(previous))
+            // A single digit is an id prefix only where a command takes a container (docker stop -t 10 7).
+            if (candidate.Length < 2 && candidate.All(char.IsAsciiDigit) && !takesContainer)
                 continue;
             yield return candidate;
         }
@@ -354,8 +368,7 @@ public static class ProtectedResourceMatcher
     /// <summary>Whether a command invokes a container runtime directly, where a short id prefix is meaningful.</summary>
     public static bool InvokesContainerRuntime(string argument, string text) =>
         ShellArguments.Contains(argument)
-        && (AnalyseShell(text).Words.Any(w => w is "docker" or "podman" or "nerdctl" or "ctr" or "crictl"
-                                              || w.EndsWith("/docker", StringComparison.Ordinal))
+        && (AnalyseShell(text).Words.Any(IsRuntimeWord)
             // the Docker API reached directly (curl to a socket proxy or a TCP endpoint)
             || RuntimeApi.IsMatch(text));
 
@@ -364,6 +377,9 @@ public static class ProtectedResourceMatcher
 
     private static readonly Regex RuntimeApiTarget = new(@"/(?:containers|exec)/([^/?#&\s]+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    private static bool IsRuntimeWord(string word) =>
+        word is "docker" or "podman" or "nerdctl" or "ctr" or "crictl" || word.EndsWith("/docker", StringComparison.Ordinal);
 
     // Runtime subcommands whose operands are containers.
     private static readonly HashSet<string> ContainerSubcommands = new(StringComparer.Ordinal)
@@ -445,6 +461,10 @@ public static class ProtectedResourceMatcher
     private static bool ComposeWrite(List<string> words, int command, string name)
     {
         var rest = words.Skip(command + 1).Where(w => !w.StartsWith('-')).ToList();
+        // A cleanup (docker system prune, docker container prune, … volume/network) removes what the daemon finds,
+        // named nowhere; images and the build cache hold no state of the control plane.
+        if (IsRuntimeWord(name) && rest.Contains("prune") && !rest.Any(w => w is "image" or "builder" or "buildx"))
+            return true;
         if (name is "docker" or "podman" && rest.Count > 0 && rest[0] is "compose" or "stack")
             rest = rest.Skip(1).ToList();
         else if (name is not ("docker-compose" or "podman-compose"))
