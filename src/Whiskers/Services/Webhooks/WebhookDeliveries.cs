@@ -110,8 +110,14 @@ internal sealed class WebhookDeliveryStore
         var taken = await db.WebhookDeliveries
             .Where(d => d.Id == existing.Id && d.State == Queued && d.Instance == existing.Instance)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Instance, token).SetProperty(d => d.ReceivedAt, now), ct);
-        existing.Instance = token;
-        return (taken == 1, existing);
+        if (taken == 1)
+        {
+            existing.Instance = token;
+            return (true, existing);
+        }
+        // Nothing changed — or a retried update after its commit answer was lost: the row as it is now tells.
+        var current = await db.WebhookDeliveries.AsNoTracking().SingleAsync(d => d.Id == existing.Id, ct);
+        return (current.Instance == token, current);
     }
 
     /// <summary>Starts the run: only under the claim that queued it (not one a later delivery took over), and only once.</summary>

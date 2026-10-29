@@ -286,6 +286,8 @@ public class GitDeployService : IGitDeployService
                 await EnsureUnchangedAsync(app);
                 plan = await _planner.PlanAsync(deployment, ct);
                 using var project = await LockProjectAsync(deployment, plan, p => plan = p, ct);
+                // The wait for the project can be long: the app must still be the one decided on.
+                await EnsureUnchangedAsync(app);
                 plan.EnsureDecided(MutationScope.Current);
                 // 4) Build
                 Report("③ docker compose build…");

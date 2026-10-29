@@ -694,6 +694,32 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task A_takeover_retried_after_its_answer_was_lost_still_runs()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var request = Signed(wh, "delivery-0207");
+        var (key, _) = WebhookSignatures.Verify(wh, request, _time.GetUtcNow(), _options.TimestampTolerance);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.WebhookDeliveries.Add(new WebhookDeliveryEntity
+            {
+                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Queued",
+                Instance = "stopped-process/claim", ReceivedAt = _time.GetUtcNow().UtcDateTime,
+            });
+            await db.SaveChangesAsync();
+        }
+        // The takeover commits, its answer is lost, and the retry changes nothing.
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.Replay);
+
+        var reply = await Service().AcceptAsync(wh.WebhookId, request);
+
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Accepted, "left-queued", "queued"), reply);
+        Assert.Equal("Succeeded", (await Finished("left-queued")).State);
+        Assert.Equal(1, _runner.Runs);
+    }
+
+    [Fact]
     public void Requests_per_webhook_and_overall_are_limited()
     {
         _options.RequestsPerMinutePerWebhook = 2;
@@ -830,7 +856,7 @@ public sealed class WebhookReplayTests : IDisposable
             CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    private enum Fault { Fail, LoseAnswer, Stall }
+    private enum Fault { Fail, LoseAnswer, Stall, Replay }
 
     /// <summary>Breaks the next database command whose text contains a fragment — with <c>runsOnly</c>, only one of
     /// a run (the worker's commands carry the run's deadline; a delivery's own lookups have none): fails it, executes
@@ -885,6 +911,11 @@ public sealed class WebhookReplayTests : IDisposable
                     // Executed, then the answer is lost: the caller cannot tell whether it was written.
                     await using (var reader = await command.ExecuteReaderAsync(ct)) { }
                     throw new OperationCanceledException("The answer was lost.");
+                case Fault.Replay:
+                    // Committed once, the answer lost, and retried (as a retrying execution strategy does): the
+                    // caller sees only the retry.
+                    await command.ExecuteNonQueryAsync(ct);
+                    break;
             }
         }
     }

@@ -440,6 +440,25 @@ public sealed class WebhookMutationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_git_app_changed_while_its_deployment_waited_for_the_project_does_not_deploy()
+    {
+        var webhook = Seed("git-deploy", AppId);
+        var held = await _locks.AcquireAsync(ResourceLocks.ComposeProject("local", "payments"));
+        var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+
+        // Saved again while the deployment waits: it is no longer the app the deployment was decided on.
+        var app = (await _git.GetAppAsync(AppId))!;
+        app.Branch = "release";
+        await _git.SaveAppAsync(app, token: null, AdminId);
+        held.Dispose();
+
+        var (success, _) = await test;
+        Assert.False(success);
+        Assert.False(Ran("git-deploy"));
+    }
+
+    [Fact]
     public async Task A_compose_webhook_and_a_git_deployment_of_one_project_share_its_lock()
     {
         _host.Files["/opt/payments/docker-compose.yml"] = "name: payments\nservices:\n  web:\n    image: nginx\n";
