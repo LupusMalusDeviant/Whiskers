@@ -22,6 +22,7 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "cat /app/data/vault.key")]               // a protected path
     [InlineData("command", "tar czf - /opt/step-ca/secrets")]
     [InlineData("command", "cd /app/data && ls")]
+    [InlineData("command", "cd /opt && rm -rf step-ca")]            // a relative operand after cd
     public void Finds_a_protected_resource(string key, string value) => Assert.NotNull(Hit(key, value));
 
     [Theory]
@@ -96,6 +97,8 @@ public class ProtectedResourceMatcherTests
     [InlineData("python3 -c \"import os; os.system('docker stop whis' + 'kers')\"")]
     [InlineData("perl -e 'system(\"docker\", \"stop\", \"whis\" . \"kers\")'")]
     [InlineData("awk 'BEGIN { system(\"docker stop whis\" \"kers\") }'")]
+    [InlineData("cd /srv/stack && docker compose down")]                      // a compose file decides the target
+    [InlineData("docker-compose -f /srv/x.yml rm -f")]
     public void Commands_the_shell_completes_at_run_time_are_unanalysable(string command)
     {
         var hit = Hit("command", command);

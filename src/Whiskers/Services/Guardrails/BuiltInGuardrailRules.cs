@@ -131,7 +131,7 @@ public sealed class ToolAllowListRule : IGuardrailRule
 /// plane (<see cref="ControlPlaneResources"/>), whatever the policy says. Matched against every argument value whole,
 /// against the resolved target the gateway adds, and against every word of a free-text argument (a command, SQL, a
 /// compose file); free text that cannot be analysed counts as touching a protected resource.
-/// A hit is refused — except for an interactive Admin (the web UI or the web chat, as an Admin): their action needs an
+/// A hit is refused — except a control-plane hit for an interactive Admin (the web UI or the web chat, as an Admin): their action needs an
 /// explicit approval at Admin level (<see cref="Id"/> among the matched rules), which the approval gate raises,
 /// binds to the call and audits.
 /// </summary>
@@ -170,7 +170,14 @@ public sealed class ProtectedResourceRule : IGuardrailRule
             : hit.InFreeText
                 ? $"The '{hit.Argument}' touches a protected resource (pattern '{hit.Pattern}')."
                 : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";
-        if (IsInteractiveAdmin(request.Context))
+        // INV-59's exception covers the control plane (its names, its paths, unanalysable free text, the capabilities
+        // that change it). A resource protected only by the policy's own pattern stays refused for everyone, as before.
+        var controlPlane = hit.Pattern is null
+                           || ControlPlaneResources.NamePatterns.Contains(hit.Pattern, StringComparer.OrdinalIgnoreCase)
+                           || ControlPlaneResources.PathPatterns.Contains(hit.Pattern, StringComparer.Ordinal)
+                           || hit.Pattern == "control plane"
+                           || !policy.Contains(hit.Pattern, StringComparer.Ordinal);
+        if (controlPlane && IsInteractiveAdmin(request.Context))
         {
             reason += " An Admin may approve it explicitly.";
             return GuardrailVerdict.Confirm;

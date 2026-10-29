@@ -25,16 +25,17 @@ All notable changes to Whiskers are documented here. The format follows
   expands (`$VAR`, `$(…)`, backticks, `{a,b}`), `eval`, `xargs`, decoding, or inline code of another interpreter
   (`python -c`, `perl -e`, `awk … system(`); in SQL dynamic SQL, `COPY … PROGRAM`, file-reading functions,
   `U&"…"` escapes, inline functions and untrusted languages (`plpython3u`). The
-  SQL console, SQL import and seed, Artisan migrations and the raw compose deploy now hand their payload to the
-  policy; the audit keeps only its length, and an approval raised from the web UI shows only the length of a
+  SQL console, SQL import and seed and the raw compose deploy now hand their payload to the policy (Artisan
+  migrations carry no free text: their command is fixed); the audit keeps only its length, and an approval raised from the web UI shows only the length of a
   command, SQL or compose file (refusal reasons never quote words of it). **Upgrade notes:** calls that used to
   pass are now refused or need an Admin approval — an MCP key or a scheduled task restarting the Whiskers container
   or its proxy; a command or query that merely mentions a protected name (also inside a domain such as
   `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a
   scheduled CustomCommand with `$(date +%F)`), `xargs`, `awk '{print $1}'`, `python -c`, a pipe into a shell or an
   interpreter (`curl … | sh`), a script (`bash deploy.sh`, `./deploy.sh`, `/opt/x/run.sh`, `python3 x.py`), `make` or
-  `npm`, any interpreter (`python3 …`, `node …`), `xargs` by any path, `find -exec` from `/`, or `rm`/`mv`/`chmod`
-  on `/var/lib/docker`; renewing or issuing mTLS certificates and restoring a self-backup
+  `npm`, any interpreter (`python3 …`, `node …`), `xargs` by any path, `find -exec` from `/`, a changing
+  `docker compose` / `docker-compose` / `docker stack` command (`up`, `down`, `rm`, … — the compose file, not the
+  command, says what it touches), or `rm`/`mv`/`chmod` on `/var/lib/docker`; renewing or issuing mTLS certificates and restoring a self-backup
   (an Admin approval in the web UI, refused for keys);
   editing an nginx site that proxies to Whiskers; deploying your own `step-ca` or `ghostunnel`; SQL with dynamic
   statements or inline functions (`EXECUTE`, `PREPARE`, `CREATE FUNCTION`, typical in migrations and `pg_dump`
@@ -48,7 +49,8 @@ All notable changes to Whiskers are documented here. The format follows
   update Whiskers from the web UI); a raw compose file in the UI deploy that uses a variable without a default
   (Admin approval, since the target directory's `.env` is not read). Rename a
   container that only shares the prefix, put the command into a script file on the host, or run the action from
-  the web UI as an Admin.
+  the web UI as an Admin. The Admin exception covers the control plane only: a resource protected by the policy's
+  own pattern stays refused for everyone, as before.
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and
   rejecting follow the same rules: the approver holds the action's effective level (Viewers decide nothing, and the
   chat now passes the approver's current role), and nobody decides their own non-interactive request — direct MCP,

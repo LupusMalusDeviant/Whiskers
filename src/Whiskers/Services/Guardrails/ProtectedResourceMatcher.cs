@@ -65,6 +65,8 @@ public static class ProtectedResourceMatcher
         foreach (var (key, element) in arguments)
         {
             var value = element.ValueKind == JsonValueKind.String ? element.GetString() ?? "" : element.GetRawText();
+            // The resolved target's kind (container, whiskers, host …) is a category, not a name.
+            if (key == ResolvedKindKey) continue;
             var keyPatterns = nameKeys is null || nameKeys(key) ? patterns : [];
             // A whole payload (SQL, a command) that matches is never quoted either: it can carry a credential.
             if (Match(value, keyPatterns) is { } whole)
@@ -98,9 +100,14 @@ public static class ProtectedResourceMatcher
                 // A command that removes, moves or changes permissions of a directory above a protected path
                 // (rm -rf /var/lib/docker) destroys it; merely reading one (df -h /var/lib/docker) does not.
                 if (shell.Words.Any(w => ModifyingCommands.Contains(Path.GetFileName(w))))
-                    foreach (var word in shell.Words.Where(w => w.StartsWith('/')))
-                        if (AncestorHit(word, pathPatterns) is { } above)
+                    foreach (var word in shell.Words.Where(w => !w.StartsWith('-')))
+                    {
+                        if (word.StartsWith('/') && AncestorHit(word, pathPatterns) is { } above)
                             return above with { Argument = key, InFreeText = true };
+                        // A relative operand (cd /app/data && rm -rf mtls) is judged by the directory it names.
+                        if (!word.StartsWith('/') && ProtectedSegment(word, pathPatterns) is { } segment)
+                            return new Hit(word, segment) { Argument = key, InFreeText = true };
+                    }
                 if (shell.Unanalyzable) return new Hit("", null, key) { Argument = key, InFreeText = true };
                 continue;
             }
@@ -172,6 +179,22 @@ public static class ProtectedResourceMatcher
             return expanded.Contains("${", StringComparison.Ordinal) ? null : expanded;
         }
         catch (RegexMatchTimeoutException) { return null; }
+    }
+
+    /// <summary>The argument the policy adapter carries the resolved target's kind in (R1-16).</summary>
+    public const string ResolvedKindKey = "__resolvedKind";
+
+    // The protected directory a relative path ends in or passes through (mtls, dockerproxy/certs, step-ca).
+    private static string? ProtectedSegment(string relative, IReadOnlyList<string> pathPatterns)
+    {
+        var segments = NormalizePath(relative).Split('/', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var pattern in pathPatterns)
+        {
+            var name = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => x != "*");
+            if (name is null || name.Contains('*')) continue;
+            if (segments.Any(s => string.Equals(s, name, StringComparison.Ordinal))) return pattern;
+        }
+        return null;
     }
 
     /// <summary>The prefix of the resolved target's related resources the policy adapter adds (R1-06, R1-16).</summary>
@@ -305,10 +328,26 @@ public static class ProtectedResourceMatcher
         var words = AnalyseShell(text).Words;
         for (var i = 0; i < words.Count; i++)
         {
-            var optionValue = i > 0 && NumericOptions.Contains(words[i - 1])
-                              && words[i].All(ch => char.IsAsciiDigit(ch) || ch is ':' or '.' or '/' or '-');
-            if (optionValue) continue;
-            foreach (var w in Words(words[i])) yield return w;
+            var w = words[i];
+            var previous = i > 0 ? words[i - 1] : "";
+            // Options, a number given to an option (--tail 100), image references (redis:7), paths, assignments
+            // and file names name no container; `container:/path` (docker cp) does by its first part.
+            if (w.StartsWith('-') || (NumericOptions.Contains(previous) && w.All(ch => char.IsAsciiDigit(ch) || ch is ':' or '.' or '/' or '-')))
+                continue;
+            // The Docker API reached directly names its container in the path (/containers/c0ffee/stop).
+            if (RuntimeApiTarget.Match(w) is { Success: true } api)
+            {
+                yield return api.Groups[1].Value;
+                continue;
+            }
+            var candidate = w.Contains(":/", StringComparison.Ordinal) ? w[..w.IndexOf(':')]
+                : w.IndexOfAny([':', '/', '=', '.', '@']) >= 0 ? null
+                : w;
+            if (candidate is null) continue;
+            // A single digit is an id prefix only where a command takes a container (docker stop 7).
+            if (candidate.Length < 2 && candidate.All(char.IsAsciiDigit) && !ContainerSubcommands.Contains(previous))
+                continue;
+            yield return candidate;
         }
     }
 
@@ -322,6 +361,16 @@ public static class ProtectedResourceMatcher
 
     private static readonly Regex RuntimeApi = new(@"/(containers|volumes|networks|exec)/|:237[56]\b|docker\.sock",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    private static readonly Regex RuntimeApiTarget = new(@"/(?:containers|exec)/([^/?#&\s]+)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    // Runtime subcommands whose operands are containers.
+    private static readonly HashSet<string> ContainerSubcommands = new(StringComparer.Ordinal)
+    {
+        "stop", "start", "restart", "kill", "rm", "pause", "unpause", "exec", "logs", "inspect", "top", "wait",
+        "port", "attach", "update", "rename", "commit", "export", "diff", "stats",
+    };
 
     // Container-runtime options that take a number (a count, a duration, a port, a size) — not a container.
     private static readonly HashSet<string> NumericOptions = new(StringComparer.Ordinal)
@@ -364,6 +413,8 @@ public static class ProtectedResourceMatcher
                 unanalyzable = true;
             else if ((Shells.Contains(name) || name == "su") && !IsCommandFlag(next))
                 unanalyzable = true;
+            else if (ComposeWrite(words, i, name))
+                unanalyzable = true;
             else if (name == "find" && words.Skip(i + 1).Any(w => w is "-exec" or "-execdir" or "-ok" or "-okdir" or "-delete"))
             {
                 // What it acts on comes from the file system: analysable only when every starting point is a plain
@@ -388,6 +439,26 @@ public static class ProtectedResourceMatcher
         catch (RegexMatchTimeoutException) { unanalyzable = true; }
         return new ShellText(words, globs, unanalyzable);
     }
+
+    /// <summary>A compose or stack command that changes containers (<c>docker compose down</c>, <c>docker-compose up</c>,
+    /// <c>docker stack deploy</c>) acts on what a compose file this text does not show defines.</summary>
+    private static bool ComposeWrite(List<string> words, int command, string name)
+    {
+        var rest = words.Skip(command + 1).Where(w => !w.StartsWith('-')).ToList();
+        if (name is "docker" or "podman" && rest.Count > 0 && rest[0] is "compose" or "stack")
+            rest = rest.Skip(1).ToList();
+        else if (name is not ("docker-compose" or "podman-compose"))
+            return false;
+        // Options with a value (-f file, -p name, --project-directory dir) leave their value among the words; the
+        // subcommand is the first word that is one.
+        return rest.Any(w => ComposeWriteCommands.Contains(w));
+    }
+
+    private static readonly HashSet<string> ComposeWriteCommands = new(StringComparer.Ordinal)
+    {
+        "up", "down", "rm", "restart", "stop", "kill", "start", "create", "run", "deploy", "pause", "scale", "exec",
+        "cp", "watch",
+    };
 
     // -c, or single-dash flags that include it (-ec, -lc); never a long option (--norc).
     private static bool IsCommandFlag(string? word) =>
@@ -492,7 +563,25 @@ public static class ProtectedResourceMatcher
                     inPrefix = false;
                     i++;
                     continue;
-                case ' ' or '\t' or '\r' or '<' or '>':
+                case '<' or '>':
+                {
+                    // A redirection: a file descriptor before it (2>) and one after it (>&1) are not words.
+                    if (inWord && !quoted && word.ToString().All(char.IsAsciiDigit))
+                    {
+                        word.Clear();
+                        inWord = glob = false;
+                    }
+                    End();
+                    i++;
+                    while (i < text.Length && text[i] is '>' or '<') i++;
+                    if (i < text.Length && text[i] == '&')
+                    {
+                        i++;
+                        while (i < text.Length && (char.IsAsciiDigit(text[i]) || text[i] == '-')) i++;
+                    }
+                    continue;
+                }
+                case ' ' or '\t' or '\r':
                     End();
                     i++;
                     continue;

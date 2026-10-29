@@ -21,13 +21,13 @@ public sealed partial class ProtectedResourceResolutionTests
     [Theory]
     [InlineData("host.exec", "command", "docker exec web pg_dump shop > /tmp/x")]               // a command
     [InlineData("host.exec", "command", "docker restart aaaa99887766")]                         // by id
-    [InlineData("db.query", "query", "TRUNCATE web.orders")]                                    // SQL
+    [InlineData("db.query", "query", "DROP DATABASE web;")]                                     // SQL
     [InlineData("compose.deploy", "yaml", "services:\n  web:\n    image: nginx\n")]              // compose
     public async Task A_policy_protected_name_in_free_text_is_decided(string capability, string key, string text)
     {
         var h = Protecting("web");
         var args = new Dictionary<string, object> { ["serverId"] = "local", [key] = text };
-        if (capability == "db.query") args["containerId"] = "whiskers-db-other";
+        if (capability == "db.query") args["containerId"] = "billing";
 
         var outcome = await AsKey(h, capability, args);
 

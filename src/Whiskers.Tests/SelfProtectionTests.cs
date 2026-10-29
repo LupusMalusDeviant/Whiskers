@@ -30,6 +30,7 @@ internal sealed class ProtectionHarness
         new() { Id = "eeee11223344proxy", Name = "nginx-proxy-manager", ServerId = "local", State = "running" },
         new() { Id = "ffff55667788tunnel", Name = "ghostunnel", ServerId = "local", State = "running" },
         new() { Id = "aaaa99887766web", Name = "web", ServerId = "local", State = "running" },
+        new() { Id = "9a9a12121212bill", Name = "billing", ServerId = "local", State = "running" },
         new() { Id = "bbbb12341234sock", Name = "socket-proxy", ServerId = "local", State = "running" },
         new() { Id = "cccc56785678ca", Name = "step-ca", ServerId = "local", State = "running" },
     ];
@@ -208,13 +209,14 @@ public class SelfProtectionTests
 
         var denied = await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
             ProtectionHarness.AdminKey, MutationSurface.Mcp);
-        await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
+        // A pattern of the policy alone is refused in the UI too (no approval card).
+        var inUi = await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
             ProtectionHarness.UiAdmin, MutationSurface.Ui);
 
         Assert.DoesNotContain("not-a-real-one", denied.Reason);
-        var card = Assert.Single(h.Approvals.GetPending());
-        Assert.DoesNotContain("not-a-real-one", card.Reason);
-        Assert.DoesNotContain("not-a-real-one", card.ParamsJson);
+        Assert.Equal(MutationStatus.Denied, inUi.Status);
+        Assert.DoesNotContain("not-a-real-one", inUi.Reason);
+        Assert.Empty(h.Approvals.GetPending());
     }
 
     [Fact]
@@ -363,5 +365,38 @@ public class SelfProtectionTests
             McpPermissionLevels.Read, ProtectionHarness.Args(new { containerId = "whiskers" }), context));
 
         Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, read.Verdict);
+    }
+
+    [Fact]
+    public async Task A_scheduled_self_backup_runs_under_the_default_policy()
+    {
+        // The kind of target ("whiskers") is not a name: it must not meet the default policy's "whiskers*".
+        var h = new ProtectionHarness(p => p.ProtectedResources = GuardrailPolicy.SafeDefault().ProtectedResources);
+        var outcome = await h.RunAsync("selfbackup.create", new { label = "nightly" }, ProtectionHarness.AdminsTask(),
+            MutationSurface.Automation);
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+    }
+
+    [Theory]
+    [InlineData("docker logs web 2>&1", "2")]                 // a redirection
+    [InlineData("docker pull postgres:16", "16")]             // an image tag
+    [InlineData("docker logs --tail=100 web", "100")]         // an option's value
+    [InlineData("docker run -d redis:7", "7")]
+    public async Task A_number_that_is_not_a_container_is_not_taken_for_an_id(string command, string idPrefix)
+    {
+        var h = new ProtectionHarness();
+        h.Containers[0].Id = idPrefix + "abc0000whiskers";
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync("host.exec",
+            new { serverId = "local", command }, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+    }
+
+    [Fact]
+    public async Task A_resource_protected_only_by_the_policy_stays_refused_for_an_interactive_Admin()
+    {
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["web"]);
+        var outcome = await h.RunAsync("container.restart", new { containerId = "web", serverId = "local" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
     }
 }
