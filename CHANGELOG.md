@@ -6,6 +6,18 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-17: **Web-terminal sessions go through the Mutation Gateway and are audited.** Opening a shell in a container
+  (`terminal.container_open`) or on a host (`terminal.host_open`) is an Admin, root-equivalent capability decided like
+  every other mutation: the kill switch opens nothing, a shell in Whiskers' own control plane needs an explicit Admin
+  approval (given once, it lets the next open of the same terminal through), and the open is audited. A session is
+  owned by the principal the gateway decided on and opens only inside that decision. Every session ends with exactly
+  one `terminal.close` audit event — principal, target, duration, the open's operation id and why it ended (closed, shell exited, idle, revoked, kill switch, terminals
+  switched off, shutdown); what is typed is never recorded. Running sessions are re-checked every 15 seconds: a
+  session whose owner no longer holds Admin (role lowered, removed, not allowed to sign in) ends, and switching the
+  kill switch on ends every session (with `Auth:Disabled` the local user stays Admin, as in the web UI). A server id that names no configured server is refused instead of opening a
+  shell on Whiskers' own host. **Upgrade notes:** a terminal open is refused while the kill switch is on; running
+  terminals end when it goes on or when their owner loses Admin; a terminal into a control-plane container
+  (`whiskers`, `socket-proxy`, …) needs an Admin approval and is opened again after it.
 - R1-16: **Whiskers protects its own control plane, and free text no longer slips past protected resources.** A
   built-in list — containers named `whiskers*`, `serverwatch*`, `socket-proxy*`, `docker-socket-proxy*`,
   `ghostunnel*`, `step-ca*`, `nginx-proxy-manager*` and those in `WHISKERS_SELF_CONTAINERS`, plus the data

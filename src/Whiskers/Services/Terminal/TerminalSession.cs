@@ -3,71 +3,67 @@ using Whiskers.Utils;
 
 namespace Whiskers.Services.Terminal;
 
-public class TerminalSession : IAsyncDisposable
+/// <summary>Who opened a terminal session: the principal id the gateway decided on (<c>user:&lt;email&gt;</c>) and the
+/// name the audit shows.</summary>
+public sealed record TerminalOwner(string Id, string DisplayName);
+
+/// <summary>What a session is a shell of: a host (<see cref="ContainerId"/> null) or a container on a server.</summary>
+public sealed record TerminalTarget(string ServerId, string? ContainerId, string Name)
 {
-    public string SessionId { get; } = Guid.NewGuid().ToString("N");
-    public string? ContainerId { get; init; }
-    public Process? Process { get; private set; }
-    public DateTime CreatedAt { get; } = DateTime.UtcNow;
-    public DateTime LastActivityAt { get; set; } = DateTime.UtcNow;
-    public bool IsRunning => Process is { HasExited: false };
+    /// <summary>The audit's target kind: <c>host</c> or <c>container</c>.</summary>
+    public string Kind => ContainerId is null ? "host" : "container";
+}
 
-    /// <summary>Marks the session active now (input OR output) so the idle sweep doesn't reap it.</summary>
-    public void Touch() => LastActivityAt = DateTime.UtcNow;
+/// <summary>Why a session ended; recorded on its one close event (INV-47).</summary>
+public enum TerminalCloseReason
+{
+    /// <summary>The user left the page or closed the terminal.</summary>
+    Closed,
+    /// <summary>The shell ended by itself.</summary>
+    Exited,
+    /// <summary>No input or output for longer than the idle timeout.</summary>
+    Idle,
+    /// <summary>The owner no longer holds Admin (role lowered, removed, not allowed to sign in).</summary>
+    Revoked,
+    /// <summary>The read-only kill switch was switched on.</summary>
+    KillSwitch,
+    /// <summary>Terminals were switched off in the settings.</summary>
+    Disabled,
+    /// <summary>Whiskers shut down.</summary>
+    Shutdown,
+}
 
-    public void Start(string shell, string? containerId = null)
-    {
-        string fileName;
-        string[] args;
+/// <summary>The program a session runs and its arguments (never through a shell on Whiskers' side).</summary>
+public sealed record TerminalLaunch(string FileName, IReadOnlyList<string> Arguments)
+{
+    /// <summary>A shell in a local container (<c>script</c> gives it a PTY), or on the host itself: Whiskers runs with
+    /// <c>pid: host</c>, so <c>nsenter</c> into PID 1's namespaces is a host shell.</summary>
+    public static TerminalLaunch Local(string shell, string? containerId) => string.IsNullOrEmpty(containerId)
+        ? new("nsenter", ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", shell, "-i", "-l"])
+        : new("docker", ["exec", "-i", containerId, "script", "-qc", $"{shell} -i", "/dev/null"]);
 
-        if (!string.IsNullOrEmpty(containerId))
-        {
-            // Use 'script' to allocate a PTY inside docker exec
-            // This gives us proper interactive shell with prompt, colors, etc.
-            fileName = "docker";
-            args = new[] { "exec", "-i", containerId, "script", "-qc", $"{shell} -i", "/dev/null" };
-        }
-        else
-        {
-            // nsenter into the host PID namespace to get a real host shell
-            // (Whiskers runs as a container with pid:host and privileged)
-            fileName = "nsenter";
-            args = new[] { "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", shell, "-i", "-l" };
-        }
-
-        StartProcess(fileName, args);
-    }
-
-    public void StartSsh(string host, int port, string user, string? keyPath)
+    /// <summary>A shell on a remote host over SSH (<paramref name="keyPath"/> null: keyless, Tailscale SSH).</summary>
+    public static TerminalLaunch Ssh(string host, int port, string user, string? keyPath)
     {
         var args = SshBaseArgs(port, keyPath);
         args.Add($"{user}@{host}");
-
-        StartProcess("ssh", args);
+        return new("ssh", args);
     }
 
-    public void StartSshDockerExec(string host, int port, string user, string? keyPath, string containerId)
+    /// <summary>A shell in a container of a remote host: SSH, then <c>docker exec</c>. The remote command is one
+    /// argument quoted for the remote shell, so the container id survives whatever it contains.</summary>
+    public static TerminalLaunch SshDockerExec(string host, int port, string user, string? keyPath, string containerId)
     {
-        // SSH into remote host, then docker exec into the container. The remote command is built as a
-        // single argv element and quoted for the *remote* shell — ssh forwards it verbatim, so the
-        // inner quoting (and the container id) survive intact regardless of special characters.
         var args = SshBaseArgs(port, keyPath);
         args.Add($"{user}@{host}");
-        args.Add(
-            $"docker exec -it {ShellUtils.Quote(containerId)} /bin/sh -c " +
-            ShellUtils.Quote("command -v bash >/dev/null && exec bash -l || exec sh"));
-
-        StartProcess("ssh", args);
+        args.Add($"docker exec -it {ShellUtils.Quote(containerId)} /bin/sh -c " +
+                 ShellUtils.Quote("command -v bash >/dev/null && exec bash -l || exec sh"));
+        return new("ssh", args);
     }
 
     private static List<string> SshBaseArgs(int port, string? keyPath)
     {
-        var args = new List<string>
-        {
-            "-tt",
-            "-o", "ServerAliveInterval=30",
-            "-p", port.ToString(),
-        };
+        var args = new List<string> { "-tt", "-o", "ServerAliveInterval=30", "-p", port.ToString() };
         // TOFU host-key verification (HOCH-11 / ADR-0002) — shared policy with tunnel + executor.
         args.AddRange(Whiskers.Services.Server.SshHostKeyPolicy.Options());
         if (!string.IsNullOrEmpty(keyPath))
@@ -77,49 +73,124 @@ public class TerminalSession : IAsyncDisposable
         }
         return args;
     }
+}
 
-    private void StartProcess(string fileName, IEnumerable<string> args)
+/// <summary>A running shell: its output streams, its input, and whether it ended.</summary>
+public interface ITerminalProcess : IAsyncDisposable
+{
+    StreamReader Output { get; }
+    StreamReader Errors { get; }
+    bool HasExited { get; }
+    Task WriteAsync(string data);
+}
+
+/// <summary>Starts the program of a session.</summary>
+public interface ITerminalLauncher
+{
+    ITerminalProcess Start(TerminalLaunch launch);
+}
+
+/// <summary>Starts a session as an OS process with redirected streams.</summary>
+public sealed class ProcessTerminalLauncher : ITerminalLauncher
+{
+    public ITerminalProcess Start(TerminalLaunch launch)
     {
         var psi = new ProcessStartInfo
         {
-            FileName = fileName,
+            FileName = launch.FileName,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (var arg in args)
+        foreach (var arg in launch.Arguments)
             psi.ArgumentList.Add(arg);
-
-        Process = new Process { StartInfo = psi };
-        Process.StartInfo.Environment["TERM"] = "xterm-256color";
-        Process.Start();
+        psi.Environment["TERM"] = "xterm-256color";
+        var process = new Process { StartInfo = psi };
+        process.Start();
+        return new OsProcess(process);
     }
+
+    private sealed class OsProcess(Process process) : ITerminalProcess
+    {
+        private volatile bool _disposed;
+
+        public StreamReader Output => process.StandardOutput;
+        public StreamReader Errors => process.StandardError;
+        // A disposed Process throws on HasExited: once disposed it has ended.
+        public bool HasExited => _disposed || process.HasExited;
+
+        public async Task WriteAsync(string data)
+        {
+            await process.StandardInput.WriteAsync(data);
+            await process.StandardInput.FlushAsync();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            if (_disposed) return ValueTask.CompletedTask;
+            _disposed = true;
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch { /* already gone */ }
+            process.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+}
+
+/// <summary>
+/// One web-terminal session (R1-17): a host or container shell opened through the Mutation Gateway on the authority
+/// of <see cref="Owner"/>. Only <see cref="ITerminalSessionManager"/> creates and ends one; it records the close.
+/// What is typed is never recorded (PC-D2).
+/// </summary>
+public sealed class TerminalSession : IAsyncDisposable
+{
+    private readonly ITerminalProcess _process;
+    private readonly TimeProvider _time;
+
+    internal TerminalSession(string sessionId, TerminalOwner owner, TerminalTarget target, ITerminalProcess process,
+        DateTime openedAt, string? operationId = null, TimeProvider? time = null)
+    {
+        _time = time ?? TimeProvider.System;
+        SessionId = sessionId;
+        OperationId = operationId;
+        Owner = owner;
+        Target = target;
+        _process = process;
+        CreatedAt = openedAt;
+        LastActivityAt = openedAt;
+    }
+
+    /// <summary>A new session id.</summary>
+    public static string NewId() => Guid.NewGuid().ToString("N");
+
+    public string SessionId { get; }
+
+    /// <summary>The gateway operation that opened the session: its audit row and the close row carry the same id.</summary>
+    public string? OperationId { get; }
+    public TerminalOwner Owner { get; }
+    public TerminalTarget Target { get; }
+    public string? ContainerId => Target.ContainerId;
+    public DateTime CreatedAt { get; }
+    public DateTime LastActivityAt { get; private set; }
+    public bool IsRunning => !_process.HasExited;
+    public StreamReader Output => _process.Output;
+    public StreamReader Errors => _process.Errors;
+
+    /// <summary>Marks the session active now (input OR output) so the idle sweep doesn't reap it.</summary>
+    public void Touch() => LastActivityAt = _time.GetUtcNow().UtcDateTime;
 
     public async Task WriteAsync(string data)
     {
-        if (Process?.StandardInput != null)
-        {
-            Touch();
-            await Process.StandardInput.WriteAsync(data);
-            await Process.StandardInput.FlushAsync();
-        }
+        if (_process.HasExited) return;
+        Touch();
+        await _process.WriteAsync(data);
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        if (Process != null)
-        {
-            try
-            {
-                if (!Process.HasExited)
-                    Process.Kill(entireProcessTree: true);
-            }
-            catch { }
-            Process.Dispose();
-        }
-        GC.SuppressFinalize(this);
-        await Task.CompletedTask;
-    }
+    public ValueTask DisposeAsync() => _process.DisposeAsync();
 }

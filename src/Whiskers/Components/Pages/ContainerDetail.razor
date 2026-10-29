@@ -1119,10 +1119,22 @@ else
 
             await JS.InvokeVoidAsync("Whiskers.Terminal.create", "container-terminal", _dotNetRef);
 
-            _termSession = SessionManager.CreateSession(ContainerId, _resolvedServerId);
+            // R1-17: opened through the gateway (Admin, kill switch, protected resources, audited open).
+            var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
+            var sid = _resolvedServerId;
+            _termSession = await Mutations.RunAsync("terminal.container_open",
+                new { containerId = ContainerId, serverId = sid },
+                ct => SessionManager.OpenContainerShellAsync(
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, sid, ContainerId), ct));
 
-            _ = ReadTermStreamAsync(_termSession.Process!.StandardOutput, _termCts.Token);
-            _ = ReadTermStreamAsync(_termSession.Process!.StandardError, _termCts.Token);
+            var opened = _termSession;
+            _ = Task.WhenAll(ReadTermStreamAsync(opened.Output, _termCts.Token), ReadTermStreamAsync(opened.Errors, _termCts.Token))
+                .ContinueWith(async _ =>
+                {
+                    // The shell ended (or was ended): its close event is recorded once, whoever gets there first.
+                    if (!opened.IsRunning)
+                        await SessionManager.CloseAsync(opened.SessionId, Whiskers.Services.Terminal.TerminalCloseReason.Exited);
+                }, TaskScheduler.Default).Unwrap();
         }
         catch (Exception ex)
         {
@@ -1140,6 +1152,8 @@ else
             {
                 var bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length);
                 if (bytesRead == 0) break;
+                // Streaming output is activity too — keep the session from being idle-closed mid-output.
+                _termSession?.Touch();
                 var text = new string(buffer, 0, bytesRead);
                 await InvokeAsync(async () =>
                 {
@@ -1932,7 +1946,7 @@ else
         try
         {
             if (_termSession != null)
-                await SessionManager.DestroySession(_termSession.SessionId);
+                await SessionManager.CloseAsync(_termSession.SessionId);
             await JS.InvokeVoidAsync("Whiskers.Terminal.dispose", "container-terminal");
         }
         catch { }

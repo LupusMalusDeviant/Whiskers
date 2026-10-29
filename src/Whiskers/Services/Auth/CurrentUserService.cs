@@ -12,6 +12,10 @@ namespace Whiskers.Services.Auth;
 /// </summary>
 public class CurrentUserService : ICurrentUserService
 {
+    /// <summary>The email of the synthetic local user <c>Auth:Disabled</c> signs every request in as (Admin); the
+    /// middleware in <c>WhiskersPipelineExtensions</c> writes the same literal.</summary>
+    public const string AuthDisabledEmail = "local@serverwatch.local";
+
     private readonly AuthenticationStateProvider _authProvider;
     private readonly IRoleService _roles;
 

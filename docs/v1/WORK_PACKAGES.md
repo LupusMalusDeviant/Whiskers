@@ -318,10 +318,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `TerminalAuditTests` verifies authorized open and exactly one close event with principal, target, duration and close reason.
-- [ ] `TargetResolutionTests.Unknown_terminal_server_never_opens_a_local_shell` passes.
-- [ ] Kill switch prevents spawning; revoked sessions terminate within 60 seconds.
-- [ ] Host and container shells require Admin. No keystroke transcript is introduced.
+- [x] `TerminalAuditTests` verifies authorized open and exactly one close event with principal, target, duration and close reason.
+- [x] `TargetResolutionTests.Unknown_terminal_server_never_opens_a_local_shell` passes.
+- [x] Kill switch prevents spawning; revoked sessions terminate within 60 seconds.
+- [x] Host and container shells require Admin. No keystroke transcript is introduced.
 
 **Out of scope:** Per-command terminal policy enforcement, excluded by PC-D2.
 
