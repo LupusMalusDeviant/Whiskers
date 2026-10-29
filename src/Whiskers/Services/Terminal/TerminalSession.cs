@@ -114,9 +114,12 @@ public sealed class ProcessTerminalLauncher : ITerminalLauncher
 
     private sealed class OsProcess(Process process) : ITerminalProcess
     {
+        private volatile bool _disposed;
+
         public StreamReader Output => process.StandardOutput;
         public StreamReader Errors => process.StandardError;
-        public bool HasExited => process.HasExited;
+        // A disposed Process throws on HasExited: once disposed it has ended.
+        public bool HasExited => _disposed || process.HasExited;
 
         public async Task WriteAsync(string data)
         {
@@ -126,6 +129,8 @@ public sealed class ProcessTerminalLauncher : ITerminalLauncher
 
         public ValueTask DisposeAsync()
         {
+            if (_disposed) return ValueTask.CompletedTask;
+            _disposed = true;
             try
             {
                 if (!process.HasExited)
