@@ -26,6 +26,13 @@ public static class ControlPlaneResources
         "/var/run/docker.sock", "/run/docker.sock", // the socket the control plane drives Docker through
     ];
 
+    /// <summary>Capabilities (and their MCP tools) that change the control plane whatever they name: rotating or
+    /// issuing mTLS material (a new key, signed by step-ca, the tunnel restarted) and restoring Whiskers' own data.</summary>
+    public static readonly IReadOnlySet<string> Capabilities = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "certificate.renew_mtls", "renew_mtls_certificate", "certificate.issue_mtls", "selfbackup.restore",
+    };
+
     /// <summary>Arguments that name a container, volume or network directly (the agent's own calls carry them raw).</summary>
     private static readonly HashSet<string> IdentityArguments = new(StringComparer.OrdinalIgnoreCase)
     {

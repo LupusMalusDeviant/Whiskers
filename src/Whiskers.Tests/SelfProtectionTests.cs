@@ -109,6 +109,7 @@ public class SelfProtectionTests
         { "container.stop", """{"containerId":"socket-proxy","serverId":"local"}""" },             // the socket proxy
         { "container.restart", """{"containerId":"step-ca","serverId":"local"}""" },                // the CA
         { "app.deploy", """{"serverId":"local","appName":"x","image":"alpine","volumes":"/var/run/docker.sock:/s"}""" },
+        { "certificate.renew_mtls", """{"serverId":"local"}""" },                                   // re-keys a tunnel
         { "host.exec", """{"serverId":"local","command":"cat /app/data/mtls/client.key"}""" },      // mTLS material
         { "host.exec", """{"serverId":"local","command":"rm -rf /opt/step-ca/secrets"}""" },        // the CA's keys
         { "host.exec", """{"serverId":"local","command":"docker stop whiskers"}""" },               // named in a command
@@ -213,6 +214,16 @@ public class SelfProtectionTests
         var card = Assert.Single(h.Approvals.GetPending());
         Assert.DoesNotContain("not-a-real-one", card.Reason);
         Assert.DoesNotContain("not-a-real-one", card.ParamsJson);
+    }
+
+    [Fact]
+    public async Task Restoring_whiskers_own_data_needs_an_Admin_approval()
+    {
+        var h = new ProtectionHarness();
+        var outcome = await h.RunAsync("selfbackup.restore", new { archive = "whiskers-backup.tar.gz" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.PendingApproval, outcome.Status);
+        Assert.Equal(McpPermissionLevels.Admin, Assert.Single(h.Approvals.GetPending()).Level);
     }
 
     [Fact]

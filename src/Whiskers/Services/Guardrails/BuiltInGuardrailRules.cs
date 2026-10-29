@@ -155,6 +155,10 @@ public sealed class ProtectedResourceRule : IGuardrailRule
                       ? ProtectedResourceMatcher.FirstHit(request.Arguments, ControlPlaneResources.NamePatterns, [],
                           analyseFreeText: true, ControlPlaneResources.NamesApplyTo(request.Arguments))
                       : null);
+        // A capability that changes the control plane by what it is, not by what it names (mTLS material, a restore
+        // of Whiskers' own data).
+        if (hit is null && change && ControlPlaneResources.Capabilities.Contains(request.ToolName))
+            hit = new ProtectedResourceMatcher.Hit(request.ToolName, "control plane") { Argument = "capability" };
         if (hit is null)
         {
             reason = "";

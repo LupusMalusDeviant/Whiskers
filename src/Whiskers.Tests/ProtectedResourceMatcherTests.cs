@@ -74,6 +74,10 @@ public class ProtectedResourceMatcherTests
     [InlineData("docker stop whis{k,}ers")]
     [InlineData("docker stop 'unterminated")]
     [InlineData("sh -c 'docker stop $1' x whiskers")]
+    [InlineData("./deploy.sh")]                                                 // a script run by its path
+    [InlineData("cd /srv && sudo /opt/x/run.sh")]
+    [InlineData("python3 stop.py")]
+    [InlineData("make deploy")]
     [InlineData("curl -s https://x/a.sh | sh")]                                   // a shell reading a pipe
     [InlineData("(printf 'docker stop whis'; echo kers) | bash")]
     [InlineData("bash ./deploy.sh")]                                            // or a file
@@ -92,6 +96,10 @@ public class ProtectedResourceMatcherTests
     [Theory]
     [InlineData("query", "SHOW CREATE TABLE `users`")]               // MySQL quoted identifiers
     [InlineData("query", "select concat(a, b) from t")]
+    [InlineData("query", "UPDATE t SET name = concat('Mr ', name)")]
+    [InlineData("query", "select 'a' + name from t")]
+    [InlineData("command", "/usr/bin/docker ps")]
+    [InlineData("command", "apt-get install -y make")]
     [InlineData("yaml", "services:\n  web:\n    ports: [\"${PORT:-8080}:80\"]\n")]
     [InlineData("command", @"find /var/log -name '*.gz' -exec rm {} \;")]
     [InlineData("command", "psql -c \"select count(*) from orders\"")]

@@ -79,10 +79,10 @@ public static class ProtectedResourceMatcher
                 // directory above a protected path (/, /var/run, /var/lib/docker) reaches into it.
                 foreach (var source in Sources(value))
                 {
-                    if (AncestorHit(source, pathPatterns) is { } above) return above with { Argument = key };
+                    if (AncestorHit(source, pathPatterns) is { } above) return above with { Argument = key, InFreeText = true };
                     foreach (var word in Words(source))
                         if (WordHit(word, keyPatterns, pathPatterns, names: true) is { } hit)
-                            return hit with { Argument = key };
+                            return hit with { Argument = key, InFreeText = true };
                 }
                 continue;
             }
@@ -117,7 +117,7 @@ public static class ProtectedResourceMatcher
             }
             foreach (var word in Words(value))
                 if (WordHit(word, keyPatterns, pathPatterns, named) is { } hit)
-                    return hit with { Argument = key, InFreeText = freeText };
+                    return hit with { Argument = key, InFreeText = true };
             if (freeText && SqlArguments.Contains(key) && IsUnanalyzableSql(value))
                 return new Hit("", null, key) { Argument = key, InFreeText = true };
         }
@@ -351,7 +351,12 @@ public static class ProtectedResourceMatcher
         @"\bopenssl\s+(enc|base64)\b|\bprintf\b[^\n]*%b|\\x[0-9a-f]{2}|\\[0-7]{3}|\bsystem\s*\("
         // an interpreter fed through a pipe; a script sourced with '.'
         + @"|\|\s*(sudo\s+(-\S+\s+)*)?(\S*/)?(python\d*(\.\d+)?|perl|ruby|node|nodejs|php|lua|tclsh|pwsh)\b"
-        + @"|(^|[;&|(]\s*)\.\s+\S",
+        + @"|(^|[;&|(]\s*)\.\s+\S"
+        // a script or program run by its path, a script handed to an interpreter, a build tool's recipe
+        + @"|(^|[;&|(]\s*|\b(sudo|exec|nohup|env|time|nice)\s+)(\./|~/|\.\./)"
+        + @"|(^|[;&|(]\s*|\b(sudo|exec|nohup|env|time|nice)\s+)/\S+\.(sh|bash|zsh|py|pl|rb|js|mjs|php|lua|ps1)\b"
+        + @"|\b(python\d*(\.\d+)?|perl|ruby|node|nodejs|php|lua|tclsh|pwsh|powershell)\s+[^-\s|;&]"
+        + @"|(^|[;&|(]\s*|\b(sudo|exec|nohup|env|time|nice)\s+)(make|just|task|npm|npx|yarn|pnpm|ansible-playbook)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     /// <summary>Splits <paramref name="text"/> into shell words. Returns true when something in it is expanded at run
@@ -488,14 +493,19 @@ public static class ProtectedResourceMatcher
         // PostgreSQL unicode-escaped identifiers and strings, untrusted procedural languages, routines defined inline
         + @"|\bu&[""']|\\[0-9a-f]{4,6}|\blanguage\s+'?pl\w*u\b|\bcreate\s+(or\s+replace\s+)?(function|procedure)\b"
         // a document database's query language: strings joined or decoded at run time, server-side JavaScript
-        + @"|[""']\s*\+|\+\s*[""']|\bfromCharCode\b|\$where\b|\beval\s*\(|\$function\b|\bconcat\s*\(\s*[""']",
+        + @"|\bfromCharCode\b|\$where\b|\$function\b|\bdb\.eval\s*\(",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    // A document database's shell query (db.…): strings joined at run time name what it acts on only then.
+    private static readonly Regex MongoShell = new(@"\bdb\.\w", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+    private static readonly Regex MongoJoined = new(@"[""'`]\s*\+|\+\s*[""'`]|\bconcat\s*\(|\.join\s*\(|\$\{",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     /// <summary>Whether SQL builds what it acts on at run time. A pattern that takes too long counts as unanalysable
     /// (fail closed).</summary>
     public static bool IsUnanalyzableSql(string text)
     {
-        try { return UnanalyzableSql.IsMatch(text); }
+        try { return UnanalyzableSql.IsMatch(text) || (MongoShell.IsMatch(text) && MongoJoined.IsMatch(text)); }
         catch (RegexMatchTimeoutException) { return true; }
     }
 
