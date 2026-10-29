@@ -79,6 +79,7 @@ public sealed class MutationGateway : IMutationGateway
     private readonly IPolicyDecisionStore? _decisions;
     private readonly ITriggerAuthority? _triggers;
     private readonly IOperationJournal? _journal;
+    private readonly IAuditRecovery? _recovery;
     // Admission locks by approval binding (striped, so they never grow): choosing the operation id of an
     // approve-then-retry and the approval gate's answer happen under one of them (R1-18).
     private readonly SemaphoreSlim[] _admission = Enumerable.Range(0, 32).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
@@ -92,6 +93,8 @@ public sealed class MutationGateway : IMutationGateway
     /// refused; the Agent module, which runs triggers, registers it.</param>
     /// <param name="journal">Execution claims by operation id (R1-18, INV-39). The app always registers it; a gateway
     /// built without it (unit tests of other steps) does not suppress duplicates.</param>
+    /// <param name="recovery">Keeps an outcome or refusal whose audit write failed and writes it again (R1-19); the app
+    /// always registers it.</param>
     public MutationGateway(
         ICapabilityCatalog catalog,
         IMutationPolicy policy,
@@ -105,7 +108,8 @@ public sealed class MutationGateway : IMutationGateway
         IEffectiveRequirementResolver? requirements = null,
         IPolicyDecisionStore? decisions = null,
         ITriggerAuthority? triggers = null,
-        IOperationJournal? journal = null)
+        IOperationJournal? journal = null,
+        IAuditRecovery? recovery = null)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
@@ -121,6 +125,7 @@ public sealed class MutationGateway : IMutationGateway
         _decisions = decisions;
         _triggers = triggers;
         _journal = journal;
+        _recovery = recovery;
     }
 
     /// <inheritdoc />
@@ -480,16 +485,8 @@ public sealed class MutationGateway : IMutationGateway
             (claim, duplicate) = await ClaimAsync(operationId, request, capability, approval, auditId);
         if (duplicate is not null)
         {
-            try
-            {
-                await _audit.CompleteAsync(auditId, operationId, MutationStatus.Denied, VerificationStatus.NotRun,
-                    duplicate!.Value.Reason, TimeSpan.Zero, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Audit outcome for refused {Capability} (operation {OperationId}) could not be written",
-                    capability.Id, operationId);
-            }
+            await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
+                VerificationStatus.NotRun, duplicate!.Value.Reason, TimeSpan.Zero), capability);
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default, duplicate!.Value.Reason,
                 VerificationStatus.NotRun)
             {
@@ -507,16 +504,8 @@ public sealed class MutationGateway : IMutationGateway
             // Nothing ran: the operation id is free again.
             await ReleaseAsync(operationId, claim, capability);
             var reason = $"Approval {approvalId} is no longer usable (used by another call, revoked or expired); the mutation was refused.";
-            try
-            {
-                await _audit.CompleteAsync(auditId, operationId, MutationStatus.Denied, VerificationStatus.NotRun, reason,
-                    TimeSpan.Zero, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Audit outcome for refused {Capability} (operation {OperationId}) could not be written",
-                    capability.Id, operationId);
-            }
+            await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
+                VerificationStatus.NotRun, reason, TimeSpan.Zero), capability);
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default, reason, VerificationStatus.NotRun,
                 ApprovalId: approvalId) { MatchedRules = decision.MatchedRules, DecisionId = request.DecisionId };
         }
@@ -583,18 +572,27 @@ public sealed class MutationGateway : IMutationGateway
 
         // 8: the outcome is recorded even when the caller has gone away (CancellationToken.None). The mutation has
         // already happened at this point, so a failed write must not hide its result from the caller; the intent
-        // row stays as evidence that it ran.
+        // row stays as evidence that it ran, and the outcome is kept and written again (R1-19).
+        await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, outcome.Status, outcome.Verification,
+            outcome.Reason, _time.GetElapsedTime(started)), capability);
+        return outcome with { DecisionId = request.DecisionId };
+    }
+
+    /// <summary>Writes the outcome to its intent row. A failed write is handed to <see cref="IAuditRecovery"/>: the
+    /// event is incomplete — visibly, in the <c>audit</c> health check — until it is written again.</summary>
+    private async Task CompleteAuditAsync(PendingAuditOutcome outcome, Capability capability)
+    {
         try
         {
-            await _audit.CompleteAsync(auditId, operationId, outcome.Status, outcome.Verification, outcome.Reason,
-                _time.GetElapsedTime(started), CancellationToken.None);
+            await _audit.CompleteAsync(outcome.AuditId, outcome.OperationId, outcome.Status, outcome.Verification,
+                outcome.Reason, outcome.Duration, CancellationToken.None);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Audit outcome for {Capability} (operation {OperationId}, status {Status}) could not be written",
-                capability.Id, operationId, outcome.Status);
+                capability.Id, outcome.OperationId, outcome.Status);
+            _recovery?.OutcomeNotWritten(outcome);
         }
-        return outcome with { DecisionId = request.DecisionId };
     }
 
     private async Task<VerificationStatus> VerifyAsync(MutationContext context, object? result, CancellationToken ct)
@@ -730,11 +728,12 @@ public sealed class MutationGateway : IMutationGateway
         reason = AuditLogMutationSink.WithoutPayloadValues(reason, request.Arguments) ?? reason;
         try
         {
-            await _audit.RecordDeniedAsync(operationId, request, capability, status, reason, ct);
+            await _audit.RecordDeniedAsync(operationId, request, capability, status, reason, approvalId, ct);
         }
         catch (Exception ex)
         {
-            // The mutation is refused either way; losing the refusal record must not turn it into an error.
+            // The mutation is refused either way; losing the refusal record must not turn it into an error. The sink
+            // keeps the event in its outbox and AuditRecovery inserts it later (R1-19).
             _logger.LogError(ex, "Audit record for refused {Capability} (operation {OperationId}) could not be written",
                 request.CapabilityId, operationId);
         }

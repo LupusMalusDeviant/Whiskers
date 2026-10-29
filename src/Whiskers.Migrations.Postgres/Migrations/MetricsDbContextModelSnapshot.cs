@@ -213,14 +213,71 @@ namespace Whiskers.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("ApprovalId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Arguments")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CredentialId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DecisionId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DelegatedBy")
+                        .HasColumnType("text");
+
                     b.Property<string>("Details")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("EventId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OnBehalfOfId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OnBehalfOfKind")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OperationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Outcome")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ParentOperationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Phase")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PrincipalId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PrincipalKind")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PrincipalSessionId")
                         .HasColumnType("text");
 
                     b.Property<string>("ServerId")
                         .HasColumnType("text");
 
+                    b.Property<string>("SessionId")
+                        .HasColumnType("text");
+
                     b.Property<bool>("Success")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("Surface")
+                        .HasColumnType("text");
 
                     b.Property<string>("TargetId")
                         .IsRequired()
@@ -237,13 +294,26 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("TriggerId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Verification")
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Actor");
 
+                    b.HasIndex("EventId")
+                        .IsUnique();
+
+                    b.HasIndex("OperationId");
+
                     b.HasIndex("Timestamp");
 
                     b.HasIndex("Action", "Timestamp");
+
+                    b.HasIndex("Phase", "Timestamp");
 
                     b.ToTable("AuditLog");
                 });

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using Whiskers.Models;
 using Whiskers.Services.Approvals;
@@ -23,12 +24,19 @@ public interface IMutationAuditSink
     /// <summary>A refusal before execution (unknown capability, level, policy). Also throws on failure.</summary>
     Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability, MutationStatus status,
         string reason, CancellationToken ct);
+
+    /// <summary><see cref="RecordDeniedAsync(string, MutationRequest, Capability?, MutationStatus, string, CancellationToken)"/>
+    /// with the approval a pending call waits for (R1-19, INV-45).</summary>
+    Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability, MutationStatus status,
+        string reason, string? approvalId, CancellationToken ct) =>
+        RecordDeniedAsync(operationId, request, capability, status, reason, ct);
 }
 
 /// <summary>
 /// Writes to today's <c>AuditLog</c> table. Unlike <c>AuditLogService.LogAsync</c>, which logs and swallows a failed
 /// write, every method here lets the exception escape: a mutation whose intent cannot be recorded does not run.
-/// Arguments are redacted before they are stored (INV-51). The hash chain (INV-49) comes with WP5.
+/// Arguments are redacted before they are stored (INV-51). The hash chain (INV-49) comes with WP5. The security
+/// fields (R1-19, INV-45) are columns of their own; the capped <c>Details</c> only repeats them.
 /// </summary>
 public sealed class AuditLogMutationSink : IMutationAuditSink
 {
@@ -37,11 +45,18 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     private const int MaxArgumentChars = 1500;
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
+    private readonly AuditOutbox? _outbox;
+    // The events whose intent this process has written and not yet completed (by EventId): recovery leaves them alone.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _inFlight = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, string> _eventOf = new();
 
-    public AuditLogMutationSink(IServiceScopeFactory scopes, TimeProvider? time = null)
+    /// <param name="outbox">Where a refusal whose insert failed is kept until it is written (R1-19); the app always
+    /// registers it.</param>
+    public AuditLogMutationSink(IServiceScopeFactory scopes, TimeProvider? time = null, AuditOutbox? outbox = null)
     {
         _scopes = scopes ?? throw new ArgumentNullException(nameof(scopes));
         _time = time ?? TimeProvider.System;
+        _outbox = outbox;
     }
 
     public async Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
@@ -49,25 +64,112 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(capability);
-        var entity = NewEntity(request, capability.Id, success: false,
+        var entity = Build(() => NewEntity(operationId, request, capability.Id, success: false,
             Details(operationId, request, phase: "intent", status: null, verification: null, reason: null, durationMs: null,
-                approval));
+                approval)));
+        entity.Phase = "intent";
+        entity.ApprovalId = approval?.ApprovalId;
+        entity.ApprovedBy = approval?.ApprovedBy;
 
-        using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        db.AuditLog.Add(entity);
-        await db.SaveChangesAsync(ct);
-        return entity.Id;
+        _inFlight[entity.EventId!] = 0;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var id = await InsertOnceAsync(db, entity, ct);
+            _eventOf[id] = entity.EventId!;
+            return id;
+        }
+        catch (Exception)
+        {
+            _inFlight.TryRemove(entity.EventId!, out _);
+            // No intent, no mutation: the gateway refuses. The attempt is still one event — the refusal, kept in the
+            // outbox under the same event id (if the intent did land after all, the outbox finds it and keeps that).
+            if (_outbox is not null)
+            {
+                Complete(entity, operationId, nameof(MutationStatus.Denied), nameof(VerificationStatus.NotRun),
+                    IntentNotWritten, 0);
+                _outbox.TryKeep(entity);
+            }
+            throw;
+        }
+    }
+
+    /// <summary>Builds an event. One that cannot even be built has nothing to keep: it counts as lost, so the audit
+    /// health shows it (the gateway refuses the attempt either way).</summary>
+    private AuditLogEntity Build(Func<AuditLogEntity> build)
+    {
+        try
+        {
+            return build();
+        }
+        catch (Exception)
+        {
+            _outbox?.MarkLost();
+            throw;
+        }
+    }
+
+    /// <summary>The gateway's refusal when the intent cannot be written.</summary>
+    internal const string IntentNotWritten = "The audit record could not be written; the mutation was refused.";
+
+    /// <summary>Whether this process wrote the intent with this event id and has not completed it yet.</summary>
+    internal bool InFlight(string? eventId) => eventId is not null && _inFlight.ContainsKey(eventId);
+
+    /// <summary>Inserts the event once: when the insert throws but the row is there (its commit answer was lost), that
+    /// row is the event. Returns its id.</summary>
+    internal static async Task<long> InsertOnceAsync(MetricsDbContext db, AuditLogEntity row, CancellationToken ct)
+    {
+        db.AuditLog.Add(row);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return row.Id;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            db.ChangeTracker.Clear();
+            var eventId = row.EventId;
+            if (await db.AuditLog.AsNoTracking().Where(a => a.EventId == eventId).Select(a => (long?)a.Id)
+                    .SingleOrDefaultAsync(ct) is { } id)
+                return id;
+            throw;
+        }
     }
 
     public async Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
         string? reason, TimeSpan duration, CancellationToken ct)
     {
-        using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var entity = await db.AuditLog.FindAsync([auditId], ct)
-                     ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
-        entity.Success = status == MutationStatus.Executed && verification != VerificationStatus.Failed;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var entity = await db.AuditLog.FindAsync([auditId], ct)
+                         ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
+            Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds);
+            await db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            // Written or not, the gateway is done with it — only now, so recovery never sees it as abandoned while
+            // its outcome is being written. A failed outcome is AuditRecovery's from here (kept, or settled from the
+            // journal), also when the row could not even be read.
+            if (_eventOf.TryRemove(auditId, out var eventId)) _inFlight.TryRemove(eventId, out _);
+        }
+    }
+
+    /// <summary>Turns an intent row into its outcome: the typed fields, and the details as one document.
+    /// <paramref name="outcome"/> is a <see cref="MutationStatus"/> name, or <c>Unknown</c> (recovery: it was running
+    /// when Whiskers stopped).</summary>
+    internal static void Complete(AuditLogEntity entity, string operationId, string outcome, string verification,
+        string? reason, long? durationMs)
+    {
+        entity.Success = outcome == nameof(MutationStatus.Executed) && verification != nameof(VerificationStatus.Failed);
+        entity.Phase = "outcome";
+        entity.Outcome = outcome;
+        entity.Verification = verification;
+        entity.DurationMs = durationMs;
+        entity.OperationId ??= operationId;
         var intent = ParseOrRaw(entity.Details);
         var redactedReason = Redact(reason);
         // INV-22: the decision id is kept at the top of the outcome and the row stays valid JSON: the variable-length
@@ -80,34 +182,54 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             // Top level like the decision id: a shortened intent must not lose it.
             trigger = StringOf(intent, "trigger"),
             phase = "outcome",
-            status = status.ToString(),
-            verification = verification.ToString(),
+            status = outcome,
+            verification,
             reason = Field(redactedReason, budget),
-            durationMs = (long)duration.TotalMilliseconds,
+            durationMs,
             intent = intentValue,
         });
         entity.Details = TryFit(budget => Outcome(budget, intent))
                          ?? Fit(budget => Outcome(budget, Field(entity.Details, budget)));
-        await db.SaveChangesAsync(ct);
     }
+
+    public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
+        MutationStatus status, string reason, CancellationToken ct) =>
+        RecordDeniedAsync(operationId, request, capability, status, reason, approvalId: null, ct);
 
     public async Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
-        MutationStatus status, string reason, CancellationToken ct)
+        MutationStatus status, string reason, string? approvalId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var entity = NewEntity(request, capability?.Id ?? request.CapabilityId, success: false,
+        var entity = Build(() => NewEntity(operationId, request, capability?.Id ?? request.CapabilityId, success: false,
             Details(operationId, request, phase: "outcome", status: status.ToString(), verification: null,
-                reason: reason, durationMs: 0));
+                reason: reason, durationMs: 0,
+                approval: approvalId is null ? null : new ApprovalGateResult(false, "", approvalId))));
+        entity.Phase = "outcome";
+        entity.Outcome = status.ToString();
+        entity.Verification = nameof(VerificationStatus.NotRun);
+        entity.DurationMs = 0;
+        entity.ApprovalId = approvalId;
 
-        using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        db.AuditLog.Add(entity);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            await InsertOnceAsync(db, entity, ct);
+        }
+        catch (Exception) when (_outbox is not null)
+        {
+            // No intent row before a refusal: the event itself is kept (redacted, with its id and time) and inserted
+            // later (AuditRecovery). The gateway still logs the failure.
+            _outbox.TryKeep(entity);
+            throw;
+        }
     }
 
-    private AuditLogEntity NewEntity(MutationRequest request, string action, bool success, string details) => new()
+    private AuditLogEntity NewEntity(string operationId, MutationRequest request, string action, bool success,
+        string details) => new()
     {
         Timestamp = _time.GetUtcNow().UtcDateTime,
+        EventId = Guid.NewGuid().ToString("N"),
         Actor = request.Principal.DisplayName,
         // "web" / "mcp" match the rows AuditLogService writes, so the audit page filters keep working.
         ActorType = request.Surface == MutationSurface.Ui ? "web" : request.Surface.ToString().ToLowerInvariant(),
@@ -118,6 +240,20 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         ServerId = request.Target.ServerId,
         Details = details,
         Success = success,
+        OperationId = operationId,
+        ParentOperationId = request.ParentOperationId,
+        DecisionId = request.DecisionId,
+        TriggerId = request.TriggerId is { } triggerId ? PrincipalIds.Trigger(triggerId) : null,
+        Surface = request.Surface.ToString(),
+        PrincipalKind = request.Principal.Kind.ToString(),
+        PrincipalId = request.Principal.Id,
+        CredentialId = request.Principal.CredentialId,
+        OnBehalfOfId = request.Principal.OnBehalfOf?.Id,
+        OnBehalfOfKind = request.Principal.OnBehalfOf?.Kind.ToString(),
+        PrincipalSessionId = request.Principal.SessionId,
+        DelegatedBy = request.Principal.DelegatedBy,
+        SessionId = request.SessionId,
+        Arguments = RedactedArguments(request.Arguments),
     };
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,
@@ -148,7 +284,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             delegatedBy = request.Principal.DelegatedBy,
         },
         sessionId = request.SessionId,
-        arguments = Field(Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
+        arguments = Field(RedactedArguments(request.Arguments),
             budget >= MaxReasonChars ? MaxArgumentChars : budget),
     }));
 
@@ -182,6 +318,69 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         }
         return text;
     }
+
+    /// <summary>The arguments as one JSON object, redacted value by value (R1-19): a payload keeps only its length,
+    /// a secret-named key (at any depth) only <c>***</c>, every other string is redacted on its own — so a pattern can
+    /// never run across the document's quotes and commas and swallow the arguments after it.</summary>
+    internal static string RedactedArguments(IReadOnlyDictionary<string, JsonElement> arguments)
+    {
+        // Written element by element (not through a node tree): a document with a repeated property name is valid
+        // input and is kept as it came — redacting it must never fail, or the attempt would have no event.
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            foreach (var (key, value) in arguments)
+            {
+                writer.WritePropertyName(key);
+                if (PayloadArguments.Contains(key))
+                    writer.WriteStringValue(
+                        $"<withheld: {(value.ValueKind == JsonValueKind.String ? value.GetString()!.Length : value.GetRawText().Length)} chars>");
+                else
+                    WriteRedacted(writer, key, value);
+            }
+            writer.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    private static void WriteRedacted(Utf8JsonWriter writer, string? key, JsonElement value)
+    {
+        // A secret-named key hides everything below it — a value, a list, an object alike.
+        if (key is not null && SecretKeyName.IsMatch(key))
+        {
+            writer.WriteStringValue("***");
+            return;
+        }
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in value.EnumerateObject())
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteRedacted(writer, property.Name, property.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in value.EnumerateArray())
+                    WriteRedacted(writer, null, item);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.String:
+                writer.WriteStringValue(Redact(value.GetString()));
+                break;
+            default:
+                value.WriteTo(writer);
+                break;
+        }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex SecretKeyName = new(
+        "(?i)password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer|credential",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
 
     internal static IReadOnlyDictionary<string, object?> WithoutPayloads(IReadOnlyDictionary<string, JsonElement> arguments) =>
         arguments.ToDictionary(a => a.Key, a => PayloadArguments.Contains(a.Key)

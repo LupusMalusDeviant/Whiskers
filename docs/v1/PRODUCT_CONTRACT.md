@@ -128,8 +128,8 @@ Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR
 (INV-26; fixed for every path in WP2 step 2.1 — guardrails are core) · **AL** AuditLog row · **AH** Agent History row only.
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
-INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (no complete audit event),
-INV-48 (audit after the fact, fail-open), INV-49 (no tamper evidence). Rows below list only the path-specific gaps.
+INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (no complete audit event — since R1-19 every gateway attempt is one complete event with typed fields; it remains for paths not yet on the gateway and for the rows MCP history and UI pages still write themselves, R1-20/R1-21),
+INV-48 (audit after the fact, fail-open — since R1-19 the gateway refuses without a durable intent and keeps a failed outcome or refusal recoverable and visible; it remains for `AuditLogService` callers outside the gateway, whose lost rows are now at least visible), INV-49 (no tamper evidence). Rows below list only the path-specific gaps.
 
 ### 7.1 MCP tools (direct `/mcp` calls; the in-process agent invokes the same methods)
 

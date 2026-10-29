@@ -64,6 +64,7 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<ICapabilityOverrides, McpToolCapabilityOverrides>();
         services.AddSingleton<IMutationTargetResolver, MutationTargetResolver>();
         services.AddSingleton<IMutationPolicy, GuardrailMutationPolicy>();
+        services.AddSingleton<AuditOutbox>();
         services.AddSingleton<IMutationAuditSink, AuditLogMutationSink>();
         // INV-22 (R1-12): every policy decision is recorded before it is acted on; a failed write refuses the call.
         services.AddSingleton<IPolicyDecisionStore, DbPolicyDecisionStore>();
@@ -71,6 +72,10 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IEffectiveRequirementResolver, SchedulerRequirementResolver>();
         // INV-39 (R1-18): every execution claims its operation id first; the same id never runs twice.
         services.AddSingleton<IOperationJournal, DbOperationJournal>();
+        // R1-19: an audit outcome that could not be written is kept, written again and settled after a restart.
+        services.AddSingleton<AuditRecovery>();
+        services.AddSingleton<IAuditRecovery>(sp => sp.GetRequiredService<AuditRecovery>());
+        services.AddHostedService(sp => sp.GetRequiredService<AuditRecovery>());
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.
         services.AddScoped<IUiMutationRunner, UiMutationRunner>();

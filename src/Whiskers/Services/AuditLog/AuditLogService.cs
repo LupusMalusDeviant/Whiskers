@@ -8,11 +8,16 @@ public class AuditLogService : IAuditLogService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<AuditLogService> _logger;
+    private readonly Whiskers.Services.Mutations.IAuditRecovery? _recovery;
 
-    public AuditLogService(IServiceScopeFactory scopeFactory, ILogger<AuditLogService> logger)
+    /// <param name="recovery">Told when a row is lost, so the <c>audit</c> health check shows the trail is incomplete
+    /// (R1-19).</param>
+    public AuditLogService(IServiceScopeFactory scopeFactory, ILogger<AuditLogService> logger,
+        Whiskers.Services.Mutations.IAuditRecovery? recovery = null)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _recovery = recovery;
     }
 
     public async Task LogAsync(string actor, string actorType, string action,
@@ -52,6 +57,7 @@ public class AuditLogService : IAuditLogService
                 "AUDIT WRITE FAILED: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} " +
                 "(target={TargetId}, server={ServerId}, success={Success}, details={Details})",
                 actorType, actor, action, targetType, targetName, targetId, serverId, success, details);
+            _recovery?.LegacyWriteFailed();
         }
     }
 

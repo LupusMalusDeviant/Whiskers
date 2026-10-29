@@ -6,6 +6,20 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-19: **Complete, fail-closed audit events.** Every gateway attempt — allowed, denied, waiting for approval, failed —
+  is one `AuditLog` event whose security fields are columns of their own (operation, parent operation, decision,
+  trigger, surface, principal kind/id/credential/session/on-behalf-of/delegation, request session, approval id and approver, phase, outcome,
+  verification, duration, the redacted arguments in full) and a unique event id: they no longer depend on the capped
+  `Details` JSON, and a pending call now names the approval it waits for. An outcome that cannot be written is kept
+  and written again; a refusal that cannot be written is kept in `<data>/audit-outbox/` and inserted later (also
+  after a restart, never twice); intents left without an outcome are settled from the operation journal (`Unknown`
+  when the operation was cut off).
+  New readiness check `audit`: **Degraded** while the trail is incomplete (also until its first check after a start), also for an hour after an older,
+  non-gateway audit write failed. No mutation runs and no configuration is published without a durable intent
+  (unchanged, now tested). A quoted MySQL password flag (`"-p…"`) is masked too, while a hyphenated name such as
+  `web-prod` no longer is. **Upgrade:** additive migration `AuditTypedFields` (SQLite and PostgreSQL) — existing rows
+  keep their columns empty; `--migrate-to-postgres` reads an older `AuditLog` without them.
+
 - R1-10: **Webhook deliveries are fresh, run once and never overlap on a target.** Each webhook has a signature scheme
   (`Provider`, new column, existing webhooks keep `github`): `github` checks `X-Hub-Signature-256` over the body as
   before; the new `whiskers` scheme signs a timestamp, a delivery id and the body (`X-Whiskers-Timestamp`,

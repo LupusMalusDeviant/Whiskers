@@ -15,6 +15,8 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 - **Coverage** includes config saves, vault `vault.set`/`vault.delete`, scheduler `scheduler.create`/`run`/`delete`, `command.execute`, and `hetzner.rescue_enable`.
 
 - **Gateway writes are different:** the Mutation Gateway writes through its own `AuditLogMutationSink` ([`../Mutations/`](../Mutations/)), which writes the intent *before* execution and **throws** on a failed write, so the mutation is refused (PC-D5).
+- **A lost row is visible (R1-19):** `LogAsync` still logs and swallows a failed write (the action already happened),
+  and tells `IAuditRecovery`, so the `audit` readiness check is Degraded for an hour.
 
 ## Related
 

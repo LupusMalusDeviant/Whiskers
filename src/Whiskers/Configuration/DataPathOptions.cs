@@ -98,6 +98,8 @@ public sealed class DataPathOptions
     public string SshKeysDir => P("ssh-keys");
     public string MtlsDir => P("mtls");
     public string BackupsDir => P("backups");
+    /// <summary>Audit events whose insert failed, kept until they are written (R1-19).</summary>
+    public string AuditOutboxDir => P("audit-outbox");
     public string ChatDir => P("chat");
     public string AgentChatDir => P("agent-chat");
 
