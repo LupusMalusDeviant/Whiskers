@@ -1679,11 +1679,11 @@ else
 
     // A changing command runs through the gateway under <paramref name="capability"/> (container target); a
     // read-only one passes null. What it does — the command, or the SQL it feeds the database — goes along as
-    // <paramref name="command"/> / <paramref name="query"/> so the gateway can check it for protected resources
-    // (R1-16); the shell line itself, which carries the database password, stays in the delegate, and the audit
+    // <paramref name="command"/> / <paramref name="query"/> (with the <paramref name="database"/> it runs in) so the
+    // gateway can check it for protected resources (R1-16); the shell line itself, which carries the database password, stays in the delegate, and the audit
     // keeps only the length of both.
     private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string? capability,
-        string[] cmd, TimeSpan timeout, string? command = null, string? query = null)
+        string[] cmd, TimeSpan timeout, string? command = null, string? query = null, string? database = null)
     {
         var dockerCmd = "docker exec " + Whiskers.Utils.ShellUtils.Quote(ContainerId) + " " +
                         string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
@@ -1694,7 +1694,7 @@ else
             return (read.Output, read.Error, read.ExitCode);
         }
         var r = await Mutations.RunAsync(capability,
-            new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, command, query },
+            new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database, command, query },
             async _ =>
             {
                 var result = await HostCommandExecutor.ExecuteAsync(sid, dockerCmd, timeout);
@@ -1797,7 +1797,7 @@ else
                 _ => "echo 'Not supported'"
             };
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
-                query: System.Text.Encoding.UTF8.GetString(_migrationFileData));
+                query: System.Text.Encoding.UTF8.GetString(_migrationFileData), database: db);
             _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
             _migrationSuccess = result.ExitCode == 0;
             if (_migrationSuccess) await LoadDatabaseInfo();
@@ -1838,7 +1838,7 @@ else
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
             };
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
-                query: System.Text.Encoding.UTF8.GetString(_seedFileData));
+                query: System.Text.Encoding.UTF8.GetString(_seedFileData), database: db);
             _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
             _seedSuccess = result.ExitCode == 0;
             if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }

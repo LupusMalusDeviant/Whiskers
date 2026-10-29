@@ -275,7 +275,10 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   is unanalysable.
 - **Compose mounts** (R1-16): `ComposePlan.Mounts()` lists every host path and volume the services mount
   (interpolated; relative bind sources resolved against the project directory; project-scoped volumes also as
-  `<project>_<key>`, explicit `name:` resolved; a volume with `driver_opts: device: <host path>` also as that path).
+  `<project>_<key>`, explicit `name:` resolved; a volume with `driver_opts: device: <host path>` also as that path;
+  `volumes_from` as the other service's mounts or the container's name). A mount whose source came from a variable is
+  decided but listed in `MutationTarget.Withheld`: the decision record stores `(withheld)`, the audit only the length of
+  `mounts`.
   A `.env` saved on the container page decides them the same way (`ComposeImpact.RunMountsAsync`). `ComposeImpact`
   decides them under `compose.deploy` (`mounts`, one per line) before the plan's containers, and
   `ComposePlan.EnsureDecided` refuses a re-plan whose mounts were not decided.

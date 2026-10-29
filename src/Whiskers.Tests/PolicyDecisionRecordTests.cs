@@ -130,6 +130,24 @@ public sealed class PolicyDecisionRecordTests : IDisposable
     }
 
     [Fact]
+    public async Task A_withheld_related_value_is_decided_but_not_stored()
+    {
+        var resolved = new MutationTarget("host", "local", "Local", "local")
+        {
+            Related = ["web-1", "/srv/canary-secret"],
+            Withheld = new HashSet<string> { "/srv/canary-secret" },
+            Resolved = true,
+        };
+        var gateway = Gateway(new FixedPolicy(MutationVerdict.Allow, "ok", []), new RecordingAudit(),
+            targets: new FixedResolver(resolved));
+
+        await gateway.ExecuteAsync(Request() with { Target = new MutationTarget("host", "local") }, (_, _) => Task.FromResult(0));
+
+        var row = Assert.Single(Decisions());
+        Assert.Equal("""["web-1","(withheld)"]""", row.TargetRelated);
+    }
+
+    [Fact]
     public async Task Credentials_in_a_resolved_target_are_never_stored()
     {
         var resolved = new MutationTarget("gitapp", "app-1", "https://deploy:hunter2@git.example.com/shop.git", "srv1")

@@ -256,11 +256,15 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (resolution.Target is { } mounting && capability.Id == "compose.deploy"
             && MutationTargets.String(request.Arguments, "composeContent") is null
             && MutationTargets.String(request.Arguments, "mounts") is { } mountList)
+        {
+            var listed = mountList.Split('\n', StringSplitOptions.RemoveEmptyEntries);
             return Done(mounting with
             {
-                Related = mounting.Related.Concat(mountList.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-                    .Distinct(StringComparer.Ordinal).ToList(),
+                Related = mounting.Related.Concat(listed).Distinct(StringComparer.Ordinal).ToList(),
+                // Whoever planned the list may have filled it from an .env: none of it is recorded.
+                Withheld = mounting.Withheld.Concat(listed).ToHashSet(StringComparer.Ordinal),
             });
+        }
         if (resolution.Target is not { } host || capability.Id != "compose.deploy"
             || MutationTargets.String(request.Arguments, "composeContent") is not { } content)
             return resolution;
@@ -307,6 +311,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             {
                 Related = target.Related.Concat(made.DecidedIdentities()).Concat(made.Mounts())
                     .Distinct(StringComparer.Ordinal).ToList(),
+                Withheld = target.Withheld.Concat(made.WithheldMounts()).ToHashSet(StringComparer.Ordinal),
                 RelatedResources = target.RelatedResources.Concat(made.DecidedResources()).ToList(),
             });
         }

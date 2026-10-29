@@ -120,9 +120,12 @@ public static class ProtectedResourceMatcher
                     || (key.Equals("yaml", StringComparison.OrdinalIgnoreCase) && BareComposeVariable.IsMatch(value)))
                     return new Hit("", null, key) { Argument = key, InFreeText = true };
                 value = expanded;
-                // A bind mount's host side (short "- /src:/dst" or long "source: /src") above a protected path.
-                foreach (Match m in ComposeMountSource.Matches(value))
-                    if (AncestorHit(m.Groups["src"].Value, pathPatterns) is { } above)
+                // A bind mount's host side above a protected path, read from the YAML itself (flow style, quoting and
+                // escapes decoded); a file that is no YAML cannot be read for its mounts.
+                if (ComposeHostSources(value) is not { } sources)
+                    return new Hit("", null, key) { Argument = key, InFreeText = true };
+                foreach (var source in sources)
+                    if (AncestorHit(source, pathPatterns) is { } above)
                         return above with { Argument = key, InFreeText = true };
             }
             foreach (var word in Words(value))
@@ -137,7 +140,7 @@ public static class ProtectedResourceMatcher
     /// <summary>Arguments whose value is a payload that can carry a credential: free text and secrets. A hit in one
     /// names the argument, never its value.</summary>
     public static readonly IReadOnlySet<string> PayloadArguments = new HashSet<string>(
-        FreeTextArguments.Concat(["env", "envVars", "password", "secret", "token"]), StringComparer.OrdinalIgnoreCase);
+        FreeTextArguments.Concat(["env", "envVars", "password", "secret", "token", "mounts"]), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Free text that is a compose file.</summary>
     public static readonly IReadOnlySet<string> ComposeArguments = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -155,9 +158,51 @@ public static class ProtectedResourceMatcher
     private static readonly Regex BareComposeVariable = new(@"(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*\}|(?<!\$)\$[A-Za-z_]",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
-    private static readonly Regex ComposeMountSource = new(
-        @"(?m)^\s*-\s*[""']?(?<src>/[^:""'\s]*)\s*:|^\s*source:\s*[""']?(?<src>/[^""'\s]*)",
-        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+    /// <summary>Every absolute host path a compose file can mount, wherever it stands (services, anchors, merges,
+    /// extensions): the source side of a <c>volumes</c> entry, a long entry's <c>source</c>, a volume's
+    /// <c>driver_opts</c> <c>device</c>. <c>null</c> when the text is no YAML.</summary>
+    public static IReadOnlyList<string>? ComposeHostSources(string yaml)
+    {
+        var stream = new YamlDotNet.RepresentationModel.YamlStream();
+        try { stream.Load(new StringReader(yaml)); }
+        catch (YamlDotNet.Core.YamlException) { return null; }
+        var sources = new List<string>();
+        foreach (var document in stream.Documents)
+            CollectSources(document.RootNode, null, sources, 0);
+        return sources;
+    }
+
+    private static void CollectSources(YamlDotNet.RepresentationModel.YamlNode node, string? key, List<string> sources,
+        int depth)
+    {
+        if (depth > 64) return;
+        switch (node)
+        {
+            case YamlDotNet.RepresentationModel.YamlMappingNode map:
+                foreach (var (k, v) in map.Children)
+                {
+                    var name = (k as YamlDotNet.RepresentationModel.YamlScalarNode)?.Value;
+                    if (name is "source" or "device" && v is YamlDotNet.RepresentationModel.YamlScalarNode s)
+                        Add(s.Value);
+                    CollectSources(v, name, sources, depth + 1);
+                }
+                break;
+            case YamlDotNet.RepresentationModel.YamlSequenceNode seq:
+                foreach (var item in seq.Children)
+                {
+                    // "- /src:/dst[:ro]": the host side is before the first colon.
+                    if (key == "volumes" && item is YamlDotNet.RepresentationModel.YamlScalarNode s && s.Value is { } v)
+                        Add(v.Contains(':') ? v[..v.IndexOf(':')] : v);
+                    CollectSources(item, key, sources, depth + 1);
+                }
+                break;
+        }
+
+        void Add(string? path)
+        {
+            if (path?.Trim() is { Length: > 0 } p && p.StartsWith('/')) sources.Add(p);
+        }
+    }
 
     private static readonly Regex ComposeVariable = new(
         @"\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:(?<op>:?[-?+])(?<word>[^{}$]*))?\}|\$(?<bare>[A-Za-z_][A-Za-z0-9_]*)|\$\$",

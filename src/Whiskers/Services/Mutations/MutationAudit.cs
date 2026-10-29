@@ -163,6 +163,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         "query", "sql", "command", "script", "content", "body", "env", "compose", "yaml", "password", "secret", "token",
         // R1-16: free text the gateway now sees for protected-resource checks — never stored in the audit either.
         "composeContent", "envVars",
+        // A deployment's planned mounts: a source can come from an .env value.
+        "mounts",
     };
 
     /// <summary>Removes the values of payload arguments from free text such as a refusal reason.</summary>

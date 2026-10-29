@@ -151,13 +151,16 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         // The policy's own patterns apply to every argument, as before. The control plane's names apply only where a
         // container, volume or network can be named — not to a server, a DNS record or a task that shares the prefix.
         // A resource protected only by the policy's own pattern is refused for everyone, wherever in the call it is
-        // named — looked for first, so a control-plane hit earlier in the call cannot make it approvable. Free text
-        // that cannot be analysed could name one, so it is refused too while the policy protects anything of its own.
-        var policyOnly = policy.Where(p => !ControlPlaneResources.NamePatterns.Contains(p, StringComparer.OrdinalIgnoreCase)
-                                           && !ControlPlaneResources.PathPatterns.Contains(p, StringComparer.Ordinal)).ToList();
-        if (policyOnly.Count > 0
-            && ProtectedResourceMatcher.FirstHit(request.Arguments, policyOnly, [], analyseFreeText: change) is { } policyHit)
+        // named — looked for first, pattern by pattern, so a control-plane hit elsewhere in the call cannot make it
+        // approvable. A policy pattern that is also a control-plane pattern counts as the control plane only where
+        // the control plane's own check finds something in the same argument (not a server named whiskers-vps).
+        // Free text that cannot be analysed could name such a resource, so it is refused too.
+        foreach (var pattern in policy)
         {
+            if (ProtectedResourceMatcher.FirstHit(request.Arguments, [pattern], [], analyseFreeText: change) is not { } policyHit)
+                continue;
+            if (change && IsControlPlanePattern(pattern) && ControlPlaneFindsIn(request.Arguments, policyHit.Argument))
+                continue;
             reason = Describe(policyHit);
             return GuardrailVerdict.Deny;
         }
@@ -186,6 +189,19 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         }
         return GuardrailVerdict.Deny;
     }
+
+    private static bool IsControlPlanePattern(string pattern) =>
+        ControlPlaneResources.NamePatterns.Contains(pattern, StringComparer.OrdinalIgnoreCase)
+        || ControlPlaneResources.PathPatterns.Contains(pattern, StringComparer.Ordinal);
+
+    // Whether the control plane's own check (its names only where a container, volume or network can be named, its
+    // paths) finds something in this one argument.
+    private static bool ControlPlaneFindsIn(IReadOnlyDictionary<string, System.Text.Json.JsonElement> arguments,
+        string? argument) =>
+        argument is not null && arguments.TryGetValue(argument, out var value)
+        && ProtectedResourceMatcher.FirstHit(new Dictionary<string, System.Text.Json.JsonElement> { [argument] = value },
+            ControlPlaneResources.NamePatterns, ControlPlaneResources.PathPatterns, analyseFreeText: true,
+            ControlPlaneResources.NamesApplyTo(arguments)) is not null;
 
     private static string Describe(ProtectedResourceMatcher.Hit hit) =>
         hit.UnanalyzableArgument is { } argument

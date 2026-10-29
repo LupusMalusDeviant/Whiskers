@@ -172,6 +172,26 @@ public sealed partial class ProtectedResourceResolutionTests
     }
 
     [Fact]
+    public async Task A_mount_from_an_env_value_is_decided_but_withheld_from_records()
+    {
+        _host.Files["/opt/deployments/tools/.env"] = "DB_PASSWORD=canary-secret\n";
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    volumes:\n      - /srv/${DB_PASSWORD}:/data\n      - /srv/plain:/p\n"));
+        Assert.Contains("/srv/canary-secret", plan.Mounts());
+        Assert.Equal(["/srv/canary-secret"], plan.WithheldMounts());
+    }
+
+    [Fact]
+    public async Task Volumes_taken_from_a_container_or_another_service_are_decided()
+    {
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    volumes_from:\n      - container:serverwatch:rw\n      - b\n" +
+            "  b:\n    image: y\n    volumes:\n      - /srv/b:/b\n"));
+        Assert.Contains("serverwatch", plan.Mounts());
+        Assert.Contains("/srv/b", plan.Mounts());
+    }
+
+    [Fact]
     public async Task A_relative_mount_is_decided_where_it_lands()
     {
         var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",

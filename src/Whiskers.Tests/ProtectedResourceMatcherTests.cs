@@ -172,6 +172,11 @@ public class ProtectedResourceMatcherTests
     [InlineData("yaml", "services:\n  t:\n    volumes:\n      - ${UNSET:-/var/run/docker.sock}:/sock\n")]
     [InlineData("yaml", "services:\n  t:\n    volumes:\n      - /:/rootfs:ro\n")]
     [InlineData("yaml", "services:\n  t:\n    volumes:\n      - type: bind\n        source: /var/run\n        target: /r\n")]
+    [InlineData("yaml", "services: {tool: {image: alpine, volumes: [\"/:/host\"]}}")]           // flow style
+    [InlineData("yaml", "services:\n  t:\n    volumes: [ \"\\x2F:/host\" ]\n")]                  // an escaped scalar
+    [InlineData("yaml", "x-v: &v\n  - /var/run:/r\nservices:\n  t:\n    volumes: *v\n")]           // an anchor
+    [InlineData("yaml", "services:\n  t:\n    volumes:\n      - h:/h\nvolumes:\n  h:\n    driver_opts: {o: bind, device: /}\n")]
+    [InlineData("yaml", "services: [unclosed")]                                                // no YAML
     [InlineData("command", "cat /var/lib/docker/volumes/serverwatch-data/_data/mtls/client.key")]
     public void Paths_reaching_the_control_plane_are_found_however_they_are_written(string key, string value) =>
         Assert.NotNull(ControlPlane(key, value));

@@ -287,6 +287,23 @@ public class SelfProtectionTests
     }
 
     [Fact]
+    public async Task A_policy_pattern_equal_to_a_control_plane_one_still_refuses_what_only_the_policy_covers()
+    {
+        // whiskers* in the policy protects the server whiskers-vps too; the control plane's names do not reach a
+        // server, so that hit is the policy's alone: refused, no approval.
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["whiskers*"], serverName: "whiskers-vps");
+        var outcome = await h.RunAsync("host.exec", new { serverId = "local", command = "df -h" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
+
+        // The same pattern on the Whiskers container is the control plane: an Admin may approve it.
+        var container = await h.RunAsync("container.restart", new { containerId = "whiskers", serverId = "local" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.PendingApproval, container.Status);
+    }
+
+    [Fact]
     public async Task A_callers_own_resolved_keys_do_not_reach_the_rules()
     {
         var h = new ProtectionHarness();
@@ -422,6 +439,17 @@ public class SelfProtectionTests
             ProtectionHarness.UiAdmin, MutationSurface.Ui);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(h.Approvals.GetPending());
+    }
+
+    [Fact]
+    public async Task An_import_into_a_protected_database_is_refused_by_the_database_it_runs_in()
+    {
+        // As the container page imports or seeds a file: the database selected there goes along.
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["billing"]);
+        var outcome = await h.RunAsync("db.query",
+            new { containerId = "web", serverId = "local", database = "billing", query = "UPDATE orders SET paid = true;" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
     }
 
     [Theory]
