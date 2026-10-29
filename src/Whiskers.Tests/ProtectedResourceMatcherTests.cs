@@ -57,6 +57,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("query", "source /tmp/wipe.sql")]                                // mysql
     [InlineData("query", ".read /tmp/wipe.sql")]                                 // sqlite
     [InlineData("query", "load('/tmp/wipe.js')")]                                // mongosh
+    [InlineData("query", "db.getSiblingDB(\"\\u0062illing\").dropDatabase()")]  // an escaped name
+    [InlineData("query", "db.getSiblingDB(\"\\x62illing\").dropDatabase()")]
+    [InlineData("query", "db.getSiblingDB(\"\\u{62}illing\").dropDatabase()")]
     public void Text_that_builds_its_target_at_run_time_counts_as_touching_one(string key, string value)
     {
         var hit = Hit(key, value);
@@ -157,6 +160,20 @@ public class ProtectedResourceMatcherTests
         ProtectedResourceMatcher.FirstHit(
             new Dictionary<string, JsonElement> { [key] = JsonSerializer.SerializeToElement(value) },
             [], ControlPlaneResources.PathPatterns, true);
+
+    [Theory]
+    [InlineData("/srv/appstate:/data", true)]          // the data directory install.sh --data bound
+    [InlineData("/srv/appstate/keys:/k", true)]
+    [InlineData("/srv:/s", true)]                      // a directory above it
+    [InlineData("/srv/other:/o", false)]
+    public void A_data_directory_bound_on_the_host_is_part_of_the_control_plane(string mount, bool hit)
+    {
+        var paths = ControlPlaneResources.PathsFor("/srv/appstate/");
+        var found = ProtectedResourceMatcher.FirstHit(
+            new Dictionary<string, JsonElement> { ["volumes"] = JsonSerializer.SerializeToElement(mount) }, [], paths, true);
+        Assert.Equal(hit, found is not null);
+        Assert.Equal(ControlPlaneResources.PathsFor(null).Count, ControlPlaneResources.PathsFor("relative/dir").Count);
+    }
 
     [Theory]
     [InlineData("volumes", "/:/rootfs:ro")]                                     // a directory above everything

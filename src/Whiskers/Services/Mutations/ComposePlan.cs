@@ -452,8 +452,11 @@ public static class ComposeModel
 
     /// <inheritdoc cref="Merge"/>
     /// <returns>Also the top-level name as written, before interpolation.</returns>
+    /// <param name="projectDirectory">The directory compose resolves relative paths against (<c>--project-directory</c>);
+    /// the first file's directory when not given.</param>
     public static (string? Name, string? NameSource, IReadOnlyList<ComposeServicePlan> Services) MergeWithSource(
-        IReadOnlyList<(string Path, string Content)> files, IReadOnlyDictionary<string, string?> env)
+        IReadOnlyList<(string Path, string Content)> files, IReadOnlyDictionary<string, string?> env,
+        string? projectDirectory = null)
     {
         string? name = null, nameSource = null;
         var services = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -462,8 +465,8 @@ public static class ComposeModel
         var volumeDevices = new Dictionary<string, string>(StringComparer.Ordinal);
         var variableVolumes = new HashSet<string>(StringComparer.Ordinal);   // name or device from a variable
         var order = new List<string>();
-        // Compose resolves a relative bind source against the project directory (the first file's directory).
-        var projectDirectory = files.Count > 0 ? ComposePaths.DirectoryOf(files[0].Path) : "/";
+        // Compose resolves a relative bind source against the project directory — the one the deployment runs with.
+        projectDirectory ??= files.Count > 0 ? ComposePaths.DirectoryOf(files[0].Path) : "/";
         foreach (var (path, content) in files)
         {
             var root = Root(path, content);
@@ -622,14 +625,18 @@ public static class ComposeModel
                 throw new ComposePlanException($"The volumes of '{service}' are not a list.");
             foreach (var entry in list.Children)
             {
+                // The whole short form is interpolated before it is split: "- ${SPEC}" can be "/:/host".
                 var raw = entry switch
                 {
-                    YamlScalarNode s => s.Value is { } v && v.Contains(':') ? v[..v.IndexOf(':')] : null,
+                    YamlScalarNode s => s.Value,
                     YamlMappingNode m => Scalar(m, "source"),
                     _ => null,
                 };
-                if (string.IsNullOrWhiteSpace(raw)) continue;   // an anonymous volume
+                if (string.IsNullOrWhiteSpace(raw)) continue;
                 var path = Interpolate(raw, env, $"A volume of '{service}'");
+                if (entry is YamlScalarNode)
+                    path = path.Contains(':') ? path[..path.IndexOf(':')] : "";
+                if (string.IsNullOrWhiteSpace(path)) continue;   // an anonymous volume
                 var hostPath = path.StartsWith('/') || path.StartsWith('.') || path.StartsWith('~');
                 // A relative source is decided where it lands (../../.. from /opt/deployments/x is /).
                 if (path.StartsWith('.'))

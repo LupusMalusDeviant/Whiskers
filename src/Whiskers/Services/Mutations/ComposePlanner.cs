@@ -78,7 +78,7 @@ public sealed class ComposePlanner : IComposePlanner
             files.Add((file.Path, file.Content ?? await ReadAsync(serverId, file.Path, ct)
                 ?? throw new ComposePlanException($"Compose file '{file.Path}' does not exist.")));
 
-        var (declared, declaredSource, services) = ComposeModel.MergeWithSource(files, env);
+        var (declared, declaredSource, services) = ComposeModel.MergeWithSource(files, env, directory);
         var project = ComposeModel.EffectiveProjectName(deployment.ProjectName, env, declared, directory);
         // COMPOSE_REMOVE_ORPHANS in the .env makes a plain `up` remove orphans: planned (and passed explicitly) too.
         var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);

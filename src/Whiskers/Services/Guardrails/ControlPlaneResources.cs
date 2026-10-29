@@ -16,7 +16,27 @@ public static class ControlPlaneResources
     /// <summary>Paths (glob) of the control plane's data and mTLS material on a host, matched against every
     /// path-like word of every argument (normalised), and as a mount source also against the directories above
     /// them.</summary>
-    public static IReadOnlyList<string> PathPatterns { get; } =
+    public static IReadOnlyList<string> PathPatterns =>
+        _pathPatterns ??= PathsFor(Environment.GetEnvironmentVariable(DataHostDirVariable));
+
+    private static IReadOnlyList<string>? _pathPatterns;
+
+    /// <summary>The host directory bound to <c>/app/data</c> when it is not a Docker volume (<c>install.sh --data</c>
+    /// writes it into the compose file): protected like the data volume.</summary>
+    public const string DataHostDirVariable = "WHISKERS_DATA_HOST_DIR";
+
+    /// <summary>The control plane's paths, with <paramref name="dataHostDir"/> (an absolute host path, else ignored)
+    /// and everything below it.</summary>
+    public static IReadOnlyList<string> PathsFor(string? dataHostDir)
+    {
+        var paths = new List<string>(BuiltInPaths);
+        if (dataHostDir?.Trim() is { Length: > 1 } dir && dir.StartsWith('/')
+            && ProtectedResourceMatcher.NormalizePath(dir) is { Length: > 1 } normal)
+            paths.AddRange([normal, normal + "/*"]);
+        return paths;
+    }
+
+    private static readonly string[] BuiltInPaths =
     [
         // Whiskers' data volume on the host (database, keys, vault, mTLS), wherever Docker keeps it by default
         "/var/lib/docker/volumes/whiskers*", "/var/lib/docker/volumes/serverwatch*",

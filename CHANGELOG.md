@@ -9,7 +9,8 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-16: **Whiskers protects its own control plane, and free text no longer slips past protected resources.** A
   built-in list — containers named `whiskers*`, `serverwatch*`, `socket-proxy*`, `docker-socket-proxy*`,
   `ghostunnel*`, `step-ca*`, `nginx-proxy-manager*` and those in `WHISKERS_SELF_CONTAINERS`, plus the data
-  volume's directory under `/var/lib/docker/volumes/`, mTLS / step-ca / ghostunnel directories (also every
+  volume's directory under `/var/lib/docker/volumes/` (or the host directory in `WHISKERS_DATA_HOST_DIR`, which
+  `install.sh --data` now sets), mTLS / step-ca / ghostunnel directories (also every
   managed host's `/opt/dockerproxy`, which holds its tunnel key and CA) and the Docker
   socket (also as a mount of a directory above them, such as `/` or `/var/run`) — is protected on every surface for
   every change, whatever the guardrail policy lists. Touching it (or a resource the policy protects) is refused for
@@ -28,8 +29,10 @@ All notable changes to Whiskers are documented here. The format follows
   expands (`$VAR`, `$(…)`, backticks, `{a,b}`), `eval`, `xargs`, decoding, or inline code of another interpreter
   (`python -c`, `perl -e`, `awk … system(`); in SQL dynamic SQL, `COPY … PROGRAM`, file-reading functions,
   `U&"…"` escapes, inline functions and untrusted languages (`plpython3u`), and client commands the text is fed to
-  (psql `\i`, `\gexec`, `\c`, `\!`; mysql `source`; sqlite `.read`; mongosh `load()`). A `.env` saved in the web UI
-  decides what the project mounts too, and a SQL import or seed decides the database it runs in. A mount whose source
+  (psql `\i`, `\gexec`, `\c`, `\!`; mysql `source`; sqlite `.read`; mongosh `load()`) and string escapes a driver
+  decodes into a name (`b`, `\x62`). A `.env` saved in the web UI
+  decides what the project mounts too (a whole short entry from a variable, `- ${SPEC}`, is expanded before it is
+  read; relative sources resolve against the project directory the deployment runs with), and a SQL import or seed decides the database it runs in. A mount whose source
   comes from an `.env` value is decided but never recorded (the audit keeps the length of `mounts`, the decision
   record `(withheld)`). A policy pattern that equals a control-plane pattern makes a hit approvable only where the
   control plane's own check finds it too (not a server named `whiskers-vps`); text that cannot be analysed is
@@ -41,7 +44,9 @@ All notable changes to Whiskers are documented here. The format follows
   between the tokens) as it masks other
   secrets, value by value, and so do the audit log and the host-command logs. **Upgrade notes:** a scheduled cleanup
   task no longer removes unused networks (which ones are unused cannot be decided before the prune): it removes
-  stopped containers, dangling images and build cache; calls that used to
+  stopped containers, dangling images and build cache; an install whose data lives in a host directory (not the
+  `whiskers-data` volume) set up before this release should add `WHISKERS_DATA_HOST_DIR=<that directory>` to the
+  container's environment, so Whiskers protects it; calls that used to
   pass are now refused or need an Admin approval — an MCP key or a scheduled task restarting the Whiskers container
   or its proxy; a command or query that merely mentions a protected name (also inside a domain such as
   `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a

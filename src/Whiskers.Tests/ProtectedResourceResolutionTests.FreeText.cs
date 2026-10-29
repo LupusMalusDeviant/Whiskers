@@ -186,6 +186,27 @@ public sealed partial class ProtectedResourceResolutionTests
     }
 
     [Fact]
+    public async Task A_whole_mount_from_a_variable_is_decided_as_what_it_expands_to()
+    {
+        _host.Files["/opt/deployments/tools/.env"] = "MOUNT_SPEC=/:/host\n";
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    volumes:\n      - ${MOUNT_SPEC}\n"));
+        Assert.Equal(["/"], plan.Mounts());
+        Assert.Equal(["/"], plan.WithheldMounts());
+    }
+
+    [Fact]
+    public async Task A_relative_mount_is_decided_in_the_project_directory_the_deployment_runs_with()
+    {
+        var plan = await Planner().PlanAsync(new ComposeDeployment("local",
+            [new ComposeFileInput("/srv/tools/compose.yml", "services:\n  a:\n    image: x\n    volumes:\n      - ./certs:/certs\n")])
+        {
+            ProjectDirectory = "/opt/dockerproxy",
+        });
+        Assert.Equal(["/opt/dockerproxy/certs"], plan.Mounts());
+    }
+
+    [Fact]
     public async Task Volumes_taken_from_a_container_or_another_service_are_decided()
     {
         var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",

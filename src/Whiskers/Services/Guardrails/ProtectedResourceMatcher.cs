@@ -775,6 +775,8 @@ public static class ProtectedResourceMatcher
         + @"|\bu&[""']|\\[0-9a-f]{4,6}|\blanguage\s+'?pl\w*u\b|\bcreate\s+(or\s+replace\s+)?(function|procedure)\b"
         // a document database's query language: strings joined or decoded at run time, server-side JavaScript
         + @"|\bfromCharCode\b|\$where\b|\$function\b|\bdb\.eval\s*\("
+        // string escapes a shell or a driver decodes into a name: b, \u{62}, \x62, octal \142
+        + @"|\\u\{?[0-9a-f]|\\x[0-9a-f]{2}|\\[0-7]{3}"
         // client commands the text is fed to: psql \i \ir \gexec \c \! …, mysql source / system / \. , sqlite .read
         // .shell …, mongosh load() — they run a file, a shell or another database the text does not name
         + @"|(?:^|[\s;])\\[a-z!.]|^\s*(source|system)\s|^\s*\.(read|shell|system|import|open|load|cd)\b|\bload\s*\(",
