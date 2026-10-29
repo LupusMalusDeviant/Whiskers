@@ -29,7 +29,8 @@ container action and a compose deployment hold their **server** — one at a tim
 deployments, which hold it from their checkout to `up`: a rebuild starts the replacement under a new id and renames the
 old container before it ends, and a deployment's files can lie anywhere (a symlinked directory, a `COMPOSE_FILE`
 elsewhere, a Git checkout), so no name, id or path is one resource throughout — the server is. A Git webhook holds its
-app's server too, before its webhook is read again; the deployment it starts runs under that lock (`Holding`). A server
+app's server too, before its webhook is read again; the deployment it starts runs under that lock (`Holding`) and only for the app at the revision whose
+server it holds (an app saved since — moved elsewhere — is refused; `GitDeployOwners.RunAsOwnerAsync(revision)`). A server
 is locked by its id (`ServerKey`), whichever alias is stored — the id in another case, the display name. The container or plan is resolved again once the lock is held, and
 the action gets exactly what was found then (a compose deployment whose project changes again before it writes is
 refused). The webhook is read again once the run holds its resource: switched off, removed or

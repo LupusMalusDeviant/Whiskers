@@ -435,9 +435,10 @@ public class WebhookService : IWebhookService
 
     /// <summary>What a run locks and acts on: <see cref="Key"/> names the resource; for a container action
     /// <see cref="Container"/>, for a compose deployment <see cref="Plan"/>, for a Git delivery its app's
-    /// <see cref="Server"/>, is what the key was made from (or <see cref="Error"/> says why there is none).</summary>
+    /// <see cref="Server"/> at <see cref="Revision"/>, is what the key was made from (or <see cref="Error"/> says why
+    /// there is none).</summary>
     private sealed record RunTarget(string Key, ContainerInfo? Container = null, ComposePlan? Plan = null,
-        string? Error = null, string? Server = null)
+        string? Error = null, string? Server = null, int? Revision = null)
     {
         /// <summary>Resolved from what the name points to now — which can change (a rebuild, an edited compose file,
         /// an app moved to another server), so it is checked again under its lock.</summary>
@@ -614,7 +615,7 @@ public class WebhookService : IWebhookService
                     return (git is null ? null : await git.GetAppAsync(webhook.TargetId), (string?)null);
                 }, ct);
                 return new RunTarget(app is null ? "git:" + webhook.TargetId : _locks.ServerKey(app.ServerId),
-                    Server: app?.ServerId);
+                    Server: app?.ServerId, Revision: app?.Revision);
             }
             case "deploy":
             {
@@ -764,7 +765,10 @@ public class WebhookService : IWebhookService
                     {
                         EnsureOwned(webhook);
                         if (app is null) throw Unresolved(error!);
-                        var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(gitDeploy, automation, app.Id, token);
+                        // Only the app at the revision whose server this run holds: an app saved since (moved to
+                        // another server) is refused, its next delivery takes the new server.
+                        var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(gitDeploy, automation,
+                            app.Id, token, revision: target.Revision);
                         if (refused)
                             throw new MutationRefusedException($"Git deployment '{app.Name}': {output}", MutationStatus.Denied, "");
                         return (success, output);

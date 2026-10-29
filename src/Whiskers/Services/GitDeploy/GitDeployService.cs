@@ -186,9 +186,26 @@ public class GitDeployService : IGitDeployService
     public async Task DeleteAppAsync(string appId)
     {
         ValidateId(appId);
-        var data = await LoadAsync();
-        var app = data.Apps.FirstOrDefault(a => a.Id == appId);
-        if (app is null) return;
+        // The teardown removes the checkout: it holds the app's server (R1-10) like every deployment and compose
+        // webhook reading it. The app is read again once the server is held; one moved meanwhile waits for its new one.
+        GitDeployApp? app;
+        ResourceLocks.Lease server;
+        while (true)
+        {
+            app = (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId);
+            if (app is null) return;
+            var key = _locks.ServerKey(app.ServerId);
+            server = await _locks.AcquireAsync(key);
+            var now = (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId);
+            if (now is not null && _locks.ServerKey(now.ServerId) == key)
+            {
+                app = now;
+                break;
+            }
+            server.Dispose();
+            if (now is null) return;
+        }
+        using var held = server;
 
         // Best-effort teardown of the target workspace (the server may be gone — never block delete).
         try
@@ -204,6 +221,7 @@ public class GitDeployService : IGitDeployService
         await _lock.WaitAsync();
         try
         {
+            var data = await LoadAsync();
             data.Apps.RemoveAll(a => a.Id == appId);
             await _store.SaveAsync(data);
         }

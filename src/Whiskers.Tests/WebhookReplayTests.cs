@@ -487,7 +487,8 @@ public sealed class WebhookReplayTests : IDisposable
     public async Task The_test_shows_a_workers_own_message_in_the_persons_language()
     {
         _options.MaxConcurrentRuns = 2;
-        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        // Long enough that the run's own lookups finish under a loaded test run; the target is held throughout.
+        _options.RunTimeout = TimeSpan.FromSeconds(2);
         var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var tested = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var service = Service(text: new KeyLocalizer());

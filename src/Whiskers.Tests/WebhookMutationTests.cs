@@ -42,7 +42,8 @@ public sealed class WebhookMutationTests : IDisposable
     {
         AllowMutations = true,
     };
-    private readonly FakeServerConfig _servers = new(new ServerConfig { Id = "local", Name = "Local", IsDefault = true });
+    private readonly FakeServerConfig _servers = new(new ServerConfig { Id = "local", Name = "Local", IsDefault = true },
+        new ServerConfig { Id = "other", Name = "Other" });
     private readonly Roles _roles = new();
     private readonly Whitelist _whitelist = new();
     private readonly FakeNotifications _notify = new();
@@ -532,6 +533,72 @@ public sealed class WebhookMutationTests : IDisposable
 
         held.Dispose();
         await test;
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
+    public async Task A_git_webhook_whose_app_moves_to_another_server_while_it_waits_takes_that_server_and_is_checked_again()
+    {
+        var webhook = Seed("git-deploy", AppId);
+        var service = Service();
+        var local = await _locks.AcquireAsync(ResourceLocks.Server("local"));
+        var other = await _locks.AcquireAsync(ResourceLocks.Server("other"));
+
+        var test = service.TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        // Moved while the delivery waits for the old server; the new one is busy too.
+        var app = (await _git.GetAppAsync(AppId))!;
+        app.ServerId = "other";
+        await _git.SaveAppAsync(app, token: null, AdminId);
+        local.Dispose();
+        await Task.Delay(500);
+        Assert.False(test.IsCompleted);
+
+        // Switched off while it waits for the new server: once it gets it, the webhook is read again.
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            (await db.Webhooks.SingleAsync(w => w.WebhookId == webhook.WebhookId)).Enabled = false;
+            await db.SaveChangesAsync();
+        }
+        other.Dispose();
+
+        var (success, _) = await test;
+        Assert.False(success);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains("git "));
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
+    public async Task A_git_deployment_of_an_app_saved_after_the_delivery_got_its_server_is_refused()
+    {
+        var revision = (await _git.GetAppAsync(AppId))!.Revision;
+        var app = (await _git.GetAppAsync(AppId))!;
+        app.ServerId = "other";
+        await _git.SaveAppAsync(app, token: null, AdminId);
+
+        var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(_git, Automation(), AppId,
+            revision: revision);
+
+        Assert.False(success);
+        Assert.True(refused, output);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains("git "));
+    }
+
+    [Fact]
+    public async Task Deleting_a_git_app_waits_for_its_server_before_removing_the_checkout()
+    {
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
+
+        var delete = _git.DeleteAppAsync(AppId);
+        await Task.Delay(500);
+        Assert.False(delete.IsCompleted);
+        Assert.DoesNotContain(_host.Executed, c => c.StartsWith("rm -rf"));
+
+        held.Dispose();
+        await delete;
+        Assert.Contains(_host.Executed, c => c.StartsWith("rm -rf"));
+        Assert.Null(await _git.GetAppAsync(AppId));
         Assert.Equal(0, _locks.Count);
     }
 
