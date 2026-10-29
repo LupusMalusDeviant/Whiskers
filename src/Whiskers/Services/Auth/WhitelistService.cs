@@ -110,8 +110,10 @@ public class WhitelistService : IWhitelistService, IInitializable
             Enabled = data.Enabled,
             Emails = new List<string>(data.Emails)
         };
+        var before = GetWhitelist();
         await _store.SaveAsync(copy);
         SetCache(copy);
+        Whiskers.Services.Mutations.ConfigChange.Record("whitelist", before, copy);   // R1-22
         _logger.LogInformation("Whitelist updated: {Count} emails, enabled={Enabled}", copy.Emails.Count, copy.Enabled);
     }
 

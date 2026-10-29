@@ -241,8 +241,9 @@ ExecuteMigrationFile, ExecuteSeedFile, ExecuteQuery, BackupDatabase; `Deploy` De
 `Firewall` ToggleFirewall, DeleteRule, OpenAddDialog and the dialog `AddFirewallRuleDialog` Submit; `NginxManager`
 SaveConfig, ToggleSite, ReloadNginx; `SystemdManager` ManageService; `SslCerts` RenewCert, RenewAll; `CloudView` Act;
 `GitDeployView` SaveApp, DeleteApp, StartDeploy, AdoptApp; `ScheduledTasksView` CreateTask, RunNow, ToggleEnabled,
-AdoptTask, AdoptAll, DeleteTask; `VolumeBackupsView` CreateBackup, RestoreBackup, DeleteBackup. The configuration
-pages (U-20–U-22, U-25, U-28, U-30–U-34) follow in R1-22. **Not through the gateway yet:** the unmarked actions of
+AdoptTask, AdoptAll, DeleteTask; `VolumeBackupsView` CreateBackup, RestoreBackup, DeleteBackup. Since R1-22 the configuration
+pages (U-20–U-22, U-25, U-28, U-30–U-34) write no rows of their own either: their role checks record a Denied event and
+their writes carry a versioned, redacted diff. **Not through the gateway yet:** the unmarked actions of
 U-20, U-21, U-25.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |

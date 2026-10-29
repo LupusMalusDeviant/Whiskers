@@ -16,7 +16,9 @@ public sealed record MutationDomainResult(string Action, string TargetType, stri
 public sealed class MutationScope : IDisposable
 {
     private const int MaxReasonChars = 500;
-    private const int MaxResults = 10;
+    // A configuration write reports one entry per changed setting (R1-22, ConfigChange): room for its 20 plus the
+    // version and the overflow count. The audit fits them into the event's size budget.
+    private const int MaxResults = 32;
     private static readonly AsyncLocal<MutationScope?> CurrentScope = new();
 
     private readonly MutationScope? _parent;
@@ -103,7 +105,7 @@ public sealed class MutationScope : IDisposable
         return reason;
     }
 
-    /// <summary>What the tool reported with <see cref="Record"/>, oldest first (at most ten).</summary>
+    /// <summary>What the tool reported with <see cref="Record"/>, oldest first (at most 32).</summary>
     public IReadOnlyList<MutationDomainResult> Results
     {
         get { lock (_results) return _results.ToArray(); }

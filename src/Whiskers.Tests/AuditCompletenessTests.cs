@@ -266,12 +266,12 @@ public sealed class AuditCompletenessTests : IDisposable
     [Fact]
     public async Task Long_tool_reports_stay_within_the_details_cap()
     {
-        // A tool that names its target by a whole command (execute_command does), ten times over (R1-20).
+        // A tool that names its target by a whole command (execute_command does), forty times over (R1-20); the scope keeps 32 (R1-22).
         var command = string.Concat(Enumerable.Repeat("echo restart the web container please; ", 200));
 
         await Gateway().ExecuteAsync(Restart("op-reports"), (_, _) =>
         {
-            for (var i = 0; i < 12; i++)
+            for (var i = 0; i < 40; i++)
                 MutationScope.Record(new MutationDomainResult("command.execute" + new string('x', 500), "command",
                     command, command, command, "local" + new string('l', 500), true));
             return Task.FromResult(1);
@@ -281,7 +281,7 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.Equal("Executed", row.Outcome);
         Assert.True(row.Details!.Length <= 4000, $"{row.Details.Length} chars");
         using var details = JsonDocument.Parse(row.Details);
-        Assert.Equal(10, details.RootElement.GetProperty("results").GetArrayLength());
+        Assert.Equal(32, details.RootElement.GetProperty("results").GetArrayLength());
     }
 
     [Fact]

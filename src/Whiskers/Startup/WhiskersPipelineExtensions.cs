@@ -22,6 +22,9 @@ namespace Whiskers.Startup;
 /// (the McpCallLog middleware still sits between the endpoint maps exactly where it did).</summary>
 public static class WhiskersPipelineExtensions
 {
+    /// <summary>The audit action of a self-backup download, handed out or refused (R1-22).</summary>
+    public const string BackupDownloadAction = "selfbackup.download";
+
     public static void ConfigureWhiskersHttpPipeline(this WebApplication app)
     {
         var configuredPathBase = app.Configuration["PathBase"] ?? "";
@@ -227,29 +230,39 @@ public static class WhiskersPipelineExtensions
                 [Microsoft.AspNetCore.Mvc.FromForm] string email,
                 [Microsoft.AspNetCore.Mvc.FromForm] string password,
                 UserManager<AppUser> users,
-                Whiskers.Services.Auth.IWhitelistService whitelist) =>
+                Whiskers.Services.Auth.IWhitelistService whitelist,
+                Whiskers.Services.Auth.IAuthAuditLog authAudit) =>
             {
+                // R1-22: every outcome below is recorded; the records never change the outcome or its response.
                 var user = await users.FindByEmailAsync(email ?? "");
                 // Generic failure for "no such user", "wrong password" and "locked out" — no account enumeration.
                 if (user is null)
                 {
                     // Spend the same hashing work as a real check so response time doesn't reveal unknown accounts.
                     LocalLoginTiming.BurnPasswordCheck(users, password);
+                    await authAudit.SignInRefusedAsync(ctx, "local", null, Whiskers.Services.Auth.AuthAuditReasons.UnknownAccount);
                     return Results.Redirect(configuredPathBase + "/login?error=invalid");
                 }
                 // CheckPasswordAsync neither honours nor counts lockout (audit TA-03), so do both explicitly:
                 // MaxFailedAccessAttempts (5) wrong passwords lock the account for DefaultLockoutTimeSpan.
                 if (await users.IsLockedOutAsync(user))
+                {
+                    await authAudit.SignInRefusedAsync(ctx, "local", user.Email, Whiskers.Services.Auth.AuthAuditReasons.LockedOut);
                     return Results.Redirect(configuredPathBase + "/login?error=invalid");
+                }
                 if (!await users.CheckPasswordAsync(user, password ?? ""))
                 {
                     await users.AccessFailedAsync(user);
+                    await authAudit.SignInRefusedAsync(ctx, "local", user.Email, Whiskers.Services.Auth.AuthAuditReasons.WrongPassword);
                     return Results.Redirect(configuredPathBase + "/login?error=invalid");
                 }
                 await users.ResetAccessFailedCountAsync(user);
 
                 if (!whitelist.IsEmailAllowed(user.Email))
+                {
+                    await authAudit.SignInRefusedAsync(ctx, "local", user.Email, Whiskers.Services.Auth.AuthAuditReasons.NotWhitelisted);
                     return Results.Redirect(configuredPathBase + "/login?error=unauthorized");
+                }
 
                 // Build the principal MANUALLY so it carries ClaimTypes.Email — the default claims factory does
                 // not, and every role consumer keys on the email claim. authenticationType is non-empty (so
@@ -262,12 +275,15 @@ public static class WhiskersPipelineExtensions
                 }, authenticationType: "LocalPassword");
                 await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
                     new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = true });
+                await authAudit.SignedInAsync(ctx, "local", user.Email!);
                 return Results.Redirect(configuredPathBase + "/");
             }).AllowAnonymous().RequireRateLimiting(LocalLoginTiming.RateLimitPolicy);
         }
 
-        app.MapGet("/logout", async (HttpContext ctx) =>
+        app.MapGet("/logout", async (HttpContext ctx, Whiskers.Services.Auth.IAuthAuditLog authAudit) =>
         {
+            // Recorded before the cookie goes: afterwards the request no longer names the user (R1-22).
+            await authAudit.SignedOutAsync(ctx);
             await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             ctx.Response.Redirect(configuredPathBase + "/login");
         }).AllowAnonymous();
@@ -300,13 +316,23 @@ public static class WhiskersPipelineExtensions
         // AuthDisabled principal). The archive is a secret-bearing artifact — even when VAULT_KEY-encrypted it
         // is restricted. The id is validated (SafeName) and resolved strictly within backups/self by the
         // service, so this endpoint cannot be steered outside the backups directory.
-        app.MapGet("/backups/self/{id}/download", (string id, HttpContext ctx) =>
+        // R1-22: every hand-out is recorded BEFORE the first byte — who, which archive, how large — and without that
+        // record the archive is not handed out (503). A signed-in user refused by the role check is recorded too.
+        app.MapGet("/backups/self/{id}/download", async (string id, HttpContext ctx) =>
         {
             var backups = ctx.RequestServices.GetRequiredService<Whiskers.Services.Backup.IBackupService>();
             var path = backups.ResolveArchivePath(id);
             if (path is null) return Results.NotFound();
-            return Results.File(path, "application/octet-stream", Path.GetFileName(path), enableRangeProcessing: true);
-        }).RequireAuthorization(policy => policy.RequireAssertion(context =>
+            var audit = ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>();
+            var (actor, actorType) = Whiskers.Services.AuditLog.IAuditLogService.GetActorFromHttpContext(ctx);
+            var name = Path.GetFileName(path);
+            var size = new FileInfo(path).Length;
+            if (!await audit.TryLogAsync(actor, actorType, BackupDownloadAction, "whiskers", id, name,
+                    details: $"{size} bytes; ip={ctx.Connection.RemoteIpAddress}"))
+                return Results.Problem("The download could not be recorded in the audit log, so it was not started.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            return Results.File(path, "application/octet-stream", name, enableRangeProcessing: true);
+        }).RequireAuthorization(policy => policy.RequireAssertion(async context =>
         {
             var httpContext = context.Resource as HttpContext;
             if (httpContext is null) return false;
@@ -314,7 +340,13 @@ public static class WhiskersPipelineExtensions
                 return true;   // trusted-LAN bypass = admin, consistent with the rest of the app
             var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
             var roles = httpContext.RequestServices.GetService<Whiskers.Services.Auth.IRoleService>();
-            return roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin;
+            if (roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin) return true;
+            if (!string.IsNullOrEmpty(email))
+                await httpContext.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>()
+                    .LogAsync(email, "web", BackupDownloadAction, "whiskers",
+                        httpContext.Request.RouteValues["id"]?.ToString() ?? "", "",
+                        details: $"Requires the Admin role.; ip={httpContext.Connection.RemoteIpAddress}", success: false);
+            return false;
         }));
 
         // Webhook API endpoint (no auth — uses HMAC signature validation). R1-10: bounded, deduplicated, queued.

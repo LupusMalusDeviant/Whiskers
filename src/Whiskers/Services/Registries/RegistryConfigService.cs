@@ -96,6 +96,9 @@ public class RegistryConfigService : IRegistryConfigService
                 throw;
             }
             _cached = next;
+            // The versioned, redacted diff is part of the gateway's event (R1-22); CredentialRef names a vault key and
+            // is redacted like a secret.
+            Whiskers.Services.Mutations.ConfigChange.Record($"registry:{stored.Id}", existing, stored);
 
             if (credential is not null && oldRef is not null && oldRef != stored.CredentialRef && _vault.IsEnabled)
                 try { await _vault.DeleteSecretAsync(oldRef); } catch { /* no registry names it any more */ }

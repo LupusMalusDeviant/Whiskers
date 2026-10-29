@@ -116,9 +116,11 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
                 }
                 saved.Add(t);
             }
+            var before = new AiTriggerData { Triggers = _triggers };
             await _store.SaveAsync(new AiTriggerData { Triggers = saved });
             _triggers = saved;
             Interlocked.Increment(ref _revision);
+            Whiskers.Services.Mutations.ConfigChange.Record("ai-triggers", before, new AiTriggerData { Triggers = saved });   // R1-22
         }
         finally
         {
@@ -142,9 +144,11 @@ public sealed class AiTriggerStore : IAiTriggerStore, IInitializable
             suspended.Enabled = false;
             suspended.SuspendedReason = string.IsNullOrWhiteSpace(reason) ? "its owner lost their authority" : reason;
             var saved = _triggers.Select(t => t.Id == triggerId ? suspended : t).ToList();
+            var before = new AiTriggerData { Triggers = _triggers };
             await _store.SaveAsync(new AiTriggerData { Triggers = saved });
             _triggers = saved;
             Interlocked.Increment(ref _revision);
+            Whiskers.Services.Mutations.ConfigChange.Record("ai-triggers", before, new AiTriggerData { Triggers = saved });   // R1-22
         }
         finally
         {

@@ -6,6 +6,25 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-22: **Configuration, sign-ins and backup downloads are audited.** A configuration or policy write — whitelist,
+  roles, MCP keys and tool switches, guardrails and presets, AI triggers, agent settings, Settings sections, servers,
+  registries, Git-deploy apps — is one gateway event that carries what changed: the section's version before and
+  after (`config.version`, the first 12 hex digits of a SHA-256 over the redacted content) and each changed setting
+  with its old and new value (target type `setting`, at most 8, the rest counted). Secrets never show a value: only
+  `[not set]` or `[set #<fingerprint>]`, keyed per process so a replaced secret is a visible change while nothing
+  stored lets anyone test a guess; a secret alone does not move the version. URLs show their origin only. The
+  configuration pages (Settings, Servers, Webhooks, self-backup, log alerts, agent, AI operations, automation owners,
+  registries) no longer write audit rows of their own: a refused attempt is the gateway's **Denied** event, and the old
+  action names (`config.save`, `server.add`/`update`/`remove`, `webhook.create`/`enable`/`disable`/`delete`/`test`/
+  `adopt`, `registry.create`/`update`/`delete`, `mcp.key.create`/`delete`, `vault.set`/`delete`,
+  `selfbackup.create`/`delete`/`restore`, `automation.owner_set`) are replaced by the capability ids. New rows:
+  `auth.login`, `auth.login_failed` (with `reason=unknown_account|wrong_password|locked_out|not_whitelisted|
+  provider_failure` and the client address; an unknown account name is never recorded) and `auth.logout`, for local,
+  Google and OIDC sign-ins — hooks only, the login itself is unchanged and a lost row never blocks it. A self-backup
+  download (`selfbackup.download`) is recorded with the requester, archive and size before the first byte, and is
+  refused with 503 when that row cannot be written; a signed-in non-Admin's attempt is recorded as refused.
+  No migration.
+
 - R1-21: **One audit event per infrastructure action in the UI.** The container, deploy, network, firewall, nginx,
   systemd, certificate, cloud, Git-deploy, scheduled-task and volume-backup pages no longer write audit rows of their
   own next to the gateway's: each attempt is exactly the gateway's event — also when the page's role check refuses

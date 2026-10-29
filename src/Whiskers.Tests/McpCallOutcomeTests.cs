@@ -344,6 +344,13 @@ public sealed class McpCallOutcomeTests : IDisposable
 
     internal sealed class RecordingAuditLog : IAuditLogService
     {
+        public async Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            await LogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+            return true;
+        }
+
         public List<string> Rows { get; } = [];
 
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,

@@ -107,9 +107,9 @@ public class GitDeployService : IGitDeployService
         {
             var idx = data.Apps.FindIndex(a => a.Id == app.Id);
             var stored = app.Clone();
-            if (idx >= 0)
+            var previous = idx >= 0 ? data.Apps[idx] : null;
+            if (previous is { } existing)
             {
-                var existing = data.Apps[idx];
                 // Edited from a stale copy: someone saved (or a deploy was decided on) a newer revision meanwhile.
                 if (existing.Revision != app.Revision)
                     throw new GitDeployConflictException($"'{existing.Name}' was changed meanwhile; reload and save again.");
@@ -123,6 +123,8 @@ public class GitDeployService : IGitDeployService
             stored.Revision = app.Revision + 1;
             if (idx >= 0) data.Apps[idx] = stored; else data.Apps.Add(stored);
             await _store.SaveAsync(data);
+            // The versioned, redacted diff is part of the gateway's event (R1-22).
+            Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{stored.Id}", previous, stored);
             return stored.Clone();
         }
         finally { _lock.Release(); }

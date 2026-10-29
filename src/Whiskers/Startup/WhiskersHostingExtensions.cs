@@ -241,6 +241,7 @@ public static class WhiskersHostingExtensions
 
         // Auth whitelist + roles
         builder.Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, WhitelistService>();
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IAuthAuditLog, Whiskers.Services.Auth.AuthAuditLog>();
         builder.Services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
         builder.Services.AddSingleton<Whiskers.Services.Setup.ISetupStateService, Whiskers.Services.Setup.SetupStateService>();
         // Track B.1/B.2: backend-neutral workload seam. Dispatches per server (Docker hosts vs.

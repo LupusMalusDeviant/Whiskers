@@ -201,8 +201,10 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         await _lock.WaitAsync(ct);
         try
         {
+            var before = _state;
             await _store.SaveAsync(next);   // throws → the previous policy stays live
             _state = new State(next, null);
+            RecordChange(before, next);
             _logger?.LogWarning("Guardrails changed by {Editor} ({Count} presets, active={Active}).",
                 editor.DisplayName, next.Presets.Count, next.ActivePreset);
         }
@@ -234,6 +236,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             if (next.Problem() is { } problem)
                 throw new GuardrailConfigException(problem);
             await _store.SaveAsync(next);
+            RecordChange(state, next);
             _state = new State(next, null);
         }
         finally
@@ -274,8 +277,10 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             var active = next.Presets.FirstOrDefault(p => p.Name == next.ActivePreset);
             if (active is null || !active.Policy.ReadOnlyMode) return;
             active.Policy.ReadOnlyMode = false;
+            var before = _state;
             await _store.SaveAsync(next);   // throws → the kill switch stays on
             _state = new State(next, null);
+            RecordChange(before, next);
             _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).", editor.DisplayName, active.Name);
         }
         finally
@@ -285,6 +290,11 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
 
         Changed?.Invoke();
     }
+
+    /// <summary>The policy change as part of the gateway's event (R1-22): versioned, every changed rule named. The
+    /// version of an unreadable file is that of no policy.</summary>
+    private static void RecordChange(State before, GuardrailConfig after) =>
+        Whiskers.Services.Mutations.ConfigChange.Record("guardrails", before.LoadError is null ? before.Config : null, after);
 
     private static void RequireAdmin(AgentPrincipal editor)
     {

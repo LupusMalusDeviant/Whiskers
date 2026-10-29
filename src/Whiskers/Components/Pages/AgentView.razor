@@ -524,7 +524,14 @@
 
     private async Task SaveLlm()
     {
-        if (!_isAdmin) { Snackbar.Add(L["AgentView_Snackbar_AdminOnly"].Value, Severity.Error); return; }
+        if (!_isAdmin)
+        {
+            Snackbar.Add(L["AgentView_Snackbar_AdminOnly"].Value, Severity.Error);
+            // The refused attempt is the gateway's Denied event (R1-22).
+            await Mutations.RefuseAsync("config.agent", new { section = "agent", provider = _llmProvider, model = _llmModel },
+                "Requires the Admin role.");
+            return;
+        }
         // Through the gateway (R1-11): Admin at the click, kill switch, audit before the file is written. The API key
         // and the system prompt are never arguments.
         var principal = await BuildPrincipalAsync();

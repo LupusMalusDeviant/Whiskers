@@ -6,7 +6,6 @@
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.Onboarding.IOnboardingService Onboarding
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject NavigationManager Nav
 @inject Whiskers.Services.Workloads.IWorkloadProviderFactory WorkloadFactory
 @inject Whiskers.Services.Workloads.Kubernetes.IKubernetesClientCache KubeClients
@@ -374,9 +373,6 @@
             return;
         }
 
-        await AuditLog.LogAsync(
-            (await CurrentUser.GetEmailAsync()) ?? "unknown", "web", "server.pause-checks",
-            "server", server.Id, server.Name, $"for {option.Label}", server.Id);
 
         Snackbar.Add($"Background checks for {server.Name} paused — {option.Label.ToLowerInvariant()}. " +
                      "Nothing there is being checked meanwhile.", Severity.Warning);
@@ -397,9 +393,6 @@
             return;
         }
 
-        await AuditLog.LogAsync(
-            (await CurrentUser.GetEmailAsync()) ?? "unknown", "web", "server.resume-checks",
-            "server", server.Id, server.Name, null, server.Id);
 
         Snackbar.Add($"Background checks for {server.Name} are running again.", Severity.Success);
         StateHasChanged();
@@ -431,9 +424,6 @@
             }
         }
 
-        await AuditLog.LogAsync(
-            (await CurrentUser.GetEmailAsync()) ?? "unknown", "web", "server.pause-checks-all",
-            "config", "fleet", "all servers", $"{paused} server(s) for {option.Label}");
 
         Snackbar.Add($"Background checks paused on {paused} of {servers.Count} servers — {option.Label.ToLowerInvariant()}. " +
                      "Nothing in the fleet is being checked meanwhile.", Severity.Warning);
@@ -449,6 +439,15 @@
             return false;
         }
         return true;
+    }
+
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
     }
 
     protected override async Task OnInitializedAsync()
@@ -506,12 +505,13 @@
     // Persists the form (add/update + SSH key) and returns the live in-memory ServerConfig — which
     // keeps the transient SshPassword (used for onboarding) that is never written to disk. One gateway decision
     // (server.save); a validation error thrown inside still reaches the caller unchanged.
-    private Task<Whiskers.Models.ServerConfig> PersistServerAsync()
+    private Task<Whiskers.Models.ServerConfig> PersistServerAsync() =>
+        Mutations.RunAsync("server.save", SaveArguments(), _ => PersistServerCoreAsync());
+
+    private object SaveArguments()
     {
         var id = _editingServer?.Id ?? _form.Id;
-        return Mutations.RunAsync("server.save",
-            new { serverId = string.IsNullOrWhiteSpace(id) ? null : id, name = _form.Name, isNew = _editingServer is null },
-            _ => PersistServerCoreAsync());
+        return new { serverId = string.IsNullOrWhiteSpace(id) ? null : id, name = _form.Name, isNew = _editingServer is null };
     }
 
     // Set by PersistServerRecordAsync for the one save in flight (saves are serialized by _saving).
@@ -598,7 +598,6 @@
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         if (_editingServer != null)
         {
             _form.Id = _editingServer.Id;
@@ -615,7 +614,6 @@
                 _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(previous);
             ConnectionManager.InvalidateClient(_form.Id);
             KubeClients.Invalidate(_form.Id); // rebuild on next use if kubeconfig/context changed
-            await AuditLog.LogAsync(actor, "web", "server.update", "server", _form.Id, _form.Name, serverId: _form.Id);
         }
         else
         {
@@ -628,7 +626,6 @@
             // saves again, that retry must UPDATE this entry instead of adding a duplicate id.
             _editingServer = ServerConfigService.GetServer(_form.Id);
 
-            await AuditLog.LogAsync(actor, "web", "server.add", "server", _form.Id, _form.Name, serverId: _form.Id);
         }
 
         _servers = ServerConfigService.GetServers();
@@ -646,7 +643,7 @@
 
     private async Task SaveServer()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "server.save", SaveArguments())) return;
         _saving = true;
         _connectError = null;
         StateHasChanged();
@@ -687,7 +684,7 @@
     // just entered. The bootstrap credentials are auto-deleted on success.
     private async Task SaveAndOnboard()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "server.save", SaveArguments())) return;
         // Ask the Tailscale question BEFORE saving/closing anything — cancelling leaves the form open
         // so the user can simply hit "Speichern" for the classic (no-mesh) path instead.
         if (!await ConfirmTailscalePreflight()) return;
@@ -741,13 +738,12 @@
 
     private async Task DeleteServer(Whiskers.Models.ServerConfig server)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "server.remove", new { serverId = server.Id, name = server.Name })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Servers_Dialog_DeleteTitle"].Value,
             L["Servers_Dialog_DeleteMessage", server.Name].Value,
             yesText: L["Servers_Button_Delete"].Value, cancelText: L["Servers_Button_Cancel"].Value);
         if (confirmed != true) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await Mutations.RunAsync("server.remove", new { serverId = server.Id, name = server.Name }, async _ =>
@@ -758,12 +754,10 @@
                 await Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(ServerConfigService, Vault, server);
             });
             _servers = ServerConfigService.GetServers();
-            await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, serverId: server.Id);
             Snackbar.Add(L["Servers_Snackbar_Removed", server.Name].Value, Severity.Success);
         }
         catch (Exception ex)
         {
-            await AuditLog.LogAsync(actor, "web", "server.remove", "server", server.Id, server.Name, details: ex.Message, serverId: server.Id, success: false);
             Snackbar.Add(ex.Message, Severity.Error);
         }
     }
@@ -819,7 +813,7 @@
 
     private async Task StartOnboarding(Whiskers.Models.ServerConfig server, bool skipPreflight = false)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "server.onboard", new { serverId = server.Id, name = server.Name })) return;
         if (!skipPreflight && !await ConfirmTailscalePreflight()) return;
         _onboardingServer = server;
         _onboardLog = new();

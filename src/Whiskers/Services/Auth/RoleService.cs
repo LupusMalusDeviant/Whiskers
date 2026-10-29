@@ -113,18 +113,21 @@ public class RoleService : IRoleService, IInitializable
     {
         // Clone before persisting/caching so the caller's mutable object can't alias the enforcement state.
         var copy = Snapshot(data);
-        EnsureAdminRemains(GetRoleData(), copy);
+        var before = GetRoleData();
+        EnsureAdminRemains(before, copy);
         await _store.SaveAsync(copy);
         SetData(copy);
+        Whiskers.Services.Mutations.ConfigChange.Record("roles", before, copy);   // R1-22
         _logger.LogInformation("Roles updated: {Count} entries, default={Default}", copy.Roles.Count, copy.DefaultRole);
     }
 
     public async Task SetRoleAsync(string email, AppRole role)
     {
-        UserRoleData snapshot;
+        UserRoleData snapshot, before;
         _lock.EnterWriteLock();
         try
         {
+            before = Snapshot(_data);
             var next = Snapshot(_data);
             var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
@@ -139,14 +142,16 @@ public class RoleService : IRoleService, IInitializable
         finally { _lock.ExitWriteLock(); }
 
         await _store.SaveAsync(snapshot);
+        Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
     }
 
     public async Task RemoveRoleAsync(string email)
     {
-        UserRoleData snapshot;
+        UserRoleData snapshot, before;
         _lock.EnterWriteLock();
         try
         {
+            before = Snapshot(_data);
             var next = Snapshot(_data);
             next.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
             EnsureAdminRemains(_data, next);
@@ -156,6 +161,7 @@ public class RoleService : IRoleService, IInitializable
         finally { _lock.ExitWriteLock(); }
 
         await _store.SaveAsync(snapshot);
+        Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
     }
 
     /// <summary>Once an instance has an explicit Admin it must keep one. Without an explicit Admin the first-run

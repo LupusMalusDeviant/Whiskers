@@ -296,8 +296,10 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
                 Tools = data.Tools.ToDictionary(kv => kv.Key, kv => CloneTool(kv.Value)),
             };
             EnforceCodeFloor(next);
+            var before = _data;
             await _store.SaveAsync(next);
             _data = next;
+            Whiskers.Services.Mutations.ConfigChange.Record("mcp-permissions", before, next);   // R1-22
             _logger.LogInformation("MCP permissions saved: {KeyCount} keys, {ToolCount} tools",
                 _data.ApiKeys.Count, _data.Tools.Count);
         }
@@ -332,8 +334,10 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
                 ApiKeys = new List<McpApiKeyConfig>(_data.ApiKeys) { keyConfig },
                 Tools = _data.Tools
             };
+            var before = _data;
             await _store.SaveAsync(newData);
             _data = newData;
+            Whiskers.Services.Mutations.ConfigChange.Record("mcp-permissions", before, newData);   // R1-22
         }
         finally
         {
@@ -361,8 +365,10 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
                 ApiKeys = _data.ApiKeys.Where(k => k.Id != id).ToList(),
                 Tools = _data.Tools
             };
+            var before = _data;
             await _store.SaveAsync(newData);
             _data = newData;
+            Whiskers.Services.Mutations.ConfigChange.Record("mcp-permissions", before, newData);   // R1-22
         }
         finally
         {
@@ -395,8 +401,10 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
                     ApiKeys = _data.ApiKeys,
                     Tools = tools
                 };
+                var before = _data;
                 await _store.SaveAsync(newData);
                 _data = newData;
+                Whiskers.Services.Mutations.ConfigChange.Record("mcp-permissions", before, newData);   // R1-22
             }
         }
         finally

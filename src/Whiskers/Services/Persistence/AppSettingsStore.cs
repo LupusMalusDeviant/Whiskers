@@ -44,16 +44,28 @@ public sealed class AppSettingsStore : IAppSettingsStore
             else
                 root = new JsonObject();
 
+            var changes = new List<(string Section, JsonNode? Before, JsonNode? After)>();
             foreach (var (section, value) in sections)
-                root[section] = value as JsonNode ?? JsonSerializer.SerializeToNode(value, value.GetType());
+            {
+                var after = value as JsonNode ?? JsonSerializer.SerializeToNode(value, value.GetType());
+                changes.Add((section, root[section]?.DeepClone(), after?.DeepClone()));
+                root[section] = after;
+            }
 
             var tmp = _path + ".tmp";
             await File.WriteAllTextAsync(tmp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             File.Move(tmp, _path, overwrite: true);
+
+            // Written: what changed goes into the gateway's event, versioned and redacted (R1-22).
+            foreach (var (section, before, after) in changes)
+                Whiskers.Services.Mutations.ConfigChange.Record(section, ToElement(before), ToElement(after));
         }
         finally
         {
             _lock.Release();
         }
     }
+
+    private static JsonElement? ToElement(JsonNode? node) =>
+        node is null ? null : JsonSerializer.Deserialize<JsonElement>(node.ToJsonString());
 }
