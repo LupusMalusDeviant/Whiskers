@@ -199,11 +199,10 @@ public sealed class WebhookReplayTests : IDisposable
         var replies = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => service.AcceptAsync(wh.WebhookId, request))));
 
         var accepted = Assert.Single(replies, r => r.Reply == WebhookReply.Accepted);
+        // A repeat while the first is still being recorded is busy (it may come again); after that, a duplicate.
         Assert.All(replies.Where(r => r.Reply != WebhookReply.Accepted), r =>
-        {
-            Assert.Equal(WebhookReply.Duplicate, r.Reply);
-            Assert.Equal(accepted.RunId, r.RunId);
-        });
+            Assert.True(r == new WebhookAcceptance(WebhookReply.Busy)
+                        || r.Reply == WebhookReply.Duplicate && r.RunId == accepted.RunId, r.ToString()));
         await Finished(accepted.RunId!);
         Assert.Equal(1, _runner.Runs);
     }
@@ -560,6 +559,28 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task A_repeat_during_recording_is_busy_not_queued_when_the_recording_then_fails()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        var request = Signed(wh, "delivery-0178");
+        // The first delivery's row is written; its answer is held, and then lost.
+        _faults.Arm("INSERT INTO \"WebhookDeliveries\"", Fault.HoldAnswer);
+        var first = Task.Run(() => service.AcceptAsync(wh.WebhookId, request));
+        await _faults.Holding.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // A repeat meanwhile is not told the delivery is queued: the first may yet fail.
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await service.AcceptAsync(wh.WebhookId, request));
+
+        _faults.Resume();
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await first);
+        var again = await service.AcceptAsync(wh.WebhookId, request);
+        Assert.Equal(WebhookReply.Accepted, again.Reply);
+        Assert.Equal("Succeeded", (await Finished(again.RunId!)).State);
+        Assert.Equal(1, _runner.Runs);
+    }
+
+    [Fact]
     public async Task A_database_wait_does_not_outlive_the_run_timeout()
     {
         _options.MaxConcurrentRuns = 1;
@@ -872,7 +893,7 @@ public sealed class WebhookReplayTests : IDisposable
             CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    private enum Fault { Fail, LoseAnswer, Stall, Replay }
+    private enum Fault { Fail, LoseAnswer, Stall, Replay, HoldAnswer }
 
     /// <summary>Breaks the next database command whose text contains a fragment — with <c>runsOnly</c>, only one of
     /// a run (the worker's commands carry the run's deadline; a delivery's own lookups have none): fails it, executes
@@ -883,6 +904,13 @@ public sealed class WebhookReplayTests : IDisposable
         private string? _fragment;
         private bool _runsOnly;
         private Fault _fault;
+        private readonly TaskCompletionSource _holding = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes once a <see cref="Fault.HoldAnswer"/> command has executed and holds its answer.</summary>
+        public Task Holding => _holding.Task;
+
+        public void Resume() => _resume.TrySetResult();
 
         public void Arm(string fragment, Fault fault, bool runsOnly = false)
         {
@@ -926,6 +954,11 @@ public sealed class WebhookReplayTests : IDisposable
                 case Fault.LoseAnswer:
                     // Executed, then the answer is lost: the caller cannot tell whether it was written.
                     await using (var reader = await command.ExecuteReaderAsync(ct)) { }
+                    throw new OperationCanceledException("The answer was lost.");
+                case Fault.HoldAnswer:
+                    await using (var reader = await command.ExecuteReaderAsync(ct)) { }
+                    _holding.TrySetResult();
+                    await _resume.Task;
                     throw new OperationCanceledException("The answer was lost.");
                 case Fault.Replay:
                     // Committed once, the answer lost, and retried (as a retrying execution strategy does): the

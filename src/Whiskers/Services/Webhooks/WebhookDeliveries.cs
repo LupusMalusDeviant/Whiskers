@@ -42,8 +42,9 @@ internal sealed class WebhookDeliveryStore
     /// <summary>This process, as the prefix of its claims (for the log; liveness is <see cref="_live"/>).</summary>
     internal string ProcessInstance { get; } = Guid.NewGuid().ToString("N");
 
-    /// <summary>The claims whose runs this process holds: recorded and queued, running, or being recorded.</summary>
-    private readonly ConcurrentDictionary<string, byte> _live = new(StringComparer.Ordinal);
+    /// <summary>The claims whose runs this process holds — <c>true</c> once the run is in the queue (or running),
+    /// <c>false</c> while its delivery is still being recorded and may yet fail.</summary>
+    private readonly ConcurrentDictionary<string, bool> _live = new(StringComparer.Ordinal);
 
     public WebhookDeliveryStore(IServiceScopeFactory scopes, TimeProvider time)
     {
@@ -59,7 +60,7 @@ internal sealed class WebhookDeliveryStore
         // This call's claim, live before the row exists: a concurrent duplicate never sees it unclaimed. A retried
         // insert whose commit answer was lost knows its row by it.
         var token = $"{ProcessInstance}/{Guid.NewGuid():N}";
-        _live[token] = 0;
+        _live[token] = false;
         var fresh = false;
         try
         {
@@ -144,6 +145,15 @@ internal sealed class WebhookDeliveryStore
 
     /// <summary>The run's claim is no longer held: a queued row of it is taken over by the next delivery.</summary>
     public void Release(string claim) => _live.TryRemove(claim, out _);
+
+    /// <summary>The run is in the queue: from now on a repeat of its delivery is answered with it. A claim released
+    /// meanwhile (its run already ended) stays released.</summary>
+    public void Enqueued(string claim) => _live.TryUpdate(claim, true, false);
+
+    /// <summary>Queued under a claim whose delivery is still being recorded: whether it runs is not known yet, so a
+    /// repeat must not be told it is queued — it is busy and may come again.</summary>
+    public bool Admitting(WebhookDeliveryEntity row) =>
+        row.State == Queued && _live.TryGetValue(row.Instance, out var enqueued) && !enqueued;
 
     /// <summary>The delivery recorded under this key, or <c>null</c>; records nothing.</summary>
     public async Task<WebhookDeliveryEntity?> FindAsync(string webhookId, string deliveryKey, CancellationToken ct)

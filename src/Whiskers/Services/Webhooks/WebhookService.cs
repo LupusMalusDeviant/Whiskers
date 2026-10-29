@@ -193,7 +193,8 @@ public class WebhookService : IWebhookService
             // Full. A delivery seen before still gets its run; a new one is not recorded — the provider may retry.
             // One a stopped process left queued runs only if a delivery takes it over, which needs a slot: busy too.
             var known = await _deliveries.FindAsync(webhook.WebhookId, key, ct);
-            if (known is not null && !_deliveries.Orphaned(known)) return Repeat(webhook, known);
+            if (known is not null && !_deliveries.Orphaned(known) && !_deliveries.Admitting(known))
+                return Repeat(webhook, known);
             _logger.LogWarning("Webhook {Name}: the delivery queue is full; refused as busy", webhook.Name);
             return new WebhookAcceptance(WebhookReply.Busy);
         }
@@ -219,6 +220,12 @@ public class WebhookService : IWebhookService
         if (!fresh)
         {
             _slots.Release();
+            // Still being recorded by a concurrent delivery that may yet fail: not "queued" before it is.
+            if (_deliveries.Admitting(row))
+            {
+                _logger.LogInformation("Webhook {Name}: a repeat of a delivery still being recorded; refused as busy", webhook.Name);
+                return new WebhookAcceptance(WebhookReply.Busy);
+            }
             return Repeat(webhook, row);
         }
 
@@ -226,6 +233,7 @@ public class WebhookService : IWebhookService
         EnsureWorkers();
         // Unbounded channel, bounded by the slot taken above: the write cannot fail.
         _queue.Writer.TryWrite(new QueuedRun(webhook.WebhookId, row.RunId, row.Instance, sourceIp));
+        _deliveries.Enqueued(row.Instance);
         _logger.LogInformation("Webhook {Name}: delivery accepted as run {RunId}", webhook.Name, row.RunId);
         return new WebhookAcceptance(WebhookReply.Accepted, row.RunId, "queued");
     }
