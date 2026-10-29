@@ -121,15 +121,8 @@ public sealed class McpCallLogMiddleware
         if (!p.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String) return;
 
         var args = p.TryGetProperty("arguments", out var a) ? a.GetRawText() : null;
-        // The id as the MCP server reads it: a string's text, a number's digits.
-        var id = msg.TryGetProperty("id", out var i)
-            ? i.ValueKind switch
-            {
-                JsonValueKind.String => i.GetString(),
-                JsonValueKind.Number => i.GetRawText(),
-                _ => null,
-            }
-            : null;
+        // Keyed as the filter keys the MCP server's id: a number and a string with the same text stay two calls.
+        var id = msg.TryGetProperty("id", out var i) ? McpCallOutcomes.KeyOf(i) : null;
         sink.Add(new SniffedCall(name.GetString()!, args, id));
     }
 

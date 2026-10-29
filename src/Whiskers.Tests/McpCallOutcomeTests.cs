@@ -194,9 +194,9 @@ public sealed class McpCallOutcomeTests : IDisposable
         await new McpCallLogMiddleware(ctx =>
         {
             // Reported out of order, as concurrent calls may finish.
-            McpCallOutcomes.Add(ctx, new("3", "list_containers", McpCallResult.Executed, "allow", null, null));
-            McpCallOutcomes.Add(ctx, new("2", "restart_container", McpCallResult.Denied, "deny", "op-db", "protected"));
-            McpCallOutcomes.Add(ctx, new("a", "restart_container", McpCallResult.Executed, "allow", "op-web", null));
+            McpCallOutcomes.Add(ctx, new("n:3", "list_containers", McpCallResult.Executed, "allow", null, null));
+            McpCallOutcomes.Add(ctx, new("n:2", "restart_container", McpCallResult.Denied, "deny", "op-db", "protected"));
+            McpCallOutcomes.Add(ctx, new("s:a", "restart_container", McpCallResult.Executed, "allow", "op-web", null));
             return Task.CompletedTask;
         }).InvokeAsync(http);
 
@@ -212,11 +212,39 @@ public sealed class McpCallOutcomeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_number_id_and_a_string_id_with_the_same_text_are_two_calls()
+    {
+        var store = new RecordingCallLog();
+        var http = Post(store, """
+            [{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"restart_container","arguments":{"containerId":"web"}}},
+             {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"restart_container","arguments":{"containerId":"db"}}}]
+            """);
+
+        await new McpCallLogMiddleware(ctx =>
+        {
+            // The string id's call finishes first.
+            McpCallOutcomes.Add(ctx, new(McpCallOutcomes.KeyOf(new RequestId("1")), "restart_container",
+                McpCallResult.Denied, "deny", "op-db", "protected"));
+            McpCallOutcomes.Add(ctx, new(McpCallOutcomes.KeyOf(new RequestId(1)), "restart_container",
+                McpCallResult.Executed, "allow", "op-web", null));
+            return Task.CompletedTask;
+        }).InvokeAsync(http);
+
+        var web = Assert.Single(store.Entries, e => e.ParamsJson!.Contains("web"));
+        Assert.True(web.Success);
+        Assert.Equal("op-web", web.CorrelationId);
+        var db = Assert.Single(store.Entries, e => e.ParamsJson!.Contains("db"));
+        Assert.False(db.Success);
+        Assert.Equal("op-db", db.CorrelationId);
+    }
+
+    [Fact]
     public async Task The_filter_reports_under_the_id_the_middleware_reads()
     {
-        // The MCP server hands the filter a RequestId; its text must be what the middleware reads from the body.
-        Assert.Equal("7", new RequestId(7).Id?.ToString());
-        Assert.Equal("a", new RequestId("a").Id?.ToString());
+        // The MCP server hands the filter a RequestId; its key must be what the middleware reads from the body.
+        Assert.Equal("n:7", McpCallOutcomes.KeyOf(new RequestId(7)));
+        Assert.Equal("s:a", McpCallOutcomes.KeyOf(new RequestId("a")));
+        Assert.NotEqual(McpCallOutcomes.KeyOf(new RequestId(1)), McpCallOutcomes.KeyOf(new RequestId("1")));
 
         var store = new RecordingCallLog();
         var http = Post(store, """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"restart_container"}}""");
@@ -224,7 +252,7 @@ public sealed class McpCallOutcomeTests : IDisposable
         await new McpCallLogMiddleware(async ctx =>
         {
             _mcp.Http = ctx;
-            await _mcp.CallAsync("restart_container", McpFilterHarness.Ok, requestId: new RequestId(7).Id?.ToString());
+            await _mcp.CallAsync("restart_container", McpFilterHarness.Ok, requestId: McpCallOutcomes.KeyOf(new RequestId(7)));
         }).InvokeAsync(http);
 
         var entry = Assert.Single(store.Entries);

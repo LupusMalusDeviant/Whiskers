@@ -128,7 +128,7 @@ Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR
 (INV-26; fixed for every path in WP2 step 2.1 — guardrails are core) · **AL** AuditLog row · **AH** Agent History row only.
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
-INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (no complete audit event — since R1-19 every gateway attempt is one complete event with typed fields; it remains for paths not yet on the gateway and for the rows MCP history and UI pages still write themselves, R1-20/R1-21),
+INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (no complete audit event — since R1-19 every gateway attempt is one complete event with typed fields; it remains for paths not yet on the gateway and for the rows UI pages still write themselves, R1-21; MCP tools write none of their own since R1-20),
 INV-48 (audit after the fact, fail-open — since R1-19 the gateway refuses without a durable intent and keeps a failed outcome or refusal recoverable and visible; it remains for `AuditLogService` callers outside the gateway, whose lost rows are now at least visible), INV-49 (no tamper evidence). Rows below list only the path-specific gaps.
 
 ### 7.1 MCP tools (direct `/mcp` calls; the in-process agent invokes the same methods)
@@ -139,53 +139,55 @@ cannot widen (INV-16); the scope check inside the tool still runs · Target: con
 (INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26); protected resources and the built-in
 control plane are matched against the resolved target and the words of free text (INV-24/59 ✅ since R1-16) · Approval ✅ approve-then-retry bound to principal, credential, capability, normalized
 arguments, resolved target and policy version, single use, persisted (INV-30/31/35 ✅ since R1-14); never decided by
-its requester, expiry and approver level checked at decision time (INV-32–34/37 ✅ since R1-15) · Execution = inside the gateway scope with a deadline · Audit: one gateway AuditLog row (decision,
-approval, intent, outcome) **plus** the tool's own row shown in the Audit column below (INV-45 ⚠️ two rows). A
-tool's error answer is recorded `Failed` by the gateway when the tool marks it (`MutationScope.Fail`; all 25
-mutating tools do for their own error texts).
+its requester, expiry and approver level checked at decision time (INV-32–34/37 ✅ since R1-15) · Execution = inside the gateway scope with a deadline · Audit: exactly one gateway AuditLog event (decision,
+approval, intent, outcome) per attempt; what the tool reports about its work (`IToolAuditLog`) is added to that event's
+`results` instead of a row of its own, and a failure it reports makes the event `Failed` (R1-20). A tool's error
+answer is recorded `Failed` too (`MutationScope.Fail`, or an MCP result with `isError`). The Agent History of a
+direct call records the filter's per-call outcome and the event's operation id, not the HTTP status (R1-20). In the
+Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports domain details into it.
 
 | ID | Tool | Level | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
-| M-01 | `start_container` | write | ❌ | AL ✅ | INV-43 |
-| M-02 | `stop_container` | write | ❌ | AL ✅ | INV-43 |
-| M-03 | `restart_container` | write | ❌ | AL ✅ | INV-43 |
-| M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | AL ✅ | INV-43, 44, 53 |
-| M-05 | `deploy_app` | admin | ❌ | AL ✅ | INV-43 (volumes checked since R1-16) |
-| M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | AL ✅ | INV-43, 51 |
-| M-07 | `deploy_compose` | admin | ❌ | AL ✅ | INV-43 (plan incl. mounts decided since R1-16) |
-| M-08 | `execute_command` | admin | ❌ | AL ✅ (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
-| M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
-| M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
-| M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ⚠️ `nginx -t` pre-check | AL ✅ | 41 (E-03) |
-| M-12 | `manage_systemd_service` | **admin** (R1-05; was write) | ❌ | AL ✅ | 43 |
-| M-13 | `renew_ssl_certificate` | admin (R1-05) | ❌ | AL ✅ | INV-43 |
-| M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service | AL ✅ | INV-58 |
-| M-15 | `execute_query` | **admin** (PC-D3) | ❌ | ❌ AH only | INV-19 (PC-D3), 24, 43, 45 |
-| M-16 | `backup_database` | admin (R1-05) | ❌ | AL ✅ | INV-43 |
-| M-17 | `set_dns_record` | write | ❌ | AL ✅ | INV-43, 52 (DNS token) |
-| M-18 | `delete_dns_record` | write | ❌ | AL ✅ | INV-43, 52 |
-| M-19 | `create_network` | **admin** (R1-05; was write) | ❌ | AL ✅ | — |
-| M-20 | `remove_network` | **admin** (R1-05; was write) | ❌ | AL ✅ | — |
-| M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45 |
-| M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45 |
-| M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | n/a | AL ✅ | INV-04 |
-| M-24 | `delete_scheduled_task` | write | n/a | AL ✅ | — |
-| M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup, DB backup or retention, resolved before the caller check and the approval (R1-05) | ❌ | AL ✅ | INV-24 (policy sees only `taskId`), 30, 43 |
-| M-26 | `cloud_power_on` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
-| M-27 | `cloud_shutdown` | **admin** (R1-05; was write) | ❌ | ❌ AH only | 43, 45, 52 |
-| M-28 | `cloud_reboot` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
-| M-29 | `cloud_hard_reset` | **admin** (R1-05; was write) | ❌ | ❌ AH only | 43, 45, 52 |
-| M-30 | `cloud_create_snapshot` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-43, 45, 52 |
-| M-31 | `hetzner_enable_rescue` | admin | ❌ | AL ✅ | INV-51 (returns root password), 52 |
-| M-32 | `hetzner_disable_rescue` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45, 52 |
-| M-33 | `hetzner_enable_backups` | **admin** (R1-05; was write) | ❌ | ❌ AH only | INV-45, 52 |
-| M-34 | `hetzner_disable_backups` (deletes backups) | **admin** (R1-05; was write) | ❌ | ❌ AH only | 45, 52 |
-| M-35 | `hetzner_change_server_type` | **admin** (R1-05; was write) | ❌ | ❌ AH only | 43, 45, 52 |
-| M-36 | `hetzner_delete_snapshot` (irreversible) | **admin** (R1-05; was write) | ❌ | ❌ AH only | 45, 52 |
-| M-37 | `create_log_alert` (feeds AI triggers) | write | n/a | ❌ AH only | INV-27, 45, 46 |
-| M-38 | `pause_server_checks` | write | n/a | ❌ AH only | INV-45 |
-| M-39 | `resume_server_checks` | write | n/a | ❌ AH only | INV-45 |
-| M-40 | `preview_auto_patch` (pulls images) | write | n/a | ❌ AH only | INV-45 |
+| M-01 | `start_container` | write | ❌ | GW ✅ + details | INV-43 |
+| M-02 | `stop_container` | write | ❌ | GW ✅ + details | INV-43 |
+| M-03 | `restart_container` | write | ❌ | GW ✅ + details | INV-43 |
+| M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | GW ✅ + details | INV-43, 44, 53 |
+| M-05 | `deploy_app` | admin | ❌ | GW ✅ + details | INV-43 (volumes checked since R1-16) |
+| M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | GW ✅ + details | INV-43, 51 |
+| M-07 | `deploy_compose` | admin | ❌ | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16) |
+| M-08 | `execute_command` | admin | ❌ | GW ✅ + details (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
+| M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | 43 |
+| M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | 43 |
+| M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ⚠️ `nginx -t` pre-check | GW ✅ + details | 41 (E-03) |
+| M-12 | `manage_systemd_service` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | 43 |
+| M-13 | `renew_ssl_certificate` | admin (R1-05) | ❌ | GW ✅ + details | INV-43 |
+| M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service | GW ✅ + details | INV-58 |
+| M-15 | `execute_query` | **admin** (PC-D3) | ❌ | GW ✅ | INV-19 (PC-D3), 24, 43 |
+| M-16 | `backup_database` | admin (R1-05) | ❌ | GW ✅ + details | INV-43 |
+| M-17 | `set_dns_record` | write | ❌ | GW ✅ + details | INV-43, 52 (DNS token) |
+| M-18 | `delete_dns_record` | write | ❌ | GW ✅ + details | INV-43, 52 |
+| M-19 | `create_network` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | — |
+| M-20 | `remove_network` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | — |
+| M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ❌ | GW ✅ | — |
+| M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ❌ | GW ✅ | — |
+| M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | n/a | GW ✅ + details | INV-04 |
+| M-24 | `delete_scheduled_task` | write | n/a | GW ✅ + details | — |
+| M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup, DB backup or retention, resolved before the caller check and the approval (R1-05) | ❌ | GW ✅ + details | INV-24 (policy sees only `taskId`), 30, 43 |
+| M-26 | `cloud_power_on` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-43, 52 |
+| M-27 | `cloud_shutdown` | **admin** (R1-05; was write) | ❌ | GW ✅ | 43, 52 |
+| M-28 | `cloud_reboot` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-43, 52 |
+| M-29 | `cloud_hard_reset` | **admin** (R1-05; was write) | ❌ | GW ✅ | 43, 52 |
+| M-30 | `cloud_create_snapshot` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-43, 52 |
+| M-31 | `hetzner_enable_rescue` | admin | ❌ | GW ✅ + details | INV-51 (returns root password), 52 |
+| M-32 | `hetzner_disable_rescue` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-52 |
+| M-33 | `hetzner_enable_backups` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-52 |
+| M-34 | `hetzner_disable_backups` (deletes backups) | **admin** (R1-05; was write) | ❌ | GW ✅ | 52 |
+| M-35 | `hetzner_change_server_type` | **admin** (R1-05; was write) | ❌ | GW ✅ | 43, 52 |
+| M-36 | `hetzner_delete_snapshot` (irreversible) | **admin** (R1-05; was write) | ❌ | GW ✅ | 52 |
+| M-37 | `create_log_alert` (feeds AI triggers) | write | n/a | GW ✅ | INV-27, 46 |
+| M-38 | `pause_server_checks` | write | n/a | GW ✅ | — |
+| M-39 | `resume_server_checks` | write | n/a | GW ✅ | — |
+| M-40 | `preview_auto_patch` (pulls images) | write | n/a | GW ✅ | — |
 | M-41 | `instruct_agent` → agent run | read | per tool | per tool | INV-08 (in-flight run survives key revocation) |
 
 ### 7.2 Agent paths

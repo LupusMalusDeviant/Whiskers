@@ -26,7 +26,7 @@ public static class McpGuardrailFilter
 {
     public static McpRequestHandler<CallToolRequestParams, CallToolResult> Create(
         McpRequestHandler<CallToolRequestParams, CallToolResult> next) => (request, ct) =>
-        HandleAsync(request.Services, request.Params, request.JsonRpcRequest?.Id.Id?.ToString(),
+        HandleAsync(request.Services, request.Params, McpCallOutcomes.KeyOf(request.JsonRpcRequest?.Id),
             token => next(request, token), ct);
 
     /// <summary>The filter without the MCP request around it: <paramref name="requestId"/> is the call's JSON-RPC id.</summary>

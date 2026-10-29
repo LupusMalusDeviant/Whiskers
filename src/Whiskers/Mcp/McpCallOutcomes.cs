@@ -21,7 +21,8 @@ public enum McpCallResult
 /// The outcome of one tool call, decided by <see cref="McpGuardrailFilter"/> where the call is handled — not derived
 /// from the HTTP status, which only says the transport accepted the request.
 /// </summary>
-/// <param name="RequestId">The call's JSON-RPC id: each call of a batch keeps its own outcome.</param>
+/// <param name="RequestId">The call's JSON-RPC id (<see cref="McpCallOutcomes.KeyOf(ModelContextProtocol.Protocol.RequestId?)"/>):
+/// each call of a batch keeps its own outcome.</param>
 /// <param name="Verdict">allow | confirm | deny.</param>
 /// <param name="OperationId">The gateway's operation id for a mutation; null for a read.</param>
 public sealed record McpCallOutcome(string? RequestId, string Tool, McpCallResult Result, string Verdict,
@@ -38,6 +39,22 @@ public static class McpCallOutcomes
 
     /// <summary>Called by the middleware before the request is handled, so the calls of a batch share one list.</summary>
     public static void Begin(HttpContext http) => Of(http);
+
+    /// <summary>A JSON-RPC id as a key that keeps its type: the number <c>1</c> and the string <c>"1"</c> are two calls.</summary>
+    public static string? KeyOf(ModelContextProtocol.Protocol.RequestId? id) => id?.Id switch
+    {
+        string s => "s:" + s,
+        null => null,
+        var n => "n:" + Convert.ToString(n, System.Globalization.CultureInfo.InvariantCulture),
+    };
+
+    /// <summary><see cref="KeyOf(ModelContextProtocol.Protocol.RequestId?)"/> for the id as it stands in the request body.</summary>
+    public static string? KeyOf(System.Text.Json.JsonElement id) => id.ValueKind switch
+    {
+        System.Text.Json.JsonValueKind.String => "s:" + id.GetString(),
+        System.Text.Json.JsonValueKind.Number => "n:" + id.GetRawText(),
+        _ => null,
+    };
 
     public static void Add(HttpContext http, McpCallOutcome outcome) => Of(http).Enqueue(outcome);
 
