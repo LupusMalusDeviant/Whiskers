@@ -340,6 +340,8 @@ public class WebhookService : IWebhookService
                 target = now;
             }
 
+            // The work this run starts holds its lock: a Git deployment it starts does not wait for its own server.
+            _locks.Holding(target.Key);
             if (!await StartAsync(run, ct)) return;
             var webhook = await ReadWebhookAsync(run.WebhookId, ct);
             if (webhook is null || !webhook.Enabled || queued is null || !SameTarget(queued, webhook))
@@ -432,14 +434,14 @@ public class WebhookService : IWebhookService
     }
 
     /// <summary>What a run locks and acts on: <see cref="Key"/> names the resource; for a container action
-    /// <see cref="Container"/>, for a compose deployment <see cref="Plan"/>, is what the key was made from (or
-    /// <see cref="Error"/> says why there is none).</summary>
+    /// <see cref="Container"/>, for a compose deployment <see cref="Plan"/>, for a Git delivery its app's
+    /// <see cref="Server"/>, is what the key was made from (or <see cref="Error"/> says why there is none).</summary>
     private sealed record RunTarget(string Key, ContainerInfo? Container = null, ComposePlan? Plan = null,
-        string? Error = null)
+        string? Error = null, string? Server = null)
     {
-        /// <summary>Resolved from what the name points to now — which can change (a rebuild, an edited compose file),
-        /// so it is checked again under its lock.</summary>
-        public bool Resolved => Container is not null || Plan is not null;
+        /// <summary>Resolved from what the name points to now — which can change (a rebuild, an edited compose file,
+        /// an app moved to another server), so it is checked again under its lock.</summary>
+        public bool Resolved => Container is not null || Plan is not null || Server is not null;
     }
 
     /// <summary>Whether the action ended before the run's deadline.</summary>
@@ -592,27 +594,38 @@ public class WebhookService : IWebhookService
     /// The resource a run locks. A container action and a compose deployment hold their server (one at a time per
     /// server): a rebuild starts the replacement under a new id and renames the old container before it ends, and a
     /// deployment's files can lie anywhere (a symlinked directory, a compose file elsewhere, a Git checkout), so no
-    /// name, id or path is one resource throughout — the server is. A Git deployment is locked by its app here and
-    /// holds the server itself, from its checkout to `up`. A container or compose action acts on exactly the container
-    /// or plan resolved under the lock; one that cannot be resolved is refused.
+    /// name, id or path is one resource throughout — the server is. A Git delivery holds its app's server too, before
+    /// its webhook is read again (the deployment it starts then does not wait for it again). A server is locked by its
+    /// id, whichever alias is stored. A container or compose action acts on exactly the container or plan resolved
+    /// under the lock; one that cannot be resolved is refused.
     /// </summary>
     private async Task<RunTarget> TargetAsync(WebhookEntity webhook, CancellationToken ct)
     {
-        var server = WebhookTargets.ServerOf(webhook);
+        var server = _locks.ServerKey(WebhookTargets.ServerOf(webhook));
         switch (webhook.Action)
         {
             case "git-deploy":
-                return new RunTarget("git:" + webhook.TargetId);
+            {
+                // An app that cannot be read is held by its id: its deployment refuses it.
+                var (app, _) = await LookupAsync(webhook, async () =>
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var git = scope.ServiceProvider.GetService<IGitDeployService>();
+                    return (git is null ? null : await git.GetAppAsync(webhook.TargetId), (string?)null);
+                }, ct);
+                return new RunTarget(app is null ? "git:" + webhook.TargetId : _locks.ServerKey(app.ServerId),
+                    Server: app?.ServerId);
+            }
             case "deploy":
             {
                 var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook, ct), ct);
-                return new RunTarget(ResourceLocks.Server(server), Plan: plan, Error: plan is null ? error : null);
+                return new RunTarget(server, Plan: plan, Error: plan is null ? error : null);
             }
             case "restart" or "rebuild":
             {
                 var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
                 return container is not null
-                    ? new RunTarget(ResourceLocks.Server(server), container)
+                    ? new RunTarget(server, container)
                     : new RunTarget($"container:{server}|{webhook.TargetId}", Error: error);
             }
             default:

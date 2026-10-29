@@ -229,7 +229,8 @@ public class GitDeployService : IGitDeployService
             // The server, from the checkout to `up` (R1-10): the deployment writes its workspace (credentials,
             // checkout) and compose reads it — no other deployment, compose webhook or webhook container action on
             // the server meanwhile, whatever path or alias it uses. The app is checked once the wait is over.
-            using var server = await _locks.AcquireAsync(ResourceLocks.Server(app.ServerId), ct);
+            // A webhook delivery already holds it (it waited for it before its webhook was read again).
+            using var server = await _locks.AcquireAsync(_locks.ServerKey(app.ServerId), ct);
             await EnsureUnchangedAsync(app);
 
             // 1) Credentials (private repos): refresh the askpass pair from the vault every run,

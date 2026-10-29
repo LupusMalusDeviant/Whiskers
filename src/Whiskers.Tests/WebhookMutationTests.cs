@@ -48,7 +48,7 @@ public sealed class WebhookMutationTests : IDisposable
     private readonly FakeNotifications _notify = new();
     private readonly RecordingAudit _audit = new();
     private readonly GitDeployService _git;
-    private readonly ResourceLocks _locks = new();
+    private readonly ResourceLocks _locks;
     private bool _readOnly;
     private string? _protect;
     private bool _requireOwner = true;
@@ -57,6 +57,7 @@ public sealed class WebhookMutationTests : IDisposable
 
     public WebhookMutationTests()
     {
+        _locks = new ResourceLocks(_servers);
         Directory.CreateDirectory(_root);
         _whitelist.Allowed.Add(Admin);
         _roles.Map[Admin] = AppRole.Admin;
@@ -477,6 +478,88 @@ public sealed class WebhookMutationTests : IDisposable
         Assert.True(Ran("git-deploy"));
     }
 
+    [Theory]
+    [InlineData("restart", "web-1", "LOCAL")]
+    [InlineData("restart", "web-1", "Local")]
+    [InlineData("deploy", "/opt/shop", "LOCAL")]
+    [InlineData("deploy", "/opt/shop", "Local")]
+    public async Task A_webhook_naming_its_server_by_an_alias_waits_for_the_same_server(string action, string target,
+        string alias)
+    {
+        // The id in another case and the display name are the same server: one lock.
+        var webhook = Seed(action, target, serverId: alias);
+        var service = Service();
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
+
+        var test = service.TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        Assert.False(test.IsCompleted, test.IsCompleted ? test.Result.Output : "");
+        Assert.False(Ran(action));
+
+        held.Dispose();
+        var (success, output) = await test;
+        // A compose deployment on an alias is refused once it may go (its plan is not the decided one): either way
+        // it waited for the server.
+        if (action == "restart") Assert.True(success, output);
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
+    public void Every_alias_of_a_server_is_one_lock()
+    {
+        var locks = new ResourceLocks(new FakeServerConfig(new ServerConfig { Id = "rabenhof", Name = "Rabenhof (Hetzner)" }));
+
+        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("rabenhof"));
+        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("RABENHOF"));
+        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("rabenhof (hetzner)"));
+        Assert.Equal(ResourceLocks.Server("gone"), locks.ServerKey("gone"));
+    }
+
+    [Fact]
+    public async Task A_git_deployment_on_a_server_alias_waits_for_the_same_server()
+    {
+        var app = (await _git.GetAppAsync(AppId))!;
+        app.ServerId = "LOCAL";
+        await _git.SaveAppAsync(app, token: null, AdminId);
+        var webhook = Seed("git-deploy", AppId);
+        var service = Service();
+        var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
+
+        var test = service.TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        Assert.False(test.IsCompleted, test.IsCompleted ? test.Result.Output : "");
+        Assert.False(Ran("git-deploy"));
+
+        held.Dispose();
+        await test;
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
+    public async Task A_git_webhook_switched_off_while_it_waits_for_its_server_does_not_check_out()
+    {
+        var webhook = Seed("git-deploy", AppId);
+        var service = Service();
+        // Another deployment holds the app's server.
+        var held = await _locks.AcquireAsync(_locks.ServerKey("local"));
+
+        var test = service.TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            (await db.Webhooks.SingleAsync(w => w.WebhookId == webhook.WebhookId)).Enabled = false;
+            await db.SaveChangesAsync();
+        }
+        held.Dispose();
+
+        var (success, _) = await test;
+        Assert.False(success);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains("git "));
+        Assert.False(Ran("git-deploy"));
+        Assert.Equal(0, _locks.Count);
+    }
+
     [Fact]
     public async Task A_compose_webhook_on_a_symlink_or_an_outside_compose_file_waits_while_a_git_deployment_holds_the_server()
     {
@@ -520,9 +603,10 @@ public sealed class WebhookMutationTests : IDisposable
     [Fact]
     public async Task A_git_app_changed_while_its_deployment_waited_for_the_project_does_not_deploy()
     {
-        var webhook = Seed("git-deploy", AppId);
+        // A deployment decided on the app (from the Git deploy page) waits for its server.
+        var decided = (await _git.GetAppAsync(AppId))!;
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
-        var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
+        var test = _git.DeployAsync(decided, (_, proceed) => proceed());
         await Task.Delay(500);
 
         // Saved again while the deployment waits: it is no longer the app the deployment was decided on.

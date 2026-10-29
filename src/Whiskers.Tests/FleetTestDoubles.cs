@@ -52,7 +52,11 @@ internal sealed class FakeServerConfig : IServerConfigService, Whiskers.Services
     public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
     public List<Whiskers.Models.ServerConfig> GetServers() => _servers;
     public List<Whiskers.Models.ServerConfig> GetEnabledServers() => _servers.Where(s => s.Enabled).ToList();
-    public Whiskers.Models.ServerConfig? GetServer(string serverId) => _servers.FirstOrDefault(s => s.Id == serverId);
+    // As the real service: the id, then the id in another case, then the display name.
+    public Whiskers.Models.ServerConfig? GetServer(string serverId) =>
+        _servers.FirstOrDefault(s => s.Id == serverId)
+        ?? _servers.FirstOrDefault(s => string.Equals(s.Id, serverId, StringComparison.OrdinalIgnoreCase))
+        ?? _servers.FirstOrDefault(s => string.Equals(s.Name, serverId, StringComparison.OrdinalIgnoreCase));
     public Whiskers.Models.ServerConfig? GetDefaultServer() => _servers.FirstOrDefault(s => s.IsDefault) ?? _servers.FirstOrDefault();
     public bool SupportsTerminal(string? serverId) => false;
     public Task AddServerAsync(Whiskers.Models.ServerConfig server) => throw new NotSupportedException();
@@ -138,7 +142,9 @@ internal sealed class FakeDocker : IDockerService
         => ListContainersThrows
             ? Task.FromException<IList<ContainerInfo>>(new InvalidOperationException("The host is unreachable."))
             : Task.FromResult<IList<ContainerInfo>>(
-                _containers.Where(c => c.ServerId == (serverId ?? DefaultServerId)).ToList());
+                // Like the real service, an id in another case names the same server.
+                _containers.Where(c => string.Equals(c.ServerId, serverId ?? DefaultServerId,
+                    StringComparison.OrdinalIgnoreCase)).ToList());
 
     /// <summary>How long a log fetch takes. Zero (the default) keeps every existing test synchronous; a value
     /// longer than the monitor's fetch timeout reproduces the wedged host from the 2026-08-26 incident.</summary>

@@ -28,8 +28,9 @@ culture or user travels to later deliveries — and stopped with the app) run ea
 container action and a compose deployment hold their **server** — one at a time per server, together with Git
 deployments, which hold it from their checkout to `up`: a rebuild starts the replacement under a new id and renames the
 old container before it ends, and a deployment's files can lie anywhere (a symlinked directory, a `COMPOSE_FILE`
-elsewhere, a Git checkout), so no name, id or path is one resource throughout — the server is. A Git webhook is held by
-its app, and its deployment then holds the server. The container or plan is resolved again once the lock is held, and
+elsewhere, a Git checkout), so no name, id or path is one resource throughout — the server is. A Git webhook holds its
+app's server too, before its webhook is read again; the deployment it starts runs under that lock (`Holding`). A server
+is locked by its id (`ServerKey`), whichever alias is stored — the id in another case, the display name. The container or plan is resolved again once the lock is held, and
 the action gets exactly what was found then (a compose deployment whose project changes again before it writes is
 refused). The webhook is read again once the run holds its resource: switched off, removed or
 pointed elsewhere meanwhile → refused; taken over → it runs on the new owner. `RunTimeout` bounds the run: a run that
