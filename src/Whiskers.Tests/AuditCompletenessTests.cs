@@ -237,6 +237,29 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.DoesNotContain("sk-123456", row.Arguments);
     }
 
+    private static Dictionary<string, JsonElement> RawArgs(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
+
+    [Fact]
+    public async Task Arguments_with_a_repeated_property_name_still_make_one_event()
+    {
+        // Valid input for the parser: the audit keeps it as it came, and the call is decided as usual.
+        var args = RawArgs("""{"containerId":"web","serverId":"local","options":{"label":"first","label":"second","token":"t1","token":"t2"}}""");
+
+        var allowed = await Gateway().ExecuteAsync(Restart("op-dup") with { Arguments = args }, (_, _) => Task.FromResult(1));
+        var refused = await Gateway().ExecuteAsync(Restart("op-dup2") with { Arguments = args, CapabilityId = "no.such" },
+            (_, _) => Task.FromResult(1));
+
+        Assert.Equal(MutationStatus.Executed, allowed.Status);
+        Assert.Equal(MutationStatus.Denied, refused.Status);
+        var row = await EventOf("op-dup");
+        Assert.Contains("first", row.Arguments);
+        Assert.Contains("second", row.Arguments);
+        Assert.DoesNotContain("t1", row.Arguments);
+        Assert.DoesNotContain("t2", row.Arguments);
+        Assert.Equal("Denied", (await EventOf("op-dup2")).Outcome);
+    }
+
     [Fact]
     public async Task Required_fields_survive_when_the_details_are_shortened()
     {

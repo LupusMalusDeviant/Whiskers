@@ -64,9 +64,9 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(capability);
-        var entity = NewEntity(operationId, request, capability.Id, success: false,
+        var entity = Build(() => NewEntity(operationId, request, capability.Id, success: false,
             Details(operationId, request, phase: "intent", status: null, verification: null, reason: null, durationMs: null,
-                approval));
+                approval)));
         entity.Phase = "intent";
         entity.ApprovalId = approval?.ApprovalId;
         entity.ApprovedBy = approval?.ApprovedBy;
@@ -91,6 +91,21 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
                     IntentNotWritten, 0);
                 _outbox.TryKeep(entity);
             }
+            throw;
+        }
+    }
+
+    /// <summary>Builds an event. One that cannot even be built has nothing to keep: it counts as lost, so the audit
+    /// health shows it (the gateway refuses the attempt either way).</summary>
+    private AuditLogEntity Build(Func<AuditLogEntity> build)
+    {
+        try
+        {
+            return build();
+        }
+        catch (Exception)
+        {
+            _outbox?.MarkLost();
             throw;
         }
     }
@@ -185,10 +200,10 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         MutationStatus status, string reason, string? approvalId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var entity = NewEntity(operationId, request, capability?.Id ?? request.CapabilityId, success: false,
+        var entity = Build(() => NewEntity(operationId, request, capability?.Id ?? request.CapabilityId, success: false,
             Details(operationId, request, phase: "outcome", status: status.ToString(), verification: null,
                 reason: reason, durationMs: 0,
-                approval: approvalId is null ? null : new ApprovalGateResult(false, "", approvalId)));
+                approval: approvalId is null ? null : new ApprovalGateResult(false, "", approvalId))));
         entity.Phase = "outcome";
         entity.Outcome = status.ToString();
         entity.Verification = nameof(VerificationStatus.NotRun);
@@ -309,32 +324,57 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     /// never run across the document's quotes and commas and swallow the arguments after it.</summary>
     internal static string RedactedArguments(IReadOnlyDictionary<string, JsonElement> arguments)
     {
-        var result = new System.Text.Json.Nodes.JsonObject();
-        foreach (var (key, value) in arguments)
-            result[key] = PayloadArguments.Contains(key)
-                ? $"<withheld: {(value.ValueKind == JsonValueKind.String ? value.GetString()!.Length : value.GetRawText().Length)} chars>"
-                : RedactedValue(key, System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText()));
-        return result.ToJsonString();
+        // Written element by element (not through a node tree): a document with a repeated property name is valid
+        // input and is kept as it came — redacting it must never fail, or the attempt would have no event.
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            foreach (var (key, value) in arguments)
+            {
+                writer.WritePropertyName(key);
+                if (PayloadArguments.Contains(key))
+                    writer.WriteStringValue(
+                        $"<withheld: {(value.ValueKind == JsonValueKind.String ? value.GetString()!.Length : value.GetRawText().Length)} chars>");
+                else
+                    WriteRedacted(writer, key, value);
+            }
+            writer.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    private static System.Text.Json.Nodes.JsonNode? RedactedValue(string? key, System.Text.Json.Nodes.JsonNode? node)
+    private static void WriteRedacted(Utf8JsonWriter writer, string? key, JsonElement value)
     {
         // A secret-named key hides everything below it — a value, a list, an object alike.
-        if (key is not null && SecretKeyName.IsMatch(key) && node is not null) return "***";
-        switch (node)
+        if (key is not null && SecretKeyName.IsMatch(key))
         {
-            case System.Text.Json.Nodes.JsonObject obj:
-                foreach (var name in obj.Select(p => p.Key).ToList())
-                    obj[name] = RedactedValue(name, obj[name]?.DeepClone());
-                return obj;
-            case System.Text.Json.Nodes.JsonArray array:
-                for (var i = 0; i < array.Count; i++)
-                    array[i] = RedactedValue(null, array[i]?.DeepClone());
-                return array;
-            case System.Text.Json.Nodes.JsonValue value when value.TryGetValue<string>(out var text):
-                return Redact(text);
+            writer.WriteStringValue("***");
+            return;
+        }
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in value.EnumerateObject())
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteRedacted(writer, property.Name, property.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in value.EnumerateArray())
+                    WriteRedacted(writer, null, item);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.String:
+                writer.WriteStringValue(Redact(value.GetString()));
+                break;
             default:
-                return node;
+                value.WriteTo(writer);
+                break;
         }
     }
 

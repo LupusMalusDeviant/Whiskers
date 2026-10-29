@@ -22,6 +22,9 @@ public sealed class AuditOutbox
     /// audit health stays Degraded for the life of the process.</summary>
     public int Lost => Volatile.Read(ref _lost);
 
+    /// <summary>An event that could not even be built (nothing to keep): counted as lost.</summary>
+    public void MarkLost() => Interlocked.Increment(ref _lost);
+
     /// <summary>Keeps the event; false (and counted as lost) when the file cannot be written.</summary>
     public bool TryKeep(AuditLogEntity row)
     {
