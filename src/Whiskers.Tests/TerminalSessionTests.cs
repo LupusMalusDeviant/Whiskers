@@ -41,15 +41,29 @@ internal static class TerminalDoubles
     public static Task<TerminalSession> OpenContainer(ITerminalSessionManager manager, string sessionId, string? serverId,
         string containerId)
     {
-        using var _ = Whiskers.Services.Mutations.MutationScope.Begin("terminal.container_open", "op-" + sessionId, AdminPrincipal);
+        using var _ = Decided("terminal.container_open", sessionId, AdminPrincipal, "container", containerId, serverId ?? "local");
         return manager.OpenContainerShellAsync(new TerminalOpenRequest(sessionId, serverId, containerId));
     }
 
     /// <summary>Opens a host shell inside the gateway's decision for it, as the pages do.</summary>
     public static Task<TerminalSession> OpenHost(ITerminalSessionManager manager, string sessionId, string? serverId)
     {
-        using var _ = Whiskers.Services.Mutations.MutationScope.Begin("terminal.host_open", "op-" + sessionId, AdminPrincipal);
+        using var _ = Decided("terminal.host_open", sessionId, AdminPrincipal, "host", serverId ?? "local", serverId ?? "local");
         return manager.OpenHostShellAsync(new TerminalOpenRequest(sessionId, serverId));
+    }
+
+    /// <summary>The scope the gateway opens around a decided call on <paramref name="targetId"/>.</summary>
+    public static Whiskers.Services.Mutations.MutationScope Decided(string capability, string sessionId,
+        Whiskers.Services.Mutations.MutationPrincipal principal, string kind, string targetId, string serverId) =>
+        Whiskers.Services.Mutations.MutationScope.Begin(capability, "op-" + sessionId, principal,
+            new Whiskers.Services.Mutations.MutationRequest(capability, principal, Whiskers.Services.Mutations.MutationSurface.Ui,
+                new Whiskers.Services.Mutations.MutationTarget(kind, targetId, targetId, serverId),
+                new Dictionary<string, System.Text.Json.JsonElement>()));
+
+    /// <summary>Lets every session go on.</summary>
+    internal sealed class Permissive : ITerminalAuthority
+    {
+        public TerminalCloseReason? MustEnd(TerminalSession session) => null;
     }
 
     public static TerminalSessionManager Manager(FakeLauncher launcher, RecordingAudit audit,
@@ -57,7 +71,7 @@ internal static class TerminalDoubles
         params ServerConfig[] servers) =>
         new(new StaticOptionsMonitor<TerminalSettings>(settings ?? new TerminalSettings()),
             new FakeServerConfig(servers.Length > 0 ? servers : [new ServerConfig { Id = "local", Name = "Local", IsDefault = true }]),
-            launcher, audit, NullLogger<TerminalSessionManager>.Instance, authority, time);
+            launcher, audit, NullLogger<TerminalSessionManager>.Instance, authority ?? new Permissive(), time);
 
     internal sealed class FakeProcess : ITerminalProcess
     {

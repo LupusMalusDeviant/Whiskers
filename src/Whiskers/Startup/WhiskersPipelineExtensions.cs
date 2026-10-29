@@ -152,7 +152,7 @@ public static class WhiskersPipelineExtensions
                 var identity = new ClaimsIdentity(new[]
                 {
                     new Claim(ClaimTypes.Name, "local"),
-                    new Claim(ClaimTypes.Email, Whiskers.Services.Auth.CurrentUserService.AuthDisabledEmail),
+                    new Claim(ClaimTypes.Email, "local@serverwatch.local"),
                     new Claim(ClaimTypes.NameIdentifier, "local-user"),
                 }, authenticationType: "AuthDisabled");
                 ctx.User = new ClaimsPrincipal(identity);

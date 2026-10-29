@@ -90,6 +90,9 @@ public class TerminalAuditTests
         using (MutationScope.Begin("terminal.host_open", "op-y"))                  // no principal
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 manager.OpenHostShellAsync(new TerminalOpenRequest("s3", "local")));
+        using (Decided("terminal.container_open", "s4", AdminPrincipal, "container", "web", "local"))   // decided: web
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                manager.OpenContainerShellAsync(new TerminalOpenRequest("s4", "local", "whiskers")));
         Assert.Empty(launcher.Started);
     }
 
@@ -100,7 +103,7 @@ public class TerminalAuditTests
         using var manager = Manager(new FakeLauncher(), audit);
         var other = new MutationPrincipal(MutationPrincipalKind.Human, "user:other@example.com", "other@example.com",
             McpPermissionLevels.Admin);
-        using (MutationScope.Begin("terminal.host_open", "op-o", other))
+        using (Decided("terminal.host_open", "s1", other, "host", "local", "local"))
             await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", "local"));
         await manager.CloseAsync("s1");
 
@@ -260,7 +263,7 @@ public class TerminalAuditTests
 
         var audit = new RecordingAudit();
         using var manager = Manager(new FakeLauncher(), audit, new TerminalAuthority(store, viewer, disabled));
-        using (MutationScope.Begin("terminal.host_open", "op-l", local))
+        using (Decided("terminal.host_open", "s1", local, "host", "local", "local"))
             await manager.OpenHostShellAsync(new TerminalOpenRequest("s1", "local"));
         await manager.SweepAsync();
         Assert.Empty(audit.Rows);
@@ -268,7 +271,7 @@ public class TerminalAuditTests
         // Without that mode the same identity holds no role: its shell ends.
         var audit2 = new RecordingAudit();
         using var strict = Manager(new FakeLauncher(), audit2, new TerminalAuthority(store, viewer));
-        using (MutationScope.Begin("terminal.host_open", "op-m", local))
+        using (Decided("terminal.host_open", "s2", local, "host", "local", "local"))
             await strict.OpenHostShellAsync(new TerminalOpenRequest("s2", "local"));
         await strict.SweepAsync();
         Assert.Equal("Revoked", Reason(Assert.Single(audit2.Rows)));

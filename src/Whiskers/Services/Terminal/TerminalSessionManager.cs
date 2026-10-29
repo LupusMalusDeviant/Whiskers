@@ -26,7 +26,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
     private readonly IServerConfigService _serverConfigService;
     private readonly ITerminalLauncher _launcher;
     private readonly IAuditLogService _audit;
-    private readonly ITerminalAuthority? _authority;
+    private readonly ITerminalAuthority _authority;
     private readonly TimeProvider _time;
     private readonly ILogger<TerminalSessionManager> _logger;
     private readonly Timer _sweepTimer;
@@ -37,14 +37,15 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         ITerminalLauncher launcher,
         IAuditLogService audit,
         ILogger<TerminalSessionManager> logger,
-        ITerminalAuthority? authority = null,
+        ITerminalAuthority authority,
         TimeProvider? time = null)
     {
         _settings = settings;
         _serverConfigService = serverConfigService;
         _launcher = launcher;
         _audit = audit;
-        _authority = authority;
+        // Required: without it a demoted owner or the kill switch would not end a running session (INV-09/21).
+        _authority = authority ?? throw new ArgumentNullException(nameof(authority));
         _time = time ?? TimeProvider.System;
         _logger = logger;
         _sweepTimer = new Timer(_ => _ = SweepAsync(), null, SweepInterval, SweepInterval);
@@ -137,6 +138,9 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
     private TerminalSession Start(TerminalOpenRequest request, MutationScope scope, TerminalTarget target,
         TerminalLaunch launch)
     {
+        // The shell opens on exactly what the gateway decided: the server, and the container or the host.
+        if (!scope.Covers(target.ServerId, target.ContainerId ?? target.ServerId))
+            throw new InvalidOperationException("This terminal is not the one the gateway decided on.");
         var owner = new TerminalOwner(scope.Principal!.Id, scope.Principal.DisplayName);
         var session = new TerminalSession(request.SessionId, owner, target, _launcher.Start(launch),
             _time.GetUtcNow().UtcDateTime, scope.OperationId, _time);
@@ -218,7 +222,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
             {
                 reason = !session.IsRunning ? TerminalCloseReason.Exited
                     : !settings.Enabled ? TerminalCloseReason.Disabled
-                    : _authority?.MustEnd(session)
+                    : _authority.MustEnd(session)
                       ?? (_time.GetUtcNow().UtcDateTime - session.LastActivityAt > timeout ? TerminalCloseReason.Idle : null);
             }
             catch (Exception ex)
