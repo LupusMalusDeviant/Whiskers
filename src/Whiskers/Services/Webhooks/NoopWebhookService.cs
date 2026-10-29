@@ -37,7 +37,9 @@ public sealed class NoopWebhookService : IWebhookService
     public Task<WebhookAcceptance> AcceptAsync(string webhookId, WebhookRequest request, CancellationToken ct = default)
         => Task.FromResult(new WebhookAcceptance(WebhookReply.Rejected));
 
-    public WebhookReply? Admit(string webhookId) => null;
+    /// <summary>Every request is rejected before its body is read: with the module off nothing is accepted, and
+    /// reading bodies only to reject them would be unbounded work for anyone.</summary>
+    public WebhookReply? Admit(string webhookId) => WebhookReply.Rejected;
 
     public Task<(bool Success, string Output)> TriggerSignedTestAsync(string webhookId)
         => Task.FromResult((false, "Webhooks are disabled."));

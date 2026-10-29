@@ -36,11 +36,14 @@ public class WebhookService : IWebhookService
     private readonly SemaphoreSlim _slots;
     // Runs whose action outlived the run timeout: they keep their target, not a worker. Bounded too.
     private readonly SemaphoreSlim _overdue;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _targets = new(StringComparer.Ordinal);
+    private readonly ResourceLocks _locks;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<RunEnd>> _waiting = new(StringComparer.Ordinal);
     private readonly RateWindow _rates;
     private int _workersStarted;
     private long _lastPrune;
+
+    /// <summary>How many resources this service's runs lock or await now.</summary>
+    internal int LockedResources => _locks.Count;
 
     private sealed record QueuedRun(string WebhookId, string RunId, string Claim, string? SourceIp);
 
@@ -54,8 +57,9 @@ public class WebhookService : IWebhookService
     public WebhookService(IServiceScopeFactory scopeFactory, IDockerService docker,
         IHostCommandExecutor executor, IComposePlanner planner, ILogger<WebhookService> logger,
         IOptions<WebhookOptions>? options = null, TimeProvider? time = null, IHostApplicationLifetime? lifetime = null,
-        IStringLocalizer<SharedResource>? text = null)
+        IStringLocalizer<SharedResource>? text = null, ResourceLocks? locks = null)
     {
+        _locks = locks ?? new ResourceLocks();
         _scopeFactory = scopeFactory;
         _docker = docker;
         _executor = executor;
@@ -286,7 +290,7 @@ public class WebhookService : IWebhookService
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_stopping);
         deadline.CancelAfter(_options.RunTimeout);
         var ct = deadline.Token;
-        SemaphoreSlim? gate = null;
+        ResourceLocks.Lease? gate = null;
         var handedOver = false;
         try
         {
@@ -294,14 +298,12 @@ public class WebhookService : IWebhookService
             var target = queued is null ? new RunTarget("missing:" + run.WebhookId) : await TargetAsync(queued, ct);
             while (true)
             {
-                gate = _targets.GetOrAdd(target.Key, _ => new SemaphoreSlim(1, 1));
                 try
                 {
-                    await gate.WaitAsync(ct);
+                    gate = await _locks.AcquireAsync(target.Key, ct);
                 }
                 catch (OperationCanceledException)
                 {
-                    gate = null;
                     message = new("Webhook_Run_NoTurn", "Failed: the delivery did not get its turn on its target in time.", []);
                     using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
                     if (await _deliveries.StartAsync(run.RunId, run.Claim, bookkeeping.Token))
@@ -318,7 +320,7 @@ public class WebhookService : IWebhookService
                     target = now;
                     break;
                 }
-                gate.Release();
+                gate.Dispose();
                 gate = null;
                 target = now;
             }
@@ -370,7 +372,7 @@ public class WebhookService : IWebhookService
                         }
                         finally
                         {
-                            held.Release();
+                            held.Dispose();
                             _deliveries.Release(run.Claim);
                             _overdue.Release();
                         }
@@ -392,12 +394,13 @@ public class WebhookService : IWebhookService
         {
             if (!handedOver)
             {
-                gate?.Release();
+                gate?.Dispose();
                 _deliveries.Release(run.Claim);
             }
             completion?.TrySetResult(new RunEnd(result.Success, result.Output, message));
-            // Not on the worker: pruning has its own time and never holds a run's worker.
-            _ = PruneIfDueAsync();
+            // Not on the worker: pruning has its own time and never holds a run's worker (SQLite runs its commands
+            // synchronously, so it is started on the thread pool, not just left unawaited).
+            _ = Task.Run(PruneIfDueAsync);
         }
     }
 
@@ -537,7 +540,7 @@ public class WebhookService : IWebhookService
             {
                 var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook, ct), ct);
                 return plan is not null
-                    ? new RunTarget($"compose-project:{server}|{plan.ProjectName}", Plan: plan)
+                    ? new RunTarget(ResourceLocks.ComposeProject(server, plan.ProjectName), Plan: plan)
                     : new RunTarget($"compose-dir:{server}|{NormalizeDirectory(webhook.TargetId)}", Error: error);
             }
             case "restart" or "rebuild":

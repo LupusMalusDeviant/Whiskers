@@ -342,6 +342,8 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal("Succeeded", (await Finished(later.RunId!)).State);
         Assert.Equal("Succeeded", (await Finished(waiting.RunId!)).State);
         Assert.Equal(["aaa111bbb222ccc333", "ddd444eee555fff666", "ddd444eee555fff666"], _runner.ContainerIds);
+        // No lock is kept for the container id that is gone (nor for the current one, once nothing holds it).
+        await WaitFor(() => service.LockedResources == 0);
     }
 
     [Fact]
@@ -745,6 +747,16 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task With_the_module_off_a_request_is_rejected_without_reading_its_body()
+    {
+        var wh = Seed();
+
+        var answer = await Endpoint(new NoopWebhookService(), wh.WebhookId, GitHub(wh, "{}"), new ThrowingStream());
+
+        Assert.Equal((400, "{ status = rejected }"), answer);
+    }
+
+    [Fact]
     public async Task A_body_over_the_limit_is_rejected()
     {
         _options.MaxBodyBytes = 16;
@@ -846,8 +858,21 @@ public sealed class WebhookReplayTests : IDisposable
             }
         }
 
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<int> result, CancellationToken ct = default)
+        {
+            await Break(command, ct);
+            return result;
+        }
+
         public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
             CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken ct = default)
+        {
+            await Break(command, ct);
+            return result;
+        }
+
+        private async Task Break(DbCommand command, CancellationToken ct)
         {
             switch (Trip(command, ct))
             {
@@ -861,7 +886,6 @@ public sealed class WebhookReplayTests : IDisposable
                     await using (var reader = await command.ExecuteReaderAsync(ct)) { }
                     throw new OperationCanceledException("The answer was lost.");
             }
-            return result;
         }
     }
 

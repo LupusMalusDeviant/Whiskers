@@ -67,6 +67,9 @@ public static class WhiskersHostingExtensions
         // per request, so it needs a default when the Webhooks module is off. The module registers the real service in
         // the loop below and wins; with it off, a trigger answers 400 instead of 500. (RoadToSAP §2.1)
         builder.Services.AddSingleton<Whiskers.Services.Webhooks.IWebhookService, Whiskers.Services.Webhooks.NoopWebhookService>();
+        // One lock per resource for the whole process (R1-10): webhook runs and Git deployments share the lock of the
+        // compose project they deploy.
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.ResourceLocks>();
         // Same pattern for git deploys (F5): the Webhooks module dispatches the "git-deploy" action
         // through this Core contract; the GitDeploy module's real service wins by last-registration.
         builder.Services.AddSingleton<Whiskers.Services.GitDeploy.IGitDeployService, Whiskers.Services.GitDeploy.NoopGitDeployService>();

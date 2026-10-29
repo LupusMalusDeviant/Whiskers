@@ -18,6 +18,7 @@ public class GitDeployService : IGitDeployService
     private readonly JsonFileStore<GitDeployData> _store;
     private readonly IHostCommandExecutor _executor;
     private readonly IVaultService _vault;
+    private readonly ResourceLocks _locks;
     private readonly IComposePlanner _planner;
     private readonly ILogger<GitDeployService> _logger;
     private GitDeployData _cached = new();
@@ -25,8 +26,10 @@ public class GitDeployService : IGitDeployService
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public GitDeployService(IHostCommandExecutor executor, IVaultService vault, IComposePlanner planner,
-        ILogger<GitDeployService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
+        ILogger<GitDeployService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
+        ResourceLocks? locks = null)
     {
+        _locks = locks ?? new ResourceLocks();
         _executor = executor;
         _vault = vault;
         _planner = planner;
@@ -36,6 +39,30 @@ public class GitDeployService : IGitDeployService
     }
 
     private static string TokenVaultKey(string appId) => $"git-token:{appId}";
+
+    /// <summary>The lock of the compose project <paramref name="plan"/> deploys, held while its plan — made again
+    /// under it — still names that project; <paramref name="replanned"/> receives the plan made under the lock.</summary>
+    private async Task<ResourceLocks.Lease> LockProjectAsync(ComposeDeployment deployment, ComposePlan plan,
+        Action<ComposePlan> replanned, CancellationToken ct)
+    {
+        while (true)
+        {
+            var key = ResourceLocks.ComposeProject(plan.ServerId, plan.ProjectName);
+            var lease = await _locks.AcquireAsync(key, ct);
+            try
+            {
+                plan = await _planner.PlanAsync(deployment, ct);
+            }
+            catch
+            {
+                lease.Dispose();
+                throw;
+            }
+            replanned(plan);
+            if (ResourceLocks.ComposeProject(plan.ServerId, plan.ProjectName) == key) return lease;
+            lease.Dispose();
+        }
+    }
 
     // App IDs flow into remote paths UNQUOTED by design (fixed hex alphabet) — enforce that here
     // so a hand-edited store file can never smuggle shell metacharacters into a path.
@@ -253,9 +280,12 @@ public class GitDeployService : IGitDeployService
             async Task BuildAndUp()
             {
                 // Decided by the gate: the app is unchanged, planned again right before the first write, and nothing
-                // undecided may run.
+                // undecided may run. The writes hold the compose project's lock (R1-10): no other deployment of that
+                // project — another app, a compose webhook — runs at the same time. The plan is made again under it;
+                // one that now names another project waits for that project's lock instead.
                 await EnsureUnchangedAsync(app);
                 plan = await _planner.PlanAsync(deployment, ct);
+                using var project = await LockProjectAsync(deployment, plan, p => plan = p, ct);
                 plan.EnsureDecided(MutationScope.Current);
                 // 4) Build
                 Report("③ docker compose build…");

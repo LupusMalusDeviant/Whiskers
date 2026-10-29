@@ -48,6 +48,7 @@ public sealed class WebhookMutationTests : IDisposable
     private readonly FakeNotifications _notify = new();
     private readonly RecordingAudit _audit = new();
     private readonly GitDeployService _git;
+    private readonly ResourceLocks _locks = new();
     private bool _readOnly;
     private string? _protect;
     private bool _requireOwner = true;
@@ -63,7 +64,8 @@ public sealed class WebhookMutationTests : IDisposable
         _host.Files[$"/opt/whiskers-git/{AppId}/repo/docker-compose.yml"] =
             "name: payments\nservices:\n  web:\n    image: nginx\n";
         _git = new GitDeployService(_host, new ProtectedResourceResolutionTests.NoVault(),
-            new ComposePlanner(_docker, _host), NullLogger<GitDeployService>.Instance, Path.Combine(_root, "apps.json"));
+            new ComposePlanner(_docker, _host), NullLogger<GitDeployService>.Instance, Path.Combine(_root, "apps.json"),
+            locks: _locks);
         _git.SaveAppAsync(new GitDeployApp
         {
             Id = AppId, Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
@@ -420,6 +422,42 @@ public sealed class WebhookMutationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_git_deployment_waits_for_its_compose_project_whoever_holds_it()
+    {
+        var webhook = Seed("git-deploy", AppId);
+        // Another deployment of the app's compose project ("payments") — a compose webhook, another app — holds it.
+        var held = await _locks.AcquireAsync(ResourceLocks.ComposeProject("local", "payments"));
+
+        var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        Assert.False(Ran("git-deploy"));
+
+        held.Dispose();
+        var (success, output) = await test;
+        Assert.True(success, output);
+        Assert.True(Ran("git-deploy"));
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
+    public async Task A_compose_webhook_and_a_git_deployment_of_one_project_share_its_lock()
+    {
+        _host.Files["/opt/payments/docker-compose.yml"] = "name: payments\nservices:\n  web:\n    image: nginx\n";
+        var compose = Seed("deploy", "/opt/payments");
+        var service = Service();
+        var held = await _locks.AcquireAsync(ResourceLocks.ComposeProject("local", "payments"));
+
+        var test = service.TriggerSignedTestAsync(compose.WebhookId);
+        await Task.Delay(500);
+        Assert.False(Ran("deploy"));
+
+        held.Dispose();
+        var (success, output) = await test;
+        Assert.True(success, output);
+        Assert.True(Ran("deploy"));
+    }
+
+    [Fact]
     public async Task A_stopped_container_is_a_target_too()
     {
         var webhook = Seed("restart", "worker");
@@ -591,7 +629,7 @@ public sealed class WebhookMutationTests : IDisposable
         // The Docker service of the webhook (lookup and planning) starts failing whenever a test says so.
         var docker = ThrowingDocker.Wrap(_docker, () => _dockerThrows, () => _dockerTimesOut);
         return new(_sp.GetRequiredService<IServiceScopeFactory>(), docker, _host, new ComposePlanner(docker, _host),
-            NullLogger<WebhookService>.Instance);
+            NullLogger<WebhookService>.Instance, locks: _locks);
     }
 
     /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>

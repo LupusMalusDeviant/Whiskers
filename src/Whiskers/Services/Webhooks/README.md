@@ -27,14 +27,18 @@ culture or user travels to later deliveries — and stopped with the app) run ea
 resource (`TargetAsync`: a container by its resolved id on its server — name, full id and unique prefix are one
 lock —, a compose deployment by its planned project on its server — compose's own identity, so a symlinked directory
 or another directory declaring the same project is one lock —, a Git app by its id), so runs on one resource never
-overlap whichever webhook fires them. A container or plan is resolved again once its lock is held; if it now names
+overlap whichever webhook fires them. The locks are the process-wide `ResourceLocks` (reference-counted: a lock for a
+container id that is gone is not kept), shared with Git deployments, which hold their compose project's lock while
+they build and run `up`. A container or plan is resolved again once its lock is held; if it now names
 another resource (a run before rebuilt the container under a new id, the compose file changed the project), the run
 waits for that lock instead, and the action gets exactly the container or plan it locked (a compose deployment whose
 project changes again before it writes is refused). The webhook is read again once the run holds its resource: switched off, removed or
 pointed elsewhere meanwhile → refused; taken over → it runs on the new owner. `RunTimeout` bounds the run: a run that
 cannot get its resource in time fails; lookups are abandoned at the deadline (they only read), and the run's database
 reads and its start honour it too (a run given up that way is taken over by its next delivery, or failed if it had
-started); recording its outcome (only under the run's own claim, so a run a later delivery took over is never touched) and the hourly retention pass get a bounded time of their own, and pruning runs beside the workers, never on one; the action gets the
+started); recording its outcome (only under the run's own claim, so a run a later delivery took over is never touched) and the hourly retention pass get a bounded time of their own, and pruning runs on the thread pool, never on a worker
+(SQLite executes commands synchronously and does not cancel them: a database step is bounded by the provider's command
+timeout, 30 s by default, so a `RunTimeout` shorter than that can be overrun by at most that much); the action gets the
 cancellation (the gateway, the planner and the host executor honour it); an action that still does not stop keeps its
 resource until it ends — nothing overlaps it — but gives its worker back, at most `MaxConcurrentRuns` such runs at once;
 beyond that it keeps its worker as well until it ends. With the queue full, a delivery left queued without a live claim is
