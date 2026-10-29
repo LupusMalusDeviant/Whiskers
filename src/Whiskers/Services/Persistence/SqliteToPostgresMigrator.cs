@@ -35,6 +35,9 @@ public static class SqliteToPostgresMigrator
     internal sealed class CopyRun
     {
         public HashSet<long> NamedAuditIds { get; init; } = [];
+        /// <summary>The source's <c>Webhooks</c> table predates R1-10's <c>Provider</c> column: read with it as
+        /// <c>github</c>, the scheme those webhooks always had. The source is not changed.</summary>
+        public bool WebhooksWithoutProvider { get; init; }
         public Dictionary<long, long> AuditIds { get; } = [];
         internal List<(Whiskers.Models.AuditLogEntity Row, long OldId)> Pending { get; } = [];
     }
@@ -72,6 +75,16 @@ public static class SqliteToPostgresMigrator
         return count > 0;
     }
 
+    /// <summary>Whether the SQLite source's table has the column. Any other provider is assumed to have the full schema.</summary>
+    private static async Task<bool> SourceHasColumnAsync(MetricsDbContext source, string table, string column, CancellationToken ct)
+    {
+        if (!source.Database.IsSqlite()) return true;
+        var count = await source.Database
+            .SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({table}) WHERE name = {column}")
+            .SingleAsync(ct);
+        return count > 0;
+    }
+
     /// <summary>Every metrics table. No foreign keys between them, so any order is safe.</summary>
     internal static readonly IReadOnlyList<Table> MetricsTables =
     [
@@ -98,7 +111,10 @@ public static class SqliteToPostgresMigrator
         T("UpdatePolicies",    c => c.UpdatePolicies,    e => e.Id = 0),
         T("UpdateHistory",     c => c.UpdateHistory,     e => e.Id = 0),
         T("UpdateRollbacks",   c => c.UpdateRollbacks,   e => e.Id = 0),
-        T("Webhooks",          c => c.Webhooks,          e => e.Id = 0),
+        new("Webhooks", typeof(Whiskers.Models.WebhookEntity), (ctx, ct) => ctx.Webhooks.AnyAsync(ct),
+            (src, dst, run, ct) => CopyAsync(run.WebhooksWithoutProvider
+                ? src.Webhooks.FromSqlRaw("SELECT *, 'github' AS \"Provider\" FROM \"Webhooks\"")
+                : src.Webhooks, dst, e => e.Id = 0, ct)),
         T("WebhookLogs",       c => c.WebhookLogs,       e => e.Id = 0),
         // R1-10: accepted deliveries by key — their run ids name audit operations, kept as they are.
         T("WebhookDeliveries", c => c.WebhookDeliveries, e => e.Id = 0),
@@ -212,6 +228,7 @@ public static class SqliteToPostgresMigrator
         // The audit rows an operation names, read before AuditLog is copied (renumbered) — a handful, not the log.
         var run = new CopyRun
         {
+            WebhooksWithoutProvider = !await SourceHasColumnAsync(source, "Webhooks", "Provider", ct),
             NamedAuditIds = missing.Contains("Operations")
                 ? []
                 : (await source.Operations.AsNoTracking().Where(o => o.AuditId != null).Select(o => o.AuditId!.Value)

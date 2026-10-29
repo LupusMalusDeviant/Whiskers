@@ -4979,4 +4979,16 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="WebhooksView_Provider_Hint_whiskers" xml:space="preserve">
     <value>X-Whiskers-Timestamp (Unix-Sekunden), X-Whiskers-Delivery (eindeutige ID) und X-Whiskers-Signature: sha256=HMAC(Secret, "timestamp.delivery.body") senden. Zustellungen älter als fünf Minuten werden abgewiesen.</value>
   </data>
+  <data name="Webhook_Test_Invalid" xml:space="preserve">
+    <value>Die Testzustellung war ungültig: {0}</value>
+  </data>
+  <data name="Webhook_Test_Busy" xml:space="preserve">
+    <value>Die Zustell-Warteschlange ist voll; bitte gleich noch einmal versuchen.</value>
+  </data>
+  <data name="Webhook_Test_NotAccepted" xml:space="preserve">
+    <value>Die Testzustellung wurde nicht angenommen ({0}).</value>
+  </data>
+  <data name="Webhook_Test_StillRunning" xml:space="preserve">
+    <value>Lauf {0} wartet noch oder läuft; sein Ergebnis erscheint im Log.</value>
+  </data>
 </root>

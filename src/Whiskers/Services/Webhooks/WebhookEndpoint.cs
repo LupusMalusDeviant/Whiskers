@@ -19,10 +19,12 @@ public static class WebhookEndpoint
     public static async Task<IResult> HandleAsync(string webhookId, HttpContext ctx)
     {
         var options = ctx.RequestServices.GetService<IOptions<WebhookOptions>>()?.Value ?? new WebhookOptions();
+        var webhooks = ctx.RequestServices.GetRequiredService<IWebhookService>();
+        // Rates first: a limited request is answered without reading its body, an oversized one counts too.
+        if (webhooks.Admit(webhookId) is { } limited) return Answer(ctx, new WebhookAcceptance(limited));
         var body = await ReadBoundedAsync(ctx.Request, options.MaxBodyBytes, ctx.RequestAborted);
         if (body is null) return Rejected();
 
-        var webhooks = ctx.RequestServices.GetRequiredService<IWebhookService>();
         var headers = ctx.Request.Headers;
         var reply = await webhooks.AcceptAsync(webhookId, new WebhookRequest(body,
             GitHubSignature: headers["X-Hub-Signature-256"].FirstOrDefault(),
@@ -30,7 +32,11 @@ public static class WebhookEndpoint
             WhiskersTimestamp: headers["X-Whiskers-Timestamp"].FirstOrDefault(),
             WhiskersDelivery: headers["X-Whiskers-Delivery"].FirstOrDefault(),
             SourceIp: ctx.Connection.RemoteIpAddress?.ToString()), ctx.RequestAborted);
+        return Answer(ctx, reply);
+    }
 
+    private static IResult Answer(HttpContext ctx, WebhookAcceptance reply)
+    {
         switch (reply.Reply)
         {
             case WebhookReply.Accepted:

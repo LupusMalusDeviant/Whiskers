@@ -4979,4 +4979,16 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="WebhooksView_Provider_Hint_whiskers" xml:space="preserve">
     <value>Send X-Whiskers-Timestamp (Unix seconds), X-Whiskers-Delivery (unique id) and X-Whiskers-Signature: sha256=HMAC(secret, "timestamp.delivery.body"). Deliveries older than five minutes are rejected.</value>
   </data>
+  <data name="Webhook_Test_Invalid" xml:space="preserve">
+    <value>The test delivery was not valid: {0}</value>
+  </data>
+  <data name="Webhook_Test_Busy" xml:space="preserve">
+    <value>The delivery queue is full; try again shortly.</value>
+  </data>
+  <data name="Webhook_Test_NotAccepted" xml:space="preserve">
+    <value>The test delivery was not accepted ({0}).</value>
+  </data>
+  <data name="Webhook_Test_StillRunning" xml:space="preserve">
+    <value>Run {0} is still queued or running; its result will appear in the log.</value>
+  </data>
 </root>

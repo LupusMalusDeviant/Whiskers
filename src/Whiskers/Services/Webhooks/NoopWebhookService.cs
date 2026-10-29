@@ -37,6 +37,8 @@ public sealed class NoopWebhookService : IWebhookService
     public Task<WebhookAcceptance> AcceptAsync(string webhookId, WebhookRequest request, CancellationToken ct = default)
         => Task.FromResult(new WebhookAcceptance(WebhookReply.Rejected));
 
+    public WebhookReply? Admit(string webhookId) => null;
+
     public Task<(bool Success, string Output)> TriggerSignedTestAsync(string webhookId)
         => Task.FromResult((false, "Webhooks are disabled."));
 }

@@ -60,6 +60,31 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal(0, await check.Approvals.CountAsync());
     }
 
+    [Fact]
+    public async Task A_source_from_before_webhook_schemes_copies_its_webhooks_as_github()
+    {
+        // A database of the release before R1-10: no WebhookDeliveries table and no Webhooks.Provider column.
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.Webhooks.Add(new WebhookEntity { WebhookId = "hook-legacy-01", Name = "ci", Secret = "s", TargetId = "web-1" });
+            await src.SaveChangesAsync();
+            await src.Database.ExecuteSqlRawAsync("DROP TABLE WebhookDeliveries; ALTER TABLE Webhooks DROP COLUMN Provider;");
+        }
+
+        int rc;
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null);
+
+        Assert.Equal(0, rc);
+        await using var check = NewDb(dstPath);
+        var copied = await check.Webhooks.SingleAsync();
+        Assert.Equal("hook-legacy-01", copied.WebhookId);
+        Assert.Equal("github", copied.Provider);
+    }
+
     [Theory]
     [InlineData("DROP TABLE PolicySnapshots;")]                       // a decision table without its versions
     [InlineData("DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;")]   // R1-12's tables gone, R1-14's there

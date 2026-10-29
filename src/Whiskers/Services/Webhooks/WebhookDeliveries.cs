@@ -110,14 +110,12 @@ internal sealed class WebhookDeliveryStore
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, state).SetProperty(d => d.FinishedAt, now));
     }
 
-    /// <summary>Removes a delivery that could not be queued (busy): nothing ran, the provider may deliver it again.</summary>
-    public async Task ForgetAsync(string runId)
+    /// <summary>The delivery recorded under this key, or <c>null</c>; records nothing.</summary>
+    public async Task<WebhookDeliveryEntity?> FindAsync(string webhookId, string deliveryKey, CancellationToken ct)
     {
         using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        await db.WebhookDeliveries
-            .Where(d => d.RunId == runId && d.State == Queued && d.Instance.StartsWith(ProcessInstance + "/"))
-            .ExecuteDeleteAsync();
+        return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.AsNoTracking()
+            .SingleOrDefaultAsync(d => d.WebhookId == webhookId && d.DeliveryKey == deliveryKey, ct);
     }
 
     /// <summary>Removes finished deliveries received before <paramref name="before"/>. A queued or running one stays.</summary>

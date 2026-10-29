@@ -15,7 +15,10 @@ All notable changes to Whiskers are documented here. The format follows
   was running when Whiskers stopped is reported `interrupted` and not run again. The endpoint now answers at once —
   202 with a `runId` (the run's operation id), 200 `duplicate` with the first run's id and state, the same 400 for
   every invalid request, 429 / 503 with `Retry-After` — and runs the action in a bounded queue, one run per target at a
-  time. New settings under `Webhooks` (body size, request rates, queue, concurrency, timestamp window, retention).
+  time — a container is one resource by name, id or id prefix — and re-reads the webhook before it runs, so one switched
+  off while its delivery waited does not run. New settings under `Webhooks` (body size, request rates, queue,
+  concurrency, timestamp window, retention, run timeout). The SQLite → PostgreSQL migrator copies webhooks of a
+  database from before this release as `github`.
   **Upgrade notes:** a new table and column, created on start. A CI job that read the action's output from the
   webhook response gets a run id instead; the result is in the webhook log.
 - R1-18: **One operation id runs at most once.** Every mutation claims its operation id in the new `Operations` table

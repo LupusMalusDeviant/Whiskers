@@ -43,6 +43,11 @@ public interface IWebhookService
     /// same target.</summary>
     Task<WebhookAcceptance> AcceptAsync(string webhookId, WebhookRequest request, CancellationToken ct = default);
 
+    /// <summary>The request-rate admission of an incoming request, before its body is read and before anything is
+    /// looked up (R1-10): <see cref="WebhookReply.RateLimited"/>, or <c>null</c> when it may go on. The per-webhook
+    /// limit counts the id as sent, so a known and an unknown id are limited alike.</summary>
+    WebhookReply? Admit(string webhookId);
+
     /// <summary>Fires a genuine end-to-end test trigger: builds a test payload, signs it with the
     /// stored secret and runs it through the same validation path as an external caller.</summary>
     Task<(bool Success, string Output)> TriggerSignedTestAsync(string webhookId);

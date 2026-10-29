@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Whiskers.Models;
+using Whiskers.Services.Docker;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Webhooks;
@@ -47,8 +48,16 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     /// <summary>A new service is a new process: what another one queued or ran reads as cut off by a restart.</summary>
-    private WebhookService Service() => new(_sp.GetRequiredService<IServiceScopeFactory>(), docker: null!,
-        executor: null!, planner: null!, NullLogger<WebhookService>.Instance, Options.Create(_options), _time);
+    private WebhookService Service(IDockerService? docker = null) => new(_sp.GetRequiredService<IServiceScopeFactory>(),
+        docker: docker!, executor: null!, planner: null!, NullLogger<WebhookService>.Instance, Options.Create(_options), _time);
+
+    private void Update(string webhookId, Action<WebhookEntity> change)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        change(db.Webhooks.Single(w => w.WebhookId == webhookId));
+        db.SaveChanges();
+    }
 
     private WebhookEntity Seed(string provider = WebhookSignatures.GitHub, string target = "web-1", bool enabled = true)
     {
@@ -255,7 +264,114 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
-    public async Task A_full_queue_answers_busy_and_keeps_nothing()
+    public async Task Runs_on_one_container_never_overlap_whatever_it_is_called()
+    {
+        _options.MaxConcurrentRuns = 4;
+        var docker = new FakeDocker(new ContainerInfo { Id = "aaa111bbb222ccc333", Name = "web-1", ServerId = "local" });
+        var byName = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var byId = Seed(WebhookSignatures.Whiskers, target: "aaa111bbb222ccc333");
+        var byPrefix = Seed(WebhookSignatures.Whiskers, target: "aaa111");
+        var service = Service(docker);
+        _runner.Delay = TimeSpan.FromMilliseconds(100);
+
+        var replies = await Task.WhenAll(
+            service.AcceptAsync(byName.WebhookId, Signed(byName, "delivery-0111")),
+            service.AcceptAsync(byId.WebhookId, Signed(byId, "delivery-0112")),
+            service.AcceptAsync(byPrefix.WebhookId, Signed(byPrefix, "delivery-0113")));
+        foreach (var r in replies) await Finished(r.RunId!);
+
+        Assert.Equal(3, _runner.Runs);
+        Assert.Equal(1, _runner.MaxConcurrent);
+        Assert.Equal(WebhookService.NormalizeDirectory("/opt//shop/./web/../"), WebhookService.NormalizeDirectory("/opt/shop"));
+    }
+
+    [Fact]
+    public async Task A_webhook_switched_off_while_its_delivery_waits_does_not_run()
+    {
+        _options.MaxConcurrentRuns = 2;
+        var first = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var second = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service();
+        _runner.Hold();
+        var running = await service.AcceptAsync(first.WebhookId, Signed(first, "delivery-0121"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var waiting = await service.AcceptAsync(second.WebhookId, Signed(second, "delivery-0122"));
+        await Task.Delay(100);   // the second run waits for the target
+
+        Update(second.WebhookId, w => w.Enabled = false);
+        _runner.Release();
+
+        Assert.Equal("Succeeded", (await Finished(running.RunId!)).State);
+        Assert.Equal("Refused", (await Finished(waiting.RunId!)).State);
+        Assert.Equal(1, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task A_webhook_taken_over_while_its_delivery_waits_runs_on_its_owner_now()
+    {
+        _options.MaxConcurrentRuns = 2;
+        var first = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var second = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service();
+        _runner.Hold();
+        await service.AcceptAsync(first.WebhookId, Signed(first, "delivery-0131"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var waiting = await service.AcceptAsync(second.WebhookId, Signed(second, "delivery-0132"));
+        await Task.Delay(100);
+
+        Update(second.WebhookId, w => w.Owner = "user:new-admin@example.com");
+        _runner.Release();
+
+        await Finished(waiting.RunId!);
+        Assert.Contains("user:new-admin@example.com", _runner.Owners);
+    }
+
+    [Fact]
+    public async Task A_run_that_outlives_its_time_keeps_its_target_but_not_its_worker()
+    {
+        _options.MaxConcurrentRuns = 1;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        var stuck = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var sameTarget = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var other = Seed(WebhookSignatures.Whiskers, target: "worker");
+        var service = Service();
+        _runner.Hold();
+
+        var first = await service.AcceptAsync(stuck.WebhookId, Signed(stuck, "delivery-0141"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var blocked = await service.AcceptAsync(sameTarget.WebhookId, Signed(sameTarget, "delivery-0142"));
+        // The only worker comes free once the first run is past its time: the second fails to get the target in
+        // time (the first still holds it), and a run on another target goes on.
+        Assert.Equal("Failed", (await Finished(blocked.RunId!)).State);
+        Assert.Equal("Running", (await Delivery(first.RunId!)).State);
+        var elsewhere = await service.AcceptAsync(other.WebhookId, Signed(other, "delivery-0143"));
+        _runner.ReleaseOthers();
+        Assert.Equal("Succeeded", (await Finished(elsewhere.RunId!)).State);
+
+        _runner.Release();
+        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
+        Assert.Equal(2, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task A_worker_carries_nothing_of_the_caller_that_started_it()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        WebhookAcceptance first;
+        Ambient.Value = "page-request";
+        using (MutationScope.Begin("container.restart", "ui-operation"))
+            first = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0151"));
+        Ambient.Value = null;
+        await Finished(first.RunId!);
+
+        Assert.Equal(new (string?, string?)[] { (null, null) }, _runner.Contexts);
+    }
+
+    internal static readonly AsyncLocal<string?> Ambient = new();
+
+    [Fact]
+    public async Task A_full_queue_answers_busy_and_records_nothing_but_still_names_known_runs()
     {
         _options.MaxConcurrentRuns = 1;
         _options.QueueCapacity = 1;
@@ -265,15 +381,20 @@ public sealed class WebhookReplayTests : IDisposable
         var running = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0201"));
         await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
         var waiting = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0202"));
+
+        // Full: a new delivery is busy and not recorded; one already queued is named with its run, which will run.
         var busy = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0203"));
+        var repeat = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0202"));
 
         Assert.Equal(WebhookReply.Accepted, running.Reply);
         Assert.Equal(WebhookReply.Accepted, waiting.Reply);
         Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), busy);
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Duplicate, waiting.RunId, "queued"), repeat);
+        using (var scope = _sp.CreateScope())
+            Assert.Equal(2, await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.CountAsync());
 
         _runner.Release();
-        await Finished(waiting.RunId!);
-        // Nothing was recorded for the busy one: delivered again, it runs.
+        Assert.Equal("Succeeded", (await Finished(waiting.RunId!)).State);
         var retried = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0203"));
         Assert.Equal(WebhookReply.Accepted, retried.Reply);
         await Finished(retried.RunId!);
@@ -281,23 +402,54 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
-    public async Task Requests_per_webhook_and_overall_are_limited()
+    public void Requests_per_webhook_and_overall_are_limited()
     {
         _options.RequestsPerMinutePerWebhook = 2;
-        var wh = Seed(WebhookSignatures.Whiskers);
         var service = Service();
 
-        Assert.Equal(WebhookReply.Accepted, (await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0301"))).Reply);
-        Assert.Equal(WebhookReply.Rejected, (await service.AcceptAsync(wh.WebhookId, Signed(wh, "bad"))).Reply);
-        Assert.Equal(WebhookReply.RateLimited, (await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0302"))).Reply);
-
+        Assert.Null(service.Admit("hook-a"));
+        Assert.Null(service.Admit("hook-a"));
+        Assert.Equal(WebhookReply.RateLimited, service.Admit("hook-a"));
         _time.Advance(TimeSpan.FromMinutes(1));
-        Assert.Equal(WebhookReply.Accepted, (await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0303"))).Reply);
+        Assert.Null(service.Admit("hook-a"));
 
         _options.RequestsPerMinute = 1;
         var limited = Service();
-        await limited.AcceptAsync("unknown", Signed(wh, "delivery-0304"));
-        Assert.Equal(WebhookReply.RateLimited, (await limited.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0305"))).Reply);
+        Assert.Null(limited.Admit("anything"));
+        Assert.Equal(WebhookReply.RateLimited, limited.Admit("something-else"));
+    }
+
+    [Fact]
+    public async Task A_known_and_an_unknown_id_are_limited_alike()
+    {
+        _options.RequestsPerMinutePerWebhook = 3;
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var bad = Signed(wh, "delivery-0306") with { WhiskersSignature = "sha256=00" };
+
+        var known = new List<int?>();
+        var unknown = new List<int?>();
+        var service = Service();
+        for (var i = 0; i < 4; i++) known.Add((await Endpoint(service, wh.WebhookId, bad)).Status);
+        for (var i = 0; i < 4; i++) unknown.Add((await Endpoint(service, "no-such-hook-0001", bad)).Status);
+
+        int?[] expected = [400, 400, 400, 429];
+        Assert.Equal(expected, known);
+        Assert.Equal(expected, unknown);
+    }
+
+    [Fact]
+    public async Task A_limited_request_is_answered_without_reading_its_body_and_oversized_ones_count()
+    {
+        _options.RequestsPerMinutePerWebhook = 2;
+        _options.MaxBodyBytes = 4;
+        var wh = Seed();
+        var service = Service();
+        var oversized = GitHub(wh, "too large");
+
+        Assert.Equal(400, (await Endpoint(service, wh.WebhookId, oversized)).Status);
+        Assert.Equal(400, (await Endpoint(service, wh.WebhookId, oversized)).Status);
+        // The third is limited before its body is touched (the stream would throw).
+        Assert.Equal(429, (await Endpoint(service, wh.WebhookId, oversized, new ThrowingStream())).Status);
     }
 
     [Fact]
@@ -339,13 +491,14 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(StatusCodes.Status200OK, (await Endpoint(service, wh.WebhookId, Signed(wh, "delivery-0405"))).Status);
     }
 
-    private async Task<(int? Status, string? Body)> Endpoint(IWebhookService service, string webhookId, WebhookRequest request)
+    private async Task<(int? Status, string? Body)> Endpoint(IWebhookService service, string webhookId, WebhookRequest request,
+        Stream? body = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(service);
         services.AddSingleton(Options.Create(_options));
         var ctx = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
-        ctx.Request.Body = new MemoryStream(request.Body);
+        ctx.Request.Body = body ?? new MemoryStream(request.Body);
         if (request.WhiskersSignature is { } s) ctx.Request.Headers["X-Whiskers-Signature"] = s;
         if (request.WhiskersTimestamp is { } t) ctx.Request.Headers["X-Whiskers-Timestamp"] = t;
         if (request.WhiskersDelivery is { } d) ctx.Request.Headers["X-Whiskers-Delivery"] = d;
@@ -363,6 +516,9 @@ public sealed class WebhookReplayTests : IDisposable
         private TaskCompletionSource _gate = Completed();
         private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<string?> OperationIds { get; } = [];
+        public List<string?> Owners { get; } = [];
+        public List<(string?, string?)> Contexts { get; } = [];
+        private int _held;
         public TimeSpan Delay { get; set; }
         public int Runs => Volatile.Read(ref _runs);
         public int MaxConcurrent => Volatile.Read(ref _max);
@@ -370,6 +526,9 @@ public sealed class WebhookReplayTests : IDisposable
 
         public void Hold() => _gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Release() => _gate.TrySetResult();
+        /// <summary>Only the run already waiting stays held; later runs pass.</summary>
+        public void ReleaseOthers() => _onlyFirst = true;
+        private volatile bool _onlyFirst;
 
         private static TaskCompletionSource Completed()
         {
@@ -382,14 +541,20 @@ public sealed class WebhookReplayTests : IDisposable
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
         {
             Interlocked.Increment(ref _runs);
-            lock (OperationIds) OperationIds.Add(actor.OperationId);
+            lock (OperationIds)
+            {
+                OperationIds.Add(actor.OperationId);
+                Owners.Add(actor.OwnerId);
+                Contexts.Add((Ambient.Value, MutationScope.Current?.OperationId));
+            }
+            var first = Interlocked.Increment(ref _held) == 1;
             var now = Interlocked.Increment(ref _current);
             int seen;
             while ((seen = Volatile.Read(ref _max)) < now && Interlocked.CompareExchange(ref _max, now, seen) != seen) { }
             _started.TrySetResult();
             try
             {
-                await _gate.Task;
+                if (first || !_onlyFirst) await _gate.Task;
                 if (Delay > TimeSpan.Zero) await Task.Delay(Delay, ct);
             }
             finally
@@ -403,6 +568,12 @@ public sealed class WebhookReplayTests : IDisposable
         public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task> action, CancellationToken ct = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class ThrowingStream : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) =>
+            throw new InvalidOperationException("The body must not be read.");
     }
 
     private sealed class ManualTime(DateTimeOffset start) : TimeProvider

@@ -31,6 +31,12 @@ public sealed class WebhookOptions
     /// long a replayed delivery is recognised.</summary>
     public TimeSpan DeliveryRetention { get; set; } = TimeSpan.FromDays(90);
 
+    /// <summary>How long a run may take, from leaving the queue: waiting for its target, looking it up and the action.
+    /// A run that has not got its target by then fails. An action that does not stop when cancelled keeps its target
+    /// until it ends (nothing overlaps it) but gives its worker back; at most <see cref="MaxConcurrentRuns"/> such runs
+    /// exist at once.</summary>
+    public TimeSpan RunTimeout { get; set; } = TimeSpan.FromMinutes(30);
+
     /// <summary>How long the Webhooks page's Test waits for its run.</summary>
     public TimeSpan TestRunTimeout { get; set; } = TimeSpan.FromMinutes(10);
 }
