@@ -44,7 +44,12 @@ public sealed class AuditFailClosedTests : IDisposable
         _sp = services.BuildServiceProvider();
         _scopes = _sp.GetRequiredService<IServiceScopeFactory>();
         using (var scope = _scopes.CreateScope())
-            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.Database.EnsureCreated();
+            // Readers and a writer at the same time, as on a busy server: a test may write while a pass reads.
+            db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+        }
         _outbox = new AuditOutbox(new DataPathOptions(_root));
 
         var policy = GuardrailPolicy.SafeDefault();
@@ -100,6 +105,19 @@ public sealed class AuditFailClosedTests : IDisposable
 
         private Func<Task>? _before;
         public void Once(Func<Task> before) => _before = before;
+
+        private Func<Task>? _after;
+        /// <summary>Runs <paramref name="after"/> once, right after the next read of the operation journal.</summary>
+        public void OnceAfter(Func<Task> after) => _after = after;
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM \"Operations\"", StringComparison.Ordinal)
+                && Interlocked.Exchange(ref _after, null) is { } after)
+                await after();
+            return result;
+        }
     }
 
     /// <summary>The system clock, moved forward by the test.</summary>
@@ -267,6 +285,24 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.Equal("op-3", row.OperationId);
         Assert.Equal(0, _outbox.Count);
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
+    }
+
+    [Fact]
+    public async Task A_refusal_kept_in_the_outbox_holds_no_secret_below_a_secret_named_key()
+    {
+        _writes.FailBefore = true;
+        var request = Restart("op-sec") with
+        {
+            CapabilityId = "no.such",
+            Arguments = Args(new { containerId = "web", options = new { credentials = new[] { "hunter2" }, apiKey = new { value = "hunter3" } } }),
+        };
+
+        await Gateway().ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        var kept = Directory.EnumerateFiles(Path.Combine(_root, "audit-outbox"), "*.json").Single();
+        var text = await File.ReadAllTextAsync(kept);
+        Assert.DoesNotContain("hunter", text);
+        Assert.Contains("containerId", text);
     }
 
     [Fact]
@@ -451,6 +487,35 @@ public sealed class AuditFailClosedTests : IDisposable
         var row = Assert.Single(await Events());
         Assert.Equal("Executed", row.Outcome);
         Assert.DoesNotContain("Recovered", row.Details);
+    }
+
+    [Fact]
+    public async Task Recovery_never_settles_on_a_journal_picture_that_changed_while_it_was_looking()
+    {
+        // The pass reads the journal (no claim yet). Then the operation is claimed, runs, its journal entry is
+        // finished and its outcome write fails. The pass's "never claimed" is stale: it must not record "did not run".
+        var sink = Sink();
+        var journal = new DbOperationJournal(_scopes);
+        var request = Restart("op-stale");
+        var auditId = await sink.BeginAsync("op-stale", request, new CapabilityCatalog().Find("container.restart")!, null, default);
+        _reads.OnceAfter(async () =>
+        {
+            var claim = await journal.ClaimAsync(new OperationClaimRequest("op-stale", null, "container.restart", Admin.Id,
+                DbOperationJournal.InputHashOf(request), null, null, auditId));
+            await journal.FinishAsync("op-stale", claim.Token!, MutationStatus.Executed, VerificationStatus.NotVerifiable);
+            _writes.FailBefore = true;
+            await Assert.ThrowsAnyAsync<Exception>(() => sink.CompleteAsync(auditId, "op-stale", MutationStatus.Executed,
+                VerificationStatus.NotVerifiable, null, TimeSpan.Zero, default));
+            _writes.FailBefore = false;
+        });
+
+        await Recovery(journal).RecoverAsync();
+        Assert.Equal("intent", Assert.Single(await Events()).Phase);
+
+        // A restart before anything wrote the outcome again: the next process settles it by the journal.
+        _sink = null;
+        await Recovery(new DbOperationJournal(_scopes)).RecoverAsync();
+        Assert.Equal("Executed", Assert.Single(await Events()).Outcome);
     }
 
     [Fact]

@@ -319,7 +319,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
 
     private static System.Text.Json.Nodes.JsonNode? RedactedValue(string? key, System.Text.Json.Nodes.JsonNode? node)
     {
-        if (key is not null && SecretKeyName.IsMatch(key) && node is System.Text.Json.Nodes.JsonValue) return "***";
+        // A secret-named key hides everything below it — a value, a list, an object alike.
+        if (key is not null && SecretKeyName.IsMatch(key) && node is not null) return "***";
         switch (node)
         {
             case System.Text.Json.Nodes.JsonObject obj:

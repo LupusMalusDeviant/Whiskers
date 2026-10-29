@@ -210,7 +210,11 @@ public sealed class AuditCompletenessTests : IDisposable
             {
                 containerId = "web-prod",
                 env = new { DB_PASSWORD = "hunter2" },
-                options = new { apiKey = "sk-123456", label = "web-prod" },
+                options = new
+                {
+                    apiKey = "sk-123456", label = "web-prod",
+                    credentials = new[] { "hunter4" }, token = new { value = "hunter5" },
+                },
                 url = "https://deploy:hunter3@git.example.com/repo.git",
                 serverId = "local",
             }),
@@ -226,7 +230,10 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.StartsWith("<withheld:", root.GetProperty("env").GetString());
         Assert.Equal("***", root.GetProperty("options").GetProperty("apiKey").GetString());
         Assert.Equal("web-prod", root.GetProperty("options").GetProperty("label").GetString());
+        Assert.Equal("***", root.GetProperty("options").GetProperty("credentials").GetString());
+        Assert.Equal("***", root.GetProperty("options").GetProperty("token").GetString());
         Assert.DoesNotContain("hunter", row.Arguments);
+        Assert.DoesNotContain("hunter", row.Details);
         Assert.DoesNotContain("sk-123456", row.Arguments);
     }
 

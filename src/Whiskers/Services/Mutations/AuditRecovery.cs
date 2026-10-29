@@ -233,11 +233,19 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                                 : null);
                         break;
                 }
-                // Only while it is still the intent: the gateway may have completed it since this pass read it, and
-                // its outcome is never overwritten.
+                // Only while it is still the intent and its journal entry is still what this pass classified it by:
+                // the gateway may have claimed, run or completed it since (its outcome write may even have failed
+                // since) — then the evidence is stale and the row is left for the next pass.
+                var rowId = row.Id;
+                var state = operation?.State;
+                var instance = operation?.Instance;
                 try
                 {
-                    await db.AuditLog.Where(a => a.Id == row.Id && a.Phase == "intent")
+                    var target = db.AuditLog.Where(a => a.Id == rowId && a.Phase == "intent");
+                    target = state is null
+                        ? target.Where(a => !db.Operations.Any(o => o.AuditId == rowId))
+                        : target.Where(a => db.Operations.Any(o => o.AuditId == rowId && o.State == state && o.Instance == instance));
+                    await target
                         .ExecuteUpdateAsync(s => s
                             .SetProperty(a => a.Phase, row.Phase)
                             .SetProperty(a => a.Outcome, row.Outcome)
