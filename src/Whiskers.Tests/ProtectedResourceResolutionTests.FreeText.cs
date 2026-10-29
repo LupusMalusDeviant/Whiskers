@@ -179,16 +179,43 @@ public sealed partial class ProtectedResourceResolutionTests
             "services:\n  a:\n    image: x\n    volumes:\n      - /srv/${DB_PASSWORD}:/data\n      - /srv/plain:/p\n"));
         Assert.Contains("/srv/canary-secret", plan.Mounts());
         Assert.Equal(["/srv/canary-secret"], plan.WithheldMounts());
+        // A plan made again that finds it undecided says so without quoting it.
+        var ex = Assert.Throws<ComposePlanException>(() => plan.EnsureDecided(null));
+        Assert.DoesNotContain("canary", ex.Message);
+        Assert.Contains("/srv/plain", ex.Message);
     }
 
     [Fact]
     public async Task Volumes_taken_from_a_container_or_another_service_are_decided()
     {
         var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
-            "services:\n  a:\n    image: x\n    volumes_from:\n      - container:serverwatch:rw\n      - b\n" +
+            "services:\n  a:\n    image: x\n    volumes_from:\n      - container:legacy-proxy:rw\n      - b\n" +
             "  b:\n    image: y\n    volumes:\n      - /srv/b:/b\n"));
-        Assert.Contains("serverwatch", plan.Mounts());
+        Assert.Contains("legacy-proxy", plan.Mounts());
+        Assert.Contains("legacy-id", plan.Mounts());
         Assert.Contains("/srv/b", plan.Mounts());
+    }
+
+    [Theory]
+    [InlineData("container:c0")]                     // a short id prefix
+    [InlineData("container:${SOURCE}")]              // an id from the .env
+    public async Task A_container_volumes_are_taken_from_is_decided_as_the_container_it_is(string reference)
+    {
+        var docker = new FakeDocker(new ContainerInfo { Id = "c0ffee000000whiskers", Name = "serverwatch", ServerId = "local" });
+        _host.Files["/opt/deployments/tools/.env"] = "SOURCE=c0ffee000000whiskers\n";
+        var plan = await new ComposePlanner(docker, _host).PlanAsync(ComposeDeployment.FromContent("local",
+            "/opt/deployments/tools", $"services:\n  a:\n    image: x\n    volumes_from:\n      - \"{reference}:rw\"\n"));
+        Assert.Contains("serverwatch", plan.Mounts());
+        Assert.Contains("c0ffee000000whiskers", plan.Mounts());
+    }
+
+    [Fact]
+    public async Task A_container_volumes_are_taken_from_that_does_not_exist_refuses_the_plan_without_naming_it()
+    {
+        _host.Files["/opt/deployments/tools/.env"] = "SOURCE=canary-secret\n";
+        var ex = await Assert.ThrowsAsync<ComposePlanException>(() => Planner().PlanAsync(ComposeDeployment.FromContent(
+            "local", "/opt/deployments/tools", "services:\n  a:\n    image: x\n    volumes_from:\n      - container:${SOURCE}\n      - ${SOURCE}\n")));
+        Assert.DoesNotContain("canary", ex.Message);
     }
 
     [Fact]

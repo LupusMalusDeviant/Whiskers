@@ -177,6 +177,7 @@ public class ProtectedResourceMatcherTests
     [InlineData("yaml", "x-v: &v\n  - /var/run:/r\nservices:\n  t:\n    volumes: *v\n")]           // an anchor
     [InlineData("yaml", "services:\n  t:\n    volumes:\n      - h:/h\nvolumes:\n  h:\n    driver_opts: {o: bind, device: /}\n")]
     [InlineData("yaml", "services: [unclosed")]                                                // no YAML
+    [InlineData("yaml", "services:\n  t:\n    volumes: [\"/var/run/dock\\u0065r.sock:/s\"]\n")]  // an escaped protected path
     [InlineData("command", "cat /var/lib/docker/volumes/serverwatch-data/_data/mtls/client.key")]
     public void Paths_reaching_the_control_plane_are_found_however_they_are_written(string key, string value) =>
         Assert.NotNull(ControlPlane(key, value));

@@ -49,7 +49,8 @@ public static class SecretRedactor
         @"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@/]+@",
         RegexOptions.Compiled, Timeout);
 
-    // SQL password literals: PASSWORD 'x', PASSWORD E'x', ENCRYPTED PASSWORD $$x$$, SET PASSWORD = 'x',
+    // SQL password literals: PASSWORD 'x', PASSWORD E'x', IDENTIFIED BY "x" (MySQL; after a space, = or ( only, so
+    // a JSON key "password": "x" stays for JsonSecret), ENCRYPTED PASSWORD $$x$$, SET PASSWORD = 'x',
     // IDENTIFIED BY x, IDENTIFIED WITH plugin BY|AS 'x'  →  keyword '***'. Doubled ('') and backslash-escaped
     // quotes stay inside the literal (a backslash that is no escape only masks more); an unclosed one is masked to
     // the end. Comments between the tokens (/* … */, -- …, # …) count as space. Meant for decoded text: for JSON,
@@ -57,7 +58,7 @@ public static class SecretRedactor
     private const string SqlGap = @"(?:\s|/\*.*?(?:\*/|$)|(?:--|\#)[^\n]*(?:\n|$))";
     private static readonly Regex SqlPassword = new(
         $@"(?is)\b(PASSWORD|IDENTIFIED(?:{SqlGap}+WITH{SqlGap}+\S+)?{SqlGap}+(?:BY|AS))({SqlGap}*(?:={SqlGap}*|\({SqlGap}*)?)" +
-        $@"(?:(?:[EBNX]|U&)?'(?:[^'\\]|''|\\.)*(?:'|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS){SqlGap}*)[^\s;'""\\]+)",
+        $@"(?:(?:[EBNX]|U&)?'(?:[^'\\]|''|\\.)*(?:'|$)|(?<=\s|=|\(|\*/)""(?:[^""\\]|""""|\\.)*(?:""|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS){SqlGap}*)[^\s;'""\\]+)",
         RegexOptions.Compiled, Timeout);
 
     // PEM private keys (certificates are public and stay readable).

@@ -159,7 +159,9 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         {
             if (ProtectedResourceMatcher.FirstHit(request.Arguments, [pattern], [], analyseFreeText: change) is not { } policyHit)
                 continue;
-            if (change && IsControlPlanePattern(pattern) && ControlPlaneFindsIn(request.Arguments, policyHit.Argument))
+            // Free text that cannot be analysed is no evidence of the control plane: refused.
+            if (change && policyHit.UnanalyzableArgument is null && IsControlPlanePattern(pattern)
+                && ControlPlaneFindsIn(request.Arguments, policyHit.Argument))
                 continue;
             reason = Describe(policyHit);
             return GuardrailVerdict.Deny;

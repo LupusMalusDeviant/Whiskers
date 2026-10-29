@@ -35,7 +35,9 @@ public class SecretHygieneTests
     [InlineData("SET PASSWORD = 'canary pw'")]
     [InlineData("SET PASSWORD FOR 'a'@'%' = PASSWORD('canary-secret')")]
     [InlineData("ALTER LOGIN sa WITH PASSWORD = 'canary-secret'")]
-    [InlineData("ALTER ROLE app PASSWORD /* rotate */ 'canary-secret';")]          // comments between the tokens
+    [InlineData("CREATE USER app IDENTIFIED BY \"canary-secret\";")]                  // MySQL double quotes
+    [InlineData("SET PASSWORD = \"canary \\\"secret\";")]
+    [InlineData("ALTER ROLE app PASSWORD /* rotate */ 'canary-secret';")]         // comments between the tokens
     [InlineData("ALTER ROLE app PASSWORD -- rotate\n 'canary-secret';")]
     [InlineData("CREATE USER a IDENTIFIED # note\n BY 'canary-secret';")]
     [InlineData("CREATE USER scott IDENTIFIED BY /* x */ canary-secret;")]

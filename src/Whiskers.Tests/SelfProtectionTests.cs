@@ -297,6 +297,12 @@ public class SelfProtectionTests
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(h.Approvals.GetPending());
 
+        // Free text that cannot be analysed could name what only the policy covers: refused, no approval.
+        var unanalysable = await h.RunAsync("host.exec", new { serverId = "local", command = "eval \"$CMD\"" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, unanalysable.Status);
+        Assert.Empty(h.Approvals.GetPending());
+
         // The same pattern on the Whiskers container is the control plane: an Admin may approve it.
         var container = await h.RunAsync("container.restart", new { containerId = "whiskers", serverId = "local" },
             ProtectionHarness.UiAdmin, MutationSurface.Ui);

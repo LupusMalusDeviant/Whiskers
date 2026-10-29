@@ -20,8 +20,9 @@ All notable changes to Whiskers are documented here. The format follows
   a container id or id prefix written in a command, by a container's other names, among the stopped containers a
   cleanup removes, and in what a deployment mounts — `deploy_app` volumes and every host path and volume of a compose
   deployment, also a local volume that binds a host path through `driver_opts: device:` and the volumes a service
-  takes over with `volumes_from` (another service's, or a container's by its name); a raw compose file is read as
-  YAML for its mounts (flow style, anchors, escapes), and one that is no YAML is refused (the Docker socket and the data volume are part of the control plane);
+  takes over with `volumes_from` (another service's, or a container's — looked up on the server by id, name or id
+  prefix; one that is not found refuses the deployment); a raw compose file is read as YAML for its mounts and names
+  (flow style, anchors, escapes decoded), and one that is no YAML is refused (the Docker socket and the data volume are part of the control plane);
   the control plane's names apply to containers, volumes and networks, not to a server called `whiskers-vps`. Free
   text that is completed at run time counts as touching a protected resource: in a command anything the shell
   expands (`$VAR`, `$(…)`, backticks, `{a,b}`), `eval`, `xargs`, decoding, or inline code of another interpreter
@@ -31,11 +32,11 @@ All notable changes to Whiskers are documented here. The format follows
   decides what the project mounts too, and a SQL import or seed decides the database it runs in. A mount whose source
   comes from an `.env` value is decided but never recorded (the audit keeps the length of `mounts`, the decision
   record `(withheld)`). A policy pattern that equals a control-plane pattern makes a hit approvable only where the
-  control plane's own check finds it too (not a server named `whiskers-vps`). The
+  control plane's own check finds it too (not a server named `whiskers-vps`, not text that cannot be analysed). The
   SQL console, SQL import and seed and the raw compose deploy now hand their payload to the policy (Artisan
   migrations carry no free text: their command is fixed); the audit keeps only its length, and an approval raised from the web UI shows only the length of a
   command, SQL or compose file (refusal reasons never quote words of it); a card that shows the text (an agent's
-  chat or MCP call) masks SQL password literals (`PASSWORD '…'`, `E'…'`, `IDENTIFIED BY …`, also with comments
+  chat or MCP call) masks SQL password literals (`PASSWORD '…'`, `E'…'`, `IDENTIFIED BY …` / `"…"`, also with comments
   between the tokens) as it masks other
   secrets, value by value, and so do the audit log and the host-command logs. **Upgrade notes:** a scheduled cleanup
   task no longer removes unused networks (which ones are unused cannot be decided before the prune): it removes

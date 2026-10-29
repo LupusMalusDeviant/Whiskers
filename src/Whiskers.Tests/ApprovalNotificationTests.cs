@@ -136,6 +136,7 @@ public class ApprovalNotificationTests
     [InlineData("ALTER ROLE whiskers PASSWORD E'canary-secret';")]
     [InlineData("ALTER ROLE whiskers PASSWORD 'it'' s canary-secret';")]
     [InlineData("ALTER ROLE whiskers PASSWORD e'it\\'s canary-secret';")]
+    [InlineData("CREATE USER whiskers IDENTIFIED BY \"canary-secret\";")]
     public async Task An_mcp_approval_stores_the_sql_without_its_password_literal(string query)
     {
         var store = new ApprovalStore();
@@ -151,7 +152,8 @@ public class ApprovalNotificationTests
 
         var stored = store.Get(result.ApprovalId!)!;
         Assert.DoesNotContain("canary", stored.ParamsJson);
-        Assert.Contains("ALTER ROLE whiskers PASSWORD '***';", stored.ParamsJson);
+        Assert.Contains(" whiskers ", stored.ParamsJson);   // the statement stays readable
+        Assert.Contains("'***';", stored.ParamsJson);
     }
 
     [Fact]

@@ -84,6 +84,7 @@ public sealed class ComposePlanner : IComposePlanner
         var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);
 
         var existing = await _docker.ListContainersAsync(all: true, serverId: serverId, ct);
+        services = ComposeModel.ResolveContainers(services, existing);
         var impact = ComposeModel.Impact(project, services, removeOrphans, existing);
         return new ComposePlan(serverId, project, directory, files.Select(f => f.Path).ToList(),
             inputs.Where(f => f.Content is not null).ToList(), deployment.EnvFileContent,

@@ -78,6 +78,10 @@ public sealed record ComposeMount(string Source, bool ProjectScoped)
 {
     /// <summary>The source came from a variable (an <c>.env</c> value can be a secret): decided, never recorded.</summary>
     public bool FromVariable { get; init; }
+
+    /// <summary>A container named by <c>volumes_from: container:…</c> (an id, id prefix or name); the planner
+    /// replaces it by the container's id and name from the inventory.</summary>
+    public bool Container { get; init; }
 }
 
 /// <summary>A compose deployment's impact could not be determined; the deployment does not run (fail closed).</summary>
@@ -163,7 +167,10 @@ public sealed record ComposePlan(
     {
         var missing = Impact.Where(i => scope is null || !scope.Covers(ServerId, i.Container.Id, i.Container.Name))
             .Select(i => i.Container.Name)
-            .Concat(Mounts().Where(m => scope is null || !scope.Covers(ServerId, m)).Select(m => $"mount {m}"))
+            // A mount from an .env value is never quoted (it can be a secret).
+            .Concat(Mounts().Where(m => scope is null || !scope.Covers(ServerId, m))
+                .Select(m => WithheldMounts().Contains(m) ? "mount (withheld)" : $"mount {m}"))
+            .Distinct()
             .ToList();
         if (missing.Count > 0)
             throw new ComposePlanException(
@@ -596,12 +603,16 @@ public static class ComposeModel
                     if (reference.StartsWith("container:", StringComparison.Ordinal))
                     {
                         var parts = reference.Split(':');
-                        yield return new ComposeMount(parts[1], ProjectScoped: false) { FromVariable = raw.Contains('$') };
+                        yield return new ComposeMount(parts[1], ProjectScoped: false)
+                        {
+                            FromVariable = raw.Contains('$'), Container = true,
+                        };
                         continue;
                     }
                     var other = reference.Split(':')[0];
+                    // The reference can come from an .env value: never quoted.
                     if (!services.Children.TryGetValue(new YamlScalarNode(other), out var o) || o is not YamlMappingNode otherDef)
-                        throw new ComposePlanException($"Service '{service}' takes volumes from '{other}', which is not defined.");
+                        throw new ComposePlanException($"Service '{service}' takes volumes from a service that is not defined.");
                     foreach (var mount in MountsOf(otherDef, services, env, other, projectDirectory, depth + 1))
                         yield return mount;
                 }
@@ -646,6 +657,36 @@ public static class ComposeModel
     /// touches: the project's containers of a defined service (recreated), with <paramref name="removeOrphans"/> the
     /// rest of the project (removed), and containers of other projects or none whose name the deployment wants.
     /// </summary>
+    /// <summary>
+    /// The services with every <c>volumes_from: container:…</c> replaced by that container's id and name from
+    /// <paramref name="existing"/> (an exact id or name, or a unique id prefix), so it is decided as the container it
+    /// is. A reference that matches no container or several refuses the plan; it is never quoted (it can come from an
+    /// <c>.env</c> value).
+    /// </summary>
+    public static IReadOnlyList<ComposeServicePlan> ResolveContainers(IReadOnlyList<ComposeServicePlan> services,
+        IEnumerable<ContainerInfo> existing)
+    {
+        var containers = existing.DistinctBy(c => c.Id).ToList();
+        return services.Select(s => s.Mounts.Any(m => m.Container)
+            ? s with { Mounts = s.Mounts.SelectMany(m => m.Container ? Resolve(s.Name, m) : [m]).Distinct().ToList() }
+            : s).ToList();
+
+        IEnumerable<ComposeMount> Resolve(string service, ComposeMount mount)
+        {
+            var reference = mount.Source;
+            var exact = containers.Where(c => c.Id == reference || c.Name == reference || c.Name == "/" + reference).ToList();
+            var found = exact.Count > 0 ? exact
+                : reference.Length > 0 && reference.All(char.IsAsciiHexDigitLower)
+                    ? containers.Where(c => c.Id.StartsWith(reference, StringComparison.Ordinal)).ToList()
+                    : [];
+            if (found.Count != 1)
+                throw new ComposePlanException(
+                    $"Service '{service}' takes volumes from a container that {(found.Count == 0 ? "does not exist" : "is not unique")}.");
+            var c = found[0];
+            return [mount with { Source = c.Id, Container = false }, mount with { Source = c.Name.TrimStart('/'), Container = false }];
+        }
+    }
+
     public static IReadOnlyList<ComposeImpactEntry> Impact(string project, IReadOnlyList<ComposeServicePlan> services,
         bool removeOrphans, IEnumerable<ContainerInfo> existing)
     {

@@ -122,11 +122,13 @@ public static class ProtectedResourceMatcher
                 value = expanded;
                 // A bind mount's host side above a protected path, read from the YAML itself (flow style, quoting and
                 // escapes decoded); a file that is no YAML cannot be read for its mounts.
-                if (ComposeHostSources(value) is not { } sources)
+                if (ReadCompose(value) is not { } compose)
                     return new Hit("", null, key) { Argument = key, InFreeText = true };
-                foreach (var source in sources)
+                foreach (var source in compose.Sources)
                     if (AncestorHit(source, pathPatterns) is { } above)
                         return above with { Argument = key, InFreeText = true };
+                // Names and paths are looked for in the decoded values too (an escaped "docker.sock").
+                value = value + "\n" + string.Join('\n', compose.Scalars);
             }
             foreach (var word in Words(value))
                 if (WordHit(word, keyPatterns, pathPatterns, named) is { } hit)
@@ -158,33 +160,38 @@ public static class ProtectedResourceMatcher
     private static readonly Regex BareComposeVariable = new(@"(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*\}|(?<!\$)\$[A-Za-z_]",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
-    /// <summary>Every absolute host path a compose file can mount, wherever it stands (services, anchors, merges,
-    /// extensions): the source side of a <c>volumes</c> entry, a long entry's <c>source</c>, a volume's
-    /// <c>driver_opts</c> <c>device</c>. <c>null</c> when the text is no YAML.</summary>
-    public static IReadOnlyList<string>? ComposeHostSources(string yaml)
+    /// <summary>A compose file read as YAML: every absolute host path it can mount, wherever it stands (services,
+    /// anchors, merges, extensions) — the source side of a <c>volumes</c> entry, a long entry's <c>source</c>, a
+    /// volume's <c>driver_opts</c> <c>device</c> — and every scalar, decoded. <c>null</c> when the text is no YAML.</summary>
+    public static (IReadOnlyList<string> Sources, IReadOnlyList<string> Scalars)? ReadCompose(string yaml)
     {
         var stream = new YamlDotNet.RepresentationModel.YamlStream();
         try { stream.Load(new StringReader(yaml)); }
         catch (YamlDotNet.Core.YamlException) { return null; }
         var sources = new List<string>();
+        var scalars = new List<string>();
         foreach (var document in stream.Documents)
-            CollectSources(document.RootNode, null, sources, 0);
-        return sources;
+            CollectSources(document.RootNode, null, sources, scalars, 0);
+        return (sources, scalars);
     }
 
     private static void CollectSources(YamlDotNet.RepresentationModel.YamlNode node, string? key, List<string> sources,
-        int depth)
+        List<string> scalars, int depth)
     {
         if (depth > 64) return;
         switch (node)
         {
+            case YamlDotNet.RepresentationModel.YamlScalarNode scalar:
+                if (scalar.Value is { Length: > 0 } text) scalars.Add(text);
+                break;
             case YamlDotNet.RepresentationModel.YamlMappingNode map:
                 foreach (var (k, v) in map.Children)
                 {
                     var name = (k as YamlDotNet.RepresentationModel.YamlScalarNode)?.Value;
                     if (name is "source" or "device" && v is YamlDotNet.RepresentationModel.YamlScalarNode s)
                         Add(s.Value);
-                    CollectSources(v, name, sources, depth + 1);
+                    if (name is not null) scalars.Add(name);
+                    CollectSources(v, name, sources, scalars, depth + 1);
                 }
                 break;
             case YamlDotNet.RepresentationModel.YamlSequenceNode seq:
@@ -193,7 +200,7 @@ public static class ProtectedResourceMatcher
                     // "- /src:/dst[:ro]": the host side is before the first colon.
                     if (key == "volumes" && item is YamlDotNet.RepresentationModel.YamlScalarNode s && s.Value is { } v)
                         Add(v.Contains(':') ? v[..v.IndexOf(':')] : v);
-                    CollectSources(item, key, sources, depth + 1);
+                    CollectSources(item, key, sources, scalars, depth + 1);
                 }
                 break;
         }
