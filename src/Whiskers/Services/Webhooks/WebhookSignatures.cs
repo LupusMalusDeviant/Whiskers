@@ -36,7 +36,9 @@ public static class WebhookSignatures
     /// <summary>The providers a webhook can be set to.</summary>
     public static readonly IReadOnlyList<string> Providers = [GitHub, Whiskers];
 
-    private static readonly Regex DeliveryIdPattern = new("^[A-Za-z0-9._-]{8,128}$", RegexOptions.CultureInvariant);
+    // No '.': it separates the signed fields, so "{ts}.{id}.{body}" splits one way only — an id ending in ".x" cannot
+    // be traded for a body starting with "x.".
+    private static readonly Regex DeliveryIdPattern = new("^[A-Za-z0-9_-]{8,128}$", RegexOptions.CultureInvariant);
 
     /// <summary>Checks the delivery against the webhook's provider rule. The key that identifies the delivery when it
     /// is valid; otherwise <c>null</c> and why (for the log only — the caller gets a generic answer).</summary>

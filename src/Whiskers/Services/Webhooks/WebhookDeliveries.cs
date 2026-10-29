@@ -135,6 +135,9 @@ internal sealed class WebhookDeliveryStore
         _ => row.State.ToLowerInvariant(),
     };
 
+    /// <summary>Queued by a process that stopped: nothing runs it until a delivery with its key takes it over.</summary>
+    public bool Orphaned(WebhookDeliveryEntity row) => row.State == Queued && !Mine(row);
+
     private bool Mine(WebhookDeliveryEntity row) =>
         row.Instance.StartsWith(ProcessInstance + "/", StringComparison.Ordinal);
 }

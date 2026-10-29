@@ -37,7 +37,7 @@ public class WebhookService : IWebhookService
     // Runs whose action outlived the run timeout: they keep their target, not a worker. Bounded too.
     private readonly SemaphoreSlim _overdue;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _targets = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<(bool, string)>> _waiting = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<RunEnd>> _waiting = new(StringComparer.Ordinal);
     private readonly RateWindow _rates;
     private int _workersStarted;
     private long _lastPrune;
@@ -179,13 +179,14 @@ public class WebhookService : IWebhookService
     /// <summary>Records the delivery and queues its run, or answers with the run it repeats. A queue slot is taken
     /// first: a delivery is recorded only when it can run, so every answer that names a queued run is kept.</summary>
     private async Task<WebhookAcceptance> QueueAsync(WebhookEntity webhook, string key, string? sourceIp,
-        TaskCompletionSource<(bool, string)>? completion, CancellationToken ct)
+        TaskCompletionSource<RunEnd>? completion, CancellationToken ct)
     {
         if (!_slots.Wait(0))
         {
             // Full. A delivery seen before still gets its run; a new one is not recorded — the provider may retry.
+            // One a stopped process left queued runs only if a delivery takes it over, which needs a slot: busy too.
             var known = await _deliveries.FindAsync(webhook.WebhookId, key, ct);
-            if (known is not null) return Repeat(webhook, known);
+            if (known is not null && !_deliveries.Orphaned(known)) return Repeat(webhook, known);
             _logger.LogWarning("Webhook {Name}: the delivery queue is full; refused as busy", webhook.Name);
             return new WebhookAcceptance(WebhookReply.Busy);
         }
@@ -277,7 +278,8 @@ public class WebhookService : IWebhookService
     private async Task ExecuteRunAsync(QueuedRun run)
     {
         _waiting.TryRemove(run.RunId, out var completion);
-        (bool Success, string Output) result = (false, "The delivery did not run.");
+        RunMessage? message = new("Webhook_Run_NotRun", "The delivery did not run.", []);
+        (bool Success, string Output) result = (false, message.English);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_stopping);
         deadline.CancelAfter(_options.RunTimeout);
         var ct = deadline.Token;
@@ -286,19 +288,35 @@ public class WebhookService : IWebhookService
         try
         {
             var queued = await ReadWebhookAsync(run.WebhookId);
-            var target = queued is null ? "missing:" + run.WebhookId : await TargetKeyAsync(queued, ct);
-            gate = _targets.GetOrAdd(target, _ => new SemaphoreSlim(1, 1));
-            try
+            var target = queued is null ? new RunTarget("missing:" + run.WebhookId) : await TargetAsync(queued, ct);
+            while (true)
             {
-                await gate.WaitAsync(ct);
-            }
-            catch (OperationCanceledException)
-            {
+                gate = _targets.GetOrAdd(target.Key, _ => new SemaphoreSlim(1, 1));
+                try
+                {
+                    await gate.WaitAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    gate = null;
+                    message = new("Webhook_Run_NoTurn", "Failed: the delivery did not get its turn on its target in time.", []);
+                    if (await _deliveries.StartAsync(run.RunId))
+                        result = await FinishAsync(run, queued, (false, message.English), WebhookDeliveryStore.Failed);
+                    return;
+                }
+                // The lock holds a resource, not a name: resolved again while it is held, the target must still be
+                // the resource locked — a run before may have rebuilt the container under a new id. Otherwise the
+                // run waits for the lock of what it would act on now. Nothing runs on a resource it has not locked.
+                if (queued is null || !target.Resolved) break;
+                var now = await TargetAsync(queued, ct);
+                if (now.Key == target.Key)
+                {
+                    target = now;
+                    break;
+                }
+                gate.Release();
                 gate = null;
-                if (await _deliveries.StartAsync(run.RunId))
-                    result = await FinishAsync(run, queued, (false, "Failed: the delivery did not get its turn on its target in time."),
-                        WebhookDeliveryStore.Failed);
-                return;
+                target = now;
             }
 
             if (!await _deliveries.StartAsync(run.RunId)) return;
@@ -306,48 +324,85 @@ public class WebhookService : IWebhookService
             if (webhook is null || !webhook.Enabled || queued is null || !SameTarget(queued, webhook))
             {
                 // Removed, switched off or pointed elsewhere while it waited: it does not run.
-                result = await FinishAsync(run, webhook,
-                    (false, "Refused: the webhook was removed, switched off or changed before the delivery ran."),
-                    WebhookDeliveryStore.Refused);
+                message = new("Webhook_Run_Changed",
+                    "Refused: the webhook was removed, switched off or changed before the delivery ran.", []);
+                result = await FinishAsync(run, webhook, (false, message.English), WebhookDeliveryStore.Refused);
                 return;
             }
 
             _logger.LogInformation("Webhook triggered: {Name} ({Action} on {Target}), run {RunId}",
                 webhook.Name, webhook.Action, webhook.TargetId, run.RunId);
-            var work = RunAsOwnerAsync(webhook, run.RunId, ct);
-            if (!await Finished(work, ct) && _overdue.Wait(0))
+            var work = RunAsOwnerAsync(webhook, run.RunId, target, ct);
+            if (!await Finished(work, ct))
             {
-                // The action outlived the run timeout and does not stop: it keeps its target until it ends — no other
-                // run may overlap it — but no longer a worker.
-                handedOver = true;
-                var held = gate;
-                result = (false, $"Run {run.RunId} exceeded its time limit and is still running; its outcome will be in the log.");
-                _ = work.ContinueWith(async done =>
+                if (!_overdue.Wait(0))
                 {
+                    // No overdue slot free: the action keeps this worker as well as its target until it ends. Its
+                    // target is never released while it runs.
+                    _logger.LogWarning("Webhook run {RunId} exceeded its time limit; it keeps its worker until it ends", run.RunId);
                     try
                     {
-                        await FinishAsync(run, webhook, Outcome(done), StateOf(done));
+                        await work;
                     }
-                    finally
+                    catch
                     {
-                        held.Release();
-                        _overdue.Release();
+                        // Its failure is its outcome, recorded below.
                     }
-                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
-                return;
+                }
+                else
+                {
+                    // The action outlived the run timeout and does not stop: it keeps its target until it ends — no other
+                    // run may overlap it — but no longer a worker.
+                    handedOver = true;
+                    var held = gate;
+                    message = new("Webhook_Run_Overdue",
+                        "Run {0} exceeded its time limit and is still running; its outcome will be in the log.", [run.RunId]);
+                    result = (false, message.English);
+                    _ = work.ContinueWith(async done =>
+                    {
+                        try
+                        {
+                            await FinishAsync(run, webhook, Outcome(done), StateOf(done));
+                        }
+                        finally
+                        {
+                            held.Release();
+                            _overdue.Release();
+                        }
+                    }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+                    return;
+                }
             }
+            message = null;
             result = await FinishAsync(run, webhook, Outcome(work), StateOf(work));
         }
         finally
         {
             if (!handedOver) gate?.Release();
-            completion?.TrySetResult(result);
+            completion?.TrySetResult(new RunEnd(result.Success, result.Output, message));
             await PruneIfDueAsync();
         }
     }
 
-    /// <summary>Whether the action ended before the run's deadline; waits for it otherwise only while no overdue
-    /// slot is free (then it keeps the worker).</summary>
+    /// <summary>How a run ended, for a caller waiting on it: <see cref="Message"/> is set when the worker itself
+    /// wrote the output, so the page's Test can show it in the person's language.</summary>
+    private sealed record RunEnd(bool Success, string Output, RunMessage? Message);
+
+    /// <summary>A worker's own message: English for the log, its resource key for the page.</summary>
+    private sealed record RunMessage(string Key, string Format, object[] Args)
+    {
+        public string English => string.Format(CultureInfo.InvariantCulture, Format, Args);
+    }
+
+    /// <summary>What a run locks and acts on: <see cref="Key"/> names the resource; for a container action
+    /// <see cref="Container"/> is the container the key was made from (or why there is none).</summary>
+    private sealed record RunTarget(string Key, ContainerInfo? Container = null, string? Error = null)
+    {
+        /// <summary>A container resolved by id: what it names can change (a rebuild), so it is checked under its lock.</summary>
+        public bool Resolved => Container is not null;
+    }
+
+    /// <summary>Whether the action ended before the run's deadline.</summary>
     private async Task<bool> Finished(Task work, CancellationToken deadline)
     {
         try
@@ -428,28 +483,25 @@ public class WebhookService : IWebhookService
     /// <summary>
     /// The resource a run locks, by its identity rather than its spelling: a container by its id on its server
     /// (name, full id and unique prefix are one container), a compose project by its normalized directory on its
-    /// server, a Git app by its id. A target that cannot be resolved locks its spelling; its run is refused anyway.
+    /// server, a Git app by its id. A container action acts on exactly the container resolved here. A target that
+    /// cannot be resolved locks its spelling; its run is refused anyway.
     /// </summary>
-    internal async Task<string> TargetKeyAsync(WebhookEntity webhook, CancellationToken ct)
+    private async Task<RunTarget> TargetAsync(WebhookEntity webhook, CancellationToken ct)
     {
         var server = WebhookTargets.ServerOf(webhook);
         switch (webhook.Action)
         {
             case "git-deploy":
-                return "git:" + webhook.TargetId;
+                return new RunTarget("git:" + webhook.TargetId);
             case "deploy":
-                return $"compose:{server}|{NormalizeDirectory(webhook.TargetId)}";
+                return new RunTarget($"compose:{server}|{NormalizeDirectory(webhook.TargetId)}");
+            case "restart" or "rebuild":
+                var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
+                return container is not null
+                    ? new RunTarget($"container:{server}|{container.Id}", container)
+                    : new RunTarget($"container:{server}|{webhook.TargetId}", null, error);
             default:
-                try
-                {
-                    var (container, _) = await WebhookTargets.ContainerAsync(_docker, webhook, ct).WaitAsync(ct);
-                    if (container is not null) return $"container:{server}|{container.Id}";
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Webhook {Name}: its container could not be resolved for the target lock", webhook.Name);
-                }
-                return $"container:{server}|{webhook.TargetId}";
+                return new RunTarget($"other:{server}|{webhook.TargetId}");
         }
     }
 
@@ -502,7 +554,7 @@ public class WebhookService : IWebhookService
     /// and leaves it on. The action itself runs only for a webhook with an owner.
     /// </summary>
     private async Task<(bool Success, string Output, bool Refused)> RunAsOwnerAsync(WebhookEntity webhook, string runId,
-        CancellationToken ct)
+        RunTarget target, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var automation = scope.ServiceProvider.GetService<IAutomationMutationRunner>();
@@ -520,8 +572,9 @@ public class WebhookService : IWebhookService
             case "restart":
             {
                 capability = "container.restart";
-                // An unresolved container is decided by its stored name: the resolver refuses it (audited).
-                var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
+                // The container the run locked. An unresolved one is decided by its stored name: the resolver refuses
+                // it (audited).
+                var (container, error) = (target.Container, target.Error);
                 outcome = await automation.RunAsync(runActor, "container.restart",
                     new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
                     async _ =>
@@ -536,7 +589,7 @@ public class WebhookService : IWebhookService
             case "rebuild":
             {
                 capability = "container.update";
-                var (container, error) = await LookupAsync(webhook, () => WebhookTargets.ContainerAsync(_docker, webhook, ct), ct);
+                var (container, error) = (target.Container, target.Error);
                 outcome = await automation.RunAsync(runActor, "container.update",
                     new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
                     async _ =>
@@ -739,7 +792,7 @@ public class WebhookService : IWebhookService
         var request = WebhookSignatures.SignedTest(webhook, _time.GetUtcNow(), "ui-test");
         var (key, problem) = WebhookSignatures.Verify(webhook, request, _time.GetUtcNow(), _options.TimestampTolerance);
         if (key is null) return (false, Text("Webhook_Test_Invalid", "The test delivery was not valid: {0}", problem!));
-        var completion = new TaskCompletionSource<(bool, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new TaskCompletionSource<RunEnd>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepted = await QueueAsync(webhook, key, request.SourceIp, completion, CancellationToken.None);
         if (accepted.Reply != WebhookReply.Accepted)
             return (false, accepted.Reply == WebhookReply.Busy
@@ -747,7 +800,8 @@ public class WebhookService : IWebhookService
                 : Text("Webhook_Test_NotAccepted", "The test delivery was not accepted ({0}).", accepted.Reply.ToString()));
         try
         {
-            return await completion.Task.WaitAsync(_options.TestRunTimeout);
+            var end = await completion.Task.WaitAsync(_options.TestRunTimeout);
+            return (end.Success, end.Message is { } m ? Text(m.Key, m.Format, m.Args) : end.Output);
         }
         catch (TimeoutException)
         {

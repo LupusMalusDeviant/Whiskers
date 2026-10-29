@@ -4991,4 +4991,16 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Webhook_Test_StillRunning" xml:space="preserve">
     <value>Lauf {0} wartet noch oder läuft; sein Ergebnis erscheint im Log.</value>
   </data>
+  <data name="Webhook_Run_NotRun" xml:space="preserve">
+    <value>Die Zustellung wurde nicht ausgeführt.</value>
+  </data>
+  <data name="Webhook_Run_NoTurn" xml:space="preserve">
+    <value>Fehlgeschlagen: Die Zustellung kam nicht rechtzeitig an ihrem Ziel an die Reihe.</value>
+  </data>
+  <data name="Webhook_Run_Changed" xml:space="preserve">
+    <value>Abgelehnt: Der Webhook wurde entfernt, ausgeschaltet oder geändert, bevor die Zustellung lief.</value>
+  </data>
+  <data name="Webhook_Run_Overdue" xml:space="preserve">
+    <value>Lauf {0} hat sein Zeitlimit überschritten und läuft noch; sein Ergebnis erscheint im Log.</value>
+  </data>
 </root>

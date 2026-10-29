@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Whiskers.Models;
@@ -48,8 +49,9 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     /// <summary>A new service is a new process: what another one queued or ran reads as cut off by a restart.</summary>
-    private WebhookService Service(IDockerService? docker = null) => new(_sp.GetRequiredService<IServiceScopeFactory>(),
-        docker: docker!, executor: null!, planner: null!, NullLogger<WebhookService>.Instance, Options.Create(_options), _time);
+    private WebhookService Service(IDockerService? docker = null, IStringLocalizer<SharedResource>? text = null) =>
+        new(_sp.GetRequiredService<IServiceScopeFactory>(), docker: docker!, executor: null!, planner: null!,
+            NullLogger<WebhookService>.Instance, Options.Create(_options), _time, text: text);
 
     private void Update(string webhookId, Action<WebhookEntity> change)
     {
@@ -144,6 +146,25 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(WebhookReply.Rejected, (await service.AcceptAsync(wh.WebhookId,
             original with { WhiskersTimestamp = _time.GetUtcNow().AddSeconds(1).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture) })).Reply);
         Assert.Equal(0, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task A_delivery_id_cannot_trade_characters_with_the_body()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        // "{ts}.delivery-0008.part.{}" would sign both id "delivery-0008.part" with body "{}" and id "delivery-0008"
+        // with body "part.{}": a captured delivery could come back as a new one. An id with a dot is never valid,
+        // so the signed fields split one way only.
+        var dotted = Signed(wh, "delivery-0008.part", body: "{}");
+        var split = new WebhookRequest(Encoding.UTF8.GetBytes("part.{}"), WhiskersSignature: dotted.WhiskersSignature,
+            WhiskersTimestamp: dotted.WhiskersTimestamp, WhiskersDelivery: "delivery-0008");
+
+        Assert.Equal(WebhookReply.Rejected, (await service.AcceptAsync(wh.WebhookId, dotted)).Reply);
+        var accepted = await service.AcceptAsync(wh.WebhookId, split);
+        await Finished(accepted.RunId!);
+        Assert.Equal(WebhookReply.Rejected, (await service.AcceptAsync(wh.WebhookId, dotted)).Reply);
+        Assert.Equal(1, _runner.Runs);
     }
 
     [Fact]
@@ -286,6 +307,40 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task A_run_acts_only_on_the_container_it_locked_also_after_a_rebuild_changed_its_id()
+    {
+        _options.MaxConcurrentRuns = 4;
+        var container = new ContainerInfo { Id = "aaa111bbb222ccc333", Name = "web-1", ServerId = "local" };
+        var docker = new FakeDocker(container);
+        var waiter = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service(docker);
+        _runner.Hold();
+        var first = await service.AcceptAsync(waiter.WebhookId, Signed(waiter, "delivery-0114"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var waiting = await service.AcceptAsync(waiter.WebhookId, Signed(waiter, "delivery-0115"));
+        await Task.Delay(100);   // it waits for the lock of aaa111…
+
+        // The container is rebuilt under a new id; a later delivery locks that one and runs (held).
+        container.Id = "ddd444eee555fff666";
+        _runner.Hold();
+        var later = await service.AcceptAsync(waiter.WebhookId, Signed(waiter, "delivery-0116"));
+        await WaitFor(() => _runner.Runs == 2);
+
+        // The first run ends: the waiting one gets the old lock, finds the container under the new id, and waits
+        // for that lock instead of running beside the later run.
+        _runner.ReleaseFirst();
+        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
+        await Task.Delay(300);
+        Assert.Equal(2, _runner.Runs);
+        Assert.Equal("Queued", (await Delivery(waiting.RunId!)).State);
+
+        _runner.Release();
+        Assert.Equal("Succeeded", (await Finished(later.RunId!)).State);
+        Assert.Equal("Succeeded", (await Finished(waiting.RunId!)).State);
+        Assert.Equal(["aaa111bbb222ccc333", "ddd444eee555fff666", "ddd444eee555fff666"], _runner.ContainerIds);
+    }
+
+    [Fact]
     public async Task A_webhook_switched_off_while_its_delivery_waits_does_not_run()
     {
         _options.MaxConcurrentRuns = 2;
@@ -354,6 +409,55 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task A_run_past_its_time_keeps_its_target_and_worker_when_no_overdue_slot_is_free()
+    {
+        _options.MaxConcurrentRuns = 1;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        var handedOver = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var kept = Seed(WebhookSignatures.Whiskers, target: "worker");
+        var service = Service();
+        _runner.Hold();
+
+        // The first overdue run takes the only overdue slot; the second finds none free.
+        var first = await service.AcceptAsync(handedOver.WebhookId, Signed(handedOver, "delivery-0144"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = await service.AcceptAsync(kept.WebhookId, Signed(kept, "delivery-0145"));
+        await WaitFor(() => _runner.Runs == 2);
+        var third = await service.AcceptAsync(kept.WebhookId, Signed(kept, "delivery-0146"));
+        await Task.Delay(900);   // well past the second run's time
+
+        // It is still running: its target is not released and nothing else runs on it.
+        Assert.Equal("Running", (await Delivery(second.RunId!)).State);
+        Assert.Equal("Queued", (await Delivery(third.RunId!)).State);
+        Assert.Equal(2, _runner.Runs);
+
+        _runner.Release();
+        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
+        Assert.Equal("Succeeded", (await Finished(second.RunId!)).State);
+        await Finished(third.RunId!);
+        Assert.Equal(3, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task The_test_shows_a_workers_own_message_in_the_persons_language()
+    {
+        _options.MaxConcurrentRuns = 2;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var tested = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service(text: new KeyLocalizer());
+        _runner.Hold();
+        await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0147"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The target stays held past the test's run time: it does not get its turn.
+        var (success, output) = await service.TriggerSignedTestAsync(tested.WebhookId);
+
+        Assert.False(success);
+        Assert.Equal("[Webhook_Run_NoTurn]", output);
+    }
+
+    [Fact]
     public async Task A_worker_carries_nothing_of_the_caller_that_started_it()
     {
         var wh = Seed(WebhookSignatures.Whiskers);
@@ -399,6 +503,40 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(WebhookReply.Accepted, retried.Reply);
         await Finished(retried.RunId!);
         Assert.Equal(3, _runner.Runs);
+    }
+
+    [Fact]
+    public async Task A_full_queue_answers_busy_for_a_delivery_a_stopped_process_left_queued()
+    {
+        _options.MaxConcurrentRuns = 1;
+        _options.QueueCapacity = 1;
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        var request = Signed(wh, "delivery-0204");
+        var (key, _) = WebhookSignatures.Verify(wh, request, _time.GetUtcNow(), _options.TimestampTolerance);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.WebhookDeliveries.Add(new WebhookDeliveryEntity
+            {
+                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Queued",
+                Instance = "stopped-process/claim", ReceivedAt = _time.GetUtcNow().UtcDateTime,
+            });
+            await db.SaveChangesAsync();
+        }
+        _runner.Hold();
+        await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0205"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var waiting = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0206"));
+
+        // Nothing would run it, so it is not "queued": the provider is told to come back.
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await service.AcceptAsync(wh.WebhookId, request));
+
+        _runner.Release();
+        await Finished(waiting.RunId!);
+        var again = await service.AcceptAsync(wh.WebhookId, request);
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Accepted, "left-queued", "queued"), again);
+        Assert.Equal("Succeeded", (await Finished("left-queued")).State);
     }
 
     [Fact]
@@ -507,25 +645,58 @@ public sealed class WebhookReplayTests : IDisposable
         return ((result as IStatusCodeHttpResult)?.StatusCode, (result as IValueHttpResult)?.Value?.ToString());
     }
 
+    private static async Task WaitFor(Func<bool> condition)
+    {
+        for (var i = 0; i < 200 && !condition(); i++) await Task.Delay(25);
+        Assert.True(condition());
+    }
+
     // ---------------------------------------------------------------- doubles
+
+    /// <summary>Answers every key as "[key]", so a test sees which resource was used.</summary>
+    private sealed class KeyLocalizer : IStringLocalizer<SharedResource>
+    {
+        public LocalizedString this[string name] => new(name, $"[{name}]");
+        public LocalizedString this[string name, params object[] arguments] => new(name, $"[{name}]");
+        public IEnumerable<LocalizedString> GetAllStrings(bool includeParentCultures) => [];
+    }
 
     /// <summary>Runs nothing: records each run, how many overlapped, and can hold a run until released.</summary>
     private sealed class RecordingRunner : IAutomationMutationRunner
     {
         private int _runs, _current, _max;
         private TaskCompletionSource _gate = Completed();
+        private readonly List<TaskCompletionSource> _gates = [];
         private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<string?> OperationIds { get; } = [];
         public List<string?> Owners { get; } = [];
         public List<(string?, string?)> Contexts { get; } = [];
+        public List<string?> ContainerIds { get; } = [];
         private int _held;
         public TimeSpan Delay { get; set; }
         public int Runs => Volatile.Read(ref _runs);
         public int MaxConcurrent => Volatile.Read(ref _max);
         public Task Started => _started.Task;
 
-        public void Hold() => _gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        public void Release() => _gate.TrySetResult();
+        /// <summary>Runs from now on wait until released; each Hold is a gate of its own.</summary>
+        public void Hold()
+        {
+            lock (_gates)
+                _gates.Add(_gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        }
+
+        public void Release()
+        {
+            lock (_gates)
+                foreach (var gate in _gates) gate.TrySetResult();
+        }
+
+        /// <summary>Releases the runs of the first Hold only.</summary>
+        public void ReleaseFirst()
+        {
+            lock (_gates) _gates[0].TrySetResult();
+        }
+
         /// <summary>Only the run already waiting stays held; later runs pass.</summary>
         public void ReleaseOthers() => _onlyFirst = true;
         private volatile bool _onlyFirst;
@@ -546,7 +717,9 @@ public sealed class WebhookReplayTests : IDisposable
                 OperationIds.Add(actor.OperationId);
                 Owners.Add(actor.OwnerId);
                 Contexts.Add((Ambient.Value, MutationScope.Current?.OperationId));
+                ContainerIds.Add(arguments.GetType().GetProperty("containerId")?.GetValue(arguments) as string);
             }
+            var held = _gate;
             var first = Interlocked.Increment(ref _held) == 1;
             var now = Interlocked.Increment(ref _current);
             int seen;
@@ -554,7 +727,7 @@ public sealed class WebhookReplayTests : IDisposable
             _started.TrySetResult();
             try
             {
-                if (first || !_onlyFirst) await _gate.Task;
+                if (first || !_onlyFirst) await held.Task;
                 if (Delay > TimeSpan.Zero) await Task.Delay(Delay, ct);
             }
             finally

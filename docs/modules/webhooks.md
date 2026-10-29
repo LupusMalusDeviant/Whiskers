@@ -25,7 +25,7 @@ every delivery (400, not a 500 from an unresolved service).
 
 - `github` — `X-Hub-Signature-256: sha256=<HMAC-SHA256(secret, body)>` (GitHub, Gitea). GitHub signs no time, so a
   repeated body is recognised for the retention period (90 days), not by its age.
-- `whiskers` — `X-Whiskers-Timestamp: <Unix seconds>`, `X-Whiskers-Delivery: <unique id, 8–128 of A-Z a-z 0-9 . _ ->`
+- `whiskers` — `X-Whiskers-Timestamp: <Unix seconds>`, `X-Whiskers-Delivery: <unique id, 8–128 of A-Z a-z 0-9 _ -; no dot>`
   and `X-Whiskers-Signature: sha256=<HMAC-SHA256(secret, "<timestamp>.<delivery>.<body>")>`; a timestamp more than
   five minutes off is refused.
 
