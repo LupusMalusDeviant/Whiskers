@@ -8,46 +8,46 @@ namespace Whiskers.Services.Mutations;
 public sealed record PendingAuditOutcome(long AuditId, string OperationId, MutationStatus Status,
     VerificationStatus Verification, string? Reason, TimeSpan Duration);
 
-/// <summary>A refusal the gateway could not record; kept and recorded again.</summary>
-public sealed record PendingAuditRefusal(string OperationId, MutationRequest Request, Capability? Capability,
-    MutationStatus Status, string Reason, string? ApprovalId);
-
 /// <summary>Whether the audit trail is complete right now (R1-19, INV-45).</summary>
-/// <param name="PendingOutcomes">Outcomes and refusals of this process still waiting to be written.</param>
-/// <param name="UnsettledIntents">Intent rows the last recovery pass could not settle (or the pass itself failed).</param>
+/// <param name="PendingEvents">Outcomes of this process and refusals in the outbox still waiting to be written, and
+/// events lost altogether (neither written nor kept).</param>
+/// <param name="UnsettledIntents">Intent rows without their outcome that are not running in this process — or 1 while
+/// no recovery pass has completed yet (unknown is not complete).</param>
 /// <param name="LegacyWriteFailed">A write of the older, non-gateway audit failed in the last hour.</param>
-public sealed record AuditHealth(int PendingOutcomes, int UnsettledIntents, bool LegacyWriteFailed)
+public sealed record AuditHealth(int PendingEvents, int UnsettledIntents, bool LegacyWriteFailed)
 {
-    public bool Complete => PendingOutcomes == 0 && UnsettledIntents == 0 && !LegacyWriteFailed;
+    public bool Complete => PendingEvents == 0 && UnsettledIntents == 0 && !LegacyWriteFailed;
 }
 
 /// <summary>
-/// Keeps the audit trail recoverable when its outcome write fails (R1-19). The intent row is already durable — the
-/// mutation ran — so a failed outcome write is kept in memory and written again, and after a restart the intent rows
-/// still in <c>intent</c> are settled from the operation journal (R1-18): executed or failed as the journal recorded
-/// it, <c>Unknown</c> when it was still running when Whiskers stopped, denied when it never ran. Until the trail is
-/// complete again <see cref="Health"/> says so (the <c>audit</c> readiness check reports Degraded).
+/// Keeps the audit trail recoverable when a write fails (R1-19). An outcome's intent row is already durable — the
+/// mutation ran — so a failed outcome write is kept in memory and written again; a refusal, which has no intent row,
+/// is kept in the <see cref="AuditOutbox"/> by the sink and inserted from there (idempotent by its event id). After a
+/// restart the intent rows still in <c>intent</c> are settled from the operation journal (R1-18): executed or failed
+/// as the journal recorded it, <c>Unknown</c> when it was still running when Whiskers stopped, denied when it never
+/// ran. Until the trail is complete again <see cref="Health"/> says so (the <c>audit</c> readiness check reports
+/// Degraded).
 /// </summary>
 public interface IAuditRecovery
 {
     void OutcomeNotWritten(PendingAuditOutcome outcome);
-    void RefusalNotWritten(PendingAuditRefusal refusal);
 
     /// <summary>The older audit (<c>AuditLogService</c>, written after the fact) lost a row.</summary>
     void LegacyWriteFailed();
 
     AuditHealth Health { get; }
 
-    /// <summary>One pass: writes the kept outcomes and refusals, then settles stale intent rows.</summary>
+    /// <summary>One pass: writes the kept outcomes and the outbox, then settles intent rows left without an outcome.</summary>
     Task RecoverAsync(CancellationToken ct = default);
 }
 
 /// <inheritdoc cref="IAuditRecovery"/>
 public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
 {
-    /// <summary>How long an intent may wait for its outcome before a pass looks at it: an intent row is written right
-    /// before the operation is claimed, so an intent without a journal row this old never ran.</summary>
-    internal static readonly TimeSpan IntentGrace = TimeSpan.FromMinutes(5);
+    /// <summary>How long an intent without a journal row may wait: the intent is written right before the operation
+    /// is claimed, so one without a claim this old never ran. An intent whose claim is finished, or was cut off by a
+    /// restart, is settled at once.</summary>
+    internal static readonly TimeSpan IntentGrace = TimeSpan.FromMinutes(1);
     internal static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
     private const int MaxKept = 10_000;
     private const int BatchSize = 500;
@@ -55,43 +55,40 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
     private readonly IMutationAuditSink _sink;
     private readonly IServiceScopeFactory _scopes;
     private readonly IOperationJournal? _journal;
+    private readonly AuditOutbox? _outbox;
     private readonly TimeProvider _time;
     private readonly ILogger<AuditRecovery> _logger;
     private readonly ConcurrentDictionary<long, PendingAuditOutcome> _outcomes = new();
-    private readonly ConcurrentDictionary<Guid, PendingAuditRefusal> _refusals = new();
     private readonly SemaphoreSlim _pass = new(1, 1);
-    private int _unsettled;
+    // Unknown until the first pass has looked: not complete.
+    private int _unsettled = 1;
     private int _dropped;
     private long _legacyFailedAt;   // UTC ticks; 0 = never
 
     public AuditRecovery(IMutationAuditSink sink, IServiceScopeFactory scopes, ILogger<AuditRecovery> logger,
-        IOperationJournal? journal = null, TimeProvider? time = null)
+        IOperationJournal? journal = null, TimeProvider? time = null, AuditOutbox? outbox = null)
     {
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _scopes = scopes ?? throw new ArgumentNullException(nameof(scopes));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _journal = journal;
+        _outbox = outbox;
         _time = time ?? TimeProvider.System;
     }
 
     public void OutcomeNotWritten(PendingAuditOutcome outcome)
     {
         ArgumentNullException.ThrowIfNull(outcome);
-        if (_outcomes.Count + _refusals.Count >= MaxKept) { Interlocked.Increment(ref _dropped); return; }
+        // Beyond the cap the outcome is not kept in memory; its intent row is settled from the journal instead, and
+        // until then the trail counts it as pending.
+        if (_outcomes.Count >= MaxKept) { Interlocked.Increment(ref _dropped); return; }
         _outcomes[outcome.AuditId] = outcome;
-    }
-
-    public void RefusalNotWritten(PendingAuditRefusal refusal)
-    {
-        ArgumentNullException.ThrowIfNull(refusal);
-        if (_outcomes.Count + _refusals.Count >= MaxKept) { Interlocked.Increment(ref _dropped); return; }
-        _refusals[Guid.NewGuid()] = refusal;
     }
 
     public void LegacyWriteFailed() => Interlocked.Exchange(ref _legacyFailedAt, _time.GetUtcNow().UtcTicks);
 
     public AuditHealth Health => new(
-        _outcomes.Count + _refusals.Count + Volatile.Read(ref _dropped),
+        _outcomes.Count + Volatile.Read(ref _dropped) + (_outbox?.Count ?? 0) + (_outbox?.Lost ?? 0),
         Volatile.Read(ref _unsettled),
         Interlocked.Read(ref _legacyFailedAt) is var failed and not 0
             && _time.GetUtcNow().UtcTicks - failed < TimeSpan.TicksPerHour);
@@ -135,19 +132,7 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                     _logger.LogWarning(ex, "Audit outcome of operation {OperationId} still not written", outcome.OperationId);
                 }
             }
-            foreach (var (id, refusal) in _refusals)
-            {
-                try
-                {
-                    await _sink.RecordDeniedAsync(refusal.OperationId, refusal.Request, refusal.Capability, refusal.Status,
-                        refusal.Reason, refusal.ApprovalId, ct);
-                    _refusals.TryRemove(id, out _);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-                {
-                    _logger.LogWarning(ex, "Audit refusal of operation {OperationId} still not recorded", refusal.OperationId);
-                }
-            }
+            await DrainOutboxAsync(ct);
             try
             {
                 Volatile.Write(ref _unsettled, await SettleIntentsAsync(ct));
@@ -165,8 +150,29 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
         }
     }
 
-    /// <summary>Settles intent rows older than <see cref="IntentGrace"/> from the journal; returns how many are left
-    /// that should have an outcome by now.</summary>
+    /// <summary>Inserts the refusals kept in the outbox; one already in the table (same event id) is just removed.</summary>
+    private async Task DrainOutboxAsync(CancellationToken ct)
+    {
+        if (_outbox is null) return;
+        foreach (var (path, row) in _outbox.Load())
+        {
+            if (row is null) continue;   // unreadable: stays, and counts as pending
+            try
+            {
+                row.Id = 0;
+                using var scope = _scopes.CreateScope();
+                await AuditLogMutationSink.InsertOnceAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), row, ct);
+                _outbox.Remove(path);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Audit event {EventId} from the outbox still not written", row.EventId);
+            }
+        }
+    }
+
+    /// <summary>Settles the intent rows left without an outcome from the journal; returns how many are left that are
+    /// not running in this process.</summary>
     private async Task<int> SettleIntentsAsync(CancellationToken ct)
     {
         // Without a journal nothing tells a running operation from one that was cut off: leave them.
@@ -180,7 +186,7 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
         while (true)
         {
             var rows = await db.AuditLog
-                .Where(a => a.Phase == "intent" && a.Timestamp < cutoff && a.Id > after)
+                .Where(a => a.Phase == "intent" && a.Id > after)
                 .OrderBy(a => a.Id).Take(BatchSize).ToListAsync(ct);
             if (rows.Count == 0) return left;
             after = rows[^1].Id;
@@ -188,14 +194,18 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
             var operations = await db.Operations.AsNoTracking()
                 .Where(o => o.AuditId != null && ids.Contains(o.AuditId.Value))
                 .ToDictionaryAsync(o => o.AuditId!.Value, ct);
+            var settling = 0;
             foreach (var row in rows)
             {
-                // Kept in memory with its exact outcome: written by the first half of the pass.
+                // Kept in memory with its exact outcome: written by the first half of the pass, counted as pending.
                 if (_outcomes.ContainsKey(row.Id)) continue;
                 operations.TryGetValue(row.Id, out var operation);
                 var operationId = row.OperationId ?? operation?.Id ?? "";
                 switch (operation?.State)
                 {
+                    case null or DbOperationJournal.Released when row.Timestamp >= cutoff:
+                        // Possibly between its intent and its claim right now.
+                        continue;
                     case null or DbOperationJournal.Released:
                         // Never claimed, or given back: it did not run.
                         AuditLogMutationSink.Complete(row, operationId, nameof(MutationStatus.Denied),
@@ -218,7 +228,9 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                                 : null);
                         break;
                 }
+                settling++;
             }
+            if (settling == 0) continue;
             try
             {
                 await db.SaveChangesAsync(ct);
@@ -227,9 +239,8 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
             {
                 _logger.LogWarning(ex, "Audit intents could not be settled");
                 db.ChangeTracker.Clear();
-                left += rows.Count;
+                left += settling;
             }
         }
     }
 }
-

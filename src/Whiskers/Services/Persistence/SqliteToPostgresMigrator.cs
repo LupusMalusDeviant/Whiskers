@@ -64,7 +64,7 @@ public static class SqliteToPostgresMigrator
 
     /// <summary>An <c>AuditLog</c> from before R1-19, with the typed security columns as NULL.</summary>
     internal const string AuditLogWithoutTypedFieldsSql =
-        "SELECT *, NULL AS \"OperationId\", NULL AS \"ParentOperationId\", NULL AS \"DecisionId\", NULL AS \"TriggerId\", " +
+        "SELECT *, NULL AS \"EventId\", NULL AS \"Arguments\", NULL AS \"OperationId\", NULL AS \"ParentOperationId\", NULL AS \"DecisionId\", NULL AS \"TriggerId\", " +
         "NULL AS \"Surface\", NULL AS \"PrincipalKind\", NULL AS \"PrincipalId\", NULL AS \"CredentialId\", " +
         "NULL AS \"OnBehalfOfId\", NULL AS \"ApprovalId\", NULL AS \"ApprovedBy\", NULL AS \"Phase\", NULL AS \"Outcome\", " +
         "NULL AS \"Verification\", NULL AS \"DurationMs\" FROM \"AuditLog\"";

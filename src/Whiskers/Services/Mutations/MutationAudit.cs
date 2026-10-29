@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using Whiskers.Models;
 using Whiskers.Services.Approvals;
@@ -44,11 +45,15 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     private const int MaxArgumentChars = 1500;
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
+    private readonly AuditOutbox? _outbox;
 
-    public AuditLogMutationSink(IServiceScopeFactory scopes, TimeProvider? time = null)
+    /// <param name="outbox">Where a refusal whose insert failed is kept until it is written (R1-19); the app always
+    /// registers it.</param>
+    public AuditLogMutationSink(IServiceScopeFactory scopes, TimeProvider? time = null, AuditOutbox? outbox = null)
     {
         _scopes = scopes ?? throw new ArgumentNullException(nameof(scopes));
         _time = time ?? TimeProvider.System;
+        _outbox = outbox;
     }
 
     public async Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
@@ -65,9 +70,28 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
 
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        db.AuditLog.Add(entity);
-        await db.SaveChangesAsync(ct);
-        return entity.Id;
+        return await InsertOnceAsync(db, entity, ct);
+    }
+
+    /// <summary>Inserts the event once: when the insert throws but the row is there (its commit answer was lost), that
+    /// row is the event. Returns its id.</summary>
+    internal static async Task<long> InsertOnceAsync(MetricsDbContext db, AuditLogEntity row, CancellationToken ct)
+    {
+        db.AuditLog.Add(row);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return row.Id;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            db.ChangeTracker.Clear();
+            var eventId = row.EventId;
+            if (await db.AuditLog.AsNoTracking().Where(a => a.EventId == eventId).Select(a => (long?)a.Id)
+                    .SingleOrDefaultAsync(ct) is { } id)
+                return id;
+            throw;
+        }
     }
 
     public async Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
@@ -133,16 +157,26 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         entity.DurationMs = 0;
         entity.ApprovalId = approvalId;
 
-        using var scope = _scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        db.AuditLog.Add(entity);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            await InsertOnceAsync(db, entity, ct);
+        }
+        catch (Exception) when (_outbox is not null)
+        {
+            // No intent row before a refusal: the event itself is kept (redacted, with its id and time) and inserted
+            // later (AuditRecovery). The gateway still logs the failure.
+            _outbox.TryKeep(entity);
+            throw;
+        }
     }
 
     private AuditLogEntity NewEntity(string operationId, MutationRequest request, string action, bool success,
         string details) => new()
     {
         Timestamp = _time.GetUtcNow().UtcDateTime,
+        EventId = Guid.NewGuid().ToString("N"),
         Actor = request.Principal.DisplayName,
         // "web" / "mcp" match the rows AuditLogService writes, so the audit page filters keep working.
         ActorType = request.Surface == MutationSurface.Ui ? "web" : request.Surface.ToString().ToLowerInvariant(),
@@ -162,6 +196,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         PrincipalId = request.Principal.Id,
         CredentialId = request.Principal.CredentialId,
         OnBehalfOfId = request.Principal.OnBehalfOf?.Id,
+        Arguments = Redact(JsonSerializer.Serialize(WithoutPayloads(request.Arguments))),
     };
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,

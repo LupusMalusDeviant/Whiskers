@@ -16,7 +16,7 @@ public sealed class AuditTrailCheck(IAuditRecovery recovery) : IHealthCheck
         return Task.FromResult(health.Complete
             ? HealthCheckResult.Healthy()
             : HealthCheckResult.Degraded(
-                $"Audit trail incomplete: {health.PendingOutcomes} event(s) waiting to be written, " +
+                $"Audit trail incomplete: {health.PendingEvents} event(s) waiting to be written or lost, " +
                 $"{health.UnsettledIntents} intent(s) unsettled, older audit write failed: {health.LegacyWriteFailed}."));
     }
 }

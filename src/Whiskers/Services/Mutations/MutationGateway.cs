@@ -732,11 +732,10 @@ public sealed class MutationGateway : IMutationGateway
         }
         catch (Exception ex)
         {
-            // The mutation is refused either way; losing the refusal record must not turn it into an error. It is kept
-            // and recorded again (R1-19).
+            // The mutation is refused either way; losing the refusal record must not turn it into an error. The sink
+            // keeps the event in its outbox and AuditRecovery inserts it later (R1-19).
             _logger.LogError(ex, "Audit record for refused {Capability} (operation {OperationId}) could not be written",
                 request.CapabilityId, operationId);
-            _recovery?.RefusalNotWritten(new PendingAuditRefusal(operationId, request, capability, status, reason, approvalId));
         }
         return new MutationOutcome<T>(operationId, status, default, reason, VerificationStatus.NotRun, ApprovalId: approvalId)
         {

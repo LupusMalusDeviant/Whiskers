@@ -1,34 +1,51 @@
+using System.Data.Common;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.HealthChecks;
 using Whiskers.Models;
-using Whiskers.Services.Approvals;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Tests;
 
 /// <summary>
-/// R1-19 (INV-48): no mutation runs and no configuration is published without a durable audit intent; an outcome that
-/// cannot be written leaves a recoverable incomplete event — kept, written again, settled from the operation journal
-/// after a restart — and the <c>audit</c> health check is Degraded until it is complete.
+/// R1-19 (INV-48): no mutation runs and no configuration is published without a durable audit intent; an event that
+/// cannot be written stays recoverable — an outcome is kept and written again, a refusal is kept in the outbox, intents
+/// left by a restart are settled from the operation journal — and the <c>audit</c> health check is Degraded until the
+/// trail is complete, also right after a restart.
 /// </summary>
 public sealed class AuditFailClosedTests : IDisposable
 {
     private static readonly MutationPrincipal Admin =
         new(MutationPrincipalKind.Human, "user:admin@example.com", "admin@example.com", McpPermissionLevels.Admin);
 
-    private readonly ApprovalDatabase _db = new();
+    private readonly string _root = Path.Combine(Path.GetTempPath(), $"sw-audit-{Guid.NewGuid():N}");
+    private readonly AuditWrites _writes = new();
+    private readonly ServiceProvider _sp;
+    private readonly IServiceScopeFactory _scopes;
+    private readonly AuditOutbox _outbox;
     private readonly AgentToolTestHelpers.FixedGuardrailStore _store;
-    private readonly string _settings = Path.Combine(Path.GetTempPath(), $"sw-audit-settings-{Guid.NewGuid():N}.json");
     private readonly ShiftedClock _time = new();
     private int _runs;
 
     public AuditFailClosedTests()
     {
+        Directory.CreateDirectory(_root);
+        var services = new ServiceCollection();
+        services.AddDbContext<MetricsDbContext>(o => o
+            .UseSqlite($"Data Source={Path.Combine(_root, "metrics.db")};Pooling=False")
+            .AddInterceptors(_writes));
+        _sp = services.BuildServiceProvider();
+        _scopes = _sp.GetRequiredService<IServiceScopeFactory>();
+        using (var scope = _scopes.CreateScope())
+            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
+        _outbox = new AuditOutbox(new DataPathOptions(_root));
+
         var policy = GuardrailPolicy.SafeDefault();
         policy.ProtectedResources = [];
         policy.ForbiddenArgPatterns = [];
@@ -39,15 +56,50 @@ public sealed class AuditFailClosedTests : IDisposable
 
     public void Dispose()
     {
-        _db.Dispose();
-        File.Delete(_settings);
+        _sp.Dispose();
+        try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
     }
 
-    private MutationGateway Gateway(IMutationAuditSink? sink = null, IAuditRecovery? recovery = null,
-        IOperationJournal? journal = null) =>
-        new(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store), sink ?? new AuditLogMutationSink(_db.Scopes), [],
-            NullLogger<MutationGateway>.Instance, decisions: new DbPolicyDecisionStore(_db.Scopes),
-            journal: journal ?? new DbOperationJournal(_db.Scopes), recovery: recovery);
+    /// <summary>Makes the audit's own writes fail: before the database has them, or after it committed them (the
+    /// answer is lost). Other tables are written normally.</summary>
+    private sealed class AuditWrites : SaveChangesInterceptor
+    {
+        public bool FailBefore { get; set; }
+        public bool FailAfter { get; set; }
+
+        private static bool Audit(DbContext? db) =>
+            db?.ChangeTracker.Entries<AuditLogEntity>().Any(e => e.State is EntityState.Added or EntityState.Modified) == true;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default) =>
+            FailBefore && Audit(eventData.Context)
+                ? throw new InvalidOperationException("database is locked")
+                : base.SavingChangesAsync(eventData, result, cancellationToken);
+
+        public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result,
+            CancellationToken cancellationToken = default) =>
+            FailAfter && eventData.Context?.ChangeTracker.Entries<AuditLogEntity>().Any() == true
+                ? throw new InvalidOperationException("connection reset after commit")
+                : base.SavedChangesAsync(eventData, result, cancellationToken);
+    }
+
+    /// <summary>The system clock, moved forward by the test.</summary>
+    private sealed class ShiftedClock : TimeProvider
+    {
+        private TimeSpan _shift;
+        public void Advance(TimeSpan by) => _shift += by;
+        public override DateTimeOffset GetUtcNow() => base.GetUtcNow() + _shift;
+    }
+
+    private AuditLogMutationSink Sink() => new(_scopes, outbox: _outbox);
+
+    private MutationGateway Gateway(IAuditRecovery? recovery = null, IOperationJournal? journal = null) =>
+        new(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store), Sink(), [],
+            NullLogger<MutationGateway>.Instance, decisions: new DbPolicyDecisionStore(_scopes),
+            journal: journal ?? new DbOperationJournal(_scopes), recovery: recovery);
+
+    private AuditRecovery Recovery(IOperationJournal? journal = null) =>
+        new(Sink(), _scopes, NullLogger<AuditRecovery>.Instance, journal ?? new DbOperationJournal(_scopes), _time, _outbox);
 
     private static Dictionary<string, JsonElement> Args(object value) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(value))!;
@@ -62,19 +114,18 @@ public sealed class AuditFailClosedTests : IDisposable
 
     private async Task Sql(string sql)
     {
-        using var scope = _db.Scopes.CreateScope();
+        using var scope = _scopes.CreateScope();
         await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.ExecuteSqlRawAsync(sql);
     }
 
     private async Task<List<AuditLogEntity>> Events()
     {
-        using var scope = _db.Scopes.CreateScope();
+        using var scope = _scopes.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().ToListAsync();
     }
 
-    private AuditRecovery Recovery(IMutationAuditSink? sink = null, IOperationJournal? journal = null) =>
-        new(sink ?? new AuditLogMutationSink(_db.Scopes), _db.Scopes, NullLogger<AuditRecovery>.Instance,
-            journal ?? new DbOperationJournal(_db.Scopes), _time);
+    private static async Task<HealthStatus> Status(IAuditRecovery recovery) =>
+        (await new AuditTrailCheck(recovery).CheckHealthAsync(new())).Status;
 
     // ---------------------------------------------------------------- no intent, no mutation
 
@@ -87,16 +138,28 @@ public sealed class AuditFailClosedTests : IDisposable
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Equal(0, _runs);
-        using var scope = _db.Scopes.CreateScope();
+        using var scope = _scopes.CreateScope();
         // Nothing claimed either: the operation never started.
         Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Operations.AnyAsync());
+    }
+
+    [Fact]
+    public async Task No_execution_when_the_intent_insert_fails()
+    {
+        _writes.FailBefore = true;
+
+        var outcome = await Gateway().ExecuteAsync(Restart("op-1"), (_, _) => Task.FromResult(Interlocked.Increment(ref _runs)));
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(0, _runs);
     }
 
     [Fact]
     public async Task No_configuration_is_published_without_a_durable_intent()
     {
         await Sql("DROP TABLE \"AuditLog\"");
-        var store = new AppSettingsStore(_settings);
+        var settings = Path.Combine(_root, "app-settings.json");
+        var store = new AppSettingsStore(settings);
 
         var outcome = await Gateway().ExecuteAsync(SaveSettings("op-cfg"), async (_, _) =>
         {
@@ -105,13 +168,14 @@ public sealed class AuditFailClosedTests : IDisposable
         });
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
-        Assert.False(File.Exists(_settings));
+        Assert.False(File.Exists(settings));
     }
 
     [Fact]
     public async Task A_configuration_is_published_once_its_intent_is_on_record()
     {
-        var store = new AppSettingsStore(_settings);
+        var settings = Path.Combine(_root, "app-settings.json");
+        var store = new AppSettingsStore(settings);
 
         var outcome = await Gateway().ExecuteAsync(SaveSettings("op-cfg"), async (_, _) =>
         {
@@ -120,160 +184,173 @@ public sealed class AuditFailClosedTests : IDisposable
         });
 
         Assert.Equal(MutationStatus.Executed, outcome.Status);
-        Assert.True(File.Exists(_settings));
+        Assert.True(File.Exists(settings));
         Assert.Equal("Executed", Assert.Single(await Events()).Outcome);
     }
 
-    // ---------------------------------------------------------------- an outcome that cannot be written
-
-    /// <summary>The real sink, whose outcome write fails while <see cref="Broken"/>.</summary>
-    private sealed class FlakySink(IMutationAuditSink inner) : IMutationAuditSink
-    {
-        public bool Broken { get; set; }
-
-        public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
-            ApprovalGateResult? approval, CancellationToken ct) => inner.BeginAsync(operationId, request, capability, approval, ct);
-
-        public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
-            string? reason, TimeSpan duration, CancellationToken ct) =>
-            Broken
-                ? throw new InvalidOperationException("database is locked")
-                : inner.CompleteAsync(auditId, operationId, status, verification, reason, duration, ct);
-
-        public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
-            MutationStatus status, string reason, CancellationToken ct) =>
-            RecordDeniedAsync(operationId, request, capability, status, reason, null, ct);
-
-        public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
-            MutationStatus status, string reason, string? approvalId, CancellationToken ct) =>
-            Broken
-                ? throw new InvalidOperationException("database is locked")
-                : inner.RecordDeniedAsync(operationId, request, capability, status, reason, approvalId, ct);
-    }
+    // ---------------------------------------------------------------- an event that cannot be written
 
     [Fact]
     public async Task A_failed_outcome_write_leaves_a_visible_incomplete_event_that_is_written_again()
     {
-        var sink = new FlakySink(new AuditLogMutationSink(_db.Scopes)) { Broken = true };
-        var recovery = Recovery(sink);
-        var check = new AuditTrailCheck(recovery);
+        var recovery = Recovery();
+        await recovery.RecoverAsync();
+        Assert.Equal(HealthStatus.Healthy, await Status(recovery));
 
-        var outcome = await Gateway(sink, recovery).ExecuteAsync(Restart("op-2"), (_, _) => Task.FromResult(1));
+        // The intent is written; then the database fails.
+        var outcome = await Gateway(recovery).ExecuteAsync(Restart("op-2"), (_, _) =>
+        {
+            _writes.FailBefore = true;
+            return Task.FromResult(1);
+        });
 
-        // The mutation ran and the caller is told so; its event is still the intent, and the trail says it is incomplete.
+        // The mutation ran and the caller is told so; its event is still the intent, and the trail is incomplete.
         Assert.Equal(MutationStatus.Executed, outcome.Status);
         Assert.Equal("intent", Assert.Single(await Events()).Phase);
-        Assert.False(recovery.Health.Complete);
-        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded,
-            (await check.CheckHealthAsync(new())).Status);
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
 
         // Still broken: kept.
         await recovery.RecoverAsync();
-        Assert.Equal(1, recovery.Health.PendingOutcomes);
+        Assert.Equal(1, recovery.Health.PendingEvents);
 
-        sink.Broken = false;
+        _writes.FailBefore = false;
         await recovery.RecoverAsync();
         var row = Assert.Single(await Events());
         Assert.Equal("outcome", row.Phase);
         Assert.Equal("Executed", row.Outcome);
-        Assert.True(recovery.Health.Complete);
-        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy,
-            (await check.CheckHealthAsync(new())).Status);
+        Assert.Equal(HealthStatus.Healthy, await Status(recovery));
     }
 
     [Fact]
-    public async Task A_refusal_that_could_not_be_recorded_is_recorded_again()
+    public async Task A_refusal_that_could_not_be_recorded_is_kept_in_the_outbox_and_survives_a_restart()
     {
-        var sink = new FlakySink(new AuditLogMutationSink(_db.Scopes)) { Broken = true };
-        var recovery = Recovery(sink);
+        _writes.FailBefore = true;
 
-        var outcome = await Gateway(sink, recovery).ExecuteAsync(Restart("op-3") with { CapabilityId = "no.such" },
+        var outcome = await Gateway().ExecuteAsync(Restart("op-3") with { CapabilityId = "no.such" },
             (_, _) => Task.FromResult(1));
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(await Events());
-        Assert.False(recovery.Health.Complete);
+        Assert.Equal(1, _outbox.Count);
 
-        sink.Broken = false;
+        // A new process: nothing in memory, the outbox is still there.
+        var recovery = Recovery();
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
         await recovery.RecoverAsync();
-        Assert.Equal("Denied", Assert.Single(await Events()).Outcome);
+        Assert.Equal(1, recovery.Health.PendingEvents);
+
+        _writes.FailBefore = false;
+        await recovery.RecoverAsync();
+        var row = Assert.Single(await Events());
+        Assert.Equal("Denied", row.Outcome);
+        Assert.Equal("op-3", row.OperationId);
+        Assert.Equal(0, _outbox.Count);
+        Assert.Equal(HealthStatus.Healthy, await Status(recovery));
+    }
+
+    [Fact]
+    public async Task A_refusal_whose_commit_answer_was_lost_is_one_event()
+    {
+        _writes.FailAfter = true;
+
+        await Gateway().ExecuteAsync(Restart("op-4") with { CapabilityId = "no.such" }, (_, _) => Task.FromResult(1));
+
+        _writes.FailAfter = false;
+        Assert.Single(await Events());
+        Assert.Equal(0, _outbox.Count);
+    }
+
+    [Fact]
+    public async Task An_outbox_event_already_in_the_table_is_not_inserted_twice()
+    {
+        await Gateway().ExecuteAsync(Restart("op-5") with { CapabilityId = "no.such" }, (_, _) => Task.FromResult(1));
+        // The same event also in the outbox (its insert committed, but the sink could not tell).
+        Assert.True(_outbox.TryKeep(Assert.Single(await Events())));
+
+        var recovery = Recovery();
+        await recovery.RecoverAsync();
+
+        Assert.Single(await Events());
+        Assert.Equal(0, _outbox.Count);
         Assert.True(recovery.Health.Complete);
     }
 
     [Fact]
-    public async Task After_a_restart_stale_intents_are_settled_from_the_operation_journal()
+    public async Task After_a_restart_intents_are_settled_from_the_operation_journal_and_shown_until_then()
     {
         // Three operations of a process that stopped before their outcomes were written: one finished, one was cut
         // off while it ran, one never got its claim.
-        var before = new DbOperationJournal(_db.Scopes);
-        var sink = new FlakySink(new AuditLogMutationSink(_db.Scopes)) { Broken = true };
-        var gateway = Gateway(sink, journal: before);
-        await gateway.ExecuteAsync(Restart("op-done"), (_, _) => Task.FromResult(1));
+        var gateway = Gateway(journal: new DbOperationJournal(_scopes));
+        await gateway.ExecuteAsync(Restart("op-done"), (_, _) =>
+        {
+            _writes.FailBefore = true;
+            return Task.FromResult(1);
+        });
+        _writes.FailBefore = false;
         var running = new TaskCompletionSource<int>();
         _ = gateway.ExecuteAsync(Restart("op-cut"), (_, _) => running.Task);
         await Task.Delay(300);
-        using (var scope = _db.Scopes.CreateScope())
+        using (var scope = _scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             db.AuditLog.Add(new AuditLogEntity
             {
-                Action = "container.restart", Phase = "intent", OperationId = "op-never", Timestamp = _time.GetUtcNow().UtcDateTime,
-                Details = "{}",
+                Action = "container.restart", Phase = "intent", OperationId = "op-never", EventId = "e-never",
+                Timestamp = _time.GetUtcNow().UtcDateTime, Details = "{}",
             });
             await db.SaveChangesAsync();
         }
         Assert.Equal(3, (await Events()).Count(e => e.Phase == "intent"));
 
-        // The next process: a new journal instance, memory lost. Too early: a recent intent may still be running.
-        var recovery = Recovery(journal: new DbOperationJournal(_db.Scopes));
-        await recovery.RecoverAsync();
-        Assert.Equal(3, (await Events()).Count(e => e.Phase == "intent"));
+        // The next process: a new journal instance, memory lost. Not complete before it has looked.
+        var recovery = Recovery(new DbOperationJournal(_scopes));
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
 
-        _time.Advance(AuditRecovery.IntentGrace + TimeSpan.FromMinutes(1));
+        // The finished and the cut-off operation are settled at once; the one without a claim may still be between
+        // its intent and its claim, so it waits.
         await recovery.RecoverAsync();
         var events = (await Events()).ToDictionary(e => e.OperationId!);
         Assert.Equal("Executed", events["op-done"].Outcome);
         Assert.Equal("Unknown", events["op-cut"].Outcome);
+        Assert.Equal("intent", events["op-never"].Phase);
+
+        _time.Advance(AuditRecovery.IntentGrace + TimeSpan.FromMinutes(1));
+        await recovery.RecoverAsync();
+        events = (await Events()).ToDictionary(e => e.OperationId!);
         Assert.Equal("Denied", events["op-never"].Outcome);
         Assert.All(events.Values, e => Assert.Equal("outcome", e.Phase));
-        Assert.True(recovery.Health.Complete);
+        Assert.Equal(HealthStatus.Healthy, await Status(recovery));
         running.SetResult(1);
     }
 
     [Fact]
     public async Task An_intent_running_in_this_process_is_left_alone()
     {
-        var journal = new DbOperationJournal(_db.Scopes);
-        var recovery = Recovery(journal: journal);
+        var journal = new DbOperationJournal(_scopes);
+        var recovery = Recovery(journal);
         var running = new TaskCompletionSource<int>();
-        var run = Gateway(recovery: recovery, journal: journal).ExecuteAsync(Restart("op-live"), (_, _) => running.Task);
+        var run = Gateway(recovery, journal).ExecuteAsync(Restart("op-live"), (_, _) => running.Task);
         await Task.Delay(300);
 
         _time.Advance(AuditRecovery.IntentGrace + TimeSpan.FromMinutes(1));
         await recovery.RecoverAsync();
         Assert.Equal("intent", Assert.Single(await Events()).Phase);
+        Assert.True(recovery.Health.Complete);
 
         running.SetResult(1);
         await run;
         Assert.Equal("Executed", Assert.Single(await Events()).Outcome);
     }
 
-    /// <summary>The system clock, moved forward by the test.</summary>
-    private sealed class ShiftedClock : TimeProvider
-    {
-        private TimeSpan _shift;
-        public void Advance(TimeSpan by) => _shift += by;
-        public override DateTimeOffset GetUtcNow() => base.GetUtcNow() + _shift;
-    }
-
     [Fact]
-    public void A_lost_row_of_the_older_audit_shows_in_the_health_check()
+    public async Task A_lost_row_of_the_older_audit_shows_in_the_health_check()
     {
         var recovery = Recovery();
+        await recovery.RecoverAsync();
         Assert.True(recovery.Health.Complete);
 
         recovery.LegacyWriteFailed();
-        Assert.True(recovery.Health.LegacyWriteFailed);
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
 
         _time.Advance(TimeSpan.FromHours(1) + TimeSpan.FromMinutes(1));
         Assert.True(recovery.Health.Complete);

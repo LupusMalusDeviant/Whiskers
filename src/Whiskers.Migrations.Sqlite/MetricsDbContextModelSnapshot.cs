@@ -210,6 +210,9 @@ namespace Whiskers.Migrations
                     b.Property<string>("ApprovedBy")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Arguments")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CredentialId")
                         .HasColumnType("TEXT");
 
@@ -221,6 +224,9 @@ namespace Whiskers.Migrations
 
                     b.Property<long?>("DurationMs")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("EventId")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("OnBehalfOfId")
                         .HasColumnType("TEXT");
@@ -276,6 +282,9 @@ namespace Whiskers.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Actor");
+
+                    b.HasIndex("EventId")
+                        .IsUnique();
 
                     b.HasIndex("OperationId");
 

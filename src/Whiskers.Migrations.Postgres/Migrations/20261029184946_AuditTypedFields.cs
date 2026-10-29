@@ -23,6 +23,12 @@ namespace Whiskers.Migrations.Postgres.Migrations
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
+                name: "Arguments",
+                table: "AuditLog",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
                 name: "CredentialId",
                 table: "AuditLog",
                 type: "text",
@@ -38,6 +44,12 @@ namespace Whiskers.Migrations.Postgres.Migrations
                 name: "DurationMs",
                 table: "AuditLog",
                 type: "bigint",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "EventId",
+                table: "AuditLog",
+                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
@@ -101,6 +113,12 @@ namespace Whiskers.Migrations.Postgres.Migrations
                 nullable: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_AuditLog_EventId",
+                table: "AuditLog",
+                column: "EventId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_AuditLog_OperationId",
                 table: "AuditLog",
                 column: "OperationId");
@@ -114,6 +132,10 @@ namespace Whiskers.Migrations.Postgres.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropIndex(
+                name: "IX_AuditLog_EventId",
+                table: "AuditLog");
+
             migrationBuilder.DropIndex(
                 name: "IX_AuditLog_OperationId",
                 table: "AuditLog");
@@ -131,6 +153,10 @@ namespace Whiskers.Migrations.Postgres.Migrations
                 table: "AuditLog");
 
             migrationBuilder.DropColumn(
+                name: "Arguments",
+                table: "AuditLog");
+
+            migrationBuilder.DropColumn(
                 name: "CredentialId",
                 table: "AuditLog");
 
@@ -140,6 +166,10 @@ namespace Whiskers.Migrations.Postgres.Migrations
 
             migrationBuilder.DropColumn(
                 name: "DurationMs",
+                table: "AuditLog");
+
+            migrationBuilder.DropColumn(
+                name: "EventId",
                 table: "AuditLog");
 
             migrationBuilder.DropColumn(

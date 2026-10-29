@@ -135,6 +135,7 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => x.Actor);
             // R1-19: an operation's event, and the intents still waiting for their outcome.
             e.HasIndex(x => x.OperationId);
+            e.HasIndex(x => x.EventId).IsUnique();
             e.HasIndex(x => new { x.Phase, x.Timestamp });
         });
 

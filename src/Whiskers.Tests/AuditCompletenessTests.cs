@@ -80,14 +80,19 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.Equal(surface, row.Surface);
         Assert.Equal(principal.Kind.ToString(), row.PrincipalKind);
         Assert.Equal(principal.Id, row.PrincipalId);
+        Assert.Equal(principal.CredentialId, row.CredentialId);
+        Assert.Equal(principal.OnBehalfOf?.Id, row.OnBehalfOfId);
+        Assert.NotNull(row.EventId);
         Assert.Equal("container", row.TargetType);
         Assert.Equal("web", row.TargetId);
         Assert.Equal("local", row.ServerId);
         Assert.NotNull(row.Verification);
         Assert.NotNull(row.DurationMs);
-        // The redacted arguments, in a document that is valid JSON.
+        // The redacted arguments, complete, in a column of their own; the details stay valid JSON.
+        using var arguments = JsonDocument.Parse(row.Arguments!);
+        Assert.Equal("web", arguments.RootElement.GetProperty("containerId").GetString());
+        Assert.Equal("local", arguments.RootElement.GetProperty("serverId").GetString());
         using var details = JsonDocument.Parse(row.Details!);
-        Assert.Contains("containerId", row.Details);
     }
 
     [Fact]
@@ -180,25 +185,36 @@ public sealed class AuditCompletenessTests : IDisposable
     [Fact]
     public async Task Required_fields_survive_when_the_details_are_shortened()
     {
-        // A huge failure text and a huge argument: the details are cut to their cap, the security fields are not.
-        var principal = Admin with { CredentialId = "key-" + new string('k', 40) };
+        // A long argument before the others and a long failure text — plain words, which no redaction rule shortens:
+        // the details are cut to their cap, the security fields and the arguments are not.
+        var principal = Admin with { CredentialId = "key-reporting" };
+        var note = string.Concat(Enumerable.Repeat("please restart the web container after the deploy ", 400));
         var request = Restart("op-big", principal: principal) with
         {
-            Arguments = Args(new { containerId = "web", serverId = "local", note = new string('x', 50_000) }),
+            Arguments = Args(new { aNote = note, containerId = "web", serverId = "local", command = "secret-cmd --password hunter2" }),
         };
 
         var outcome = await Gateway().ExecuteAsync<int>(request,
-            (_, _) => throw new InvalidOperationException(new string('e', 50_000)));
+            (_, _) => throw new InvalidOperationException(string.Concat(Enumerable.Repeat("the daemon did not answer ", 2000))));
 
         var row = await EventOf("op-big");
         Assert.True(row.Details!.Length <= 4000);
         using var details = JsonDocument.Parse(row.Details);
+        Assert.DoesNotContain("containerId", row.Details[^200..]);   // the details really were shortened
         Assert.Equal("Failed", row.Outcome);
         Assert.Equal(outcome.DecisionId, row.DecisionId);
+        Assert.NotNull(row.DecisionId);
         Assert.Equal(principal.Id, row.PrincipalId);
-        Assert.Equal(principal.CredentialId, row.CredentialId);
+        Assert.Equal("key-reporting", row.CredentialId);
         Assert.Equal("Ui", row.Surface);
         Assert.Equal("NotRun", row.Verification);
         Assert.NotNull(row.DurationMs);
+        using var arguments = JsonDocument.Parse(row.Arguments!);
+        Assert.Equal(note, arguments.RootElement.GetProperty("aNote").GetString());
+        Assert.Equal("web", arguments.RootElement.GetProperty("containerId").GetString());
+        Assert.Equal("local", arguments.RootElement.GetProperty("serverId").GetString());
+        // A payload keeps only its length, in the column as in the details.
+        Assert.DoesNotContain("hunter2", row.Arguments);
+        Assert.DoesNotContain("hunter2", row.Details);
     }
 }

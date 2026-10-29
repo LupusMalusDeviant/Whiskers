@@ -22,7 +22,7 @@ descriptions or exceptions, so nothing internal leaks. Note `/health` (no `z`) i
 |---|---|
 | `DbReadyCheck.cs` | Readiness: `MetricsDbContext.Database.CanConnectAsync` (a fresh context is resolved per probe through a scope). Tag `ready`. |
 | `ServerConfigReadyCheck.cs` | Readiness: `IServerConfigService.IsInitialized` — the fleet registry finished loading at startup. Tag `ready`. |
-| `AuditTrailCheck.cs` | Readiness (R1-19): `Degraded` while the audit trail is incomplete — an outcome or refusal still waits to be written, an intent could not be settled, or `AuditLogService` lost a row in the last hour ([`IAuditRecovery`](../Services/Mutations/AuditRecovery.cs)). Never `Unhealthy`: a mutation still runs only once its intent is on record. Tag `ready`. |
+| `AuditTrailCheck.cs` | Readiness (R1-19): `Degraded` while the audit trail is incomplete — an outcome or a refusal (outbox) still waits to be written or was lost, an intent is unsettled (or not checked yet since the start), or `AuditLogService` lost a row in the last hour ([`IAuditRecovery`](../Services/Mutations/AuditRecovery.cs)). Never `Unhealthy`: a mutation still runs only once its intent is on record. Tag `ready`. |
 | `MaintenanceReadyCheck.cs` | Readiness: `Unhealthy` while [`IMaintenanceStateService`](../Services/Maintenance/) is in maintenance (an F3 self-restore is staged and the process is about to restart), so load balancers drain. Tag `ready`. Deliberately readiness-only: `/healthz` is what the container `HEALTHCHECK` probes, so entering maintenance must never make Docker kill the app mid-restore. |
 
 To add a readiness check: implement `IHealthCheck` and register it in

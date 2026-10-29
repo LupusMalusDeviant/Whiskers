@@ -17,6 +17,9 @@ public class AuditLogEntity
     // R1-19 (INV-45): the security fields of a gateway event, as columns of their own — never shortened with
     // Details, which is capped. Null on rows written outside the gateway (and before R1-19).
 
+    /// <summary>This event's own id (unique): a retried insert of the same event — a lost commit answer, the
+    /// outbox — never makes a second row.</summary>
+    public string? EventId { get; set; }
     /// <summary>The operation this event is about (R1-18).</summary>
     public string? OperationId { get; set; }
     /// <summary>The operation it ran inside, if nested.</summary>
@@ -43,4 +46,6 @@ public class AuditLogEntity
     public string? Outcome { get; set; }
     public string? Verification { get; set; }
     public long? DurationMs { get; set; }
+    /// <summary>The redacted arguments in full (payload values withheld, only their length kept) — not shortened.</summary>
+    public string? Arguments { get; set; }
 }

@@ -219,6 +219,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.Property<string>("ApprovedBy")
                         .HasColumnType("text");
 
+                    b.Property<string>("Arguments")
+                        .HasColumnType("text");
+
                     b.Property<string>("CredentialId")
                         .HasColumnType("text");
 
@@ -230,6 +233,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
 
                     b.Property<long?>("DurationMs")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("EventId")
+                        .HasColumnType("text");
 
                     b.Property<string>("OnBehalfOfId")
                         .HasColumnType("text");
@@ -285,6 +291,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Actor");
+
+                    b.HasIndex("EventId")
+                        .IsUnique();
 
                     b.HasIndex("OperationId");
 
