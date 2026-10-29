@@ -36,12 +36,13 @@ public static class SqliteToPostgresMigrator
             (src, dst, ct) => CopyAsync(set(src), dst, resetId, ct));
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
-    /// exactly one of these sets — the tables of every release after its own (R1-14: the approvals; R1-12: the
+    /// exactly one of these sets — the tables of every release after its own (R1-18: the operations; R1-14: the approvals; R1-12: the
     /// decision tables).</summary>
     internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
     [
-        new(StringComparer.Ordinal) { "Approvals" },
-        new(StringComparer.Ordinal) { "Approvals", "PolicyDecisions", "PolicySnapshots" },
+        new(StringComparer.Ordinal) { "Operations" },
+        new(StringComparer.Ordinal) { "Operations", "Approvals" },
+        new(StringComparer.Ordinal) { "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots" },
     ];
 
     /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
@@ -81,6 +82,8 @@ public static class SqliteToPostgresMigrator
         T("PolicyDecisions",   c => c.PolicyDecisions,   _ => { }),
         // R1-14: approvals keep their ids — audit rows and decisions name them.
         T("Approvals",         c => c.Approvals,         _ => { }),
+        // R1-18: execution claims keep their operation ids — audit rows, decisions and approvals name them.
+        T("Operations",        c => c.Operations,        _ => { }),
     ];
 
     /// <summary>CLI entry point: builds the SQLite source + PostgreSQL target contexts, migrates the target
@@ -162,7 +165,7 @@ public static class SqliteToPostgresMigrator
 
         // The source schema is checked before anything is copied: a missing table would otherwise fail half-way,
         // after earlier tables committed. Only a known older release may lack tables, and only all of a release's
-        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals); anything else is not a Whiskers
+        // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations); anything else is not a Whiskers
         // database this tool understands (a wrong path, a damaged file).
         var missing = new HashSet<string>(StringComparer.Ordinal);
         foreach (var table in MetricsTables)

@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-18: **One operation id runs at most once.** Every mutation claims its operation id in the new `Operations` table
+  (paired SQLite/PostgreSQL migrations, copied by the SQLite → PostgreSQL migrator) right before it runs, and the claim
+  records how it ended. A retry under the same id — concurrent, after it ran (also after it failed), or after a
+  restart cut it off — does not run again: an operation that was running when Whiskers stopped stays "outcome
+  unknown" and is never replayed blindly; the same id used for another principal, capability or arguments is
+  refused. A call waiting for its approval claims nothing, so the approved retry runs once. Decision, approval,
+  execution, verification and audit carry the same id; a mutation nested in another one's execution gets an id of
+  its own and keeps the link (`parentOperationId` in the audit row, `ParentId` in the journal). A journal that cannot
+  be written refuses the mutation. **Upgrade notes:** a new table, created on start; nothing to migrate by hand.
 - R1-17: **Web-terminal sessions go through the Mutation Gateway and are audited.** Opening a shell in a container
   (`terminal.container_open`) or on a host (`terminal.host_open`) is an Admin, root-equivalent capability decided like
   every other mutation: the kill switch opens nothing, a shell in Whiskers' own control plane needs an explicit Admin

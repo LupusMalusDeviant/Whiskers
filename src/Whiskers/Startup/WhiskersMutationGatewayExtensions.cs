@@ -69,6 +69,8 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IPolicyDecisionStore, DbPolicyDecisionStore>();
         services.AddSingleton<IMutationScopeMonitor, MutationScopeMonitor>();
         services.AddSingleton<IEffectiveRequirementResolver, SchedulerRequirementResolver>();
+        // INV-39 (R1-18): every execution claims its operation id first; the same id never runs twice.
+        services.AddSingleton<IOperationJournal, DbOperationJournal>();
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.
         services.AddScoped<IUiMutationRunner, UiMutationRunner>();

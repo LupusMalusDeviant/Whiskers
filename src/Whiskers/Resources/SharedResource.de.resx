@@ -4949,4 +4949,19 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_RequireSecondApprover_Helper" xml:space="preserve">
     <value>Niemand gibt eigene Anfragen frei oder lehnt sie ab, auch nicht im Agent-Chat. Bei einer Installation mit nur einem Admin ausgeschaltet lassen. Anfragen von MCP-Clients, KI-Triggern und geplanten Aufgaben entscheidet ohnehin nie die anfragende Stelle.</value>
   </data>
+  <data name="Mutation_Refused_OperationAlreadyRun" xml:space="preserve">
+    <value>Vorgang {0} wurde schon ausgeführt; er läuft nicht noch einmal.</value>
+  </data>
+  <data name="Mutation_Refused_OperationRunning" xml:space="preserve">
+    <value>Vorgang {0} läuft bereits; er läuft nicht doppelt.</value>
+  </data>
+  <data name="Mutation_Refused_OperationOutcomeUnknown" xml:space="preserve">
+    <value>Vorgang {0} lief, als Whiskers anhielt; ob er gewirkt hat, ist unbekannt. Prüfe das Ziel und starte ihn dann neu.</value>
+  </data>
+  <data name="Mutation_Refused_OperationIdReused" xml:space="preserve">
+    <value>Die Vorgangs-ID {0} wurde schon für einen anderen Aufruf verwendet; es wurde nichts geändert.</value>
+  </data>
+  <data name="Mutation_Refused_OperationNotRegistered" xml:space="preserve">
+    <value>Der Vorgang konnte nicht registriert werden; es wurde nichts geändert.</value>
+  </data>
 </root>

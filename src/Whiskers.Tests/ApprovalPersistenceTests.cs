@@ -46,6 +46,9 @@ public sealed class ApprovalDatabase : IDisposable
 
     public IApprovalPersistence Persistence() => new DbApprovalPersistence(_sp.GetRequiredService<IServiceScopeFactory>());
 
+    /// <summary>Scopes over this database, for the other stores that share it (R1-18: the operation journal).</summary>
+    public IServiceScopeFactory Scopes => _sp.GetRequiredService<IServiceScopeFactory>();
+
     public async Task<ApprovalRecordEntity?> RowAsync(string id)
     {
         using var scope = _sp.CreateScope();

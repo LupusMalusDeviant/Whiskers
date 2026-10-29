@@ -128,6 +128,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `PolicyDecisions.cs` | R1-12 (INV-22/23): `PolicySnapshot` (preset + the exact policy in canonical JSON + its SHA-256 = the policy version), `PolicyCanonicalJson` (keys sorted at every level; `InputHash` of a call's arguments), `EffectivePolicy` (live active preset, or a pinned preset with the global kill switch; a fail-closed store → fail-closed), `PolicyDecisionRecord`, `IPolicyDecisionStore` + `DbPolicyDecisionStore` (decision and, once per version, its snapshot in one save; versions are never rewritten). `PinnedPolicy` itself lives with `AgentContext` in `Models/Agent`. |
 | `MutationAudit.cs` | `IMutationAuditSink` + `AuditLogMutationSink`: writes the intent (with the approval id and approver) before execution and turns the same `AuditLog` row into the outcome. Unlike `AuditLogService`, it throws on a failed write. |
 | `TriggerAuthority.cs` | R1-13: `ITriggerAuthority` (the gateway's per-mutation question "may this AI trigger do this now?", implemented by the Agent module's `AiTriggerAuthority`) and `TriggerAuthority` (`TriggerOf(principal)`, `GlobMatch`). |
+| `OperationJournal.cs` | R1-18 (INV-39): `IOperationJournal` + `DbOperationJournal` (table `Operations`). `ClaimAsync` claims an operation id before it runs — `Claimed`, or `AlreadyRunning` (this process runs it now), `AlreadyRun` (executed or failed), `OutcomeUnknown` (a `Running` row of another process: a restart cut it off; never replayed), `Mismatch` (the id with other inputs: `InputHashOf` = principal, capability and arguments without the gateway's `__…` keys). A claim token (process + claim) lets a retried insert recognise its own row. `FinishAsync` records `Executed` / `Failed` and the verification; `ReleaseAsync` gives a claim back when the call is refused after it (nothing ran) — exactly one later claimer can take it. Rows are never deleted. |
 | `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. `Covers(serverId, identities)` says whether this or an enclosing decision saw a resource (target, related resources, argument values) on that server — used by `ComposePlan.EnsureDecided` (R1-07). `PinnedPolicy` and `TriggerId` (R1-13) are inherited by nested scopes. |
 | `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Report mode:** a call outside a scope still runs; the first sighting per capability is logged at Information. The guard implements only the guarded interface; `IMutationScopeProxy.Inner` gives the instance behind it (used by `AddInitializable` for startup warm-up). |
 
@@ -163,13 +164,20 @@ registrations are wrapped too.
    Policy `Confirm` otherwise → [`IApprovalGate`](../Approvals/): runs only with an approval a human gave for exactly this call
    (the agent session's own approval for this operation, or approve-then-retry for a direct MCP call); otherwise
    **PendingApproval**.
-7. Audit intent written; if that fails → **Denied** (PC-D5). Only now is the approval used up
+7. Audit intent written; if that fails → **Denied** (PC-D5). Then the operation id is claimed in the journal
+   (`IOperationJournal`, R1-18): already running, already run, cut off by a restart (outcome unknown) or used for
+   other inputs → **Denied** with `OperationRunning` / `OperationAlreadyRun` / `OperationOutcomeUnknown` /
+   `OperationIdReused`; a journal that cannot be written → **Denied** (`OperationNotRegistered`). A call nested in
+   another one's execution carries `MutationRequest.ParentOperationId` (journal and audit). Only now is the approval used up
    (`IApprovalGate.TryConsumeAsync`, one conditional database update since R1-14, so also across a restart); a concurrent call that already used it turns this attempt's row into **Denied**.
 8. Delegate runs inside a `MutationScope`, cancelled at the capability's deadline; an exception, the deadline or a
    reported failure (`MutationScope.Fail`, or an MCP result with `isError`) → **Failed**. A reported failure keeps
    the delegate's value, so the caller still gets the tool's own answer.
 9. The capability's `IMutationVerifier`, if any → `Verified` / `Failed`; otherwise `NotVerifiable`.
-10. The audit row is completed, with `CancellationToken.None` so a cancelled caller still leaves a record.
+10. The journal claim is finished (`Executed` / `Failed` with the verification; a failed write leaves it `Running`, so
+    a retry after a restart is refused as outcome unknown), then the audit row is completed, with
+    `CancellationToken.None` so a cancelled caller still leaves a record. A refusal after the claim (the approval was
+    used by another call) gives the id back.
 
 Refusals (1–7) are recorded as one row each; a failed refusal record is logged and does not change the outcome.
 Over MCP a tool that throws is rethrown, so the client sees the same error as before the gateway; a tool that

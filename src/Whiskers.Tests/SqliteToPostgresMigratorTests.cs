@@ -29,8 +29,9 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
     }
 
     [Theory]
-    [InlineData("DROP TABLE Approvals; DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;", "PolicyDecisions")]  // before R1-12
-    [InlineData("DROP TABLE Approvals;", "Approvals")]                                                               // before R1-14
+    [InlineData("DROP TABLE Operations; DROP TABLE Approvals; DROP TABLE PolicyDecisions; DROP TABLE PolicySnapshots;", "PolicyDecisions")]  // before R1-12
+    [InlineData("DROP TABLE Operations; DROP TABLE Approvals;", "Approvals")]                                        // before R1-14
+    [InlineData("DROP TABLE Operations;", "Operations")]                                                             // before R1-18
     public async Task A_source_from_an_older_release_migrates_completely(string drop, string absent)
     {
         // A database migrated by an older release lacks the tables of every release after its own.

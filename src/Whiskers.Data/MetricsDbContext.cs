@@ -94,6 +94,9 @@ public class MetricsDbContext : DbContext
     /// <summary>Human-in-the-Loop approvals with their decision and single use, never deleted (R1-14).</summary>
     public DbSet<ApprovalRecordEntity> Approvals => Set<ApprovalRecordEntity>();
 
+    /// <summary>The execution claim of every mutation, by operation id, never deleted (R1-18, INV-39).</summary>
+    public DbSet<OperationRecordEntity> Operations => Set<OperationRecordEntity>();
+
     public MetricsDbContext(DbContextOptions<MetricsDbContext> options) : base(options) { }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -224,6 +227,15 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => x.CreatedAt);
             e.HasIndex(x => x.Binding);
             e.HasIndex(x => x.CorrelationId);
+        });
+
+        modelBuilder.Entity<OperationRecordEntity>(e =>
+        {
+            e.ToTable("Operations");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ParentId);
+            e.HasIndex(x => x.State);
+            e.HasIndex(x => x.ClaimedAt);
         });
     }
 }

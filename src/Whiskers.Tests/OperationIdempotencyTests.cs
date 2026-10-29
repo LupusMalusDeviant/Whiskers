@@ -1,0 +1,294 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Configuration;
+using Whiskers.Models;
+using Whiskers.Services.Approvals;
+using Whiskers.Services.Mutations;
+using Whiskers.Services.Persistence;
+
+namespace Whiskers.Tests;
+
+/// <summary>
+/// R1-18 (INV-39): every mutation claims its operation id in the database before it runs. An identical retry, a
+/// concurrent retry and a retry after a restart do not run it again — an operation cut off by a restart stays
+/// "outcome unknown" instead of being replayed; an id used for different inputs is refused. Decision, approval,
+/// execution, verification and audit carry the same id, and a nested operation links to its parent under an id of
+/// its own.
+/// </summary>
+public sealed class OperationIdempotencyTests : IDisposable
+{
+    private static readonly MutationPrincipal Admin =
+        new(MutationPrincipalKind.Human, "user:admin@example.com", "admin@example.com", McpPermissionLevels.Admin);
+
+    private readonly ApprovalDatabase _db = new();
+    private readonly GuardrailPolicy _policy;
+    private readonly AgentToolTestHelpers.FixedGuardrailStore _store;
+    private readonly ApprovalStore _approvals;
+    private int _runs;
+
+    public OperationIdempotencyTests()
+    {
+        _policy = GuardrailPolicy.SafeDefault();
+        _policy.ProtectedResources = [];
+        _policy.ForbiddenArgPatterns = [];
+        _policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+        _policy.RequireConfirmationForWrites = false;
+        _store = new AgentToolTestHelpers.FixedGuardrailStore(_policy);
+        _approvals = new ApprovalStore(policy: _store, persistence: _db.Persistence());
+    }
+
+    public void Dispose() => _db.Dispose();
+
+    private DbOperationJournal NewJournal() => new(_db.Scopes);
+
+    private MutationGateway Gateway(IOperationJournal journal, params IMutationVerifier[] verifiers) =>
+        new(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store), new AuditLogMutationSink(_db.Scopes), verifiers,
+            NullLogger<MutationGateway>.Instance, decisions: new DbPolicyDecisionStore(_db.Scopes),
+            approvals: new ApprovalGate(_approvals, _store), journal: journal);
+
+    private static MutationRequest Restart(string? operationId, string container = "web") =>
+        new("container.restart", Admin, MutationSurface.Ui, new MutationTarget("container", container, container, "local"),
+            Args(new { containerId = container, serverId = "local" }), OperationId: operationId);
+
+    private static Dictionary<string, JsonElement> Args(object value) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(value))!;
+
+    private Task<MutationOutcome<int>> Run(MutationGateway gateway, MutationRequest request) =>
+        gateway.ExecuteAsync(request, (_, _) => Task.FromResult(Interlocked.Increment(ref _runs)));
+
+    private async Task<OperationRecordEntity?> Row(string id)
+    {
+        using var scope = _db.Scopes.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Operations.AsNoTracking()
+            .SingleOrDefaultAsync(o => o.Id == id);
+    }
+
+    // ---------------------------------------------------------------- retries
+
+    [Fact]
+    public async Task An_identical_retry_does_not_run_again()
+    {
+        var gateway = Gateway(NewJournal());
+        var first = await Run(gateway, Restart("op-1"));
+        var retry = await Run(gateway, Restart("op-1"));
+
+        Assert.Equal(MutationStatus.Executed, first.Status);
+        Assert.Equal(MutationStatus.Denied, retry.Status);
+        Assert.Equal(MutationReasonCodes.OperationAlreadyRun, retry.ReasonCode);
+        Assert.Equal(1, _runs);
+        Assert.Equal("Executed", (await Row("op-1"))!.State);
+    }
+
+    [Fact]
+    public async Task A_failed_operation_is_not_retried_under_the_same_id()
+    {
+        var gateway = Gateway(NewJournal());
+        var failed = await gateway.ExecuteAsync<int>(Restart("op-f"), (_, _) => throw new InvalidOperationException("boom"));
+        var retry = await Run(gateway, Restart("op-f"));
+
+        Assert.Equal(MutationStatus.Failed, failed.Status);
+        Assert.Equal(MutationReasonCodes.OperationAlreadyRun, retry.ReasonCode);
+        Assert.Equal(0, _runs);
+        Assert.Equal("Failed", (await Row("op-f"))!.State);
+    }
+
+    [Fact]
+    public async Task Concurrent_retries_run_once()
+    {
+        var gateway = Gateway(NewJournal());
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = Enumerable.Range(0, 8).Select(_ => Task.Run(() => gateway.ExecuteAsync(Restart("op-c"), async (_, _) =>
+        {
+            Interlocked.Increment(ref _runs);
+            await release.Task;
+            return 0;
+        }))).ToList();
+
+        // Let every attempt reach the claim, then let the one that runs finish.
+        await Task.Delay(500);
+        release.SetResult();
+        var outcomes = await Task.WhenAll(attempts);
+
+        Assert.Equal(1, _runs);
+        Assert.Single(outcomes, o => o.Status == MutationStatus.Executed);
+        Assert.All(outcomes.Where(o => o.Status != MutationStatus.Executed), o =>
+            Assert.Contains(o.ReasonCode, new[] { MutationReasonCodes.OperationRunning, MutationReasonCodes.OperationAlreadyRun }));
+    }
+
+    [Fact]
+    public async Task An_id_used_for_other_inputs_is_refused()
+    {
+        var gateway = Gateway(NewJournal());
+        await Run(gateway, Restart("op-m", "web"));
+        var other = await Run(gateway, Restart("op-m", "billing"));
+
+        Assert.Equal(MutationStatus.Denied, other.Status);
+        Assert.Equal(MutationReasonCodes.OperationIdReused, other.ReasonCode);
+        Assert.Equal(1, _runs);
+    }
+
+    [Fact]
+    public async Task An_operation_cut_off_by_a_restart_stays_unknown_and_is_not_replayed()
+    {
+        // The process that claimed it stopped before it finished (the row is still Running).
+        var before = NewJournal();
+        Assert.Equal(OperationClaimResult.Claimed, await before.ClaimAsync(new OperationClaimRequest("op-r", null,
+            "container.restart", Admin.Id, DbOperationJournal.InputHashOf(Restart("op-r")), null, null, null)));
+
+        var afterRestart = Gateway(NewJournal());
+        var retry = await Run(afterRestart, Restart("op-r"));
+
+        Assert.Equal(MutationStatus.Denied, retry.Status);
+        Assert.Equal(MutationReasonCodes.OperationOutcomeUnknown, retry.ReasonCode);
+        Assert.Equal(0, _runs);
+        Assert.Equal("Running", (await Row("op-r"))!.State);   // explicit, not rewritten
+    }
+
+    [Fact]
+    public async Task A_new_id_after_an_unknown_outcome_runs()
+    {
+        var before = NewJournal();
+        await before.ClaimAsync(new OperationClaimRequest("op-u", null, "container.restart", Admin.Id,
+            DbOperationJournal.InputHashOf(Restart("op-u")), null, null, null));
+
+        var outcome = await Run(Gateway(NewJournal()), Restart(null));
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.NotEqual("op-u", outcome.OperationId);
+    }
+
+    [Fact]
+    public async Task A_claim_given_back_before_it_ran_can_be_taken_again_once()
+    {
+        var journal = NewJournal();
+        var claim = new OperationClaimRequest("op-x", null, "container.restart", Admin.Id, "hash", null, null, null);
+        Assert.Equal(OperationClaimResult.Claimed, await journal.ClaimAsync(claim));
+        await journal.ReleaseAsync("op-x");
+
+        var again = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => journal.ClaimAsync(claim)));
+
+        Assert.Single(again, r => r == OperationClaimResult.Claimed);
+    }
+
+    [Fact]
+    public async Task A_call_waiting_for_its_approval_keeps_its_id_for_the_approved_retry()
+    {
+        // Policy asks for a confirmation: nothing is claimed while it waits; the approved retry runs once.
+        _policy.RequireConfirmationForWrites = true;
+        var gateway = Gateway(NewJournal());
+        var agent = Restart("op-a") with
+        {
+            Principal = MutationPrincipals.Agent(new Whiskers.Models.Agent.AgentPrincipal(
+                Whiskers.Models.Agent.AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null,
+                UserEmail: "admin@example.com"), "chat-1"),
+            Surface = MutationSurface.Agent,
+            SessionId = "chat-1",
+            AgentOrigin = Whiskers.Models.Agent.AgentOrigin.WebUi,
+        };
+
+        var asked = await Run(gateway, agent);
+        Assert.Equal(MutationStatus.PendingApproval, asked.Status);
+        Assert.Null(await Row("op-a"));
+
+        Assert.Equal(ApprovalDecisionResult.Decided, await _approvals.DecideAsync(asked.ApprovalId!, true,
+            ApprovalResolver.User("other-admin@example.com", AppRole.Admin)));
+        var ran = await Run(gateway, agent);
+        Assert.Equal(MutationStatus.Executed, ran.Status);
+
+        // The same id once more: its approval is used up, so it does not run again.
+        var again = await Run(gateway, agent);
+        Assert.NotEqual(MutationStatus.Executed, again.Status);
+        Assert.Equal(1, _runs);
+        Assert.Equal(asked.ApprovalId, (await Row("op-a"))!.ApprovalId);
+    }
+
+    [Fact]
+    public async Task A_journal_that_cannot_be_written_refuses_the_call()
+    {
+        var gateway = Gateway(new BrokenJournal());
+        var outcome = await Run(gateway, Restart("op-b"));
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(MutationReasonCodes.OperationNotRegistered, outcome.ReasonCode);
+        Assert.Equal(0, _runs);
+    }
+
+    // ---------------------------------------------------------------- one id across every step
+
+    [Fact]
+    public async Task Decision_approval_execution_verification_and_audit_share_the_id()
+    {
+        var verifier = new RecordingVerifier();
+        var gateway = Gateway(NewJournal(), verifier);
+        string? executedAs = null, scopeId = null;
+
+        var outcome = await gateway.ExecuteAsync(Restart("op-l"), (ctx, _) =>
+        {
+            executedAs = ctx.OperationId;
+            scopeId = MutationScope.Current?.OperationId;
+            return Task.FromResult(1);
+        });
+
+        Assert.Equal("op-l", outcome.OperationId);
+        Assert.Equal("op-l", executedAs);
+        Assert.Equal("op-l", scopeId);
+        Assert.Equal("op-l", verifier.OperationId);
+        var row = (await Row("op-l"))!;
+        Assert.Equal(outcome.DecisionId, row.DecisionId);
+        Assert.Equal("Verified", row.Verification);
+        using var scope = _db.Scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        Assert.Equal("op-l", (await db.PolicyDecisions.AsNoTracking().SingleAsync(d => d.Id == outcome.DecisionId)).OperationId);
+        var audit = await db.AuditLog.AsNoTracking().SingleAsync(a => a.Id == row.AuditId);
+        Assert.Contains("\"operationId\":\"op-l\"", audit.Details);
+    }
+
+    [Fact]
+    public async Task A_nested_operation_links_to_its_parent_under_an_id_of_its_own()
+    {
+        var gateway = Gateway(NewJournal());
+        MutationOutcome<int>? child = null, reused = null;
+
+        await gateway.ExecuteAsync(Restart("op-parent"), async (_, _) =>
+        {
+            child = await Run(gateway, Restart(null, "billing"));
+            reused = await Run(gateway, Restart("op-parent"));   // the parent's own id, from inside it
+            return 0;
+        });
+
+        Assert.Equal(MutationStatus.Executed, child!.Status);
+        Assert.NotEqual("op-parent", child.OperationId);
+        var row = (await Row(child.OperationId))!;
+        Assert.Equal("op-parent", row.ParentId);
+        Assert.Equal(MutationStatus.Denied, reused!.Status);
+        Assert.Equal(MutationReasonCodes.OperationRunning, reused.ReasonCode);
+
+        using var scope = _db.Scopes.CreateScope();
+        var audit = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking()
+            .SingleAsync(a => a.Id == row.AuditId);
+        Assert.Contains("\"parentOperationId\":\"op-parent\"", audit.Details);
+    }
+
+    private sealed class RecordingVerifier : IMutationVerifier
+    {
+        public string CapabilityId => "container.restart";
+        public string? OperationId { get; private set; }
+
+        public Task<VerificationStatus> VerifyAsync(MutationContext context, object? result, CancellationToken ct)
+        {
+            OperationId = context.OperationId;
+            return Task.FromResult(VerificationStatus.Verified);
+        }
+    }
+
+    private sealed class BrokenJournal : IOperationJournal
+    {
+        public Task<OperationClaimResult> ClaimAsync(OperationClaimRequest claim, CancellationToken ct = default) =>
+            throw new IOException("database unavailable");
+        public Task FinishAsync(string operationId, MutationStatus status, VerificationStatus verification,
+            CancellationToken ct = default) => Task.CompletedTask;
+        public Task ReleaseAsync(string operationId, CancellationToken ct = default) => Task.CompletedTask;
+    }
+}
