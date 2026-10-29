@@ -718,18 +718,44 @@ public static class ComposeModel
             && !string.IsNullOrEmpty(s.Value) ? s.Value : null;
 
     /// <summary>
-    /// The existing containers a deployment of <paramref name="services"/> as project <paramref name="project"/>
-    /// touches: the project's containers of a defined service (recreated), with <paramref name="removeOrphans"/> the
-    /// rest of the project (removed), and containers of other projects or none whose name the deployment wants.
+    /// The services with the mounts <c>docker compose config</c> resolved on the server
+    /// (<see cref="ComposeConfigEffects"/>) added: a mount the model already read stays as it is (its own
+    /// <see cref="ComposeMount.FromVariable"/>), any other counts as possibly from an <c>.env</c> and is withheld. A
+    /// service compose knows and the model does not refuses the plan (fail closed).
     /// </summary>
+    public static IReadOnlyList<ComposeServicePlan> WithEffects(IReadOnlyList<ComposeServicePlan> services,
+        IReadOnlyDictionary<string, IReadOnlyList<ComposeMount>> effects)
+    {
+        var known = services.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        if (effects.Keys.Any(name => !known.Contains(name)))
+            throw new ComposePlanException("docker compose resolves a service the deployment's files do not show.");
+        return services.Select(s => effects.TryGetValue(s.Name, out var resolved)
+            ? s with
+            {
+                Mounts = s.Mounts.Concat(resolved.Where(r =>
+                    !s.Mounts.Any(m => m.Source == r.Source && m.Container == r.Container))).ToList(),
+            }
+            : s).ToList();
+    }
+
+    /// <summary>The existing containers <c>volumes_from: container:…</c> names (see <see cref="ResolveContainers"/>).</summary>
+    public static IReadOnlyList<ContainerInfo> SourceContainers(IReadOnlyList<ComposeServicePlan> services,
+        IEnumerable<ContainerInfo> existing)
+    {
+        var containers = existing.DistinctBy(c => c.Id).ToList();
+        return services.SelectMany(s => s.Mounts.Where(m => m.Container).Select(m => FindContainer(s.Name, m, containers)))
+            .DistinctBy(c => c.Id).ToList();
+    }
+
     /// <summary>
     /// The services with every <c>volumes_from: container:…</c> replaced by that container's id and name from
     /// <paramref name="existing"/> (an exact id or name, or a unique id prefix), so it is decided as the container it
-    /// is. A reference that matches no container or several refuses the plan; it is never quoted (it can come from an
-    /// <c>.env</c> value).
+    /// is, plus the host paths and volumes that container mounts (<paramref name="inherited"/>, by id; the new
+    /// container gets them too). A reference that matches no container or several, or a container whose mounts are
+    /// not given, refuses the plan; it is never quoted (it can come from an <c>.env</c> value).
     /// </summary>
     public static IReadOnlyList<ComposeServicePlan> ResolveContainers(IReadOnlyList<ComposeServicePlan> services,
-        IEnumerable<ContainerInfo> existing)
+        IEnumerable<ContainerInfo> existing, IReadOnlyDictionary<string, IReadOnlyList<string>> inherited)
     {
         var containers = existing.DistinctBy(c => c.Id).ToList();
         return services.Select(s => s.Mounts.Any(m => m.Container)
@@ -738,20 +764,37 @@ public static class ComposeModel
 
         IEnumerable<ComposeMount> Resolve(string service, ComposeMount mount)
         {
-            var reference = mount.Source;
-            var exact = containers.Where(c => c.Id == reference || c.Name == reference || c.Name == "/" + reference).ToList();
-            var found = exact.Count > 0 ? exact
-                : reference.Length > 0 && reference.All(char.IsAsciiHexDigitLower)
-                    ? containers.Where(c => c.Id.StartsWith(reference, StringComparison.Ordinal)).ToList()
-                    : [];
-            if (found.Count != 1)
-                throw new ComposePlanException(
-                    $"Service '{service}' takes volumes from a container that {(found.Count == 0 ? "does not exist" : "is not unique")}.");
-            var c = found[0];
-            return [mount with { Source = c.Id, Container = false }, mount with { Source = c.Name.TrimStart('/'), Container = false }];
+            var c = FindContainer(service, mount, containers);
+            if (!inherited.TryGetValue(c.Id, out var mounts))
+                throw new ComposePlanException($"Service '{service}' takes volumes from a container whose mounts are unknown.");
+            return new[] { c.Id, c.Name.TrimStart('/') }.Concat(mounts)
+                .Select(source => mount with
+                {
+                    Source = source.StartsWith('/') ? Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(source) : source,
+                    Container = false,
+                }).ToList();
         }
     }
 
+    private static ContainerInfo FindContainer(string service, ComposeMount mount, IReadOnlyList<ContainerInfo> containers)
+    {
+        var reference = mount.Source;
+        var exact = containers.Where(c => c.Id == reference || c.Name == reference || c.Name == "/" + reference).ToList();
+        var found = exact.Count > 0 ? exact
+            : reference.Length > 0 && reference.All(char.IsAsciiHexDigitLower)
+                ? containers.Where(c => c.Id.StartsWith(reference, StringComparison.Ordinal)).ToList()
+                : [];
+        if (found.Count != 1)
+            throw new ComposePlanException(
+                $"Service '{service}' takes volumes from a container that {(found.Count == 0 ? "does not exist" : "is not unique")}.");
+        return found[0];
+    }
+
+    /// <summary>
+    /// The existing containers a deployment of <paramref name="services"/> as project <paramref name="project"/>
+    /// touches: the project's containers of a defined service (recreated), with <paramref name="removeOrphans"/> the
+    /// rest of the project (removed), and containers of other projects or none whose name the deployment wants.
+    /// </summary>
     public static IReadOnlyList<ComposeImpactEntry> Impact(string project, IReadOnlyList<ComposeServicePlan> services,
         bool removeOrphans, IEnumerable<ContainerInfo> existing)
     {

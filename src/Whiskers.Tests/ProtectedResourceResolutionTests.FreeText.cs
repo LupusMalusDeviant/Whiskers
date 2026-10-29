@@ -81,14 +81,38 @@ public sealed partial class ProtectedResourceResolutionTests
     }
 
     [Fact]
-    public void A_cleanup_removes_no_network_and_no_volume()
+    public void A_cleanup_removes_the_decided_containers_by_id_and_no_network_or_volume()
     {
         // A network the policy protects could not be decided on before the prune: the cleanup leaves networks alone.
-        var command = Whiskers.Services.Scheduler.TaskExecutor.CleanupCommand;
-        Assert.DoesNotContain("system prune", command);
+        // A container is removed by the id it was decided on — no prune that picks up one that stopped since.
+        var command = Whiskers.Services.Scheduler.TaskExecutor.CleanupCommandFor(["c1", "c2"]);
+        Assert.DoesNotContain("prune -a", command);
+        Assert.DoesNotContain("container prune", command);
         Assert.DoesNotContain("network", command);
         Assert.DoesNotContain("volume", command);
-        Assert.Contains("docker container prune", command);
+        Assert.StartsWith("docker rm 'c1' 'c2' 2>&1 && ", command);
+        Assert.DoesNotContain("docker rm", Whiskers.Services.Scheduler.TaskExecutor.CleanupCommandFor([]));
+    }
+
+    [Fact]
+    public async Task A_cleanup_of_listed_containers_decides_exactly_those()
+    {
+        var h = new ProtectionHarness();
+        var db = h.Containers.Single(c => c.Name == "whiskers-db");
+        var other = h.Containers.Single(c => c.Name == "web");
+        db.State = "exited";
+        other.State = "exited";
+
+        // Listed before whiskers-db stopped: it is not decided and not removed.
+        Assert.Equal(MutationStatus.Executed, (await h.RunAsync("host.prune",
+            new { serverId = "local", containerIds = other.Id }, ProtectionHarness.AdminsTask(), MutationSurface.Automation)).Status);
+        Assert.Equal(MutationStatus.Denied, (await h.RunAsync("host.prune",
+            new { serverId = "local", containerIds = $"{other.Id}\n{db.Id}" }, ProtectionHarness.AdminsTask(),
+            MutationSurface.Automation)).Status);
+        // One that is gone meanwhile refuses the run.
+        Assert.NotEqual(MutationStatus.Executed, (await h.RunAsync("host.prune",
+            new { serverId = "local", containerIds = "gone0000" }, ProtectionHarness.AdminsTask(), MutationSurface.Automation)).Status);
+        Assert.Equal(1, h.Runs);
     }
 
     [Fact]
@@ -252,12 +276,84 @@ public sealed partial class ProtectedResourceResolutionTests
     [Fact]
     public async Task Volumes_taken_from_a_container_or_another_service_are_decided()
     {
+        _host.Mounts["legacy-id"] = """[{"Type":"bind","Source":"/var/run/docker.sock"},{"Type":"volume","Name":"serverwatch-data","Source":"/var/lib/docker/volumes/serverwatch-data/_data"}]""";
         var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
             "services:\n  a:\n    image: x\n    volumes_from:\n      - container:legacy-proxy:rw\n      - b\n" +
             "  b:\n    image: y\n    volumes:\n      - /srv/b:/b\n"));
         Assert.Contains("legacy-proxy", plan.Mounts());
         Assert.Contains("legacy-id", plan.Mounts());
         Assert.Contains("/srv/b", plan.Mounts());
+        // What the source container mounts, the new one gets too.
+        Assert.Contains("/var/run/docker.sock", plan.Mounts());
+        Assert.Contains("serverwatch-data", plan.Mounts());
+    }
+
+    [Fact]
+    public async Task A_container_whose_mounts_cannot_be_read_refuses_the_plan() =>
+        await Assert.ThrowsAsync<ComposePlanException>(() => Planner().PlanAsync(ComposeDeployment.FromContent("local",
+            "/opt/deployments/tools", "services:\n  a:\n    image: x\n    volumes_from: [\"container:legacy-proxy\"]\n")));
+
+    [Fact]
+    public async Task A_mount_only_compose_itself_resolves_is_decided_and_withheld()
+    {
+        // e.g. through extends or an anchor form the model does not follow: compose's own model counts.
+        _host.ComposeConfig = """
+            {"services":{"a":{"volumes":[{"type":"bind","source":"/opt/dockerproxy/certs","target":"/c"},
+              {"type":"volume","source":"data","target":"/d"},{"type":"tmpfs","target":"/t"}]}},
+             "volumes":{"data":{"name":"serverwatch-data"}}}
+            """;
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    volumes:\n      - /srv/a:/a\n"));
+        Assert.Contains("/srv/a", plan.Mounts());
+        Assert.Contains("/opt/dockerproxy/certs", plan.WithheldMounts());
+        Assert.Contains("serverwatch-data", plan.WithheldMounts());
+        Assert.DoesNotContain("/srv/a", plan.WithheldMounts());
+        // The planned file reaches compose encoded, never as text on the command line.
+        Assert.DoesNotContain("/srv/a", Assert.Single(_host.ConfigCommands));
+    }
+
+    [Theory]
+    [InlineData(null)]                                                       // compose fails
+    [InlineData("not json")]
+    [InlineData("""{"volumes":{}}""")]                                       // no services
+    [InlineData("""{"services":{"ghost":{}}}""")]                            // a service the files do not show
+    [InlineData("""{"services":{"a":{"volumes":[{"type":"cluster","source":"x"}]}}}""")]   // an unknown mount kind
+    [InlineData("""{"services":{"a":{"volumes_from":["nowhere"]}}}""")]      // volumes_from an undefined service
+    public async Task A_deployment_compose_cannot_resolve_refuses_the_plan(string? config)
+    {
+        _host.ComposeConfig = config;
+        await Assert.ThrowsAsync<ComposePlanException>(() => Planner().PlanAsync(ComposeDeployment.FromContent("local",
+            "/opt/deployments/tools", "services:\n  a:\n    image: x\n")));
+    }
+
+    [Fact]
+    public void Composes_model_yields_every_source_a_service_mounts()
+    {
+        var effects = ComposeConfigEffects.Parse("""
+            {"services":{
+               "a":{"volumes":[{"type":"volume","source":"cache"},{"type":"volume","source":"ext"},{"type":"volume","target":"/anon"}],
+                    "volumes_from":["b","container:legacy:ro"],"secrets":[{"source":"ca"}],"configs":["app"]},
+               "b":{"volumes":[{"type":"bind","source":"/srv/b/../b"}]}},
+             "volumes":{"cache":{"driver_opts":{"device":"/opt/dockerproxy","o":"bind"}}},
+             "secrets":{"ca":{"file":"/etc/ssl/ca.pem"}},"configs":{"app":{"file":"/opt/app.conf"}}}
+            """, "tools");
+        var a = effects["a"];
+        Assert.Equal(["tools_cache", "/opt/dockerproxy", "ext", "/srv/b", "legacy", "/etc/ssl/ca.pem", "/opt/app.conf"],
+            a.Select(m => m.Source));
+        Assert.True(a.Single(m => m.Source == "legacy").Container);
+        Assert.All(a, m => Assert.True(m.FromVariable));
+    }
+
+    [Fact]
+    public void Composes_model_is_built_from_the_planned_files_and_env()
+    {
+        var plan = new ComposePlan("local", "tools", "/opt/t", ["/opt/t/compose.yml", "/opt/t/extra.yml"],
+            [new ComposeFileInput("/opt/t/compose.yml", "services: {}")], "SECRET=canary-secret", HasEnvFile: true, false, [], []);
+        var command = ComposeConfigEffects.Command(plan);
+        Assert.DoesNotContain("canary", command);
+        Assert.Contains("-f \"$d/0.yml\" -f '/opt/t/extra.yml' --env-file \"$d/.env\"", command);
+        Assert.Contains("-p 'tools' --project-directory '/opt/t'", command);
+        Assert.StartsWith("d=$(mktemp -d) && trap", command);
     }
 
     [Theory]
@@ -267,6 +363,7 @@ public sealed partial class ProtectedResourceResolutionTests
     {
         var docker = new FakeDocker(new ContainerInfo { Id = "c0ffee000000whiskers", Name = "serverwatch", ServerId = "local" });
         _host.Files["/opt/deployments/tools/.env"] = "SOURCE=c0ffee000000whiskers\n";
+        _host.Mounts["c0ffee000000whiskers"] = "null";
         var plan = await new ComposePlanner(docker, _host).PlanAsync(ComposeDeployment.FromContent("local",
             "/opt/deployments/tools", $"services:\n  a:\n    image: x\n    volumes_from:\n      - \"{reference}:rw\"\n"));
         Assert.Contains("serverwatch", plan.Mounts());

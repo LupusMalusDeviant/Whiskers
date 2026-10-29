@@ -33,6 +33,7 @@ public sealed class ComposePlanner : IComposePlanner
     private const string ConfigFilesLabel = "com.docker.compose.project.config_files";
     private const int MaxFileChars = 2_000_000;
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ConfigTimeout = TimeSpan.FromSeconds(30);
 
     private readonly IDockerService _docker;
     private readonly IHostCommandExecutor _executor;
@@ -83,16 +84,60 @@ public sealed class ComposePlanner : IComposePlanner
         // COMPOSE_REMOVE_ORPHANS in the .env makes a plain `up` remove orphans: planned (and passed explicitly) too.
         var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);
 
-        var existing = await _docker.ListContainersAsync(all: true, serverId: serverId, ct);
-        services = ComposeModel.ResolveContainers(services, existing);
-        var impact = ComposeModel.Impact(project, services, removeOrphans, existing);
-        return new ComposePlan(serverId, project, directory, files.Select(f => f.Path).ToList(),
+        var plan = new ComposePlan(serverId, project, directory, files.Select(f => f.Path).ToList(),
             inputs.Where(f => f.Content is not null).ToList(), deployment.EnvFileContent,
-            HasEnvFile: envContent is not null, removeOrphans, services, impact)
+            HasEnvFile: envContent is not null, removeOrphans, services, [])
         {
             ProjectNameSource = ComposeModel.ProjectNameSource(deployment.ProjectName, env, envTemplates, declared,
                 declaredSource),
         };
+        // What the deployment mounts as compose itself resolves it on the server, besides the model's own reading.
+        services = ComposeModel.WithEffects(services, await ConfigEffectsAsync(plan, ct));
+
+        var existing = await _docker.ListContainersAsync(all: true, serverId: serverId, ct);
+        // A container volumes_from takes over brings its own mounts along.
+        var inherited = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var source in ComposeModel.SourceContainers(services, existing))
+            inherited[source.Id] = await MountsOfContainerAsync(serverId, source.Id, ct);
+        services = ComposeModel.ResolveContainers(services, existing, inherited);
+        var impact = ComposeModel.Impact(project, services, removeOrphans, existing);
+        return plan with { Services = services, Impact = impact };
+    }
+
+    /// <summary>The deployment's mounts per service from <c>docker compose config</c> on the server (fail closed: a
+    /// model compose cannot produce refuses the plan; its output is never quoted, it can hold .env values).</summary>
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<ComposeMount>>> ConfigEffectsAsync(ComposePlan plan,
+        CancellationToken ct)
+    {
+        var result = await _executor.ExecuteAsync(plan.ServerId, ComposeConfigEffects.Command(plan), ConfigTimeout, ct,
+            MaxFileChars);
+        if (!result.Success || result.OutputTruncated)
+            throw new ComposePlanException("docker compose could not resolve the deployment on the server.");
+        return ComposeConfigEffects.Parse(result.Output, plan.ProjectName);
+    }
+
+    /// <summary>The host paths and volume names a container mounts (<c>docker inspect</c>); unreadable refuses the plan.</summary>
+    private async Task<IReadOnlyList<string>> MountsOfContainerAsync(string serverId, string containerId, CancellationToken ct)
+    {
+        var result = await _executor.ExecuteAsync(serverId,
+            $"docker inspect --format '{{{{json .Mounts}}}}' {ShellUtils.Quote(containerId)}", ReadTimeout, ct, MaxFileChars);
+        if (!result.Success || result.OutputTruncated)
+            throw new ComposePlanException("The mounts of a container volumes are taken from cannot be read.");
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(result.Output.Trim());
+            if (document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Null) return [];
+            return document.RootElement.EnumerateArray()
+                .SelectMany(m => new[] { Field(m, "Source"), Field(m, "Name") })
+                .Where(v => !string.IsNullOrEmpty(v)).Select(v => v!).Distinct(StringComparer.Ordinal).ToList();
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException)
+        {
+            throw new ComposePlanException("The mounts of a container volumes are taken from cannot be read.");
+        }
+
+        static string? Field(System.Text.Json.JsonElement m, string name) =>
+            m.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
     }
 
     public async Task<ComposePlan> PlanEnvChangeAsync(ContainerInfo container, string serverId,

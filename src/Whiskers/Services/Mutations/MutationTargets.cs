@@ -250,7 +250,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     {
         var resolution = Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true);
         if (resolution.Target is { } pruned && capability.Id == "host.prune")
-            return await WithStoppedContainersAsync(pruned, ct);
+            return await WithStoppedContainersAsync(pruned,
+                MutationTargets.String(request.Arguments, "containerIds")?.Split('\n', StringSplitOptions.RemoveEmptyEntries), ct);
         // The mounts of a planned deployment, decided before its containers (ComposeImpact, R1-16): each is
         // something the deployment touches.
         if (resolution.Target is { } mounting && capability.Id == "compose.deploy"
@@ -275,7 +276,11 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             ComposeDeployment.FromContent(host.ServerId!, ComposeDeployment.DeploymentDirectory(project), content), ct));
     }
 
-    private async Task<TargetResolution> WithStoppedContainersAsync(MutationTarget host, CancellationToken ct)
+    /// <param name="named">The containers the cleanup removes by id (the scheduled cleanup lists them first); each
+    /// is decided by id and name, and one that is no longer there refuses the run. Without a list every stopped
+    /// container of the server is decided.</param>
+    private async Task<TargetResolution> WithStoppedContainersAsync(MutationTarget host, IReadOnlyList<string>? named,
+        CancellationToken ct)
     {
         if (_services.GetService<IDockerService>() is not { } docker)
             return Refuse("The containers a cleanup removes could not be checked: no container runtime is available.");
@@ -289,6 +294,13 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Refuse("The containers a cleanup removes could not be checked: the server's containers could not be listed.");
         }
         var stopped = containers.Where(c => !string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (named is not null)
+        {
+            var byId = containers.DistinctBy(c => c.Id).ToDictionary(c => c.Id, StringComparer.Ordinal);
+            if (named.Any(id => !byId.ContainsKey(id)))
+                return Refuse("A container the cleanup removes is no longer on the server.");
+            stopped = named.Distinct(StringComparer.Ordinal).Select(id => byId[id]).ToList();
+        }
         return Done(host with
         {
             Related = host.Related.Concat(stopped.SelectMany(c => new[] { c.Id, c.Name }))

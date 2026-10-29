@@ -485,6 +485,30 @@ public class SelfProtectionTests
         Assert.Equal(MutationStatus.Denied, outcome.Status);
     }
 
+    [Fact]
+    public async Task Whiskers_own_database_on_a_shared_server_is_the_control_plane()
+    {
+        // A postgres that also holds other databases: the database the request runs in counts, not only the container.
+        var h = new ProtectionHarness();
+        var args = new { containerId = "web", serverId = "local", database = "whiskers", query = "DELETE FROM users;" };
+        Assert.Equal(MutationStatus.Denied, (await h.RunAsync("db.query", args, ProtectionHarness.AdminKey, MutationSurface.Mcp)).Status);
+        Assert.Equal(MutationStatus.PendingApproval,
+            (await h.RunAsync("db.query", args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
+    }
+
+    [Theory]
+    [InlineData("UPDATE billing.orders SET paid = true")]
+    [InlineData("UPDATE \"billing\".\"orders\" SET paid = true")]
+    [InlineData("DELETE FROM `billing`.`orders`")]
+    [InlineData("TRUNCATE prod.billing.orders")]
+    public async Task A_qualified_name_names_each_of_its_parts(string query)
+    {
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["billing"]);
+        var outcome = await h.RunAsync("db.query", new { containerId = "web", serverId = "local", query },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+    }
+
     [Theory]
     [InlineData("\\i /tmp/wipe.sql")]
     [InlineData("select 'drop database ' || 'bil' || 'ling' \\gexec")]

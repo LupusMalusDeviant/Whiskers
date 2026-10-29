@@ -62,7 +62,7 @@ public static class ControlPlaneResources
     private static readonly HashSet<string> IdentityArguments = new(StringComparer.OrdinalIgnoreCase)
     {
         "containerId", "containerName", "container", "volumeName", "volume", "networkId", "networkName", "network",
-        "serviceName",
+        "serviceName", "database", "databaseName", "dbName",   // a database the request runs in (a shared server)
     };
 
     /// <summary>Target kinds whose resolved id and name can be part of the control plane.</summary>

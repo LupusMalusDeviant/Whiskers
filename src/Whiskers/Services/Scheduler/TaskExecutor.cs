@@ -212,36 +212,48 @@ public class TaskExecutor : ITaskExecutor
     {
         var sid = ScheduledTaskServer.Of(task);
 
-        // `docker system prune` removes every stopped container. The gateway decided on the host only, so a stopped
-        // protected container would go with it: refuse the cleanup while one exists (fail closed without policy).
-        if (await StoppedProtectedContainersAsync(sid) is { Count: > 0 } blocked)
+        // The stopped containers are listed once: exactly these are decided (each by id and name) and removed, by
+        // id — a container that stops between the decision and the run is not touched (R1-16). A stopped protected
+        // one refuses the cleanup (fail closed without policy).
+        var stopped = await StoppedContainersAsync(sid);
+        if (StoppedProtectedContainers(stopped) is { Count: > 0 } blocked)
             return (false, $"Cleanup refused: it would remove stopped protected container(s) {string.Join(", ", blocked)}.");
 
-        // Stopped containers, dangling images and build cache. Not networks (R1-16): which ones are unused cannot be
+        // Those containers, dangling images and build cache. Not networks (R1-16): which ones are unused cannot be
         // told before the prune, so a protected network could not be decided on — they stay.
+        var ids = stopped.Select(c => c.Id).ToList();
         var outcome = await _automation.RunAsync(ActorOf(task), "host.prune",
-            new { serverId = sid, taskId = task.TaskId },
-            _ => _executor.ExecuteAsync(sid, CleanupCommand, TimeSpan.FromMinutes(2)));
+            new { serverId = sid, taskId = task.TaskId, containerIds = string.Join('\n', ids) },
+            _ => _executor.ExecuteAsync(sid, CleanupCommandFor(ids), TimeSpan.FromMinutes(2)));
         if (Problem(outcome, "host.prune") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
         return (result.Success, result.Success ? $"Cleanup done:\n{result.Output}" : result.Error);
     }
 
-    /// <summary>What a cleanup task runs: stopped containers, dangling images, build cache — no networks, no volumes.</summary>
-    public const string CleanupCommand =
-        "docker container prune -f 2>&1 && docker image prune -f 2>&1 && docker builder prune -f 2>&1";
+    /// <summary>What a cleanup task runs: the decided stopped containers by id (<c>docker rm</c> without force: one
+    /// that runs again is not removed), dangling images, build cache — no networks, no volumes.</summary>
+    public static string CleanupCommandFor(IReadOnlyList<string> containerIds)
+    {
+        const string rest = "docker image prune -f 2>&1 && docker builder prune -f 2>&1";
+        return containerIds.Count == 0
+            ? rest
+            : $"docker rm {string.Join(' ', containerIds.Select(Whiskers.Utils.ShellUtils.Quote))} 2>&1 && {rest}";
+    }
 
     private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
 
-    /// <summary>Stopped containers on the server that match a protected-resource pattern. Without the guardrail
-    /// store nobody can say what is protected, so every stopped container counts.</summary>
-    private async Task<IReadOnlyList<string>> StoppedProtectedContainersAsync(string serverId)
-    {
-        // The same explicit server the prune runs on: null would list the default server instead.
-        var stopped = (await _docker.ListContainersAsync(all: true, serverId: serverId))
+    // The same explicit server the cleanup runs on: null would list the default server instead.
+    private async Task<IReadOnlyList<ContainerInfo>> StoppedContainersAsync(string serverId) =>
+        (await _docker.ListContainersAsync(all: true, serverId: serverId))
             .Where(c => !string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase))
+            .DistinctBy(c => c.Id)
             .ToList();
+
+    /// <summary>The stopped containers that match a protected-resource pattern. Without the guardrail store nobody
+    /// can say what is protected, so every stopped container counts.</summary>
+    private IReadOnlyList<string> StoppedProtectedContainers(IReadOnlyList<ContainerInfo> stopped)
+    {
         if (_guardrails is null) return stopped.Select(c => c.Name).ToList();
         // The policy the run is decided under (INV-23): an AI trigger's pinned preset when the task runs inside its
         // call, else the live active one — the same one the gateway applies to this run's mutations.

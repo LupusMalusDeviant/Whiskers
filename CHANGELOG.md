@@ -34,7 +34,14 @@ All notable changes to Whiskers are documented here. The format follows
   decides what the project mounts too (a whole short entry from a variable, `- ${SPEC}`, is expanded before it is
   read; relative sources — also of a long `type: bind` entry — resolve against the project directory the deployment
   runs with; mounts merged through any depth of YAML anchors, `volumes_from` a service of another file, and the
-  files of file-backed `secrets` and `configs` count too), and a SQL import or seed decides the database it runs in. A mount whose source
+  files of file-backed `secrets` and `configs` count too). Besides its own reading, Whiskers has compose resolve
+  every deployment on the server (`docker compose config`, with the planned files and `.env`) and decides every
+  mount compose reports — `extends`, merges and interpolation as compose itself does them; what only compose found is
+  decided as possibly from an `.env` (withheld); a deployment compose cannot resolve is refused. A container whose
+  volumes a service takes over brings its own mounts along (read with `docker inspect`; unreadable refuses the
+  deployment). The database a request runs in (`database`) counts as a name too, so Whiskers' own database on a
+  shared database server is the control plane, and a qualified SQL name (`billing.orders`, `"billing"."orders"`)
+  names each of its parts. A SQL import or seed decides the database it runs in. A mount whose source
   comes from an `.env` value is decided but never recorded (the audit keeps the length of `mounts`, the decision
   record `(withheld)`). A policy pattern that equals a control-plane pattern makes a hit approvable only where the
   control plane's own check finds it too (not a server named `whiskers-vps`); text that cannot be analysed is
@@ -45,8 +52,10 @@ All notable changes to Whiskers are documented here. The format follows
   chat or MCP call) masks SQL password literals (`PASSWORD '…'`, `E'…'`, `IDENTIFIED BY …` / `"…"`, also with comments
   between the tokens) as it masks other
   secrets, value by value, and so do the audit log and the host-command logs. **Upgrade notes:** a scheduled cleanup
-  task no longer removes unused networks (which ones are unused cannot be decided before the prune): it removes
-  stopped containers, dangling images and build cache; an install whose data lives in a host directory (not the
+  task no longer removes unused networks (which ones are unused cannot be decided before the prune): it lists the
+  stopped containers first, decides exactly those and removes them by id (`docker rm`, no `container prune`: one
+  that stops meanwhile stays), then dangling images and build cache; a run needs `docker compose` v2 on the server
+  for compose deployments (it resolves each deployment with `docker compose config`); an install whose data lives in a host directory (not the
   `whiskers-data` volume) set up before this release should add `WHISKERS_DATA_HOST_DIR=<that directory>` to the
   container's environment, so Whiskers protects it; calls that used to
   pass are now refused or need an Admin approval — an MCP key or a scheduled task restarting the Whiskers container

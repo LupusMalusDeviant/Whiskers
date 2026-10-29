@@ -581,9 +581,25 @@ public sealed partial class ProtectedResourceResolutionTests
         public HashSet<string> Failing { get; } = new(StringComparer.Ordinal);
         public List<string> Executed { get; } = [];
 
+        /// <summary>What <c>docker compose config --format json</c> prints (compose's own resolution); null fails it.</summary>
+        public string? ComposeConfig { get; set; } = """{"services":{}}""";
+
+        /// <summary>The commands that asked compose for its model.</summary>
+        public List<string> ConfigCommands { get; } = [];
+
+        /// <summary><c>docker inspect … .Mounts</c> per container id; a missing id fails the read.</summary>
+        public Dictionary<string, string> Mounts { get; } = new(StringComparer.Ordinal);
+
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)
         {
+            if (command.EndsWith(" config --format json", StringComparison.Ordinal))
+            {
+                ConfigCommands.Add(command);
+                return ComposeConfig is null ? Done("no such file", 1) : Done(ComposeConfig);
+            }
+            if (Regex.Match(command, @"^docker inspect --format '\{\{json \.Mounts\}\}' '([^']*)'$") is { Success: true } inspect)
+                return Mounts.TryGetValue(inspect.Groups[1].Value, out var mounts) ? Done(mounts) : Done("", 1);
             if (Regex.Match(command, @"^if \[ -e '([^']*)' \]") is { Success: true } read)
             {
                 var path = read.Groups[1].Value;

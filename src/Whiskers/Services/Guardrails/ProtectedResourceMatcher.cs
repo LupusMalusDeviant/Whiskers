@@ -134,10 +134,11 @@ public static class ProtectedResourceMatcher
                 // Names and paths are looked for in the decoded values too (an escaped "docker.sock").
                 value = value + "\n" + string.Join('\n', compose.Scalars);
             }
-            foreach (var word in Words(value))
+            var sql = SqlArguments.Contains(key);
+            foreach (var word in sql ? SqlWords(value) : Words(value))
                 if (WordHit(word, keyPatterns, pathPatterns, named) is { } hit)
                     return hit with { Argument = key, InFreeText = true };
-            if (freeText && SqlArguments.Contains(key) && IsUnanalyzableSql(value))
+            if (freeText && sql && IsUnanalyzableSql(value))
                 return new Hit("", null, key) { Argument = key, InFreeText = true };
         }
         return null;
@@ -382,6 +383,19 @@ public static class ProtectedResourceMatcher
             if (!word.Contains('/')) continue;
             foreach (var segment in word.Split('/', StringSplitOptions.RemoveEmptyEntries))
                 if (segment != word) yield return segment;
+        }
+    }
+
+    /// <summary>The words of SQL, and each part of a qualified name (<c>whiskers.public.users</c>,
+    /// <c>"billing"."whiskers"</c>, <c>`db`.`t`</c>): a schema or database is named by any of its parts.</summary>
+    public static IEnumerable<string> SqlWords(string text)
+    {
+        foreach (var word in Words(text))
+        {
+            yield return word;
+            if (!word.Contains('.')) continue;
+            foreach (var part in word.Split('.', StringSplitOptions.RemoveEmptyEntries))
+                if (part != word) yield return part;
         }
     }
 

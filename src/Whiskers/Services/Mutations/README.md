@@ -260,10 +260,12 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   controller: the resolver re-reads the pod (`IWorkloadProvider.GetWorkloadAsync`) instead of trusting the name the
   page rendered (R1-06). The provider resolves the controller again when it acts; a controller change in between is
   not detected.
-- **Bulk prune** (`host.prune`) is decided on every stopped container of the server, which the prune removes
-  (R1-16; unlistable containers refuse it); the cleanup task keeps its own pre-check. It runs
-  `TaskExecutor.CleanupCommand` (container, image and builder prune): networks are not pruned, since which ones are
-  unused cannot be decided beforehand; dangling images are not checked against protected patterns.
+- **Bulk prune** (`host.prune`) is decided on the stopped containers it removes (R1-16; unlistable containers
+  refuse it): those listed in `containerIds` (one per line; one no longer on the server refuses the run), else every
+  stopped container of the server. The cleanup task lists them once, keeps its own pre-check, and runs
+  `TaskExecutor.CleanupCommandFor(ids)` — `docker rm` of exactly those ids, then image and builder prune — so a
+  container that stops after the decision is not removed; networks are not pruned, since which ones are unused
+  cannot be decided beforehand; dangling images are not checked against protected patterns.
 - **Free text** (`command`, `query`, `yaml`, …) is checked word by word against protected names and the control
   plane (R1-16, `ProtectedResourceMatcher`; commands as the shell reads them); `MutationTargetResolver` adds every
   container a free-text word of twelve or more hex digits (any hex word in a `docker …` command except options,
@@ -279,7 +281,12 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   a long `type: bind` entry as a host path even when relative; `<<` merges through any depth; the files of
   file-backed `secrets` / `configs`; `volumes_from` as the other service's mounts (of any file, resolved after all
   files are read) or the container's id and name, looked up on the server —
-  `ComposeModel.ResolveContainers`; not found or not unique refuses the plan without quoting the reference). A mount whose source came from a variable is
+  `ComposeModel.ResolveContainers`; not found or not unique refuses the plan without quoting the reference — plus
+  that container's own mounts from `docker inspect`, unreadable → refused). `ComposePlanner` also has compose
+  resolve the deployment on the server (`ComposeConfigEffects`: `docker compose config --format json` with the
+  planned files and `.env` written base64 to a temporary directory) and adds every mount compose reports that its own
+  model did not (`ComposeModel.WithEffects`, withheld); a failed or unreadable run, a service the files do not show
+  or an unknown mount kind refuses the plan. A mount whose source came from a variable is
   decided but listed in `MutationTarget.Withheld`: the decision record stores `(withheld)`, the audit only the length of
   `mounts`.
   A `.env` saved on the container page decides them the same way (`ComposeImpact.RunMountsAsync`). `ComposeImpact`
