@@ -16,7 +16,9 @@ All notable changes to Whiskers are documented here. The format follows
   file, the deployment output, the template or registry deployed, the previous owner on a takeover — is part of that
   event. The old page-level action names
   (`deploy.app`, `backup.create`, `task.adopt`, …) are no longer written for these pages; filter the audit by the
-  capability instead (`app.deploy`, `volume.backup`, `scheduler.update`, …). No migration.
+  capability instead (`app.deploy`, `volume.backup`, `scheduler.update`, …). A page's refusal names the resolved
+  target like the action's other outcomes. Automation runs (scheduled tasks, AutoPatch) likewise record a result
+  whose `Success` is false — for example a failed mTLS renewal — as **Failed**. No migration.
 
 - R1-20: **One outcome per MCP call, one audit event per mutation.** The Agent History of a direct MCP call no longer
   takes success from the HTTP status: each call records what it came to — executed, denied, failed, waiting for

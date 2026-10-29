@@ -48,10 +48,11 @@ public sealed class UiAuditCompletenessTests : IDisposable
         public Task<bool> HasRoleAsync(AppRole required) => Task.FromResult(role >= required);
     }
 
-    private UiMutationRunner Runner(AppRole role)
+    private UiMutationRunner Runner(AppRole role, IMutationTargetResolver? targets = null)
     {
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store),
             new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance,
+            targets: targets,
             decisions: new DbPolicyDecisionStore(_db.Scopes),
             approvals: new ApprovalGate(new ApprovalStore(policy: _store, persistence: _db.Persistence()), _store),
             journal: new DbOperationJournal(_db.Scopes));
@@ -102,6 +103,22 @@ public sealed class UiAuditCompletenessTests : IDisposable
         Assert.Equal("container.restart", row.Action);
         Assert.Contains("Operator role", row.Details);
         Assert.NotNull(row.OperationId);
+    }
+
+    private sealed class Canonical : IMutationTargetResolver
+    {
+        public Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct) =>
+            Task.FromResult(new TargetResolution(new MutationTarget("container", "web", "web", "local"), null));
+    }
+
+    [Fact]
+    public async Task A_role_refusal_names_the_resolved_target_like_the_other_outcomes()
+    {
+        // The page knows only the raw id and no server; the event carries the canonical identity anyway.
+        await Runner(AppRole.Viewer, new Canonical()).RefuseAsync("container.restart", new { containerId = "web" },
+            "Requires the Operator role.");
+
+        Assert.Equal("Denied", (await TheEventAsync()).Outcome);   // asserts target "web" on server "local"
     }
 
     [Fact]
@@ -207,8 +224,15 @@ public sealed class UiAuditCompletenessTests : IDisposable
             ["Pages/ContainerDetail.razor"] = ["CheckMigrationStatus"],
             ["Pages/NginxManager.razor"] = ["TestConfig"],
         }.GetValueOrDefault(page, []);
-        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"private async Task (\w+)\([^)]*\)\s*\{\s*if \(!Require\(AppRole"))
-            Assert.Contains(m.Groups[1].Value, reads);
+        // Every plain Require( call — whatever its argument and wherever it sits in the handler — must be in a read.
+        var handlers = System.Text.RegularExpressions.Regex.Matches(source, @"(?:private|protected|public)[^\n(]*?\s(\w+)\(");
+        foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
+                     @"(?<![\w.])Require\("))
+        {
+            var handler = handlers.Where(h => h.Index < call.Index).LastOrDefault()?.Groups[1].Value;
+            if (handler is "Require" or "RequireAsync") continue;   // the helpers themselves
+            Assert.True(handler is not null && reads.Contains(handler),
+                $"{page}: a plain Require( in '{handler}' records no refusal — use RequireAsync.");
+        }
     }
 }

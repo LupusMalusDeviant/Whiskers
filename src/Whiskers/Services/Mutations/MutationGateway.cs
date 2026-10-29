@@ -138,7 +138,7 @@ public sealed class MutationGateway : IMutationGateway
     }
 
     /// <inheritdoc />
-    public Task<MutationOutcome<object?>> RefuseAsync(MutationRequest request, string reason, CancellationToken ct = default)
+    public async Task<MutationOutcome<object?>> RefuseAsync(MutationRequest request, string reason, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Principal);
@@ -147,8 +147,23 @@ public sealed class MutationGateway : IMutationGateway
         request = request with { OperationId = operationId };
         if (MutationScope.Current is { } enclosing)
             request = request with { ParentOperationId = enclosing.OperationId };
-        return RefuseAsync<object?>(operationId, request, _catalog.Find(request.CapabilityId), MutationStatus.Denied,
-            reason, ct);
+        var capability = _catalog.Find(request.CapabilityId);
+        // The refusal names the same canonical target as the action's other outcomes would (INV-57); when the target
+        // cannot be resolved the refusal stands with the target as named.
+        if (_targets is not null && capability is not null)
+        {
+            try
+            {
+                if ((await _targets.ResolveAsync(request, capability, ct)).Target is { } resolved)
+                    request = request with { Target = resolved };
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Target of refused {Capability} could not be resolved (operation {OperationId})",
+                    capability.Id, operationId);
+            }
+        }
+        return await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied, reason, ct);
     }
 
     /// <inheritdoc />

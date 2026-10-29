@@ -55,11 +55,14 @@ public sealed class UiMutationRunner : IUiMutationRunner
     private readonly ICapabilityCatalog _catalog;
     private readonly ICurrentUserService _user;
     private readonly Microsoft.Extensions.Localization.IStringLocalizer<SharedResource>? _text;
+    private readonly Microsoft.Extensions.Logging.ILogger<UiMutationRunner>? _logger;
 
     public UiMutationRunner(IMutationGateway gateway, ICapabilityCatalog catalog, ICurrentUserService user,
-        Microsoft.Extensions.Localization.IStringLocalizer<SharedResource>? text = null)
+        Microsoft.Extensions.Localization.IStringLocalizer<SharedResource>? text = null,
+        Microsoft.Extensions.Logging.ILogger<UiMutationRunner>? logger = null)
     {
         _text = text;
+        _logger = logger;
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _user = user ?? throw new ArgumentNullException(nameof(user));
@@ -118,9 +121,14 @@ public sealed class UiMutationRunner : IUiMutationRunner
             await _gateway.RefuseAsync(new MutationRequest(capabilityId, await PrincipalAsync(), MutationSurface.Ui,
                 target, args), reason, ct);
         }
-        catch (Exception) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            // The refusal stands whether or not it could be recorded; the gateway already logged and kept it (R1-19).
+            // The refusal stands whether or not it could be recorded. A failure inside the gateway is logged and kept
+            // there (R1-19); one before it (principal, arguments) is logged here — the capability only, never arguments.
+            // The exception type only: its message may carry argument values.
+            if (_logger is not null)
+                Microsoft.Extensions.Logging.LoggerExtensions.LogError(_logger,
+                    "A UI refusal of {Capability} could not be recorded ({Error})", capabilityId, ex.GetType().Name);
         }
     }
 
