@@ -460,6 +460,41 @@ public sealed class WebhookMutationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_git_deployment_does_not_touch_its_workspace_while_another_deployment_reads_it()
+    {
+        var webhook = Seed("git-deploy", AppId);
+        var workDir = GitDeployCommands.WorkDir(AppId);
+        // A compose webhook deploying from the app's checkout holds the workspace.
+        var held = await _locks.AcquireAsync(ResourceLocks.Workspace("local", workDir));
+
+        var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
+        await Task.Delay(500);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains(workDir));   // no credentials, no fetch, no checkout
+
+        held.Dispose();
+        var (success, output) = await test;
+        Assert.True(success, output);
+        Assert.True(Ran("git-deploy"));
+    }
+
+    [Fact]
+    public async Task A_compose_webhook_on_a_git_checkout_waits_for_its_workspace()
+    {
+        var compose = Seed("deploy", $"{GitDeployCommands.WorkDir(AppId)}/repo");
+        var held = await _locks.AcquireAsync(ResourceLocks.Workspace("local", GitDeployCommands.WorkDir(AppId)));
+
+        var test = Service().TriggerSignedTestAsync(compose.WebhookId);
+        await Task.Delay(500);
+        Assert.False(Ran("deploy"));
+
+        held.Dispose();
+        var (success, output) = await test;
+        Assert.True(success, output);
+        Assert.True(Ran("deploy"));
+        Assert.Equal(0, _locks.Count);
+    }
+
+    [Fact]
     public async Task A_git_app_changed_while_its_deployment_waited_for_the_project_does_not_deploy()
     {
         var webhook = Seed("git-deploy", AppId);

@@ -64,3 +64,4 @@ docker-compose.override.yml
 .claude/.locks/
 .claude/auto-drive.off
 .claude/gate-guard.off
+.relay/runs/

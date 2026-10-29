@@ -4,7 +4,9 @@ namespace Whiskers.Services.Mutations;
 /// One lock per resource, by key, shared by everything that mutates it in this process (R1-10, INV-42): webhook runs
 /// and Git deployments take the lock of the compose project they deploy (<see cref="ComposeProject"/>), so deployments
 /// of one project never overlap whichever path starts them; container actions and deployments both take the lock of
-/// their server's containers (<see cref="Containers"/>), a deployment after its project's — always in that order. A lock exists only while it is held or awaited: the table
+/// their server's containers (<see cref="Containers"/>), a deployment after its project's; a deployment from a Git
+/// workspace takes the workspace (<see cref="Workspace"/>) before all of them — always in the order workspace,
+/// project, containers. A lock exists only while it is held or awaited: the table
 /// does not grow with resources that came and went (a container rebuilt under a new id).
 /// </summary>
 public sealed class ResourceLocks
@@ -19,6 +21,10 @@ public sealed class ResourceLocks
 
     /// <summary>The key of a compose project on a server — compose's own identity of a deployment.</summary>
     public static string ComposeProject(string serverId, string projectName) => $"compose-project:{serverId}|{projectName}";
+
+    /// <summary>The key of a deployment workspace (a Git app's checkout) on a server: held while it is written to and
+    /// while a deployment reads its compose files.</summary>
+    public static string Workspace(string serverId, string directory) => $"workspace:{serverId}|{directory}";
 
     /// <summary>The key of a server's containers: held by every webhook container action and every deployment on it.</summary>
     public static string Containers(string serverId) => $"containers:{serverId}";

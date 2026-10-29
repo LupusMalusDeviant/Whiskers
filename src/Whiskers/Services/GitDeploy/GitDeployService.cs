@@ -253,6 +253,11 @@ public class GitDeployService : IGitDeployService
 
         try
         {
+            // The workspace is written (credentials, checkout) and read (the compose files) by this deployment from
+            // here to `up` (R1-10): no other deployment of the app, nor a compose webhook on its checkout, meanwhile.
+            // Taken before the project and server locks, as everywhere.
+            using var workspace = await _locks.AcquireAsync(
+                ResourceLocks.Workspace(app.ServerId, GitDeployCommands.WorkDir(appId)), ct);
             await EnsureUnchangedAsync(app);
 
             // 1) Credentials (private repos): refresh the askpass pair from the vault every run,

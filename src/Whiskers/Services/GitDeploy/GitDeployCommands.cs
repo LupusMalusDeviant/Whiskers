@@ -13,6 +13,16 @@ public static class GitDeployCommands
     /// <summary>Deploy workspace on the target server. The slug comes from the app ID (hex-only).</summary>
     public static string WorkDir(string appId) => $"/opt/whiskers-git/{appId}";
 
+    /// <summary>The Git workspace a normalized absolute directory lies in (the workspace itself or below it), or
+    /// <c>null</c>.</summary>
+    public static string? WorkDirOf(string directory)
+    {
+        const string root = "/opt/whiskers-git/";
+        if (!directory.StartsWith(root, StringComparison.Ordinal)) return null;
+        var slug = directory[root.Length..].Split('/')[0];
+        return slug.Length > 0 && slug.All(Uri.IsHexDigit) ? WorkDir(slug) : null;
+    }
+
     /// <summary>Writes the askpass helper + token file (0700/0600) from base64 — content never
     /// touches shell quoting. The helper answers git's username prompt with a fixed token user and
     /// the password prompt with the token file's content.</summary>

@@ -220,8 +220,9 @@ public class WebhookService : IWebhookService
         if (!fresh)
         {
             _slots.Release();
-            // Still being recorded by a concurrent delivery that may yet fail: not "queued" before it is.
-            if (_deliveries.Admitting(row))
+            // Still being recorded by a concurrent delivery that may yet fail, or queued with nothing holding it (a
+            // concurrent takeover that won and then failed): not "queued" — busy, and the next delivery takes it over.
+            if (_deliveries.Admitting(row) || _deliveries.Orphaned(row))
             {
                 _logger.LogInformation("Webhook {Name}: a repeat of a delivery still being recorded; refused as busy", webhook.Name);
                 return new WebhookAcceptance(WebhookReply.Busy);
@@ -308,9 +309,12 @@ public class WebhookService : IWebhookService
             {
                 try
                 {
-                    gate = await _locks.AcquireAsync(target.Key, ct);
+                    // A deployment from a Git workspace holds the workspace first: a Git deployment writes it.
+                    gate = target.Workspace is { } workspace ? await _locks.AcquireAsync(workspace, ct) : null;
+                    var resource = await _locks.AcquireAsync(target.Key, ct);
+                    gate = gate is null ? resource : ResourceLocks.Both(gate, resource);
                     // A deployment recreates and removes containers: it holds its server's containers too, after its
-                    // project (the one order everywhere). It is planned again below, after both waits.
+                    // project (the one order everywhere). It is planned again below, after the waits.
                     if (target.Plan is { } planned)
                         gate = ResourceLocks.Both(gate, await _locks.AcquireAsync(ResourceLocks.Containers(planned.ServerId), ct));
                 }
@@ -430,7 +434,7 @@ public class WebhookService : IWebhookService
     /// <see cref="Container"/>, for a compose deployment <see cref="Plan"/>, is what the key was made from (or
     /// <see cref="Error"/> says why there is none).</summary>
     private sealed record RunTarget(string Key, ContainerInfo? Container = null, ComposePlan? Plan = null,
-        string? Error = null)
+        string? Error = null, string? Workspace = null)
     {
         /// <summary>Resolved from what the name points to now — which can change (a rebuild, an edited compose file),
         /// so it is checked again under its lock.</summary>
@@ -551,10 +555,12 @@ public class WebhookService : IWebhookService
                 return new RunTarget("git:" + webhook.TargetId);
             case "deploy":
             {
+                var directory = NormalizeDirectory(webhook.TargetId);
+                var workspace = GitDeployCommands.WorkDirOf(directory) is { } dir ? ResourceLocks.Workspace(server, dir) : null;
                 var (plan, error) = await LookupAsync(webhook, () => PlanAsync(webhook, ct), ct);
                 return plan is not null
-                    ? new RunTarget(ResourceLocks.ComposeProject(server, plan.ProjectName), Plan: plan)
-                    : new RunTarget($"compose-dir:{server}|{NormalizeDirectory(webhook.TargetId)}", Error: error);
+                    ? new RunTarget(ResourceLocks.ComposeProject(server, plan.ProjectName), Plan: plan, Workspace: workspace)
+                    : new RunTarget($"compose-dir:{server}|{directory}", Error: error, Workspace: workspace);
             }
             case "restart" or "rebuild":
             {

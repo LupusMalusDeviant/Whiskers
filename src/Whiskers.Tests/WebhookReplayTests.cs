@@ -757,6 +757,34 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
+    public async Task A_takeover_lost_to_one_that_then_failed_is_busy_not_queued()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var request = Signed(wh, "delivery-0208");
+        var (key, _) = WebhookSignatures.Verify(wh, request, _time.GetUtcNow(), _options.TimestampTolerance);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.WebhookDeliveries.Add(new WebhookDeliveryEntity
+            {
+                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Queued",
+                Instance = "stopped-process/claim", ReceivedAt = _time.GetUtcNow().UtcDateTime,
+            });
+            await db.SaveChangesAsync();
+        }
+        var service = Service();
+        // Another delivery takes it over first and then fails before queueing it: this one's takeover changes
+        // nothing and finds the row under a claim nothing holds.
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.Steal);
+
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await service.AcceptAsync(wh.WebhookId, request));
+
+        var again = await service.AcceptAsync(wh.WebhookId, request);
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Accepted, "left-queued", "queued"), again);
+        Assert.Equal("Succeeded", (await Finished("left-queued")).State);
+    }
+
+    [Fact]
     public void Requests_per_webhook_and_overall_are_limited()
     {
         _options.RequestsPerMinutePerWebhook = 2;
@@ -893,7 +921,7 @@ public sealed class WebhookReplayTests : IDisposable
             CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    private enum Fault { Fail, LoseAnswer, Stall, Replay, HoldAnswer }
+    private enum Fault { Fail, LoseAnswer, Stall, Replay, HoldAnswer, Steal }
 
     /// <summary>Breaks the next database command whose text contains a fragment — with <c>runsOnly</c>, only one of
     /// a run (the worker's commands carry the run's deadline; a delivery's own lookups have none): fails it, executes
@@ -960,6 +988,15 @@ public sealed class WebhookReplayTests : IDisposable
                     _holding.TrySetResult();
                     await _resume.Task;
                     throw new OperationCanceledException("The answer was lost.");
+                case Fault.Steal:
+                    // Another claim (one that is no longer held) took the row just before this command.
+                    await using (var steal = command.Connection!.CreateCommand())
+                    {
+                        steal.Transaction = command.Transaction;
+                        steal.CommandText = "UPDATE \"WebhookDeliveries\" SET \"Instance\" = 'lost-winner/claim'";
+                        await steal.ExecuteNonQueryAsync(ct);
+                    }
+                    break;
                 case Fault.Replay:
                     // Committed once, the answer lost, and retried (as a retrying execution strategy does): the
                     // caller sees only the retry.
