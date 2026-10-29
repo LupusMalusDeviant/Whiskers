@@ -32,7 +32,9 @@ All notable changes to Whiskers are documented here. The format follows
   (psql `\i`, `\gexec`, `\c`, `\!`; mysql `source`; sqlite `.read`; mongosh `load()`) and string escapes a driver
   decodes into a name (`b`, `\x62`). A `.env` saved in the web UI
   decides what the project mounts too (a whole short entry from a variable, `- ${SPEC}`, is expanded before it is
-  read; relative sources resolve against the project directory the deployment runs with), and a SQL import or seed decides the database it runs in. A mount whose source
+  read; relative sources — also of a long `type: bind` entry — resolve against the project directory the deployment
+  runs with; mounts merged through any depth of YAML anchors, `volumes_from` a service of another file, and the
+  files of file-backed `secrets` and `configs` count too), and a SQL import or seed decides the database it runs in. A mount whose source
   comes from an `.env` value is decided but never recorded (the audit keeps the length of `mounts`, the decision
   record `(withheld)`). A policy pattern that equals a control-plane pattern makes a hit approvable only where the
   control plane's own check finds it too (not a server named `whiskers-vps`); text that cannot be analysed is

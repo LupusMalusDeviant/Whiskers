@@ -276,7 +276,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 - **Compose mounts** (R1-16): `ComposePlan.Mounts()` lists every host path and volume the services mount
   (interpolated; relative bind sources resolved against the project directory; project-scoped volumes also as
   `<project>_<key>`, explicit `name:` resolved; a volume with `driver_opts: device: <host path>` also as that path;
-  `volumes_from` as the other service's mounts or the container's id and name, looked up on the server —
+  a long `type: bind` entry as a host path even when relative; `<<` merges through any depth; the files of
+  file-backed `secrets` / `configs`; `volumes_from` as the other service's mounts (of any file, resolved after all
+  files are read) or the container's id and name, looked up on the server —
   `ComposeModel.ResolveContainers`; not found or not unique refuses the plan without quoting the reference). A mount whose source came from a variable is
   decided but listed in `MutationTarget.Withheld`: the decision record stores `(withheld)`, the audit only the length of
   `mounts`.

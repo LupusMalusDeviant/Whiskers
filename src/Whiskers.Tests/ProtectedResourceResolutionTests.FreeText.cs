@@ -207,6 +207,49 @@ public sealed partial class ProtectedResourceResolutionTests
     }
 
     [Fact]
+    public async Task A_relative_long_bind_mount_is_a_host_path()
+    {
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    volumes:\n      - type: bind\n        source: data\n        target: /d\n" +
+            "      - type: volume\n        source: cache\n        target: /c\n"));
+        Assert.Contains("/opt/deployments/tools/data", plan.Mounts());
+        Assert.Contains("cache", plan.Mounts());                         // a named volume stays one
+        Assert.DoesNotContain("data", plan.Mounts());
+    }
+
+    [Fact]
+    public async Task Mounts_merged_through_several_anchors_are_decided()
+    {
+        _host.Files["/opt/deployments/tools/.env"] = "SRC=/\n";
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "x-base: &base\n  volumes: [\"${SRC}:/host\"]\nx-mid: &mid\n  <<: *base\nservices:\n  tool:\n    <<: *mid\n    image: alpine\n"));
+        Assert.Contains("/", plan.Mounts());
+    }
+
+    [Fact]
+    public async Task File_backed_secrets_and_configs_are_decided_as_their_files()
+    {
+        _host.Files["/opt/deployments/tools/.env"] = "CA_FILE=/opt/dockerproxy/certs/key.pem\n";
+        var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",
+            "services:\n  a:\n    image: x\n    secrets: [ca]\n    configs:\n      - source: app\n        target: /etc/app\n" +
+            "secrets:\n  ca:\n    file: ${CA_FILE}\n  unused:\n    external: true\nconfigs:\n  app:\n    file: ./app.conf\n"));
+        Assert.Contains("/opt/dockerproxy/certs/key.pem", plan.Mounts());
+        Assert.Contains("/opt/deployments/tools/app.conf", plan.Mounts());
+        Assert.Contains("/opt/dockerproxy/certs/key.pem", plan.WithheldMounts());
+    }
+
+    [Fact]
+    public async Task Volumes_from_a_service_of_another_file_are_decided()
+    {
+        var plan = await Planner().PlanAsync(new ComposeDeployment("local",
+        [
+            new ComposeFileInput("/opt/deployments/tools/compose.yml", "services:\n  data:\n    image: x\n    volumes:\n      - /srv/data:/d\n"),
+            new ComposeFileInput("/opt/deployments/tools/override.yml", "services:\n  app:\n    image: y\n    volumes_from: [data]\n"),
+        ]));
+        Assert.Equal(["/srv/data"], plan.Services.Single(s => s.Name == "app").Mounts.Select(m => m.Source));
+    }
+
+    [Fact]
     public async Task Volumes_taken_from_a_container_or_another_service_are_decided()
     {
         var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/tools",

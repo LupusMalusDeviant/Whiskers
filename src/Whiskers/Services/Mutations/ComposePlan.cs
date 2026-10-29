@@ -82,6 +82,10 @@ public sealed record ComposeMount(string Source, bool ProjectScoped)
     /// <summary>A container named by <c>volumes_from: container:…</c> (an id, id prefix or name); the planner
     /// replaces it by the container's id and name from the inventory.</summary>
     public bool Container { get; init; }
+
+    /// <summary>What the entry refers to by name until every file is read: <c>service</c> (<c>volumes_from</c> of
+    /// another service), <c>secret</c> or <c>config</c> (a file-backed one is mounted into the container).</summary>
+    public string? Reference { get; init; }
 }
 
 /// <summary>A compose deployment's impact could not be determined; the deployment does not run (fail closed).</summary>
@@ -464,6 +468,8 @@ public static class ComposeModel
         var volumeNames = new Dictionary<string, string>(StringComparer.Ordinal);
         var volumeDevices = new Dictionary<string, string>(StringComparer.Ordinal);
         var variableVolumes = new HashSet<string>(StringComparer.Ordinal);   // name or device from a variable
+        // Top-level secrets and configs backed by a host file ("secret:<name>" / "config:<name>" → its path).
+        var referencedFiles = new Dictionary<string, ComposeMount>(StringComparer.Ordinal);
         var order = new List<string>();
         // Compose resolves a relative bind source against the project directory — the one the deployment runs with.
         projectDirectory ??= files.Count > 0 ? ComposePaths.DirectoryOf(files[0].Path) : "/";
@@ -497,6 +503,21 @@ public static class ComposeModel
                                     Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(hostPath);
                         }
                     }
+            foreach (var kind in (string[])["secret", "config"])
+                if (root.Children.TryGetValue(new YamlScalarNode(kind + "s"), out var top) && top is YamlMappingNode topMap)
+                    foreach (var (key, value) in topMap.Children)
+                        if ((key as YamlScalarNode)?.Value is { } entryName && value is YamlMappingNode def
+                            && Scalar(def, "file") is { } file)
+                        {
+                            var filePath = Interpolate(file, env, $"The file of {kind} '{entryName}'");
+                            if (!filePath.StartsWith('/'))
+                                filePath = ComposePaths.Join(projectDirectory, filePath);
+                            referencedFiles[$"{kind}:{entryName}"] = new ComposeMount(
+                                Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(filePath), false)
+                            {
+                                FromVariable = file.Contains('$'),
+                            };
+                        }
             if (!root.Children.TryGetValue(new YamlScalarNode("services"), out var node)) continue;
             if (node is not YamlMappingNode serviceMap)
                 throw new ComposePlanException($"{path}: 'services' is not a mapping.");
@@ -523,6 +544,25 @@ public static class ComposeModel
         }
         if (order.Count == 0)
             throw new ComposePlanException("The compose files define no services.");
+        // References by name, now that every file is read: another service's mounts (volumes_from), a file-backed
+        // secret or config (its file; one that is not file-backed mounts nothing from the host).
+        IEnumerable<ComposeMount> Resolved(ComposeMount m, int depth)
+        {
+            if (depth > 8) throw new ComposePlanException("A volumes_from chain is too deep.");
+            switch (m.Reference)
+            {
+                case "service":
+                    // The reference can come from an .env value: never quoted.
+                    if (!mounts.TryGetValue(m.Source, out var inherited))
+                        throw new ComposePlanException("A service takes volumes from a service that is not defined.");
+                    return inherited.SelectMany(i => Resolved(i, depth + 1))
+                        .Select(i => m.FromVariable ? i with { FromVariable = true } : i).ToList();
+                case "secret" or "config":
+                    return referencedFiles.TryGetValue($"{m.Reference}:{m.Source}", out var file) ? [file] : [];
+                default:
+                    return [m];
+            }
+        }
         // A volume with an explicit top-level name is created under that name, not under the project's.
         ComposeMount Named(ComposeMount m) =>
             m.ProjectScoped && volumeNames.TryGetValue(m.Source, out var real)
@@ -535,7 +575,9 @@ public static class ComposeModel
                 : [Named(m)];
         return (name, nameSource, order.Select(s => new ComposeServicePlan(s, services[s])
         {
-            Mounts = mounts.TryGetValue(s, out var m) ? m.SelectMany(Effects).Distinct().ToList() : [],
+            Mounts = mounts.TryGetValue(s, out var m)
+                ? m.SelectMany(x => Resolved(x, 0)).SelectMany(Effects).Distinct().ToList()
+                : [],
         }).ToList());
     }
 
@@ -587,10 +629,7 @@ public static class ComposeModel
         IReadOnlyDictionary<string, string?> env, string service, string projectDirectory, int depth = 0)
     {
         if (depth > 8) throw new ComposePlanException("Service 'extends' chain is too deep.");
-        var sources = new List<YamlMappingNode> { definition };
-        if (definition.Children.TryGetValue(new YamlScalarNode("<<"), out var merge))
-            sources.AddRange((merge is YamlSequenceNode seq ? seq.Children : [merge]).OfType<YamlMappingNode>());
-        foreach (var source in sources)
+        foreach (var source in Merged(definition, 0))
         {
             // volumes_from inherits every mount of a container ("container:<name>", decided by its name) or of
             // another service of the file (its mounts).
@@ -612,14 +651,20 @@ public static class ComposeModel
                         };
                         continue;
                     }
-                    var other = reference.Split(':')[0];
-                    // The reference can come from an .env value: never quoted.
-                    if (!services.Children.TryGetValue(new YamlScalarNode(other), out var o) || o is not YamlMappingNode otherDef)
-                        throw new ComposePlanException($"Service '{service}' takes volumes from a service that is not defined.");
-                    foreach (var mount in MountsOf(otherDef, services, env, other, projectDirectory, depth + 1))
-                        yield return mount;
+                    // Another service, possibly of another file: resolved once every file is read.
+                    yield return new ComposeMount(reference.Split(':')[0], ProjectScoped: false)
+                    {
+                        FromVariable = raw.Contains('$'), Reference = "service",
+                    };
                 }
             }
+            // File-backed secrets and configs are mounted into the container: resolved once every file is read.
+            foreach (var kind in (string[])["secret", "config"])
+                if (source.Children.TryGetValue(new YamlScalarNode(kind + "s"), out var used) && used is YamlSequenceNode usedList)
+                    foreach (var entry in usedList.Children)
+                        if (((entry as YamlScalarNode)?.Value ?? (entry is YamlMappingNode em ? Scalar(em, "source") : null))
+                            is { } entryName)
+                            yield return new ComposeMount(entryName, ProjectScoped: false) { Reference = kind };
             if (!source.Children.TryGetValue(new YamlScalarNode("volumes"), out var node)) continue;
             if (node is not YamlSequenceNode list)
                 throw new ComposePlanException($"The volumes of '{service}' are not a list.");
@@ -637,9 +682,11 @@ public static class ComposeModel
                 if (entry is YamlScalarNode)
                     path = path.Contains(':') ? path[..path.IndexOf(':')] : "";
                 if (string.IsNullOrWhiteSpace(path)) continue;   // an anonymous volume
-                var hostPath = path.StartsWith('/') || path.StartsWith('.') || path.StartsWith('~');
+                // A long entry of type bind is a host path even when relative ("source: data").
+                var bind = entry is YamlMappingNode longForm && Scalar(longForm, "type") == "bind";
+                var hostPath = bind || path.StartsWith('/') || path.StartsWith('.') || path.StartsWith('~');
                 // A relative source is decided where it lands (../../.. from /opt/deployments/x is /).
-                if (path.StartsWith('.'))
+                if (path.StartsWith('.') || (bind && !path.StartsWith('/') && !path.StartsWith('~')))
                     path = Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(
                         ComposePaths.Join(projectDirectory, path));
                 yield return new ComposeMount(path, ProjectScoped: !hostPath) { FromVariable = raw.Contains('$') };
@@ -653,6 +700,17 @@ public static class ComposeModel
                 foreach (var mount in MountsOf(baseDef, services, env, baseName, projectDirectory, depth + 1))
                     yield return mount;
         }
+    }
+
+    /// <summary>A mapping and every mapping it merges with <c>&lt;&lt;</c>, through any depth (anchors of anchors).</summary>
+    private static IEnumerable<YamlMappingNode> Merged(YamlMappingNode map, int depth)
+    {
+        if (depth > 16) throw new ComposePlanException("A YAML merge chain is too deep.");
+        yield return map;
+        if (!map.Children.TryGetValue(new YamlScalarNode("<<"), out var merge)) yield break;
+        foreach (var source in (merge is YamlSequenceNode seq ? seq.Children : [merge]).OfType<YamlMappingNode>())
+            foreach (var inner in Merged(source, depth + 1))
+                yield return inner;
     }
 
     private static string? Scalar(YamlMappingNode map, string key) =>
