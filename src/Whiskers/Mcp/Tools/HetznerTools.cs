@@ -23,7 +23,7 @@ public class HetznerTools
     [McpServerTool, Description("Enable Hetzner rescue mode on a server (by Whiskers name or id), then it must be reset to boot into rescue. Returns the temporary root password. Recovery when the OS won't boot.")]
     public static async Task<string> HetznerEnableRescue(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        ICloudControlService cloud, IHetznerExtensions hetzner, IAuditLogService auditLog,
+        ICloudControlService cloud, IHetznerExtensions hetzner, IToolAuditLog auditLog,
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_rescue");

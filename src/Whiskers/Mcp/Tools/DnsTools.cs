@@ -64,7 +64,7 @@ public class DnsTools
     [McpServerTool, Description("Create or update one DNS record at the configured provider — idempotent: an existing record with the same name and type is updated (never duplicated), and an identical value answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after.")]
     public static async Task<string> SetDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        IDnsRecordService dns, IAuditLogService auditLog,
+        IDnsRecordService dns, IToolAuditLog auditLog,
         [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
         [Description("Record name relative to the zone, e.g. 'holler.app' or '@' for the zone itself")] string name,
         [Description("Record type: A, AAAA, CNAME or TXT")] string type,
@@ -104,7 +104,7 @@ public class DnsTools
     [McpServerTool, Description("Delete the DNS record(s) with the given name and type in a zone at the configured provider. Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op.")]
     public static async Task<string> DeleteDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
-        IDnsRecordService dns, IAuditLogService auditLog,
+        IDnsRecordService dns, IToolAuditLog auditLog,
         [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
         [Description("Record name relative to the zone, e.g. 'holler.app' or '@'")] string name,
         [Description("Record type: A, AAAA, CNAME or TXT")] string type)

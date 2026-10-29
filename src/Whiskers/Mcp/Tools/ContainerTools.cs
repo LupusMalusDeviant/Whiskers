@@ -107,7 +107,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
@@ -140,7 +140,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
@@ -173,7 +173,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
     {
@@ -207,7 +207,7 @@ public class ContainerTools
         IMcpPermissionService permissionService,
         IDockerService docker,
         IImageUpdateStore updateStore,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         Whiskers.Services.AutoUpdate.IAutoUpdateService autoUpdate,
         [Description("Container ID or name")] string containerId,
         [Description("Server ID")] string? serverId = null)
@@ -282,7 +282,7 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Application name (used as container name)")] string appName,
         [Description("Docker image to deploy (e.g. 'nginx:latest', 'postgres:17', 'node:22-alpine')")] string image,
         [Description("Server ID to deploy on")] string? serverId = null,
@@ -399,7 +399,7 @@ public class ContainerTools
         IDockerService docker,
         IHostCommandExecutor executor,
         IComposePlanner planner,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Environment variables to set as 'KEY=VALUE' pairs, comma-separated (e.g. 'OPENAI_API_KEY=sk-...,MODEL=gpt-4')")] string envVars,
         [Description("Server ID")] string? serverId = null)
@@ -453,7 +453,7 @@ public class ContainerTools
         IMcpPermissionService permissionService,
         IHostCommandExecutor executor,
         IComposePlanner planner,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Server ID to deploy on")] string serverId,
         [Description("Name/directory for the deployment (e.g. 'my-app')")] string projectName,
         [Description("Full docker-compose.yml content")] string composeContent)

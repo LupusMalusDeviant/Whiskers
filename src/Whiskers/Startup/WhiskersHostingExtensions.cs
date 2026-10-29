@@ -315,6 +315,8 @@ public static class WhiskersHostingExtensions
 
         // Audit log
         builder.Services.AddSingleton<Whiskers.Services.AuditLog.IAuditLogService, Whiskers.Services.AuditLog.AuditLogService>();
+        // What a tool reports about its own work: part of the gateway's event inside a mutation (R1-20).
+        builder.Services.AddSingleton<Whiskers.Services.AuditLog.IToolAuditLog, Whiskers.Services.AuditLog.ToolAuditLog>();
 
         // MCP/agent observability (Agent History)
         builder.Services.AddSingleton<Whiskers.Services.Observability.IMcpCallLogStore, Whiskers.Services.Observability.McpCallLogStore>();

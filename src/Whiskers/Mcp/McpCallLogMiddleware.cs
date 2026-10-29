@@ -1,9 +1,9 @@
-using Whiskers.Services.Mutations;
 using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using Whiskers.Models;
 using Whiskers.Services.Mcp;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Observability;
 using Whiskers.Utils;
 
@@ -14,7 +14,10 @@ namespace Whiskers.Mcp;
 /// <c>/mcp</c> without going through the in-process agent) into the Agent-History log.
 /// The in-process agent path is already captured by <see cref="Whiskers.Services.Agent.AgentToolInvoker"/>;
 /// this middleware covers everything that bypasses it, so EVERY MCP tool call is observable.
-/// It only inspects the JSON-RPC envelope (method + params), never alters the request, and never throws.
+/// It only inspects the JSON-RPC envelope (method + params + id), never alters the request, and never throws.
+/// What a call came to is the outcome <see cref="McpGuardrailFilter"/> reported for it (R1-20) — executed, denied,
+/// failed, waiting for approval, failed verification — matched by its JSON-RPC id, so each call of a batch keeps its
+/// own. The HTTP status is not an outcome: a call the filter reported nothing for is recorded as not successful.
 /// </summary>
 public sealed class McpCallLogMiddleware
 {
@@ -45,6 +48,7 @@ public sealed class McpCallLogMiddleware
             return;
         }
 
+        McpCallOutcomes.Begin(context);
         var sw = Stopwatch.StartNew();
         try
         {
@@ -53,18 +57,33 @@ public sealed class McpCallLogMiddleware
         finally
         {
             sw.Stop();
-            // status < 400 ⇒ the transport accepted the request; tool-internal errors surface in the
-            // JSON-RPC body (not captured here), but transport success is a useful coarse signal.
-            var success = context.Response.StatusCode < 400;
-            foreach (var (tool, argsJson) in calls)
-                await RecordAsync(context, tool, argsJson, success, sw.ElapsedMilliseconds);
+            var outcomes = McpCallOutcomes.Get(context).ToList();
+            foreach (var call in calls)
+                await RecordAsync(context, call, Take(outcomes, call), sw.ElapsedMilliseconds);
         }
     }
 
-    /// <summary>Reads and rewinds the request body, returning every (toolName, argumentsJson) in it.</summary>
-    private async Task<List<(string Tool, string? Args)>> SniffToolCallsAsync(HttpContext context)
+    /// <summary>The outcome reported for <paramref name="call"/> — the one with its JSON-RPC id, else the first one for
+    /// the same tool without an id — removed from <paramref name="outcomes"/> so no outcome counts twice.</summary>
+    private static McpCallOutcome? Take(List<McpCallOutcome> outcomes, SniffedCall call)
     {
-        var result = new List<(string, string?)>();
+        var index = call.Id is null
+            ? -1
+            : outcomes.FindIndex(o => o.RequestId == call.Id && o.Tool == call.Tool);
+        if (index < 0)
+            index = outcomes.FindIndex(o => o.RequestId is null && o.Tool == call.Tool);
+        if (index < 0) return null;
+        var outcome = outcomes[index];
+        outcomes.RemoveAt(index);
+        return outcome;
+    }
+
+    private sealed record SniffedCall(string Tool, string? Args, string? Id);
+
+    /// <summary>Reads and rewinds the request body, returning every tool call in it.</summary>
+    private async Task<List<SniffedCall>> SniffToolCallsAsync(HttpContext context)
+    {
+        var result = new List<SniffedCall>();
         try
         {
             context.Request.EnableBuffering();
@@ -94,7 +113,7 @@ public sealed class McpCallLogMiddleware
         return result;
     }
 
-    private static void AddIfToolCall(JsonElement msg, List<(string, string?)> sink)
+    private static void AddIfToolCall(JsonElement msg, List<SniffedCall> sink)
     {
         if (msg.ValueKind != JsonValueKind.Object) return;
         if (!msg.TryGetProperty("method", out var method) || method.GetString() != "tools/call") return;
@@ -102,10 +121,19 @@ public sealed class McpCallLogMiddleware
         if (!p.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String) return;
 
         var args = p.TryGetProperty("arguments", out var a) ? a.GetRawText() : null;
-        sink.Add((name.GetString()!, args));
+        // The id as the MCP server reads it: a string's text, a number's digits.
+        var id = msg.TryGetProperty("id", out var i)
+            ? i.ValueKind switch
+            {
+                JsonValueKind.String => i.GetString(),
+                JsonValueKind.Number => i.GetRawText(),
+                _ => null,
+            }
+            : null;
+        sink.Add(new SniffedCall(name.GetString()!, args, id));
     }
 
-    private async Task RecordAsync(HttpContext context, string tool, string? argsJson, bool success, long durationMs)
+    private async Task RecordAsync(HttpContext context, SniffedCall call, McpCallOutcome? outcome, long durationMs)
     {
         try
         {
@@ -114,31 +142,36 @@ public sealed class McpCallLogMiddleware
             if (store is null) return;
 
             var perm = sp.GetService<IMcpPermissionService>();
-            var (actor, verdict) = ResolveActorAndVerdict(context, perm, tool);
-            var level = McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(tool, McpPermissionLevels.Admin);
+            var (actor, verdict) = ResolveActorAndVerdict(context, perm, call.Tool);
+            var level = McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(call.Tool, McpPermissionLevels.Admin);
 
             await store.RecordAsync(new McpToolCallEntity
             {
                 Timestamp = DateTime.UtcNow,
                 Actor = actor,
                 ActorType = "mcp-direct",
-                ToolName = tool,
+                ToolName = call.Tool,
                 Level = level,
-                ParamsJson = Cap(SecretRedactor.Redact(argsJson), 4000),
-                Verdict = verdict,
-                Success = success,
+                ParamsJson = Cap(SecretRedactor.Redact(call.Args), 4000),
+                Verdict = outcome?.Verdict ?? verdict,
+                Success = outcome?.Success ?? false,
                 DurationMs = (int)durationMs,
-                ResultSummary = null,
-                Error = success ? null : $"HTTP {context.Response.StatusCode}",
+                ResultSummary = outcome?.Result.ToString(),
+                // The gateway's operation id: the same id as the call's audit event.
+                CorrelationId = outcome?.OperationId,
+                Error = outcome is null
+                    ? $"No outcome was reported for this call (HTTP {context.Response.StatusCode})."
+                    : outcome.Success ? null : Cap(SecretRedactor.Redact(outcome.Error ?? outcome.Result.ToString()), 1000),
             });
         }
         catch (Exception ex)
         {
-            _logger?.LogDebug(ex, "Failed to record external MCP call for {Tool}", tool);
+            _logger?.LogDebug(ex, "Failed to record external MCP call for {Tool}", call.Tool);
         }
     }
 
-    /// <summary>Identifies the caller (API-key name or web user) and whether the call was permitted.</summary>
+    /// <summary>Identifies the caller (API-key id or web user), and — for a call the filter reported no outcome for —
+    /// whether its key may call the tool at all ("deny") or nothing is known ("unknown").</summary>
     private static (string Actor, string Verdict) ResolveActorAndVerdict(
         HttpContext context, IMcpPermissionService? perm, string tool)
     {
@@ -150,24 +183,18 @@ public sealed class McpCallLogMiddleware
             // The key's id, not its name: a rename must not split one caller into two (INV-01).
             var actor = cfg is not null ? PrincipalIds.Key(cfg.Id) : PrincipalIds.Anonymous;
             var allowed = perm?.IsToolAllowed(key, tool) ?? false;
-            return (actor, allowed ? GuardrailVerdictOf(context) : "deny");
+            return (actor, allowed ? "unknown" : "deny");
         }
 
         // Cookie-authenticated web user POSTing directly to /mcp.
         if (context.User.Identity?.IsAuthenticated == true)
         {
             var email = context.User.FindFirst(ClaimTypes.Email)?.Value;
-            return (string.IsNullOrWhiteSpace(email) ? PrincipalIds.Anonymous : PrincipalIds.User(email),
-                GuardrailVerdictOf(context));
+            return (string.IsNullOrWhiteSpace(email) ? PrincipalIds.Anonymous : PrincipalIds.User(email), "unknown");
         }
 
         return (PrincipalIds.Anonymous, "deny");
     }
-
-    /// <summary>The guardrail filter's verdict for this request ("allow", "confirm", "deny"); "allow" when it did
-    /// not run (agent module off). One verdict per request, which is exact for the usual single tools/call.</summary>
-    private static string GuardrailVerdictOf(HttpContext context) =>
-        context.Items.TryGetValue(McpGuardrailFilter.VerdictItemKey, out var v) && v is string s ? s : "allow";
 
     private static string? Cap(string? s, int max) =>
         s is null ? null : (s.Length > max ? s[..max] + "…" : s);

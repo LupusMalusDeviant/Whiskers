@@ -20,18 +20,21 @@ namespace Whiskers.Mcp;
 /// The tool's own <see cref="McpPermissionCheck"/> (the key's scope) still runs inside. The in-process agent never
 /// passes here: it invokes tools directly and reaches the gateway through <c>AgentToolInvoker</c>, so no call is
 /// evaluated twice. Guardrails are core (PC-D8); if they are missing anyway, every call is refused (INV-26).
+/// Every call's outcome is handed to the call history (<see cref="McpCallOutcomes"/>, R1-20), keyed by its JSON-RPC id.
 /// </summary>
 public static class McpGuardrailFilter
 {
-    /// <summary>HttpContext item carrying the guardrail verdict, so the call log records what was decided.</summary>
-    public const string VerdictItemKey = "whiskers.mcp.guardrail-verdict";
-
     public static McpRequestHandler<CallToolRequestParams, CallToolResult> Create(
-        McpRequestHandler<CallToolRequestParams, CallToolResult> next) => async (request, ct) =>
+        McpRequestHandler<CallToolRequestParams, CallToolResult> next) => (request, ct) =>
+        HandleAsync(request.Services, request.Params, request.JsonRpcRequest?.Id.Id?.ToString(),
+            token => next(request, token), ct);
+
+    /// <summary>The filter without the MCP request around it: <paramref name="requestId"/> is the call's JSON-RPC id.</summary>
+    internal static async ValueTask<CallToolResult> HandleAsync(IServiceProvider? services, CallToolRequestParams? call,
+        string? requestId, Func<CancellationToken, ValueTask<CallToolResult>> next, CancellationToken ct)
     {
-        var services = request.Services;
-        if (request.Params is null)
-            return await next(request, ct);
+        if (call is null)
+            return await next(ct);
         if (services is null)
             return Refuse("Guardrails are unavailable; the call was not executed.");
 
@@ -39,77 +42,114 @@ public static class McpGuardrailFilter
         var http = services.GetService<IHttpContextAccessor>()?.HttpContext;
         var resolver = services.GetService<IAgentPrincipalResolver>();
         var guard = services.GetService<IDirectMcpCallGuard>();
-        if (http is null || resolver is null)
+        if (http is null)
             return Refuse("Guardrails could not identify the caller; the call was not executed.");
+        var tool = new Call(http, requestId, call.Name);
+        if (resolver is null)
+            return tool.Deny("Guardrails could not identify the caller; the call was not executed.");
         if (guard is null)
-            return Refuse("Guardrails are unavailable; the call was not executed.");
+            return tool.Deny("Guardrails are unavailable; the call was not executed.");
 
         var principal = resolver.Resolve(http);
-        var arguments = request.Params.Arguments is { } args
+        var arguments = call.Arguments is { } args
             ? new Dictionary<string, JsonElement>(args)
             : new Dictionary<string, JsonElement>();
 
         var catalog = services.GetService<ICapabilityCatalog>();
         if (catalog is null)
-            return Refuse("The capability catalog is unavailable; the call was not executed.");
-        var capability = catalog.FindByMcpTool(request.Params.Name);
+            return tool.Deny("The capability catalog is unavailable; the call was not executed.");
+        var capability = catalog.FindByMcpTool(call.Name);
         if (capability is not null)
         {
             var gateway = services.GetService<IMutationGateway>();
             if (gateway is null)
-                return Refuse("The Mutation Gateway is unavailable; the call was not executed.");
-            return await ThroughGatewayAsync(gateway, capability, principal, arguments, http, request, next, ct);
+                return tool.Deny("The Mutation Gateway is unavailable; the call was not executed.");
+            return await ThroughGatewayAsync(gateway, capability, principal, arguments, tool, call, next, ct);
         }
 
         // Reads: the tool switch and level apply to every principal kind, not only to API keys (INV-15). Checking the
         // level here also keeps a key's AllowedTools list from widening what its level permits (INV-16).
         var overrides = services.GetService<ICapabilityOverrides>();
         if (overrides is null)
-            return Refuse("Tool settings are unavailable; the call was not executed.");
-        var availability = overrides.ResolveTool(request.Params.Name,
-            McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(request.Params.Name, McpPermissionLevels.Admin));
+            return tool.Deny("Tool settings are unavailable; the call was not executed.");
+        var availability = overrides.ResolveTool(call.Name,
+            McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(call.Name, McpPermissionLevels.Admin));
         if (!availability.Enabled)
-            return RefuseRead(http, $"'{request.Params.Name}' is disabled in Settings → MCP.");
+            return tool.Deny($"'{call.Name}' is disabled in Settings → MCP.");
         if (!McpPermissionLevels.HasAccess(McpPermissionLevels.Normalize(principal.PermissionLevel), availability.RequiredLevel))
-            return RefuseRead(http, $"'{request.Params.Name}' requires '{availability.RequiredLevel}'.");
+            return tool.Deny($"'{call.Name}' requires '{availability.RequiredLevel}'.");
 
-        var verdict = await guard.EvaluateAsync(principal, request.Params.Name, arguments, ct);
-        http.Items[VerdictItemKey] = verdict.Allowed ? "allow" : verdict.Verdict.ToString().ToLowerInvariant();
-        return verdict.Allowed ? await next(request, ct) : Refuse(verdict.Message ?? "Blocked by guardrails.");
-    };
+        var verdict = await guard.EvaluateAsync(principal, call.Name, arguments, ct);
+        if (!verdict.Allowed)
+            return tool.Deny(verdict.Message ?? "Blocked by guardrails.", verdict.Verdict.ToString().ToLowerInvariant());
+
+        CallToolResult result;
+        try
+        {
+            result = await next(ct);
+        }
+        catch (Exception ex)
+        {
+            tool.Report(McpCallResult.Failed, "allow", null, ex.Message);
+            throw;
+        }
+        tool.Report(result.IsError == true ? McpCallResult.Failed : McpCallResult.Executed, "allow", null,
+            result.IsError == true ? ErrorText(result) : null);
+        return result;
+    }
 
     private static async ValueTask<CallToolResult> ThroughGatewayAsync(
         IMutationGateway gateway, Capability capability, AgentPrincipal principal,
-        Dictionary<string, JsonElement> arguments, HttpContext http,
-        RequestContext<CallToolRequestParams> request,
-        McpRequestHandler<CallToolRequestParams, CallToolResult> next, CancellationToken ct)
+        Dictionary<string, JsonElement> arguments, Call tool, CallToolRequestParams call,
+        Func<CancellationToken, ValueTask<CallToolResult>> next, CancellationToken ct)
     {
         var mutation = new MutationRequest(
             capability.Id, PrincipalOf(principal), MutationSurface.Mcp,
             MutationTargets.FromArguments(capability, arguments), arguments);
 
-        var outcome = await gateway.ExecuteAsync(mutation, async (decided, token) =>
+        MutationOutcome<CallToolResult> outcome;
+        try
         {
-            // The tool runs on the identity the gateway resolved and decided on (R1-06), not on a second lookup of
-            // what the client typed: the target's key and serverId are replaced by their canonical values.
-            // A call without an arguments object still receives the server it was decided on.
-            var wire = request.Params.Arguments ??= new Dictionary<string, JsonElement>();
-            foreach (var (key, value) in MutationTargets.CanonicalArguments(capability, arguments,
-                         decided.Request.Target, McpToolParameters.TakesServerId(request.Params.Name)))
-                if (!wire.TryGetValue(key, out var old) || old.GetRawText() != value.GetRawText())
-                    wire[key] = value;
-            var result = await next(request, token);
-            // A tool result marked as an error is a failed mutation, not a successful one.
-            if (result.IsError == true)
-                MutationScope.Fail(ErrorText(result));
-            return result;
-        }, ct);
-        http.Items[VerdictItemKey] = outcome.Status switch
+            outcome = await gateway.ExecuteAsync(mutation, async (decided, token) =>
+            {
+                // The tool runs on the identity the gateway resolved and decided on (R1-06), not on a second lookup of
+                // what the client typed: the target's key and serverId are replaced by their canonical values.
+                // A call without an arguments object still receives the server it was decided on.
+                var wire = call.Arguments ??= new Dictionary<string, JsonElement>();
+                foreach (var (key, value) in MutationTargets.CanonicalArguments(capability, arguments,
+                             decided.Request.Target, McpToolParameters.TakesServerId(call.Name)))
+                    if (!wire.TryGetValue(key, out var old) || old.GetRawText() != value.GetRawText())
+                        wire[key] = value;
+                var result = await next(token);
+                // A tool result marked as an error is a failed mutation, not a successful one.
+                if (result.IsError == true)
+                    MutationScope.Fail(ErrorText(result));
+                return result;
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            // The gateway itself threw (a refusal, also for an intent it could not write, is an outcome, not this): what
+            // was decided is unknown, and the call did not succeed.
+            tool.Report(McpCallResult.Failed, "unknown", null, ex.Message);
+            throw;
+        }
+
+        var verdict = outcome.Status switch
         {
             MutationStatus.Denied => "deny",
             MutationStatus.PendingApproval => "confirm",
             _ => outcome.ApprovalId is null ? "allow" : "confirm",
         };
+        var result = outcome.Status switch
+        {
+            MutationStatus.Executed when outcome.Verification == VerificationStatus.Failed => McpCallResult.VerificationFailed,
+            MutationStatus.Executed => McpCallResult.Executed,
+            MutationStatus.Denied => McpCallResult.Denied,
+            MutationStatus.PendingApproval => McpCallResult.PendingApproval,
+            _ => McpCallResult.Failed,
+        };
+        tool.Report(result, verdict, outcome.OperationId, result == McpCallResult.Executed ? null : outcome.Reason);
 
         return outcome.Status switch
         {
@@ -127,6 +167,19 @@ public static class McpGuardrailFilter
     /// <summary>An API key, or a web user calling <c>/mcp</c> with a session cookie.</summary>
     internal static MutationPrincipal PrincipalOf(AgentPrincipal p) => MutationPrincipals.Of(p);
 
+    /// <summary>One call being handled: where its outcome goes.</summary>
+    private sealed record Call(HttpContext Http, string? RequestId, string Tool)
+    {
+        public void Report(McpCallResult result, string verdict, string? operationId, string? error) =>
+            McpCallOutcomes.Add(Http, new McpCallOutcome(RequestId, Tool, result, verdict, operationId, error));
+
+        public CallToolResult Deny(string message, string verdict = "deny")
+        {
+            Report(McpCallResult.Denied, verdict, null, message);
+            return Refuse(message);
+        }
+    }
+
     private static string ErrorText(CallToolResult result)
     {
         var text = string.Join('\n', result.Content.OfType<TextContentBlock>().Select(c => c.Text));
@@ -143,12 +196,6 @@ public static class McpGuardrailFilter
     {
         ExceptionDispatchInfo.Capture(error).Throw();
         throw error;   // unreachable
-    }
-
-    private static CallToolResult RefuseRead(HttpContext http, string message)
-    {
-        http.Items[VerdictItemKey] = "deny";
-        return Refuse(message);
     }
 
     private static CallToolResult Refuse(string message) => new()

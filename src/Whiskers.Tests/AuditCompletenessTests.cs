@@ -4,7 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using ModelContextProtocol.Protocol;
+using Whiskers.Mcp;
 using Whiskers.Services.Approvals;
+using Whiskers.Services.AuditLog;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 
@@ -306,5 +309,53 @@ public sealed class AuditCompletenessTests : IDisposable
         // A payload keeps only its length, in the column as in the details.
         Assert.DoesNotContain("hunter2", row.Arguments);
         Assert.DoesNotContain("hunter2", row.Details);
+    }
+
+    private static readonly HashSet<string> HardProtected = new(StringComparer.Ordinal) { "renew_mtls_certificate" };
+
+    /// <summary>Every mutating MCP tool — every tool above Read (R1-20).</summary>
+    public static TheoryData<string> MutatingMcpTools()
+    {
+        var data = new TheoryData<string>();
+        foreach (var tool in McpPermissionLevels.DefaultToolLevels
+                     .Where(t => t.Value != McpPermissionLevels.Read).Select(t => t.Key).Order(StringComparer.Ordinal))
+            data.Add(tool);
+        return data;
+    }
+
+    /// <summary>R1-20: a direct MCP call of any mutating tool is one authoritative event, the gateway's; what the tool
+    /// reports about its own work enriches that event instead of becoming a second row.</summary>
+    [Theory]
+    [MemberData(nameof(MutatingMcpTools))]
+    public async Task Every_mutating_mcp_tool_call_is_one_authoritative_event(string tool)
+    {
+        using var mcp = new McpFilterHarness();
+        var legacy = new McpCallOutcomeTests.RecordingAuditLog();
+        var report = new ToolAuditLog(legacy);
+        var ran = false;
+
+        await mcp.CallAsync(tool, async _ =>
+        {
+            ran = true;
+            await report.LogAsync("someone", "mcp", "tool.report", "thing", "t-1", "thing one", "made it", "local");
+            return new CallToolResult { Content = [new TextContentBlock { Text = "done" }] };
+        });
+
+        var row = Assert.Single(await mcp.EventsAsync());
+        Assert.Equal("outcome", row.Phase);
+        Assert.Equal("Mcp", row.Surface);
+        Assert.Equal("key:k1", row.PrincipalId);
+        Assert.NotNull(row.OperationId);
+        Assert.Equal(row.OperationId, Assert.Single(McpCallOutcomes.Get(mcp.Http)).OperationId);
+        Assert.Empty(legacy.Rows);
+        if (!ran)
+        {
+            // Refused by a rule no setting lifts (the control plane is protected): still exactly one event.
+            Assert.True(HardProtected.Contains(tool), $"{tool}: {row.Outcome} — {row.Details}");
+            Assert.Equal("Denied", row.Outcome);
+            return;
+        }
+        Assert.Equal("Executed", row.Outcome);
+        Assert.Contains("made it", row.Details);
     }
 }

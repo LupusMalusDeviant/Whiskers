@@ -43,7 +43,7 @@ public class NetworkTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Network name")] string name,
         [Description("Network driver: bridge, overlay, macvlan (default: bridge)")] string driver = "bridge",
         [Description("Server ID")] string? serverId = null)
@@ -75,7 +75,7 @@ public class NetworkTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Network name or ID")] string networkId,
         [Description("Server ID")] string? serverId = null)
     {

@@ -158,7 +158,7 @@ public class DatabaseTools
         IMcpPermissionService permissionService,
         IDockerService docker,
         IDatabaseService dbService,
-        IAuditLogService auditLog,
+        IToolAuditLog auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Database name to backup")] string database,
         [Description("Server ID")] string? serverId = null)
