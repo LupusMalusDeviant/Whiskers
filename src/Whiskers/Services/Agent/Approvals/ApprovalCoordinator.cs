@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Approvals;
@@ -51,7 +53,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     public async Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context, string reason, GuardrailDecision decision)
     {
         var (actor, actorType) = ActorOf(context);
-        var paramsJson = Cap(SecretRedactor.Redact(call.ArgumentsJson), MaxParamChars);
+        var paramsJson = Cap(SecretRedactor.Redact(Unescaped(call.ArgumentsJson)), MaxParamChars);
         // Real required level of the tool (was hardcoded "write"), so the card and the resolver-level
         // check reflect what the tool actually needs.
         var level = McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(call.Name, "write");
@@ -151,4 +153,15 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
 
     private static string? Cap(string? s, int max) =>
         s is null ? null : (s.Length > max ? s[..max] + "…" : s);
+
+    // Rewrites the arguments with only the escapes JSON needs, so a quote an encoder wrote as ' is a quote
+    // again when the redactor looks for a SQL password literal. Unparsable text is redacted as it is.
+    private static string Unescaped(string json)
+    {
+        try { return JsonNode.Parse(json)?.ToJsonString(Relaxed) ?? json; }
+        catch (JsonException) { return json; }
+    }
+
+    private static readonly JsonSerializerOptions Relaxed =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 }

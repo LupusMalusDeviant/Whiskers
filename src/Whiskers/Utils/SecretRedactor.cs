@@ -47,6 +47,14 @@ public static class SecretRedactor
         @"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@/]+@",
         RegexOptions.Compiled, Timeout);
 
+    // SQL password literals: PASSWORD 'x', ENCRYPTED PASSWORD $$x$$, SET PASSWORD = 'x', IDENTIFIED BY x,
+    // IDENTIFIED WITH plugin BY|AS 'x'  →  keyword '***'. A quoted literal ends at a quote followed by a
+    // delimiter, so doubled ('') or backslash-escaped quotes stay inside it; an unclosed one is masked to the end.
+    private static readonly Regex SqlPassword = new(
+        @"(?is)\b(PASSWORD|IDENTIFIED(?:\s+WITH\s+\S+)?\s+(?:BY|AS))(\s*(?:=\s*|\(\s*)?)" +
+        @"(?:'.*?(?:'(?=[\s;,)\\""]|$)|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS)\s*)[^\s;'""\\]+)",
+        RegexOptions.Compiled, Timeout);
+
     // PEM private keys (certificates are public and stay readable).
     private static readonly Regex PemPrivateKey = new(
         @"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)",
@@ -69,6 +77,7 @@ public static class SecretRedactor
             s = EnvPassword.Replace(s, m => $"{m.Groups[1].Value}=***");
             s = MysqlPwFlag.Replace(s, "-p***");
             s = RedisAuthFlag.Replace(s, "-a ***");
+            s = SqlPassword.Replace(s, m => $"{m.Groups[1].Value}{m.Groups[2].Value}'***'");
             s = PemPrivateKey.Replace(s, "[REDACTED PRIVATE KEY]");
             s = LongBase64.Replace(s, "[REDACTED BASE64]");
             s = UrlCredentials.Replace(s, m => $"{m.Groups[1].Value}:***@");

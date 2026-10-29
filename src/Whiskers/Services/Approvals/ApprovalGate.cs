@@ -206,12 +206,16 @@ public sealed class ApprovalGate : IApprovalGate
             ? new ApprovalGateResult(true, "Approved.", approval.Id, approval.ResolvedBy)
             : null;
 
+    private static readonly JsonSerializerOptions Relaxed =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     private Task<Approval> RaiseAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,
         string argumentsHash, CancellationToken ct)
     {
+        // Only the escapes JSON needs, so a quote is a quote when the redactor looks for a SQL password literal.
         var argsJson = subject.WithholdPayloads
-            ? JsonSerializer.Serialize(Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloads(subject.Arguments))
-            : JsonSerializer.Serialize(subject.Arguments);
+            ? JsonSerializer.Serialize(Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloads(subject.Arguments), Relaxed)
+            : JsonSerializer.Serialize(subject.Arguments, Relaxed);
         var resolved = subject.TargetServer is not null || subject.TargetWorkload is not null;
         var (server, workload) = resolved
             ? (subject.TargetServer, subject.TargetWorkload)

@@ -27,7 +27,9 @@ All notable changes to Whiskers are documented here. The format follows
   `U&"…"` escapes, inline functions and untrusted languages (`plpython3u`). The
   SQL console, SQL import and seed and the raw compose deploy now hand their payload to the policy (Artisan
   migrations carry no free text: their command is fixed); the audit keeps only its length, and an approval raised from the web UI shows only the length of a
-  command, SQL or compose file (refusal reasons never quote words of it). **Upgrade notes:** calls that used to
+  command, SQL or compose file (refusal reasons never quote words of it); a card that shows the text (an agent's
+  chat or MCP call) masks SQL password literals (`PASSWORD '…'`, `IDENTIFIED BY …`) as it masks other secrets, and
+  so do the audit log and the host-command logs. **Upgrade notes:** calls that used to
   pass are now refused or need an Admin approval — an MCP key or a scheduled task restarting the Whiskers container
   or its proxy; a command or query that merely mentions a protected name (also inside a domain such as
   `whiskers.example.com`); any command from MCP or automation that uses a shell variable or `$(…)` (for example a

@@ -132,6 +132,43 @@ public class ApprovalNotificationTests
     }
 
     [Fact]
+    public async Task An_mcp_approval_stores_the_sql_without_its_password_literal()
+    {
+        var store = new ApprovalStore();
+        var gate = new ApprovalGate(store, new Policy(), new Recorder());
+        var subject = new ApprovalSubject("db.query", McpPermissionLevels.Admin, "key:k1", "ci-key", "mcp-direct",
+            Args(new { serverId = "local", containerId = "db", query = "ALTER ROLE whiskers PASSWORD 'canary-secret';" }))
+        {
+            Binding = "binding-sql",
+            Requesters = ["key:k1"],
+        };
+
+        var result = await gate.CheckAsync(subject, "needs a human", []);
+
+        var stored = store.Get(result.ApprovalId!)!;
+        Assert.DoesNotContain("canary", stored.ParamsJson);
+        Assert.Contains("ALTER ROLE whiskers PASSWORD '***'", stored.ParamsJson);
+    }
+
+    [Fact]
+    public async Task A_chat_approval_stores_the_sql_without_its_password_literal()
+    {
+        var store = new ApprovalStore();
+        var coordinator = new ApprovalCoordinator(store, new Recorder(), new Policy());
+        var call = new AgentToolCall("call_0", "db_execute", JsonSerializer.Serialize(new
+        {
+            serverId = "local", containerId = "db", sql = "ALTER ROLE whiskers PASSWORD 'canary-secret';",
+        }));
+
+        var approval = await coordinator.RaiseAsync(new Session("chat-1"), call, Chat, "Writes need a human.",
+            new GuardrailDecision(GuardrailVerdict.Confirm, "Writes need a human.", Array.Empty<string>()));
+
+        var stored = store.Get(approval.Id)!;
+        Assert.DoesNotContain("canary", stored.ParamsJson);
+        Assert.Contains("ALTER ROLE whiskers PASSWORD '***'", stored.ParamsJson);
+    }
+
+    [Fact]
     public async Task A_chat_approval_the_gateway_did_not_decide_names_no_target()
     {
         var store = new ApprovalStore();
