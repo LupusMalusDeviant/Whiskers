@@ -30,12 +30,15 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     private readonly ICapabilityOverrides? _overrides;
     private readonly ICapabilityCatalog? _catalog;
     private readonly IEffectiveRequirementResolver? _requirements;
+    private readonly Whiskers.Configuration.WhiskersPublicUrl? _publicUrl;
 
     public ApprovalCoordinator(
         IApprovalStore store, INotificationService notify, IGuardrailStore guardrails,
         ILogger<ApprovalCoordinator>? logger = null, ICapabilityOverrides? overrides = null,
-        ICapabilityCatalog? catalog = null, IEffectiveRequirementResolver? requirements = null)
+        ICapabilityCatalog? catalog = null, IEffectiveRequirementResolver? requirements = null,
+        Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null)
     {
+        _publicUrl = publicUrl;
         _overrides = overrides;
         _catalog = catalog;
         _requirements = requirements;
@@ -72,7 +75,12 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
                 level = McpPermissionLevels.Admin;
             }
         }
-        var (targetServer, targetWorkload) = ApprovalDisplay.ExtractTarget(call.ArgumentsJson);
+        // The gateway's resolved target when it decided the call; else the card reads it from the arguments (the
+        // notification then names none).
+        var resolved = decision.ResolvedServer is not null || decision.ResolvedResource is not null;
+        var (targetServer, targetWorkload) = resolved
+            ? (decision.ResolvedServer, decision.ResolvedResource)
+            : ApprovalDisplay.ExtractTarget(call.ArgumentsJson);
         var rule = decision.MatchedRuleIds.Count > 0 ? string.Join(", ", decision.MatchedRuleIds) : null;
 
         var request = new ApprovalRequest(
@@ -97,10 +105,14 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             DecisionId: decision.DecisionId,
             // R1-14: the gateway runs the call only for the caller, target and policy version decided here.
             Binding: decision.Binding,
-            Interactive: true);
+            Interactive: true,
+            // R1-15: the person chatting asks; they may decide it themselves unless a second approver is required.
+            Requesters: [actor]);
 
-        // The resolver reaches back to the still-running session that is awaiting the decision.
-        var approval = await _store.CreateAsync(request, approved => session.ResolveConfirmationAsync(call.Id, approved));
+        // The resolver reaches back to the still-running session that is awaiting the decision — by the call's
+        // operation id, which is unique, not by the provider's tool-call id, which a provider may reuse (C-18).
+        var approval = await _store.CreateAsync(request,
+            approved => session.ResolveConfirmationAsync(call.CorrelationId, approved));
 
         // Push to the in-app bell (+ external channels if active). Never let a push failure block the flow.
         try
@@ -108,8 +120,9 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = "agent_approval",
-                ImageInfo = $"Agent \"{actor}\" wants to run \"{call.Name}\" — approval required.",
+                ImageInfo = ApprovalDisplay.NotificationText(approval, decision.NotifiedTarget, _publicUrl),
                 CorrelationId = call.CorrelationId,
+                ApprovalId = approval.Id,
             });
         }
         catch (Exception ex)

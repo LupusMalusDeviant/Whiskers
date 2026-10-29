@@ -100,7 +100,8 @@ public class SchedulerApprovalEndToEndTests
 
         var pending = await gateway.ExecuteAsync(Request(capabilityId, args, "op-1"), Run);
         Assert.Equal(0, runs);
-        Assert.True(await approvals.ResolveAsync(pending.ApprovalId!, approved: true, "admin@example.com", McpPermissionLevels.Admin));
+        // Another admin: the agent asked on behalf of admin@example.com, who may not decide it (PC-D4, R1-15).
+        Assert.True(await approvals.ResolveAsync(pending.ApprovalId!, approved: true, "second-admin@example.com", McpPermissionLevels.Admin));
 
         var executed = await gateway.ExecuteAsync(Request(capabilityId, args, "op-1"), Run);
         var again = await gateway.ExecuteAsync(Request(capabilityId, args, "op-1"), Run);
@@ -121,7 +122,7 @@ public class SchedulerApprovalEndToEndTests
         var tool = Catalog.Find(capabilityId)!.McpTool!;
         var lowered = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "admin@example.com", "agent-web", tool,
             McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-1",
-            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(args))), _ => Task.CompletedTask);
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(args)), Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
         Assert.True(await approvals.ResolveAsync(lowered.Id, approved: true, "operator@example.com", McpPermissionLevels.Write));
         var runs = 0;
 

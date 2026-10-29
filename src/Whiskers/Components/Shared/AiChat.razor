@@ -1,3 +1,4 @@
+@implements IAsyncDisposable
 @using Microsoft.Extensions.Options
 @using Whiskers.Configuration
 @using Whiskers.Models
@@ -16,6 +17,7 @@
 @inject ICurrentUserService CurrentUser
 @inject IApprovalCoordinator ApprovalCoordinator
 @inject IApprovalStore ApprovalStore
+@inject IChatConnectionWatcher ConnectionWatcher
 @inject IChatWidgetParser WidgetParser
 @inject IJSRuntime JS
 @inject IStringLocalizer<SharedResource> L
@@ -60,7 +62,7 @@
                 </div>
                 <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearChat" title="@L["AiChat_Button_ClearChat"]"
                                Style="color: var(--sw-text-muted);" />
-                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _isOpen = false)"
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CloseAsync"
                                Style="color: var(--sw-text-muted);" />
             </div>
 
@@ -93,8 +95,9 @@
                 {
                     <div style="align-self:stretch; padding:8px 10px; border-radius:8px; background:var(--sw-accent-primary-soft); border:1px solid var(--sw-accent-primary);">
                         <div style="font-size:0.8rem; margin-bottom:6px; overflow-wrap:anywhere;"><b>@L["AiChat_Approval_Required"]</b> <code>@_pendingConfirm.Call.Name</code> — @_pendingReason</div>
-                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="@(() => Resolve(true))" Class="mr-2">@L["AiChat_Button_Approve"]</MudButton>
-                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" OnClick="@(() => Resolve(false))">@L["AiChat_Button_Reject"]</MudButton>
+                        @* Decided only through the recorded approval: no button before it exists (R1-15, INV-37). *@
+                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Disabled="@(_pendingApprovalId is null)" OnClick="@(() => Resolve(true))" Class="mr-2">@L["AiChat_Button_Approve"]</MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" Disabled="@(_pendingApprovalId is null)" OnClick="@(() => Resolve(false))">@L["AiChat_Button_Reject"]</MudButton>
                     </div>
                 }
                 @if (_thinking && _pendingConfirm is null)
@@ -130,6 +133,7 @@
 
     private bool _isOpen;
     private bool _thinking;
+    private bool _clearing;
     private bool _loaded;
     private bool _dragArmed;
     private bool _includeScreenshot;
@@ -144,6 +148,9 @@
     private AgentEvent.ConfirmationRequired? _pendingConfirm;
     private string _pendingReason = "";
     private string? _pendingApprovalId;
+    // R1-15: the session's run and its pending approvals end with this chat (INV-36).
+    private AgentChatLifetime? _lifetime;
+    private AgentChatLifetime Lifetime => _lifetime ??= new AgentChatLifetime(ApprovalStore, ConnectionWatcher);
     private Whiskers.Services.AiChat.ChatMessage? _streaming;
 
     private bool AgentMode => AgentSettings.CurrentValue.Enabled;
@@ -182,7 +189,10 @@
 
     private async Task Send()
     {
-        if (string.IsNullOrWhiteSpace(_input) || _thinking) return;
+        if (string.IsNullOrWhiteSpace(_input) || _thinking || _clearing) return;
+        // R1-15: this run's token, taken before the first await — closing the chat while the send prepares (page
+        // context, screenshot) refuses it.
+        var run = Lifetime.BeginRun();
         var userMsg = _input.Trim();
         _input = "";
         _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "user", Content = userMsg });
@@ -192,8 +202,12 @@
 
         try
         {
-            if (AgentMode) await SendAgentAsync(userMsg);
+            if (AgentMode) await SendAgentAsync(userMsg, run);
             else await SendAdvisorAsync(userMsg);
+        }
+        catch (OperationCanceledException)
+        {
+            // The chat was cleared or closed: the run was stopped on purpose.
         }
         catch (Exception ex)
         {
@@ -238,7 +252,7 @@
         _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "assistant", Content = response });
     }
 
-    private async Task SendAgentAsync(string userMsg)
+    private async Task SendAgentAsync(string userMsg, CancellationToken run)
     {
         PageCtx? ctx = null;
         try { ctx = await JS.InvokeAsync<PageCtx>("swAgent.getPageContext"); } catch { }
@@ -257,9 +271,15 @@
             _context = await BuildContextAsync();
             _session = await AgentService.StartSessionAsync(_context);
         }
+        // Every run is tied to the chat: a run after closing the widget or a dropped connection is a new run.
+        Lifetime.Attach(_session, run);
+        // This run's session and context: Clear may swap the fields while an approval is being raised, and the
+        // approval must still be checked against the run it belongs to.
+        var session = _session;
+        var context = _context;
 
         _streaming = null;
-        await foreach (var ev in _session.SendAsync(prompt, shot, "image/jpeg"))
+        await foreach (var ev in session.SendAsync(prompt, shot, "image/jpeg", run))
         {
             switch (ev)
             {
@@ -286,8 +306,12 @@
                 case AgentEvent.ConfirmationRequired c:
                     _pendingConfirm = c;
                     _pendingReason = c.Reason;
-                    if (_session is not null && _context is not null)
-                        _pendingApprovalId = (await ApprovalCoordinator.RaiseAsync(_session, c.Call, _context, c.Reason, c.Decision)).Id;
+                    _pendingApprovalId = null;   // a new card: no earlier approval's id may decide it
+                    if (context is not null)
+                    {
+                        var approval = await Lifetime.RaiseAsync(ApprovalCoordinator, session, context, c, run);
+                        if (ReferenceEquals(_session, session)) _pendingApprovalId = approval.Id;
+                    }
                     StateHasChanged();
                     await ScrollToBottom();
                     break;
@@ -301,15 +325,44 @@
     private async Task Resolve(bool approved)
     {
         var id = _pendingApprovalId;
-        var confirm = _pendingConfirm;
+
+        // Every decision — approve or reject — goes through the recorded approval and its eligibility rules
+        // (INV-37); while it is still being raised there is nothing to decide yet (the buttons are disabled).
+        if (id is null) return;
+
+        // Through the central store, as the person signed in now at their current role (R1-15).
+        var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
+        var result = resolver is null
+            ? ApprovalDecisionResult.InsufficientLevel
+            : await ApprovalStore.DecideAsync(id, approved, resolver);
+        // Only this decision's own card ends: while it was being recorded the chat may have moved on to a newer one.
+        if (ApprovalDecisionMessages.EndsTheCard(result) && _pendingApprovalId == id)
+        {
+            _pendingConfirm = null;
+            _pendingApprovalId = null;
+        }
+        if (result != ApprovalDecisionResult.Decided)
+            _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "error", Content = L[ApprovalDecisionMessages.Key(result)].Value });
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_lifetime is not null) await _lifetime.DisposeAsync();
+    }
+
+    /// <summary>Closing the widget ends what runs in it (R1-15): nobody watches a closed chat. The conversation stays;
+    /// the next message starts a new run.</summary>
+    private async Task CloseAsync()
+    {
+        _isOpen = false;
+        // A send that is still preparing took its run token already and is refused when it tries to start. The run is
+        // stopped (synchronously, inside EndAsync) and its controls dropped before anything is awaited: a chat reopened
+        // meanwhile keeps the controls of its own, newer run.
+        var ending = _lifetime?.EndAsync() ?? Task.CompletedTask;
         _pendingConfirm = null;
         _pendingApprovalId = null;
-        StateHasChanged();
-        if (id is not null)
-            await ApprovalStore.ResolveAsync(id, approved, _userEmail);
-        else if (_session is not null && confirm is not null)
-            // Fallback: resolve the session confirmation directly, else the chat hangs until expiry.
-            await _session.ResolveConfirmationAsync(confirm.Call.Id, approved);
+        await ending;
     }
 
     private async Task<AgentContext> BuildContextAsync()
@@ -333,13 +386,25 @@
 
     private async Task ClearChat()
     {
-        if (_session is not null) await ApprovalStore.CancelForSessionAsync(_session.SessionId);
-        _messages.Clear();
-        _session = null;
-        _context = null;
-        _pendingConfirm = null;
-        _pendingApprovalId = null;
-        await HistoryStore.ClearAsync(_userEmail);
+        // R1-15: no send starts while Clear runs, and Clear only drops what belonged to the ended run: the run is
+        // stopped (synchronously, inside EndAsync) and the chat reset before anything is awaited — a send started
+        // afterwards gets a new session that Clear never touches.
+        _clearing = true;
+        try
+        {
+            var ending = Lifetime.EndAsync();
+            _messages.Clear();
+            _session = null;
+            _context = null;
+            _pendingConfirm = null;
+            _pendingApprovalId = null;
+            await ending;
+            await HistoryStore.ClearAsync(_userEmail);
+        }
+        finally
+        {
+            _clearing = false;
+        }
     }
 
     private async Task ScrollToBottom()

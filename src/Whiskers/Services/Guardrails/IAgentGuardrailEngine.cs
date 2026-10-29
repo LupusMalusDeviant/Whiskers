@@ -40,6 +40,15 @@ public sealed record GuardrailDecision(
 
     /// <summary>What an approval for this call is bound to (R1-14); set when the gateway decided it.</summary>
     public string? Binding { get; init; }
+
+    /// <summary>The server and the resource the gateway resolved the call's target to (R1-15); set when the gateway
+    /// decided it. Shown on the approval card, never in a notification.</summary>
+    public string? ResolvedServer { get; init; }
+    public string? ResolvedResource { get; init; }
+
+    /// <summary>What an approval notification names of the call's target (R1-15, <c>ApprovalDisplay.NotifiedTarget</c>):
+    /// its kind, and its inventory id and server where the resolver took them from the inventory.</summary>
+    public string? NotifiedTarget { get; init; }
 }
 
 public enum GuardrailVerdict { Allow, Confirm, Deny }

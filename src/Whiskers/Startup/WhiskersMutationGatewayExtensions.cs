@@ -37,8 +37,18 @@ public static class WhiskersMutationGatewayExtensions
         // R1-14: approvals live in the database; the store loads the open ones after the schema is migrated.
         services.AddSingleton<IApprovalPersistence, DbApprovalPersistence>();
         services.AddSingleton<IApprovalStore>(sp => new ApprovalStore(sp.GetService<ILogger<ApprovalStore>>(),
-            persistence: sp.GetRequiredService<IApprovalPersistence>()));
+            persistence: sp.GetRequiredService<IApprovalPersistence>(),
+            // R1-15: RequireSecondApprover is read from the active policy at each decision.
+            policy: sp.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>()));
+        // R1-15: absolute links in notifications come only from the configured public address, never a request host.
+        services.AddSingleton(sp => Whiskers.Configuration.WhiskersPublicUrl.From(sp.GetRequiredService<IConfiguration>()));
         services.AddSingleton<IApprovalGate, ApprovalGate>();
+        // R1-15: a chat ends its session (and its approvals) when the browser connection drops.
+        services.AddScoped<Whiskers.Services.Agent.Approvals.ChatConnectionWatcher>();
+        services.AddScoped<Whiskers.Services.Agent.Approvals.IChatConnectionWatcher>(sp =>
+            sp.GetRequiredService<Whiskers.Services.Agent.Approvals.ChatConnectionWatcher>());
+        services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler>(sp =>
+            sp.GetRequiredService<Whiskers.Services.Agent.Approvals.ChatConnectionWatcher>());
         services.AddSingleton<IDirectMcpCallGuard, DirectMcpCallGuard>();
         services.AddSingleton<IAgentPrincipalResolver, AgentPrincipalResolver>();
         // Tool metadata for the guardrail editor; executing tools stays with the Agent module's invoker.

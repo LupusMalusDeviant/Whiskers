@@ -70,7 +70,8 @@ public static class NotificationFormatter
     /// <summary>Relative, path-base-safe in-app link target for a notification (null = not navigable).</summary>
     public static string? LinkFor(NotificationEvent e)
     {
-        if (e.EventType == "agent_approval") return "approvals";
+        if (e.EventType == "agent_approval")
+            return string.IsNullOrWhiteSpace(e.ApprovalId) ? "approvals" : Approvals.ApprovalDisplay.LinkOf(e.ApprovalId);
         if (e.EventType == "webhook_disabled") return "webhooks";
         if (e.EventType.StartsWith("agent_action", StringComparison.Ordinal)) return "agent-history";
         if (e.EventType == "cve_finding") return "cves";

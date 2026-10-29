@@ -41,6 +41,13 @@ public class ApprovalRecordEntity
     /// <summary>Raised for a live agent session that waits on it; such an approval cannot outlive the process.</summary>
     public bool Interactive { get; set; }
 
+    /// <summary>The principal ids that asked for the approval (R1-15), one per line, the requesting principal first.
+    /// None of them may decide a non-interactive request.</summary>
+    public string? RequesterIds { get; set; }
+
+    /// <summary>Decided by one of its requesters (an interactive request, R1-15): a self-approval on record.</summary>
+    public bool SelfApproved { get; set; }
+
     /// <summary>Pending, Approved, Rejected, Expired or Cancelled.</summary>
     public string Status { get; set; } = string.Empty;
 

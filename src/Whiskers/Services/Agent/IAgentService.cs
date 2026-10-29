@@ -26,7 +26,9 @@ public interface IAgentSession
         string userMessage, string? imageBase64 = null, string? imageMediaType = null,
         CancellationToken ct = default);
 
-    /// <summary>Hybrid flow: approve or reject an open confirm tool call.
-    /// On approved=true the loop continues, otherwise the call is fed back as Deny.</summary>
-    Task ResolveConfirmationAsync(string toolCallId, bool approved, CancellationToken ct = default);
+    /// <summary>Hybrid flow: approve or reject the open confirm tool call with this operation id
+    /// (<see cref="Whiskers.Models.Agent.AgentToolCall.CorrelationId"/>, unique per call — never the provider's
+    /// tool-call id, which can repeat). On approved=true the loop continues, otherwise the call is fed back as Deny.
+    /// An id the session does not wait on (an ended run, a stale decision) changes nothing.</summary>
+    Task ResolveConfirmationAsync(string operationId, bool approved, CancellationToken ct = default);
 }

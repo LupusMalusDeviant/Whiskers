@@ -113,6 +113,9 @@
                     </MudSelect>
                     <MudSwitch @bind-Value="_edit.Policy.RequireConfirmationForWrites" Color="Color.Primary"
                                Label="@L["GuardrailsView_RequireConfirm_Label"]" Class="mt-3" />
+                    <MudSwitch @bind-Value="_edit.Policy.RequireSecondApprover" Color="Color.Primary"
+                               Label="@L["GuardrailsView_RequireSecondApprover_Label"]" Class="mt-1" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["GuardrailsView_RequireSecondApprover_Helper"]</MudText>
                     <MudNumericField @bind-Value="_edit.Policy.MaxActionsPerSession" Label="@L["GuardrailsView_MaxActions_Label"]"
                                      Margin="Margin.Dense" Variant="Variant.Outlined" Min="1" Class="mt-2" />
                 </MudPaper>
@@ -410,6 +413,7 @@
         ReadOnlyMode = s.ReadOnlyMode,
         RequireConfirmationForWrites = s.RequireConfirmationForWrites,
         MaxActionsPerSession = s.MaxActionsPerSession,
+        RequireSecondApprover = s.RequireSecondApprover,
         ToolMode = s.ToolMode,
         ToolDenyList = new(s.ToolDenyList),
         ToolAllowList = new(s.ToolAllowList),

@@ -143,6 +143,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("RequesterIds")
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("ResolvedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -151,6 +154,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
 
                     b.Property<string>("RiskLevel")
                         .HasColumnType("text");
+
+                    b.Property<bool>("SelfApproved")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("SessionId")
                         .IsRequired()

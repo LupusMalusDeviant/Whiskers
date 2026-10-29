@@ -2576,9 +2576,6 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ApprovalsView_ExpiresAt_Tooltip" xml:space="preserve">
     <value>Läuft ab {0}</value>
   </data>
-  <data name="ApprovalsView_NoPermission_Snackbar" xml:space="preserve">
-    <value>Keine Berechtigung, diese Aktion zu genehmigen — deine Rolle ist niedriger als die angeforderte Berechtigungsstufe.</value>
-  </data>
   <data name="ApprovalsView_PageTitle" xml:space="preserve">
     <value>Freigaben - Whiskers</value>
   </data>
@@ -4682,14 +4679,8 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Layout_ThemeTooltip" xml:space="preserve">
     <value>Design</value>
   </data>
-  <data name="ApprovalsView_NotFound_Snackbar" xml:space="preserve">
-    <value>Diese Freigabe existiert nicht mehr (Sitzung beendet oder App neu gestartet).</value>
-  </data>
   <data name="ApprovalsView_AlreadyResolved_Snackbar" xml:space="preserve">
     <value>Diese Freigabe ist nicht mehr offen (Status: {0}).</value>
-  </data>
-  <data name="ApprovalsView_ResolveFailed_Snackbar" xml:space="preserve">
-    <value>Die Freigabe konnte nicht entschieden werden — vermutlich wurde sie gleichzeitig entschieden.</value>
   </data>
   <data name="ApprovalsView_ResolveError_Snackbar" xml:space="preserve">
     <value>Fehler beim Entscheiden der Freigabe: {0}</value>
@@ -4924,5 +4915,35 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="AiTriggersView_NoOwner_Chip" xml:space="preserve">
     <value>Kein Besitzer: Er wird beim nächsten Lauf ausgesetzt. Aus- und wieder einschalten (jeweils speichern), um ihn zu übernehmen.</value>
+  </data>
+  <data name="Approval_Result_Decided" xml:space="preserve">
+    <value>Entschieden.</value>
+  </data>
+  <data name="Approval_Result_NotFound" xml:space="preserve">
+    <value>Diese Freigabe gibt es nicht mehr.</value>
+  </data>
+  <data name="Approval_Result_NotPending" xml:space="preserve">
+    <value>Diese Freigabe wurde bereits entschieden oder abgebrochen.</value>
+  </data>
+  <data name="Approval_Result_Expired" xml:space="preserve">
+    <value>Diese Freigabe ist abgelaufen und kann nicht mehr entschieden werden.</value>
+  </data>
+  <data name="Approval_Result_InsufficientLevel" xml:space="preserve">
+    <value>Ihre Rolle reicht für diese Aktion nicht; entscheiden muss jemand mit der erforderlichen Stufe.</value>
+  </data>
+  <data name="Approval_Result_RequesterCannotDecide" xml:space="preserve">
+    <value>Sie haben diese Aktion angefordert; entscheiden muss eine andere Person.</value>
+  </data>
+  <data name="Approval_Result_NotRecorded" xml:space="preserve">
+    <value>Die Entscheidung konnte nicht gespeichert werden; es wurde nichts entschieden.</value>
+  </data>
+  <data name="ApprovalsView_SelfApproved" xml:space="preserve">
+    <value>eigene Anfrage</value>
+  </data>
+  <data name="GuardrailsView_RequireSecondApprover_Label" xml:space="preserve">
+    <value>Zweite Person muss freigeben</value>
+  </data>
+  <data name="GuardrailsView_RequireSecondApprover_Helper" xml:space="preserve">
+    <value>Niemand gibt eigene Anfragen frei oder lehnt sie ab, auch nicht im Agent-Chat. Bei einer Installation mit nur einem Admin ausgeschaltet lassen. Anfragen von MCP-Clients, KI-Triggern und geplanten Aufgaben entscheidet ohnehin nie die anfragende Stelle.</value>
   </data>
 </root>

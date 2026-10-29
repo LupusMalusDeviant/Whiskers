@@ -53,6 +53,8 @@ services:
       - Mattermost__WebhookUrl=${MATTERMOST_WEBHOOK_URL:-}
       - Mattermost__Enabled=${MATTERMOST_ENABLED:-false}
       - PathBase=${PATH_BASE:-}
+      # The address people open Whiskers at; puts approval links into e-mail/chat notifications. See .env.example.
+      - Whiskers__PublicUrl=${WHISKERS_PUBLIC_URL:-}
       - AiChat__Enabled=${AICHAT_ENABLED:-false}
       - AiChat__ApiKey=${AICHAT_API_KEY:-}
       - AiChat__ApiUrl=${AICHAT_API_URL:-}

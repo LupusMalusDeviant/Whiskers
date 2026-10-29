@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
@@ -14,10 +15,22 @@ public sealed class ApprovalDatabase : IDisposable
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"sw-approvals-{Guid.NewGuid():N}.db");
     private readonly ServiceProvider _sp;
 
-    public ApprovalDatabase()
+    /// <summary>An execution strategy that retries, as PostgreSQL's <c>EnableRetryOnFailure</c> does: EF then refuses
+    /// a transaction opened outside the strategy.</summary>
+    private sealed class Retrying(ExecutionStrategyDependencies dependencies)
+        : ExecutionStrategy(dependencies, maxRetryCount: 3, maxRetryDelay: TimeSpan.FromMilliseconds(10))
+    {
+        protected override bool ShouldRetryOn(Exception exception) => false;
+    }
+
+    /// <param name="retrying">Use a retrying execution strategy, like the PostgreSQL registration.</param>
+    public ApprovalDatabase(bool retrying = false)
     {
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_path}"));
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_path}", sqlite =>
+        {
+            if (retrying) sqlite.ExecutionStrategy(d => new Retrying(d));
+        }));
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
         scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
@@ -63,11 +76,13 @@ public sealed class ApprovalPersistenceTests : IDisposable
         new("restart_container", McpPermissionLevels.Write, "key:k1", "ci", "mcp-direct", Args(container))
         {
             Binding = "binding-" + container,
+            Requesters = ["key:k1"],
         };
 
     private static ApprovalRequest Request(string toolCallId, bool interactive = false) => new(
         "s1", toolCallId, "ops@example.com", "agent-web", "restart_container", McpPermissionLevels.Write, null,
-        "needs a human", Binding: "binding-" + toolCallId, Interactive: interactive);
+        "needs a human", Binding: "binding-" + toolCallId, Interactive: interactive,
+        Requesters: ["user:ops@example.com"]);
 
     [Fact]
     public async Task An_approved_retry_survives_a_restart_and_then_runs_once()
@@ -164,6 +179,50 @@ public sealed class ApprovalPersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_decision_refused_once_its_row_is_held_is_not_committed_and_a_restart_finds_it_pending()
+    {
+        // INV-32: the write waited for the row past the expiry; nothing of it becomes durable, so neither a crash nor
+        // a restart can turn it into a usable grant.
+        var persistence = _db.Persistence();
+        var store = await _db.StartAsync();
+        var approval = await store.CreateAsync(Request("c-late"), _ => Task.CompletedTask);
+
+        Assert.False(await persistence.ResolveAsync(approval.Id, ApprovalStatus.Approved, DateTime.UtcNow, "bob",
+            DateTime.UtcNow.AddMinutes(10), stillDecidable: () => false));
+
+        var row = await _db.RowAsync(approval.Id);
+        Assert.Equal(nameof(ApprovalStatus.Pending), row!.Status);
+        Assert.Null(row.GrantExpiresAt);
+        Assert.False(await persistence.ConsumeAsync(approval.Id, "op-1", DateTime.UtcNow));
+        // A decision that is still in time is committed.
+        Assert.True(await persistence.ResolveAsync(approval.Id, ApprovalStatus.Approved, DateTime.UtcNow, "bob",
+            DateTime.UtcNow.AddMinutes(10), stillDecidable: () => true));
+        Assert.Equal(nameof(ApprovalStatus.Approved), (await _db.RowAsync(approval.Id))!.Status);
+
+        // The same for its use: a grant that lapsed while the row was being waited for is not used.
+        Assert.False(await persistence.ConsumeAsync(approval.Id, "op-1", DateTime.UtcNow, stillUsable: () => false));
+        Assert.Null((await _db.RowAsync(approval.Id))!.ConsumedAt);
+        Assert.True(await persistence.ConsumeAsync(approval.Id, "op-2", DateTime.UtcNow, stillUsable: () => true));
+        Assert.Equal("op-2", (await _db.RowAsync(approval.Id))!.ConsumedBy);
+    }
+
+    [Fact]
+    public async Task Decisions_and_uses_work_under_a_retrying_execution_strategy()
+    {
+        // PostgreSQL runs with EnableRetryOnFailure; a transaction opened outside the strategy would be refused there.
+        using var db = new ApprovalDatabase(retrying: true);
+        var store = await db.StartAsync();
+        var approval = await store.CreateAsync(Request("c-retry"), _ => Task.CompletedTask);
+
+        Assert.Equal(ApprovalDecisionResult.Decided, await store.DecideAsync(approval.Id, true,
+            new ApprovalResolver("user:bob@example.com", McpPermissionLevels.Admin, "bob@example.com")));
+        Assert.True(await store.TryConsumeAsync(approval.Id, "op-1", DateTime.UtcNow));
+
+        var row = await db.RowAsync(approval.Id);
+        Assert.Equal((nameof(ApprovalStatus.Approved), "op-1"), (row!.Status, row.ConsumedBy));
+    }
+
+    [Fact]
     public async Task An_approval_whose_decision_cannot_be_recorded_stays_pending()
     {
         var persistence = new FailingPersistence { FailInsert = false };
@@ -185,10 +244,12 @@ public sealed class ApprovalPersistenceTests : IDisposable
             FailInsert ? throw new InvalidOperationException("database unavailable") : _inner.InsertAsync(approval, ct);
 
         public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
-            DateTime? grantExpiresAt, CancellationToken ct = default) =>
+            DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
+            CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
 
-        public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, CancellationToken ct = default) =>
+        public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, Func<bool>? stillUsable = null,
+            CancellationToken ct = default) =>
             throw new InvalidOperationException("database unavailable");
 
         public Task<IReadOnlyList<Approval>> LoadOpenAsync(CancellationToken ct = default) => _inner.LoadOpenAsync(ct);

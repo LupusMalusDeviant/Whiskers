@@ -150,7 +150,7 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
                     case AgentEvent.ConfirmationRequired c:
                         // An action that surfaces as Confirm is above the preset's autonomous level. No human
                         // is watching a trigger run, so it must be denied, never auto-approved.
-                        await session.ResolveConfirmationAsync(c.Call.Id, false);
+                        await session.ResolveConfirmationAsync(c.Call.CorrelationId, false);
                         sb.AppendLine($"[not allowed unattended: {c.Call.Name}]");
                         break;
                     case AgentEvent.Failed f:
