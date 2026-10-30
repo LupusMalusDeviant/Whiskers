@@ -14,7 +14,7 @@ All notable changes to Whiskers are documented here. The format follows
   webhooks, log-alert rules, servers, registries and Git-deploy apps also on create, toggle, rotation and delete).
   Changes are detected on the complete values, so an edit past the shown part or inside a URL's path counts. Secrets
   never show a value: only `[not set]` or `[set #<fingerprint>]`, keyed per process so a replaced secret is a visible
-  change while nothing stored lets anyone test a guess. URLs show their origin only; free text (prompts, log
+  change while nothing stored lets anyone test a guess. URLs show their origin only (a URL-named value that is no absolute URL shows as text); free text (prompts, log
   patterns, commands, descriptions — however short — and any long or URL-holding value) shows as
   `[text, N chars #<fingerprint>]`. The version is computed without secrets, URL paths and free text, so a change of
   those alone keeps it and appears as a changed setting. ntfy topics count as secrets, an address with user info as
@@ -34,7 +34,8 @@ All notable changes to Whiskers are documented here. The format follows
   provider_failure` and the client address; an unknown account name is never recorded) and `auth.logout`, for local,
   Google and OIDC sign-ins — hooks only, the login itself is unchanged; the rows are queued and written in the
   background, so a slow or locked audit database never delays a sign-in, and a lost row is reported to the `audit`
-  health check; a queued row keeps the time the sign-in happened. Saves of one section are serialized from capture
+  health check; a queued row keeps the time the sign-in happened. Secrets are compared by their whole per-process HMAC, so colliding short fingerprints never hide a change.
+  Saves of one section (also log-alert rules) are serialized from capture
   to diff, and a server's diff compares with what was stored, so every event describes the change it made. Refusing an enabled whitelist without addresses is a Denied event. A self-backup
   download (`selfbackup.download`) is recorded with the requester, archive and size before the first byte, and is
   refused with 503 when that row cannot be written; a signed-in non-Admin's attempt is recorded as refused.

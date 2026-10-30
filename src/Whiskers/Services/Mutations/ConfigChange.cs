@@ -129,11 +129,14 @@ public static class ConfigChange
             if (old?.Compared == @new?.Compared) continue;
             var oldShown = old?.Shown ?? "(none)";
             var newShown = @new?.Shown ?? "(none)";
-            // Different values that show the same (a URL rotated on its origin): tell them apart by fingerprint.
+            // Different values that show the same (a URL rotated on its origin, two secrets whose short fingerprints
+            // collide): tell them apart by a fingerprint long enough to differ.
             if (old is not null && @new is not null && oldShown == newShown)
             {
-                oldShown += $" #{Fingerprint(old.Compared)}";
-                newShown += $" #{Fingerprint(@new.Compared)}";
+                var length = 6;
+                while (length < 64 && Fingerprint(old.Compared, length) == Fingerprint(@new.Compared, length)) length += 6;
+                oldShown += $" #{Fingerprint(old.Compared, length)}";
+                newShown += $" #{Fingerprint(@new.Compared, length)}";
             }
             changes.Add((path, oldShown, newShown));
         }
@@ -212,7 +215,7 @@ public static class ConfigChange
             case TextKind.Secret:
                 return unset
                     ? new("[not set]", "[not set]", "[not set]")
-                    : new($"[set #{Fingerprint(text)}]", Fingerprint(text), "[set]");
+                    : new($"[set #{Fingerprint(text)}]", Digest(text), "[set]");
             case TextKind.Url:
                 // The version holds scheme, host and port only, so a path or query edit alone never moves it.
                 var uri = new Uri(text);
@@ -231,8 +234,12 @@ public static class ConfigChange
     {
         if (secret || SecretName.IsMatch(name)) return TextKind.Secret;
         if (OpaqueName.IsMatch(name)) return TextKind.Opaque;
-        if (UrlName.IsMatch(name) && Uri.TryCreate(text, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
-            return TextKind.Url;
+        // A URL-named value that is no absolute URL (a pasted address without its scheme) may still carry a secret
+        // path: it is never shown or versioned.
+        if (UrlName.IsMatch(name))
+            return Uri.TryCreate(text, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host)
+                ? TextKind.Url
+                : TextKind.Opaque;
         // An address with user info but no scheme is not recognised by the redactor: never shown, never versioned.
         if ((HostName.IsMatch(name) || UrlName.IsMatch(name)) && text.Contains('@')) return TextKind.Opaque;
         var plain = text.Length <= MaxValueChars
@@ -263,7 +270,12 @@ public static class ConfigChange
         return bracket < 0 ? segment : segment[..bracket];
     }
 
-    /// <summary>Six hex digits of an HMAC under the per-process key: tells two values apart within this process only.</summary>
-    private static string Fingerprint(string value) =>
-        Convert.ToHexStringLower(HMACSHA256.HashData(ProcessKey, Encoding.UTF8.GetBytes(value)))[..6];
+    /// <summary>The first <paramref name="length"/> hex digits (six by default) of an HMAC under the per-process key:
+    /// tells two values apart within this process only.</summary>
+    private static string Fingerprint(string value, int length = 6) => Digest(value)[..Math.Min(length, 64)];
+
+    /// <summary>The whole HMAC under the per-process key: what a secret is compared by, so two secrets never compare
+    /// equal because their short fingerprints collide. Never stored.</summary>
+    private static string Digest(string value) =>
+        Convert.ToHexStringLower(HMACSHA256.HashData(ProcessKey, Encoding.UTF8.GetBytes(value)));
 }

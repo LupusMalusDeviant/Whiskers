@@ -305,7 +305,7 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.Equal("true → false", Text(Setting(await ResultsOf("op-rule-off"), $"{section}:Enabled"), "details"));
         Assert.Contains(await ResultsOf("op-rule-del"), r => Text(r, "action") == ConfigChange.VersionAction
                                                              && Text(r, "targetId") == section
-                                                             && Text(r, "details").EndsWith("15 changed", StringComparison.Ordinal));
+                                                             && Text(r, "details").EndsWith("13 changed", StringComparison.Ordinal));
         foreach (var op in new[] { "op-rule-new", "op-rule-off", "op-rule-del" })
             Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9", await EventText(op));
     }
@@ -629,6 +629,71 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.Equal("true → false", Text(Setting(results, "automation-owner:auto-update:Blocked"), "details"));
         Assert.Contains(results, r => Text(r, "action") == ConfigChange.VersionAction
                                       && Text(r, "targetId") == "automation-owner:auto-update");
+    }
+
+    [Fact]
+    public async Task Overlapping_toggles_of_one_log_alert_record_the_switch_once()
+    {
+        var monitor = new Whiskers.Services.LogMonitor.LogMonitorService(_db.Scopes, Stub<Whiskers.Services.Docker.IDockerService>(),
+            Stub<Whiskers.Services.ServerConfig.IServerConfigService>(), Stub<Whiskers.Services.Notifications.INotificationService>(),
+            NullLogger<Whiskers.Services.LogMonitor.LogMonitorService>.Instance, Stub<Whiskers.Services.Docker.Budget.IServerBudget>(),
+            Stub<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>(), Stub<Whiskers.Services.LogMonitor.Hygiene.ILogScanExclusions>(),
+            Stub<Whiskers.Services.Observability.Outcomes.IActionOutcomeService>());
+        var rule = await monitor.CreateRuleAsync(new LogAlertRuleEntity { Name = "oom", Pattern = "out of memory" });
+        var ops = Enumerable.Range(0, 6).Select(i => $"op-par-toggle-{i}").ToList();
+
+        await Task.WhenAll(ops.Select(op => Gateway().ExecuteAsync(Config("logalert.toggle", "log-alert", op), async (_, _) =>
+        {
+            await monitor.ToggleRuleAsync(rule.RuleId, false);
+            return 1;
+        })));
+
+        var switched = new List<string>();
+        foreach (var op in ops)
+            switched.AddRange((await ResultsOf(op))
+                .Where(r => Text(r, "targetId") == $"log-alert:{rule.RuleId}:Enabled").Select(r => Text(r, "details")));
+        Assert.Equal("true → false", Assert.Single(switched));
+    }
+
+    [Theory]
+    [InlineData("hooks.slack.com/services/T0/B0/q7Secret")]
+    [InlineData("not a url q7Secret")]
+    public async Task A_url_setting_that_is_no_absolute_url_is_never_shown_or_versioned(string value)
+    {
+        var store = new AppSettingsStore(Path.Combine(_dir, "appsettings.json"));
+        await store.SaveSectionAsync("Slack", new { WebhookUrl = "https://hooks.slack.com/services/T0/B0/first" });
+
+        await Gateway().ExecuteAsync(Config("config.save", "settings", "op-bare-url"), async (_, _) =>
+        {
+            await store.SaveSectionAsync("Slack", new { WebhookUrl = value });
+            return 1;
+        });
+
+        Assert.DoesNotContain("q7Secret", await EventText("op-bare-url"));
+        Assert.Matches(@"^\[text, \d+ chars #[0-9a-f]{6}\]$",
+            Text(Setting(await ResultsOf("op-bare-url"), "Slack:WebhookUrl"), "details").Split(" → ")[1]);
+        Assert.Equal(ConfigChange.Describe(new { WebhookUrl = "other q7Other" }).Version,
+            ConfigChange.Describe(new { WebhookUrl = value }).Version);
+    }
+
+    [Fact]
+    public void Two_secrets_whose_short_fingerprints_collide_are_still_a_change_shown_apart()
+    {
+        // Within a few thousand values two share their six-digit fingerprint (birthday bound of 24 bits).
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+        (string A, string B)? pair = null;
+        for (var i = 0; i < 200_000 && pair is null; i++)
+        {
+            var value = $"secret-{i}";
+            var shown = ConfigChange.Describe(new { Password = value }).Settings["Password"].Shown;
+            if (seen.TryGetValue(shown, out var earlier)) pair = (earlier, value);
+            else seen[shown] = value;
+        }
+        Assert.NotNull(pair);
+
+        var change = Assert.Single(ConfigChange.Diff(
+            ConfigChange.Describe(new { Password = pair.Value.A }), ConfigChange.Describe(new { Password = pair.Value.B })));
+        Assert.NotEqual(change.Before, change.After);
     }
 
     [Fact]

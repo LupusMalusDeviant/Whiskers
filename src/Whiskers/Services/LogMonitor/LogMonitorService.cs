@@ -26,6 +26,9 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
     private readonly Observability.SelfMetrics.ISelfMetrics _selfMetrics;
     private readonly Hygiene.ILogScanExclusions _exclusions;
     private readonly Observability.Outcomes.IActionOutcomeService _outcomes;
+    // R1-22: one rule writer at a time (create, toggle, delete), so each recorded change starts where the one before
+    // ended and never describes a change another request already made.
+    private readonly SemaphoreSlim _rules = new(1, 1);
     private readonly ConcurrentDictionary<string, DateTime> _cooldowns = new();
     // Per-container timestamp of the last log check, so we fetch only NEW lines and an old ERROR line
     // doesn't re-alert every cycle. Keyed by "{serverId}:{containerId}" (see CompositeKey): container ids
@@ -541,40 +544,65 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         if (rule.IsRegex)
             _ = new Regex(rule.Pattern, RegexOptions.None, TimeSpan.FromSeconds(1)); // throws on invalid
 
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        db.LogAlertRules.Add(rule);
-        await db.SaveChangesAsync();
-        // The versioned, redacted change is part of the gateway's event (R1-22); the pattern shows as text only.
-        Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{rule.RuleId}", null, rule);
-        return rule;
+        await _rules.WaitAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.LogAlertRules.Add(rule);
+            await db.SaveChangesAsync();
+            // The versioned, redacted change is part of the gateway's event (R1-22); the pattern shows as text only.
+            Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{rule.RuleId}", null, AuditView(rule));
+            return rule;
+        }
+        finally { _rules.Release(); }
     }
 
     public async Task DeleteRuleAsync(string ruleId)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var rule = await db.LogAlertRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
-        if (rule != null)
+        await _rules.WaitAsync();
+        try
         {
-            var before = Whiskers.Services.Mutations.ConfigChange.Capture(rule);
-            db.LogAlertRules.Remove(rule);
-            await db.SaveChangesAsync();
-            Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{ruleId}", before, null);   // R1-22
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var rule = await db.LogAlertRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
+            if (rule != null)
+            {
+                var before = AuditView(rule);
+                db.LogAlertRules.Remove(rule);
+                await db.SaveChangesAsync();
+                Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{ruleId}", before, null);   // R1-22
+            }
         }
+        finally { _rules.Release(); }
     }
 
     public async Task ToggleRuleAsync(string ruleId, bool enabled)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var rule = await db.LogAlertRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
-        if (rule != null)
+        await _rules.WaitAsync();
+        try
         {
-            var before = Whiskers.Services.Mutations.ConfigChange.Capture(rule);
-            rule.Enabled = enabled;
-            await db.SaveChangesAsync();
-            Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{ruleId}", before, rule);   // R1-22
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var rule = await db.LogAlertRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
+            if (rule != null)
+            {
+                var before = AuditView(rule);
+                rule.Enabled = enabled;
+                await db.SaveChangesAsync();
+                Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{ruleId}", before, AuditView(rule));   // R1-22
+            }
         }
+        finally { _rules.Release(); }
+    }
+
+    /// <summary>What the audit compares and versions for a rule (R1-22): its configuration, not its trigger counters,
+    /// which change with every match.</summary>
+    private static object? AuditView(LogAlertRuleEntity rule)
+    {
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(rule)!.AsObject();
+        node.Remove(nameof(LogAlertRuleEntity.LastTriggered));
+        node.Remove(nameof(LogAlertRuleEntity.TriggerCount));
+        return System.Text.Json.JsonSerializer.SerializeToElement(node);
     }
 }
