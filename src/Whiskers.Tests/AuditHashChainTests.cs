@@ -172,6 +172,39 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public async Task Checkpoints_written_before_VAULT_KEY_was_set_are_untrusted_but_no_tamper_finding()
+    {
+        // Running without VAULT_KEY is a supported mode; setting the key later must not turn the trail red.
+        using var before = new AuditTrailFixture(vaultKey: null);
+        await before.LogAsync(2);
+        await before.Chain.CheckpointAsync();
+        var keyed = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
+        await before.LogAsync(1);
+
+        var report = await keyed.VerifyAsync();
+
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Null(report.TrustedCheckpointSeq);
+        Assert.True(report.CheckpointsSigned);
+    }
+
+    [Theory]
+    [InlineData("zz")]   // 64 characters that are not hex
+    [InlineData("0")]
+    public async Task A_garbled_signature_is_a_finding_not_an_error(string filler)
+    {
+        await _trail.LogAsync(2);
+        await _trail.Chain.CheckpointAsync();
+        var garbled = string.Concat(Enumerable.Repeat(filler, 64 / filler.Length));
+        await _trail.SqlAsync($"UPDATE AuditCheckpoints SET Mac = '{garbled}'");
+
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.False(report.Intact);
+        Assert.Contains(report.Problems, p => p.Contains("has an invalid signature"));
+    }
+
+    [Fact]
     public async Task An_intent_row_completed_later_stays_valid()
     {
         // Mutation rows are written as an intent and completed with their outcome: each version is a link.

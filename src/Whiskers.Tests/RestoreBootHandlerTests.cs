@@ -61,6 +61,37 @@ public class RestoreBootHandlerTests
         finally { Cleanup(root); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_database_restored_without_its_audit_checkpoint_does_not_keep_the_old_one(bool archiveHasCheckpoint)
+    {
+        // R1-23: an archive from before the audit chain carries no checkpoint; the live one signs the replaced chain.
+        var p = NewRoot(out var root);
+        try
+        {
+            File.WriteAllText(p.DbPath, "OLD-DB");
+            File.WriteAllText(p.AuditCheckpointJson, "OLD-CHECKPOINT");
+            Directory.CreateDirectory(p.RestoreStagingDir);
+            File.WriteAllText(Path.Combine(p.RestoreStagingDir, "metrics.db"), "NEW-DB");
+            if (archiveHasCheckpoint)
+                File.WriteAllText(Path.Combine(p.RestoreStagingDir, "audit-checkpoint.json"), "NEW-CHECKPOINT");
+            WriteMarker(p);
+
+            RestoreBootHandler.ApplyPendingRestore(p);
+
+            if (archiveHasCheckpoint)
+                Assert.Equal("NEW-CHECKPOINT", File.ReadAllText(p.AuditCheckpointJson));
+            else
+            {
+                Assert.False(File.Exists(p.AuditCheckpointJson));
+                var kept = Assert.Single(Directory.GetFiles(root, "audit-checkpoint.json.pre-restore-*"));
+                Assert.Equal("OLD-CHECKPOINT", File.ReadAllText(kept));   // kept aside, never deleted
+            }
+        }
+        finally { Cleanup(root); }
+    }
+
     [Fact]
     public void No_marker_is_a_no_op()
     {

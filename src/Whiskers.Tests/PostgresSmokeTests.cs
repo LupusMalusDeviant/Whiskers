@@ -73,6 +73,65 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on()
+    {
+        Skip.IfNot(_up, "Docker daemon not available");
+        // R1-23 with the production shape: retries on, so every chain transaction runs inside the execution strategy;
+        // verification and export read a RepeatableRead snapshot.
+        var dir = Path.Combine(Path.GetTempPath(), $"pg-chain-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions.AddDbContext<MetricsDbContext>(
+            services, o => o.UseNpgsql(_pg.GetConnectionString(), npg =>
+            {
+                npg.EnableRetryOnFailure(3);
+                npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
+            }));
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Whiskers.Services.AuditLog.IAuditChain>(
+            services, sp => new Whiskers.Services.AuditLog.AuditChain("pg-test-vault-key", Path.Combine(dir, "audit-checkpoint.json"),
+                scopes: Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                    .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp)));
+        await using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions
+            .BuildServiceProvider(services);
+        try
+        {
+            await using (var db = Pg()) await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
+            var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp);
+            var chain = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>(sp);
+            var audit = new Whiskers.Services.AuditLog.AuditLogService(scopes,
+                NullLogger<Whiskers.Services.AuditLog.AuditLogService>.Instance);
+
+            await chain.SealExistingAsync();   // empty database: genesis over nothing
+            Assert.True(await audit.TryLogAtAsync(DateTime.UtcNow.AddDays(-400), "a@example.com", "web", "container.restart",
+                "container", "c1", "old", details: "Ärger <&>"));
+            Assert.True(await audit.TryLogAsync("a@example.com", "web", "container.restart", "container", "c2", "young"));
+            await chain.CheckpointAsync();
+
+            var intact = await chain.VerifyAsync();
+            Assert.True(intact.Intact, string.Join("; ", intact.Problems));
+            Assert.Equal(2, intact.LinksChecked);
+            Assert.Equal(2, intact.TrustedCheckpointSeq);
+
+            Assert.Equal(1, await chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365));
+            using var output = new MemoryStream();
+            var exported = await chain.ExportAsync(output);
+            Assert.True(exported.Intact, string.Join("; ", exported.Problems));
+            Assert.Equal(2, exported.RowsChecked);   // the young row + the retention record
+
+            // A change made directly in the database is found.
+            await using (var db = Pg())
+                await db.Database.ExecuteSqlRawAsync("UPDATE \"AuditLog\" SET \"Details\" = 'rewritten' WHERE \"TargetId\" = 'c2'");
+            Assert.Contains((await chain.VerifyAsync()).Problems, p => p.Contains("was changed after it was written"));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
+        }
+    }
+
+    [SkippableFact]
     public async Task Migrate_crud_retention_and_markread_on_real_postgres()
     {
         Skip.IfNot(_up, "Docker daemon not available");

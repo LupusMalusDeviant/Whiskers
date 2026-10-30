@@ -89,5 +89,11 @@ Option B.
 - A database restored from an older backup verifies as truncated against the checkpoint file: restoring self-backup
   also restores the checkpoint file (both live in the data directory). The backup takes the file *before* the database
   copy, so the restored database always reaches the restored checkpoint.
-- A chain emptied while its checkpoint file remains is not started again at the next start (that would launder the
-  trail); verification reports it.
+- Rows of a chain emptied while its checkpoint file remains are not sealed again (that would launder the trail): new
+  events start a fresh chain, and verification keeps reporting the old rows and the cut-off end. A restore of an
+  archive without a checkpoint (from before the chain) moves the live checkpoint file aside, so a legitimate restore
+  is sealed as a new genesis.
+- Checkpoints written while `VAULT_KEY` was not set carry no signature; once a key is set they are not trusted, but
+  not reported as tampering either.
+- The canonical JSON uses System.Text.Json's default escaping (non-ASCII and HTML-sensitive characters as upper-case
+  `\uXXXX`), pinned in code.

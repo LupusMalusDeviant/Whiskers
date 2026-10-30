@@ -135,8 +135,15 @@ public sealed class AuditChain : IAuditChain
             };
             if (value is null) canonical.Remove(property.Name);
         }
-        return Sha256(canonical.ToJsonString());
+        return Sha256(canonical.ToJsonString(CanonicalJson));
     }
+
+    /// <summary>Pinned, so a change of the runtime's default cannot change every row's hash: System.Text.Json's default
+    /// escaping (non-ASCII and HTML-sensitive characters as upper-case <c>\uXXXX</c>), no indentation.</summary>
+    private static readonly JsonSerializerOptions CanonicalJson = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default, WriteIndented = false,
+    };
 
     /// <summary>The hash of a link: its predecessor, its position, the row and the row's version.</summary>
     public static string LinkHash(string prevHash, long seq, long auditId, string rowHash) =>
@@ -153,10 +160,16 @@ public sealed class AuditChain : IAuditChain
     private static string Signed(AuditCheckpointEntity c) =>
         string.Create(CultureInfo.InvariantCulture, $"{c.Kind}|{c.Seq}|{c.Hash}|{c.PrunedThroughId}|{Micros(c.At)}");
 
-    /// <summary>Whether a checkpoint's signature is right; without a key nothing is trusted as signed.</summary>
-    private bool Valid(AuditCheckpointEntity checkpoint) =>
-        _key is not null && checkpoint.Mac is { Length: 64 } mac
-        && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(mac), Convert.FromHexString(Sign(checkpoint)!));
+    /// <summary>Whether a checkpoint's signature is right; without a key nothing is trusted as signed. A signature
+    /// that is not 64 hex digits is wrong, never an error.</summary>
+    private bool Valid(AuditCheckpointEntity checkpoint)
+    {
+        if (_key is null || checkpoint.Mac is not { Length: 64 } mac) return false;
+        var given = new byte[32];
+        return Convert.FromHexString(mac, given, out _, out var written) == System.Buffers.OperationStatus.Done
+               && written == 32
+               && CryptographicOperations.FixedTimeEquals(given, Convert.FromHexString(Sign(checkpoint)!));
+    }
 
     // ---------------------------------------------------------------------------------------------- writing
 
@@ -262,7 +275,12 @@ public sealed class AuditChain : IAuditChain
             var (seq, hash) = head is null ? await AnchorAsync(db, ct) : (head.Seq, head.Hash);
             var newest = await db.AuditCheckpoints.AsNoTracking().OrderByDescending(c => c.Seq)
                 .ThenByDescending(c => c.Id).FirstOrDefaultAsync(ct);
-            if (kind == HeadKind && newest is not null && newest.Seq == seq && newest.Hash == hash) return;   // nothing new
+            if (kind == HeadKind && newest is not null && newest.Seq == seq && newest.Hash == hash)
+            {
+                // Nothing new — but the file must name it too (a retention checkpoint is signed in the database first).
+                if (ReadFile() is not { } file || file.Seq != newest.Seq || file.Hash != newest.Hash) WriteFile(newest);
+                return;
+            }
             var written = new AuditCheckpointEntity
             {
                 Kind = kind, Seq = seq, Hash = hash, At = Truncate(_time.GetUtcNow().UtcDateTime),
@@ -383,7 +401,9 @@ public sealed class AuditChain : IAuditChain
         {
             if (_key is null) continue;
             if (Valid(checkpoint)) trusted.Add(checkpoint);
-            else if (checkpoint.Kind != "unreadable")
+            // An unsigned checkpoint was written while VAULT_KEY was not set: not trusted, but no sign of tampering —
+            // nulling a signature gains nothing, the file keeps the newest signed checkpoint.
+            else if (checkpoint.Kind != "unreadable" && checkpoint.Mac is not null)
                 Problem($"Checkpoint at link {checkpoint.Seq} ({checkpoint.Kind}) has an invalid signature.");
         }
 
@@ -515,11 +535,8 @@ public sealed class AuditChain : IAuditChain
             await db.SaveChangesAsync(token);
             return (count, Array.Empty<long>());
         }, ct);
-        if (written is not null)
-        {
-            WriteFile(written);
-            await CheckpointAsync(db, HeadKind, ct);
-        }
+        // Under the lock: brings the file up to the new start (and anything written since).
+        if (written is not null) await CheckpointAsync(db, HeadKind, ct);
         return removed;
     }
 }

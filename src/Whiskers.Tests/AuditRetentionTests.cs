@@ -67,6 +67,25 @@ public sealed class AuditRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task After_a_prune_the_checkpoint_file_names_the_newest_checkpoint()
+    {
+        await _trail.LogAsync(2, DateTime.UtcNow.AddDays(-400));
+        await _trail.LogAsync(1);
+        await _trail.Chain.CheckpointAsync();
+
+        await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+        await _trail.Chain.CheckpointAsync();   // the timer's next tick: nothing new
+
+        using var scope = _trail.Scope();
+        var newest = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditCheckpoints
+            .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).FirstAsync();
+        var file = JsonSerializer.Deserialize<AuditCheckpointEntity>(await File.ReadAllTextAsync(_trail.CheckpointFile))!;
+        Assert.Equal(newest.Seq, file.Seq);
+        Assert.Equal(newest.Hash, file.Hash);
+        Assert.Equal(newest.Mac, file.Mac);
+    }
+
+    [Fact]
     public async Task Nothing_old_means_nothing_removed_and_no_record()
     {
         await _trail.LogAsync(2);

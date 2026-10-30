@@ -176,6 +176,17 @@ public sealed class AuditFailClosedTests : IDisposable
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().ToListAsync();
     }
 
+    /// <summary>R1-23: every row the gateway, the outbox drain or recovery wrote is on the audit chain, in its
+    /// latest version.</summary>
+    private async Task AssertTrailIntact()
+    {
+        using var scope = _scopes.CreateScope();
+        var report = await Whiskers.Services.AuditLog.AuditChain.Shared.VerifyAsync(
+            scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), CancellationToken.None);
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.True(report.LinksChecked >= report.RowsChecked);
+    }
+
     private static async Task<HealthStatus> Status(IAuditRecovery recovery) =>
         (await new AuditTrailCheck(recovery).CheckHealthAsync(new())).Status;
 
@@ -271,6 +282,7 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.Equal("outcome", row.Phase);
         Assert.Equal("Executed", row.Outcome);
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
+        await AssertTrailIntact();
     }
 
     [Fact]
@@ -298,6 +310,7 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.Equal("op-3", row.OperationId);
         Assert.Equal(0, _outbox.Count);
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
+        await AssertTrailIntact();
     }
 
     [Fact]
@@ -328,6 +341,7 @@ public sealed class AuditFailClosedTests : IDisposable
         _writes.FailAfter = false;
         Assert.Single(await Events());
         Assert.Equal(0, _outbox.Count);
+        await AssertTrailIntact();
     }
 
     [Fact]
@@ -444,6 +458,7 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.Equal(1, _runs);
         Assert.Equal("Executed", Assert.Single(await Events()).Outcome);
         Assert.Equal(0, _outbox.Count);
+        await AssertTrailIntact();
     }
 
     [Fact]

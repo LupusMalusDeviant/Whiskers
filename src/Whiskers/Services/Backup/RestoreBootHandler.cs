@@ -86,6 +86,19 @@ public static class RestoreBootHandler
                 TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-shm"));
             }
         }
+
+        // R1-23: a restored database comes with the audit checkpoint taken with it. An archive from before the audit
+        // chain has none: the live file signs the replaced database's chain and would make the restored one look
+        // tampered with (and stop it from being sealed). Kept aside, never deleted.
+        var checkpointName = Path.GetFileName(dataPaths.AuditCheckpointJson);
+        if (File.Exists(Path.Combine(staging, SelfBackupFormat.DbEntryName))
+            && !File.Exists(Path.Combine(staging, checkpointName))
+            && File.Exists(dataPaths.AuditCheckpointJson))
+        {
+            var kept = $"{dataPaths.AuditCheckpointJson}.pre-restore-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            Retry(() => File.Move(dataPaths.AuditCheckpointJson, kept));
+            Console.Out.WriteLine($"[restore] The archive has no audit checkpoint; the current one was kept as {kept}.");
+        }
     }
 
     private static void ReplaceFile(string source, string target)

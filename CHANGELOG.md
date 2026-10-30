@@ -20,7 +20,8 @@ All notable changes to Whiskers are documented here. The format follows
   chain's new start. The Audit log and Agent History pages (and the audit rows of the Self status timeline) are Admin
   only. `GET /audit/export` (Admin only) downloads the whole trail as JSON — verification result, checkpoints, chain and
   rows from one snapshot — and is recorded as `audit.export` before anything is read (503 without that record).
-  Self-backups take the checkpoint file before the database copy.
+  Self-backups take the checkpoint file before the database copy; restoring an archive from before R1-23 keeps the
+  current checkpoint file aside (`audit-checkpoint.json.pre-restore-<time>`) so the restored rows start a new chain.
 - R1-22 follow-up: a webhook switched off automatically writes its own `webhook.suspended` row with the version
   before and after; a restore refused by archive validation is a Denied event; flags named after a secret
   (`HasToken`) stay readable; the configuration pages' Admin gates are checked to record their refusals.
