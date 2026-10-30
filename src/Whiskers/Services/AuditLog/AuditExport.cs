@@ -21,15 +21,21 @@ public static class AuditExport
     /// file is never touched.</summary>
     public static void SweepStale(string directory, DateTime nowUtc)
     {
-        foreach (var file in Directory.EnumerateFiles(directory, TempPrefix + "*.tmp"))
+        // Housekeeping never blocks an export: any failure, also of the listing itself, waits for the next one.
+        try
         {
-            try
+            foreach (var file in Directory.EnumerateFiles(directory, TempPrefix + "*.tmp"))
             {
-                if (nowUtc - File.GetLastWriteTimeUtc(file) > TimeSpan.FromHours(1)) File.Delete(file);
+                try
+                {
+                    if (nowUtc - File.GetLastWriteTimeUtc(file) > TimeSpan.FromHours(1)) File.Delete(file);
+                }
+                catch (IOException) { /* in use or gone: the next export tries again */ }
+                catch (UnauthorizedAccessException) { }
             }
-            catch (IOException) { /* in use or gone: the next export tries again */ }
-            catch (UnauthorizedAccessException) { }
         }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     public static async Task WriteAsync(MetricsDbContext db, AuditChainReport report, AuditCheckpointEntity? checkpointFile,

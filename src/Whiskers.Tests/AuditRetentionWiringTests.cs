@@ -85,6 +85,10 @@ public sealed class AuditRetentionWiringTests
         }
     }
 
+    [Fact]
+    public void A_sweep_that_cannot_list_the_directory_does_not_fail_the_export() =>
+        AuditExport.SweepStale(Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}"), DateTime.UtcNow);
+
     private sealed class Fixed(AuditSettings value) : IOptionsMonitor<AuditSettings>
     {
         public AuditSettings CurrentValue => value;
