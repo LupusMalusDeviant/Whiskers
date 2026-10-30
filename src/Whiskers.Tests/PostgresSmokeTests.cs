@@ -231,6 +231,37 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
         }
     }
 
+    [SkippableFact]
+    public async Task The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside()
+    {
+        Skip.IfNot(_up, "Docker daemon not available");
+        // R1-23: PostgreSQL starts its own chain; a leftover checkpoint file would block it as a tampered trail.
+        var root = Path.Combine(Path.GetTempPath(), $"sw-smoke-cli-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var paths = new Whiskers.Configuration.DataPathOptions(root);
+        try
+        {
+            await using (var src = Sqlite(paths.DbPath))
+            {
+                await src.Database.EnsureCreatedAsync();
+                src.AuditLog.Add(new AuditLogEntity { Actor = "admin", ActorType = "web", Action = "login", TargetType = "system" });
+                await src.SaveChangesAsync();
+            }
+            await File.WriteAllTextAsync(paths.AuditCheckpointJson, "{}");
+
+            var rc = await SqliteToPostgresMigrator.RunAsync(paths, _pg.GetConnectionString(), TextWriter.Null);
+
+            Assert.Equal(0, rc);
+            Assert.False(File.Exists(paths.AuditCheckpointJson));
+            Assert.Single(Directory.GetFiles(root, "audit-checkpoint.json.sqlite-*"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir */ }
+        }
+    }
+
     private static MetricsDbContext Sqlite(string path) =>
         new(new DbContextOptionsBuilder<MetricsDbContext>().UseSqlite($"Data Source={path}").Options);
 }

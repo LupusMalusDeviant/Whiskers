@@ -12,7 +12,8 @@ All notable changes to Whiskers are documented here. The format follows
   `audit-checkpoint.json` beside it. *Verify integrity* on the Audit log page reports a changed row, an inserted row, a
   deleted row, a broken link, a forged checkpoint and an end cut off before a signed checkpoint. Without `VAULT_KEY`
   checkpoints are unsigned and a cut-off end cannot be detected (the page says so); a compromised host can still
-  rewrite everything (documented limit). On the first start the existing rows are sealed once (genesis). New tables
+  rewrite everything, and a database writer can change the last minute before the next checkpoint (documented
+  limits). On the first start the existing rows are sealed once (genesis). New tables
   `AuditChain` and `AuditCheckpoints` (additive migration, both providers); the SQLite→PostgreSQL copy does not copy
   them, so PostgreSQL starts a new chain and the old checkpoint file is kept as `audit-checkpoint.json.sqlite-<time>`.
   **Retention changed: audit log and MCP call history are now kept 365 days (was 90)**, configurable with

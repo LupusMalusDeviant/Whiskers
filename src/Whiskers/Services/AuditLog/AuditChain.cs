@@ -74,6 +74,10 @@ public sealed class AuditChain : IAuditChain
     /// changes every later hash, so the newest checkpoint already catches it.</summary>
     public const int KeptHeadCheckpoints = 60;
 
+    /// <summary>Retention checkpoints kept in the database (the newest ones); verification starts at the newest
+    /// trusted one.</summary>
+    public const int KeptRetentionCheckpoints = 60;
+
     /// <summary>At most this many rows are removed per retention run, so the chain lock is never held for long; the
     /// hourly run catches up.</summary>
     public const int MaxPruneRows = 10_000;
@@ -105,10 +109,7 @@ public sealed class AuditChain : IAuditChain
         IServiceScopeFactory? scopes = null)
     {
         _scopes = scopes;
-        _key = string.IsNullOrEmpty(vaultKey)
-            ? null
-            : HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(vaultKey), 32,
-                salt: Encoding.UTF8.GetBytes("whiskers-audit-checkpoint"), info: Encoding.UTF8.GetBytes("v1"));
+        _key = string.IsNullOrEmpty(vaultKey) ? null : DerivedKeys.GetOrAdd(vaultKey, DeriveKey);
         _checkpointFile = checkpointFile;
         _logger = logger;
         _time = time ?? TimeProvider.System;
@@ -119,6 +120,30 @@ public sealed class AuditChain : IAuditChain
         IServiceScopeFactory scopes) =>
         new(configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY"), paths.AuditCheckpointJson, logger,
             scopes: scopes);
+
+    /// <summary>The checkpoint key: the passphrase stretched like the vault's (PBKDF2-SHA-256, 600,000 rounds) and
+    /// then separated for this use with HKDF. The stretch matters because the signed checkpoints sit in the database:
+    /// without it a leaked database would test VAULT_KEY guesses at HMAC speed.</summary>
+    private static byte[] DeriveKey(string vaultKey)
+    {
+        var stretched = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(vaultKey),
+            Encoding.UTF8.GetBytes("whiskers-audit-checkpoint-kdf"), KdfIterations, HashAlgorithmName.SHA256, 32);
+        try
+        {
+            return HKDF.DeriveKey(HashAlgorithmName.SHA256, stretched, 32,
+                salt: Encoding.UTF8.GetBytes("whiskers-audit-checkpoint"), info: Encoding.UTF8.GetBytes("v1"));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(stretched);
+        }
+    }
+
+    /// <summary>PBKDF2 rounds of the checkpoint key (as the vault).</summary>
+    public const int KdfIterations = 600_000;
+
+    /// <summary>One stretch per passphrase and process.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> DerivedKeys = new(StringComparer.Ordinal);
 
     private IServiceScope Scope() =>
         (_scopes ?? throw new InvalidOperationException("This audit chain has no database of its own.")).CreateScope();
@@ -361,7 +386,7 @@ public sealed class AuditChain : IAuditChain
             var written = new AuditCheckpointEntity
             {
                 Kind = kind, Seq = seq, Hash = hash, At = Truncate(_time.GetUtcNow().UtcDateTime),
-                PrunedThroughId = newest?.PrunedThroughId ?? 0,
+                PrunedThroughId = await TrustedPrunedThroughAsync(db, ct),
             };
             written.Mac = Sign(written);
             db.AuditCheckpoints.Add(written);
@@ -379,6 +404,15 @@ public sealed class AuditChain : IAuditChain
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>How far retention removed rows, from the newest retention checkpoint this chain trusts (signed, or any
+    /// without a key) — never copied from an unchecked row.</summary>
+    private async Task<long> TrustedPrunedThroughAsync(MetricsDbContext db, CancellationToken ct)
+    {
+        var starts = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
+            .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).Take(KeptRetentionCheckpoints).ToListAsync(ct);
+        return starts.FirstOrDefault(c => _key is null || Valid(c))?.PrunedThroughId ?? 0;
     }
 
     /// <summary>Whether the checkpoint file may be replaced: only while the database trail still reaches what the file
@@ -657,7 +691,8 @@ public sealed class AuditChain : IAuditChain
                 .OrderByDescending(c => c.Seq).FirstOrDefaultAsync(token);
             var (seq, hash) = anchor is null ? await AnchorAsync(db, token) : (anchor.Seq, anchor.Hash);
             if (anchor is not null) await db.AuditChain.Where(c => c.Seq <= anchor.Seq).ExecuteDeleteAsync(token);
-            // Head checkpoints before the new start name links that are gone; retention and genesis checkpoints stay.
+            // Head checkpoints before the new start name links that are gone; genesis and the newest retention
+            // checkpoints stay.
             await db.AuditCheckpoints.Where(c => c.Kind == HeadKind && c.Seq < seq).ExecuteDeleteAsync(token);
             written = new AuditCheckpointEntity
             {
@@ -667,6 +702,10 @@ public sealed class AuditChain : IAuditChain
             written.Mac = Sign(written);
             db.AuditCheckpoints.Add(written);
             await db.SaveChangesAsync(token);
+            var oldest = await db.AuditCheckpoints.Where(c => c.Kind == RetentionKind).OrderByDescending(c => c.Id)
+                .Skip(KeptRetentionCheckpoints).Select(c => (long?)c.Id).FirstOrDefaultAsync(token);
+            if (oldest is { } cut)
+                await db.AuditCheckpoints.Where(c => c.Kind == RetentionKind && c.Id <= cut).ExecuteDeleteAsync(token);
             return (count, Array.Empty<long>());
         }, ct);
         // Under the lock: brings the file up to the new start (and anything written since).

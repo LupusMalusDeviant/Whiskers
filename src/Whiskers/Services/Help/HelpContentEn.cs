@@ -379,7 +379,7 @@ internal static class HelpContentEn
                 new("Filtering & Details", """
                     Filter by **actor**, **tool**, **time range**, or just **write calls/rejections**.
                     One click opens the detail view with parameters and result. Retention matches the
-                    audit log (90 days).
+                    audit log (365 days by default, `Audit__RetentionDays`). Admin only.
                     """),
             }),
 

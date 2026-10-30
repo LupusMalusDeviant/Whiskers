@@ -426,6 +426,20 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public void Every_sealed_row_hashes_exactly_these_columns()
+    {
+        // ADR-0006: every property is in the hash. A new one must be nullable without a default (old rows keep their
+        // hash because nulls are left out); a computed or defaulted property would change every sealed row.
+        var properties = typeof(AuditLogEntity).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Where(p => p.CanRead).Select(p => p.Name).Order(StringComparer.Ordinal).ToList();
+        var fresh = new AuditLogEntity();
+        var nonNullByDefault = properties.Where(n => typeof(AuditLogEntity).GetProperty(n)!.GetValue(fresh) is not null).ToList();
+        Assert.Equal(["Action", "Actor", "ActorType", "Id", "Success", "TargetId", "TargetName", "TargetType", "Timestamp"],
+            nonNullByDefault);
+        Assert.All(properties, n => Assert.True(typeof(AuditLogEntity).GetProperty(n)!.CanWrite, $"{n} is computed"));
+    }
+
+    [Fact]
     public void The_hashes_are_standard_SHA256_over_documented_input()
     {
         // ADR-0006: Hash = SHA256("{prev}|{seq}|{auditId}|{rowHash}") in lower-case hex — checkable without Whiskers.

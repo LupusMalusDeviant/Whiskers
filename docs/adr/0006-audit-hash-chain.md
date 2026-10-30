@@ -51,7 +51,8 @@ self-hosted product does not have; out of scope for R1 (WORK_PACKAGES R1-23).
 Option B.
 
 - **Canonical row.** Every column of `AuditLogEntity` by name in ordinal order, as compact JSON; null columns are left
-  out (a column added later does not change the hash of rows that never had it); timestamps as whole microseconds
+  out (a *nullable* column added later does not change the hash of rows that never had it — a new column must be
+  nullable without a default, and no computed property may be added; `AuditHashChainTests` pins the column list); timestamps as whole microseconds
   since 0001-01-01 UTC (both providers store at least that). `RowHash` is the lower-case hex SHA-256 of that JSON;
   `Hash = SHA256("{prevHash}|{seq}|{auditId}|{rowHash}")`, the first `prevHash` being 64 zeros.
 - **Verification** walks the chain from its anchor: each entry's `PrevHash` must be the previous entry's `Hash`, and
@@ -82,8 +83,16 @@ Option B.
   and the database together and can rewrite all three consistently. The design protects against database-only
   tampering (a leaked database credential, a restored or edited database file), not against a compromised host. An
   external anchor (option C) is the later answer.
-- **Window:** events written after the newest checkpoint can be cut off undetected; checkpoints are written every
-  minute and at shutdown.
+- **Window:** events after the newest checkpoint can be cut off, altered or added undetected by whoever can write the
+  database — the next checkpoint (every minute and at shutdown) signs what is there then. Checkpoints narrow the
+  window; they do not close it.
+- **Key stretching.** The signed checkpoints sit in the database, so the checkpoint key is the passphrase stretched
+  with PBKDF2-SHA-256 (600,000 rounds, as the vault) and then separated with HKDF: a leaked database tests VAULT_KEY
+  guesses no faster than the vault does. VAULT_KEY must still be a strong, generated secret.
+- **Findings expire with retention.** Once retention moves the start past a cut, that cut is no longer reported:
+  verify at least once per retention period.
+- **Restore.** A self-backup restore rolls the trail back to the archive's state; the restore's own event is written
+  to the database that the restore replaces.
 - Each audit write takes the chain lock and a transaction: audit writes are serialized. Their rate is low (human and
   automation actions), and the gateway already writes one row at a time per operation.
 - A database restored from an older backup verifies as truncated against the checkpoint file: restoring self-backup
