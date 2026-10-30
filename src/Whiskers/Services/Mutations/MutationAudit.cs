@@ -277,8 +277,9 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         ActorType = request.Surface == MutationSurface.Ui ? "web" : request.Surface.ToString().ToLowerInvariant(),
         Action = action,
         TargetType = request.Target.Kind,
-        TargetId = request.Target.Id,
-        TargetName = request.Target.Name ?? request.Target.Id,
+        // Redacted here too, not only on save: a row that cannot be written goes to the outbox file as it is.
+        TargetId = SinkRedaction.Text(request.Target.Id) ?? "",
+        TargetName = SinkRedaction.Text(request.Target.Name ?? request.Target.Id) ?? "",
         ServerId = request.Target.ServerId,
         Details = details,
         Success = success,

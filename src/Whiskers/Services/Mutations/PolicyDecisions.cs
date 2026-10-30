@@ -233,9 +233,11 @@ internal static class PolicyDecisions
 {
     // scheme://anything@host → scheme://***@host: a user name alone can be a token (https://<token>@github.com).
     private static readonly System.Text.RegularExpressions.Regex UrlUserInfo =
-        new(@"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@", System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
 
-    /// <summary>The text with the user info of every URL in it replaced by <c>***</c>, nothing else changed.</summary>
+    /// <summary>The text with the user info of every URL in it replaced by <c>***</c>, nothing else changed. Input the
+    /// pattern cannot finish in time is withheld whole (fail closed).</summary>
     public static string? WithoutUrlCredentials(string? value) =>
-        value is null ? null : UrlUserInfo.Replace(value, "$1***@");
+        value is null ? null : Whiskers.Utils.SecretRedactor.FailClosed(value, v => UrlUserInfo.Replace(v, "$1***@"));
 }

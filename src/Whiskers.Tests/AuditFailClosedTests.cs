@@ -176,6 +176,17 @@ public sealed class AuditFailClosedTests : IDisposable
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().ToListAsync();
     }
 
+    /// <summary>Waits until the operation's intent row is written (a fixed delay was too short under a loaded run).</summary>
+    private async Task IntentWrittenAsync(string operationId)
+    {
+        var until = DateTime.UtcNow.AddSeconds(15);
+        while (!(await Events()).Any(e => e.OperationId == operationId && e.Phase == "intent"))
+        {
+            Assert.True(DateTime.UtcNow < until, $"the intent of {operationId} was not written");
+            await Task.Delay(20);
+        }
+    }
+
     /// <summary>R1-23: every row the gateway, the outbox drain or recovery wrote is on the audit chain, in its
     /// latest version.</summary>
     private async Task AssertTrailIntact()
@@ -373,7 +384,7 @@ public sealed class AuditFailClosedTests : IDisposable
         _writes.FailBefore = false;
         var running = new TaskCompletionSource<int>();
         _ = gateway.ExecuteAsync(Restart("op-cut"), (_, _) => running.Task);
-        await Task.Delay(300);
+        await IntentWrittenAsync("op-cut");
         using (var scope = _scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -474,7 +485,7 @@ public sealed class AuditFailClosedTests : IDisposable
         var recovery = Recovery(journal);
         var running = new TaskCompletionSource<int>();
         var run = Gateway(recovery, journal).ExecuteAsync(Restart("op-live"), (_, _) => running.Task);
-        await Task.Delay(300);
+        await IntentWrittenAsync("op-live");
 
         _time.Advance(AuditRecovery.IntentGrace + TimeSpan.FromMinutes(1));
         await recovery.RecoverAsync();

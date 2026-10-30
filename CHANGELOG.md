@@ -16,7 +16,7 @@ All notable changes to Whiskers are documented here. The format follows
   is `***` at any depth; URL user info (`https://user:token@host`, also a token alone) is removed before the patterns.
   Approval cards keep a chat or MCP call's payload readable for the approver, with secrets in it redacted. The agent
   history's error column is redacted too (it was stored as it came). Stored JSON keeps quotes readable (`'`, not
-  `'`). Rows written before this version stay as they are.
+  `\u0027`). Rows written before this version stay as they are.
 - R1-23 follow-up: an unreadable checkpoint file and a pending VAULT_KEY adoption are logged as what they are (not as
   tampering); the page counts every finding, also above the display cap; export scratch files left by a crash are
   removed by the next export.

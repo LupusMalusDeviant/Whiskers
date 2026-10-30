@@ -84,6 +84,18 @@ public sealed class SecretRedactorTests
     }
 
     [Fact]
+    public void Removing_url_user_info_ends_in_bounded_time_on_hostile_input()
+    {
+        var input = string.Concat(Enumerable.Repeat("a://", 50_000)) + $"x://{Canary}@host";
+
+        var watch = Stopwatch.StartNew();
+        var redacted = SinkRedaction.Text(input);
+
+        Assert.DoesNotContain(Canary, redacted);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
+
+    [Fact]
     public void Pathological_input_ends_in_bounded_time_without_leaking()
     {
         // Thousands of comments between the keyword and the literal, and an unclosed literal: the worst case for the

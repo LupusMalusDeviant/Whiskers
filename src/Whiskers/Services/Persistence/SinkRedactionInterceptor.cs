@@ -39,6 +39,8 @@ public sealed class SinkRedactionInterceptor : SaveChangesInterceptor
             {
                 case AuditLogEntity row:
                     row.Details = SinkRedaction.Json(row.Details);
+                    // Some writers name a whole command as the target (execute_command): both are redacted.
+                    row.TargetId = SinkRedaction.Text(row.TargetId) ?? "";
                     row.TargetName = SinkRedaction.Text(row.TargetName) ?? "";
                     row.Arguments = SinkRedaction.Arguments(row.Arguments);
                     break;

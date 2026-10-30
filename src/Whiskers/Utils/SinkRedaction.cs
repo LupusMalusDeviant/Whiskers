@@ -54,12 +54,17 @@ public static class SinkRedaction
         return $"<withheld: {value.GetRawText().Length} chars>";
     }
 
-    private static bool IsWithheld(string text) =>
-        text.StartsWith("<withheld", StringComparison.Ordinal) && text.EndsWith('>');
+    // Exactly the marker this class writes: a caller's "<withheld: …>" carrying anything else is a payload like any other.
+    private static readonly System.Text.RegularExpressions.Regex WithheldMarker = new(
+        @"^<withheld: [0-9]{1,10} chars>$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    /// <summary>Free text: URL user info removed, then the secret patterns.</summary>
+    private static bool IsWithheld(string text) => WithheldMarker.IsMatch(text);
+
+    /// <summary>Free text: URL user info removed, then the secret patterns. A pattern that times out withholds the
+    /// whole text (fail closed).</summary>
     public static string? Text(string? text) =>
-        string.IsNullOrEmpty(text) ? text : SecretRedactor.Redact(WithoutUrlCredentials(text));
+        string.IsNullOrEmpty(text) ? text
+            : SecretRedactor.FailClosed(text, t => SecretRedactor.Redact(WithoutUrlCredentials(t)));
 
     /// <summary>A document that may be JSON: redacted value by value (so a pattern never runs across quotes and
     /// commas), plain text otherwise.</summary>

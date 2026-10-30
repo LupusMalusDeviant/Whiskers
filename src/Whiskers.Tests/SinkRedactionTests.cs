@@ -78,6 +78,21 @@ public sealed class SinkRedactionTests
     }
 
     [Theory]
+    [InlineData("<withheld: export PGPASSWORD=canary-value-r124>")]
+    [InlineData("<withheld: 12 chars> canary-value-r124 <withheld: 3 chars>")]
+    [InlineData("<withheld: canary-value-r124 chars>")]
+    public void A_payload_dressed_as_the_marker_is_withheld_like_any_other(string payload)
+    {
+        var stored = SinkRedaction.Arguments(JsonSerializer.Serialize(new { command = payload, prompt = payload }));
+
+        AssertClean(stored);
+        using var document = JsonDocument.Parse(stored!);
+        Assert.Equal($"<withheld: {payload.Length} chars>", document.RootElement.GetProperty("command").GetString());
+        Assert.DoesNotContain(CanaryPrefix, SinkRedaction.WithoutPayloads(
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new { command = payload }))!)["command"]?.ToString());
+    }
+
+    [Theory]
     [MemberData(nameof(Secrets))]
     public void A_secret_in_an_ordinary_argument_is_redacted(string secret) =>
         AssertClean(SinkRedaction.Arguments(JsonSerializer.Serialize(new { serverId = "local", description = secret })));
@@ -126,7 +141,7 @@ public sealed class SinkRedactionTests
     {
         using var db = Context();
         var args = JsonSerializer.Serialize(new { command = secret, description = secret });
-        var audit = new AuditLogEntity { Action = "x", Details = secret, TargetName = secret, Arguments = args };
+        var audit = new AuditLogEntity { Action = "x", Details = secret, TargetId = secret, TargetName = secret, Arguments = args };
         var call = new McpToolCallEntity { ToolName = "x", ParamsJson = args, ResultSummary = secret, Error = secret };
         var approval = new ApprovalRecordEntity { ParamsJson = args, Reason = secret, Diff = secret };
         var decision = new PolicyDecisionEntity { Reason = secret };
@@ -138,11 +153,32 @@ public sealed class SinkRedactionTests
 
         foreach (var value in new[]
                  {
-                     audit.Details, audit.TargetName, audit.Arguments, call.ParamsJson, call.ResultSummary, call.Error,
+                     audit.Details, audit.TargetId, audit.TargetName, audit.Arguments, call.ParamsJson, call.ResultSummary, call.Error,
                      approval.ParamsJson, approval.Reason, approval.Diff, decision.Reason, run.Output, run.Error,
                      task.LastResult,
                  })
             AssertClean(value);
+    }
+
+    [Fact]
+    public void A_row_already_redacted_is_left_byte_identical()
+    {
+        // The audit chain adds no link for a write that left the row as it was: redacting again must change nothing.
+        using var db = Context();
+        var audit = new AuditLogEntity
+        {
+            Action = "x", TargetId = "web-prod", TargetName = SecretTexts[2],
+            Details = JsonSerializer.Serialize(new { result = SecretTexts[1], note = "it's done" }),
+            Arguments = JsonSerializer.Serialize(new { command = $"echo {Canary}", sql = SecretTexts[1], serverId = "local" }),
+        };
+        db.Add(audit);
+        SinkRedactionInterceptor.Redact(db);
+        var first = (audit.TargetId, audit.TargetName, audit.Details, audit.Arguments);
+
+        SinkRedactionInterceptor.Redact(db);
+
+        Assert.Equal(first, (audit.TargetId, audit.TargetName, audit.Details, audit.Arguments));
+        Assert.Equal("web-prod", audit.TargetId);
     }
 
     [Fact]
@@ -210,10 +246,22 @@ public sealed class SinkRedactionTests
                 await db.SaveChangesAsync();
             }
 
-            await using var read = services.GetRequiredService<MetricsDbContext>();
-            var row = await read.McpToolCalls.AsNoTracking().SingleAsync();
-            AssertClean(row.ParamsJson);
-            AssertClean(row.Error);
+            await using (var read = services.GetRequiredService<MetricsDbContext>())
+            {
+                var row = await read.McpToolCalls.AsNoTracking().SingleAsync();
+                AssertClean(row.ParamsJson);
+                AssertClean(row.Error);
+            }
+
+            // A tracked row changed later (an outcome written to an existing row) is redacted on that save too.
+            await using (var update = services.GetRequiredService<MetricsDbContext>())
+            {
+                var tracked = await update.McpToolCalls.SingleAsync();
+                tracked.ResultSummary = $"done, token: {Canary}";
+                await update.SaveChangesAsync();
+            }
+            await using var reread = services.GetRequiredService<MetricsDbContext>();
+            AssertClean((await reread.McpToolCalls.AsNoTracking().SingleAsync()).ResultSummary);
         }
         finally
         {
