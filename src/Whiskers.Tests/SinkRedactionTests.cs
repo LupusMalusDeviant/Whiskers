@@ -150,9 +150,16 @@ public sealed class SinkRedactionTests
         var decision = new PolicyDecisionEntity { Reason = secret };
         var run = new TaskRunHistoryEntity { Output = secret, Error = secret };
         var task = new ScheduledTaskEntity { LastResult = secret };
-        db.AddRange(audit, call, approval, decision, run, task);
+        var identity = new AuditLogEntity
+        {
+            Action = "x", Details = JsonSerializer.Serialize(new { principal = new { kind = "ApiKey", id = "key:k1", keyId = "k1" } }),
+        };
+        db.AddRange(audit, call, approval, decision, run, task, identity);
 
         SinkRedactionInterceptor.Redact(db);
+
+        // The credential's id is no secret and stays readable.
+        Assert.Contains("\"keyId\":\"k1\"", identity.Details);
 
         foreach (var value in new[]
                  {

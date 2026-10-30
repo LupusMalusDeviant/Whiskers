@@ -16,9 +16,9 @@ public static class SecretRedactor
     private static readonly Regex MysqlPwFlag = new(
         @"(?<![\w-])-p\S+", RegexOptions.Compiled, Timeout);
 
-    // redis-cli -a <secret>  →  -a ***
+    // redis-cli -a <secret>  →  -a ***  — a flag, so not inside a word: "data-a daily" is a name.
     private static readonly Regex RedisAuthFlag = new(
-        @"-a\s+\S+", RegexOptions.Compiled, Timeout);
+        @"(?<![\w-])-a\s+\S+", RegexOptions.Compiled, Timeout);
 
     // PGPASSWORD=x / MYSQL_PWD=x / REDISCLI_AUTH=x  →  NAME=***
     private static readonly Regex EnvPassword = new(

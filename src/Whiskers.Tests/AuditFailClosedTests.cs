@@ -343,6 +343,27 @@ public sealed class AuditFailClosedTests : IDisposable
     }
 
     [Fact]
+    public async Task A_refusal_kept_in_the_outbox_holds_no_secret_in_its_target_or_payload()
+    {
+        // R1-24: the outbox file is written as the row was built â€” the interceptor never sees it.
+        _writes.FailBefore = true;
+        var request = Restart("op-sec2") with
+        {
+            CapabilityId = "no.such",
+            Target = new MutationTarget("repo", "https://deploy:hunter4@git.example.org/r.git",
+                "git clone https://hunter5@git.example.org/r.git", "local"),
+            Arguments = Args(new { containerId = "web", command = "curl -u deploy:hunter6 https://api.example.org" }),
+        };
+
+        await Gateway().ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        var kept = Directory.EnumerateFiles(Path.Combine(_root, "audit-outbox"), "*.json").Single();
+        var text = await File.ReadAllTextAsync(kept);
+        Assert.DoesNotContain("hunter", text);
+        Assert.Contains("git.example.org", text);
+    }
+
+    [Fact]
     public async Task A_refusal_whose_commit_answer_was_lost_is_one_event()
     {
         _writes.FailAfter = true;

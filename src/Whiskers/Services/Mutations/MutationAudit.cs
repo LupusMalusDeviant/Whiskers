@@ -320,7 +320,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             kind = request.Principal.Kind.ToString(),
             id = request.Principal.Id,
-            credential = request.Principal.CredentialId,
+            // The credential's id (an MCP key's id), not a secret — named so the sinks' secret-key rule keeps it.
+            keyId = request.Principal.CredentialId,
             session = request.Principal.SessionId,
             onBehalfOf = request.Principal.OnBehalfOf?.Id,
             onBehalfOfKind = request.Principal.OnBehalfOf?.Kind.ToString(),
