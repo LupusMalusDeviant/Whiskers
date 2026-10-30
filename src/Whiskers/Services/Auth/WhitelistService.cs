@@ -13,6 +13,8 @@ public class WhitelistService : IWhitelistService, IInitializable
     private readonly ILogger<WhitelistService> _logger;
     private WhitelistData _cached = new();
     private readonly ReaderWriterLockSlim _lock = new();
+    // R1-22: one writer at a time from capture to diff, so a save's recorded change is the change it made.
+    private readonly SemaphoreSlim _save = new(1, 1);
 
     public WhitelistService(IConfiguration configuration, IRoleService roleService, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null)
     {
@@ -110,8 +112,15 @@ public class WhitelistService : IWhitelistService, IInitializable
             Enabled = data.Enabled,
             Emails = new List<string>(data.Emails)
         };
-        await _store.SaveAsync(copy);
-        SetCache(copy);
+        await _save.WaitAsync();
+        try
+        {
+            var before = GetWhitelist();
+            await _store.SaveAsync(copy);
+            SetCache(copy);
+            Whiskers.Services.Mutations.ConfigChange.Record("whitelist", before, copy);   // R1-22
+        }
+        finally { _save.Release(); }
         _logger.LogInformation("Whitelist updated: {Count} emails, enabled={Enabled}", copy.Emails.Count, copy.Enabled);
     }
 

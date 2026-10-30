@@ -146,7 +146,13 @@ else
 
     private async Task CreateKey()
     {
-        if (!_isAdmin) return;
+        if (!_isAdmin)
+        {
+            // The refused attempt is the gateway's Denied event (R1-22).
+            await Mutations.RefuseAsync("mcp.key_create", new { section = "mcp-api-keys", level = McpPermissionLevels.Read },
+                "Requires the Admin role.");
+            return;
+        }
         _busy = true;
         try
         {
@@ -163,7 +169,11 @@ else
 
     private async Task ActivatePreset(string name)
     {
-        if (!_isAdmin) return;
+        if (!_isAdmin)
+        {
+            await Mutations.RefuseAsync("guardrails.save", new { section = "guardrails", preset = name }, "Requires the Admin role.");
+            return;
+        }
         _busy = true;
         try
         {

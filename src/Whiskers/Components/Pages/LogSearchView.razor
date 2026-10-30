@@ -169,6 +169,15 @@ else
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
@@ -207,7 +216,7 @@ else
 
     private async Task CreateRule()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!await RequireAsync(AppRole.Operator, "logalert.create", new { name = _ruleName, containerName = _ruleContainer })) return;
         try
         {
             var rule = new Whiskers.Models.LogAlertRuleEntity
@@ -220,6 +229,7 @@ else
                 CooldownMinutes = _ruleCooldown
             };
             await Mutations.RunAsync("logalert.create", new { name = rule.Name, containerName = rule.ContainerName },
+                // The new rule, its pattern as text only, is the store's versioned diff in the gateway's event (R1-22).
                 _ => MonitorService.CreateRuleAsync(rule));
             Snackbar.Add(L["LogSearchView_Snackbar_RuleCreated", _ruleName].Value, Severity.Success);
             _showRuleDialog = false;
@@ -234,7 +244,8 @@ else
 
     private async Task ToggleRule(Whiskers.Models.LogAlertRuleEntity rule, bool enabled)
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!await RequireAsync(AppRole.Operator, "logalert.toggle",
+                new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName, enabled })) return;
         try
         {
             await Mutations.RunAsync("logalert.toggle",
@@ -252,7 +263,8 @@ else
 
     private async Task DeleteRule(Whiskers.Models.LogAlertRuleEntity rule)
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!await RequireAsync(AppRole.Operator, "logalert.delete",
+                new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName })) return;
         try
         {
             await Mutations.RunAsync("logalert.delete",

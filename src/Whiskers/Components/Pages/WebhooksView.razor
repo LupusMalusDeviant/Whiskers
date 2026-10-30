@@ -6,7 +6,6 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IComposePlanner ComposePlanner
 @inject IAutomationOwnerResolver OwnerResolver
@@ -233,6 +232,15 @@ else
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
@@ -277,7 +285,9 @@ else
 
     private async Task CreateWebhook()
     {
-        if (!Require(AppRole.Admin) || _me is null) return;
+        if (_me is null) return;
+        if (!await RequireAsync(AppRole.Admin, "webhook.save",
+                new { name = _formName, action = _formAction, target = _formTarget, serverId = _formServerId, provider = _formProvider })) return;
         try
         {
             // Decided by the gateway (R1-09); the creator becomes the owner an external call runs on. The secret is
@@ -296,10 +306,14 @@ else
             var wh = await Mutations.RunAsync("webhook.save",
                 new { name = entity.Name, action = entity.Action, target = entity.TargetId, serverId = entity.ServerId, owner,
                       provider = entity.Provider },
-                _ => WebhookService.CreateWebhookAsync(entity));
+                async _ =>
+                {
+                    var created = await WebhookService.CreateWebhookAsync(entity);
+                    // The new webhook's id is part of the gateway's event (R1-22); its secret never is.
+                    MutationScope.Note($"Webhook {created.WebhookId}");
+                    return created;
+                });
             _showDialog = false;
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                "webhook.create", "webhook", wh.WebhookId, wh.Name, serverId: wh.ServerId);
             // One-time display: the secret is only ever available right here.
             ShowSecretOnce(wh.WebhookId, wh.Secret);
             _webhooks = await WebhookService.GetWebhooksAsync();
@@ -312,22 +326,27 @@ else
     /// over — for a webhook saved before owners were recorded, the only way to make it run again.</summary>
     private async Task AdoptWebhook(Whiskers.Models.WebhookEntity wh)
     {
-        if (!Require(AppRole.Admin) || _me is null) return;
+        if (_me is null) return;
+        if (!await RequireAsync(AppRole.Admin, "webhook.save",
+                new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, owner = _me })) return;
         try
         {
             var me = _me;
             var previous = wh.Owner;
             var adopted = await Mutations.RunAsync("webhook.save",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, owner = me },
-                _ => WebhookService.SetOwnerAsync(wh.WebhookId, me, previous));
+                async _ =>
+                {
+                    var changed = await WebhookService.SetOwnerAsync(wh.WebhookId, me, previous);
+                    if (changed) MutationScope.Note($"Owner: previous={previous ?? "none"}; new={me}");
+                    return changed;
+                });
             if (!adopted)
             {
                 Snackbar.Add(L["WebhooksView_Snackbar_Conflict", wh.Name].Value, Severity.Warning);
             }
             else
             {
-                await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "webhook.adopt",
-                    "webhook", wh.WebhookId, wh.Name, details: $"previous={previous ?? "none"}; new={me}", serverId: wh.ServerId);
                 Snackbar.Add(L["WebhooksView_Snackbar_Adopted", wh.Name].Value, Severity.Success);
             }
         }
@@ -339,8 +358,9 @@ else
     private async Task TestWebhook(Whiskers.Models.WebhookEntity wh)
     {
         // Triggering runs restart/rebuild/deploy on the host — gate it behind Operator so a Viewer
-        // cannot fire host actions from the UI.
-        if (!Require(AppRole.Operator)) return;
+        // cannot fire host actions from the UI. A refusal is decided on the action the test would run (R1-22).
+        if (!await RequireAsync(AppRole.Operator, TestCapabilityOf(wh),
+                new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId })) return;
         Snackbar.Add(L["WebhooksView_Snackbar_Testing", wh.Name].Value, Severity.Info);
         bool success;
         string output;
@@ -355,8 +375,6 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
-        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-            "webhook.test", "webhook", wh.WebhookId, wh.Name, serverId: wh.ServerId, success: success);
         Snackbar.Add(success ? L["WebhooksView_Snackbar_TestOk", output].Value : L["WebhooksView_Snackbar_Error", output].Value,
             success ? Severity.Success : Severity.Error);
         _webhooks = await WebhookService.GetWebhooksAsync();
@@ -371,7 +389,13 @@ else
     {
         // The same server and container the trigger resolves when it runs (R1-06).
         var serverId = Whiskers.Services.Webhooks.WebhookTargets.ServerOf(wh);
-        Task<(bool, string)> Fire() => WebhookService.TriggerSignedTestAsync(wh.WebhookId);
+        async Task<(bool, string)> Fire()
+        {
+            var fired = await WebhookService.TriggerSignedTestAsync(wh.WebhookId);
+            // The test and its answer are part of the decided action's event (R1-22).
+            MutationScope.Note($"Webhook test {wh.WebhookId}", fired.Item1);
+            return fired;
+        }
         switch (wh.Action)
         {
             case "restart":
@@ -405,9 +429,19 @@ else
         }
     }
 
+    private static string TestCapabilityOf(Whiskers.Models.WebhookEntity wh) => wh.Action switch
+    {
+        "restart" => "container.restart",
+        "rebuild" => "container.update",
+        "deploy" => "compose.deploy",
+        "git-deploy" => "gitdeploy.deploy",
+        _ => "webhook.save",
+    };
+
     private async Task RegenerateSecret(Whiskers.Models.WebhookEntity wh)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "webhook.rotate_secret",
+                new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["WebhooksView_Dialog_RegenerateTitle"].Value,
             L["WebhooksView_Dialog_RegenerateMessage", wh.Name].Value,
@@ -419,8 +453,6 @@ else
             var secret = await Mutations.RunAsync("webhook.rotate_secret",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId },
                 _ => WebhookService.RegenerateSecretAsync(wh.WebhookId));
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                "webhook.regenerate-secret", "webhook", wh.WebhookId, wh.Name, serverId: wh.ServerId);
             ShowSecretOnce(wh.WebhookId, secret);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }
@@ -430,15 +462,14 @@ else
 
     private async Task ToggleEnabled(Whiskers.Models.WebhookEntity wh)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "webhook.set_enabled",
+                new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, enabled = !wh.Enabled })) return;
         try
         {
             var enable = !wh.Enabled;
             await Mutations.RunAsync("webhook.set_enabled",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, enabled = enable },
                 _ => WebhookService.SetEnabledAsync(wh.WebhookId, enable));
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                wh.Enabled ? "webhook.disable" : "webhook.enable", "webhook", wh.WebhookId, wh.Name, serverId: wh.ServerId);
             Snackbar.Add(wh.Enabled ? L["WebhooksView_Snackbar_Disabled"].Value : L["WebhooksView_Snackbar_Enabled"].Value, Severity.Success);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }
@@ -465,7 +496,8 @@ else
 
     private async Task DeleteWebhook(Whiskers.Models.WebhookEntity wh)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "webhook.delete",
+                new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["WebhooksView_Dialog_DeleteTitle"].Value,
             L["WebhooksView_Dialog_DeleteMessage", wh.Name].Value,
@@ -476,8 +508,6 @@ else
             await Mutations.RunAsync("webhook.delete",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId },
                 _ => WebhookService.DeleteWebhookAsync(wh.WebhookId));
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                "webhook.delete", "webhook", wh.WebhookId, wh.Name, serverId: wh.ServerId);
             Snackbar.Add(L["WebhooksView_Snackbar_Deleted"].Value, Severity.Success);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }

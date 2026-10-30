@@ -5,7 +5,6 @@
 @inject IOptionsMonitor<AutomationOptions> AutomationOptions
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IStringLocalizer<SharedResource> L
 
 @* PC-D6 (ADR-0005 step 2.3): the fleet-wide automations have no item of their own to keep an owner on, so an admin
@@ -86,19 +85,30 @@
 
     private async Task TakeOver(Feature feature)
     {
-        if (_role < AppRole.Admin || string.IsNullOrWhiteSpace(_email)) return;
+        if (string.IsNullOrWhiteSpace(_email)) return;
         var owner = PrincipalIds.User(_email);
         var featureId = feature.Id;
+        var isAdmin = _role >= AppRole.Admin;
+        if (!isAdmin)
+        {
+            // The refused attempt is the gateway's Denied event (R1-22).
+            await Mutations.RefuseAsync("automation.owner_set", new { feature = featureId, owner }, "Requires the Admin role.");
+            return;
+        }
         _busy = true;
         try
         {
             // The replaced owner comes from the store's locked write, not from this page: another admin may have
             // taken the feature over since it was rendered.
             var previous = await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
-                _ => Owners.SetAsync(featureId, owner));
-            await AuditLog.LogAsync(owner, "web", "automation.owner_set", "automation", featureId, featureId,
-                details: $"previous={AutomationOwners.AuthorityOf(OwnerResolver, previous)}; " +
-                         $"new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
+                async _ =>
+                {
+                    var replaced = await Owners.SetAsync(featureId, owner);
+                    // Who held the feature before is part of the gateway's event (R1-22).
+                    MutationScope.Note($"Owner: previous={AutomationOwners.AuthorityOf(OwnerResolver, replaced)}; " +
+                                       $"new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
+                    return replaced;
+                });
             Snackbar.Add(L["AutomationOwners_Snackbar_Done", L[feature.TitleKey].Value].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)

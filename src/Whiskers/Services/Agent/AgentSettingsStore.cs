@@ -55,8 +55,16 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
             var tmp = $"{_path}.{Guid.NewGuid():N}.tmp";
             try
             {
+                JsonNode? before = null;
+                if (File.Exists(_path))
+                    try { before = JsonNode.Parse(await File.ReadAllTextAsync(_path))?["Agent"]?.DeepClone(); }
+                    catch (System.Text.Json.JsonException) { /* an unreadable file is no previous version */ }
                 await File.WriteAllTextAsync(tmp, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
                 File.Move(tmp, _path, overwrite: true);
+                // Written: the change as part of the gateway's event, the API key and prompt redacted (R1-22).
+                Whiskers.Services.Mutations.ConfigChange.Record("agent",
+                    before is null ? null : System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(before.ToJsonString()),
+                    System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(doc["Agent"]!.ToJsonString()));
             }
             finally
             {

@@ -3,7 +3,6 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
@@ -98,11 +97,25 @@
             var cred = string.IsNullOrWhiteSpace(_formCredential) ? null : _formCredential;
             // Host and name only: the credential never goes into the arguments the audit keeps.
             var form = _form;
+            // A host with user info (user:password@host) would carry its password into the recorded arguments.
+            if (form.Host.Contains('@'))
+            {
+                await Mutations.RefuseAsync("registry.save",
+                    new { section = "registries", registryId = string.IsNullOrWhiteSpace(form.Id) ? null : form.Id, name = form.Name },
+                    "The host contains user info.");
+                Snackbar.Add(L["RegistriesPanel_Snackbar_HostUserInfo"].Value, Severity.Warning);
+                return;
+            }
             await Mutations.RunAsync("registry.save",
                 new { section = "registries", registryId = string.IsNullOrWhiteSpace(form.Id) ? null : form.Id, name = form.Name, host = form.Host },
-                _ => Registries.SaveRegistryAsync(form, cred));
-            await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-                _editing == null ? "registry.create" : "registry.update", "registry", _form.Id, _form.Name);
+                async _ =>
+                {
+                    var saved = await Registries.SaveRegistryAsync(form, cred);
+                    // The saved registry's id (new on create) is part of the gateway's event (R1-22); the credential
+                    // never is — only whether one is stored.
+                    MutationScope.Note($"Registry {saved.Id} ({(saved.HasCredential ? "with" : "without")} credential)");
+                    return saved;
+                });
             Snackbar.Add(L["RegistriesPanel_Snackbar_Saved", _form.Name].Value, Severity.Success);
             _showDialog = false;
             _registries = await Registries.GetRegistriesAsync();
@@ -123,8 +136,6 @@
                 _ => Registries.DeleteRegistryAsync(reg.Id));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
-        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web",
-            "registry.delete", "registry", reg.Id, reg.Name);
         Snackbar.Add(L["RegistriesPanel_Snackbar_Deleted"].Value, Severity.Success);
         _registries = await Registries.GetRegistriesAsync();
     }

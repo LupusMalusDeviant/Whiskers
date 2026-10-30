@@ -226,6 +226,13 @@ public class ScheduledTasksTakeoverTests : BunitContext
 
     private sealed class NullAudit : IAuditLogService
     {
+        public async Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            await LogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+            return true;
+        }
+
         public List<(string Action, string? Details)> Entries { get; } = [];
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
             string targetName, string? details = null, string? serverId = null, bool success = true)

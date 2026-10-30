@@ -235,8 +235,17 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 - **One audit event per attempt** for MCP tools (R1-20, `IToolAuditLog`) and the infrastructure pages (R1-21): the
   gateway's event carries decision, approval, intent, outcome and what the tool or page reports about its work
   (`MutationScope.Record` / `Note`). A page's role check in front of its confirmation dialog records its refusal
-  through `IUiMutationRunner.RefuseAsync` → `IMutationGateway.RefuseAsync` (one Denied event, nothing runs). The
-  configuration pages still write rows of their own (R1-22).
+  through `IUiMutationRunner.RefuseAsync` → `IMutationGateway.RefuseAsync` (one Denied event, nothing runs). Since
+  R1-22 the configuration pages follow the same rule, and a configuration store calls `ConfigChange.Record(section,
+  before, after)` after a successful write (`ConfigChange.Capture` copies an entity before it is changed in place):
+  the event gets the section's version before/after (`config.version`, never shortened) and each changed setting
+  (`setting`, at most `ConfigChange.MaxChanges` per operation, the rest counted). Comparison uses the complete
+  values (a secret by its per-process fingerprint); the version hashes only a safe projection — secrets as `[set]`,
+  URLs as their origin, free text as `[text]` — so a change of those alone keeps the version and still appears as a
+  changed setting. What is shown is safe: secrets (also ntfy topics) as `[set #…]`/`[not set]`, URLs as their
+  origin, free text and addresses with user info as `[text, N chars #…]`. A repeated record identity is numbered
+  by occurrence (`a@example.com~2`). A scope keeps at most 20 reports and counts the rest (`MutationScope.OmittedAction`).
+  Outside a gateway scope `Record` does nothing.
 - **Failure reports.** The 25 mutating MCP tools mark their error answers with `MutationScope.Fail`. UI actions are
   classified by `MutationResults`: `false`, a failed `CommandResult`, a `QueryResult` with an error or a tuple whose
   first item is `false`, or a result object whose `bool Success` is `false` (R1-21), is recorded as `Failed` (the page

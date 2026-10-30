@@ -114,6 +114,13 @@ internal static class TerminalDoubles
 
     internal sealed class RecordingAudit : IAuditLogService
     {
+        public async Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            await LogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+            return true;
+        }
+
         public List<AuditRow> Rows { get; } = [];
 
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,

@@ -85,34 +85,40 @@ public class GitDeployService : IGitDeployService
         if (app.ComposePath.StartsWith('/') || app.ComposePath.Contains(".."))
             throw new ArgumentException("Compose path must be relative to the repo root.");
 
-        if (token is not null)
-        {
-            if (token.Length == 0)
-            {
-                if (_vault.IsEnabled) await _vault.DeleteSecretAsync(TokenVaultKey(app.Id));
-                app.HasToken = false;
-            }
-            else
-            {
-                if (!_vault.IsEnabled)
-                    throw new InvalidOperationException("Private repositories require the vault — set VAULT_KEY and restart.");
-                await _vault.SetSecretAsync(TokenVaultKey(app.Id), token.Trim());
-                app.HasToken = true;
-            }
-        }
+        if (token is { Length: > 0 } && !_vault.IsEnabled)
+            throw new InvalidOperationException("Private repositories require the vault — set VAULT_KEY and restart.");
 
         var data = await LoadAsync();
         await _lock.WaitAsync();
         try
         {
             var idx = data.Apps.FindIndex(a => a.Id == app.Id);
-            var stored = app.Clone();
-            if (idx >= 0)
+            var previous = idx >= 0 ? data.Apps[idx] : null;
+            // Edited from a stale copy: someone saved (or a deploy was decided on) a newer revision meanwhile.
+            if (previous is not null && previous.Revision != app.Revision)
+                throw new GitDeployConflictException($"'{previous.Name}' was changed meanwhile; reload and save again.");
+
+            // Under the lock and after the revision check: the token this save replaces and the one it stores are
+            // exactly what the audit describes (R1-22), and a save that loses the check never touches the vault.
+            var oldToken = _vault.IsEnabled ? _vault.GetSecret(TokenVaultKey(app.Id)) : null;
+            var newToken = token is null ? oldToken : token.Length == 0 ? null : token.Trim();
+            if (token is not null)
             {
-                var existing = data.Apps[idx];
-                // Edited from a stale copy: someone saved (or a deploy was decided on) a newer revision meanwhile.
-                if (existing.Revision != app.Revision)
-                    throw new GitDeployConflictException($"'{existing.Name}' was changed meanwhile; reload and save again.");
+                if (token.Length == 0)
+                {
+                    if (_vault.IsEnabled) await _vault.DeleteSecretAsync(TokenVaultKey(app.Id));
+                    app.HasToken = false;
+                }
+                else
+                {
+                    await _vault.SetSecretAsync(TokenVaultKey(app.Id), token.Trim());
+                    app.HasToken = true;
+                }
+            }
+
+            var stored = app.Clone();
+            if (previous is { } existing)
+            {
                 stored.CreatedAt = existing.CreatedAt;
                 stored.LastDeployedAt = existing.LastDeployedAt;
                 stored.LastDeployedSha = existing.LastDeployedSha;
@@ -123,10 +129,33 @@ public class GitDeployService : IGitDeployService
             stored.Revision = app.Revision + 1;
             if (idx >= 0) data.Apps[idx] = stored; else data.Apps.Add(stored);
             await _store.SaveAsync(data);
+            // The versioned, redacted diff is part of the gateway's event (R1-22).
+            Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{stored.Id}",
+                AuditView(previous, previous is { HasToken: true } ? oldToken : null), AuditView(stored, stored.HasToken ? newToken : null));
             return stored.Clone();
         }
         finally { _lock.Release(); }
     }
+
+    /// <summary>What the audit compares and versions for an app (R1-22): its settings and its token as a secret
+    /// (a replaced token is a change, shown as a fingerprint), without the revision counter, which moves on every save
+    /// and would make the version change with every edit of a URL's path or the token alone, and without the last
+    /// deploy's result.</summary>
+    private static object? AuditView(GitDeployApp? app, string? token)
+    {
+        if (app is null) return null;
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(app)!.AsObject();
+        node.Remove(nameof(GitDeployApp.Revision));
+        // Deploy results change with deploys, not with the configuration.
+        node.Remove(nameof(GitDeployApp.LastDeployedAt));
+        node.Remove(nameof(GitDeployApp.LastDeployedSha));
+        node.Remove(nameof(GitDeployApp.LastDeploySucceeded));
+        node["Token"] = token ?? "";
+        return System.Text.Json.JsonSerializer.SerializeToElement(node);
+    }
+
+    /// <summary>A step that leaves the token as it is: only whether one is stored matters (versioned as set/unset).</summary>
+    private static string? Kept(GitDeployApp? app) => app is { HasToken: true } ? "(kept)" : null;
 
     public async Task<bool> SetOwnerAsync(string appId, string ownerId, string? expectedOwnerId)
     {
@@ -144,6 +173,8 @@ public class GitDeployService : IGitDeployService
             stored.Revision = existing.Revision + 1;
             data.Apps[data.Apps.IndexOf(existing)] = stored;
             await _store.SaveAsync(data);
+            Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{appId}",
+                AuditView(existing, Kept(existing)), AuditView(stored, Kept(stored)));   // R1-22
             return true;
         }
         finally { _lock.Release(); }
@@ -222,8 +253,10 @@ public class GitDeployService : IGitDeployService
         try
         {
             var data = await LoadAsync();
+            var removed = data.Apps.FirstOrDefault(a => a.Id == appId);
             data.Apps.RemoveAll(a => a.Id == appId);
             await _store.SaveAsync(data);
+            Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{appId}", AuditView(removed, Kept(removed)), null);   // R1-22
         }
         finally { _lock.Release(); }
     }

@@ -3,7 +3,6 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject Whiskers.Modules.IModuleRegistry ModuleRegistry
 @inject IConfiguration Configuration
 @inject Microsoft.AspNetCore.Components.NavigationManager NavManager
@@ -129,6 +128,15 @@ else
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     private async Task LoadBackups()
     {
         try { _backups = (await BackupService.ListBackupsAsync()).ToList(); }
@@ -137,20 +145,24 @@ else
 
     private async Task CreateBackup()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "selfbackup.create", new { trigger = "manual" })) return;
         _busy = true;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             var info = await Mutations.RunAsync("selfbackup.create", new { trigger = "manual" },
-                token => BackupService.CreateBackupAsync("manual", token));
-            await AuditLog.LogAsync(actor, "web", "selfbackup.create", "whiskers", info.Id, info.FileName);
+                async token =>
+                {
+                    var created = await BackupService.CreateBackupAsync("manual", token);
+                    // The archive is part of the gateway's event (R1-22): which file, how large, encrypted or not.
+                    MutationScope.Note($"Backup {created.Id}: {created.FileName} ({created.SizeBytes} bytes, " +
+                                       $"{(created.Encrypted ? "encrypted" : "NOT encrypted")})");
+                    return created;
+                });
             Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupCreated", FormatBytes(info.SizeBytes) + (info.Encrypted ? L["SelfBackupPanel_Snackbar_EncryptedSuffix"].Value : "")].Value, Severity.Success);
             await LoadBackups();
         }
         catch (Exception ex)
         {
-            await AuditLog.LogAsync(actor, "web", "selfbackup.create", "whiskers", "", "", details: ex.Message, success: false);
             Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupFailed", ex.Message].Value, Severity.Error);
         }
         finally { _busy = false; }
@@ -158,7 +170,8 @@ else
 
     private void Download(Whiskers.Services.Backup.SelfBackupInfo info)
     {
-        if (!Require(AppRole.Admin)) return;
+        // The endpoint decides and audits: it hands the archive to an Admin only after recording that, and records a
+        // refused attempt (R1-22). The page does not refuse on its own, so no refusal goes unrecorded.
         // Full browser navigation (bypasses the Blazor router) to the admin-only streaming endpoint; the
         // attachment response downloads the file without replacing the page.
         NavManager.NavigateTo($"backups/self/{info.Id}/download", forceLoad: true);
@@ -166,31 +179,28 @@ else
 
     private async Task DeleteBackup(Whiskers.Services.Backup.SelfBackupInfo info)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "selfbackup.delete", new { archive = info.FileName })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["SelfBackupPanel_Dialog_DeleteTitle"].Value,
             L["SelfBackupPanel_Dialog_DeleteMessage", info.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value,
             yesText: L["SelfBackupPanel_Dialog_DeleteYes"].Value, cancelText: L["SelfBackupPanel_Dialog_Cancel"].Value);
         if (confirmed != true) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await Mutations.RunAsync("selfbackup.delete", new { archive = info.FileName },
                 _ => BackupService.DeleteBackupAsync(info.Id));
-            await AuditLog.LogAsync(actor, "web", "selfbackup.delete", "whiskers", info.Id, info.FileName);
             Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupDeleted"].Value, Severity.Success);
             await LoadBackups();
         }
         catch (Exception ex)
         {
-            await AuditLog.LogAsync(actor, "web", "selfbackup.delete", "whiskers", info.Id, info.FileName, details: ex.Message, success: false);
             Snackbar.Add(L["SelfBackupPanel_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }
 
     private async Task RestoreExisting(Whiskers.Services.Backup.SelfBackupInfo info)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "selfbackup.restore", new { archive = info.FileName })) return;
         var path = BackupService.ResolveArchivePath(info.Id);
         if (path is null) { Snackbar.Add(L["SelfBackupPanel_Snackbar_ArchiveNotFound"].Value, Severity.Error); return; }
         await ConfirmAndRestore(path, L["SelfBackupPanel_Text_BackupFrom", info.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value);
@@ -198,7 +208,7 @@ else
 
     private async Task OnFileSelected(InputFileChangeEventArgs e)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "selfbackup.restore", new { archive = e.File?.Name })) return;
         var file = e.File;
         if (file is null) return;
         _busy = true;
@@ -226,7 +236,7 @@ else
 
     private async Task ConfirmAndRestore(string archivePath, string description)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "selfbackup.restore", new { archive = Path.GetFileName(archivePath) })) return;
 
         // Validate before asking, so we can show a precise error instead of a scary confirm on a bad file.
         var validation = await BackupService.ValidateArchiveAsync(archivePath);
@@ -250,12 +260,9 @@ else
             // Through the gateway: the kill switch stops it too. The outcome row may stay at the intent, since the
             // process stops before the gateway can complete it.
             await Mutations.RunAsync("selfbackup.restore", new { archive = Path.GetFileName(archivePath) },
-                async _ =>
-                {
-                    // Logged before the call: the process stops while restoring.
-                    await AuditLog.LogAsync(actor, "web", "selfbackup.restore", "whiskers", "", description);
-                    await BackupService.BeginRestoreAsync(archivePath, actor);
-                });
+                // The process stops while restoring: the intent the gateway wrote before this runs is the record; the
+                // restore itself names the archive in its arguments (R1-22).
+                _ => BackupService.BeginRestoreAsync(archivePath, actor));
         }
         catch (MutationRefusedException ex)
         {
@@ -263,7 +270,6 @@ else
         }
         catch (Exception ex)
         {
-            await AuditLog.LogAsync(actor, "web", "selfbackup.restore", "whiskers", "", description, details: ex.Message, success: false);
             Snackbar.Add(L["SelfBackupPanel_Snackbar_RestoreFailed", ex.Message].Value, Severity.Error);
         }
     }

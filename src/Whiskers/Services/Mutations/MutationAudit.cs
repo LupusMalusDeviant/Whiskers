@@ -210,7 +210,11 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
                     targetName = Field(Redact(r.TargetName), Math.Min(budget, MaxResultNameChars)),
                     serverId = Field(r.ServerId, Math.Min(budget, MaxResultNameChars)),
                     success = r.Success,
-                    details = Field(Redact(r.Details), Math.Min(budget, MaxResultDetailChars)),
+                    // A configuration write's version entry and the count of left-out reports are short and bounded;
+                    // they never shrink (R1-22).
+                    details = r.Action is ConfigChange.VersionAction or MutationScope.OmittedAction
+                        ? r.Details
+                        : Field(Redact(r.Details), Math.Min(budget, MaxResultDetailChars)),
                 }).ToList()
                 : null,
             intent = intentValue,

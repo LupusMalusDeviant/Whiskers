@@ -18,13 +18,21 @@ namespace Whiskers.Tests;
 /// </summary>
 public sealed class UiAuditCompletenessTests : IDisposable
 {
-    /// <summary>The infrastructure pages migrated in R1-21 (the configuration pages follow in R1-22).</summary>
+    /// <summary>The infrastructure pages migrated in R1-21.</summary>
     public static readonly string[] MigratedPages =
     [
         "Pages/Dashboard.razor", "Pages/ContainerDetail.razor", "Pages/Deploy.razor", "Pages/AppStore.razor",
         "Pages/ComposeEditor.razor", "Pages/Networks.razor", "Pages/Firewall.razor", "Pages/AddFirewallRuleDialog.razor",
         "Pages/NginxManager.razor", "Pages/SystemdManager.razor", "Pages/SslCerts.razor", "Pages/CloudView.razor",
         "Pages/GitDeployView.razor", "Pages/ScheduledTasksView.razor", "Pages/VolumeBackupsView.razor",
+    ];
+
+    /// <summary>The configuration and policy pages migrated in R1-22.</summary>
+    public static readonly string[] ConfigurationPages =
+    [
+        "Pages/Settings.razor", "Pages/Servers.razor", "Pages/WebhooksView.razor", "Pages/SelfBackupPanel.razor",
+        "Pages/LogSearchView.razor", "Pages/AgentView.razor", "Pages/AiOperationsView.razor",
+        "Shared/AutomationOwnersPanel.razor", "Shared/RegistriesPanel.razor",
     ];
 
     private readonly ApprovalDatabase _db = new();
@@ -249,7 +257,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
     public static TheoryData<string> Pages()
     {
         var data = new TheoryData<string>();
-        foreach (var page in MigratedPages) data.Add(page);
+        foreach (var page in MigratedPages.Concat(ConfigurationPages)) data.Add(page);
         return data;
     }
 
@@ -273,6 +281,8 @@ public sealed class UiAuditCompletenessTests : IDisposable
         {
             ["Pages/ContainerDetail.razor"] = ["CheckMigrationStatus"],
             ["Pages/NginxManager.razor"] = ["TestConfig"],
+            // Skips loading the admin-only settings into the circuit; changes nothing.
+            ["Pages/Settings.razor"] = ["OnInitializedAsync"],
         }.GetValueOrDefault(page, []);
         // Every plain Require( call — whatever its argument and wherever it sits in the handler — must be in a read.
         var handlers = System.Text.RegularExpressions.Regex.Matches(source, @"(?:private|protected|public)[^\n(]*?\s(\w+)\(");
@@ -280,6 +290,8 @@ public sealed class UiAuditCompletenessTests : IDisposable
         foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
                      @"(?<![\w.])Require\(|if \(_role < "))
         {
+            // `@if (_role < …)` in the markup only decides what is rendered.
+            if (call.Index > 0 && source[call.Index - 1] == '@') continue;
             var handler = handlers.Where(h => h.Index < call.Index).LastOrDefault()?.Groups[1].Value;
             if (handler is "Require" or "RequireAsync") continue;   // the helpers themselves
             Assert.True(handler is not null && reads.Contains(handler),

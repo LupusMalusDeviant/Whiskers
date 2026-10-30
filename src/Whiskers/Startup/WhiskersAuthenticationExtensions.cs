@@ -29,18 +29,11 @@ public static class WhiskersAuthenticationExtensions
         var oidcEnabled = oidcSection.GetValue<bool>("Enabled") && !string.IsNullOrWhiteSpace(oidcSection["Authority"]);
 
         // Shared gate: after a provider authenticates the user, enforce the email whitelist before issuing
-        // the local cookie. Used by both Google and OIDC (both deliver a TicketReceivedContext).
-        Task WhitelistGate(Microsoft.AspNetCore.Authentication.TicketReceivedContext context)
-        {
-            var whitelist = context.HttpContext.RequestServices.GetRequiredService<Whiskers.Services.Auth.IWhitelistService>();
-            var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
-            if (!whitelist.IsEmailAllowed(email))
-            {
-                context.Response.Redirect(configuredPathBase + "/login?error=unauthorized");
-                context.HandleResponse();
-            }
-            return Task.CompletedTask;
-        }
+        // the local cookie. Used by both Google and OIDC; both outcomes and a failed round trip are audited (R1-22).
+        Task WhitelistGate(Microsoft.AspNetCore.Authentication.TicketReceivedContext context) =>
+            Whiskers.Services.Auth.FederatedSignIn.WhitelistGateAsync(context, configuredPathBase);
+        Task RecordRemoteFailure(Microsoft.AspNetCore.Authentication.RemoteFailureContext context) =>
+            Whiskers.Services.Auth.FederatedSignIn.RecordRemoteFailureAsync(context);
 
         if (authDisabled)
         {
@@ -111,6 +104,7 @@ public static class WhiskersAuthenticationExtensions
                     options.ClientId = googleClientId!;
                     options.ClientSecret = googleAuthSection["ClientSecret"] ?? "";
                     options.Events.OnTicketReceived = WhitelistGate;
+                    options.Events.OnRemoteFailure = RecordRemoteFailure;
                 });
             }
 
@@ -157,7 +151,8 @@ public static class WhiskersAuthenticationExtensions
 
                     options.Events = new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectEvents
                     {
-                        OnTicketReceived = WhitelistGate
+                        OnTicketReceived = WhitelistGate,
+                        OnRemoteFailure = RecordRemoteFailure
                     };
                 });
             }

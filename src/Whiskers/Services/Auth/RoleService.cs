@@ -12,6 +12,8 @@ public class RoleService : IRoleService, IInitializable
     private readonly ILogger<RoleService> _logger;
     private UserRoleData _data = new();
     private readonly ReaderWriterLockSlim _lock = new();
+    // R1-22: one writer at a time from capture to diff, so a save's recorded change is the change it made.
+    private readonly SemaphoreSlim _save = new(1, 1);
 
     public RoleService(IConfiguration configuration, ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
@@ -113,49 +115,70 @@ public class RoleService : IRoleService, IInitializable
     {
         // Clone before persisting/caching so the caller's mutable object can't alias the enforcement state.
         var copy = Snapshot(data);
-        EnsureAdminRemains(GetRoleData(), copy);
-        await _store.SaveAsync(copy);
-        SetData(copy);
+        await _save.WaitAsync();
+        try
+        {
+            var before = GetRoleData();
+            EnsureAdminRemains(before, copy);
+            await _store.SaveAsync(copy);
+            SetData(copy);
+            Whiskers.Services.Mutations.ConfigChange.Record("roles", before, copy);   // R1-22
+        }
+        finally { _save.Release(); }
         _logger.LogInformation("Roles updated: {Count} entries, default={Default}", copy.Roles.Count, copy.DefaultRole);
     }
 
     public async Task SetRoleAsync(string email, AppRole role)
     {
-        UserRoleData snapshot;
-        _lock.EnterWriteLock();
+        await _save.WaitAsync();
         try
         {
-            var next = Snapshot(_data);
-            var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-            if (existing != null)
-                existing.Role = role;
-            else
-                next.Roles.Add(new UserRoleEntry { Email = email, Role = role });
-            EnsureAdminRemains(_data, next);
-            _data = next;
-            // Snapshot inside the lock; persist outside — never serialize the live list another writer may mutate.
-            snapshot = Snapshot(_data);
-        }
-        finally { _lock.ExitWriteLock(); }
+            UserRoleData snapshot, before;
+            _lock.EnterWriteLock();
+            try
+            {
+                before = Snapshot(_data);
+                var next = Snapshot(_data);
+                var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                    existing.Role = role;
+                else
+                    next.Roles.Add(new UserRoleEntry { Email = email, Role = role });
+                EnsureAdminRemains(_data, next);
+                _data = next;
+                // Snapshot inside the lock; persist outside — never serialize the live list another writer may mutate.
+                snapshot = Snapshot(_data);
+            }
+            finally { _lock.ExitWriteLock(); }
 
-        await _store.SaveAsync(snapshot);
+            await _store.SaveAsync(snapshot);
+            Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
+        }
+        finally { _save.Release(); }
     }
 
     public async Task RemoveRoleAsync(string email)
     {
-        UserRoleData snapshot;
-        _lock.EnterWriteLock();
+        await _save.WaitAsync();
         try
         {
-            var next = Snapshot(_data);
-            next.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-            EnsureAdminRemains(_data, next);
-            _data = next;
-            snapshot = Snapshot(_data);
-        }
-        finally { _lock.ExitWriteLock(); }
+            UserRoleData snapshot, before;
+            _lock.EnterWriteLock();
+            try
+            {
+                before = Snapshot(_data);
+                var next = Snapshot(_data);
+                next.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+                EnsureAdminRemains(_data, next);
+                _data = next;
+                snapshot = Snapshot(_data);
+            }
+            finally { _lock.ExitWriteLock(); }
 
-        await _store.SaveAsync(snapshot);
+            await _store.SaveAsync(snapshot);
+            Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
+        }
+        finally { _save.Release(); }
     }
 
     /// <summary>Once an instance has an explicit Admin it must keep one. Without an explicit Admin the first-run

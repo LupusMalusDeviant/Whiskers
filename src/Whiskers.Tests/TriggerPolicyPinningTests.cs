@@ -455,6 +455,13 @@ public class TriggerPolicyPinningTests
 
     private sealed class CapturingAudit : IAuditLogService
     {
+        public async Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            await LogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+            return true;
+        }
+
         public List<string> Refusals { get; } = [];
         public TaskCompletionSource<string> Refused { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

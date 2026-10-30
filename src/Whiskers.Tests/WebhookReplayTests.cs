@@ -430,7 +430,8 @@ public sealed class WebhookReplayTests : IDisposable
     public async Task A_run_that_outlives_its_time_keeps_its_target_but_not_its_worker()
     {
         _options.MaxConcurrentRuns = 1;
-        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        // Long enough for a healthy run's own lookups on a loaded CI runner (300 ms failed there).
+        _options.RunTimeout = TimeSpan.FromMilliseconds(1500);
         var stuck = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var sameTarget = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var other = Seed(WebhookSignatures.Whiskers, target: "worker");
@@ -457,7 +458,8 @@ public sealed class WebhookReplayTests : IDisposable
     public async Task A_run_past_its_time_keeps_its_target_and_worker_when_no_overdue_slot_is_free()
     {
         _options.MaxConcurrentRuns = 1;
-        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        // Long enough for a healthy run's own lookups on a loaded CI runner (300 ms failed there).
+        _options.RunTimeout = TimeSpan.FromMilliseconds(1500);
         var handedOver = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var kept = Seed(WebhookSignatures.Whiskers, target: "worker");
         var service = Service();
@@ -469,7 +471,7 @@ public sealed class WebhookReplayTests : IDisposable
         var second = await service.AcceptAsync(kept.WebhookId, Signed(kept, "delivery-0145"));
         await WaitFor(() => _runner.Runs == 2);
         var third = await service.AcceptAsync(kept.WebhookId, Signed(kept, "delivery-0146"));
-        await Task.Delay(900);   // well past the second run's time
+        await Task.Delay(3500);   // well past the second run's time
 
         // It is still running: its target is not released and nothing else runs on it.
         Assert.Equal("Running", (await Delivery(second.RunId!)).State);
@@ -587,7 +589,9 @@ public sealed class WebhookReplayTests : IDisposable
     public async Task A_database_wait_does_not_outlive_the_run_timeout()
     {
         _options.MaxConcurrentRuns = 1;
-        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        // Long enough for the second, healthy run on a loaded CI runner (300 ms failed it there), short enough that
+        // the stalled run's deadline frees the worker well inside Finished's wait.
+        _options.RunTimeout = TimeSpan.FromMilliseconds(1500);
         var stalled = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var next = Seed(WebhookSignatures.Whiskers, target: "worker");
         var service = Service();

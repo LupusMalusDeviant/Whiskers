@@ -1601,6 +1601,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="SelfBackupPanel_Snackbar_BackupDeleted" xml:space="preserve">
     <value>Backup gelöscht.</value>
   </data>
+  <data name="SelfBackup_Download_NotRecorded" xml:space="preserve">
+    <value>Der Download konnte nicht im Audit-Log vermerkt werden und wurde deshalb nicht gestartet.</value>
+  </data>
   <data name="SelfBackupPanel_Snackbar_BackupFailed" xml:space="preserve">
     <value>Backup fehlgeschlagen: {0}</value>
   </data>
@@ -3754,6 +3757,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="RegistriesPanel_Snackbar_Deleted" xml:space="preserve">
     <value>Gelöscht.</value>
+  </data>
+  <data name="RegistriesPanel_Snackbar_HostUserInfo" xml:space="preserve">
+    <value>Der Host darf keine Zugangsdaten enthalten (benutzer:passwort@host). Passwort oder Token gehören in ihr eigenes Feld.</value>
   </data>
   <data name="RegistriesPanel_Snackbar_Error" xml:space="preserve">
     <value>Fehler: {0}</value>

@@ -13,7 +13,6 @@
 @inject IWhitelistService WhitelistService
 @inject Whiskers.Services.Auth.IRoleService RoleService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject Microsoft.JSInterop.IJSRuntime JS
 @inject Whiskers.Services.Vault.IVaultService VaultService
 @inject Whiskers.Services.Mcp.IMcpPermissionService McpPermissionService
@@ -801,7 +800,6 @@ else
                 },
                 });
             });
-            await Audit("notifications");
             Snackbar.Add(L["Settings_Snackbar_NotificationsSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -819,7 +817,6 @@ else
                     RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
                 });
             });
-            await Audit("healthmonitor");
             Snackbar.Add(L["Settings_Snackbar_HealthSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -838,7 +835,6 @@ else
                     AnomalyEnabled = _maAnom, AnomalyWindow = _maAnomWindow, AnomalySigma = _maAnomSigma, AnomalyFloorPercent = _maAnomFloor,
                 });
             });
-            await Audit("metricalert");
             Snackbar.Add(L["Settings_Snackbar_MetricAlertsSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -859,7 +855,6 @@ else
                     OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
                 });
             });
-            await Audit("cvemonitor");
             Snackbar.Add(L["Settings_Snackbar_CveSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -876,7 +871,6 @@ else
                     Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
                 });
             });
-            await Audit("imageupdate");
             Snackbar.Add(L["Settings_Snackbar_ImageUpdatesSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -896,7 +890,6 @@ else
                     IdleTimeoutMinutes = _termIdle,
                 });
             });
-            await Audit("terminal");
             Snackbar.Add(L["Settings_Snackbar_TerminalSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -936,7 +929,6 @@ else
                     DefaultTtl = Math.Clamp(_dnsDefaultTtl, 60, 86400),
                 });
             });
-            await Audit("dns");
             _dnsApiToken = "";
             _dnsHasToken = !string.IsNullOrWhiteSpace(token);
             _dnsTokenTail = _dnsHasToken && token.Length >= 4 ? token[^4..] : "";
@@ -960,7 +952,6 @@ else
                     DefaultTtl = current.DefaultTtl,
                 });
             });
-            await Audit("dns");
             _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
             Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
         }
@@ -982,7 +973,6 @@ else
                     ApiKey = _aiApiKey ?? "",
                 });
             });
-            await Audit("aichat");
             Snackbar.Add(L["Settings_Snackbar_AiChatSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -1027,7 +1017,6 @@ else
                 },
                 });
             });
-            await Audit("notification-channels");
             Snackbar.Add(L["Settings_Snackbar_ChannelsSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
@@ -1043,14 +1032,14 @@ else
         catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", ex.Message].Value, Severity.Warning); }
     }
 
-    private async Task Audit(string section)
+    /// <summary>The Admin check in front of a write: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/>, so the attempt is on record once (R1-22).</summary>
+    private async Task<bool> RequireAdminAsync(string capabilityId, object arguments)
     {
-        try
-        {
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "config.save", "config", section, section);
-        }
-        catch { }
+        if (await CurrentUser.HasRoleAsync(AppRole.Admin)) return true;
+        Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error);
+        await Mutations.RefuseAsync(capabilityId, arguments, "Requires the Admin role.");
+        return false;
     }
 
     private async Task CopyKey(string value)
@@ -1085,7 +1074,7 @@ else
 
     private async Task AddApiKey()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
+        if (!await RequireAdminAsync("mcp.key_create", new { section = "mcp-api-keys", name = _newKeyName?.Trim(), level = _newKeyLevel })) return;
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         Whiskers.Models.McpApiKeyConfig newKey;
         try
@@ -1098,17 +1087,14 @@ else
         ReloadApiKeysKeepingPendingToggles();
         _freshKey = (newKey.Id, newKey.Key!); // shown now, never again
         _newKeyName = "";
-        // Name and level only — the key value never goes into the audit log.
-        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "mcp.key.create", "mcp-api-key",
-            newKey.Id, newKey.Name, details: $"Level: {newKey.PermissionLevel}");
         Snackbar.Add(L["Settings_Snackbar_ApiKeyCreated", newKey.Name].Value, Severity.Success);
     }
 
     private async Task RemoveApiKey(string id)
     {
         // Same guard as every other write on this page — hiding the page is not authorization.
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
         var name = _mcpApiKeys.FirstOrDefault(k => k.Id == id)?.Name ?? id;
+        if (!await RequireAdminAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name })) return;
         try
         {
             await Mutations.RunAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name },
@@ -1117,7 +1103,6 @@ else
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         ReloadApiKeysKeepingPendingToggles();
         if (_freshKey?.Id == id) _freshKey = null;
-        await AuditLog.LogAsync(await CurrentUser.GetEmailAsync() ?? "unknown", "web", "mcp.key.delete", "mcp-api-key", id, name);
         Snackbar.Add(L["Settings_Snackbar_ApiKeyDeleted"].Value, Severity.Info);
     }
 
@@ -1142,8 +1127,6 @@ else
                     ApiKeys = _mcpApiKeys,
                     Tools = _mcpTools
                 }));
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "config.save", "config", "mcp-permissions", "MCP-Rechte");
             Snackbar.Add(L["Settings_Snackbar_McpSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
@@ -1179,12 +1162,15 @@ else
 
     private async Task SaveWhitelist()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
+        if (!await RequireAdminAsync("config.whitelist", new { section = "whitelist" })) return;
         // An enabled whitelist with zero entries denies everyone (fail-closed) — refuse to save that state
         // so an admin can't accidentally lock the whole instance (including themselves) out.
         if (_whitelistEnabled && _whitelistEmails.Count == 0)
         {
             Snackbar.Add(L["Settings_Snackbar_WhitelistEmptyError"].Value, Severity.Error);
+            // The refused attempt is the gateway's Denied event (R1-22).
+            await Mutations.RefuseAsync("config.whitelist", new { section = "whitelist", enabled = true, emails = 0 },
+                "An enabled whitelist needs at least one address.");
             return;
         }
         _savingWhitelist = true;
@@ -1196,8 +1182,6 @@ else
                     Enabled = _whitelistEnabled,
                     Emails = _whitelistEmails.ToList()
                 }));
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "config.save", "config", "whitelist", "E-Mail-Whitelist");
             Snackbar.Add(L["Settings_Snackbar_WhitelistSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
@@ -1260,7 +1244,7 @@ else
 
     private async Task SaveRoles()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
+        if (!await RequireAdminAsync("config.roles", new { section = "roles" })) return;
         // DefaultRole travels along: without it every role change reset a configured default to Viewer.
         try
         {
@@ -1289,8 +1273,6 @@ else
             _defaultRole = stored.DefaultRole;
             return;
         }
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-        await AuditLog.LogAsync(actor, "web", "config.save", "config", "roles", "Benutzerrollen");
         Snackbar.Add(L["Settings_Snackbar_RolesSaved"].Value, Severity.Success);
     }
 
@@ -1303,20 +1285,19 @@ else
 
     private async Task DeleteVaultSecret(string key)
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
+        if (!await RequireAdminAsync("vault.secret_delete", new { section = "vault", key })) return;
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key },
                 _ => VaultService.DeleteSecretAsync(key));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
-        await AuditVault("vault.delete", key);
         LoadVault();
     }
 
     private async Task AddVaultSecret()
     {
-        if (!await CurrentUser.HasRoleAsync(AppRole.Admin)) { Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error); return; }
+        if (!await RequireAdminAsync("vault.secret_set", new { section = "vault", key = _newVaultKey?.Trim() })) return;
         if (string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue)) return;
         var key = _newVaultKey.Trim();
         try
@@ -1325,7 +1306,6 @@ else
             var value = _newVaultValue;
             await Mutations.RunAsync("vault.secret_set", new { section = "vault", key },
                 _ => VaultService.SetSecretAsync(key, value));
-            await AuditVault("vault.set", key);
             Snackbar.Add(L["Settings_Snackbar_SecretSaved", key].Value, Severity.Success);
             _newVaultKey = ""; _newVaultValue = "";
             LoadVault();
@@ -1340,16 +1320,6 @@ else
         }
     }
 
-    // Audit a vault mutation — key NAMES only, never values.
-    private async Task AuditVault(string action, string key)
-    {
-        try
-        {
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", action, "vault", key, key);
-        }
-        catch { }
-    }
 
     // === CVE Monitor ===
 

@@ -16,6 +16,9 @@ public class ServerConfigService : IServerConfigService, IInitializable
 
     private readonly string _sshKeysBasePath;
 
+    // R1-22: one SSH key write at a time, from reading the replaced key to recording the change.
+    private readonly SemaphoreSlim _sshKeys = new(1, 1);
+
     public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
         var paths = dataPaths ?? DataPathOptions.Default;
@@ -145,6 +148,7 @@ public class ServerConfigService : IServerConfigService, IInitializable
             var newData = new ServerConfigData { Servers = servers };
             await _store.SaveAsync(newData);
             _cached = newData;
+            Whiskers.Services.Mutations.ConfigChange.Record($"server:{server.Id}", null, server);   // R1-22
         }
         finally
         {
@@ -170,8 +174,12 @@ public class ServerConfigService : IServerConfigService, IInitializable
             var servers = new List<Models.ServerConfig>(_cached.Servers);
             servers[index] = server;
             var newData = new ServerConfigData { Servers = servers };
+            // The diff compares with what was persisted, not with the cached object: a caller that edited the cached
+            // instance in place (onboarding) would otherwise compare the new values with themselves.
+            var persisted = (await _store.LoadAsync()).Servers.FirstOrDefault(s => s.Id == server.Id);
             await _store.SaveAsync(newData);
             _cached = newData;
+            Whiskers.Services.Mutations.ConfigChange.Record($"server:{server.Id}", persisted ?? current, server);   // R1-22
             return current;
         }
         finally
@@ -196,6 +204,7 @@ public class ServerConfigService : IServerConfigService, IInitializable
             var newData = new ServerConfigData { Servers = servers };
             await _store.SaveAsync(newData);
             _cached = newData;
+            Whiskers.Services.Mutations.ConfigChange.Record($"server:{serverId}", server, null);   // R1-22
 
             // Clean up SSH keys
             var keyDir = Path.Combine(_sshKeysBasePath, serverId);
@@ -216,25 +225,44 @@ public class ServerConfigService : IServerConfigService, IInitializable
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("Ungültiger Dateiname");
 
-        var keyDir = Path.Combine(_sshKeysBasePath, serverId);
-        Directory.CreateDirectory(keyDir);
-
-        var keyPath = Path.Combine(keyDir, fileName);
-        await File.WriteAllBytesAsync(keyPath, keyData);
-
-        // Set restrictive permissions (SSH requires this). Linux-only API — guarded so the analyzer
-        // and any non-Linux dev build are satisfied; the app itself runs in Linux containers.
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-
-        // Update server config on a clone — never mutate the cached live object the lock-free readers see.
-        var server = GetServer(serverId)?.Clone();
-        if (server != null)
+        await _sshKeys.WaitAsync();
+        try
         {
-            server.SshKeyFileName = fileName;
-            await UpdateServerAsync(server);
+            var replaced = await ReadSshKeyAsync(GetServer(serverId));
+            var keyDir = Path.Combine(_sshKeysBasePath, serverId);
+            Directory.CreateDirectory(keyDir);
+
+            var keyPath = Path.Combine(keyDir, fileName);
+            await File.WriteAllBytesAsync(keyPath, keyData);
+
+            // Set restrictive permissions (SSH requires this). Linux-only API — guarded so the analyzer
+            // and any non-Linux dev build are satisfied; the app itself runs in Linux containers.
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            // The key itself is a credential: its replacement is a change, also under the same file name (R1-22).
+            RecordSshKey(serverId, replaced, Convert.ToBase64String(keyData));
+
+            // Update server config on a clone — never mutate the cached live object the lock-free readers see.
+            var server = GetServer(serverId)?.Clone();
+            if (server != null)
+            {
+                server.SshKeyFileName = fileName;
+                await UpdateServerAsync(server);
+            }
         }
+        finally { _sshKeys.Release(); }
     }
+
+    /// <summary>The stored key of <paramref name="server"/> (base64), only to compare it by fingerprint; never logged.</summary>
+    private async Task<string?> ReadSshKeyAsync(Models.ServerConfig? server)
+    {
+        var path = server is null ? null : GetSshKeyPath(server);
+        return path is null ? null : Convert.ToBase64String(await File.ReadAllBytesAsync(path));
+    }
+
+    private static void RecordSshKey(string serverId, string? before, string? after) =>
+        Whiskers.Services.Mutations.ConfigChange.Record($"ssh-key:{serverId}",
+            before is null ? null : new { PrivateKey = before }, after is null ? null : new { PrivateKey = after });
 
     public string? GetSshKeyPath(Models.ServerConfig server)
     {
@@ -247,15 +275,22 @@ public class ServerConfigService : IServerConfigService, IInitializable
 
     public async Task DeleteSshKeyAsync(string serverId)
     {
-        var keyDir = Path.Combine(_sshKeysBasePath, serverId);
-        try { if (Directory.Exists(keyDir)) Directory.Delete(keyDir, true); }
-        catch { /* best effort */ }
-
-        var server = GetServer(serverId)?.Clone();
-        if (server != null && server.SshKeyFileName != null)
+        await _sshKeys.WaitAsync();
+        try
         {
-            server.SshKeyFileName = null;
-            await UpdateServerAsync(server);
+            var removed = await ReadSshKeyAsync(GetServer(serverId));
+            var keyDir = Path.Combine(_sshKeysBasePath, serverId);
+            try { if (Directory.Exists(keyDir)) Directory.Delete(keyDir, true); }
+            catch { /* best effort */ }
+            if (removed is not null && !Directory.Exists(keyDir)) RecordSshKey(serverId, removed, null);
+
+            var server = GetServer(serverId)?.Clone();
+            if (server != null && server.SshKeyFileName != null)
+            {
+                server.SshKeyFileName = null;
+                await UpdateServerAsync(server);
+            }
         }
+        finally { _sshKeys.Release(); }
     }
 }

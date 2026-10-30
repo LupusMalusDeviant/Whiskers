@@ -7,7 +7,7 @@ namespace Whiskers.Tests;
 
 // Audit-logging fixes for Bean Whiskers-wjhf: MIT-4 fail-safe fallback (here) and, later, MIT-7's
 // redacted scheduler audit. MIT-3/NIED-4 are UI/tool wiring covered by pattern-mirroring + build/DI boot.
-public class AuditLoggingTests
+public sealed partial class AuditLoggingTests
 {
     // ---------------------------------------------------------------- MIT-4: fail-safe fallback
 
@@ -25,6 +25,15 @@ public class AuditLoggingTests
         Assert.NotNull(err.Exception);
         foreach (var expected in new[] { "alice@example.com", "web", "vault.delete", "vault", "api-key", "prod-1" })
             Assert.Contains(expected, err.Message);
+    }
+
+    [Fact]
+    public async Task A_lost_row_is_reported_to_a_caller_that_must_not_go_on_without_it()
+    {
+        // R1-22: the backup download hands out nothing unless its row was stored.
+        var svc = new AuditLogService(new ThrowingScopeFactory(), new CapturingLogger<AuditLogService>());
+
+        Assert.False(await svc.TryLogAsync("alice@example.com", "web", "selfbackup.download", "whiskers", "b1", "b1.tar.gz"));
     }
 
     // ---------------------------------------------------------------- MIT-7: audit stays secret-safe
