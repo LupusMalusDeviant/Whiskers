@@ -4,6 +4,8 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 **Mutations go through the gateway.** A page never calls a mutating service method (one with `[MutatingOperation]`) directly; it wraps the call in `IUiMutationRunner.RunAsync("<capability>", new { … }, _ => Service.Call(…))` and catches `MutationRefusedException` to show the reason (ADR-0005 step 2.2, see [`Services/Mutations`](../../Services/Mutations/)). The page keeps its own role check; `MutationBypassArchitectureTests` fails on a new direct call. Container shells and the database query need Admin (PC-D2, PC-D3). Scheduled Tasks records the creator as the task's owner and lets an Admin take over tasks without one (PC-D6).
 
+**One audit event per attempt (R1-21).** The gateway's event is the only record of an infrastructure action: a page writes no audit row of its own (no `IAuditLogService`). The role check in front of a mutation is `await RequireAsync(role, "<capability>", new { … })`, which on refusal records the attempt through `IUiMutationRunner.RefuseAsync` (one Denied event, nothing runs); a plain `Require` is left only in front of a read. What the page learns inside the delegate — a created container, network or app id, a backup file, deployment output — goes into that event with `MutationScope.Note(...)`; a failure the service reports without throwing (`false`, a `(false, …)` tuple, a result with `Success == false`) makes the event Failed, and a provider answer that says the action failed throws rather than returning text. `UiAuditCompletenessTests` and `ComponentTests/UiCreatedResourceAuditTests` hold this.
+
 ## Overview & containers
 
 | Page | Purpose |

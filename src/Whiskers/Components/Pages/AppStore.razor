@@ -9,7 +9,6 @@
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>App Store - Whiskers</PageTitle>
@@ -382,6 +381,15 @@
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     private class InstalledApp
     {
         public string Project { get; set; } = "";
@@ -499,7 +507,9 @@
 
     private async Task DeployTemplate()
     {
-        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
+        // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
+        if (!await RequireAsync(AppRole.Admin, "app.deploy",
+                new { projectName = _deployProjectName, appName = _selectedTemplate?.Name, serverId = _deployServerId })) return;
         if (_selectedTemplate == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
         {
@@ -540,10 +550,8 @@
             foreach (var (key, value) in _deployVars)
                 yaml = yaml.Replace($"{{{key}}}", value);
 
-            var result = await DeployGatedAsync(_deployServerId, yaml, _selectedTemplate.Name);
+            var result = await DeployGatedAsync(_deployServerId, yaml, _selectedTemplate.Name, $"template {_selectedTemplate.Id}");
 
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, _selectedTemplate.Name, details: $"Template: {_selectedTemplate.Id}", serverId: _deployServerId, success: result.Success);
             if (result.Success)
             {
                 Snackbar.Add(L["AppStore_Snackbar_TemplateDeployed", _selectedTemplate.Name, _servers.FirstOrDefault(s => s.Id == _deployServerId)?.Name ?? "Local"].Value, Severity.Success);
@@ -618,7 +626,9 @@
 
     private async Task DeployRegistryImage()
     {
-        if (!Require(AppRole.Admin)) return;   // deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools
+        // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
+        if (!await RequireAsync(AppRole.Admin, "app.deploy",
+                new { projectName = _deployProjectName, appName = _selectedImage?.PullReference, serverId = _deployServerId })) return;
         if (_selectedImage == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
         {
@@ -647,11 +657,9 @@
         _deploying = true;
         try
         {
-            var result = await DeployGatedAsync(_deployServerId, sb.ToString(), imageRef);
+            var result = await DeployGatedAsync(_deployServerId, sb.ToString(), imageRef,
+                $"registry {_selectedImage.RegistryName} ({_selectedImage.RegistryId})");
 
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "deploy.app", "container", _deployProjectName, imageRef,
-                details: $"Registry: {_selectedImage.RegistryName} ({_selectedImage.RegistryId})", serverId: _deployServerId, success: result.Success);
 
             if (result.Success)
             {
@@ -670,10 +678,13 @@
 
     // Both store deploys write a compose file and run `docker compose up` as root on the host: one gated mutation,
     // plus one decision per existing container the plan touches (R1-07), then exactly the planned deployment.
-    private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string yaml, string appName)
+    // <paramref name="source"/> (the template or registry) goes along as an argument, so the gateway's event says
+    // where the deployment came from (R1-21).
+    private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string yaml, string appName,
+        string source)
     {
         return await Mutations.DeployAsync(Executor, ComposePlanner, "app.deploy",
-            new { projectName = _deployProjectName, appName, serverId },
+            new { projectName = _deployProjectName, appName, serverId, source },
             ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_deployProjectName), yaml));
     }
 

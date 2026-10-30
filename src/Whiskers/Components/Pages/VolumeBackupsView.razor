@@ -4,7 +4,6 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
-@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
@@ -131,6 +130,15 @@ else
         return true;
     }
 
+    /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
+    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    {
+        if (Require(required)) return true;
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
     private string GetVolumeDisplayName(string volumeName)
     {
         if (_volumeLabels.TryGetValue(volumeName, out var label))
@@ -215,7 +223,8 @@ else
 
     private async Task CreateBackup()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!await RequireAsync(AppRole.Operator, "volume.backup",
+                new { volumeName = _selectedVolume, containerName = _backupContainerName, serverId = _backupServerId })) return;
         _creating = true;
         try
         {
@@ -225,9 +234,12 @@ else
             var notes = _backupNotes;
             var backup = await Mutations.RunAsync("volume.backup",
                 new { volumeName, containerName, serverId = backupServerId },
-                _ => BackupService.BackupVolumeAsync(volumeName, containerName, backupServerId, notes));
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", backup.BackupId, _selectedVolume, serverId: _backupServerId);
+                async _ =>
+                {
+                    var created = await BackupService.BackupVolumeAsync(volumeName, containerName, backupServerId, notes);
+                    MutationScope.Note($"Backup {created.BackupId}: {created.FileName} ({created.SizeBytes} bytes)");
+                    return created;
+                });
             Snackbar.Add(L["VolumeBackupsView_Snackbar_BackupCreated", backup.FileName, FormatBytes(backup.SizeBytes)].Value, Severity.Success);
             _showBackupDialog = false;
             await LoadBackups();
@@ -238,8 +250,6 @@ else
         }
         catch (Exception ex)
         {
-            var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
-            await AuditLog.LogAsync(actor, "web", "backup.create", "volume", _selectedVolume, _selectedVolume, details: ex.Message, serverId: _backupServerId, success: false);
             Snackbar.Add(L["VolumeBackupsView_Snackbar_BackupFailed", ex.Message].Value, Severity.Error);
         }
         finally
@@ -250,19 +260,18 @@ else
 
     private async Task RestoreBackup(Whiskers.Models.VolumeBackupEntity backup)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "volume.restore",
+                new { volumeName = backup.VolumeName, backupId = backup.BackupId, fileName = backup.FileName, serverId = backup.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["VolumeBackupsView_Dialog_RestoreTitle"].Value,
             L["VolumeBackupsView_Dialog_RestoreMessage", backup.VolumeName].Value,
             yesText: L["VolumeBackupsView_Dialog_RestoreYes"].Value, cancelText: L["VolumeBackupsView_Button_Cancel"].Value);
         if (confirmed != true) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await Mutations.RunAsync("volume.restore",
                 new { volumeName = backup.VolumeName, backupId = backup.BackupId, fileName = backup.FileName, serverId = backup.ServerId },
                 _ => BackupService.RestoreVolumeAsync(backup.BackupId));
-            await AuditLog.LogAsync(actor, "web", "backup.restore", "volume", backup.BackupId, backup.VolumeName, serverId: backup.ServerId);
             Snackbar.Add(L["VolumeBackupsView_Snackbar_Restored", backup.VolumeName].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
@@ -271,26 +280,24 @@ else
         }
         catch (Exception ex)
         {
-            await AuditLog.LogAsync(actor, "web", "backup.restore", "volume", backup.BackupId, backup.VolumeName, details: ex.Message, serverId: backup.ServerId, success: false);
             Snackbar.Add(L["VolumeBackupsView_Snackbar_RestoreFailed", ex.Message].Value, Severity.Error);
         }
     }
 
     private async Task DeleteBackup(Whiskers.Models.VolumeBackupEntity backup)
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!await RequireAsync(AppRole.Admin, "volume.backup_delete",
+                new { volumeName = backup.VolumeName, backupId = backup.BackupId, fileName = backup.FileName, serverId = backup.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["VolumeBackupsView_Dialog_DeleteTitle"].Value,
             L["VolumeBackupsView_Dialog_DeleteMessage", backup.VolumeName, backup.CreatedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value,
             yesText: L["VolumeBackupsView_Dialog_DeleteYes"].Value, cancelText: L["VolumeBackupsView_Button_Cancel"].Value);
         if (confirmed != true) return;
-        var actor = await CurrentUser.GetEmailAsync() ?? "unknown";
         try
         {
             await Mutations.RunAsync("volume.backup_delete",
                 new { volumeName = backup.VolumeName, backupId = backup.BackupId, fileName = backup.FileName, serverId = backup.ServerId },
                 _ => BackupService.DeleteBackupAsync(backup.BackupId));
-            await AuditLog.LogAsync(actor, "web", "backup.delete", "volume", backup.BackupId, backup.VolumeName, serverId: backup.ServerId);
             Snackbar.Add(L["VolumeBackupsView_Snackbar_Deleted"].Value, Severity.Success);
             await LoadBackups();
         }
@@ -300,7 +307,6 @@ else
         }
         catch (Exception ex)
         {
-            await AuditLog.LogAsync(actor, "web", "backup.delete", "volume", backup.BackupId, backup.VolumeName, details: ex.Message, serverId: backup.ServerId, success: false);
             Snackbar.Add(L["VolumeBackupsView_Snackbar_Error", ex.Message].Value, Severity.Error);
         }
     }

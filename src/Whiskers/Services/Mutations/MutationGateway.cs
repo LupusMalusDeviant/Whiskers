@@ -24,6 +24,15 @@ public interface IMutationGateway
     /// </summary>
     Task<MutationDecisionResult?> DecideAsync(MutationRequest request, CancellationToken ct = default) =>
         Task.FromResult<MutationDecisionResult?>(null);
+
+    /// <summary>
+    /// Records a refusal the surface made before asking the gateway (R1-21) — a page whose role check stops the user
+    /// in front of its confirmation dialog — as the gateway's own Denied event for that capability, so the attempt is
+    /// on record exactly once. Nothing runs.
+    /// </summary>
+    Task<MutationOutcome<object?>> RefuseAsync(MutationRequest request, string reason, CancellationToken ct = default) =>
+        Task.FromResult(new MutationOutcome<object?>(request.OperationId ?? "", MutationStatus.Denied, null, reason,
+            VerificationStatus.NotRun));
 }
 
 /// <summary>What <see cref="IMutationGateway.DecideAsync"/> decided. <see cref="Refused"/> is set when the call was
@@ -126,6 +135,36 @@ public sealed class MutationGateway : IMutationGateway
         _triggers = triggers;
         _journal = journal;
         _recovery = recovery;
+    }
+
+    /// <inheritdoc />
+    public async Task<MutationOutcome<object?>> RefuseAsync(MutationRequest request, string reason, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Principal);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        var operationId = string.IsNullOrWhiteSpace(request.OperationId) ? Guid.NewGuid().ToString("N") : request.OperationId;
+        request = request with { OperationId = operationId };
+        if (MutationScope.Current is { } enclosing)
+            request = request with { ParentOperationId = enclosing.OperationId };
+        var capability = _catalog.Find(request.CapabilityId);
+        // The refusal names the same canonical target as the action's other outcomes would (INV-57); when the target
+        // cannot be resolved the refusal stands with the target as named.
+        if (_targets is not null && capability is not null)
+        {
+            try
+            {
+                if ((await _targets.ResolveAsync(request, capability, ct)).Target is { } resolved)
+                    request = request with { Target = resolved };
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The type only: a resolver's message echoes the raw target from the arguments.
+                _logger.LogWarning("Target of refused {Capability} could not be resolved ({Error}, operation {OperationId})",
+                    capability.Id, ex.GetType().Name, operationId);
+            }
+        }
+        return await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied, reason, ct);
     }
 
     /// <inheritdoc />
