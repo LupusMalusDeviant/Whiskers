@@ -901,7 +901,10 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   (`fec0::/10`), reserved `240.0.0.0/4`, IETF `192.0.0.0/24`, benchmarking `198.18.0.0/15`, documentation
   (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), deprecated 6to4 relay anycast
   (`192.88.99.0/24`), IPv6 benchmarking (`2001:2::/48`), ORCHIDv2 (`2001:20::/28`), discard `100::/64`, multicast and
-  broadcast; local-use NAT64 (`64:ff9b:1::/48`) is judged like `64:ff9b::/96` by its embedded IPv4; 6to4
+  broadcast; local-use NAT64 (`64:ff9b:1::/48`) is denied as a whole (where its IPv4 sits depends on the translator's
+  prefix length, so it cannot be decoded safely; a test refuses `64:ff9b:1:0:a:0:100:0`, which embeds `10.0.0.1`
+  under a `/64` translator), only exact-address exceptions reach it; the well-known `64:ff9b::/96` is judged by its
+  embedded IPv4; 6to4
   (`2002::/16`) addresses are judged by the IPv4 address they embed, and Teredo (`2001::/32`) is denied outright (it
   embeds two IPv4 addresses, one obfuscated). The list is fixed in code (Docker's default bridge and overlay pools fall
   inside RFC 1918); an empty configuration denies all of them. Addresses are canonicalised first (IPv4-mapped and
@@ -934,6 +937,10 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   not accepted. Each change is a gated configuration write (R1-11) with audit (R1-22); Viewer/Operator and a demoted
   Admin are refused, the kill switch refuses, an audit failure refuses before the list is published, and a failed
   save leaves the live list unchanged.
+- [ ] Removing or narrowing an exception also ends the connections it allowed: the guard runs in `ConnectCallback`,
+  which a pooled keep-alive connection does not pass again, so a published change replaces the outbound handler
+  (or its connection pool) before the next delivery starts. A test removes an exception and sends a second request
+  that would otherwise reuse the keep-alive connection; it is refused.
 - [ ] A refused delivery is a visible notification failure (R1-40), with the reason and without the URL's secrets
   (R1-25).
 
@@ -964,8 +971,9 @@ settings, SQLite → PostgreSQL migrator (R1-34's transactional transfer); appro
 
 - [ ] `MetricRollupTests`: raw samples roll up into fixed tiers (for example 10 min / 1 h / 8 h) keeping average,
   maximum and sample count per series. Only closed windows are rolled up; a roll-up interrupted by a restart neither
-  loses nor double-counts a window (idempotent per window), and retention never deletes raw data of a window that has
-  not been rolled up — also when the roll-up fails while retention runs.
+  loses nor double-counts a window (idempotent per window), and retention never deletes data of any tier (raw or
+  rolled up) before every successor window built from it is durably committed — also when a higher-tier roll-up
+  fails while retention runs, and across a restart (tested for raw → first tier and first → second tier).
 - [ ] A query covers its whole range without gaps or duplicate timestamps: coarse tiers for the old part, finer tiers
   and raw data for the recent part (stitched at window boundaries). Averages that combine windows are weighted by
   sample count; maxima are the true maxima of the original samples. Tests cover uneven sample counts, empty and
@@ -1023,7 +1031,9 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   alerts are migrated to it. Today `high_cpu`, `high_memory` and `high_disk` re-fire after `CooldownMinutes`
   (`MetricsCollectorService.cs`, Settings panel): the package states what replaces that — one raise per breach plus
   a Cleared finding, with `CooldownMinutes` kept as the minimum gap between two breaches of the same series — updates
-  the Settings panel, and carries the change in the CHANGELOG. `metric_anomaly` (the rolling z-score rule in
+  the Settings panel, and carries the change in the CHANGELOG. Raised and Cleared are state transitions: like
+  reachability and certificate events today (`NotificationThrottler.IsTransition`) they bypass the per-channel
+  throttle; a test delivers two breaches and their recoveries inside one channel-throttle window. `metric_anomaly` (the rolling z-score rule in
   `MetricsCollectorService`) is a point-in-time outlier, not a threshold breach: it keeps re-firing after
   `CooldownMinutes` as today and is not migrated to breach semantics.
 - [ ] Quiet hours (per rule or global, IANA time zone explicit) suppress delivery to channels, never evaluation: the
@@ -1053,8 +1063,10 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
 - [ ] What was suppressed is recorded durably (bounded aggregation per rule and target; past the bound the summary
   carries an "N further events suppressed" count, so overflow is never silent) and delivered as one summary
   after the window, through R1-40's outbox — widened by this package from Critical notifications to these summaries —
-  with an idempotency key: a restart during quiet hours or during summary
-  delivery neither loses nor duplicates the summary; a window that ends early (rule changed) delivers it then. The
+  with an idempotency key: the summary is created exactly once (a restart during quiet hours neither loses nor
+  doubles it) and delivered at least once — a crash after a provider accepted it but before Whiskers recorded that
+  may deliver it again, which the documentation states (Slack and others offer no receiver-side deduplication);
+  tested at that crash boundary. A window that ends early (rule changed) delivers it then. The
   summary bypasses the per-channel `NotificationThrottler`, as state transitions do (tested).
 - [ ] Rule and quiet-hour changes are gated configuration writes (R1-11) with audit (R1-22): Viewer/Operator and a
   demoted Admin are refused, the kill switch refuses, an audit failure refuses before publication, and a failed save
@@ -1087,8 +1099,10 @@ the Local server included — through that executor; Whiskers itself opens no co
 - [ ] A check run is a registered gateway capability with an owner principal (INV-04): the owner's authority is
   re-checked on every run, the kill switch and an audit failure refuse the run, and every run is one audited gateway
   event with its own operation id (R1-18). Runs come from one background loop under R1-41's rules, and a check's
-  interval has a validated minimum of 60 seconds, which bounds both privileged executions and audit rows (at most
-  1440 per check and day; audit retention is R1-23's).
+  interval has a validated minimum of 60 seconds, which bounds runs and their audit rows (at most 1440 per check and
+  day; audit retention is R1-23's). Executor calls per run are bounded separately: one `getent`, then at most 4
+  allowed addresses tried (further answers are ignored and the result says so), each attempt under the check's
+  timeout and the whole run under one deadline; tests cover a name with many answers and every address failing.
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists
@@ -1153,8 +1167,10 @@ smartctl output); that setup is the operator's, documented in the package, and n
   (fixtures; Whiskers reads the configured `MetricsEndpoint`, never exporter text) into distinct
   states: Healthy, Degraded/Failing, Unknown and Unsupported. Unsupported means a host never had a reading (for
   example a Docker-source server without `MetricsEndpoint`); Unknown means a host had one and it is now missing,
-  malformed, partial or stale (older than a documented freshness limit). Neither is ever Healthy, and neither can
-  clear an existing Degraded/Failing state.
+  malformed, partial or stale (older than a documented freshness limit). Freshness is judged by collection-age
+  evidence — the collector's last-success timestamp or `node_textfile_mtime_seconds` — never by the query's sample
+  timestamp, which a scrape of a stale textfile keeps fresh; a fixture with fresh sample timestamps but an expired
+  source file must read Unknown. Neither is ever Healthy, and neither can clear an existing Degraded/Failing state.
 - [ ] Disabled by default; enabling is a gated configuration write (R1-11) with audit (R1-22) — Viewer/Operator and a
   demoted Admin refused, kill switch and audit failure refuse, a failed save leaves the setting unchanged — and needs
   no new privileged agent and no write path on the host. The panel enforces the existing read role.
