@@ -223,21 +223,6 @@ public sealed class AuditChain : IAuditChain
         LinkHash(link.PrevHash, link.Seq, link.AuditId, link.RowHash) == link.Hash
         && (link.Mac is null || _key is null || ValidLink(link));
 
-    /// <summary>The link after which every link must be signed: the newest trusted genesis or retention checkpoint (the
-    /// moment of trust); none trusted yet — nothing is required (<see cref="long.MaxValue"/>).</summary>
-    private async Task<long> SignedFromAsync(MetricsDbContext db, CancellationToken ct)
-    {
-        if (_key is null) return long.MaxValue;
-        var boundaries = await db.AuditCheckpoints.AsNoTracking()
-            .Where(c => c.Kind == GenesisKind || c.Kind == RetentionKind).ToListAsync(ct);
-        var trusted = boundaries.Where(Valid).Select(c => c.Seq).ToList();
-        if (trusted.Count > 0) return trusted.Max();
-        // No boundary in the database: a trusted head checkpoint (database or file) still means the trail is signed.
-        var file = ReadFile();
-        var signed = (file is not null && Valid(file))
-                     || (await db.AuditCheckpoints.AsNoTracking().Where(c => c.Mac != null).ToListAsync(ct)).Any(Valid);
-        return signed ? 0 : long.MaxValue;
-    }
 
     private static bool SameMac(string? given, string? expected)
     {
@@ -312,8 +297,7 @@ public sealed class AuditChain : IAuditChain
             if (row is null) continue;   // nothing to change: the write will match no row
             var link = await db.AuditChain.AsNoTracking().Where(c => c.AuditId == id).OrderByDescending(c => c.Seq)
                 .FirstOrDefaultAsync(ct);
-            if (link is null || !LinkHolds(link) || link.RowHash != RowHash(row)
-                || (_key is not null && link.Mac is null && link.Seq > await SignedFromAsync(db, ct)))
+            if (link is null || !LinkHolds(link) || link.RowHash != RowHash(row) || (_key is not null && link.Mac is null))
             {
                 _logger?.LogError("AUDIT ROW CHANGED OUTSIDE WHISKERS: audit row {AuditId} does not match its newest " +
                                   "link — not writing its next version; verify the audit trail", id);
@@ -489,8 +473,21 @@ public sealed class AuditChain : IAuditChain
                     db.AuditCheckpoints.Add(signed);
                     await db.SaveChangesAsync(ct);
                 }
-                // A genesis checkpoint (never thinned): the links before it were written without the key and are
-                // covered by its hash; every link after it must carry a signature.
+                // The links written before the key are signed now, a page at a time — the same moment of trust as the
+                // genesis below: from here on every link of the trail carries a signature, so none of them can be
+                // recomputed in the database unnoticed.
+                var from = anchor?.Seq ?? 0;
+                while (true)
+                {
+                    var page = await db.AuditChain.Where(c => c.Seq > from && c.Mac == null).OrderBy(c => c.Seq)
+                        .Take(SealPage).ToListAsync(ct);
+                    if (page.Count == 0) break;
+                    foreach (var link in page) link.Mac = SignLink(link.Hash);
+                    await db.SaveChangesAsync(ct);
+                    db.ChangeTracker.Clear();
+                    from = page[^1].Seq;
+                }
+                // A genesis checkpoint (never thinned): the trail's end at the moment of trust.
                 var head = await db.AuditChain.AsNoTracking().OrderByDescending(c => c.Seq)
                     .Select(c => new { c.Seq, c.Hash }).FirstOrDefaultAsync(ct);
                 var (seq, hash) = head is null ? await AnchorAsync(db, ct) : (head.Seq, head.Hash);
@@ -751,12 +748,9 @@ public sealed class AuditChain : IAuditChain
         var prunedThrough = retention?.PrunedThroughId ?? 0;
 
         // Links after the anchor, in order: each continues the one before. Once the trail is signed (a trusted
-        // checkpoint exists), every link after its moment of trust — the anchor or a signed genesis — carries a valid
-        // signature; links before it were written without the key and are covered by that checkpoint's hash.
-        var signedFrom = trusted.Count == 0
-            ? long.MaxValue
-            : Math.Max(anchorSeq, trusted.Where(c => c.Kind == GenesisKind && c.Seq >= anchorSeq).Select(c => c.Seq)
-                .DefaultIfEmpty(anchorSeq).Max());
+        // checkpoint exists), every link carries a valid signature — the links from before the key were signed when it
+        // was adopted.
+        var signedFrom = trusted.Count == 0 ? long.MaxValue : anchorSeq;
         var latest = new Dictionary<long, string>();
         var checkedAt = trusted.Select(c => c.Seq).ToHashSet();
         var hashAt = new Dictionary<long, string> { [anchorSeq] = running };
@@ -946,11 +940,15 @@ public sealed class AuditChain : IAuditChain
         return removed;
     }
 
-    /// <summary>Under the lock, after a verification outside it: the links written since continue the verified head
-    /// (each one holding, and signed under the key), and every row about to be removed — with each link naming it —
-    /// is still what the chain recorded. Bounded by the batch and the links written meanwhile.</summary>
+    /// <summary>Under the lock, after a verification outside it: everything retention is about to remove or sign over
+    /// still holds. The links written since continue the verified head; the chain prefix from the trusted start up to
+    /// the batch's end is continuous, each link holding and — under the key — signed; every row of the batch matches
+    /// its newest link; and no linked row of the batch's range is missing (a row deleted meanwhile is not excused by
+    /// this retention). Bounded by the batch and the links written meanwhile.</summary>
     internal async Task<bool> UnchangedSinceAsync(MetricsDbContext db, AuditChainReport verified, long through, CancellationToken ct)
     {
+        bool Holds(AuditChainEntry link) => LinkHolds(link) && (_key is null || link.Mac is not null);
+
         var running = verified.HeadHash;
         var atHead = await db.AuditChain.AsNoTracking().Where(c => c.Seq == verified.HeadSeq).Select(c => c.Hash)
             .FirstOrDefaultAsync(ct) ?? (await AnchorAsync(db, ct)) switch
@@ -962,19 +960,38 @@ public sealed class AuditChain : IAuditChain
         await foreach (var link in db.AuditChain.AsNoTracking().Where(c => c.Seq > verified.HeadSeq).OrderBy(c => c.Seq)
                            .AsAsyncEnumerable().WithCancellation(ct))
         {
-            if (link.PrevHash != running || !LinkHolds(link) || (_key is not null && link.Mac is null)) return false;
+            if (link.PrevHash != running || !Holds(link)) return false;
             running = link.Hash;
         }
 
-        var latest = new Dictionary<long, AuditChainEntry>();
-        await foreach (var link in db.AuditChain.AsNoTracking().Where(c => c.AuditId <= through).OrderBy(c => c.Seq)
+        // The prefix from the trusted start, up to the first link naming a row that stays.
+        var start = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
+            .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).Take(KeptRetentionCheckpoints).ToListAsync(ct);
+        var trustedStart = start.FirstOrDefault(c => _key is null || Valid(c));
+        var (anchorSeq, prev) = trustedStart is null ? (0L, Genesis) : (trustedStart.Seq, trustedStart.Hash);
+        var prunedBefore = trustedStart?.PrunedThroughId ?? 0;
+        await foreach (var link in db.AuditChain.AsNoTracking().Where(c => c.Seq > anchorSeq).OrderBy(c => c.Seq)
                            .AsAsyncEnumerable().WithCancellation(ct))
         {
-            if (!LinkHolds(link)) return false;
+            if (link.AuditId > through) break;
+            if (link.PrevHash != prev || !Holds(link)) return false;
+            prev = link.Hash;
+        }
+
+        // Every row of the batch against its newest link; every linked row of the range still there.
+        var latest = new Dictionary<long, AuditChainEntry>();
+        await foreach (var link in db.AuditChain.AsNoTracking().Where(c => c.AuditId <= through && c.AuditId > prunedBefore)
+                           .OrderBy(c => c.Seq).AsAsyncEnumerable().WithCancellation(ct))
+        {
+            if (!Holds(link)) return false;
             latest[link.AuditId] = link;
         }
+        var present = new HashSet<long>();
         await foreach (var row in db.AuditLog.AsNoTracking().Where(a => a.Id <= through).AsAsyncEnumerable().WithCancellation(ct))
+        {
             if (!latest.TryGetValue(row.Id, out var link) || link.RowHash != RowHash(row)) return false;
-        return true;
+            present.Add(row.Id);
+        }
+        return latest.Keys.All(present.Contains);
     }
 }

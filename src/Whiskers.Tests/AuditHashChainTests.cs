@@ -590,6 +590,47 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public async Task A_row_whose_link_was_recomputed_without_a_signature_is_never_given_a_new_version()
+    {
+        // Row, RowHash and Hash rewritten consistently, the signature removed: only the signature is missing.
+        var ids = await _trail.LogAsync(2);
+        await _trail.SqlAsync($"UPDATE AuditLog SET Actor = 'someone-else' WHERE Id = {ids[0]}");
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var link = await db.AuditChain.AsNoTracking().SingleAsync(c => c.AuditId == ids[0]);
+            var rowHash = AuditChain.RowHash(await db.AuditLog.AsNoTracking().SingleAsync(a => a.Id == ids[0]));
+            var hash = AuditChain.LinkHash(link.PrevHash, link.Seq, link.AuditId, rowHash);
+            await _trail.SqlAsync($"UPDATE AuditChain SET RowHash = '{rowHash}', Hash = '{hash}', Mac = NULL WHERE Seq = {link.Seq}");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => _trail.Chain.UpdateAsync(db, [ids[0]], async ct =>
+            {
+                var changed = await db.AuditLog.Where(a => a.Id == ids[0])
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, "outcome"), ct);
+                return (changed, (IReadOnlyCollection<long>)[ids[0]]);
+            }));
+        }
+    }
+
+    [Fact]
+    public async Task Key_adoption_signs_the_links_written_before_it()
+    {
+        using var before = new AuditTrailFixture(vaultKey: null);
+        await before.LogAsync(3);
+        await before.Chain.CheckpointAsync();
+
+        var keyed = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
+        await keyed.SealExistingAsync();
+
+        using (var scope = before.Scope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditChain.AnyAsync(c => c.Mac == null));
+        // From now on an unsigned link is a finding — also one of the old ones.
+        await before.SqlAsync("UPDATE AuditChain SET Mac = NULL WHERE Seq = 1");
+        var report = await keyed.VerifyAsync();
+        Assert.Contains("Link 1 is not signed: it was added outside Whiskers.", report.Problems);
+    }
+
+    [Fact]
     public async Task A_checkpoint_file_that_cannot_be_opened_is_not_taken_for_a_missing_one()
     {
         // File.Exists says "no" for a path it may not open: that must make the check incomplete, not skip the file.

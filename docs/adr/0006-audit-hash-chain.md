@@ -59,10 +59,11 @@ Option B.
   database writer can compute a link's SHA-256 but not this, so a link appended outside Whiskers — for instance a
   forged "new version" of an old row, which the verifier would otherwise take as that row's latest state — is
   reported at once and is never signed over by the next checkpoint. Links written before the key was adopted are
-  covered by the genesis checkpoint written at adoption (the moment of trust); every link after it must be signed.
+  signed at adoption, together with the genesis checkpoint (the moment of trust): from then on every link of the
+  trail must carry a valid signature, so no link — old or new — can be recomputed in the database unnoticed.
 - **Changing a row.** A row is changed only through `UpdateAsync`, which locks it (`FOR UPDATE` on PostgreSQL; the
   SQLite write transaction holds the database lock) and checks it against its newest link — the link's fields still
-  give its hash, its signature is valid (required after the moment of trust), and its row hash is the row's — before
+  give its hash, its signature is valid (required whenever the key is set), and its row hash is the row's — before
   the change. A writer that computes the new version from a row it read earlier writes it only while the row is still
   exactly what it read (recovery). A row changed in the database is refused, so the
   application never turns someone else's edit into an authenticated next version (completion, recovery). A plain
@@ -76,8 +77,10 @@ Option B.
 - **Retention** (configurable, default 365 days, minimum 30; run daily): the whole trail is verified first, in one
   snapshot outside the chain lock, and nothing is removed when it is not intact, incomplete, or key adoption is
   pending (else a tampered or backdated prefix would be cut and its end signed as the new start). Under the lock only
-  what may have changed since is checked again — the links written meanwhile continue the verified head, and the rows
-  of the batch and their links still hold — so audit writers are never held up for a scan of the whole trail. Then
+  what may have changed since is checked again — the links written meanwhile continue the verified head; the chain
+  prefix from the trusted start to the batch's end is continuous, each link holding and signed; every row of the batch
+  matches its newest link; and no linked row in the batch's range is missing — so audit writers are never held up for
+  a scan of the whole trail, and a row deleted or backdated meanwhile is not excused by the removal. Then
   one transaction writes an `audit.retention` event (counts, boundary), deletes the rows up to an id boundary and the chain prefix that only names such rows, and writes
   a signed *retention checkpoint* holding the new anchor (seq, hash) and the pruned id boundary. Rows past the
   boundary keep their entries; entries after the anchor that name pruned rows are allowed. The MCP call history
@@ -129,8 +132,8 @@ Option B.
 - Checkpoints written while `VAULT_KEY` was not set carry no signature; once a key is set they are not trusted, but
   not reported as tampering either. At the first start with a key, when no checkpoint anywhere (database or file)
   carries a signature, the newest unsigned retention anchor is signed once — the same moment of trust as a genesis —
-  so a trail pruned before the key was set still reaches its start. The signed anchor and the genesis boundary are
-  written in one transaction, so an interrupted start never leaves one without the other. Never again once any
+  so a trail pruned before the key was set still reaches its start. The signed anchor, the signatures of the
+  existing links and the genesis boundary are written in one transaction, so an interrupted start never leaves one without the other. Never again once any
   signature exists.
 - **Changing `VAULT_KEY`** invalidates every existing checkpoint signature: the trail then reports invalid signatures
   until a rotation path exists (R1-28).

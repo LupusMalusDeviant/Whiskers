@@ -243,6 +243,46 @@ public sealed class AuditRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_young_row_deleted_after_the_verification_is_not_excused_by_the_removal()
+    {
+        // Old, young, old, young: once the first young row is gone, the batch would reach past it.
+        var first = await _trail.LogAsync(1, DateTime.UtcNow.AddDays(-400));
+        var young = await _trail.LogAsync(1);
+        var third = await _trail.LogAsync(1, DateTime.UtcNow.AddDays(-400));
+        await _trail.LogAsync(1);
+        var chain = (AuditChain)_trail.Chain;
+        var verified = await chain.VerifyAsync();
+        Assert.True(verified.Intact, string.Join("; ", verified.Problems));
+
+        await _trail.SqlAsync($"DELETE FROM AuditLog WHERE Id = {young[0]}");
+
+        using var scope = _trail.Scope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        Assert.False(await chain.UnchangedSinceAsync(db, verified, third[0], default));
+        Assert.True(first[0] < young[0]);
+    }
+
+    [Fact]
+    public async Task A_young_row_backdated_with_a_recomputed_unsigned_link_is_not_removed()
+    {
+        await _trail.LogAsync(1, DateTime.UtcNow.AddDays(-400));
+        var young = await _trail.LogAsync(1);
+        var third = await _trail.LogAsync(1, DateTime.UtcNow.AddDays(-400));
+        var chain = (AuditChain)_trail.Chain;
+        var verified = await chain.VerifyAsync();
+
+        await _trail.SqlAsync($"UPDATE AuditLog SET Timestamp = '2024-01-01 00:00:00' WHERE Id = {young[0]}");
+        using var scope = _trail.Scope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var link = await db.AuditChain.AsNoTracking().SingleAsync(c => c.AuditId == young[0]);
+        var rowHash = AuditChain.RowHash(await db.AuditLog.AsNoTracking().SingleAsync(a => a.Id == young[0]));
+        var hash = AuditChain.LinkHash(link.PrevHash, link.Seq, link.AuditId, rowHash);
+        await _trail.SqlAsync($"UPDATE AuditChain SET RowHash = '{rowHash}', Hash = '{hash}', Mac = NULL WHERE Seq = {link.Seq}");
+
+        Assert.False(await chain.UnchangedSinceAsync(db, verified, third[0], default));
+    }
+
+    [Fact]
     public async Task The_MCP_call_history_is_removed_in_batches_too()
     {
         await _trail.LogAsync(1);
