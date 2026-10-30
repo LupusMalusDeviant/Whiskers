@@ -94,6 +94,12 @@ Option B.
   archive without a checkpoint (from before the chain) moves the live checkpoint file aside, so a legitimate restore
   is sealed as a new genesis.
 - Checkpoints written while `VAULT_KEY` was not set carry no signature; once a key is set they are not trusted, but
-  not reported as tampering either.
+  not reported as tampering either. At the first start with a key, when no checkpoint anywhere (database or file)
+  carries a signature, the newest unsigned retention anchor is signed once — the same moment of trust as a genesis —
+  so a trail pruned before the key was set still reaches its start. Never again once any signature exists.
+- **Changing `VAULT_KEY`** invalidates every existing checkpoint signature: the trail then reports invalid signatures
+  until a rotation path exists (R1-28).
+- A checkpoint file that cannot be read makes a verification *incomplete* (reported, not counted as tampering).
+- Pruning also removes the head checkpoints before the new start; retention and genesis checkpoints are kept.
 - The canonical JSON uses System.Text.Json's default escaping (non-ASCII and HTML-sensitive characters as upper-case
   `\uXXXX`), pinned in code.

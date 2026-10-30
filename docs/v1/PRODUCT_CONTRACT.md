@@ -90,8 +90,9 @@ contract than it says.
    rights are root on the host. The contract governs *who may reach* that power and *what is recorded*; it
    does not make the power smaller.
 2. **An Admin with shell access to the Whiskers host is outside the contract.** They can edit the database,
-   the JSON stores and the binaries. The audit hash chain (INV-49) makes such edits *detectable*, not
-   impossible.
+   the JSON stores and the binaries. The audit hash chain (INV-49) makes database-only edits *detectable*;
+   a host that holds `VAULT_KEY`, the checkpoint file and the database can rewrite all three consistently
+   (ADR-0006).
 3. **Commands typed inside an interactive terminal are not policy-checked one by one.** The contract covers
    opening the session (authorization, kill switch, audit) and, depending on PC-D2, a transcript.
 4. **Single replica.** Whiskers 1.0 is a single-instance appliance. Availability and RPO/RTO follow from that

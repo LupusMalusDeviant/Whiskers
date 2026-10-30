@@ -5036,4 +5036,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AgentHistory_AdminOnly" xml:space="preserve">
     <value>The agent history is available to administrators.</value>
   </data>
+  <data name="AuditLog_Verify_Incomplete" xml:space="preserve">
+    <value>The checkpoint file could not be read, so the end of the trail was not checked against it. Verify again shortly; if it stays unreadable, check the data directory.</value>
+  </data>
 </root>

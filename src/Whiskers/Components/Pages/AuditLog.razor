@@ -40,7 +40,7 @@ else
 
 @if (_report is not null)
 {
-    <MudAlert Severity="@(_report.Intact ? (_report.CheckpointsSigned ? Severity.Success : Severity.Warning) : Severity.Error)"
+    <MudAlert Severity="@(_report.Intact ? (_report.CheckpointsSigned && _report.Complete ? Severity.Success : Severity.Warning) : Severity.Error)"
               Class="mb-3" Dense="true">
         @if (_report.Intact)
         {
@@ -48,6 +48,10 @@ else
             @if (!_report.CheckpointsSigned)
             {
                 <br />@L["AuditLog_Verify_Unsigned"]
+            }
+            @if (!_report.Complete)
+            {
+                <br />@L["AuditLog_Verify_Incomplete"]
             }
         }
         else

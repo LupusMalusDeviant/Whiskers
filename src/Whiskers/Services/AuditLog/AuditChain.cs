@@ -43,7 +43,8 @@ public interface IAuditChain
     Task<AuditChainReport> ExportAsync(Stream output, CancellationToken ct = default);
 }
 
-/// <summary>What <see cref="IAuditChain.VerifyAsync"/> found.</summary>
+/// <summary>What <see cref="IAuditChain.VerifyAsync"/> found. <see cref="Complete"/> is false when something needed
+/// for the check could not be read (the checkpoint file): no finding, but no clean result either.</summary>
 public sealed record AuditChainReport(
     bool Intact,
     IReadOnlyList<string> Problems,
@@ -51,7 +52,8 @@ public sealed record AuditChainReport(
     long LinksChecked,
     long HeadSeq,
     long? TrustedCheckpointSeq,
-    bool CheckpointsSigned);
+    bool CheckpointsSigned,
+    bool Complete = true);
 
 public sealed class AuditChain : IAuditChain
 {
@@ -244,7 +246,11 @@ public sealed class AuditChain : IAuditChain
 
     internal async Task SealExistingAsync(MetricsDbContext db, CancellationToken ct)
     {
-        if (await db.AuditChain.AnyAsync(ct) || await db.AuditCheckpoints.AnyAsync(ct)) return;
+        if (await db.AuditChain.AnyAsync(ct) || await db.AuditCheckpoints.AnyAsync(ct))
+        {
+            await AdoptKeyAsync(db, ct);
+            return;
+        }
         // A chain that was here once is not started again: emptied chain tables beside a checkpoint file are a
         // tampered trail, and sealing its rows now would hide that. Verification reports it.
         if (ReadFile() is not null)
@@ -257,6 +263,33 @@ public sealed class AuditChain : IAuditChain
         await WriteAsync(db, _ => Task.FromResult((0, (IReadOnlyCollection<long>)ids)), ct);
         await CheckpointAsync(db, GenesisKind, ct);
         _logger?.LogInformation("Audit chain started: {Count} existing audit rows sealed (genesis)", ids.Count);
+    }
+
+    /// <summary>The first start with VAULT_KEY on a trail that never had one: nothing anywhere carries a signature, so
+    /// the newest (unsigned) retention anchor is signed once — the same moment of trust as a genesis. Without it a
+    /// trail pruned before the key was set would no longer reach its start. Never when any checkpoint, in the database
+    /// or in the file, carries a signature: then the trail was signed before, and only those are trusted.</summary>
+    private async Task AdoptKeyAsync(MetricsDbContext db, CancellationToken ct)
+    {
+        if (_key is null) return;
+        var file = ReadFile();
+        if (file is not null && (file.Kind == "unreadable" || file.Mac is not null)) return;
+        if (await db.AuditCheckpoints.AnyAsync(c => c.Mac != null, ct)) return;
+        var anchor = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
+            .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).FirstOrDefaultAsync(ct);
+        if (anchor is not null)
+        {
+            var signed = new AuditCheckpointEntity
+            {
+                Kind = RetentionKind, Seq = anchor.Seq, Hash = anchor.Hash, PrunedThroughId = anchor.PrunedThroughId,
+                At = Truncate(_time.GetUtcNow().UtcDateTime),
+            };
+            signed.Mac = Sign(signed);
+            db.AuditCheckpoints.Add(signed);
+            await db.SaveChangesAsync(ct);
+        }
+        await CheckpointAsync(db, HeadKind, ct);
+        _logger?.LogInformation("Audit chain: VAULT_KEY adopted, checkpoints are signed from now on");
     }
 
     public async Task CheckpointAsync(CancellationToken ct = default)
@@ -275,7 +308,8 @@ public sealed class AuditChain : IAuditChain
             var (seq, hash) = head is null ? await AnchorAsync(db, ct) : (head.Seq, head.Hash);
             var newest = await db.AuditCheckpoints.AsNoTracking().OrderByDescending(c => c.Seq)
                 .ThenByDescending(c => c.Id).FirstOrDefaultAsync(ct);
-            if (kind == HeadKind && newest is not null && newest.Seq == seq && newest.Hash == hash)
+            if (kind == HeadKind && newest is not null && newest.Seq == seq && newest.Hash == hash
+                && (_key is null || newest.Mac is not null))
             {
                 // Nothing new — but the file must name it too (a retention checkpoint is signed in the database first).
                 if (ReadFile() is not { } file || file.Seq != newest.Seq || file.Hash != newest.Hash) WriteFile(newest);
@@ -321,14 +355,22 @@ public sealed class AuditChain : IAuditChain
     private AuditCheckpointEntity? ReadFile()
     {
         if (_checkpointFile is null || !File.Exists(_checkpointFile)) return null;
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            return JsonSerializer.Deserialize<AuditCheckpointEntity>(File.ReadAllText(_checkpointFile));
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
-        {
-            _logger?.LogWarning(ex, "Audit checkpoint file unreadable: {Path}", _checkpointFile);
-            return new AuditCheckpointEntity { Kind = "unreadable", Seq = long.MaxValue };
+            try
+            {
+                return JsonSerializer.Deserialize<AuditCheckpointEntity>(File.ReadAllText(_checkpointFile))
+                       ?? throw new JsonException("empty checkpoint file");
+            }
+            catch (IOException) when (attempt < 3)
+            {
+                Thread.Sleep(50);   // the file is being replaced (a checkpoint is written right now)
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            {
+                _logger?.LogWarning(ex, "Audit checkpoint file unreadable: {Path}", _checkpointFile);
+                return new AuditCheckpointEntity { Kind = "unreadable", Seq = long.MaxValue };
+            }
         }
     }
 
@@ -391,9 +433,14 @@ public sealed class AuditChain : IAuditChain
 
         // Checkpoints: only a valid signature is trusted. The file holds the newest one outside the database.
         var checkpoints = await db.AuditCheckpoints.AsNoTracking().OrderBy(c => c.Seq).ThenBy(c => c.Id).ToListAsync(ct);
+        var complete = true;
         if (file is not null)
         {
-            if (file.Kind == "unreadable") Problem("The checkpoint file cannot be read.");
+            if (file.Kind == "unreadable")
+            {
+                complete = false;
+                problems.Add("The checkpoint file cannot be read: the end of the trail could not be checked against it.");
+            }
             else checkpoints.Add(file);
         }
         var trusted = new List<AuditCheckpointEntity>();
@@ -415,6 +462,7 @@ public sealed class AuditChain : IAuditChain
 
         // Links after the anchor, in order: each continues the one before.
         var latest = new Dictionary<long, string>();
+        var checkedAt = trusted.Select(c => c.Seq).ToHashSet();
         var hashAt = new Dictionary<long, string> { [anchorSeq] = running };
         long links = 0, head = anchorSeq;
         await foreach (var link in db.AuditChain.AsNoTracking().Where(c => c.Seq > anchorSeq).OrderBy(c => c.Seq)
@@ -427,7 +475,7 @@ public sealed class AuditChain : IAuditChain
                 Problem($"Link {link.Seq} was changed.");
             running = link.Hash;
             head = link.Seq;
-            hashAt[link.Seq] = link.Hash;
+            if (checkedAt.Contains(link.Seq)) hashAt[link.Seq] = link.Hash;
             latest[link.AuditId] = link.RowHash;
         }
 
@@ -455,7 +503,7 @@ public sealed class AuditChain : IAuditChain
             Problem($"Audit row {missing} was deleted.");
 
         if (count > MaxProblems) problems.Add($"… and {count - MaxProblems} more.");
-        return new AuditChainReport(count == 0, problems, rows, links, head, newest?.Seq, _key is not null);
+        return new AuditChainReport(count == 0, problems, rows, links, head, newest?.Seq, _key is not null, complete);
     }
 
     // ---------------------------------------------------------------------------------------------- export
@@ -525,6 +573,8 @@ public sealed class AuditChain : IAuditChain
                 .OrderByDescending(c => c.Seq).FirstOrDefaultAsync(token);
             var (seq, hash) = anchor is null ? await AnchorAsync(db, token) : (anchor.Seq, anchor.Hash);
             if (anchor is not null) await db.AuditChain.Where(c => c.Seq <= anchor.Seq).ExecuteDeleteAsync(token);
+            // Head checkpoints before the new start name links that are gone; retention and genesis checkpoints stay.
+            await db.AuditCheckpoints.Where(c => c.Kind == HeadKind && c.Seq < seq).ExecuteDeleteAsync(token);
             written = new AuditCheckpointEntity
             {
                 Kind = RetentionKind, Seq = seq, Hash = hash, PrunedThroughId = through,

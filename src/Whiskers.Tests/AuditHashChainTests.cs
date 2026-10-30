@@ -188,6 +188,67 @@ public sealed class AuditHashChainTests : IDisposable
         Assert.True(report.CheckpointsSigned);
     }
 
+    [Fact]
+    public async Task A_trail_pruned_before_VAULT_KEY_was_set_is_adopted_once_and_stays_verifiable()
+    {
+        using var before = new AuditTrailFixture(vaultKey: null);
+        await before.LogAsync(2, DateTime.UtcNow.AddDays(-400));
+        await before.LogAsync(1);
+        await before.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+        await before.LogAsync(1);
+        await before.Chain.CheckpointAsync();
+
+        // The next start with the key: the unsigned anchor is signed once, and the end is signed.
+        var keyed = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
+        await keyed.SealExistingAsync();
+        var report = await keyed.VerifyAsync();
+
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Equal(report.HeadSeq, report.TrustedCheckpointSeq);
+
+        // Later starts adopt nothing more: an unsigned checkpoint planted afterwards is not taken as an anchor.
+        await before.SqlAsync("INSERT INTO AuditCheckpoints (Kind, Seq, Hash, PrunedThroughId, At, Mac) VALUES " +
+                              $"('retention', 0, '{AuditChain.Genesis}', 999999, '2026-01-01 00:00:00', NULL)");
+        await keyed.SealExistingAsync();
+        using var scope = before.Scope();
+        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditCheckpoints
+            .CountAsync(c => c.Kind == AuditChain.RetentionKind && c.Mac != null));
+        Assert.True((await keyed.VerifyAsync()).Intact);
+    }
+
+    [Fact]
+    public async Task A_signed_trail_whose_signatures_were_removed_is_not_adopted_again()
+    {
+        // Database-only tampering: nulling every signature in the database. The file still carries one, so nothing
+        // is re-signed and the removed rows stay visible.
+        var ids = await _trail.LogAsync(3);
+        await _trail.Chain.CheckpointAsync();
+        await _trail.SqlAsync($"DELETE FROM AuditLog WHERE Id = {ids[0]}");
+        await _trail.SqlAsync("UPDATE AuditCheckpoints SET Mac = NULL");
+
+        await _trail.Chain.SealExistingAsync();
+
+        using (var scope = _trail.Scope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditCheckpoints.AnyAsync(c => c.Mac != null));
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.False(report.Intact);
+        Assert.Contains($"Audit row {ids[0]} was deleted.", report.Problems);
+    }
+
+    [Fact]
+    public async Task An_unreadable_checkpoint_file_makes_the_check_incomplete_not_a_tamper_finding()
+    {
+        await _trail.LogAsync(2);
+        await _trail.Chain.CheckpointAsync();
+        await File.WriteAllTextAsync(_trail.CheckpointFile, "{ not json");
+
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.False(report.Complete);
+        Assert.Contains(report.Problems, p => p.Contains("checkpoint file cannot be read"));
+    }
+
     [Theory]
     [InlineData("zz")]   // 64 characters that are not hex
     [InlineData("0")]

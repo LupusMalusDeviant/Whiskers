@@ -5036,4 +5036,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AgentHistory_AdminOnly" xml:space="preserve">
     <value>Die Agent-History ist Administratoren vorbehalten.</value>
   </data>
+  <data name="AuditLog_Verify_Incomplete" xml:space="preserve">
+    <value>Die Checkpoint-Datei war nicht lesbar, daher wurde das Ende des Pfads nicht gegen sie geprüft. Bitte gleich erneut prüfen; bleibt sie unlesbar, das Datenverzeichnis kontrollieren.</value>
+  </data>
 </root>

@@ -57,8 +57,10 @@ public sealed class AuditRetentionTests : IDisposable
             var retention = await db.AuditCheckpoints.SingleAsync(c => c.Kind == AuditChain.RetentionKind);
             Assert.Equal(old[^1], retention.PrunedThroughId);
             Assert.NotNull(retention.Mac);
-            // Only the links that named removed rows went.
+            // Only the links that named removed rows went, and the head checkpoints that named them.
             Assert.DoesNotContain(await db.AuditChain.Select(c => c.AuditId).ToListAsync(), id => old.Contains(id));
+            Assert.DoesNotContain(await db.AuditCheckpoints.ToListAsync(),
+                c => c.Kind == AuditChain.HeadKind && c.Seq < retention.Seq);
         }
 
         var report = await _trail.Chain.VerifyAsync();
