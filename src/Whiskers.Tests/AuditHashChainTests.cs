@@ -270,6 +270,18 @@ public sealed class AuditHashChainTests : IDisposable
         Assert.False(pending.Complete);   // no clean result while nothing can be signed
         Assert.False(pending.CheckpointsSigned);
         Assert.Contains(pending.Findings!, f => f.Code == "AdoptionPending");
+        // An unsigned row is not changed meanwhile — refused as pending, not reported as changed outside Whiskers.
+        using (var scope = before.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var id = await db.AuditLog.Select(a => a.Id).MaxAsync();
+            var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => keyed.UpdateAsync(db, [id], async ct =>
+            {
+                var changed = await db.AuditLog.Where(a => a.Id == id).ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, "x"), ct);
+                return (changed, (IReadOnlyCollection<long>)[id]);
+            }));
+            Assert.Contains("adoption is pending", refused.Message);
+        }
 
         File.Delete(before.CheckpointFile);   // the file is readable again (here: gone) at the next start
         var restarted = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
@@ -320,6 +332,18 @@ public sealed class AuditHashChainTests : IDisposable
         Assert.False(report.Intact);
         Assert.Contains("Link 3 is not signed: it was added outside Whiskers.", report.Problems);
         Assert.Contains(report.Findings!, f => f.Code == "LinkUnsigned");
+    }
+
+    [Fact]
+    public async Task The_finding_count_is_every_finding_also_above_the_cap()
+    {
+        await _trail.LogAsync(AuditChain.MaxProblems + 3);
+        await _trail.SqlAsync("UPDATE AuditLog SET Actor = 'someone-else'");
+
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.Equal(AuditChain.MaxProblems + 3, report.FindingCount);
+        Assert.Equal(AuditChain.MaxProblems + 1, report.Problems.Count);   // the cap and the "… and 3 more." line
     }
 
     [Fact]

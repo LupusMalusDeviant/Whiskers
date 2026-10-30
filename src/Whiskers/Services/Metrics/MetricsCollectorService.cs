@@ -277,20 +277,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
 
         }
 
-        // Audit log + MCP tool-call history: their own, configurable retention (R1-23), once a day. Both go through the
-        // chain — the trail is verified first, the removal is an event of its own and the chain's new start is
-        // signed — never a plain delete.
-        if (now - _lastAuditPrune > TimeSpan.FromDays(1))
-        {
-            _lastAuditPrune = now;
-            var auditDays = _services.GetService<IOptionsMonitor<AuditSettings>>()?.CurrentValue.EffectiveRetentionDays
-                            ?? new AuditSettings().EffectiveRetentionDays;
-            var auditCutoff = now.AddDays(-auditDays);
-            if (_services.GetService<Whiskers.Services.AuditLog.IAuditChain>() is { } chain)
-                await chain.PruneAsync(auditCutoff, auditDays, ct);
-            else
-                await Whiskers.Services.AuditLog.AuditChain.Shared.PruneAsync(db, auditCutoff, auditDays, ct);
-        }
+        _lastAuditPrune = await PruneAuditIfDueAsync(_services, db, now, _lastAuditPrune, ct);
 
         // Bound the in-memory alert-state map: drop per-container entries whose container is gone.
         // "disk:{server}" keys are kept — one per server, stable.
@@ -433,5 +420,22 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             .Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes)
             .Select(s => s.Id)
             .ToList();
+    }
+
+    /// <summary>Audit log + MCP tool-call history: their own, configurable retention (R1-23), once a day. Both go
+    /// through the chain — the trail is verified first, the removal is an event of its own and the chain's new start is
+    /// signed — never a plain delete. Returns when it last ran.</summary>
+    internal static async Task<DateTime> PruneAuditIfDueAsync(IServiceProvider services, MetricsDbContext db, DateTime now,
+        DateTime last, CancellationToken ct)
+    {
+        if (now - last <= TimeSpan.FromDays(1)) return last;
+        var auditDays = services.GetService<IOptionsMonitor<AuditSettings>>()?.CurrentValue.EffectiveRetentionDays
+                        ?? new AuditSettings().EffectiveRetentionDays;
+        var auditCutoff = now.AddDays(-auditDays);
+        if (services.GetService<Whiskers.Services.AuditLog.IAuditChain>() is { } chain)
+            await chain.PruneAsync(auditCutoff, auditDays, ct);
+        else
+            await Whiskers.Services.AuditLog.AuditChain.Shared.PruneAsync(db, auditCutoff, auditDays, ct);
+        return now;
     }
 }

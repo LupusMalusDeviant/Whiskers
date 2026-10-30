@@ -14,6 +14,24 @@ public static class AuditExport
     /// <summary>The event recorded before an export starts.</summary>
     public const string Action = "audit.export";
 
+    /// <summary>The scratch files an export streams through (deleted when the response is done).</summary>
+    public const string TempPrefix = "audit-export-";
+
+    /// <summary>Removes the scratch files a crashed process left behind: older than an hour, so a running export's
+    /// file is never touched.</summary>
+    public static void SweepStale(string directory, DateTime nowUtc)
+    {
+        foreach (var file in Directory.EnumerateFiles(directory, TempPrefix + "*.tmp"))
+        {
+            try
+            {
+                if (nowUtc - File.GetLastWriteTimeUtc(file) > TimeSpan.FromHours(1)) File.Delete(file);
+            }
+            catch (IOException) { /* in use or gone: the next export tries again */ }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     public static async Task WriteAsync(MetricsDbContext db, AuditChainReport report, AuditCheckpointEntity? checkpointFile,
         Stream output, DateTime exportedUtc, CancellationToken ct = default)
     {

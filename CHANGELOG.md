@@ -6,6 +6,9 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-23 follow-up: an unreadable checkpoint file and a pending VAULT_KEY adoption are logged as what they are (not as
+  tampering); the page counts every finding, also above the display cap; export scratch files left by a crash are
+  removed by the next export.
 - R1-23: **The audit trail is tamper-evident, retained on purpose and Admin-only.** Every written version of an audit
   row becomes a link of one SHA-256 hash chain, in the same transaction as the write (ADR-0006). Every minute and at
   shutdown the chain's end is signed with HMAC-SHA-256 under a key derived from `VAULT_KEY`, in the database and in
