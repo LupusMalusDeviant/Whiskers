@@ -1101,8 +1101,15 @@ the Local server included — through that executor; Whiskers itself opens no co
   event with its own operation id (R1-18). Runs come from one background loop under R1-41's rules, and a check's
   interval has a validated minimum of 60 seconds, which bounds runs and their audit rows (at most 1440 per check and
   day; audit retention is R1-23's). Executor calls per run are bounded separately: one `getent`, then at most 4
-  allowed addresses tried (further answers are ignored and the result says so), each attempt under the check's
-  timeout and the whole run under one deadline; tests cover a name with many answers and every address failing.
+  allowed addresses tried, each attempt under the check's timeout and the whole run under one deadline; tests cover
+  a name with many answers and every address failing.
+- [ ] **Prerequisite — executor deadlines.** Today the mTLS path drops cancellation (`HostCommandExecutor.cs:61`) and
+  `HostShellOperations.cs:56` inspects or pulls the helper image, creates and starts the container before its timeout
+  starts, with log retrieval and cleanup outside it; a stalled Docker step can outlive any check deadline. Before
+  checks ship, the executor honours one deadline across setup, execution, result retrieval and cleanup on every
+  transport. This touches the mTLS layer, a protected area: it needs the maintainer's explicit approval and lands as
+  its own reviewed change (or inside R1-57 once approved). Tests cover a stalled image pull/create, a stalled command
+  and a stalled log retrieval, each ending within the deadline.
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists
@@ -1124,12 +1131,18 @@ the Local server included — through that executor; Whiskers itself opens no co
   exit status inside the bounded stream (`( cmd 2>&1; echo "__rc=$?" ) | head -c N`), since a POSIX `sh` has no
   `pipefail`; a missing or non-zero marker is a failed check. Each parser also requires positive evidence (a parsed
   3-digit HTTP status, a parsed `notAfter`, the TCP marker 0) — tested with curl exit 28/6/7 and an openssl connect
-  failure. The
+  failure. The TLS template keeps both statuses: `s_client`'s output is captured on its own with its marker
+  (`( openssl s_client … 2>&1; echo "__rc=$?" ) | head -c N`) and the certificate is parsed from that bounded output
+  in Whiskers (or with `openssl x509` fed from it in a second step whose own marker is checked); a non-zero `s_client`
+  status fails the check even when a certificate was printed — tested with certificate output followed by exit 1. The
   pinned port is the URL's effective port (80/443 when the URL names none); a definition port that disagrees with the
   URL is refused on save, since curl would otherwise fall back to the host's DNS — tested with and without an explicit
   port. When the name answers several addresses, every answer must pass (one denied answer refuses the check, as in
-  R1-54); step (3) then tries every unique allowed address in answer order (`getent ahosts` repeats an address per
-  socket type) until one answers, and the result records which address answered, or that none did. An IP-literal
+  R1-54), and the complete answer is validated before any address is chosen — a truncated or unparsable resolve output
+  refuses the check; step (3) then tries at most the first 4 unique allowed addresses in answer order (`getent ahosts`
+  repeats an address per socket type) until one answers, and the result records which address answered, that none
+  did, and how many further addresses were not tried. Tests: a denied fifth answer refuses the check; five allowed
+  answers try four. An IP-literal
   target skips
   step (1) and must be a canonical dotted quad or RFC 5952 IPv6 literal; decimal, octal and hex forms are refused. IPv6 addresses are bracketed where
   the tool needs it (`'<name>:<port>:[<ip>]'`, `'[<ip>]:<port>'`) — tested with an IPv6 answer. Tests cover a redirect
