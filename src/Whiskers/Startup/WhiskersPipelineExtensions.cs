@@ -344,10 +344,17 @@ public static class WhiskersPipelineExtensions
             var roles = httpContext.RequestServices.GetService<Whiskers.Services.Auth.IRoleService>();
             if (roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin) return true;
             if (!string.IsNullOrEmpty(email))
+            {
+                // Only an id that names an existing archive is recorded; any other route text is not (it is the
+                // requester's input and could carry anything).
+                var requested = httpContext.Request.RouteValues["id"]?.ToString() ?? "";
+                var archive = httpContext.RequestServices.GetRequiredService<Whiskers.Services.Backup.IBackupService>()
+                    .ResolveArchivePath(requested);
                 await httpContext.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>()
                     .LogAsync(email, "web", BackupDownloadAction, "whiskers",
-                        httpContext.Request.RouteValues["id"]?.ToString() ?? "", "",
+                        archive is null ? "(unknown archive)" : requested, archive is null ? "" : Path.GetFileName(archive),
                         details: $"Requires the Admin role.; ip={httpContext.Connection.RemoteIpAddress}", success: false);
+            }
             return false;
         }));
 

@@ -146,6 +146,7 @@ public class GitDeployService : IGitDeployService
             stored.Revision = existing.Revision + 1;
             data.Apps[data.Apps.IndexOf(existing)] = stored;
             await _store.SaveAsync(data);
+            Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{appId}", existing, stored);   // R1-22
             return true;
         }
         finally { _lock.Release(); }

@@ -14,10 +14,12 @@ All notable changes to Whiskers are documented here. The format follows
   webhooks, log-alert rules, servers, registries and Git-deploy apps also on create, toggle, rotation and delete).
   Changes are detected on the complete values, so an edit past the shown part or inside a URL's path counts. Secrets
   never show a value: only `[not set]` or `[set #<fingerprint>]`, keyed per process so a replaced secret is a visible
-  change while nothing stored lets anyone test a guess; a secret alone does not move the version. URLs show their
-  origin only; free text (prompts, log patterns, long values) shows as `[text, N chars #<fingerprint>]`; a list of
+  change while nothing stored lets anyone test a guess. URLs show their origin only; free text (prompts, log
+  patterns, commands, descriptions — however short — and any long or URL-holding value) shows as
+  `[text, N chars #<fingerprint>]`. The version is computed without secrets, URL paths and free text, so a change of
+  those alone keeps it and appears as a changed setting; a list of
   records such as API keys is classified field by field, so a key's level change is readable. An event keeps at most
-  20 reports and counts the rest (`results.omitted`). The
+  20 reports and counts the rest (`results.omitted`). Git-deploy takeovers carry the owner change. The
   configuration pages (Settings, Servers, Webhooks, self-backup, log alerts, agent, AI operations, automation owners,
   registries) no longer write audit rows of their own: a refused attempt is the gateway's **Denied** event, and the old
   action names (`config.save`, `server.add`/`update`/`remove`, `webhook.create`/`enable`/`disable`/`delete`/`test`/

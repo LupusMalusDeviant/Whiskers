@@ -139,12 +139,18 @@ public sealed class AuthAuditBootTests
             Assert.Equal("/", (await LoginAsync(client, token, viewer, Password)).Headers.Location!.OriginalString);
 
             var response = await client.GetAsync($"/backups/self/{backup.Id}/download");
+            // Route text that names no archive (and could carry anything) is never recorded.
+            var forged = await client.GetAsync("/backups/self/password=hunter2/download");
 
             Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
-            var row = Assert.Single(await RowsAsync(services, WhiskersPipelineExtensions.BackupDownloadAction, expected: 1));
-            Assert.Equal(viewer, row.Actor);
-            Assert.False(row.Success);
-            Assert.Equal(backup.Id, row.TargetId);
+            Assert.NotEqual(HttpStatusCode.OK, forged.StatusCode);
+            var rows = await RowsAsync(services, WhiskersPipelineExtensions.BackupDownloadAction, expected: 2);
+            Assert.Equal(2, rows.Count);
+            Assert.All(rows, r => Assert.Equal(viewer, r.Actor));
+            Assert.All(rows, r => Assert.False(r.Success));
+            Assert.Single(rows, r => r.TargetId == backup.Id && r.TargetName == backup.FileName);
+            Assert.Single(rows, r => r.TargetId == "(unknown archive)");
+            Assert.DoesNotContain(rows, r => $"{r.TargetId}{r.TargetName}{r.Details}".Contains("hunter2"));
         });
 
     /// <summary>The audit rows whose action starts with <paramref name="prefix"/>, once at least

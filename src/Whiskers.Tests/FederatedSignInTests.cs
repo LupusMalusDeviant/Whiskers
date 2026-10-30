@@ -98,4 +98,31 @@ public sealed class FederatedSignInTests
         Assert.Null(context.Result);   // not handled: the default failure path still runs
         Assert.Equal(("refused", "oidc", null, AuthAuditReasons.ProviderFailure), Assert.Single(audit.Rows));
     }
+
+    private sealed class CountingRecovery : Whiskers.Services.Mutations.IAuditRecovery
+    {
+        public int Lost;
+        public void OutcomeNotWritten(Whiskers.Services.Mutations.PendingAuditOutcome outcome) { }
+        public void LegacyWriteFailed() => Interlocked.Increment(ref Lost);
+        public Whiskers.Services.Mutations.AuditHealth Health => new(0, 0, Lost > 0);
+        public Task RecoverAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task A_full_sign_in_queue_reports_every_row_it_cannot_take_and_never_blocks()
+    {
+        // The writer is not started: nothing drains the queue, as with a stalled audit database.
+        var recovery = new CountingRecovery();
+        var log = new AuthAuditLog(new TerminalDoubles.RecordingAudit(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthAuditLog>.Instance, recovery);
+        var http = new DefaultHttpContext();
+
+        var all = Task.WhenAll(Enumerable.Range(0, AuthAuditLog.Capacity + 3)
+            .Select(i => log.SignedInAsync(http, "local", $"u{i}@example.com")));
+
+        Assert.True(all.IsCompletedSuccessfully);   // no call waited
+        await all;
+        Assert.Equal(3, recovery.Lost);
+        Assert.True(recovery.Health.LegacyWriteFailed);
+    }
 }

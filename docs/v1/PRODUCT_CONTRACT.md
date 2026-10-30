@@ -269,19 +269,19 @@ U-20, U-21, U-25.
 | U-19 | SSL certificate renew | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-20 | Servers add/update/delete (+ vault secrets, SSH keys) | Admin | — | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
 | U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | ❌ | INV-45 |
-| U-22 | Servers pause/resume checks | **markup only** | — | AL ✅ | INV-17 |
+| U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | — | GW ✅ (no page row since R1-22) | INV-17 |
 | U-23 | Cloud power / snapshot | Admin | ❌ | GW ✅ (R1-21) | INV-43, 52 |
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-25 | Self-backup create / delete / restore / download | Admin | ⚠️ archive validation | GW ✅ (download: audited before the first byte, refused without its row — R1-22) | INV-55 |
 | U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | GW ✅ (R1-21) | INV-04 |
 | U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | — | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09) + AL | INV-04, 19 (test fires the real action at Operator) |
+| U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | — | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09); since R1-22 the one gateway event per action, with a versioned diff, no page row | INV-04, 19 (test fires the real action at Operator) |
 | U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | GW ✅ (R1-21) | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | GW ✅ (`logalert.*`; create/toggle/delete carry a versioned diff, the pattern as text only — R1-22) | INV-27 |
-| U-31 | AI triggers save (prompt, preset, write grant) | Admin | — | AL ✅ (`aitrigger.save` through the gateway) | INV-23, 27, 28, 46 |
+| U-31 | AI triggers save (prompt, preset, write grant) | Admin | — | GW ✅ (`aitrigger.save`; versioned diff, the prompt as text only — R1-22) | INV-23, 27, 28, 46 |
 | U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | — | GW ✅ | INV-28 |
 | U-33 | Approvals approve / reject | approve **and** reject (same rules since R1-15, INV-37): level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); a requester never decides their own non-interactive request, and decides an interactive one only while `RequireSecondApprover` is off (PC-D4); not after expiry | — | ✅ (R1-15: `ApprovalSeparationOfDutyTests`, `ApprovalStoreTests`) | — (INV-31 closed by R1-14; INV-32, 33, 34, 37 by R1-15) |
-| U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | — | AL ✅ GW ✅ | INV-15, 16 |
+| U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | — | GW ✅ (versioned, redacted diff; no page row since R1-22) | INV-15, 16 |
 
 ### 7.6 Totals
 

@@ -452,18 +452,97 @@ public sealed partial class AuditLoggingTests : IDisposable
     }
 
     [Fact]
-    public void Changes_past_the_shown_part_are_still_changes_and_move_the_version()
+    public void Changes_past_the_shown_part_are_still_changes_but_hidden_parts_never_enter_the_version()
     {
         var longBefore = ConfigChange.Describe(new { Pattern = new string('a', 100) + "1" });
         var longAfter = ConfigChange.Describe(new { Pattern = new string('a', 100) + "2" });
         var urlBefore = ConfigChange.Describe(new { WebhookUrl = "https://hooks.example.com/T0/B0/one" });
         var urlAfter = ConfigChange.Describe(new { WebhookUrl = "https://hooks.example.com/T0/B0/two" });
+        var plainBefore = ConfigChange.Describe(new { WebhookUrl = "https://hooks.example.com/T0/B0/one", Throttle = 5 });
+        var plainAfter = ConfigChange.Describe(new { WebhookUrl = "https://hooks.example.com/T0/B0/one", Throttle = 6 });
 
-        Assert.NotEqual(longBefore.Version, longAfter.Version);
+        // Free text and a URL's path are changes, but no hash of them is stored: the version cannot be used to test
+        // a guess. A plain setting moves the version.
         Assert.Single(ConfigChange.Diff(longBefore, longAfter));
+        Assert.Equal(longBefore.Version, longAfter.Version);
+        Assert.Equal(urlBefore.Version, urlAfter.Version);
+        Assert.NotEqual(plainBefore.Version, plainAfter.Version);
         var rotated = Assert.Single(ConfigChange.Diff(urlBefore, urlAfter));
         Assert.Matches(@"^https://hooks\.example\.com/… #[0-9a-f]{6}$", rotated.Before);
         Assert.NotEqual(rotated.Before, rotated.After);
+    }
+
+    [Theory]
+    [InlineData("Use key abc123")]
+    [InlineData("password=hunter2")]
+    [InlineData("x")]
+    public void Free_text_fields_are_never_shown_however_short(string value)
+    {
+        var shown = ConfigChange.Describe(new { Prompt = value, SystemPrompt = value, Pattern = value, Command = value }).Shown;
+
+        Assert.All(shown.Values, v => Assert.Matches(@"^\[text, \d+ chars #[0-9a-f]{6}\]$", v));
+    }
+
+    [Fact]
+    public void A_list_of_free_text_is_keyed_by_position_and_its_version_is_stable_across_processes()
+    {
+        var policy = new { ForbiddenArgPatterns = new[] { "rm\\s+-rf\\s+/", "(?i)drop\\s+database" }, Names = new[] { "web", "db" } };
+
+        var snapshot = ConfigChange.Describe(policy);
+
+        // No per-process fingerprint in a path or the version: the same content has the same version after a restart.
+        Assert.DoesNotContain(snapshot.Settings.Keys, k => k.Contains('#'));
+        Assert.Contains("ForbiddenArgPatterns[0]", snapshot.Settings.Keys);
+        Assert.Contains("Names[web]", snapshot.Settings.Keys);
+        Assert.Equal(ConfigChange.Describe(policy).Version, snapshot.Version);
+        Assert.DoesNotContain(snapshot.Settings.Values, v => v.Versioned.Contains('#'));
+    }
+
+    [Fact]
+    public async Task A_tool_switch_and_level_change_are_readable()
+    {
+        var mcp = new McpPermissionService(NullLogger<McpPermissionService>.Instance, new DataPathOptions(_dir));
+        await mcp.InitializeAsync();
+        var data = mcp.GetPermissionData();
+        data.Tools["list_containers"] = new McpToolConfig { Enabled = true, RequiredLevel = McpPermissionLevels.Read };
+        await mcp.SavePermissionDataAsync(data);
+
+        await Gateway().ExecuteAsync(Config("config.mcp_permissions", "mcp-permissions", "op-tool-off"), async (_, _) =>
+        {
+            await mcp.SetToolEnabledAsync("list_containers", false);
+            return 1;
+        });
+        var changed = mcp.GetPermissionData();
+        changed.Tools["list_containers"].RequiredLevel = McpPermissionLevels.Write;
+        await Gateway().ExecuteAsync(Config("config.mcp_permissions", "mcp-permissions", "op-tool-level"), async (_, _) =>
+        {
+            await mcp.SavePermissionDataAsync(changed);
+            return 1;
+        });
+
+        Assert.Equal("true → false", Text(Setting(await ResultsOf("op-tool-off"), "mcp-permissions:Tools.list_containers.Enabled"), "details"));
+        Assert.Equal($"{McpPermissionLevels.Read} → {McpPermissionLevels.Write}",
+            Text(Setting(await ResultsOf("op-tool-level"), "mcp-permissions:Tools.list_containers.RequiredLevel"), "details"));
+    }
+
+    [Fact]
+    public async Task A_git_app_takeover_records_the_owner_change_and_a_lost_race_records_nothing()
+    {
+        var git = new Whiskers.Services.GitDeploy.GitDeployService(new ProtectedResourceResolutionTests.FakeHost(),
+            new ProtectedResourceResolutionTests.NoVault(), Stub<IComposePlanner>(),
+            NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(_dir, "apps.json"));
+        await git.SaveAppAsync(new GitDeployApp
+            { Id = "0123456789ab", Name = "shop", RepoUrl = "https://example.org/shop.git", ServerId = "local" },
+            token: null, "user:old@example.com");
+
+        await Gateway().ExecuteAsync(Config("gitdeploy.save", "gitdeploy", "op-take"), async (_, _) =>
+            await git.SetOwnerAsync("0123456789ab", "user:admin@example.com", "user:old@example.com"));
+        await Gateway().ExecuteAsync(Config("gitdeploy.save", "gitdeploy", "op-lost"), async (_, _) =>
+            await git.SetOwnerAsync("0123456789ab", "user:third@example.com", "user:old@example.com"));
+
+        Assert.Equal("user:old@example.com → user:admin@example.com",
+            Text(Setting(await ResultsOf("op-take"), "gitdeploy:0123456789ab:Owner"), "details"));
+        Assert.DoesNotContain(await ResultsOf("op-lost"), r => Text(r, "action") == ConfigChange.VersionAction);
     }
 
     [Fact]

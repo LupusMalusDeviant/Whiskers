@@ -28,7 +28,9 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     private readonly CancellationTokenSource _abort = new();
     private Task? _writer;
     private readonly Channel<Row> _queue = Channel.CreateBounded<Row>(
-        new BoundedChannelOptions(Capacity) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+        // Wait mode: TryWrite then answers false when the queue is full (DropWrite would report the dropped row as
+        // written), so a lost row is always logged and reported.
+        new BoundedChannelOptions(Capacity) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
 
     public AuthAuditLog(IAuditLogService audit, ILogger<AuthAuditLog> logger, IAuditRecovery? recovery = null)
     {
