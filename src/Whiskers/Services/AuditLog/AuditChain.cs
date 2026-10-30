@@ -243,6 +243,14 @@ public sealed class AuditChain : IAuditChain
         if (auditIds.Count == 0) return;
         var head = await db.AuditChain.AsNoTracking().OrderByDescending(c => c.Seq)
             .Select(c => new { c.Seq, c.Hash }).FirstOrDefaultAsync(ct);
+        if (head is null && !await db.AuditCheckpoints.AnyAsync(ct) && ReadFile() is null)
+        {
+            // The chain's first link and no trace of an earlier chain: rows written before it (an audit write that ran
+            // ahead of the start-up sealing) are sealed first, so none of them is reported as added outside it.
+            await SealAllAsync(db, ct);
+            head = await db.AuditChain.AsNoTracking().OrderByDescending(c => c.Seq)
+                .Select(c => new { c.Seq, c.Hash }).FirstOrDefaultAsync(ct);
+        }
         var anchor = head is null ? await AnchorAsync(db, ct) : (head.Seq, head.Hash);
         var (seq, hash) = anchor;
         foreach (var id in auditIds.Distinct().Order())
@@ -393,9 +401,13 @@ public sealed class AuditChain : IAuditChain
             await db.SaveChangesAsync(ct);
             if (kind == HeadKind)
             {
-                var cut = await db.AuditCheckpoints.Where(c => c.Kind == HeadKind).OrderByDescending(c => c.Id)
-                    .Skip(KeptHeadCheckpoints).Select(c => (long?)c.Id).FirstOrDefaultAsync(ct);
-                if (cut is { } id) await db.AuditCheckpoints.Where(c => c.Kind == HeadKind && c.Id <= id).ExecuteDeleteAsync(ct);
+                // Without the key only unsigned heads are thinned: a signed one is evidence this process cannot renew.
+                var keyless = _key is null;
+                var cut = await db.AuditCheckpoints.Where(c => c.Kind == HeadKind && (!keyless || c.Mac == null))
+                    .OrderByDescending(c => c.Id).Skip(KeptHeadCheckpoints).Select(c => (long?)c.Id).FirstOrDefaultAsync(ct);
+                if (cut is { } id)
+                    await db.AuditCheckpoints.Where(c => c.Kind == HeadKind && (!keyless || c.Mac == null) && c.Id <= id)
+                        .ExecuteDeleteAsync(ct);
             }
             // Under the lock: a slower, older checkpoint never overwrites a newer one in the file.
             if (await FileMayBeReplacedAsync(db, ct)) WriteFile(written);
@@ -424,6 +436,7 @@ public sealed class AuditChain : IAuditChain
         if (file is null) return true;
         string? reason = null;
         if (file.Kind == "unreadable") reason = "it cannot be read";
+        else if (_key is null && file.Mac is not null) reason = "it is signed and VAULT_KEY is not set";
         else if (_key is not null && file.Mac is not null && !Valid(file)) reason = "its signature does not match VAULT_KEY";
         else if (file.Seq == 0 && file.Hash == Genesis) return true;
         else if (await db.AuditChain.AsNoTracking().AnyAsync(c => c.Seq == file.Seq && c.Hash == file.Hash, ct)) return true;

@@ -132,7 +132,7 @@ public class AiChatService : IAiChatService
         - /tasks — Scheduled tasks: cron-based automatic backups, container restarts, cleanup
         - /webhooks — CI/CD webhooks: create a URL for GitHub/GitLab deployments
         - /diff — Container comparison: compare two containers side-by-side (image, env vars, ports, labels)
-        - /audit-log — Audit log: track all actions
+        - /audit-log — Audit log: track all actions (Admin only)
         - /settings — Settings: Mattermost, Matrix, user roles, secret vault, MCP keys
 
         CURRENT INFRASTRUCTURE:

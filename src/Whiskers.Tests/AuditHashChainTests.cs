@@ -164,6 +164,78 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public async Task A_VAULT_KEY_outage_does_not_erase_the_signed_evidence()
+    {
+        // A day without the key: the keyless process checkpoints every minute but never thins or replaces a signature.
+        await _trail.LogAsync(3);
+        await _trail.Chain.CheckpointAsync();
+        var keyless = new AuditChain(vaultKey: null, _trail.CheckpointFile, scopes: _trail.Scopes);
+        var ids = new List<long>();
+        for (var i = 0; i < AuditChain.KeptHeadCheckpoints + 1; i++)
+        {
+            ids.AddRange(await _trail.LogAsync(1));
+            await keyless.CheckpointAsync();
+        }
+        var signedFile = System.Text.Json.JsonSerializer.Deserialize<AuditCheckpointEntity>(await File.ReadAllTextAsync(_trail.CheckpointFile))!;
+        Assert.NotNull(signedFile.Mac);   // not replaced by an unsigned one
+        using (var scope = _trail.Scope())
+            Assert.True(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditCheckpoints
+                .AnyAsync(c => c.Kind == AuditChain.HeadKind && c.Mac != null));
+
+        // Meanwhile the end is cut below the last signed checkpoint; the key comes back.
+        await _trail.SqlAsync("DELETE FROM AuditLog WHERE Id > (SELECT MIN(Id) FROM AuditLog)");
+        await _trail.SqlAsync("DELETE FROM AuditChain WHERE Seq > 1");
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.False(report.Intact);
+        Assert.Contains(report.Problems, p => p.Contains("its end was cut off"));
+    }
+
+    [Fact]
+    public async Task Rows_written_before_the_first_link_are_sealed_with_it()
+    {
+        // An audit write that runs ahead of the start-up sealing must not leave the older rows outside the trail.
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.AuditLog.AddRange(new AuditLogEntity { Actor = "a", Action = "old.one" }, new AuditLogEntity { Actor = "b", Action = "old.two" });
+            await db.SaveChangesAsync();
+        }
+
+        await _trail.LogAsync(1);
+        await _trail.Chain.SealExistingAsync();
+
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Equal(3, report.RowsChecked);
+        Assert.Equal(3, report.LinksChecked);
+    }
+
+    [Fact]
+    public async Task Verification_reads_one_snapshot_while_writes_go_on()
+    {
+        await _trail.LogAsync(5);
+        using var stop = new CancellationTokenSource();
+        var writer = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested) await _trail.LogAsync(1);
+        });
+        try
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                var report = await _trail.Chain.VerifyAsync();
+                Assert.True(report.Intact, string.Join("; ", report.Problems));
+            }
+        }
+        finally
+        {
+            stop.Cancel();
+            await writer;
+        }
+    }
+
+    [Fact]
     public async Task Only_the_newest_head_checkpoints_are_kept()
     {
         for (var i = 0; i < AuditChain.KeptHeadCheckpoints + 5; i++)

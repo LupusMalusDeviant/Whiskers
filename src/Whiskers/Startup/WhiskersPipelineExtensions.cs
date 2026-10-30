@@ -372,8 +372,13 @@ public static class WhiskersPipelineExtensions
                         .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<Whiskers.SharedResource>>()
                         ["AuditLog_Export_NotRecorded"].Value,
                     statusCode: StatusCodes.Status503ServiceUnavailable);
-            var temp = new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None,
-                64 * 1024, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+            // In the data directory's backup build folder, not /tmp (often RAM in a container); excluded from
+            // self-backups and deleted when the response is done.
+            var build = Path.Combine(ctx.RequestServices.GetRequiredService<Whiskers.Configuration.DataPathOptions>().SelfBackupsDir,
+                ".build");
+            Directory.CreateDirectory(build);
+            var temp = new FileStream(Path.Combine(build, $"audit-export-{Guid.NewGuid():N}.tmp"), FileMode.CreateNew,
+                FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
             try
             {
                 await ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>()
@@ -552,13 +557,14 @@ public static class WhiskersPipelineExtensions
             await Whiskers.Services.Persistence.DatabaseInitializer.InitializeAsync(db, dbLogger);
         }
 
+        // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis) — before
+        // anything else can write an audit row.
+        await app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>().SealExistingAsync(CancellationToken.None);
+
         // R1-14: the approvals live in the metrics database, so they load only once its schema is current. Pending
         // agent approvals are cancelled here (their sessions are gone); approve-then-retry approvals and unused
         // grants carry on.
         await app.Services.GetRequiredService<Whiskers.Services.Approvals.IApprovalStore>().LoadAsync(CancellationToken.None);
-
-        // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis).
-        await app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>().SealExistingAsync(CancellationToken.None);
 
         // Local-auth (F1): migrate the Identity schema in its OWN __IdentityMigrationsHistory table (kept off
         // the metrics legacy-baseline path), then seed the unattended admin if configured. Brand-new tables →

@@ -103,7 +103,15 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
             var audit = new Whiskers.Services.AuditLog.AuditLogService(scopes,
                 NullLogger<Whiskers.Services.AuditLog.AuditLogService>.Instance);
 
-            await chain.SealExistingAsync();   // empty database: genesis over nothing
+            // Rows from before the chain: sealed at the first start, in pages.
+            await using (var db = Pg())
+            {
+                for (var i = 0; i < 3; i++)
+                    db.AuditLog.Add(new AuditLogEntity { Actor = "legacy", ActorType = "web", Action = "login", TargetType = "system",
+                        Timestamp = DateTime.UtcNow.AddDays(-500) });
+                await db.SaveChangesAsync();
+            }
+            await chain.SealExistingAsync();
             Assert.True(await audit.TryLogAtAsync(DateTime.UtcNow.AddDays(-400), "a@example.com", "web", "container.restart",
                 "container", "c1", "old", details: "Ärger <&>"));
             Assert.True(await audit.TryLogAsync("a@example.com", "web", "container.restart", "container", "c2", "young"));
@@ -111,10 +119,10 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
 
             var intact = await chain.VerifyAsync();
             Assert.True(intact.Intact, string.Join("; ", intact.Problems));
-            Assert.Equal(2, intact.LinksChecked);
-            Assert.Equal(2, intact.TrustedCheckpointSeq);
+            Assert.Equal(5, intact.LinksChecked);
+            Assert.Equal(5, intact.TrustedCheckpointSeq);
 
-            Assert.Equal(1, await chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365));
+            Assert.Equal(4, await chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365));   // three legacy rows + the old one
             using var output = new MemoryStream();
             var exported = await chain.ExportAsync(output);
             Assert.True(exported.Intact, string.Join("; ", exported.Problems));

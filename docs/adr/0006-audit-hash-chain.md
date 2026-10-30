@@ -116,5 +116,6 @@ Option B.
   the file names (the same hash at its link, or a trusted retention start at or past it). A database cut short, wiped
   or rebuilt below the file keeps the file — and the finding — for good; an error is logged.
 - A trail that was signed is not pruned while `VAULT_KEY` is missing (its new start could not be signed).
+  Likewise a process without the key never thins signed head checkpoints nor replaces a signed checkpoint file.
 - The canonical JSON uses System.Text.Json's default escaping (non-ASCII and HTML-sensitive characters as upper-case
   `\uXXXX`), pinned in code.

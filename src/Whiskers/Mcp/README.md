@@ -45,7 +45,7 @@ SELECT ToolName,
        SUM(CASE WHEN Verdict <> 'allow' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS DeniedPct,
        COUNT(*) AS Calls
 FROM McpToolCalls
-WHERE Timestamp > datetime('now', '-90 days')
+WHERE Timestamp > datetime('now', '-90 days')   -- a look-back window; the history itself is kept Audit:RetentionDays (365)
 GROUP BY ToolName
 HAVING Calls > 5
 ORDER BY DeniedPct DESC;
