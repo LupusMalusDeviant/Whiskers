@@ -70,6 +70,17 @@ public sealed class AuditChain : IAuditChain
     /// <summary>At most this many problems are listed (the count is exact).</summary>
     public const int MaxProblems = 50;
 
+    /// <summary>Head checkpoints kept in the database (the newest ones); older ones add nothing: a rewritten middle
+    /// changes every later hash, so the newest checkpoint already catches it.</summary>
+    public const int KeptHeadCheckpoints = 60;
+
+    /// <summary>At most this many rows are removed per retention run, so the chain lock is never held for long; the
+    /// hourly run catches up.</summary>
+    public const int MaxPruneRows = 10_000;
+
+    /// <summary>Rows sealed per round trip on the first start.</summary>
+    private const int SealPage = 1_000;
+
     private static readonly PropertyInfo[] RowProperties = typeof(AuditLogEntity)
         .GetProperties(BindingFlags.Public | BindingFlags.Instance)
         .Where(p => p.CanRead)
@@ -259,10 +270,40 @@ public sealed class AuditChain : IAuditChain
                               "not starting a new one; verify the audit trail", _checkpointFile);
             return;
         }
-        var ids = await db.AuditLog.AsNoTracking().OrderBy(a => a.Id).Select(a => a.Id).ToListAsync(ct);
-        await WriteAsync(db, _ => Task.FromResult((0, (IReadOnlyCollection<long>)ids)), ct);
+        var sealedRows = await WriteAsync(db, async token => (await SealAllAsync(db, token), Array.Empty<long>()), ct);
         await CheckpointAsync(db, GenesisKind, ct);
-        _logger?.LogInformation("Audit chain started: {Count} existing audit rows sealed (genesis)", ids.Count);
+        _logger?.LogInformation("Audit chain started: {Count} existing audit rows sealed (genesis)", sealedRows);
+    }
+
+    /// <summary>Seals every row of a database without a chain, in id order, a page at a time. Inside the caller's
+    /// transaction, under the lock.</summary>
+    private async Task<int> SealAllAsync(MetricsDbContext db, CancellationToken ct)
+    {
+        var (seq, hash) = await AnchorAsync(db, ct);
+        long after = 0;
+        var count = 0;
+        while (true)
+        {
+            var page = await db.AuditLog.AsNoTracking().Where(a => a.Id > after).OrderBy(a => a.Id).Take(SealPage)
+                .ToListAsync(ct);
+            if (page.Count == 0) return count;
+            foreach (var row in page)
+            {
+                seq++;
+                var rowHash = RowHash(row);
+                var link = new AuditChainEntry
+                {
+                    Seq = seq, AuditId = row.Id, RowHash = rowHash, PrevHash = hash,
+                    Hash = LinkHash(hash, seq, row.Id, rowHash), At = _time.GetUtcNow().UtcDateTime,
+                };
+                db.AuditChain.Add(link);
+                hash = link.Hash;
+            }
+            await db.SaveChangesAsync(ct);
+            db.ChangeTracker.Clear();
+            after = page[^1].Id;
+            count += page.Count;
+        }
     }
 
     /// <summary>The first start with VAULT_KEY on a trail that never had one: nothing anywhere carries a signature, so
@@ -312,7 +353,9 @@ public sealed class AuditChain : IAuditChain
                 && (_key is null || newest.Mac is not null))
             {
                 // Nothing new — but the file must name it too (a retention checkpoint is signed in the database first).
-                if (ReadFile() is not { } file || file.Seq != newest.Seq || file.Hash != newest.Hash) WriteFile(newest);
+                if ((ReadFile() is not { } file || file.Seq != newest.Seq || file.Hash != newest.Hash)
+                    && await FileMayBeReplacedAsync(db, ct))
+                    WriteFile(newest);
                 return;
             }
             var written = new AuditCheckpointEntity
@@ -323,13 +366,44 @@ public sealed class AuditChain : IAuditChain
             written.Mac = Sign(written);
             db.AuditCheckpoints.Add(written);
             await db.SaveChangesAsync(ct);
+            if (kind == HeadKind)
+            {
+                var cut = await db.AuditCheckpoints.Where(c => c.Kind == HeadKind).OrderByDescending(c => c.Id)
+                    .Skip(KeptHeadCheckpoints).Select(c => (long?)c.Id).FirstOrDefaultAsync(ct);
+                if (cut is { } id) await db.AuditCheckpoints.Where(c => c.Kind == HeadKind && c.Id <= id).ExecuteDeleteAsync(ct);
+            }
             // Under the lock: a slower, older checkpoint never overwrites a newer one in the file.
-            WriteFile(written);
+            if (await FileMayBeReplacedAsync(db, ct)) WriteFile(written);
         }
         finally
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>Whether the checkpoint file may be replaced: only while the database trail still reaches what the file
+    /// names — the same hash at its link, or a trusted retention start at or past it. A database cut short or rebuilt
+    /// below the file must never be signed over it: the file is what shows it. Under the lock.</summary>
+    private async Task<bool> FileMayBeReplacedAsync(MetricsDbContext db, CancellationToken ct)
+    {
+        var file = ReadFile();
+        if (file is null) return true;
+        string? reason = null;
+        if (file.Kind == "unreadable") reason = "it cannot be read";
+        else if (_key is not null && file.Mac is not null && !Valid(file)) reason = "its signature does not match VAULT_KEY";
+        else if (file.Seq == 0 && file.Hash == Genesis) return true;
+        else if (await db.AuditChain.AsNoTracking().AnyAsync(c => c.Seq == file.Seq && c.Hash == file.Hash, ct)) return true;
+        else
+        {
+            var starts = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind && c.Seq >= file.Seq)
+                .ToListAsync(ct);
+            if (starts.Any(c => (_key is null || Valid(c)) && (c.Seq > file.Seq || c.Hash == file.Hash))) return true;
+            reason = string.Create(CultureInfo.InvariantCulture,
+                $"the database trail no longer reaches its checkpoint at link {file.Seq}");
+        }
+        _logger?.LogError("AUDIT CHECKPOINT FILE KEPT: {Path} is not replaced because {Reason} — verify the audit trail",
+            _checkpointFile, reason);
+        return false;
     }
 
     private static DateTime Truncate(DateTime time) => new(Micros(time) * 10, DateTimeKind.Utc);
@@ -539,6 +613,13 @@ public sealed class AuditChain : IAuditChain
 
     internal async Task<int> PruneAsync(MetricsDbContext db, DateTime cutoffUtc, int retentionDays, CancellationToken ct)
     {
+        // A trail that was signed is not cut without the key: its new start could not be signed, and the trail would
+        // no longer verify once the key is back.
+        if (_key is null && (ReadFile()?.Mac is not null || await db.AuditCheckpoints.AnyAsync(c => c.Mac != null, ct)))
+        {
+            _logger?.LogError("AUDIT RETENTION SKIPPED: the trail is signed but VAULT_KEY is not set");
+            return 0;
+        }
         AuditCheckpointEntity? written = null;
         var removed = await WriteAsync(db, async token =>
         {
@@ -549,6 +630,9 @@ public sealed class AuditChain : IAuditChain
             var through = firstYoung is { } young
                 ? young - 1
                 : await db.AuditLog.MaxAsync(a => (long?)a.Id, token) ?? 0;
+            if (await db.AuditLog.Where(a => a.Id <= through).OrderBy(a => a.Id).Skip(MaxPruneRows - 1)
+                    .Select(a => (long?)a.Id).FirstOrDefaultAsync(token) is { } batchEnd)
+                through = batchEnd;
             var count = await db.AuditLog.CountAsync(a => a.Id <= through, token);
             if (count == 0) return (0, Array.Empty<long>());
 

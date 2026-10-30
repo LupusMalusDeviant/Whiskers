@@ -74,7 +74,11 @@ public sealed class BackupService : IBackupService
             if (File.Exists(_dataPaths.AuditCheckpointJson))
             {
                 stagedCheckpoint = Path.Combine(buildDir, Path.GetFileName(_dataPaths.AuditCheckpointJson));
-                File.Copy(_dataPaths.AuditCheckpointJson, stagedCheckpoint);
+                for (var attempt = 1; ; attempt++)
+                {
+                    try { File.Copy(_dataPaths.AuditCheckpointJson, stagedCheckpoint, overwrite: true); break; }
+                    catch (IOException) when (attempt < 3) { await Task.Delay(50, ct); }   // being replaced right now
+                }
             }
 
             using (var scope = _scopeFactory.CreateScope())

@@ -124,6 +124,61 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public async Task The_checkpoint_timer_never_signs_over_a_cut_off_end()
+    {
+        // The running app checkpoints every minute: that must not replace the file that shows the cut.
+        var ids = await _trail.LogAsync(4);
+        await _trail.Chain.CheckpointAsync();
+        await _trail.SqlAsync($"DELETE FROM AuditLog WHERE Id >= {ids[2]}");
+        await _trail.SqlAsync("DELETE FROM AuditChain WHERE Seq >= 3");
+        await _trail.SqlAsync("DELETE FROM AuditCheckpoints");
+
+        await _trail.Chain.CheckpointAsync();                 // the next tick
+        await _trail.LogAsync(3);                               // the trail grows past the old end
+        await _trail.Chain.CheckpointAsync();
+
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.False(report.Intact);
+        Assert.Contains("The trail does not match the checkpoint at link 4.", report.Problems);
+        var file = System.Text.Json.JsonSerializer.Deserialize<AuditCheckpointEntity>(await File.ReadAllTextAsync(_trail.CheckpointFile))!;
+        Assert.Equal(4, file.Seq);                              // kept, not signed over
+    }
+
+    [Fact]
+    public async Task The_checkpoint_timer_never_signs_over_a_wiped_trail()
+    {
+        await _trail.LogAsync(3);
+        await _trail.Chain.CheckpointAsync();
+        await _trail.SqlAsync("DELETE FROM AuditLog");
+        await _trail.SqlAsync("DELETE FROM AuditChain");
+        await _trail.SqlAsync("DELETE FROM AuditCheckpoints");
+
+        await _trail.Chain.SealExistingAsync();   // a restart
+        await _trail.Chain.CheckpointAsync();
+        await _trail.LogAsync(1);
+        await _trail.Chain.CheckpointAsync();
+
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.False(report.Intact);
+        Assert.Contains(report.Problems, p => p.Contains("checkpoint at link 3"));
+    }
+
+    [Fact]
+    public async Task Only_the_newest_head_checkpoints_are_kept()
+    {
+        for (var i = 0; i < AuditChain.KeptHeadCheckpoints + 5; i++)
+        {
+            await _trail.LogAsync(1);
+            await _trail.Chain.CheckpointAsync();
+        }
+
+        using (var scope = _trail.Scope())
+            Assert.Equal(AuditChain.KeptHeadCheckpoints, await scope.ServiceProvider.GetRequiredService<MetricsDbContext>()
+                .AuditCheckpoints.CountAsync(c => c.Kind == AuditChain.HeadKind));
+        Assert.True((await _trail.Chain.VerifyAsync()).Intact);
+    }
+
+    [Fact]
     public async Task A_rewritten_trail_does_not_match_its_checkpoint()
     {
         // A trail rebuilt from scratch with consistent hashes still differs from what was signed.

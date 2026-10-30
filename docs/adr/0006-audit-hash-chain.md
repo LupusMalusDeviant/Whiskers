@@ -100,6 +100,12 @@ Option B.
 - **Changing `VAULT_KEY`** invalidates every existing checkpoint signature: the trail then reports invalid signatures
   until a rotation path exists (R1-28).
 - A checkpoint file that cannot be read makes a verification *incomplete* (reported, not counted as tampering).
-- Pruning also removes the head checkpoints before the new start; retention and genesis checkpoints are kept.
+- Pruning also removes the head checkpoints before the new start; retention and genesis checkpoints are kept. Only the
+  newest 60 head checkpoints stay in the database (an older one adds nothing: a rewritten middle changes every later
+  hash). A retention run removes at most 10,000 rows, so the chain lock is held briefly; the hourly run catches up.
+- **The file is never signed over.** A checkpoint replaces the file only while the database trail still reaches what
+  the file names (the same hash at its link, or a trusted retention start at or past it). A database cut short, wiped
+  or rebuilt below the file keeps the file — and the finding — for good; an error is logged.
+- A trail that was signed is not pruned while `VAULT_KEY` is missing (its new start could not be signed).
 - The canonical JSON uses System.Text.Json's default escaping (non-ASCII and HTML-sensitive characters as upper-case
   `\uXXXX`), pinned in code.

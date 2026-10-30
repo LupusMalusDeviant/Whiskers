@@ -88,6 +88,38 @@ public sealed class AuditRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_signed_trail_is_not_pruned_while_VAULT_KEY_is_missing()
+    {
+        await _trail.LogAsync(2, DateTime.UtcNow.AddDays(-400));
+        await _trail.Chain.CheckpointAsync();
+        var keyless = new AuditChain(vaultKey: null, _trail.CheckpointFile, scopes: _trail.Scopes);
+
+        Assert.Equal(0, await keyless.PruneAsync(DateTime.UtcNow.AddDays(-365), 365));
+
+        using var scope = _trail.Scope();
+        Assert.Equal(2, await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.CountAsync());
+        Assert.True((await _trail.Chain.VerifyAsync()).Intact);
+    }
+
+    [Fact]
+    public async Task A_retention_run_removes_at_most_one_batch_and_the_next_run_continues()
+    {
+        // Rows from before the chain (sealed at the first start), enough for more than one batch.
+        await _trail.SqlAsync(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < " + (AuditChain.MaxPruneRows + 5) + ") " +
+            "INSERT INTO AuditLog (Timestamp, Actor, ActorType, Action, TargetType, TargetId, TargetName, Success) " +
+            "SELECT '2025-01-01 00:00:00', 'a', 'web', 'container.restart', 'container', 'c', 'c', 1 FROM n");
+        await _trail.Chain.SealExistingAsync();
+
+        Assert.Equal(AuditChain.MaxPruneRows, await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365));
+        Assert.Equal(5, await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365));
+
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Equal(2, report.RowsChecked);   // the two retention records
+    }
+
+    [Fact]
     public async Task Nothing_old_means_nothing_removed_and_no_record()
     {
         await _trail.LogAsync(2);

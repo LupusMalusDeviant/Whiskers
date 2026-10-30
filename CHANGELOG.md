@@ -22,7 +22,8 @@ All notable changes to Whiskers are documented here. The format follows
   rows from one snapshot — and is recorded as `audit.export` before anything is read (503 without that record).
   Self-backups take the checkpoint file before the database copy; restoring an archive from before R1-23 keeps the
   current checkpoint file aside (`audit-checkpoint.json.pre-restore-<time>`) so the restored rows start a new chain.
-  Setting `VAULT_KEY` later is supported: the first start with it signs the existing (unsigned) start of the chain
+  A retention run removes at most 10,000 rows (the hourly run catches up) and is skipped while a signed trail has no
+  `VAULT_KEY`. Setting `VAULT_KEY` later is supported: the first start with it signs the existing (unsigned) start of the chain
   once. **Changing** `VAULT_KEY` makes earlier checkpoint signatures invalid. To start over with a fresh database in
   the same data directory, move `audit-checkpoint.json` aside first — otherwise the new database is not sealed and
   its trail reports the old end as cut off.
