@@ -12,6 +12,9 @@ using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
 using Whiskers.Services.AiChat;
+using Whiskers.Services.AuditLog;
+using Whiskers.Services.Auth;
+using Whiskers.Services.Server;
 using Whiskers.Services.Persistence;
 using Whiskers.Utils;
 
@@ -201,6 +204,80 @@ public sealed class SinkRedactionTests
         var report = await trail.Chain.VerifyAsync();
         Assert.True(report.Intact, string.Join("; ", report.Problems));
         Assert.Equal(1, report.LinksChecked);
+    }
+
+    [Fact]
+    public async Task An_audit_row_changed_later_is_redacted_and_chained_as_stored()
+    {
+        // The outcome write path: an existing row changed under the chain's UpdateAsync, with the interceptor on.
+        using var trail = new AuditTrailFixture(AuditHashChainTests.VaultKey, redacting: true);
+        var id = Assert.Single(await trail.LogAsync(1));
+        using (var scope = trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            await trail.Chain.UpdateAsync(db, [id], async token =>
+            {
+                var row = await db.AuditLog.SingleAsync(a => a.Id == id, token);
+                row.Details = JsonSerializer.Serialize(new { result = $"failed: password={Canary}" });
+                await db.SaveChangesAsync(token);
+                return (true, (IReadOnlyCollection<long>)[id]);
+            });
+        }
+        await trail.Chain.CheckpointAsync();
+
+        using (var scope = trail.Scope())
+            AssertClean((await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().SingleAsync()).Details);
+        var report = await trail.Chain.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Equal(2, report.LinksChecked);
+    }
+
+    [Fact]
+    public async Task An_executed_command_reaches_the_audit_log_only_as_its_length()
+    {
+        // No pattern knows curl's "-u user:pass": the command must not be stored at all, not even cut.
+        var command = $"curl -u deploy:{Canary}{new string('x', 200)} https://api.example.org/hook";
+        var audit = new CapturingAudit();
+        var http = new DefaultHttpContextAccessor(AuthConstants.AgentSyntheticScheme);
+
+        await Whiskers.Mcp.Tools.ServerTools.ExecuteCommand(http, null!, new OkExecutor(), audit, "local", command);
+
+        var (targetId, targetName, details) = Assert.Single(audit.Calls);
+        Assert.Equal($"<withheld: {command.Length} chars>", targetId);
+        Assert.Equal(targetId, targetName);
+        AssertClean(details ?? "");
+    }
+
+    private sealed class CapturingAudit : IToolAuditLog
+    {
+        public List<(string TargetId, string TargetName, string? Details)> Calls { get; } = [];
+
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            Calls.Add((targetId, targetName, details));
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class OkExecutor : IHostCommandExecutor
+    {
+        public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
+            CancellationToken ct = default, int? maxOutputChars = null) =>
+            Task.FromResult(new CommandResult { ExitCode = 0, Output = "ok" });
+    }
+
+    /// <summary>An in-process agent call at Admin level, as the agent's synthetic context carries it.</summary>
+    private sealed class DefaultHttpContextAccessor : Microsoft.AspNetCore.Http.IHttpContextAccessor
+    {
+        public DefaultHttpContextAccessor(string scheme) =>
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                    [new System.Security.Claims.Claim(AuthConstants.McpLevelClaim, McpPermissionLevels.Admin)], scheme)),
+            };
+
+        public Microsoft.AspNetCore.Http.HttpContext? HttpContext { get; set; }
     }
 
     [Fact]

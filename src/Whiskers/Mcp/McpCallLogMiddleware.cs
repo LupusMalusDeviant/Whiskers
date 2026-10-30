@@ -189,9 +189,8 @@ public sealed class McpCallLogMiddleware
         return (PrincipalIds.Anonymous, "deny");
     }
 
-    // URL user info first: a token alone in front of the host (https://<token>@host) is no pattern the redactor knows.
-    private static string? Redact(string? text) =>
-        text is null ? null : SecretRedactor.Redact(PolicyDecisions.WithoutUrlCredentials(text)!);
+    // The sinks' one rule (R1-24): URL user info first, then the patterns; fail closed on a timeout.
+    private static string? Redact(string? text) => SinkRedaction.Text(text);
 
     private static string? Cap(string? s, int max) =>
         s is null ? null : (s.Length > max ? s[..max] + "…" : s);

@@ -60,6 +60,9 @@ public static class SinkRedaction
 
     private static bool IsWithheld(string text) => WithheldMarker.IsMatch(text);
 
+    /// <summary>The length-only stand-in for a payload text (a command, SQL) a writer names directly.</summary>
+    public static string Withheld(string text) => IsWithheld(text) ? text : $"<withheld: {text.Length} chars>";
+
     /// <summary>Free text: URL user info removed, then the secret patterns. A pattern that times out withholds the
     /// whole text (fail closed).</summary>
     public static string? Text(string? text) =>
