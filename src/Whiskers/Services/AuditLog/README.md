@@ -20,7 +20,8 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 - **Gateway writes are different:** the Mutation Gateway writes through its own `AuditLogMutationSink` ([`../Mutations/`](../Mutations/)), which writes the intent *before* execution and **throws** on a failed write, so the mutation is refused (PC-D5).
 - **Sign-ins and downloads (R1-22):** `auth.login`, `auth.login_failed`, `auth.logout` are written by
   [`../Auth/AuthAuditLog.cs`](../Auth/AuthAuditLog.cs); `selfbackup.download` by the download endpoint, fail-closed
-  through `TryLogAsync`.
+  through `TryLogAsync` — one row per request, so a browser resuming a large archive with range requests writes
+  several. A queued sign-in row keeps the time it happened (`TryLogAtAsync`).
 - **A lost row is visible (R1-19):** `LogAsync` still logs and swallows a failed write (the action already happened),
   and tells `IAuditRecovery`, so the `audit` readiness check is Degraded for an hour.
 

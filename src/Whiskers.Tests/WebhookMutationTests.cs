@@ -56,6 +56,8 @@ public sealed class WebhookMutationTests : IDisposable
     private bool _dockerThrows;
     private bool _dockerTimesOut;
 
+    private readonly McpCallOutcomeTests.RecordingAuditLog _rows = new();
+
     public WebhookMutationTests()
     {
         _locks = new ResourceLocks(_servers);
@@ -78,6 +80,7 @@ public sealed class WebhookMutationTests : IDisposable
         services.AddSingleton<IAutomationMutationRunner>(_ => Automation());
         services.AddSingleton<INotificationService>(_notify);
         services.AddSingleton<IGitDeployService>(_git);
+        services.AddSingleton<Whiskers.Services.AuditLog.IAuditLogService>(_rows);
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
         scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
@@ -123,6 +126,9 @@ public sealed class WebhookMutationTests : IDisposable
         Assert.False(Ran(action));
         Assert.False(Stored(webhook.WebhookId).Enabled);
         Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended");
+        // The switch-off is a configuration change of its own: one row, written after the run's event (R1-22).
+        var row = Assert.Single(_rows.Entries, r => r.Action == WebhookService.SuspendAction);
+        Assert.Matches(@"^operation=[^;]+; config\.version ([0-9a-f]{12}) → (?!\1)[0-9a-f]{12}; Enabled: true → false$", row.Details);
     }
 
     [Theory]

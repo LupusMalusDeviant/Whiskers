@@ -26,3 +26,6 @@ compose file and brought up with `docker compose up -d`.
 
 - Module: [`../../Modules/GitDeploy/`](../../Modules/GitDeploy/) · UI: [`../../Components/Pages/GitDeployView.razor`](../../Components/Pages/GitDeployView.razor)
 - Webhook dispatch: [`../Webhooks/WebhookService.cs`](../Webhooks/WebhookService.cs)
+- Audit (R1-22): save, takeover and delete record the app's versioned diff ([`../Mutations/ConfigChange.cs`](../Mutations/ConfigChange.cs)); the token is a secret (a replaced
+  token is a change, fingerprints only), the revision counter and the last deploy are not part of the version. The
+  revision check, the token write and the diff run under the app lock.

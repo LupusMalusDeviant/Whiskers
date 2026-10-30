@@ -48,3 +48,5 @@ has no Core consumer; `ILogMonitorService` does (the AI-triggers page), so Core 
 - UI: [`../../Components/Pages/LogSearch.razor`](../../Components/Pages/LogSearch.razor) (thin `ModuleGuard`
   wrapper) → [`../../Components/Pages/LogSearchView.razor`](../../Components/Pages/LogSearchView.razor)
 - MCP tools: `search_logs`, `list_log_alerts`, `create_log_alert`
+- Audit (R1-22): create, toggle and delete run under one lock and record the rule's versioned diff ([`../Mutations/ConfigChange.cs`](../Mutations/ConfigChange.cs)); the pattern
+  shows as text only, the trigger counters are not part of it.

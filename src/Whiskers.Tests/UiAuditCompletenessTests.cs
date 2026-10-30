@@ -297,5 +297,20 @@ public sealed class UiAuditCompletenessTests : IDisposable
             Assert.True(handler is not null && reads.Contains(handler),
                 $"{page}: a plain Require( in '{handler}' records no refusal — use RequireAsync.");
         }
+
+        // The configuration pages' own gate style (`if (!_isAdmin)`, `HasRoleAsync(AppRole.…)`): the handler holding it
+        // must record its refusal itself (RefuseAsync), unless it only loads what the page shows.
+        var all = handlers.ToList();
+        foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
+                     @"if \(!_isAdmin\)|HasRoleAsync\(AppRole\."))
+        {
+            if (call.Index > 0 && source[call.Index - 1] == '@') continue;
+            var at = all.FindLastIndex(h => h.Index < call.Index);
+            var handler = at < 0 ? null : all[at].Groups[1].Value;
+            if (handler is null || handler.StartsWith("OnInitialized", StringComparison.Ordinal) || reads.Contains(handler)) continue;
+            var end = at + 1 < all.Count ? all[at + 1].Index : source.Length;
+            Assert.True(source[all[at].Index..end].Contains("RefuseAsync", StringComparison.Ordinal),
+                $"{page}: the role gate in '{handler}' records no refusal — call Mutations.RefuseAsync.");
+        }
     }
 }

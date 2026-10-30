@@ -853,7 +853,7 @@ public class WebhookService : IWebhookService
         var lost = string.IsNullOrWhiteSpace(webhook.Owner)
             ? "it has no owner"
             : automation.LostAuthority(actor, capability);
-        if (lost is not null && await SuspendAsync(webhook.WebhookId, webhook.Owner))
+        if (lost is not null && await SuspendAsync(webhook.WebhookId, webhook.Owner, outcome.OperationId))
         {
             await NotifyAsync(scope, "automation_suspended", webhook,
                 $"Webhook \"{webhook.Name}\" was switched off: {lost}. It stays off until an admin takes it over on " +
@@ -913,15 +913,20 @@ public class WebhookService : IWebhookService
     }
 
     /// <summary>Switches the webhook off if it still has the owner the call ran on; a takeover meanwhile wins.</summary>
-    private async Task<bool> SuspendAsync(string webhookId, string? owner)
+    private async Task<bool> SuspendAsync(string webhookId, string? owner, string operationId)
     {
         await _config.WaitAsync();
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            return await db.Webhooks.Where(w => w.WebhookId == webhookId && w.Owner == owner)
-                .ExecuteUpdateAsync(s => s.SetProperty(w => w.Enabled, false)) == 1;
+            var before = await db.Webhooks.AsNoTracking().FirstOrDefaultAsync(w => w.WebhookId == webhookId);
+            // Only a webhook that is still on: one an Admin switched off meanwhile needs no switch-off (and no row).
+            if (await db.Webhooks.Where(w => w.WebhookId == webhookId && w.Owner == owner && w.Enabled)
+                    .ExecuteUpdateAsync(s => s.SetProperty(w => w.Enabled, false)) != 1)
+                return false;
+            if (before is not null) await RecordSuspensionAsync(scope, before, operationId);
+            return true;
         }
         catch (Exception ex)
         {
@@ -930,6 +935,27 @@ public class WebhookService : IWebhookService
         }
         finally { _config.Release(); }
     }
+
+    /// <summary>The automatic switch-off is a configuration change made after the run's own event was written: it gets
+    /// a row of its own with the webhook's version before and after, so the section's versions stay one chain (R1-22).
+    /// Written under the configuration lock, like every other change of the webhook.</summary>
+    private async Task RecordSuspensionAsync(IServiceScope scope, WebhookEntity before, string operationId)
+    {
+        if (scope.ServiceProvider.GetService<Whiskers.Services.AuditLog.IAuditLogService>() is not { } audit) return;
+        var from = Whiskers.Services.Mutations.ConfigChange.Describe(AuditView(before));
+        var wasEnabled = before.Enabled;
+        before.Enabled = false;
+        var to = Whiskers.Services.Mutations.ConfigChange.Describe(AuditView(before));
+        before.Enabled = wasEnabled;
+        var changes = string.Join("; ", Whiskers.Services.Mutations.ConfigChange.Diff(from, to)
+            .Select(c => $"{c.Path}: {c.Before} → {c.After}"));
+        await audit.TryLogAsync("system", "system", SuspendAction, "webhook", before.WebhookId, before.Name,
+            $"operation={operationId}; {Whiskers.Services.Mutations.ConfigChange.VersionAction} {from.Version} → {to.Version}" +
+            (changes.Length > 0 ? $"; {changes}" : ""), success: true);
+    }
+
+    /// <summary>The audit action of an automatic switch-off (the owner lost the authority, or there is none).</summary>
+    public const string SuspendAction = "webhook.suspended";
 
     private async Task NotifyAsync(IServiceScope scope, string eventType, WebhookEntity webhook, string message)
     {

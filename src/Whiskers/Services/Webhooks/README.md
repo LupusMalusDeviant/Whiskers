@@ -67,3 +67,6 @@ request, so Core keeps the `NoopWebhookService` default above for when the modul
 
 - UI: [`../../Components/Pages/Webhooks.razor`](../../Components/Pages/Webhooks.razor)
 - Deployment: [`../Deployment/`](../Deployment/)
+- Audit (R1-22): every configuration writer (create, rotate, enable, takeover, delete, automatic switch-off) runs under
+  one lock and records the webhook's versioned diff ([`../Mutations/ConfigChange.cs`](../Mutations/ConfigChange.cs)) without its trigger counters; the automatic switch-off,
+  made after the run's own event, writes its own `webhook.suspended` row with the version before and after.

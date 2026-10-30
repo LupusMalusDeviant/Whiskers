@@ -352,11 +352,16 @@ public sealed class McpCallOutcomeTests : IDisposable
         }
 
         public List<string> Rows { get; } = [];
+        public List<(string Action, string? Details)> Entries { get; } = [];
 
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
             string targetName, string? details = null, string? serverId = null, bool success = true)
         {
-            lock (Rows) Rows.Add(action);
+            lock (Rows)
+            {
+                Rows.Add(action);
+                Entries.Add((action, details));
+            }
             return Task.CompletedTask;
         }
 

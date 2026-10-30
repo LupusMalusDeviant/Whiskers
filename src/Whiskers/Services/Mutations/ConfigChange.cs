@@ -106,11 +106,6 @@ public static class ConfigChange
         return true;
     }
 
-    /// <summary>A copy of <paramref name="value"/> as it is now, for a store that changes the object in place
-    /// (an entity) and records the change afterwards.</summary>
-    public static object? Capture(object? value) =>
-        value is null ? null : JsonSerializer.SerializeToElement(value, value.GetType());
-
     /// <summary>The settings of <paramref name="value"/> and the version they make up.</summary>
     public static Snapshot Describe(object? value)
     {
@@ -157,7 +152,10 @@ public static class ConfigChange
                 foreach (var property in element.EnumerateObject())
                 {
                     var child = path.Length == 0 ? property.Name : $"{path}.{property.Name}";
-                    Flatten(property.Value, child, secret || IsSecretName(property.Name), into);
+                    // A flag or count named after a secret (HasToken, HasCredential) holds no secret: it stays readable.
+                    var named = IsSecretName(property.Name)
+                                && property.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Number);
+                    Flatten(property.Value, child, secret || named, into);
                 }
                 break;
             case JsonValueKind.Array:

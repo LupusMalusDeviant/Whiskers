@@ -243,6 +243,9 @@ else
         if (!validation.Ok)
         {
             Snackbar.Add(L["SelfBackupPanel_Snackbar_RestoreNotPossible", validation.Error].Value, Severity.Error);
+            // The refused attempt is on record too (R1-22): the archive's file name and a fixed reason only.
+            await Mutations.RefuseAsync("selfbackup.restore", new { archive = Path.GetFileName(archivePath) },
+                "The archive failed validation.");
             return;
         }
 
