@@ -697,6 +697,47 @@ public sealed partial class AuditLoggingTests : IDisposable
     }
 
     [Fact]
+    public async Task An_ssh_key_replaced_under_the_same_file_name_is_a_change()
+    {
+        var servers = new Whiskers.Services.ServerConfig.ServerConfigService(
+            Microsoft.Extensions.Options.Options.Create(new DockerSettings { SocketPath = "unix:///nope.sock" }),
+            NullLogger<Whiskers.Services.ServerConfig.ServerConfigService>.Instance, storePath: Path.Combine(_dir, "servers.json"),
+            dataPaths: new DataPathOptions(_dir));
+        await servers.InitializeAsync();
+        await servers.AddServerAsync(new ServerConfig { Id = "edge", Name = "edge", ConnectionType = ConnectionType.SSH, SshHost = "10.0.0.1" });
+        await servers.SaveSshKeyAsync("edge", "id_ed25519", "first-key-material"u8.ToArray());
+
+        await Gateway().ExecuteAsync(Config("server.save", "server", "op-ssh-key"), async (_, _) =>
+        {
+            await servers.SaveSshKeyAsync("edge", "id_ed25519", "second-key-material"u8.ToArray());
+            return 1;
+        });
+
+        var results = await ResultsOf("op-ssh-key");
+        Assert.Matches(@"^\[set #[0-9a-f]{6,}\] → \[set #[0-9a-f]{6,}\]$", Text(Setting(results, "ssh-key:edge:PrivateKey"), "details"));
+        var text = await EventText("op-ssh-key");
+        Assert.DoesNotContain("key-material", text);
+        Assert.DoesNotContain(Convert.ToBase64String("second-key-material"u8.ToArray()), text);
+    }
+
+    [Fact]
+    public void A_kubeconfig_reference_is_a_secret_and_a_token_limit_is_a_number()
+    {
+        var kubeBefore = ConfigChange.Describe(new { KubeconfigRef = "kubeconfig:edge:aaaa" });
+        var kubeAfter = ConfigChange.Describe(new { KubeconfigRef = "kubeconfig:edge:bbbb" });
+        var change = Assert.Single(ConfigChange.Diff(kubeBefore, kubeAfter));
+        Assert.Matches(@"^\[set #[0-9a-f]{6,}\]$", change.After);
+        Assert.Equal(kubeBefore.Version, kubeAfter.Version);   // a rotated credential alone keeps the version
+
+        var limitBefore = ConfigChange.Describe(new { MaxTokens = 4096, Model = "m" });
+        var limitAfter = ConfigChange.Describe(new { MaxTokens = 8192, Model = "m" });
+        Assert.Equal(("MaxTokens", "4096", "8192"), Assert.Single(ConfigChange.Diff(limitBefore, limitAfter)));
+        Assert.NotEqual(limitBefore.Version, limitAfter.Version);
+        // The credential itself stays a secret.
+        Assert.Matches(@"^\[set #", ConfigChange.Describe(new { ApiToken = "abc" }).Settings["ApiToken"].Shown);
+    }
+
+    [Fact]
     public async Task Overlapping_role_and_whitelist_saves_each_record_the_change_they_made()
     {
         var roles = new RoleService(EmptyConfig(), NullLogger<RoleService>.Instance, Path.Combine(_dir, "roles.json"));

@@ -46,8 +46,14 @@ public static class ConfigChange
     public const string SettingTarget = "setting";
 
     private static readonly Regex SecretName = new(
-        @"(?i)(pass(word|wd|phrase)?|pwd|secret|token|api_?key|access_?key|private_?key|credential|cookie|^key$|keyhash|keyhint|hash$|salt|vault|topic)",
+        @"(?i)(pass(word|wd|phrase)?|pwd|secret|token|api_?key|access_?key|private_?key|credential|cookie|^key$|keyhash|keyhint|hash$|salt|vault|topic|kubeconfig)",
         RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>Counts and limits whose name merely contains a secret word (<c>MaxTokens</c>): plain numbers.</summary>
+    private static readonly Regex CountName = new(
+        @"(?i)((max|min|num|total)_?tokens?|tokens?_?(count|limit|budget))$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+
+    private static bool IsSecretName(string name) => SecretName.IsMatch(name) && !CountName.IsMatch(name);
 
     private static readonly Regex UrlName = new(
         @"(?i)(url|uri|endpoint|homeserver|server)$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
@@ -151,7 +157,7 @@ public static class ConfigChange
                 foreach (var property in element.EnumerateObject())
                 {
                     var child = path.Length == 0 ? property.Name : $"{path}.{property.Name}";
-                    Flatten(property.Value, child, secret || SecretName.IsMatch(property.Name), into);
+                    Flatten(property.Value, child, secret || IsSecretName(property.Name), into);
                 }
                 break;
             case JsonValueKind.Array:
@@ -197,7 +203,7 @@ public static class ConfigChange
     {
         foreach (var name in KeyProperties)
             if (item.TryGetProperty(name, out var key) && key.ValueKind is JsonValueKind.String or JsonValueKind.Number
-                && !SecretName.IsMatch(name) && key.ToString() is { Length: > 0 } text
+                && !IsSecretName(name) && key.ToString() is { Length: > 0 } text
                 && Classify(text, name, secret: false) == TextKind.Plain)
                 return text;
         return null;
@@ -232,7 +238,7 @@ public static class ConfigChange
     /// name; anything else is plain.</summary>
     private static TextKind Classify(string text, string name, bool secret)
     {
-        if (secret || SecretName.IsMatch(name)) return TextKind.Secret;
+        if (secret || IsSecretName(name)) return TextKind.Secret;
         if (OpaqueName.IsMatch(name)) return TextKind.Opaque;
         // A URL-named value that is no absolute URL (a pasted address without its scheme) may still carry a secret
         // path: it is never shown or versioned.
