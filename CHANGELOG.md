@@ -17,7 +17,10 @@ All notable changes to Whiskers are documented here. The format follows
   change while nothing stored lets anyone test a guess. URLs show their origin only; free text (prompts, log
   patterns, commands, descriptions — however short — and any long or URL-holding value) shows as
   `[text, N chars #<fingerprint>]`. The version is computed without secrets, URL paths and free text, so a change of
-  those alone keeps it and appears as a changed setting; a list of
+  those alone keeps it and appears as a changed setting. ntfy topics count as secrets, an address with user info as
+  free text, and a registry host carrying user info (`user:password@host`) is now refused on save — the credential
+  belongs in its own field. Two records with one identity (two role entries for one account) are numbered by
+  occurrence (`a@example.com~2`), so neither hides a change of the other; a list of
   records such as API keys is classified field by field, so a key's level change is readable. An event keeps at most
   20 reports and counts the rest (`results.omitted`). Git-deploy takeovers carry the owner change. The
   configuration pages (Settings, Servers, Webhooks, self-backup, log alerts, agent, AI operations, automation owners,

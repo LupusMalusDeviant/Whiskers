@@ -239,9 +239,12 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   R1-22 the configuration pages follow the same rule, and a configuration store calls `ConfigChange.Record(section,
   before, after)` after a successful write (`ConfigChange.Capture` copies an entity before it is changed in place):
   the event gets the section's version before/after (`config.version`, never shortened) and each changed setting
-  (`setting`, at most `ConfigChange.MaxChanges` per operation, the rest counted). Comparison and version use the
-  complete values; what is shown is safe: secrets as `[set #…]`/`[not set]`, URLs as their origin, free text as
-  `[text, N chars #…]`. A scope keeps at most 20 reports and counts the rest (`MutationScope.OmittedAction`).
+  (`setting`, at most `ConfigChange.MaxChanges` per operation, the rest counted). Comparison uses the complete
+  values (a secret by its per-process fingerprint); the version hashes only a safe projection — secrets as `[set]`,
+  URLs as their origin, free text as `[text]` — so a change of those alone keeps the version and still appears as a
+  changed setting. What is shown is safe: secrets (also ntfy topics) as `[set #…]`/`[not set]`, URLs as their
+  origin, free text and addresses with user info as `[text, N chars #…]`. A repeated record identity is numbered
+  by occurrence (`a@example.com~2`). A scope keeps at most 20 reports and counts the rest (`MutationScope.OmittedAction`).
   Outside a gateway scope `Record` does nothing.
 - **Failure reports.** The 25 mutating MCP tools mark their error answers with `MutationScope.Fail`. UI actions are
   classified by `MutationResults`: `false`, a failed `CommandResult`, a `QueryResult` with an error or a tuple whose

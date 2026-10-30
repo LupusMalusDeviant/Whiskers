@@ -46,11 +46,15 @@ public static class ConfigChange
     public const string SettingTarget = "setting";
 
     private static readonly Regex SecretName = new(
-        @"(?i)(pass(word|wd|phrase)?|pwd|secret|token|api_?key|access_?key|private_?key|credential|cookie|^key$|keyhash|keyhint|hash$|salt|vault)",
+        @"(?i)(pass(word|wd|phrase)?|pwd|secret|token|api_?key|access_?key|private_?key|credential|cookie|^key$|keyhash|keyhint|hash$|salt|vault|topic)",
         RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex UrlName = new(
         @"(?i)(url|uri|endpoint|homeserver|server)$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>Names of an address that may carry user info without a scheme (<c>user:password@host</c>).</summary>
+    private static readonly Regex HostName = new(
+        @"(?i)(host(name)?|address|registry)$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex OpaqueName = new(
         @"(?i)(prompt|pattern|regex|command|script|template|body|message|description|notes?|text|args?|arguments|query|instructions?)s?$",
@@ -149,6 +153,7 @@ public static class ConfigChange
                 break;
             case JsonValueKind.Array:
                 var index = 0;
+                var used = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var item in element.EnumerateArray())
                 {
                     // Lists of records are keyed by their identity, lists of plain values by the value itself: an entry
@@ -156,8 +161,12 @@ public static class ConfigChange
                     // free text) is keyed by position, so no secret or per-process fingerprint enters a path.
                     if (item.ValueKind == JsonValueKind.Object)
                     {
-                        // A record in a secret-named list (ApiKeys) is classified by its own fields.
-                        Flatten(item, $"{path}[{KeyOf(item) ?? Index(index)}]", secret: false, into);
+                        // A record in a secret-named list (ApiKeys) is classified by its own fields. A repeated identity
+                        // (two role entries for one account) is numbered by occurrence, so neither hides the other.
+                        var key = KeyOf(item) ?? Index(index);
+                        var unique = key;
+                        for (var n = 2; !used.Add(unique); n++) unique = $"{key}~{Index(n)}";
+                        Flatten(item, $"{path}[{unique}]", secret: false, into);
                     }
                     else if (item.ValueKind == JsonValueKind.Array)
                     {
@@ -223,6 +232,8 @@ public static class ConfigChange
         if (OpaqueName.IsMatch(name)) return TextKind.Opaque;
         if (UrlName.IsMatch(name) && Uri.TryCreate(text, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
             return TextKind.Url;
+        // An address with user info but no scheme is not recognised by the redactor: never shown, never versioned.
+        if ((HostName.IsMatch(name) || UrlName.IsMatch(name)) && text.Contains('@')) return TextKind.Opaque;
         var plain = text.Length <= MaxValueChars
                     && !text.Contains("://", StringComparison.Ordinal)
                     && !text.Contains('\n')

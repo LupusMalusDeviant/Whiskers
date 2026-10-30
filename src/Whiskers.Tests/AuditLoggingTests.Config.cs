@@ -374,6 +374,74 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.Equal(36 - ConfigChange.MaxChanges, counted);
     }
 
+    [Fact]
+    public async Task A_registry_host_with_user_info_is_refused_and_never_reaches_the_event()
+    {
+        var registries = new Whiskers.Services.Registries.RegistryConfigService(
+            new ProtectedResourceResolutionTests.NoVault(), Path.Combine(_dir, "registries.json"));
+
+        RegistryConfig WithUserInfo() => new() { Id = "r1", Name = "ci", Host = "https://ci:owl42@registry.example" };
+        await Assert.ThrowsAsync<ArgumentException>(() => registries.SaveRegistryAsync(WithUserInfo(), credential: null));
+        await Gateway().ExecuteAsync(Config("registry.save", "registries", "op-reg"), async (_, _) =>
+            await registries.SaveRegistryAsync(WithUserInfo(), credential: null));
+
+        Assert.Empty(await registries.GetRegistriesAsync());
+        Assert.DoesNotContain("owl42", await EventText("op-reg"));
+        // A host stored before the check is still never shown or versioned.
+        var legacy = ConfigChange.Describe(new { Host = "ci:owl42@registry.example" });
+        Assert.DoesNotContain(legacy.Settings.Values, v => v.Shown.Contains("owl") || v.Versioned.Contains("owl"));
+        Assert.Equal(ConfigChange.Describe(new { Host = "ci:other@registry.example" }).Version, legacy.Version);
+    }
+
+    [Fact]
+    public async Task An_ntfy_topic_is_a_secret_in_the_event()
+    {
+        var store = new AppSettingsStore(Path.Combine(_dir, "appsettings.json"));
+        await store.SaveSectionAsync(NtfySettings.SectionName, new NtfySettings { Topic = "alerts-q7wz" });
+
+        await Gateway().ExecuteAsync(Config("config.save", "settings", "op-topic"), async (_, _) =>
+        {
+            await store.SaveSectionAsync(NtfySettings.SectionName, new NtfySettings { Topic = "alerts-m3vx" });
+            return 1;
+        });
+
+        var results = await ResultsOf("op-topic");
+        Assert.Matches(@"^\[set #[0-9a-f]{6}\] → \[set #[0-9a-f]{6}\]$", Text(Setting(results, "Ntfy:Topic"), "details"));
+        // A topic-only rotation keeps the version: no hash of the topic is stored.
+        Assert.Matches(@"^([0-9a-f]{12}) → \1; 1 changed$",
+            Text(Assert.Single(results, r => Text(r, "action") == ConfigChange.VersionAction), "details"));
+        var text = await EventText("op-topic");
+        Assert.DoesNotContain("q7wz", text);
+        Assert.DoesNotContain("m3vx", text);
+    }
+
+    [Fact]
+    public async Task A_change_of_the_first_of_two_entries_for_one_account_is_recorded()
+    {
+        var roles = new RoleService(EmptyConfig(), NullLogger<RoleService>.Instance, Path.Combine(_dir, "roles.json"));
+        await roles.SaveRoleDataAsync(new UserRoleData { Roles =
+        [
+            new() { Email = "ops@example.com", Role = AppRole.Viewer },
+            new() { Email = "ops@example.com", Role = AppRole.Viewer },
+        ] });
+
+        await Gateway().ExecuteAsync(Config("config.roles", "roles", "op-dup"), async (_, _) =>
+        {
+            await roles.SaveRoleDataAsync(new UserRoleData { Roles =
+            [
+                new() { Email = "ops@example.com", Role = AppRole.Admin },
+                new() { Email = "ops@example.com", Role = AppRole.Viewer },
+            ] });
+            return 1;
+        });
+
+        var results = await ResultsOf("op-dup");
+        Assert.Equal($"{(int)AppRole.Viewer} → {(int)AppRole.Admin}",
+            Text(Setting(results, "roles:Roles[ops@example.com].Role"), "details"));
+        Assert.Matches(@"; 1 changed$", Text(Assert.Single(results, r => Text(r, "action") == ConfigChange.VersionAction), "details"));
+        Assert.Contains("Roles[ops@example.com~2].Role", ConfigChange.Describe(roles.GetRoleData()).Settings.Keys);
+    }
+
     // ---- ConfigChange in isolation ------------------------------------------------------------------------------
 
     private sealed record Notifier(string Name, string WebhookUrl, string? Password, string Homeserver);

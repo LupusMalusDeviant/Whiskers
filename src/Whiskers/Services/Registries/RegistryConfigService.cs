@@ -56,6 +56,9 @@ public class RegistryConfigService : IRegistryConfigService
             // Accept a pasted URL, keep only the host[:port] part.
             .Replace("https://", "", StringComparison.OrdinalIgnoreCase)
             .Replace("http://", "", StringComparison.OrdinalIgnoreCase);
+        // Credentials belong in the vault, never in the stored (and audited) host.
+        if (stored.Host.Contains('@'))
+            throw new ArgumentException("Host must not contain user info — enter the credential in its own field.");
 
         await _lock.WaitAsync();
         try
