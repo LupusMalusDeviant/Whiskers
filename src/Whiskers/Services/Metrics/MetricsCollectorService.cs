@@ -277,7 +277,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
 
         }
 
-        _lastAuditPrune = await PruneAuditIfDueAsync(_services, db, now, _lastAuditPrune, ct);
+        _lastAuditPrune = await PruneAuditIfDueAsync(_services, db, now, _lastAuditPrune, ct, _logger);
 
         // Bound the in-memory alert-state map: drop per-container entries whose container is gone.
         // "disk:{server}" keys are kept — one per server, stable.
@@ -424,18 +424,26 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
 
     /// <summary>Audit log + MCP tool-call history: their own, configurable retention (R1-23), once a day. Both go
     /// through the chain — the trail is verified first, the removal is an event of its own and the chain's new start is
-    /// signed — never a plain delete. Returns when it last ran.</summary>
+    /// signed — never a plain delete. Returns when it last ran: also after a failure, which is logged and waits for
+    /// the next day (a full-trail verification every cycle would be load of its own, and must not stop the metrics).</summary>
     internal static async Task<DateTime> PruneAuditIfDueAsync(IServiceProvider services, MetricsDbContext db, DateTime now,
-        DateTime last, CancellationToken ct)
+        DateTime last, CancellationToken ct, ILogger? logger = null)
     {
         if (now - last <= TimeSpan.FromDays(1)) return last;
         var auditDays = services.GetService<IOptionsMonitor<AuditSettings>>()?.CurrentValue.EffectiveRetentionDays
                         ?? new AuditSettings().EffectiveRetentionDays;
         var auditCutoff = now.AddDays(-auditDays);
-        if (services.GetService<Whiskers.Services.AuditLog.IAuditChain>() is { } chain)
-            await chain.PruneAsync(auditCutoff, auditDays, ct);
-        else
-            await Whiskers.Services.AuditLog.AuditChain.Shared.PruneAsync(db, auditCutoff, auditDays, ct);
+        try
+        {
+            if (services.GetService<Whiskers.Services.AuditLog.IAuditChain>() is { } chain)
+                await chain.PruneAsync(auditCutoff, auditDays, ct);
+            else
+                await Whiskers.Services.AuditLog.AuditChain.Shared.PruneAsync(db, auditCutoff, auditDays, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger?.LogError(ex, "AUDIT RETENTION FAILED — nothing removed; the next run is in a day");
+        }
         return now;
     }
 }

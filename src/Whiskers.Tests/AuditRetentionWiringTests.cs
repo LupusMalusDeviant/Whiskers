@@ -33,6 +33,19 @@ public sealed class AuditRetentionWiringTests
     }
 
     [Fact]
+    public async Task A_failed_run_is_logged_and_waits_for_the_next_day()
+    {
+        var chain = new PruneRecorder { Fails = true };
+        var services = new ServiceCollection().AddSingleton<IAuditChain>(chain).BuildServiceProvider();
+        var now = DateTime.UtcNow;
+
+        var last = await MetricsCollectorService.PruneAuditIfDueAsync(services, null!, now, DateTime.MinValue, default);
+
+        Assert.Equal(now, last);   // not retried every cycle
+        Assert.Single(chain.Calls);
+    }
+
+    [Fact]
     public async Task A_period_below_the_floor_is_raised_to_it()
     {
         var chain = new PruneRecorder();
@@ -82,11 +95,12 @@ public sealed class AuditRetentionWiringTests
     private sealed class PruneRecorder : IAuditChain
     {
         public List<(DateTime Cutoff, int Days)> Calls { get; } = [];
+        public bool Fails { get; init; }
 
         public Task<int> PruneAsync(DateTime cutoffUtc, int retentionDays, CancellationToken ct = default)
         {
             Calls.Add((cutoffUtc, retentionDays));
-            return Task.FromResult(0);
+            return Fails ? throw new InvalidOperationException("database is locked") : Task.FromResult(0);
         }
 
         public Task<T> WriteAsync<T>(MetricsDbContext db,

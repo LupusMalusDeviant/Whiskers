@@ -830,7 +830,7 @@ public sealed class AuditChain : IAuditChain
             findings.Add(new AuditFinding("More", [count - MaxProblems]));
         }
         return new AuditChainReport(count == 0, problems, rows, links, head, newest?.Seq, newest is not null, complete,
-            _key is not null, findings, running, count);
+            _key is not null, findings, running, count + findings.Count(f => f.Code is "FileUnreadable" or "AdoptionPending"));
     }
 
     // ---------------------------------------------------------------------------------------------- export
