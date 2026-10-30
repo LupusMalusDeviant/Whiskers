@@ -44,7 +44,10 @@ public interface IAuditChain
 }
 
 /// <summary>What <see cref="IAuditChain.VerifyAsync"/> found. <see cref="Complete"/> is false when something needed
-/// for the check could not be read (the checkpoint file): no finding, but no clean result either.</summary>
+/// for the check could not be read (the checkpoint file) or key adoption is pending: no finding, but no clean result
+/// either. <see cref="CheckpointsSigned"/>: at least one checkpoint was authenticated under the key;
+/// <see cref="KeyConfigured"/>: VAULT_KEY is set. <see cref="Problems"/> are English sentences (logs, export);
+/// <see cref="Findings"/> carry the same as codes and arguments for the UI's languages.</summary>
 public sealed record AuditChainReport(
     bool Intact,
     IReadOnlyList<string> Problems,
@@ -53,7 +56,12 @@ public sealed record AuditChainReport(
     long HeadSeq,
     long? TrustedCheckpointSeq,
     bool CheckpointsSigned,
-    bool Complete = true);
+    bool Complete = true,
+    bool KeyConfigured = false,
+    IReadOnlyList<AuditFinding>? Findings = null);
+
+/// <summary>One verification result for display: <see cref="Code"/> names the resource <c>AuditFinding_{Code}</c>.</summary>
+public sealed record AuditFinding(string Code, object[] Args);
 
 public sealed class AuditChain : IAuditChain
 {
@@ -79,7 +87,7 @@ public sealed class AuditChain : IAuditChain
     public const int KeptRetentionCheckpoints = 60;
 
     /// <summary>At most this many rows are removed per retention run, so the chain lock is never held for long; the
-    /// hourly run catches up.</summary>
+    /// next daily run continues.</summary>
     public const int MaxPruneRows = 10_000;
 
     /// <summary>Rows sealed per round trip on the first start.</summary>
@@ -193,6 +201,23 @@ public sealed class AuditChain : IAuditChain
 
     private static string Sha256(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
+    /// <summary>The signature of a link (R1-23, round 7): HMAC-SHA-256 over <c>link|{hash}</c> under the checkpoint key —
+    /// a database writer can compute a link's SHA-256 but not this, so a link added outside Whiskers is found even
+    /// before the next checkpoint. Null without a key.</summary>
+    private string? SignLink(string hash) =>
+        _key is null ? null : Convert.ToHexStringLower(HMACSHA256.HashData(_key, Encoding.UTF8.GetBytes("link|" + hash)));
+
+    private bool ValidLink(AuditChainEntry link) => SameMac(link.Mac, SignLink(link.Hash));
+
+    private static bool SameMac(string? given, string? expected)
+    {
+        if (expected is null || given is not { Length: 64 }) return false;
+        var bytes = new byte[32];
+        return Convert.FromHexString(given, bytes, out _, out var written) == System.Buffers.OperationStatus.Done
+               && written == 32
+               && CryptographicOperations.FixedTimeEquals(bytes, Convert.FromHexString(expected));
+    }
+
     private string? Sign(AuditCheckpointEntity checkpoint) =>
         _key is null ? null : Convert.ToHexStringLower(HMACSHA256.HashData(_key, Encoding.UTF8.GetBytes(Signed(checkpoint))));
 
@@ -201,14 +226,7 @@ public sealed class AuditChain : IAuditChain
 
     /// <summary>Whether a checkpoint's signature is right; without a key nothing is trusted as signed. A signature
     /// that is not 64 hex digits is wrong, never an error.</summary>
-    private bool Valid(AuditCheckpointEntity checkpoint)
-    {
-        if (_key is null || checkpoint.Mac is not { Length: 64 } mac) return false;
-        var given = new byte[32];
-        return Convert.FromHexString(mac, given, out _, out var written) == System.Buffers.OperationStatus.Done
-               && written == 32
-               && CryptographicOperations.FixedTimeEquals(given, Convert.FromHexString(Sign(checkpoint)!));
-    }
+    private bool Valid(AuditCheckpointEntity checkpoint) => _key is not null && SameMac(checkpoint.Mac, Sign(checkpoint));
 
     // ---------------------------------------------------------------------------------------------- writing
 
@@ -242,6 +260,7 @@ public sealed class AuditChain : IAuditChain
     private async Task AppendAsync(MetricsDbContext db, IReadOnlyCollection<long> auditIds, CancellationToken ct)
     {
         if (auditIds.Count == 0) return;
+        await RefuseUnsignedOnSignedTrailAsync(db, ct);
         var head = await db.AuditChain.AsNoTracking().OrderByDescending(c => c.Seq)
             .Select(c => new { c.Seq, c.Hash }).FirstOrDefaultAsync(ct);
         if (head is null && !await db.AuditCheckpoints.AnyAsync(ct) && ReadFile() is null)
@@ -269,10 +288,22 @@ public sealed class AuditChain : IAuditChain
                 Seq = seq, AuditId = id, RowHash = rowHash, PrevHash = hash,
                 Hash = LinkHash(hash, seq, id, rowHash), At = _time.GetUtcNow().UtcDateTime,
             };
+            link.Mac = SignLink(link.Hash);
             db.AuditChain.Add(link);
             hash = link.Hash;
         }
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>A trail that was signed is not continued without the key (fail closed): an unsigned link there is
+    /// indistinguishable from one added outside Whiskers. The audit write fails, so the gateway refuses the mutation
+    /// until VAULT_KEY is set again. Not cached: the checkpoint table is small, and the answer belongs to the database
+    /// at hand.</summary>
+    private async Task RefuseUnsignedOnSignedTrailAsync(MetricsDbContext db, CancellationToken ct)
+    {
+        if (_key is not null) return;
+        if (ReadFile()?.Mac is not null || await db.AuditCheckpoints.AnyAsync(c => c.Mac != null, ct))
+            throw new InvalidOperationException("The audit trail is signed but VAULT_KEY is not set: audit writes are refused until it is.");
     }
 
     /// <summary>Where the chain starts when it has no link: the newest retention anchor, else the genesis hash.</summary>
@@ -313,6 +344,7 @@ public sealed class AuditChain : IAuditChain
     /// transaction, under the lock.</summary>
     private async Task<int> SealAllAsync(MetricsDbContext db, CancellationToken ct)
     {
+        await RefuseUnsignedOnSignedTrailAsync(db, ct);
         var (seq, hash) = await AnchorAsync(db, ct);
         long after = 0;
         var count = 0;
@@ -330,6 +362,7 @@ public sealed class AuditChain : IAuditChain
                     Seq = seq, AuditId = row.Id, RowHash = rowHash, PrevHash = hash,
                     Hash = LinkHash(hash, seq, row.Id, rowHash), At = _time.GetUtcNow().UtcDateTime,
                 };
+                link.Mac = SignLink(link.Hash);
                 db.AuditChain.Add(link);
                 hash = link.Hash;
             }
@@ -372,8 +405,10 @@ public sealed class AuditChain : IAuditChain
             db.AuditCheckpoints.Add(signed);
             await db.SaveChangesAsync(ct);
         }
-        await CheckpointAsync(db, HeadKind, ct);
-        _logger?.LogInformation("Audit chain: VAULT_KEY adopted, checkpoints are signed from now on");
+        // A genesis checkpoint (never thinned): the links before it were written without the key and are covered by
+        // its hash; every link after it must carry a signature.
+        await CheckpointAsync(db, GenesisKind, ct);
+        _logger?.LogInformation("Audit chain: VAULT_KEY adopted, checkpoints and links are signed from now on");
     }
 
     public async Task CheckpointAsync(CancellationToken ct = default)
@@ -561,10 +596,13 @@ public sealed class AuditChain : IAuditChain
     private async Task<AuditChainReport> VerifyAsync(MetricsDbContext db, AuditCheckpointEntity? file, CancellationToken ct)
     {
         var problems = new List<string>();
+        var findings = new List<AuditFinding>();
         var count = 0;
-        void Problem(string text)
+        void Problem(string code, string text, params object[] args)
         {
-            if (count++ < MaxProblems) problems.Add(text);
+            if (count++ >= MaxProblems) return;
+            problems.Add(text);
+            findings.Add(new AuditFinding(code, args));
         }
 
         // Checkpoints: only a valid signature is trusted. The file holds the newest one outside the database.
@@ -576,8 +614,15 @@ public sealed class AuditChain : IAuditChain
             {
                 complete = false;
                 problems.Add("The checkpoint file cannot be read: the end of the trail could not be checked against it.");
+                findings.Add(new AuditFinding("FileUnreadable", []));
             }
             else checkpoints.Add(file);
+        }
+        if (_adoptionPending)
+        {
+            complete = false;
+            problems.Add("VAULT_KEY adoption is pending: nothing is signed until the checkpoint file can be read at a start.");
+            findings.Add(new AuditFinding("AdoptionPending", []));
         }
         var trusted = new List<AuditCheckpointEntity>();
         foreach (var checkpoint in checkpoints)
@@ -587,7 +632,8 @@ public sealed class AuditChain : IAuditChain
             // An unsigned checkpoint was written while VAULT_KEY was not set: not trusted, but no sign of tampering —
             // nulling a signature gains nothing, the file keeps the newest signed checkpoint.
             else if (checkpoint.Kind != "unreadable" && checkpoint.Mac is not null)
-                Problem($"Checkpoint at link {checkpoint.Seq} ({checkpoint.Kind}) has an invalid signature.");
+                Problem("CheckpointSignature", $"Checkpoint at link {checkpoint.Seq} ({checkpoint.Kind}) has an invalid signature.",
+                    checkpoint.Seq, checkpoint.Kind);
         }
 
         // The anchor: the newest signed retention checkpoint (unsigned ones are taken only when nothing can be signed).
@@ -596,7 +642,13 @@ public sealed class AuditChain : IAuditChain
         var (anchorSeq, running) = retention is null ? (0L, Genesis) : (retention.Seq, retention.Hash);
         var prunedThrough = retention?.PrunedThroughId ?? 0;
 
-        // Links after the anchor, in order: each continues the one before.
+        // Links after the anchor, in order: each continues the one before. Once the trail is signed (a trusted
+        // checkpoint exists), every link after its moment of trust — the anchor or a signed genesis — carries a valid
+        // signature; links before it were written without the key and are covered by that checkpoint's hash.
+        var signedFrom = trusted.Count == 0
+            ? long.MaxValue
+            : Math.Max(anchorSeq, trusted.Where(c => c.Kind == GenesisKind && c.Seq >= anchorSeq).Select(c => c.Seq)
+                .DefaultIfEmpty(anchorSeq).Max());
         var latest = new Dictionary<long, string>();
         var checkedAt = trusted.Select(c => c.Seq).ToHashSet();
         var hashAt = new Dictionary<long, string> { [anchorSeq] = running };
@@ -606,9 +658,13 @@ public sealed class AuditChain : IAuditChain
         {
             links++;
             if (link.PrevHash != running)
-                Problem($"Link {link.Seq} does not continue the link before it (a link was removed or changed).");
+                Problem("LinkBroken", $"Link {link.Seq} does not continue the link before it (a link was removed or changed).", link.Seq);
             if (LinkHash(link.PrevHash, link.Seq, link.AuditId, link.RowHash) != link.Hash)
-                Problem($"Link {link.Seq} was changed.");
+                Problem("LinkChanged", $"Link {link.Seq} was changed.", link.Seq);
+            if (link.Mac is not null && _key is not null && !ValidLink(link))
+                Problem("LinkSignature", $"Link {link.Seq} has an invalid signature.", link.Seq);
+            else if (link.Mac is null && link.Seq > signedFrom)
+                Problem("LinkUnsigned", $"Link {link.Seq} is not signed: it was added outside Whiskers.", link.Seq);
             running = link.Hash;
             head = link.Seq;
             if (checkedAt.Contains(link.Seq)) hashAt[link.Seq] = link.Hash;
@@ -620,9 +676,10 @@ public sealed class AuditChain : IAuditChain
         foreach (var checkpoint in trusted.Where(c => c.Seq >= anchorSeq))
         {
             if (checkpoint.Seq > head)
-                Problem($"The trail ends at link {head}, before the checkpoint at link {checkpoint.Seq}: its end was cut off.");
+                Problem("CutOff", $"The trail ends at link {head}, before the checkpoint at link {checkpoint.Seq}: its end was cut off.",
+                    head, checkpoint.Seq);
             else if (!hashAt.TryGetValue(checkpoint.Seq, out var at) || at != checkpoint.Hash)
-                Problem($"The trail does not match the checkpoint at link {checkpoint.Seq}.");
+                Problem("CheckpointMismatch", $"The trail does not match the checkpoint at link {checkpoint.Seq}.", checkpoint.Seq);
         }
 
         // Every row against its newest link; every link's row must still be there unless retention removed it.
@@ -631,15 +688,20 @@ public sealed class AuditChain : IAuditChain
         {
             rows++;
             if (!latest.Remove(row.Id, out var expected))
-                Problem($"Audit row {row.Id} has no link: it was added outside the trail.");
+                Problem("RowUnlinked", $"Audit row {row.Id} has no link: it was added outside the trail.", row.Id);
             else if (expected != RowHash(row))
-                Problem($"Audit row {row.Id} was changed after it was written.");
+                Problem("RowChanged", $"Audit row {row.Id} was changed after it was written.", row.Id);
         }
         foreach (var missing in latest.Keys.Where(id => id > prunedThrough).Order())
-            Problem($"Audit row {missing} was deleted.");
+            Problem("RowDeleted", $"Audit row {missing} was deleted.", missing);
 
-        if (count > MaxProblems) problems.Add($"… and {count - MaxProblems} more.");
-        return new AuditChainReport(count == 0, problems, rows, links, head, newest?.Seq, _key is not null, complete);
+        if (count > MaxProblems)
+        {
+            problems.Add($"… and {count - MaxProblems} more.");
+            findings.Add(new AuditFinding("More", [count - MaxProblems]));
+        }
+        return new AuditChainReport(count == 0, problems, rows, links, head, newest?.Seq, newest is not null, complete,
+            _key is not null, findings);
     }
 
     // ---------------------------------------------------------------------------------------------- export
@@ -660,7 +722,7 @@ public sealed class AuditChain : IAuditChain
         {
             output.SetLength(0);   // a retried read starts the document over
             var report = await VerifyAsync(db, file, ct);
-            await AuditExport.WriteAsync(db, report, output, exportedUtc, ct);
+            await AuditExport.WriteAsync(db, report, file, output, exportedUtc, ct);
             return report;
         }, ct);
     }
@@ -682,6 +744,11 @@ public sealed class AuditChain : IAuditChain
             _logger?.LogError("AUDIT RETENTION SKIPPED: the trail is signed but VAULT_KEY is not set");
             return 0;
         }
+        if (_adoptionPending)
+        {
+            _logger?.LogError("AUDIT RETENTION SKIPPED: VAULT_KEY adoption is pending");
+            return 0;
+        }
         AuditCheckpointEntity? written = null;
         var removed = await WriteAsync(db, async token =>
         {
@@ -696,7 +763,18 @@ public sealed class AuditChain : IAuditChain
                     .Select(a => (long?)a.Id).FirstOrDefaultAsync(token) is { } batchEnd)
                 through = batchEnd;
             var count = await db.AuditLog.CountAsync(a => a.Id <= through, token);
-            if (count == 0) return (0, Array.Empty<long>());
+            var history = await db.McpToolCalls.CountAsync(e => e.Timestamp < cutoffUtc, token);
+            if (count == 0 && history == 0) return (0, Array.Empty<long>());
+
+            // Nothing is removed from, nor signed over, a trail that does not verify: retention would otherwise sign a
+            // tampered prefix end as the new start, and drop rows whose timestamps were backdated.
+            var report = await VerifyAsync(db, ReadFile(), token);
+            if (!report.Intact || !report.Complete)
+            {
+                _logger?.LogError("AUDIT RETENTION SKIPPED: the trail does not verify ({Problems}) — nothing removed",
+                    string.Join("; ", report.Problems.Take(5)));
+                return (0, Array.Empty<long>());
+            }
 
             // The removal is an event of its own, sealed before anything goes.
             var record = new AuditLogEntity
@@ -704,7 +782,7 @@ public sealed class AuditChain : IAuditChain
                 Timestamp = _time.GetUtcNow().UtcDateTime, Actor = "system", ActorType = "system",
                 Action = RetentionAction, TargetType = "audit", TargetId = "audit-log", TargetName = "Audit log",
                 Details = string.Create(CultureInfo.InvariantCulture,
-                    $"Removed {count} audit row(s) through id {through}, older than {cutoffUtc:O} (retention {retentionDays} days)."),
+                    $"Removed {count} audit row(s) through id {through} and {history} MCP call history row(s), older than {cutoffUtc:O} (retention {retentionDays} days)."),
                 Success = true,
             };
             db.AuditLog.Add(record);
@@ -712,6 +790,8 @@ public sealed class AuditChain : IAuditChain
             await AppendAsync(db, [record.Id], token);
             db.ChangeTracker.Clear();
 
+            await db.McpToolCalls.Where(e => e.Timestamp < cutoffUtc).ExecuteDeleteAsync(token);
+            if (count == 0) return (0, Array.Empty<long>());   // only history went: the trail keeps its start
             await db.AuditLog.Where(a => a.Id <= through).ExecuteDeleteAsync(token);
             // The new anchor: the end of the chain prefix that names only removed rows.
             var firstKept = await db.AuditChain.Where(c => c.AuditId > through).MinAsync(c => (long?)c.Seq, token);

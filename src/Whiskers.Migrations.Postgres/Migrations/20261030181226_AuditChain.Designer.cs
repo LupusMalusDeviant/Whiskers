@@ -211,6 +211,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Mac")
+                        .HasColumnType("text");
+
                     b.Property<string>("PrevHash")
                         .IsRequired()
                         .HasColumnType("text");

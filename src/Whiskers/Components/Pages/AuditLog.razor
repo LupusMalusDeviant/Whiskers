@@ -45,22 +45,26 @@ else
         @if (_report.Intact)
         {
             @L["AuditLog_Verify_Intact", _report.RowsChecked, _report.LinksChecked]
-            @if (!_report.CheckpointsSigned)
+            @if (!_report.KeyConfigured)
             {
                 <br />@L["AuditLog_Verify_Unsigned"]
             }
-            @if (!_report.Complete)
+            else if (!_report.CheckpointsSigned)
             {
-                <br />@L["AuditLog_Verify_Incomplete"]
+                <br />@L["AuditLog_Verify_NoTrustedCheckpoint"]
+            }
+            @foreach (var finding in _report.Findings ?? [])
+            {
+                <br />@L["AuditFinding_" + finding.Code, finding.Args]
             }
         }
         else
         {
             @L["AuditLog_Verify_Broken", _report.Problems.Count]
             <ul class="mb-0">
-                @foreach (var problem in _report.Problems)
+                @foreach (var finding in _report.Findings ?? [])
                 {
-                    <li>@problem</li>
+                    <li>@L["AuditFinding_" + finding.Code, finding.Args]</li>
                 }
             </ul>
         }

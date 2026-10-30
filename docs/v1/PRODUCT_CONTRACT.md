@@ -211,7 +211,7 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | S-05 | Git deploy (via S-04 or U-29) | U-29: the person; S-04: the app owner (R1-08) | owner re-checked each run | ✅ gateway (stored app, revision; S-04 via automation runner) | ❌ | ❌ | clone + compose up of the decided snapshot (planned, explicit `-p` / `-f`; every planned container decided — R1-07/08) | ❌ | ✅ gateway | INV-04, 20, 24, 41 (branch), 45 |
 | S-06 | Health / log / CVE / cert monitors | system | — | — | — | — | no direct mutation; emits events → A-03 | — | — | INV-27 (event text → prompt) |
 | S-07 | VPN bootstrap at startup | system | — | — | — | — | `EnsureUpAsync` local | ❌ | ❌ log only | INV-41 (E-08), 45 |
-| S-08 | Retention purge of AuditLog + Agent History | system | — | — | — | — | after `Audit:RetentionDays` (default 365, at least 30); the audit rows through the chain: an `audit.retention` event first, then the signed new start (R1-23) | — | ✅ (`audit.retention`) | — |
+| S-08 | Retention purge of AuditLog + Agent History | system | — | — | — | — | after `Audit:RetentionDays` (default 365, at least 30), daily; both through the chain: the trail is verified first (nothing removed otherwise), an `audit.retention` event naming both counts, then the signed new start (R1-23) | — | ✅ (`audit.retention`) | — |
 
 ### 7.4 Interactive terminals
 

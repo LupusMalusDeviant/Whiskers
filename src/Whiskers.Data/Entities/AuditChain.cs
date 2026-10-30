@@ -13,6 +13,9 @@ public class AuditChainEntry
     public string PrevHash { get; set; } = "";
     public string Hash { get; set; } = "";
     public DateTime At { get; set; }
+    /// <summary>HMAC-SHA-256 over <c>link|{Hash}</c> under the key derived from VAULT_KEY; null when the vault is not
+    /// configured. Once the trail is signed every new link carries one.</summary>
+    public string? Mac { get; set; }
 }
 
 /// <summary>A signed statement "the chain had reached <see cref="Seq"/> with <see cref="Hash"/>" (R1-23). A retention

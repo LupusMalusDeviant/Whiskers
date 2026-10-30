@@ -204,6 +204,9 @@ namespace Whiskers.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Mac")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PrevHash")
                         .IsRequired()
                         .HasColumnType("TEXT");

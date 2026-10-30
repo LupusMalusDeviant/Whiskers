@@ -10,22 +10,25 @@ All notable changes to Whiskers are documented here. The format follows
   row becomes a link of one SHA-256 hash chain, in the same transaction as the write (ADR-0006). Every minute and at
   shutdown the chain's end is signed with HMAC-SHA-256 under a key derived from `VAULT_KEY`, in the database and in
   `audit-checkpoint.json` beside it. *Verify integrity* on the Audit log page reports a changed row, an inserted row, a
-  deleted row, a broken link, a forged checkpoint and an end cut off before a signed checkpoint. Without `VAULT_KEY`
-  checkpoints are unsigned and the trail is not tamper-evident against a database writer (the page says so); a compromised host can still
-  rewrite everything, and a database writer can change the last minute before the next checkpoint (documented
-  limits). On the first start the existing rows are sealed once (genesis). New tables
+  deleted row, a broken link, a link added outside Whiskers (every link is signed too), a forged checkpoint and an end
+  cut off before a signed checkpoint, in the page's language. Without `VAULT_KEY` nothing is signed and the trail is
+  not tamper-evident against a database writer (the page says so); a compromised host can still rewrite everything,
+  and a database writer can cut off the last minute before the next checkpoint (documented limits). **Once the trail
+  is signed, a start without `VAULT_KEY` refuses audit writes — and with them every mutation — until the key is set
+  again** (fail closed). On the first start the existing rows are sealed once (genesis). New tables
   `AuditChain` and `AuditCheckpoints` (additive migration, both providers); the SQLite→PostgreSQL copy does not copy
   them, so PostgreSQL starts a new chain and the old checkpoint file is kept as `audit-checkpoint.json.sqlite-<time>`.
   **Retention changed: audit log and MCP call history are now kept 365 days (was 90)**, configurable with
-  `Audit__RetentionDays` (never below 30); a retention run is recorded as an `audit.retention` event and signs the
-  chain's new start. The Audit log and Agent History pages (and the audit rows of the Self status timeline) are Admin
-  only. `GET /audit/export` (Admin only) downloads the whole trail as JSON — verification result, checkpoints, chain and
-  rows from one snapshot — and is recorded as `audit.export` before anything is read (503 without that record).
+  `Audit__RetentionDays` (never below 30); a daily retention run first verifies the trail (and removes nothing from
+  one that does not verify), is recorded as an `audit.retention` event naming both counts and signs the chain's new
+  start. The Audit log and Agent History pages (and the audit rows of the Self status timeline) are Admin
+  only. `GET /audit/export` (Admin only) downloads the whole trail as JSON — verification result, the checkpoint file,
+  checkpoints, chain and rows from one snapshot — and is recorded as `audit.export` before anything is read (503 without that record).
   A self-backup restore is recorded after the restart as a chained `selfbackup.restored` event (who, which archive,
   when) — the restore's own event lived in the database it replaced. Self-backups take the checkpoint file before the
   database copy; restoring an archive from before R1-23 keeps the
   current checkpoint file aside (`audit-checkpoint.json.pre-restore-<time>`) so the restored rows start a new chain.
-  A retention run removes at most 10,000 rows (the hourly run catches up) and is skipped while a signed trail has no
+  A retention run removes at most 10,000 rows (the next day's run continues) and is skipped while a signed trail has no
   `VAULT_KEY`. Setting `VAULT_KEY` later is supported: the first start with it signs the existing (unsigned) start of the chain
   once. **Changing** `VAULT_KEY` makes earlier checkpoint signatures invalid. To start over with a fresh database in
   the same data directory, move `audit-checkpoint.json` aside first — otherwise the new database is not sealed and

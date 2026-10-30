@@ -266,6 +266,10 @@ public sealed class AuditHashChainTests : IDisposable
         await keyed.CheckpointAsync();   // pending: signs nothing
         using (var scope = before.Scope())
             Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditCheckpoints.AnyAsync(c => c.Mac != null));
+        var pending = await keyed.VerifyAsync();
+        Assert.False(pending.Complete);   // no clean result while nothing can be signed
+        Assert.False(pending.CheckpointsSigned);
+        Assert.Contains(pending.Findings!, f => f.Code == "AdoptionPending");
 
         File.Delete(before.CheckpointFile);   // the file is readable again (here: gone) at the next start
         var restarted = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
@@ -291,6 +295,90 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public async Task A_superseding_link_forged_for_an_old_row_is_reported_and_never_signed()
+    {
+        // A database writer changes an old row and appends a "new version" link with a correct SHA-256 — everything
+        // but the link signature, which needs VAULT_KEY.
+        var ids = await _trail.LogAsync(2);
+        await _trail.Chain.CheckpointAsync();
+        await _trail.SqlAsync($"UPDATE AuditLog SET Actor = 'someone-else' WHERE Id = {ids[0]}");
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var row = await db.AuditLog.AsNoTracking().SingleAsync(a => a.Id == ids[0]);
+            var head = await db.AuditChain.AsNoTracking().OrderByDescending(c => c.Seq).FirstAsync();
+            var rowHash = AuditChain.RowHash(row);
+            var hash = AuditChain.LinkHash(head.Hash, head.Seq + 1, row.Id, rowHash);
+            await _trail.SqlAsync("INSERT INTO AuditChain (Seq, AuditId, RowHash, PrevHash, Hash, At) VALUES " +
+                                  $"({head.Seq + 1}, {row.Id}, '{rowHash}', '{head.Hash}', '{hash}', '2026-10-30 00:00:00')");
+        }
+
+        // The next checkpoint must not launder it.
+        await _trail.Chain.CheckpointAsync();
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.False(report.Intact);
+        Assert.Contains("Link 3 is not signed: it was added outside Whiskers.", report.Problems);
+        Assert.Contains(report.Findings!, f => f.Code == "LinkUnsigned");
+    }
+
+    [Fact]
+    public async Task A_link_with_a_wrong_signature_is_reported()
+    {
+        await _trail.LogAsync(2);
+        await _trail.SqlAsync("UPDATE AuditChain SET Mac = '" + new string('b', 64) + "' WHERE Seq = 2");
+
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.False(report.Intact);
+        Assert.Contains("Link 2 has an invalid signature.", report.Problems);
+    }
+
+    [Fact]
+    public async Task Without_VAULT_KEY_a_signed_trail_takes_no_more_writes()
+    {
+        // An unsigned link on a signed trail is indistinguishable from a forged one: the write fails (the gateway then
+        // refuses the mutation) until the key is back.
+        await _trail.LogAsync(1);
+        await _trail.Chain.CheckpointAsync();
+        var keyless = new AuditChain(vaultKey: null, _trail.CheckpointFile, scopes: _trail.Scopes);
+        using var scope = _trail.Scope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => keyless.WriteAsync(db, async token =>
+        {
+            var row = new AuditLogEntity { Actor = "a", Action = "x" };
+            db.AuditLog.Add(row);
+            await db.SaveChangesAsync(token);
+            return (0, (IReadOnlyCollection<long>)[row.Id]);
+        }));
+        Assert.Equal(1, await db.AuditLog.CountAsync());   // nothing written: row and link are one transaction
+    }
+
+    [Fact]
+    public async Task Every_finding_has_both_texts()
+    {
+        foreach (var code in new[] { "FileUnreadable", "AdoptionPending", "CheckpointSignature", "LinkBroken", "LinkChanged",
+                     "LinkSignature", "LinkUnsigned", "CutOff", "CheckpointMismatch", "RowUnlinked", "RowChanged",
+                     "RowDeleted", "More" })
+        {
+            foreach (var file in new[] { "SharedResource.resx", "SharedResource.de.resx" })
+            {
+                var path = Directory.GetFiles(FindRepo(), file, SearchOption.AllDirectories)
+                    .Single(p => p.Contains("Resources") && !p.Contains("bin") && !p.Contains("obj"));
+                Assert.Contains($"name=\"AuditFinding_{code}\"", await File.ReadAllTextAsync(path));
+            }
+        }
+
+        static string FindRepo()
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "Whiskers"))) dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "src", "Whiskers");
+        }
+    }
+
+    [Fact]
     public async Task A_rewritten_trail_does_not_match_its_checkpoint()
     {
         // A trail rebuilt from scratch with consistent hashes still differs from what was signed.
@@ -298,6 +386,7 @@ public sealed class AuditHashChainTests : IDisposable
         await _trail.Chain.CheckpointAsync();
         await _trail.SqlAsync("UPDATE AuditLog SET Actor = 'someone-else'");
         await _trail.SqlAsync("DELETE FROM AuditChain");
+        await _trail.SqlAsync("DELETE FROM AuditCheckpoints");   // the database's checkpoints go with it; the file stays
         using (var scope = _trail.Scope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -352,7 +441,8 @@ public sealed class AuditHashChainTests : IDisposable
 
         Assert.True(report.Intact, string.Join("; ", report.Problems));
         Assert.Null(report.TrustedCheckpointSeq);
-        Assert.True(report.CheckpointsSigned);
+        Assert.True(report.KeyConfigured);
+        Assert.False(report.CheckpointsSigned);   // nothing authenticated yet: the UI says so instead of "intact"
     }
 
     [Fact]

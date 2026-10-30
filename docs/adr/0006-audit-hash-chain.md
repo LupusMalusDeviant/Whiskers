@@ -55,21 +55,32 @@ Option B.
   nullable without a default, and no computed property may be added; `AuditHashChainTests` pins the column list); timestamps as whole microseconds
   since 0001-01-01 UTC (both providers store at least that). `RowHash` is the lower-case hex SHA-256 of that JSON;
   `Hash = SHA256("{prevHash}|{seq}|{auditId}|{rowHash}")`, the first `prevHash` being 64 zeros.
+- **Signed links.** With `VAULT_KEY` set, every link also carries `Mac = HMAC-SHA-256(key, "link|{hash}")`. A
+  database writer can compute a link's SHA-256 but not this, so a link appended outside Whiskers — for instance a
+  forged "new version" of an old row, which the verifier would otherwise take as that row's latest state — is
+  reported at once and is never signed over by the next checkpoint. Links written before the key was adopted are
+  covered by the genesis checkpoint written at adoption (the moment of trust); every link after it must be signed.
 - **Verification** walks the chain from its anchor: each entry's `PrevHash` must be the previous entry's `Hash`, and
   each `Hash` must recompute. Every audit row must have a latest chain entry whose `RowHash` matches the row now;
   every chain entry must name a row that exists, unless that row was pruned by a recorded retention. The newest
   trusted checkpoint (valid MAC; the later of the database's and the file's) must lie on the chain with the same
   hash, and the chain must not end before it. Verification reads one database snapshot (a row and its link are always
   both in it or both out); the file is read first, so it never names a link the snapshot cannot have.
-- **Retention** (configurable, default 365 days, minimum 30): one transaction writes an `audit.retention` event
-  (count, boundary), deletes the rows up to an id boundary and the chain prefix that only names such rows, and writes
+- **Retention** (configurable, default 365 days, minimum 30; run daily): one transaction first verifies the whole
+  trail and removes nothing when it is not intact, incomplete, or key adoption is pending (else a tampered or
+  backdated prefix would be cut and its end signed as the new start); then it writes an `audit.retention` event
+  (counts, boundary), deletes the rows up to an id boundary and the chain prefix that only names such rows, and writes
   a signed *retention checkpoint* holding the new anchor (seq, hash) and the pruned id boundary. Rows past the
-  boundary keep their entries; entries after the anchor that name pruned rows are allowed.
+  boundary keep their entries; entries after the anchor that name pruned rows are allowed. The MCP call history
+  (`McpToolCalls`) shares the retention period and is removed in the same recorded transaction — never by a plain
+  delete elsewhere.
 - **Upgrade.** Rows written before R1-23 have no chain. On the first start the existing rows are sealed in id order
   and a checkpoint marks this genesis: they are protected from then on, not proven untouched before.
 - **Readers.** Audit data is Admin only (INV-50): the Audit log and Agent History pages, and `GET /audit/export`,
-  which records an `audit.export` event before it reads anything and returns the verification result, checkpoints,
-  chain and rows from one snapshot — enough to re-check the chain with SHA-256 alone.
+  which records an `audit.export` event before it reads anything and returns the verification result, the checkpoint
+  file as read, the checkpoints, chain and rows from one snapshot — enough to re-check the chain with SHA-256 alone
+  (and its signatures, given the key). Findings carry a code and arguments, so the page shows them in the UI's
+  language; the English sentences stay in logs and the export.
 - **PostgreSQL migration.** The SQLite→PostgreSQL copy renumbers audit rows, so the chain is not copied: PostgreSQL
   seals the copied rows as a new genesis, and the old checkpoint file is kept under another name.
 - **Without `VAULT_KEY`** the chain still works, but checkpoints cannot be signed: the verifier reports
@@ -85,9 +96,9 @@ Option B.
   and the database together and can rewrite all three consistently. The design protects against database-only
   tampering (a leaked database credential, a restored or edited database file), not against a compromised host. An
   external anchor (option C) is the later answer.
-- **Window:** events after the newest checkpoint can be cut off, altered or added undetected by whoever can write the
-  database — the next checkpoint (every minute and at shutdown) signs what is there then. Checkpoints narrow the
-  window; they do not close it.
+- **Window:** events after the newest checkpoint can be cut off undetected by whoever can write the database. With
+  `VAULT_KEY` they cannot be altered or added there (links are signed); without it they can, and the next checkpoint
+  (every minute and at shutdown) signs what is there then.
 - **Key stretching.** The signed checkpoints sit in the database, so the checkpoint key is the passphrase stretched
   with PBKDF2-SHA-256 (600,000 rounds, as the vault) and then separated with HKDF: a leaked database tests VAULT_KEY
   guesses no faster than the vault does. VAULT_KEY must still be a strong, generated secret.
@@ -115,11 +126,15 @@ Option B.
 - A checkpoint file that cannot be read makes a verification *incomplete* (reported, not counted as tampering).
 - Pruning also removes the head checkpoints before the new start; retention and genesis checkpoints are kept. Only the
   newest 60 head checkpoints stay in the database (an older one adds nothing: a rewritten middle changes every later
-  hash). A retention run removes at most 10,000 rows, so the chain lock is held briefly; the hourly run catches up.
+  hash). A retention run removes at most 10,000 rows, so the chain lock is held briefly; the next daily run continues.
 - **The file is never signed over.** A checkpoint replaces the file only while the database trail still reaches what
   the file names (the same hash at its link, or a trusted retention start at or past it). A database cut short, wiped
   or rebuilt below the file keeps the file — and the finding — for good; an error is logged.
 - A trail that was signed is not pruned while `VAULT_KEY` is missing (its new start could not be signed).
   Likewise a process without the key never thins signed head checkpoints nor replaces a signed checkpoint file.
+- **Fail closed without the key.** On a trail that was signed (a signed checkpoint in the database or the file), a
+  process without `VAULT_KEY` refuses to append links: an unsigned link there could not be told apart from a forged
+  one. The audit write fails, so the mutation gateway refuses mutations until the key is set again (INV-01/INV-49);
+  reads keep working.
 - The canonical JSON uses System.Text.Json's default escaping (non-ASCII and HTML-sensitive characters as upper-case
   `\uXXXX`), pinned in code.

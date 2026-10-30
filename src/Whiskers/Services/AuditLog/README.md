@@ -31,11 +31,17 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 - **Tamper evidence (R1-23):** every writer — `AuditLogService`, the gateway's intent and outcome rows, the outbox drain
   and settle in [`../Mutations/`](../Mutations/) — writes through `IAuditChain.WriteAsync`, so a row never exists
   without its link. Never write `AuditLog` directly: verification reports such a row as added outside the trail.
-  Limits: a host compromise holding `VAULT_KEY` can rewrite everything; without `VAULT_KEY` checkpoints are unsigned
-  and a cut-off end goes unnoticed; events after the newest checkpoint (≤ 1 min) can be cut off unnoticed.
+  With `VAULT_KEY` every link and checkpoint is signed (HMAC); a link added outside Whiskers is reported at once. On a
+  signed trail a process without `VAULT_KEY` refuses audit writes (fail closed), so mutations are refused until the
+  key is back. Limits ([ADR-0006](../../../../docs/adr/0006-audit-hash-chain.md)): a host compromise holding
+  `VAULT_KEY` can rewrite everything; without `VAULT_KEY` nothing is signed, so rows and links can be rewritten
+  consistently and a cut-off end goes unnoticed; events after the newest checkpoint (≤ 1 min) can be cut off
+  unnoticed. Verification findings carry a code (`AuditFinding_*` resources) for the page's language.
 - **Retention (R1-23):** `Audit:RetentionDays` (default 365, at least 30; [`AuditSettings`](../../Configuration/AuditSettings.cs)),
-  run hourly by [`../Metrics/MetricsCollectorService.cs`](../Metrics/MetricsCollectorService.cs): an `audit.retention`
-  event first, then the old rows and the chain prefix naming only them, then a signed `retention` checkpoint as the new start.
+  run daily by [`../Metrics/MetricsCollectorService.cs`](../Metrics/MetricsCollectorService.cs): the trail is verified
+  first (nothing is removed from a trail that does not verify), then an `audit.retention` event, then the old rows,
+  the old MCP call history and the chain prefix naming only removed rows, then a signed `retention` checkpoint as the
+  new start.
 - **Readers (R1-23):** the Audit log and Agent History pages are Admin only; the Audit log page verifies the trail on
   demand and exports it via `GET /audit/export` (Admin only; `audit.export` is recorded before anything is read, 503
   without it).

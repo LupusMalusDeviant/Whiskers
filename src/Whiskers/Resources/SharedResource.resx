@@ -5036,7 +5036,46 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AgentHistory_AdminOnly" xml:space="preserve">
     <value>The agent history is available to administrators.</value>
   </data>
-  <data name="AuditLog_Verify_Incomplete" xml:space="preserve">
+  <data name="AuditLog_Verify_NoTrustedCheckpoint" xml:space="preserve">
+    <value>VAULT_KEY is set, but no checkpoint is signed yet: the end of the trail is not protected until the next checkpoint (within a minute).</value>
+  </data>
+  <data name="AuditFinding_FileUnreadable" xml:space="preserve">
     <value>The checkpoint file could not be read, so the end of the trail was not checked against it. Verify again shortly; if it stays unreadable, check the data directory.</value>
+  </data>
+  <data name="AuditFinding_AdoptionPending" xml:space="preserve">
+    <value>VAULT_KEY was set, but the checkpoint file could not be read at start-up: nothing is signed until it can be read at a start. Check the data directory and restart.</value>
+  </data>
+  <data name="AuditFinding_CheckpointSignature" xml:space="preserve">
+    <value>The checkpoint at link {0} ({1}) has an invalid signature.</value>
+  </data>
+  <data name="AuditFinding_LinkBroken" xml:space="preserve">
+    <value>Link {0} does not continue the link before it (a link was removed or changed).</value>
+  </data>
+  <data name="AuditFinding_LinkChanged" xml:space="preserve">
+    <value>Link {0} was changed.</value>
+  </data>
+  <data name="AuditFinding_LinkSignature" xml:space="preserve">
+    <value>Link {0} has an invalid signature.</value>
+  </data>
+  <data name="AuditFinding_LinkUnsigned" xml:space="preserve">
+    <value>Link {0} is not signed: it was added outside Whiskers.</value>
+  </data>
+  <data name="AuditFinding_CutOff" xml:space="preserve">
+    <value>The trail ends at link {0}, before the checkpoint at link {1}: its end was cut off.</value>
+  </data>
+  <data name="AuditFinding_CheckpointMismatch" xml:space="preserve">
+    <value>The trail does not match the checkpoint at link {0}.</value>
+  </data>
+  <data name="AuditFinding_RowUnlinked" xml:space="preserve">
+    <value>Audit row {0} has no link: it was added outside the trail.</value>
+  </data>
+  <data name="AuditFinding_RowChanged" xml:space="preserve">
+    <value>Audit row {0} was changed after it was written.</value>
+  </data>
+  <data name="AuditFinding_RowDeleted" xml:space="preserve">
+    <value>Audit row {0} was deleted.</value>
+  </data>
+  <data name="AuditFinding_More" xml:space="preserve">
+    <value>… and {0} more.</value>
   </data>
 </root>

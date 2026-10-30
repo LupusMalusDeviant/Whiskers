@@ -20,6 +20,7 @@ namespace Whiskers.Migrations
                     RowHash = table.Column<string>(type: "TEXT", nullable: false),
                     PrevHash = table.Column<string>(type: "TEXT", nullable: false),
                     Hash = table.Column<string>(type: "TEXT", nullable: false),
+                    Mac = table.Column<string>(type: "TEXT", nullable: true),
                     At = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>

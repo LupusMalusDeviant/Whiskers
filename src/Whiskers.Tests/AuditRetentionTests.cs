@@ -173,6 +173,74 @@ public sealed class AuditRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_backdated_row_is_not_pruned_and_no_new_start_is_signed()
+    {
+        // Someone moves a young row's timestamp into the past, hoping retention removes it and signs the new start.
+        var ids = await _trail.LogAsync(3);
+        await _trail.Chain.CheckpointAsync();
+        await _trail.SqlAsync($"UPDATE AuditLog SET Timestamp = '2024-01-01 00:00:00' WHERE Id = {ids[0]}");
+
+        var removed = await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+
+        Assert.Equal(0, removed);
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            Assert.Equal(3, await db.AuditLog.CountAsync());
+            Assert.False(await db.AuditCheckpoints.AnyAsync(c => c.Kind == AuditChain.RetentionKind));
+            Assert.False(await db.AuditLog.AnyAsync(a => a.Action == AuditChain.RetentionAction));
+        }
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.Contains($"Audit row {ids[0]} was changed after it was written.", report.Problems);
+    }
+
+    [Fact]
+    public async Task The_MCP_call_history_goes_through_the_same_recorded_retention()
+    {
+        await _trail.LogAsync(1);
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.McpToolCalls.AddRange(
+                new McpToolCallEntity { Timestamp = DateTime.UtcNow.AddDays(-400), Actor = "a", ToolName = "old_tool" },
+                new McpToolCallEntity { Timestamp = DateTime.UtcNow, Actor = "a", ToolName = "young_tool" });
+            await db.SaveChangesAsync();
+        }
+
+        var removed = await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+
+        Assert.Equal(0, removed);   // no audit row was old enough
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            Assert.Equal(["young_tool"], await db.McpToolCalls.Select(e => e.ToolName).ToListAsync());
+            var record = await db.AuditLog.SingleAsync(a => a.Action == AuditChain.RetentionAction);
+            Assert.Contains("Removed 0 audit row(s)", record.Details);
+            Assert.Contains("and 1 MCP call history row(s)", record.Details);
+        }
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+    }
+
+    [Fact]
+    public async Task A_tampered_trail_keeps_its_MCP_call_history_too()
+    {
+        var ids = await _trail.LogAsync(1);
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.McpToolCalls.Add(new McpToolCallEntity { Timestamp = DateTime.UtcNow.AddDays(-400), Actor = "a", ToolName = "old_tool" });
+            await db.SaveChangesAsync();
+        }
+        await _trail.SqlAsync($"UPDATE AuditLog SET Actor = 'x' WHERE Id = {ids[0]}");
+
+        await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+
+        using var check = _trail.Scope();
+        Assert.Equal(1, await check.ServiceProvider.GetRequiredService<MetricsDbContext>().McpToolCalls.CountAsync());
+    }
+
+    [Fact]
     public async Task A_forged_retention_checkpoint_cannot_hide_deleted_rows()
     {
         var ids = await _trail.LogAsync(3);
@@ -203,6 +271,10 @@ public sealed class AuditRetentionTests : IDisposable
         using var json = JsonDocument.Parse(output.ToArray());
         var root = json.RootElement;
         Assert.Equal("whiskers-audit-export/v1", root.GetProperty("format").GetString());
+        // The checkpoint file — the one part outside the database — is in it too.
+        var file = root.GetProperty("checkpointFile");
+        Assert.Equal(JsonValueKind.Object, file.ValueKind);
+        Assert.False(string.IsNullOrEmpty(file.GetProperty("Mac").GetString()));
         Assert.True(root.GetProperty("verification").GetProperty("Intact").GetBoolean());
         var rows = root.GetProperty("rows").EnumerateArray().ToList();
         Assert.Equal(4, rows.Count);   // three young rows + the retention record

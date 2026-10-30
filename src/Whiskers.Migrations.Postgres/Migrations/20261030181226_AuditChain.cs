@@ -21,6 +21,7 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     RowHash = table.Column<string>(type: "text", nullable: false),
                     PrevHash = table.Column<string>(type: "text", nullable: false),
                     Hash = table.Column<string>(type: "text", nullable: false),
+                    Mac = table.Column<string>(type: "text", nullable: true),
                     At = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
