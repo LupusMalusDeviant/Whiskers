@@ -60,7 +60,7 @@ else
         }
         else
         {
-            @L["AuditLog_Verify_Broken", _report.Problems.Count]
+            @L["AuditLog_Verify_Broken", _report.FindingCount]
             <ul class="mb-0">
                 @foreach (var finding in _report.Findings ?? [])
                 {

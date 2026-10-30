@@ -377,7 +377,8 @@ public static class WhiskersPipelineExtensions
             var build = Path.Combine(ctx.RequestServices.GetRequiredService<Whiskers.Configuration.DataPathOptions>().SelfBackupsDir,
                 ".build");
             Directory.CreateDirectory(build);
-            var temp = new FileStream(Path.Combine(build, $"audit-export-{Guid.NewGuid():N}.tmp"), FileMode.CreateNew,
+            Whiskers.Services.AuditLog.AuditExport.SweepStale(build, DateTime.UtcNow);
+            var temp = new FileStream(Path.Combine(build, $"{Whiskers.Services.AuditLog.AuditExport.TempPrefix}{Guid.NewGuid():N}.tmp"), FileMode.CreateNew,
                 FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
             try
             {

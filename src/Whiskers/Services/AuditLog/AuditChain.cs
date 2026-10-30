@@ -66,7 +66,8 @@ public sealed record AuditChainReport(
     bool Complete = true,
     bool KeyConfigured = false,
     IReadOnlyList<AuditFinding>? Findings = null,
-    string? HeadHash = null);
+    string? HeadHash = null,
+    int FindingCount = 0);
 
 /// <summary>One verification result for display: <see cref="Code"/> names the resource <c>AuditFinding_{Code}</c>.</summary>
 public sealed record AuditFinding(string Code, object[] Args);
@@ -297,6 +298,12 @@ public sealed class AuditChain : IAuditChain
             if (row is null) continue;   // nothing to change: the write will match no row
             var link = await db.AuditChain.AsNoTracking().Where(c => c.AuditId == id).OrderByDescending(c => c.Seq)
                 .FirstOrDefaultAsync(ct);
+            if (_adoptionPending && link is not null && link.Mac is null && LinkHolds(link) && link.RowHash == RowHash(row))
+            {
+                _logger?.LogWarning("Audit row {AuditId} not changed: VAULT_KEY adoption is pending, its link is not signed yet", id);
+                throw new InvalidOperationException(
+                    $"Audit row {id} cannot be changed while VAULT_KEY adoption is pending (its link is not signed yet).");
+            }
             if (link is null || !LinkHolds(link) || link.RowHash != RowHash(row) || (_key is not null && link.Mac is null))
             {
                 _logger?.LogError("AUDIT ROW CHANGED OUTSIDE WHISKERS: audit row {AuditId} does not match its newest " +
@@ -392,10 +399,14 @@ public sealed class AuditChain : IAuditChain
         }
         // A chain that was here once is not started again: emptied chain tables beside a checkpoint file are a
         // tampered trail, and sealing its rows now would hide that. Verification reports it.
-        if (ReadFile() is not null)
+        if (ReadFile() is { } present)
         {
-            _logger?.LogError("AUDIT CHAIN MISSING: the checkpoint file {Path} exists but the database has no chain — " +
-                              "not starting a new one; verify the audit trail", _checkpointFile);
+            if (present.Kind == "unreadable")
+                _logger?.LogError("AUDIT CHAIN NOT STARTED: the checkpoint file {Path} cannot be read — audit writes are " +
+                                  "refused until a start can read it; check the file's permissions", _checkpointFile);
+            else
+                _logger?.LogError("AUDIT CHAIN MISSING: the checkpoint file {Path} exists but the database has no chain — " +
+                                  "not starting a new one; verify the audit trail", _checkpointFile);
             return;
         }
         var sealedRows = await WriteAsync(db, async token => (await SealAllAsync(db, token), Array.Empty<long>()), ct);
@@ -819,7 +830,7 @@ public sealed class AuditChain : IAuditChain
             findings.Add(new AuditFinding("More", [count - MaxProblems]));
         }
         return new AuditChainReport(count == 0, problems, rows, links, head, newest?.Seq, newest is not null, complete,
-            _key is not null, findings, running);
+            _key is not null, findings, running, count + findings.Count(f => f.Code is "FileUnreadable" or "AdoptionPending"));
     }
 
     // ---------------------------------------------------------------------------------------------- export

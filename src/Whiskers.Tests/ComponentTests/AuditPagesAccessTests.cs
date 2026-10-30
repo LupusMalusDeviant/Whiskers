@@ -9,6 +9,11 @@ using Whiskers.Models;
 using Whiskers.Services.AuditLog;
 using Whiskers.Services.Auth;
 using Whiskers.Services.Observability;
+using Whiskers.Services.Docker.Budget;
+using Whiskers.Services.LogMonitor;
+using Whiskers.Services.LogMonitor.Hygiene;
+using Whiskers.Services.Observability.SelfMetrics;
+using Whiskers.Services.ServerConfig;
 
 namespace Whiskers.Tests.ComponentTests;
 
@@ -63,6 +68,35 @@ public class AuditPagesAccessTests : BunitContext, IAsyncLifetime
         Assert.Empty(_calls.Calls);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_Self_status_timeline_reads_audit_rows_for_admins_only(bool admin)
+    {
+        Setup(admin);
+        Services.AddSingleton((ISelfMetrics)(object)Recording<ISelfMetrics>.Create());
+        Services.AddSingleton((IServerBudget)(object)Recording<IServerBudget>.Create());
+        Services.AddSingleton((IServerCircuitBreaker)(object)Recording<IServerCircuitBreaker>.Create());
+        Services.AddSingleton((ILoopSuspensionService)(object)Recording<ILoopSuspensionService>.Create());
+        Services.AddSingleton((ILogMonitorService)(object)Recording<ILogMonitorService>.Create());
+        Services.AddSingleton((ILogScanExclusions)(object)Recording<ILogScanExclusions>.Create());
+        Services.AddSingleton((IServerConfigService)(object)Recording<IServerConfigService>.Create());
+        var alerts = Recording<Whiskers.Services.Notifications.IInAppNotificationStore>.Create();
+        Services.AddSingleton((Whiskers.Services.Notifications.IInAppNotificationStore)(object)alerts);
+        Services.AddSingleton((Whiskers.Services.Observability.Outcomes.IActionOutcomeService)(object)
+            Recording<Whiskers.Services.Observability.Outcomes.IActionOutcomeService>.Create());
+
+        var page = Render<SelfStatus>();
+
+        if (admin) page.WaitForAssertion(() => Assert.Contains(nameof(IAuditLogService.GetRecentAsync), _audit.Calls));
+        else
+        {
+            // The timeline was read (its alerts), just without the audit rows.
+            page.WaitForAssertion(() => Assert.Contains("QueryAsync", alerts.Calls));
+            Assert.DoesNotContain(nameof(IAuditLogService.GetRecentAsync), _audit.Calls);
+        }
+    }
+
     [Fact]
     public void An_admin_gets_the_rows()
     {
@@ -83,7 +117,7 @@ public class AuditPagesAccessTests : BunitContext, IAsyncLifetime
         public Task<bool> HasRoleAsync(AppRole required) => Task.FromResult(role >= required);
     }
 
-    /// <summary>Records every call; answers with empty lists and default values.</summary>
+    /// <summary>Records every call; answers with empty collections and default values.</summary>
     public class Recording<T> : DispatchProxy where T : class
     {
         public ConcurrentQueue<string> Calls { get; } = new();
@@ -99,12 +133,28 @@ public class AuditPagesAccessTests : BunitContext, IAsyncLifetime
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Task<>))
             {
                 var inner = type.GetGenericArguments()[0];
-                object? value = inner.IsValueType ? Activator.CreateInstance(inner)
-                    : inner.IsGenericType && inner.GetGenericTypeDefinition() == typeof(List<>) ? Activator.CreateInstance(inner)
-                    : null;
-                return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(inner).Invoke(null, [value]);
+                return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(inner).Invoke(null, [Empty(inner)]);
             }
-            return type.IsValueType ? Activator.CreateInstance(type) : null;
+            return Empty(type);
+        }
+
+        private static object? Empty(Type type)
+        {
+            if (type.IsValueType) return Activator.CreateInstance(type);
+            if (type.IsArray) return Array.CreateInstance(type.GetElementType()!, 0);
+            if (!type.IsGenericType) return null;
+            var definition = type.GetGenericTypeDefinition();
+            var arguments = type.GetGenericArguments();
+            if (definition == typeof(List<>) || definition == typeof(Dictionary<,>) || definition == typeof(HashSet<>))
+                return Activator.CreateInstance(type);
+            if (definition == typeof(IReadOnlyDictionary<,>) || definition == typeof(IDictionary<,>))
+                return Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(arguments));
+            if (definition == typeof(IEnumerable<>) || definition == typeof(IReadOnlyList<>) || definition == typeof(IReadOnlyCollection<>)
+                || definition == typeof(IList<>) || definition == typeof(ICollection<>))
+                return Array.CreateInstance(arguments[0], 0);
+            if (definition == typeof(IReadOnlySet<>) || definition == typeof(ISet<>))
+                return Activator.CreateInstance(typeof(HashSet<>).MakeGenericType(arguments));
+            return null;
         }
     }
 }
