@@ -117,6 +117,24 @@ public class BackupServiceTests
     }
 
     [Fact]
+    public async Task The_audit_checkpoint_file_is_archived_once_as_taken_before_the_database()
+    {
+        // R1-23: staged before VACUUM INTO, so a restored database always reaches the restored checkpoint.
+        var (svc, paths, root, sp) = NewService(vaultKey: null);
+        try
+        {
+            await File.WriteAllTextAsync(paths.AuditCheckpointJson, "{\"Kind\":\"head\",\"Seq\":7}");
+
+            var info = await svc.CreateBackupAsync("manual");
+
+            await using var fs = File.OpenRead(svc.ResolveArchivePath(info.Id)!);
+            var inspection = await BackupArchiver.InspectAsync(fs, Path.Combine(root, "insp"));
+            Assert.Single(inspection.EntryNames, n => n == "audit-checkpoint.json");
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
     public async Task Validate_rejects_a_newer_schema()
     {
         var (svc, _, root, sp) = NewService(vaultKey: null);

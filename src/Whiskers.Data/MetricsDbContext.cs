@@ -66,6 +66,9 @@ public class MetricsDbContext : DbContext
     public DbSet<ServerMetricEntity> ServerMetrics => Set<ServerMetricEntity>();
     public DbSet<AlertHistoryEntity> AlertHistory => Set<AlertHistoryEntity>();
     public DbSet<AuditLogEntity> AuditLog => Set<AuditLogEntity>();
+    /// <summary>The audit hash chain and its signed checkpoints (R1-23, ADR-0006).</summary>
+    public DbSet<AuditChainEntry> AuditChain => Set<AuditChainEntry>();
+    public DbSet<AuditCheckpointEntity> AuditCheckpoints => Set<AuditCheckpointEntity>();
     public DbSet<McpToolCallEntity> McpToolCalls => Set<McpToolCallEntity>();
     public DbSet<VolumeBackupEntity> VolumeBackups => Set<VolumeBackupEntity>();
     public DbSet<ScheduledTaskEntity> ScheduledTasks => Set<ScheduledTaskEntity>();
@@ -137,6 +140,19 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => x.OperationId);
             e.HasIndex(x => x.EventId).IsUnique();
             e.HasIndex(x => new { x.Phase, x.Timestamp });
+        });
+
+        modelBuilder.Entity<AuditChainEntry>(e =>
+        {
+            // The appender assigns the position: it is hashed, so the database must not choose it.
+            e.HasKey(x => x.Seq);
+            e.Property(x => x.Seq).ValueGeneratedNever();
+            e.HasIndex(x => x.AuditId);
+        });
+
+        modelBuilder.Entity<AuditCheckpointEntity>(e =>
+        {
+            e.HasIndex(x => new { x.Kind, x.Seq });
         });
 
         modelBuilder.Entity<McpToolCallEntity>(e =>

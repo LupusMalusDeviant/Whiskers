@@ -4455,7 +4455,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>active</value>
   </data>
   <data name="AiOps_AdminOnly" xml:space="preserve">
-    <value>This guided setup is available to administrators. You can still read the governance pages (Guardrails, Approvals, Agent History) with your current role.</value>
+    <value>This guided setup is available to administrators. You can still read the Guardrails and Approvals pages with your current role.</value>
   </data>
   <data name="AiOps_Copied" xml:space="preserve">
     <value>Copied to clipboard.</value>
@@ -5011,5 +5011,29 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Webhook_Run_Cancelled" xml:space="preserve">
     <value>The action was cancelled.</value>
+  </data>
+  <data name="AuditLog_AdminOnly" xml:space="preserve">
+    <value>The audit log is available to administrators.</value>
+  </data>
+  <data name="AuditLog_Verify" xml:space="preserve">
+    <value>Verify integrity</value>
+  </data>
+  <data name="AuditLog_Export" xml:space="preserve">
+    <value>Export</value>
+  </data>
+  <data name="AuditLog_Verify_Intact" xml:space="preserve">
+    <value>The audit trail is intact: {0} rows and {1} chain links checked.</value>
+  </data>
+  <data name="AuditLog_Verify_Unsigned" xml:space="preserve">
+    <value>VAULT_KEY is not set, so checkpoints are unsigned: a cut-off end of the trail cannot be detected.</value>
+  </data>
+  <data name="AuditLog_Verify_Broken" xml:space="preserve">
+    <value>The audit trail was tampered with ({0} findings):</value>
+  </data>
+  <data name="AuditLog_Export_NotRecorded" xml:space="preserve">
+    <value>The export could not be recorded in the audit log, so it was not started. Try again shortly.</value>
+  </data>
+  <data name="AgentHistory_AdminOnly" xml:space="preserve">
+    <value>The agent history is available to administrators.</value>
   </data>
 </root>

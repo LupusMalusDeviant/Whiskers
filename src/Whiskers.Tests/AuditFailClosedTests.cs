@@ -40,7 +40,7 @@ public sealed class AuditFailClosedTests : IDisposable
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o
             .UseSqlite($"Data Source={Path.Combine(_root, "metrics.db")};Pooling=False")
-            .AddInterceptors(_writes, _reads));
+            .AddInterceptors(_writes, _writes.Commits, _reads));
         _sp = services.BuildServiceProvider();
         _scopes = _sp.GetRequiredService<IServiceScopeFactory>();
         using (var scope = _scopes.CreateScope())
@@ -82,11 +82,24 @@ public sealed class AuditFailClosedTests : IDisposable
                 ? throw new InvalidOperationException("database is locked")
                 : base.SavingChangesAsync(eventData, result, cancellationToken);
 
+        // Outside a transaction the save is the commit; inside one (the audit chain's, R1-23) the commit is.
         public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result,
             CancellationToken cancellationToken = default) =>
-            FailAfter && eventData.Context?.ChangeTracker.Entries<AuditLogEntity>().Any() == true
+            FailAfter && eventData.Context?.Database.CurrentTransaction is null
+                      && eventData.Context.ChangeTracker.Entries<AuditLogEntity>().Any()
                 ? throw new InvalidOperationException("connection reset after commit")
                 : base.SavedChangesAsync(eventData, result, cancellationToken);
+
+        public DbTransactionInterceptor Commits => new CommitAnswers(this);
+
+        private sealed class CommitAnswers(AuditWrites writes) : DbTransactionInterceptor
+        {
+            public override Task TransactionCommittedAsync(System.Data.Common.DbTransaction transaction,
+                TransactionEndEventData eventData, CancellationToken cancellationToken = default) =>
+                writes.FailAfter && eventData.Context?.ChangeTracker.Entries<AuditLogEntity>().Any() == true
+                    ? throw new InvalidOperationException("connection reset after commit")
+                    : base.TransactionCommittedAsync(transaction, eventData, cancellationToken);
+        }
     }
 
     /// <summary>Runs <see cref="Before"/> once, right before the next read of the operation journal.</summary>

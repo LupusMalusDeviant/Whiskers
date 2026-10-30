@@ -274,10 +274,16 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             await db.ServerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
             await db.AlertHistory.Where(a => a.Timestamp < cutoff).ExecuteDeleteAsync(ct);
 
-            // Audit log + MCP tool-call log have a longer retention (90 days). Timestamp is indexed.
-            var cutoff90d = now.AddDays(-90);
-            await db.AuditLog.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
-            await db.McpToolCalls.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
+            // Audit log + MCP tool-call log: their own, configurable retention (R1-23). The audit rows go through the
+            // chain — the removal is an event of its own and the chain's new start is signed — never a plain delete.
+            var auditDays = _services.GetService<IOptionsMonitor<AuditSettings>>()?.CurrentValue.EffectiveRetentionDays
+                            ?? new AuditSettings().EffectiveRetentionDays;
+            var auditCutoff = now.AddDays(-auditDays);
+            if (_services.GetService<Whiskers.Services.AuditLog.IAuditChain>() is { } chain)
+                await chain.PruneAsync(auditCutoff, auditDays, ct);
+            else
+                await Whiskers.Services.AuditLog.AuditChain.Shared.PruneAsync(db, auditCutoff, auditDays, ct);
+            await db.McpToolCalls.Where(e => e.Timestamp < auditCutoff).ExecuteDeleteAsync(ct);
         }
 
         // Bound the in-memory alert-state map: drop per-container entries whose container is gone.

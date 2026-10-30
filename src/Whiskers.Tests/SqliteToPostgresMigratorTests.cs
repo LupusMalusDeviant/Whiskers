@@ -33,6 +33,7 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
     [InlineData("DROP TABLE WebhookDeliveries; DROP TABLE Operations; DROP TABLE Approvals;", "Approvals")]          // before R1-14
     [InlineData("DROP TABLE WebhookDeliveries; DROP TABLE Operations;", "Operations")]                               // before R1-18
     [InlineData("DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]                                               // before R1-10
+    [InlineData("DROP TABLE AuditChain; DROP TABLE AuditCheckpoints; DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]  // before R1-10 and R1-23
     public async Task A_source_from_an_older_release_migrates_completely(string drop, string absent)
     {
         // A database migrated by an older release lacks the tables of every release after its own.
@@ -58,6 +59,34 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal(1, await check.ScheduledTasks.CountAsync());
         Assert.Equal(0, await check.PolicyDecisions.CountAsync());
         Assert.Equal(0, await check.Approvals.CountAsync());
+    }
+
+    [Fact]
+    public async Task The_audit_chain_is_not_copied_the_target_starts_its_own()
+    {
+        // R1-23: the copied audit rows get new ids, so the source's links would name the wrong rows.
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        await using (var src = NewDb(srcPath))
+        {
+            src.AuditLog.Add(new AuditLogEntity { Actor = "a", Action = "container.start" });
+            await src.SaveChangesAsync();
+            await Whiskers.Services.AuditLog.AuditChain.Shared.WriteAsync(src,
+                _ => Task.FromResult((0, (IReadOnlyCollection<long>)[src.AuditLog.Single().Id])));
+        }
+
+        int rc;
+        var log = new StringWriter();
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, log);
+
+        Assert.Equal(0, rc);
+        Assert.Contains("'AuditChain' is not copied", log.ToString());
+        await using var check = NewDb(dstPath);
+        Assert.Equal(1, await check.AuditLog.CountAsync());
+        Assert.Equal(0, await check.AuditChain.CountAsync());
+        Assert.Equal(0, await check.AuditCheckpoints.CountAsync());
     }
 
     [Fact]

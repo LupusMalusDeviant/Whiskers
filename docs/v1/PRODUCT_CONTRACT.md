@@ -129,7 +129,7 @@ Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
 INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (no complete audit event — since R1-19 every gateway attempt is one complete event with typed fields; it remains for paths not yet on the gateway and for the rows UI pages still write themselves, R1-21; MCP tools write none of their own since R1-20),
-INV-48 (audit after the fact, fail-open — since R1-19 the gateway refuses without a durable intent and keeps a failed outcome or refusal recoverable and visible; it remains for `AuditLogService` callers outside the gateway, whose lost rows are now at least visible), INV-49 (no tamper evidence). Rows below list only the path-specific gaps.
+INV-48 (audit after the fact, fail-open — since R1-19 the gateway refuses without a durable intent and keeps a failed outcome or refusal recoverable and visible; it remains for `AuditLogService` callers outside the gateway, whose lost rows are now at least visible). INV-49 holds since R1-23 for every audit row (hash chain with signed checkpoints, ADR-0006). Rows below list only the path-specific gaps.
 
 ### 7.1 MCP tools (direct `/mcp` calls; the in-process agent invokes the same methods)
 
@@ -210,7 +210,7 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | S-05 | Git deploy (via S-04 or U-29) | U-29: the person; S-04: the app owner (R1-08) | owner re-checked each run | ✅ gateway (stored app, revision; S-04 via automation runner) | ❌ | ❌ | clone + compose up of the decided snapshot (planned, explicit `-p` / `-f`; every planned container decided — R1-07/08) | ❌ | ✅ gateway | INV-04, 20, 24, 41 (branch), 45 |
 | S-06 | Health / log / CVE / cert monitors | system | — | — | — | — | no direct mutation; emits events → A-03 | — | — | INV-27 (event text → prompt) |
 | S-07 | VPN bootstrap at startup | system | — | — | — | — | `EnsureUpAsync` local | ❌ | ❌ log only | INV-41 (E-08), 45 |
-| S-08 | Retention purge of AuditLog + Agent History | system | — | — | — | — | hard delete after 90 days | — | ❌ | INV-50 |
+| S-08 | Retention purge of AuditLog + Agent History | system | — | — | — | — | after `Audit:RetentionDays` (default 365, at least 30); the audit rows through the chain: an `audit.retention` event first, then the signed new start (R1-23) | — | ✅ (`audit.retention`) | — |
 
 ### 7.4 Interactive terminals
 
@@ -283,6 +283,10 @@ mTLS carries the server's diff.
 | U-33 | Approvals approve / reject | approve **and** reject (same rules since R1-15, INV-37): level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); a requester never decides their own non-interactive request, and decides an interactive one only while `RequireSecondApprover` is off (PC-D4); not after expiry | — | ✅ (R1-15: `ApprovalSeparationOfDutyTests`, `ApprovalStoreTests`) | — (INV-31 closed by R1-14; INV-32, 33, 34, 37 by R1-15) |
 | U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | — | GW ✅ (versioned, redacted diff; no page row since R1-22) | INV-15, 16 |
 
+Reading the trail is not a mutation and not counted above, but it is governed (R1-23, INV-50): the Audit log and Agent
+History pages and the audit rows of the Self status timeline are Admin only; `GET /audit/export` is Admin only, records
+`audit.export` before it reads anything (503 without that row) and records a signed-in user's refusal.
+
 ### 7.6 Totals
 
 *Correction:* the inventory summary in `audit/B-mutations.md` and `TECHNICAL_AUDIT.md` §6 said 87 paths; its rows add up
@@ -292,12 +296,12 @@ to 41 + 4 + 8 + 3 + 34 = **90**. Both documents are corrected in this PR.
 |---|---|---|
 | MCP tools | 41 | 40 |
 | Agent | 4 | 4 |
-| Background / webhook / system | 8 | 8 |
+| Background / webhook / system | 8 | 7 |
 | Terminals | 3 | 3 |
 | UI handler groups | 34 | 34 |
-| **Total** | **90** | **89** (M-24 has no path-specific gap) |
+| **Total** | **90** | **88** (M-24 and S-08 have no path-specific gap) |
 
-All 90 paths are blocked today by the shared gaps (INV-01, 22, 38, 39, 45, 48, 49). WP2 (gateway) closes most of
+All 90 paths were blocked by the shared gaps (INV-01, 22, 38, 39, 45, 48, 49; INV-49 closed by R1-23). WP2 (gateway) closes most of
 them structurally. The path-specific gaps then close in WP3–WP7.
 
 ## 8. How this document is maintained

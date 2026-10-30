@@ -161,7 +161,8 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
             {
                 row.Id = 0;
                 using var scope = _scopes.CreateScope();
-                await AuditLogMutationSink.InsertOnceAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), row, ct);
+                await AuditLogMutationSink.InsertOnceAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), row,
+                    Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider), ct);
                 _outbox.Remove(path);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -246,15 +247,20 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                     target = state is null
                         ? target.Where(a => !db.Operations.Any(o => o.AuditId == rowId))
                         : target.Where(a => db.Operations.Any(o => o.AuditId == rowId && o.State == state && o.Instance == instance));
-                    var settled = await target
-                        .ExecuteUpdateAsync(s => s
-                            .SetProperty(a => a.Phase, row.Phase)
-                            .SetProperty(a => a.Outcome, row.Outcome)
-                            .SetProperty(a => a.Verification, row.Verification)
-                            .SetProperty(a => a.DurationMs, row.DurationMs)
-                            .SetProperty(a => a.Success, row.Success)
-                            .SetProperty(a => a.OperationId, row.OperationId)
-                            .SetProperty(a => a.Details, row.Details), ct);
+                    // The settled outcome is the row's next version: a link of the audit chain, same transaction (R1-23).
+                    var settled = await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).WriteAsync(db, async token =>
+                    {
+                        var changed = await target
+                            .ExecuteUpdateAsync(s => s
+                                .SetProperty(a => a.Phase, row.Phase)
+                                .SetProperty(a => a.Outcome, row.Outcome)
+                                .SetProperty(a => a.Verification, row.Verification)
+                                .SetProperty(a => a.DurationMs, row.DurationMs)
+                                .SetProperty(a => a.Success, row.Success)
+                                .SetProperty(a => a.OperationId, row.OperationId)
+                                .SetProperty(a => a.Details, row.Details), token);
+                        return (changed, changed == 1 ? (IReadOnlyCollection<long>)[rowId] : []);
+                    }, ct);
                     // Skipped on stale evidence: unless the gateway completed it meanwhile, it is still incomplete.
                     if (settled == 0 && await db.AuditLog.AnyAsync(a => a.Id == rowId && a.Phase == "intent", ct))
                         left++;

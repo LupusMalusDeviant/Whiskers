@@ -13,6 +13,7 @@
 @inject ILogScanExclusions Exclusions
 @inject IServerConfigService ServerConfig
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Services.Notifications.IInAppNotificationStore Alerts
 @inject Whiskers.Services.Observability.Outcomes.IActionOutcomeService Outcomes
 @using Whiskers.Services.Observability.Outcomes
@@ -308,9 +309,11 @@ else
     /// <summary>The timeline window. Long enough to cover "it started sometime this morning", short enough
     /// that the list stays readable without paging.</summary>
     private static readonly TimeSpan TimelineWindow = TimeSpan.FromHours(6);
+    private bool _isAdmin;
 
     protected override async Task OnInitializedAsync()
     {
+        _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
         Refresh();
         await RefreshTimelineAsync();
 
@@ -344,7 +347,8 @@ else
         try
         {
             var since = DateTime.UtcNow - TimelineWindow;
-            var audit = await AuditLog.GetRecentAsync(count: 200);
+            // R1-23: audit rows are Admin-only; other roles see the alerts on the timeline.
+            var audit = _isAdmin ? await AuditLog.GetRecentAsync(count: 200) : [];
             var alerts = await Alerts.QueryAsync(severity: null, eventType: null, skip: 0, take: 200);
 
             _timeline = ActionTimeline.Build(audit, alerts, serverId: null, sinceUtc: since);

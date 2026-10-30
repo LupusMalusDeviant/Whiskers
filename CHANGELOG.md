@@ -6,6 +6,21 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-23: **The audit trail is tamper-evident, retained on purpose and Admin-only.** Every written version of an audit
+  row becomes a link of one SHA-256 hash chain, in the same transaction as the write (ADR-0006). Every minute and at
+  shutdown the chain's end is signed with HMAC-SHA-256 under a key derived from `VAULT_KEY`, in the database and in
+  `audit-checkpoint.json` beside it. *Verify integrity* on the Audit log page reports a changed row, an inserted row, a
+  deleted row, a broken link, a forged checkpoint and an end cut off before a signed checkpoint. Without `VAULT_KEY`
+  checkpoints are unsigned and a cut-off end cannot be detected (the page says so); a compromised host can still
+  rewrite everything (documented limit). On the first start the existing rows are sealed once (genesis). New tables
+  `AuditChain` and `AuditCheckpoints` (additive migration, both providers); the SQLite→PostgreSQL copy does not copy
+  them, so PostgreSQL starts a new chain and the old checkpoint file is kept as `audit-checkpoint.json.sqlite-<time>`.
+  **Retention changed: audit log and MCP call history are now kept 365 days (was 90)**, configurable with
+  `Audit__RetentionDays` (never below 30); a retention run is recorded as an `audit.retention` event and signs the
+  chain's new start. The Audit log and Agent History pages (and the audit rows of the Self status timeline) are Admin
+  only. `GET /audit/export` (Admin only) downloads the whole trail as JSON — verification result, checkpoints, chain and
+  rows from one snapshot — and is recorded as `audit.export` before anything is read (503 without that record).
+  Self-backups take the checkpoint file before the database copy.
 - R1-22 follow-up: a webhook switched off automatically writes its own `webhook.suspended` row with the version
   before and after; a restore refused by archive validation is a Denied event; flags named after a secret
   (`HasToken`) stay readable; the configuration pages' Admin gates are checked to record their refusals.

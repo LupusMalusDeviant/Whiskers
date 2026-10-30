@@ -1,0 +1,93 @@
+# ADR-0006: Tamper-evident audit trail — SHA-256 chain with HMAC checkpoints
+
+- **Status:** Accepted (2026-10-30) — chain + keyed checkpoints with a key derived from `VAULT_KEY`, chosen by the
+  maintainer for R1-23
+- **Date:** 2026-10-30
+- **Author:** LupusMalusDeviant
+- **Context documents:** [`docs/v1/SECURITY_INVARIANTS.md`](../v1/SECURITY_INVARIANTS.md) (INV-49, INV-50),
+  [`docs/v1/WORK_PACKAGES.md`](../v1/WORK_PACKAGES.md) (R1-23), [ADR-0005](0005-mutation-gateway.md)
+
+## Context and problem
+
+The audit trail (`AuditLog`) is a plain table. Anyone with write access to the database — a leaked PostgreSQL
+password, a copied SQLite file that is put back, a careless manual fix — can change, add or remove rows, and nothing
+notices. Retention hard-deletes rows older than 90 days without a trace (TA-35, B-20).
+
+Two properties of the table shape the design:
+
+- **Rows change after they are written.** A gateway event is written as its *intent* before the mutation runs and is
+  turned into its *outcome* afterwards (ADR-0005, R1-19); `AuditRecovery` settles intents whose outcome was lost.
+- **Several writers.** The gateway sink, `AuditLogService` (sign-ins, downloads, legacy rows), recovery, retention.
+
+**Core question:** How does a verifier tell, from the database plus something the database alone cannot forge, that
+no event was modified, inserted, removed from the middle or cut off at the end — while rows legitimately change from
+intent to outcome and old rows are legitimately pruned?
+
+## Requirements
+
+- Detect modification, insertion, deletion in the middle and truncation of the end (INV-49).
+- Standard primitives only (SHA-256, HMAC-SHA-256, HKDF); no own cryptography.
+- Retention stays possible, is configurable, is itself recorded, and leaves the remaining chain verifiable (INV-50).
+- Works on SQLite and PostgreSQL; no extra service.
+- A writer that fails must not leave a row without its chain entry (no false alarms after a crash).
+
+## Options
+
+**A — Hash column on each row.** `Hash = SHA256(prevHash ‖ row)`. Breaks on every intent → outcome update (the hash
+of a later row would no longer match), and an unkeyed chain can simply be recomputed by whoever edits the table.
+
+**B — Append-only chain of row versions + keyed checkpoints (chosen).** A separate table `AuditChain` gets one entry
+per written *version* of an audit row: `RowHash = SHA256(canonical row)`, `Hash = SHA256(prevHash ‖ seq ‖ auditId ‖
+rowHash)`. The entry is appended in the same transaction as the row write, under one process-wide lock, so the
+chain is a single sequence. Checkpoints `(seq, hash, time)` are signed with HMAC-SHA-256 under a key derived with
+HKDF from `VAULT_KEY`, stored in the database **and** in a file next to it (`audit-checkpoint.json` in the data
+directory).
+
+**C — External anchoring** (a transparency log, an SIEM, WORM storage). Strongest, but needs a service the
+self-hosted product does not have; out of scope for R1 (WORK_PACKAGES R1-23).
+
+## Decision
+
+Option B.
+
+- **Canonical row.** Every column of `AuditLogEntity` by name in ordinal order, as compact JSON; null columns are left
+  out (a column added later does not change the hash of rows that never had it); timestamps as whole microseconds
+  since 0001-01-01 UTC (both providers store at least that). `RowHash` is the lower-case hex SHA-256 of that JSON;
+  `Hash = SHA256("{prevHash}|{seq}|{auditId}|{rowHash}")`, the first `prevHash` being 64 zeros.
+- **Verification** walks the chain from its anchor: each entry's `PrevHash` must be the previous entry's `Hash`, and
+  each `Hash` must recompute. Every audit row must have a latest chain entry whose `RowHash` matches the row now;
+  every chain entry must name a row that exists, unless that row was pruned by a recorded retention. The newest
+  trusted checkpoint (valid MAC; the later of the database's and the file's) must lie on the chain with the same
+  hash, and the chain must not end before it. Verification reads one database snapshot (a row and its link are always
+  both in it or both out); the file is read first, so it never names a link the snapshot cannot have.
+- **Retention** (configurable, default 365 days, minimum 30): one transaction writes an `audit.retention` event
+  (count, boundary), deletes the rows up to an id boundary and the chain prefix that only names such rows, and writes
+  a signed *retention checkpoint* holding the new anchor (seq, hash) and the pruned id boundary. Rows past the
+  boundary keep their entries; entries after the anchor that name pruned rows are allowed.
+- **Upgrade.** Rows written before R1-23 have no chain. On the first start the existing rows are sealed in id order
+  and a checkpoint marks this genesis: they are protected from then on, not proven untouched before.
+- **Readers.** Audit data is Admin only (INV-50): the Audit log and Agent History pages, and `GET /audit/export`,
+  which records an `audit.export` event before it reads anything and returns the verification result, checkpoints,
+  chain and rows from one snapshot — enough to re-check the chain with SHA-256 alone.
+- **PostgreSQL migration.** The SQLite→PostgreSQL copy renumbers audit rows, so the chain is not copied: PostgreSQL
+  seals the copied rows as a new genesis, and the old checkpoint file is kept under another name.
+- **Without `VAULT_KEY`** the chain still works, but checkpoints cannot be signed: the verifier reports
+  "checkpoints unsigned" and cannot detect a truncated end.
+
+## Consequences
+
+- **Detects:** any change of a sealed row, a row added without its entry, an entry removed from the middle (broken
+  link), and — up to the newest trusted checkpoint — a cut-off end.
+- **Limitation (host compromise):** whoever controls the host running Whiskers has `VAULT_KEY`, the checkpoint file
+  and the database together and can rewrite all three consistently. The design protects against database-only
+  tampering (a leaked database credential, a restored or edited database file), not against a compromised host. An
+  external anchor (option C) is the later answer.
+- **Window:** events written after the newest checkpoint can be cut off undetected; checkpoints are written every
+  minute and at shutdown.
+- Each audit write takes the chain lock and a transaction: audit writes are serialized. Their rate is low (human and
+  automation actions), and the gateway already writes one row at a time per operation.
+- A database restored from an older backup verifies as truncated against the checkpoint file: restoring self-backup
+  also restores the checkpoint file (both live in the data directory). The backup takes the file *before* the database
+  copy, so the restored database always reaches the restored checkpoint.
+- A chain emptied while its checkpoint file remains is not started again at the next start (that would launder the
+  trail); verification reports it.

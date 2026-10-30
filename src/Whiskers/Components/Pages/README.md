@@ -46,8 +46,8 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `Webhooks.razor` | CI/CD webhooks. |
 | `LogSearch.razor` | Log search and alerts. |
 | `Cves.razor` | CVE dashboard, **one row per CVE** (de-duplicated), expandable to all affected container/server instances with OS context + a verified flag; shows how long each CVE has been open and whether a fix exists. |
-| `AuditLog.razor` | Audit trail of privileged actions. |
-| `AgentHistory.razor` | Observability dashboard for every agent/MCP tool call (`/agent-history`): filter by actor, tool, period, writes-only or denies-only; row click opens `AgentCallDetailDialog`. Backed by [`IMcpCallLogStore`](../../Services/Observability/). |
+| `AuditLog.razor` | Audit trail of privileged actions — Admin only (R1-23), with *Verify integrity* (`IAuditChain.VerifyAsync`) and *Export* (`/audit/export`). |
+| `AgentHistory.razor` | Observability dashboard for every agent/MCP tool call (`/agent-history`, Admin only since R1-23): filter by actor, tool, period, writes-only or denies-only; row click opens `AgentCallDetailDialog`. Backed by [`IMcpCallLogStore`](../../Services/Observability/). |
 | `AgentCallDetailDialog.razor` | Detail dialog for a single recorded tool call, metadata, redacted parameters, result summary, error. |
 | `Agent.razor` | The acting agent's chat/console (markdown rendering, file attachments, provider + system-prompt editor). Leaving the page or clearing the chat ends the session and cancels its pending approvals (R1-15). |
 | `Guardrails.razor` | Multi-preset guardrail editor (per-preset tool grid + mode, free-text rules, "Require a second approver"). Core page since ADR-0005 step 2.1 — available with the Agent module off. |

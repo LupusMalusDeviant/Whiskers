@@ -91,6 +91,8 @@ public sealed class DataPathOptions
     public string AiTriggersJson => P("ai-triggers.json");
     /// <summary>Owners an admin confirmed for AutoPatch and AutoUpdate (PC-D6).</summary>
     public string AutomationOwnersJson => P("automation-owners.json");
+    /// <summary>The newest signed audit checkpoint, kept outside the database (R1-23, ADR-0006).</summary>
+    public string AuditCheckpointJson => P("audit-checkpoint.json");
     /// <summary>Emails that had a local account, so a deleted one is noticed with federated sign-in too (R1-04).</summary>
     public string KnownLocalAccountsJson => P("known-local-accounts.json");
 

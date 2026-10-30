@@ -155,6 +155,62 @@ public sealed class AuthAuditBootTests
             Assert.DoesNotContain(rows, r => $"{r.TargetId}{r.TargetName}{r.Details}".Contains("hunter2"));
         });
 
+    [Fact]
+    public async Task An_audit_export_is_recorded_first_and_carries_an_intact_trail() =>
+        await BootAsync(async (services, client) =>
+        {
+            var token = await AntiforgeryTokenAsync(client);
+            await LoginAsync(client, token, Email, Password);
+
+            var response = await client.GetAsync("/audit/export");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.True(json.RootElement.GetProperty("verification").GetProperty("Intact").GetBoolean());
+            // The export's own record was written before the snapshot, so it is part of what was exported.
+            Assert.Contains(json.RootElement.GetProperty("rows").EnumerateArray(),
+                r => r.GetProperty("Action").GetString() == AuditExport.Action && r.GetProperty("Actor").GetString() == Email);
+            var row = Assert.Single(await RowsAsync(services, AuditExport.Action, expected: 1));
+            Assert.True(row.Success);
+        });
+
+    [Fact]
+    public async Task Without_its_audit_record_no_audit_export_is_handed_out() =>
+        await BootAsync(async (_, client) =>
+        {
+            var token = await AntiforgeryTokenAsync(client);
+            await LoginAsync(client, token, Email, Password);
+
+            var response = await client.GetAsync("/audit/export");
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.DoesNotContain(response.Content.Headers, h => h.Key == "Content-Disposition");
+        }, audit: AuditMode.Down);
+
+    [Fact]
+    public async Task A_non_admin_cannot_export_the_audit_trail_and_the_refusal_is_recorded() =>
+        await BootAsync(async (services, client) =>
+        {
+            const string viewer = "operator@local.test";
+            using (var scope = services.CreateScope())
+            {
+                var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Whiskers.Services.Persistence.AppUser>>();
+                Assert.True((await users.CreateAsync(new Whiskers.Services.Persistence.AppUser { UserName = viewer, Email = viewer }, Password)).Succeeded);
+            }
+            await services.GetRequiredService<IRoleService>().SetRoleAsync(viewer, AppRole.Operator);
+            var token = await AntiforgeryTokenAsync(client);
+            Assert.Equal("/", (await LoginAsync(client, token, viewer, Password)).Headers.Location!.OriginalString);
+
+            var response = await client.GetAsync("/audit/export");
+
+            Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+            Assert.DoesNotContain(response.Content.Headers, h => h.Key == "Content-Disposition");
+            var row = Assert.Single(await RowsAsync(services, AuditExport.Action, expected: 1));
+            Assert.Equal(viewer, row.Actor);
+            Assert.False(row.Success);
+        });
+
     /// <summary>The audit rows whose action starts with <paramref name="prefix"/>, once at least
     /// <paramref name="expected"/> are there (sign-in rows are written in the background) or after 10 seconds.</summary>
     private static async Task<List<AuditLogEntity>> RowsAsync(IServiceProvider services, string prefix, int expected = 0)

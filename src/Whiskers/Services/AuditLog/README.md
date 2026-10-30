@@ -8,6 +8,9 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 |---|---|
 | `IAuditLogService.cs` / `AuditLogService.cs` | Records audit entries and extracts the actor (name + type, e.g. `("user@example.com", "web")` or `("Claude Code", "mcp")`) from an HTTP context. |
 | `TryLogAsync` | Like `LogAsync`, and returns whether the row was stored — for a caller that must not go on without it (the self-backup download, R1-22). |
+| `AuditChain.cs` | `IAuditChain`, the tamper-evident trail (R1-23, [ADR-0006](../../../../docs/adr/0006-audit-hash-chain.md)): `WriteAsync` runs a row write and appends each written row's version to the SHA-256 chain in one transaction under one lock; `CheckpointAsync` signs the chain's end (HMAC-SHA-256, key derived from `VAULT_KEY` with HKDF) in `AuditCheckpoints` and `audit-checkpoint.json`; `VerifyAsync` checks links, rows and checkpoints in one snapshot; `PruneAsync` is retention; `ExportAsync` writes the export. `SealExistingAsync` seals the rows of a database from before the chain once (genesis) and refuses when the checkpoint file says a chain was there. |
+| `AuditCheckpointService.cs` | Signs the chain's end every minute and at shutdown. |
+| `AuditExport.cs` | The export document (`whiskers-audit-export/v1`): verification result, checkpoints, chain, rows. |
 | `ToolAuditLog.cs` | `IToolAuditLog`, what MCP tools write about their own work (R1-20). Inside a gateway mutation the report enriches the gateway's event (`MutationScope.Record`: the `results` of its outcome) instead of becoming a second security event, and a reported failure fails the mutation; outside one it is an ordinary `LogAsync` row. |
 
 ## Behaviour notes
@@ -24,6 +27,18 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
   several. A queued sign-in row keeps the time it happened (`TryLogAtAsync`).
 - **A lost row is visible (R1-19):** `LogAsync` still logs and swallows a failed write (the action already happened),
   and tells `IAuditRecovery`, so the `audit` readiness check is Degraded for an hour.
+
+- **Tamper evidence (R1-23):** every writer — `AuditLogService`, the gateway's intent and outcome rows, the outbox drain
+  and settle in [`../Mutations/`](../Mutations/) — writes through `IAuditChain.WriteAsync`, so a row never exists
+  without its link. Never write `AuditLog` directly: verification reports such a row as added outside the trail.
+  Limits: a host compromise holding `VAULT_KEY` can rewrite everything; without `VAULT_KEY` checkpoints are unsigned
+  and a cut-off end goes unnoticed; events after the newest checkpoint (≤ 1 min) can be cut off unnoticed.
+- **Retention (R1-23):** `Audit:RetentionDays` (default 365, at least 30; [`AuditSettings`](../../Configuration/AuditSettings.cs)),
+  run hourly by [`../Metrics/MetricsCollectorService.cs`](../Metrics/MetricsCollectorService.cs): an `audit.retention`
+  event first, then the old rows and the chain prefix naming only them, then a signed `retention` checkpoint as the new start.
+- **Readers (R1-23):** the Audit log and Agent History pages are Admin only; the Audit log page verifies the trail on
+  demand and exports it via `GET /audit/export` (Admin only; `audit.export` is recorded before anything is read, 503
+  without it).
 
 ## Related
 

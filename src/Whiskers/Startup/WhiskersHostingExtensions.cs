@@ -285,6 +285,7 @@ public static class WhiskersHostingExtensions
             // R1-19: Degraded (still ready) while an audit event is incomplete.
             .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" });
         builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
+        builder.Services.Configure<AuditSettings>(builder.Configuration.GetSection(AuditSettings.SectionName));
         builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
         builder.Services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore, Whiskers.Services.Persistence.AppSettingsStore>();
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IMetricsQueryService, MetricsQueryService>();
@@ -318,6 +319,11 @@ public static class WhiskersHostingExtensions
 
         // Audit log
         builder.Services.AddSingleton<Whiskers.Services.AuditLog.IAuditLogService, Whiskers.Services.AuditLog.AuditLogService>();
+        // The tamper-evident chain over it and its signed checkpoints (R1-23, ADR-0006).
+        builder.Services.AddSingleton<Whiskers.Services.AuditLog.IAuditChain>(sp => Whiskers.Services.AuditLog.AuditChain.FromConfiguration(
+            sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<Whiskers.Configuration.DataPathOptions>(),
+            sp.GetRequiredService<ILogger<Whiskers.Services.AuditLog.AuditChain>>(), sp.GetRequiredService<IServiceScopeFactory>()));
+        builder.Services.AddHostedService<Whiskers.Services.AuditLog.AuditCheckpointService>();
         // What a tool reports about its own work: part of the gateway's event inside a mutation (R1-20).
         builder.Services.AddSingleton<Whiskers.Services.AuditLog.IToolAuditLog, Whiskers.Services.AuditLog.ToolAuditLog>();
 

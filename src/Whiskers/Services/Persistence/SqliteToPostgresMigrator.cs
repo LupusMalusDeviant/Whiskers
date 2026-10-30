@@ -28,7 +28,8 @@ public static class SqliteToPostgresMigrator
         string Name,
         Type EntityType,
         Func<MetricsDbContext, CancellationToken, Task<bool>> AnyAsync,
-        Func<MetricsDbContext, MetricsDbContext, CopyRun, CancellationToken, Task<int>> CopyAsync);
+        Func<MetricsDbContext, MetricsDbContext, CopyRun, CancellationToken, Task<int>> CopyAsync,
+        bool Copied = true);
 
     /// <summary>What one migration run carries from table to table: the old ids of the audit rows an operation names
     /// (read before the copy), and the new id each of them got in the target.</summary>
@@ -149,7 +150,16 @@ public static class SqliteToPostgresMigrator
         // AuditId names the audit row by its new id (null when that row is gone, as retention may have removed it).
         T("Operations",        c => c.Operations,
             run => o => o.AuditId = o.AuditId is { } old && run.AuditIds.TryGetValue(old, out var renumbered) ? renumbered : null),
+        // R1-23: the audit chain is not copied. The audit rows get new ids in the target, so the old links would no
+        // longer name them; the target starts its own chain on its first start, sealing the copied rows (genesis,
+        // ADR-0006). The checkpoint file stays with the old database.
+        NotCopied<Whiskers.Models.AuditChainEntry>("AuditChain"),
+        NotCopied<Whiskers.Models.AuditCheckpointEntity>("AuditCheckpoints"),
     ];
+
+    private static Table NotCopied<TEntity>(string name) where TEntity : class =>
+        new(name, typeof(TEntity), (ctx, ct) => ctx.Set<TEntity>().AnyAsync(ct), (_, _, _, _) => Task.FromResult(0),
+            Copied: false);
 
     /// <summary>CLI entry point: builds the SQLite source + PostgreSQL target contexts, migrates the target
     /// schema, then copies the data. Returns a process exit code (0 = success; non-zero = aborted/failed).</summary>
@@ -165,7 +175,7 @@ public static class SqliteToPostgresMigrator
 
         await log.WriteLineAsync("Whiskers — one-time SQLite → PostgreSQL data migration");
         await log.WriteLineAsync($"  source (SQLite): {dataPaths.DbConnectionString}");
-        await log.WriteLineAsync("  NOTE: the source is never modified — but back up metrics.db before proceeding.");
+        await log.WriteLineAsync("  NOTE: the source database is never modified — but back up metrics.db before proceeding.");
         await log.WriteLineAsync("");
 
         var sqliteOptions = new DbContextOptionsBuilder<MetricsDbContext>()
@@ -200,7 +210,16 @@ public static class SqliteToPostgresMigrator
             await log.WriteLineAsync("Bringing the target schema up to date (PostgreSQL migrate)…");
             await target.Database.MigrateAsync(ct);
             await idTarget.Database.MigrateAsync(ct);
-            return await MigrateDataAsync(source, target, log, ct, idSource, idTarget);
+            var result = await MigrateDataAsync(source, target, log, ct, idSource, idTarget);
+            // The checkpoint file signs the SQLite chain; PostgreSQL starts its own (R1-23), which a leftover file
+            // would block as a tampered trail. Kept under another name (move it back to return to SQLite).
+            if (result == 0 && File.Exists(dataPaths.AuditCheckpointJson))
+            {
+                var kept = $"{dataPaths.AuditCheckpointJson}.sqlite-{DateTime.UtcNow:yyyyMMddHHmmss}";
+                File.Move(dataPaths.AuditCheckpointJson, kept);
+                await log.WriteLineAsync($"Note: the SQLite audit checkpoint was kept as {kept}; PostgreSQL starts a new audit chain.");
+            }
+            return result;
         }
         catch (Exception ex)
         {
@@ -233,7 +252,8 @@ public static class SqliteToPostgresMigrator
         // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations, R1-10 WebhookDeliveries); anything else is not a Whiskers
         // database this tool understands (a wrong path, a damaged file).
         var missing = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var table in MetricsTables)
+        // A table that is not copied is never read, so the source need not have it (releases before R1-23 do not).
+        foreach (var table in MetricsTables.Where(t => t.Copied))
             if (!await SourceHasTableAsync(source, table, ct)) missing.Add(table.Name);
         if (missing.Count > 0 && !OlderReleaseTables.Any(set => set.SetEquals(missing)))
         {
@@ -256,6 +276,11 @@ public static class SqliteToPostgresMigrator
         var report = new List<(string Table, int Rows)>();
         foreach (var table in MetricsTables)
         {
+            if (!table.Copied)
+            {
+                await log.WriteLineAsync($"Note: '{table.Name}' is not copied — the target starts a new audit chain (R1-23).");
+                continue;
+            }
             if (missing.Contains(table.Name))
             {
                 await log.WriteLineAsync($"Note: the source has no '{table.Name}' table (older release) — nothing to copy.");

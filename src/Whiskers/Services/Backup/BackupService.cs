@@ -67,6 +67,16 @@ public sealed class BackupService : IBackupService
             string[] identityMigrations;
             string? stagedDb = null;
 
+            // R1-23: the audit checkpoint file is taken BEFORE the database. A checkpoint reaches the file only after
+            // the database has it, so the restored database always reaches the restored checkpoint; taken after,
+            // a checkpoint written in between would make the restored trail look cut off.
+            string? stagedCheckpoint = null;
+            if (File.Exists(_dataPaths.AuditCheckpointJson))
+            {
+                stagedCheckpoint = Path.Combine(buildDir, Path.GetFileName(_dataPaths.AuditCheckpointJson));
+                File.Copy(_dataPaths.AuditCheckpointJson, stagedCheckpoint);
+            }
+
             using (var scope = _scopeFactory.CreateScope())
             {
                 var metrics = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -113,6 +123,11 @@ public sealed class BackupService : IBackupService
             var entries = new List<PackEntry> { new(SelfBackupFormat.ManifestEntryName, manifestPath) };
             if (stagedDb is not null)
                 entries.Add(new PackEntry(SelfBackupFormat.DbEntryName, stagedDb));
+            if (stagedCheckpoint is not null)
+                entries.Add(new PackEntry(
+                    Path.GetRelativePath(Path.GetFullPath(_dataPaths.RootDir), Path.GetFullPath(_dataPaths.AuditCheckpointJson))
+                        .Replace('\\', '/'),
+                    stagedCheckpoint));
             entries.AddRange(EnumerateDataFiles(Path.GetFullPath(_dataPaths.RootDir)));
 
             var tmpTarGz = Path.Combine(buildDir, "archive.tar.gz");
@@ -461,6 +476,7 @@ public sealed class BackupService : IBackupService
             Path.GetFullPath(_dataPaths.DbPath + "-shm"),
             Path.GetFullPath(_dataPaths.RestorePendingMarker),
             Path.GetFullPath(_dataPaths.RestorePendingMarker + ".corrupt"),
+            Path.GetFullPath(_dataPaths.AuditCheckpointJson),   // staged before the database copy instead
             Path.GetFullPath(Path.Combine(rootFull, "vault.key"))
         };
 

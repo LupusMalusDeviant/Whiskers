@@ -358,6 +358,50 @@ public static class WhiskersPipelineExtensions
             return false;
         }));
 
+        // R1-23: the whole audit trail as one JSON document — Admin only, like the trail itself. The hand-out is
+        // recorded before anything is read (503 without that record); a signed-in user refused by the role check is
+        // recorded too. Written to a temporary file first: a retried database read starts the document over, which a
+        // half-sent response could not.
+        app.MapGet("/audit/export", async (HttpContext ctx) =>
+        {
+            var audit = ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>();
+            var (actor, actorType) = Whiskers.Services.AuditLog.IAuditLogService.GetActorFromHttpContext(ctx);
+            if (!await audit.TryLogAsync(actor, actorType, Whiskers.Services.AuditLog.AuditExport.Action, "audit",
+                    "audit-log", "Audit log", details: $"ip={ctx.Connection.RemoteIpAddress}"))
+                return Results.Problem(ctx.RequestServices
+                        .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<Whiskers.SharedResource>>()
+                        ["AuditLog_Export_NotRecorded"].Value,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            var temp = new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None,
+                64 * 1024, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+            try
+            {
+                await ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>()
+                    .ExportAsync(temp, ctx.RequestAborted);
+                temp.Position = 0;
+            }
+            catch
+            {
+                await temp.DisposeAsync();
+                throw;
+            }
+            return Results.File(temp, "application/json", $"whiskers-audit-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json");
+        }).RequireAuthorization(policy => policy.RequireAssertion(async context =>
+        {
+            var httpContext = context.Resource as HttpContext;
+            if (httpContext is null) return false;
+            if (httpContext.User.Identity?.AuthenticationType == Whiskers.Services.Auth.AuthConstants.AuthDisabledScheme)
+                return true;   // trusted-LAN bypass = admin, consistent with the rest of the app
+            var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
+            var roles = httpContext.RequestServices.GetService<Whiskers.Services.Auth.IRoleService>();
+            if (roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin) return true;
+            if (!string.IsNullOrEmpty(email))
+                await httpContext.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>()
+                    .LogAsync(email, "web", Whiskers.Services.AuditLog.AuditExport.Action, "audit", "audit-log", "Audit log",
+                        details: $"Requires the Admin role.; ip={httpContext.Connection.RemoteIpAddress}", success: false);
+            return false;
+        }));
+
         // Webhook API endpoint (no auth — uses HMAC signature validation). R1-10: bounded, deduplicated, queued.
         app.MapPost("/api/webhooks/{webhookId}", (string webhookId, HttpContext ctx) =>
             Whiskers.Services.Webhooks.WebhookEndpoint.HandleAsync(webhookId, ctx)).AllowAnonymous();
@@ -512,6 +556,9 @@ public static class WhiskersPipelineExtensions
         // agent approvals are cancelled here (their sessions are gone); approve-then-retry approvals and unused
         // grants carry on.
         await app.Services.GetRequiredService<Whiskers.Services.Approvals.IApprovalStore>().LoadAsync(CancellationToken.None);
+
+        // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis).
+        await app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>().SealExistingAsync(CancellationToken.None);
 
         // Local-auth (F1): migrate the Identity schema in its OWN __IdentityMigrationsHistory table (kept off
         // the metrics legacy-baseline path), then seed the unattended admin if configured. Brand-new tables →
