@@ -145,7 +145,7 @@ public sealed class McpCallLogMiddleware
                 ActorType = "mcp-direct",
                 ToolName = call.Tool,
                 Level = level,
-                ParamsJson = Cap(Redact(call.Args), 4000),
+                ParamsJson = Cap(SinkRedaction.Arguments(call.Args), 4000),
                 Verdict = outcome?.Verdict ?? verdict,
                 Success = outcome?.Success ?? false,
                 DurationMs = (int)durationMs,

@@ -44,8 +44,10 @@ public class ChatHistoryStore : IChatHistoryStore
     {
         Directory.CreateDirectory(_basePath);
         var path = GetPath(userEmail);
-        // Keep last 50 messages per user
-        var toSave = messages.TakeLast(50).ToList();
+        // Keep last 50 messages per user, each redacted (R1-24): a pasted secret never lands in the file.
+        var toSave = messages.TakeLast(50)
+            .Select(m => new ChatMessage { Role = m.Role, Content = Whiskers.Utils.SinkRedaction.Text(m.Content) ?? "", Timestamp = m.Timestamp })
+            .ToList();
         var json = System.Text.Json.JsonSerializer.Serialize(new UserChatHistory { Messages = toSave },
             new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
         // Atomic write: a crash mid-write must not leave a truncated/corrupt history file.

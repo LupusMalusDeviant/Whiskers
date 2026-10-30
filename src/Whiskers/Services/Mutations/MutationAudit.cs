@@ -335,99 +335,23 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     private static string? Redact(string? text) =>
         text is null ? null : SecretRedactor.Redact(PolicyDecisions.WithoutUrlCredentials(text)!);
 
-    /// <summary>Argument names whose value is free text that can carry credentials in any syntax (SQL
-    /// <c>PASSWORD '…'</c>, a shell command, a file body). The pattern-based redactor cannot recognise all of them, so
-    /// the audit row keeps only their length (TA-09, "never log secrets").</summary>
-    internal static readonly HashSet<string> PayloadArguments = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "query", "sql", "command", "script", "content", "body", "env", "compose", "yaml", "password", "secret", "token",
-        // R1-16: free text the gateway now sees for protected-resource checks — never stored in the audit either.
-        "composeContent", "envVars",
-        // A deployment's planned mounts: a source can come from an .env value.
-        "mounts",
-    };
+    /// <summary>Whether an argument's value is free text that can carry credentials in any syntax (SQL
+    /// <c>PASSWORD '…'</c>, a shell command, a file body): the audit row keeps only its length (TA-09, "never log
+    /// secrets"). One rule for every sink: <see cref="SinkRedaction.IsPayload"/> (R1-24).</summary>
+    internal static bool IsPayload(string name) => SinkRedaction.IsPayload(name);
 
     /// <summary>Removes the values of payload arguments from free text such as a refusal reason.</summary>
-    internal static string? WithoutPayloadValues(string? text, IReadOnlyDictionary<string, JsonElement> arguments)
-    {
-        if (string.IsNullOrEmpty(text)) return text;
-        foreach (var (key, value) in arguments)
-        {
-            if (!PayloadArguments.Contains(key) || value.ValueKind != JsonValueKind.String) continue;
-            var payload = value.GetString();
-            if (!string.IsNullOrEmpty(payload) && payload.Length >= 3)
-                text = text.Replace(payload, "<withheld>", StringComparison.Ordinal);
-        }
-        return text;
-    }
+    internal static string? WithoutPayloadValues(string? text, IReadOnlyDictionary<string, JsonElement> arguments) =>
+        SinkRedaction.WithoutPayloadValues(text, arguments);
 
     /// <summary>The arguments as one JSON object, redacted value by value (R1-19): a payload keeps only its length,
     /// a secret-named key (at any depth) only <c>***</c>, every other string is redacted on its own — so a pattern can
     /// never run across the document's quotes and commas and swallow the arguments after it.</summary>
-    internal static string RedactedArguments(IReadOnlyDictionary<string, JsonElement> arguments)
-    {
-        // Written element by element (not through a node tree): a document with a repeated property name is valid
-        // input and is kept as it came — redacting it must never fail, or the attempt would have no event.
-        using var buffer = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            foreach (var (key, value) in arguments)
-            {
-                writer.WritePropertyName(key);
-                if (PayloadArguments.Contains(key))
-                    writer.WriteStringValue(
-                        $"<withheld: {(value.ValueKind == JsonValueKind.String ? value.GetString()!.Length : value.GetRawText().Length)} chars>");
-                else
-                    WriteRedacted(writer, key, value);
-            }
-            writer.WriteEndObject();
-        }
-        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
-    }
-
-    private static void WriteRedacted(Utf8JsonWriter writer, string? key, JsonElement value)
-    {
-        // A secret-named key hides everything below it — a value, a list, an object alike.
-        if (key is not null && SecretKeyName.IsMatch(key))
-        {
-            writer.WriteStringValue("***");
-            return;
-        }
-        switch (value.ValueKind)
-        {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (var property in value.EnumerateObject())
-                {
-                    writer.WritePropertyName(property.Name);
-                    WriteRedacted(writer, property.Name, property.Value);
-                }
-                writer.WriteEndObject();
-                break;
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in value.EnumerateArray())
-                    WriteRedacted(writer, null, item);
-                writer.WriteEndArray();
-                break;
-            case JsonValueKind.String:
-                writer.WriteStringValue(Redact(value.GetString()));
-                break;
-            default:
-                value.WriteTo(writer);
-                break;
-        }
-    }
-
-    private static readonly System.Text.RegularExpressions.Regex SecretKeyName = new(
-        "(?i)password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer|credential",
-        System.Text.RegularExpressions.RegexOptions.Compiled);
+    internal static string RedactedArguments(IReadOnlyDictionary<string, JsonElement> arguments) =>
+        SinkRedaction.Arguments(arguments);
 
     internal static IReadOnlyDictionary<string, object?> WithoutPayloads(IReadOnlyDictionary<string, JsonElement> arguments) =>
-        arguments.ToDictionary(a => a.Key, a => PayloadArguments.Contains(a.Key)
-            ? (object?)$"<withheld: {(a.Value.ValueKind == JsonValueKind.String ? a.Value.GetString()!.Length : a.Value.GetRawText().Length)} chars>"
-            : a.Value);
+        SinkRedaction.WithoutPayloads(arguments);
 
     // The intent is nested as JSON so the outcome row stays one readable document; an intent that is not valid JSON
     // (a row written before R1-12 could be cut off) is kept as text instead.

@@ -41,8 +41,10 @@ public static class DatabaseRegistration
                     : connectionString;
                 // Context in Whiskers.Data, SQLite migrations in Whiskers.Migrations.Sqlite — EF must be
                 // told which assembly to load them from (ADR-0004, separate migration assemblies).
+                // R1-24: every sink row is redacted on save, whoever wrote it.
                 builder.Services.AddDbContext<MetricsDbContext>(
-                    o => o.UseSqlite(sqliteCs, sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite")),
+                    o => o.UseSqlite(sqliteCs, sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite"))
+                        .AddInterceptors(SinkRedactionInterceptor.Instance),
                     ServiceLifetime.Transient);
                 // Local-auth Identity context (F1): SAME database, its OWN __IdentityMigrationsHistory so it
                 // never touches the metrics legacy-baseline path. Scoped (default) — UserManager/store are Scoped.
@@ -64,7 +66,7 @@ public static class DatabaseRegistration
                     {
                         npg.EnableRetryOnFailure(3);
                         npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
-                    }),
+                    }).AddInterceptors(SinkRedactionInterceptor.Instance),
                     ServiceLifetime.Transient);
                 // Local-auth Identity context (F1): SAME database, its OWN __IdentityMigrationsHistory. Scoped.
                 builder.Services.AddDbContext<WhiskersIdentityDbContext>(

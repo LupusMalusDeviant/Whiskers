@@ -51,7 +51,9 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
     public async Task<Approval> RaiseAsync(IAgentSession session, AgentToolCall call, AgentContext context, string reason, GuardrailDecision decision)
     {
         var (actor, actorType) = ActorOf(context);
-        var paramsJson = Cap(SecretRedactor.RedactJson(call.ArgumentsJson), MaxParamChars);
+        // The approver decides on what the call does, so its payloads stay readable; secrets in them are redacted
+        // (INV-51). Only the argument hash binds the approval to the real values.
+        var paramsJson = Cap(SinkRedaction.Json(call.ArgumentsJson) ?? "", MaxParamChars);
         // Real required level of the tool (was hardcoded "write"), so the card and the resolver-level
         // check reflect what the tool actually needs.
         var level = McpPermissionLevels.DefaultToolLevels.GetValueOrDefault(call.Name, "write");

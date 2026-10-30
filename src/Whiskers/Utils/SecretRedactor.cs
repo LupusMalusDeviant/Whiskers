@@ -122,26 +122,36 @@ public static class SecretRedactor
     {
         if (string.IsNullOrEmpty(input))
             return input ?? "";
+        return FailClosed(input, Patterns);
+    }
 
+    /// <summary>Runs <paramref name="redact"/>; when a pattern times out on pathological input the whole string is
+    /// withheld rather than leaked.</summary>
+    internal static string FailClosed(string input, Func<string, string> redact)
+    {
         try
         {
-            var s = input;
-            s = EnvPassword.Replace(s, m => $"{m.Groups[1].Value}=***");
-            s = MysqlPwFlag.Replace(s, "-p***");
-            s = RedisAuthFlag.Replace(s, "-a ***");
-            s = SqlPassword.Replace(s, m => $"{m.Groups[1].Value}{m.Groups[2].Value}'***'");
-            s = PemPrivateKey.Replace(s, "[REDACTED PRIVATE KEY]");
-            s = LongBase64.Replace(s, "[REDACTED BASE64]");
-            s = UrlCredentials.Replace(s, m => $"{m.Groups[1].Value}:***@");
-            s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
-            s = BearerToken.Replace(s, "Bearer ***");
-            s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");
-            return s;
+            return redact(input);
         }
         catch (RegexMatchTimeoutException)
         {
-            // On pathological input, fail closed: redact the whole string rather than leak it.
             return "***";
         }
+    }
+
+    private static string Patterns(string input)
+    {
+        var s = input;
+        s = EnvPassword.Replace(s, m => $"{m.Groups[1].Value}=***");
+        s = MysqlPwFlag.Replace(s, "-p***");
+        s = RedisAuthFlag.Replace(s, "-a ***");
+        s = SqlPassword.Replace(s, m => $"{m.Groups[1].Value}{m.Groups[2].Value}'***'");
+        s = PemPrivateKey.Replace(s, "[REDACTED PRIVATE KEY]");
+        s = LongBase64.Replace(s, "[REDACTED BASE64]");
+        s = UrlCredentials.Replace(s, m => $"{m.Groups[1].Value}:***@");
+        s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
+        s = BearerToken.Replace(s, "Bearer ***");
+        s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");
+        return s;
     }
 }

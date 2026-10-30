@@ -432,10 +432,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `SinkRedactionTests` injects secrets into every message role, tool arguments, results, errors and approval reasons.
-- [ ] `SecretRedactorTests` covers SQL password syntax, JSON, credentials in URLs, multiline material and timeout behavior.
-- [ ] Neither full secrets nor prefixes survive persistence.
-- [ ] Free-text payload omission uses all actual parameter names, including Compose content variants.
+- [x] `SinkRedactionTests` injects secrets into every message role, tool arguments, results, errors and approval reasons.
+- [x] `SecretRedactorTests` covers SQL password syntax, JSON, credentials in URLs, multiline material and timeout behavior.
+- [x] Neither full secrets nor prefixes survive persistence.
+- [x] Free-text payload omission uses all actual parameter names, including Compose content variants.
 
 **Out of scope:** Logging and outbound channels.
 

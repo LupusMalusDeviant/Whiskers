@@ -6,6 +6,17 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-24: **No persistent sink keeps a secret.** Every free-text column of the audit log, the MCP/agent call history,
+  approvals, policy decisions and scheduled-task results is redacted on save by a database interceptor, whoever wrote
+  the row (bulk updates excepted; they only copy redacted values or fixed texts). The agent transcript now redacts
+  every message role (it redacted tool output only) and the arguments of kept tool calls; the advisor chat history is
+  redacted per message. Tool arguments in the call history and the audit log keep free-text payloads (a command, SQL,
+  a compose file, an `.env` block, a prompt) only as their length, matched on every spelling of the name
+  (`composeContent`, `compose_content`, `docker-compose`, `existingContent`, `envVars` …); a key named after a secret
+  is `***` at any depth; URL user info (`https://user:token@host`, also a token alone) is removed before the patterns.
+  Approval cards keep a chat or MCP call's payload readable for the approver, with secrets in it redacted. The agent
+  history's error column is redacted too (it was stored as it came). Stored JSON keeps quotes readable (`'`, not
+  `'`). Rows written before this version stay as they are.
 - R1-23 follow-up: an unreadable checkpoint file and a pending VAULT_KEY adoption are logged as what they are (not as
   tampering); the page counts every finding, also above the display cap; export scratch files left by a crash are
   removed by the next export.

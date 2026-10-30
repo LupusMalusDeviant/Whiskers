@@ -250,12 +250,12 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 ToolName = tool,
                 Level = level,
                 CorrelationId = correlationId,
-                ParamsJson = Cap(SecretRedactor.Redact(rawArgs), 4000),
+                ParamsJson = Cap(SinkRedaction.Arguments(rawArgs) ?? "", 4000),
                 Verdict = decision.Verdict.ToString().ToLowerInvariant(),
                 Success = success,
                 DurationMs = (int)sw.ElapsedMilliseconds,
-                ResultSummary = output is null ? null : Cap(SecretRedactor.Redact(output), 2000),
-                Error = error is null ? null : Cap(error, 1000),
+                ResultSummary = output is null ? null : Cap(SinkRedaction.Text(output)!, 2000),
+                Error = error is null ? null : Cap(SinkRedaction.Text(error)!, 1000),
             });
         }
         catch { /* observability must never break tool execution */ }
