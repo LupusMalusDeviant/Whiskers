@@ -568,6 +568,43 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public async Task A_row_changed_together_with_its_link_is_never_given_a_new_version()
+    {
+        // The link's RowHash is rewritten to match the edited row; its Hash and signature are left as they were.
+        var ids = await _trail.LogAsync(1);
+        await _trail.SqlAsync($"UPDATE AuditLog SET Actor = 'someone-else' WHERE Id = {ids[0]}");
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var edited = AuditChain.RowHash(await db.AuditLog.AsNoTracking().SingleAsync(a => a.Id == ids[0]));
+            await _trail.SqlAsync($"UPDATE AuditChain SET RowHash = '{edited}' WHERE AuditId = {ids[0]}");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => _trail.Chain.UpdateAsync(db, [ids[0]], async ct =>
+            {
+                var changed = await db.AuditLog.Where(a => a.Id == ids[0])
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, "outcome"), ct);
+                return (changed, (IReadOnlyCollection<long>)[ids[0]]);
+            }));
+            Assert.Equal(1, await db.AuditChain.CountAsync());
+        }
+    }
+
+    [Fact]
+    public async Task A_checkpoint_file_that_cannot_be_opened_is_not_taken_for_a_missing_one()
+    {
+        // File.Exists says "no" for a path it may not open: that must make the check incomplete, not skip the file.
+        await _trail.LogAsync(1);
+        await _trail.Chain.CheckpointAsync();
+        File.Delete(_trail.CheckpointFile);
+        Directory.CreateDirectory(_trail.CheckpointFile);   // opening it as a file fails on every platform
+
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.False(report.Complete);
+        Assert.Contains(report.Findings!, f => f.Code == "FileUnreadable");
+    }
+
+    [Fact]
     public async Task A_change_of_an_existing_row_outside_UpdateAsync_is_refused()
     {
         var ids = await _trail.LogAsync(1);

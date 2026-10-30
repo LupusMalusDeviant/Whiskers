@@ -204,6 +204,9 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                 // This process is running it right now (between its intent and its outcome).
                 if (sink?.InFlight(row.EventId) == true) continue;
                 operations.TryGetValue(row.Id, out var operation);
+                // The row as this pass read it: its outcome below is computed from it, so it is written only while the
+                // row is still exactly that — and UpdateAsync has checked that against the chain (R1-23).
+                var scannedHash = Whiskers.Services.AuditLog.AuditChain.RowHash(row);
                 var operationId = row.OperationId ?? operation?.Id ?? "";
                 switch (operation?.State)
                 {
@@ -252,6 +255,9 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                     // never settled into an authenticated version (R1-23).
                     var settled = await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).UpdateAsync(db, [rowId], async token =>
                     {
+                        var current = await db.AuditLog.AsNoTracking().FirstOrDefaultAsync(a => a.Id == rowId, token);
+                        if (current is null || Whiskers.Services.AuditLog.AuditChain.RowHash(current) != scannedHash)
+                            return (0, (IReadOnlyCollection<long>)[]);   // changed since it was read: the next pass
                         var changed = await target
                             .ExecuteUpdateAsync(s => s
                                 .SetProperty(a => a.Phase, row.Phase)

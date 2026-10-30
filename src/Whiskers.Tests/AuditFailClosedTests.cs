@@ -433,6 +433,41 @@ public sealed class AuditFailClosedTests : IDisposable
     }
 
     [Fact]
+    public async Task Recovery_never_settles_from_a_row_put_back_after_it_read_it()
+    {
+        // Forged details while the pass reads the row, the genuine ones back before the settlement is checked: the
+        // outcome computed from what was read must not be written.
+        var gateway = Gateway(journal: new DbOperationJournal(_scopes));
+        await gateway.ExecuteAsync(Restart("op-swap"), (_, _) =>
+        {
+            _writes.FailBefore = true;
+            return Task.FromResult(1);
+        });
+        _writes.FailBefore = false;
+        string genuine;
+        using (var scope = _scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            genuine = (await db.AuditLog.AsNoTracking().SingleAsync()).Details!;
+            await db.AuditLog.ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, "{\"forged\":true}"));
+        }
+        _reads.OnceAfter(async () =>
+        {
+            using var scope = _scopes.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, genuine));
+        });
+
+        _sink = null;
+        var recovery = Recovery(new DbOperationJournal(_scopes));
+        await recovery.RecoverAsync();
+
+        var row = Assert.Single(await Events());
+        Assert.Equal("intent", row.Phase);
+        Assert.DoesNotContain("forged", row.Details);
+    }
+
+    [Fact]
     public async Task An_intent_running_in_this_process_is_left_alone()
     {
         var journal = new DbOperationJournal(_scopes);

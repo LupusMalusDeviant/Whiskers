@@ -41,7 +41,8 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
   unnoticed. Verification findings carry a code (`AuditFinding_*` resources) for the page's language.
 - **Retention (R1-23):** `Audit:RetentionDays` (default 365, at least 30; [`AuditSettings`](../../Configuration/AuditSettings.cs)),
   run daily by [`../Metrics/MetricsCollectorService.cs`](../Metrics/MetricsCollectorService.cs): the trail is verified
-  first (nothing is removed from a trail that does not verify), then an `audit.retention` event, then the old rows,
+  first, outside the chain lock (nothing is removed from a trail that does not verify; under the lock only what
+  changed since is checked again), then an `audit.retention` event, then the old rows,
   the old MCP call history and the chain prefix naming only removed rows, then a signed `retention` checkpoint as the
   new start.
 - **Readers (R1-23):** the Audit log and Agent History pages are Admin only; the Audit log page verifies the trail on

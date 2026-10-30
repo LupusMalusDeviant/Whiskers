@@ -65,7 +65,8 @@ public sealed record AuditChainReport(
     bool CheckpointsSigned,
     bool Complete = true,
     bool KeyConfigured = false,
-    IReadOnlyList<AuditFinding>? Findings = null);
+    IReadOnlyList<AuditFinding>? Findings = null,
+    string? HeadHash = null);
 
 /// <summary>One verification result for display: <see cref="Code"/> names the resource <c>AuditFinding_{Code}</c>.</summary>
 public sealed record AuditFinding(string Code, object[] Args);
@@ -216,6 +217,28 @@ public sealed class AuditChain : IAuditChain
 
     private bool ValidLink(AuditChainEntry link) => SameMac(link.Mac, SignLink(link.Hash));
 
+    /// <summary>A link whose fields still give its hash and whose signature (when it has one, under the key) is valid —
+    /// so its <see cref="AuditChainEntry.RowHash"/> is the one that was written, not one changed in the database.</summary>
+    private bool LinkHolds(AuditChainEntry link) =>
+        LinkHash(link.PrevHash, link.Seq, link.AuditId, link.RowHash) == link.Hash
+        && (link.Mac is null || _key is null || ValidLink(link));
+
+    /// <summary>The link after which every link must be signed: the newest trusted genesis or retention checkpoint (the
+    /// moment of trust); none trusted yet — nothing is required (<see cref="long.MaxValue"/>).</summary>
+    private async Task<long> SignedFromAsync(MetricsDbContext db, CancellationToken ct)
+    {
+        if (_key is null) return long.MaxValue;
+        var boundaries = await db.AuditCheckpoints.AsNoTracking()
+            .Where(c => c.Kind == GenesisKind || c.Kind == RetentionKind).ToListAsync(ct);
+        var trusted = boundaries.Where(Valid).Select(c => c.Seq).ToList();
+        if (trusted.Count > 0) return trusted.Max();
+        // No boundary in the database: a trusted head checkpoint (database or file) still means the trail is signed.
+        var file = ReadFile();
+        var signed = (file is not null && Valid(file))
+                     || (await db.AuditCheckpoints.AsNoTracking().Where(c => c.Mac != null).ToListAsync(ct)).Any(Valid);
+        return signed ? 0 : long.MaxValue;
+    }
+
     private static bool SameMac(string? given, string? expected)
     {
         if (expected is null || given is not { Length: 64 }) return false;
@@ -289,7 +312,8 @@ public sealed class AuditChain : IAuditChain
             if (row is null) continue;   // nothing to change: the write will match no row
             var link = await db.AuditChain.AsNoTracking().Where(c => c.AuditId == id).OrderByDescending(c => c.Seq)
                 .FirstOrDefaultAsync(ct);
-            if (link is null || link.RowHash != RowHash(row) || (link.Mac is not null && _key is not null && !ValidLink(link)))
+            if (link is null || !LinkHolds(link) || link.RowHash != RowHash(row)
+                || (_key is not null && link.Mac is null && link.Seq > await SignedFromAsync(db, ct)))
             {
                 _logger?.LogError("AUDIT ROW CHANGED OUTSIDE WHISKERS: audit row {AuditId} does not match its newest " +
                                   "link — not writing its next version; verify the audit trail", id);
@@ -603,13 +627,19 @@ public sealed class AuditChain : IAuditChain
 
     private AuditCheckpointEntity? ReadFile()
     {
-        if (_checkpointFile is null || !File.Exists(_checkpointFile)) return null;
+        if (_checkpointFile is null) return null;
         for (var attempt = 1; ; attempt++)
         {
             try
             {
                 return JsonSerializer.Deserialize<AuditCheckpointEntity>(File.ReadAllText(_checkpointFile))
                        ?? throw new JsonException("empty checkpoint file");
+            }
+            // Only a confirmed absence is "no file"; a denied access or any other failure is "cannot be read" — never
+            // a reason to verify without it (File.Exists answers false for both).
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
             }
             catch (IOException) when (attempt < 3)
             {
@@ -779,7 +809,7 @@ public sealed class AuditChain : IAuditChain
             findings.Add(new AuditFinding("More", [count - MaxProblems]));
         }
         return new AuditChainReport(count == 0, problems, rows, links, head, newest?.Seq, newest is not null, complete,
-            _key is not null, findings);
+            _key is not null, findings, running);
     }
 
     // ---------------------------------------------------------------------------------------------- export
@@ -827,9 +857,25 @@ public sealed class AuditChain : IAuditChain
             _logger?.LogError("AUDIT RETENTION SKIPPED: VAULT_KEY adoption is pending");
             return 0;
         }
+        // Anything due at all? Then the whole trail is verified first — outside the chain lock, in one snapshot, so
+        // audit writers (and with them every mutation) are not held up for a scan of the whole trail.
+        if (!await db.AuditLog.AnyAsync(a => a.Timestamp < cutoffUtc, ct)
+            && !await db.McpToolCalls.AnyAsync(e => e.Timestamp < cutoffUtc, ct))
+            return 0;
+        // Nothing is removed from, nor signed over, a trail that does not verify: retention would otherwise sign a
+        // tampered prefix end as the new start, and drop rows whose timestamps were backdated.
+        var verified = await VerifyAsync(db, ct);
+        if (!verified.Intact || !verified.Complete)
+        {
+            _logger?.LogError("AUDIT RETENTION SKIPPED: the trail does not verify ({Problems}) — nothing removed",
+                string.Join("; ", verified.Problems.Take(5)));
+            return 0;
+        }
+
         AuditCheckpointEntity? written = null;
         var removed = await WriteAsync(db, async token =>
         {
+            db.ChangeTracker.Clear();
             // Up to the first row that is still young: a row is never removed before its time, also where ids and
             // timestamps are not in the same order.
             var firstYoung = await db.AuditLog.Where(a => a.Timestamp >= cutoffUtc).OrderBy(a => a.Id)
@@ -841,16 +887,17 @@ public sealed class AuditChain : IAuditChain
                     .Select(a => (long?)a.Id).FirstOrDefaultAsync(token) is { } batchEnd)
                 through = batchEnd;
             var count = await db.AuditLog.CountAsync(a => a.Id <= through, token);
-            var history = await db.McpToolCalls.CountAsync(e => e.Timestamp < cutoffUtc, token);
+            // The MCP call history in batches too, by id.
+            var historyThrough = await db.McpToolCalls.Where(e => e.Timestamp < cutoffUtc).OrderBy(e => e.Id)
+                .Skip(MaxPruneRows - 1).Select(e => (long?)e.Id).FirstOrDefaultAsync(token) ?? long.MaxValue;
+            var history = await db.McpToolCalls.CountAsync(e => e.Timestamp < cutoffUtc && e.Id <= historyThrough, token);
             if (count == 0 && history == 0) return (0, Array.Empty<long>());
 
-            // Nothing is removed from, nor signed over, a trail that does not verify: retention would otherwise sign a
-            // tampered prefix end as the new start, and drop rows whose timestamps were backdated.
-            var report = await VerifyAsync(db, ReadFile(), token);
-            if (!report.Intact || !report.Complete)
+            // What may have changed since the verification, checked again under the lock: bounded by this batch and
+            // the links written meanwhile.
+            if (!await UnchangedSinceAsync(db, verified, through, token))
             {
-                _logger?.LogError("AUDIT RETENTION SKIPPED: the trail does not verify ({Problems}) — nothing removed",
-                    string.Join("; ", report.Problems.Take(5)));
+                _logger?.LogError("AUDIT RETENTION SKIPPED: the trail changed outside Whiskers since it was verified — nothing removed");
                 return (0, Array.Empty<long>());
             }
 
@@ -868,7 +915,7 @@ public sealed class AuditChain : IAuditChain
             await AppendAsync(db, [record.Id], token);
             db.ChangeTracker.Clear();
 
-            await db.McpToolCalls.Where(e => e.Timestamp < cutoffUtc).ExecuteDeleteAsync(token);
+            await db.McpToolCalls.Where(e => e.Timestamp < cutoffUtc && e.Id <= historyThrough).ExecuteDeleteAsync(token);
             if (count == 0) return (0, Array.Empty<long>());   // only history went: the trail keeps its start
             await db.AuditLog.Where(a => a.Id <= through).ExecuteDeleteAsync(token);
             // The new anchor: the end of the chain prefix that names only removed rows.
@@ -897,5 +944,37 @@ public sealed class AuditChain : IAuditChain
         // Under the lock: brings the file up to the new start (and anything written since).
         if (written is not null) await CheckpointAsync(db, HeadKind, ct);
         return removed;
+    }
+
+    /// <summary>Under the lock, after a verification outside it: the links written since continue the verified head
+    /// (each one holding, and signed under the key), and every row about to be removed — with each link naming it —
+    /// is still what the chain recorded. Bounded by the batch and the links written meanwhile.</summary>
+    internal async Task<bool> UnchangedSinceAsync(MetricsDbContext db, AuditChainReport verified, long through, CancellationToken ct)
+    {
+        var running = verified.HeadHash;
+        var atHead = await db.AuditChain.AsNoTracking().Where(c => c.Seq == verified.HeadSeq).Select(c => c.Hash)
+            .FirstOrDefaultAsync(ct) ?? (await AnchorAsync(db, ct)) switch
+            {
+                var (seq, hash) when seq == verified.HeadSeq => hash,
+                _ => null,
+            };
+        if (running is null || atHead != running) return false;
+        await foreach (var link in db.AuditChain.AsNoTracking().Where(c => c.Seq > verified.HeadSeq).OrderBy(c => c.Seq)
+                           .AsAsyncEnumerable().WithCancellation(ct))
+        {
+            if (link.PrevHash != running || !LinkHolds(link) || (_key is not null && link.Mac is null)) return false;
+            running = link.Hash;
+        }
+
+        var latest = new Dictionary<long, AuditChainEntry>();
+        await foreach (var link in db.AuditChain.AsNoTracking().Where(c => c.AuditId <= through).OrderBy(c => c.Seq)
+                           .AsAsyncEnumerable().WithCancellation(ct))
+        {
+            if (!LinkHolds(link)) return false;
+            latest[link.AuditId] = link;
+        }
+        await foreach (var row in db.AuditLog.AsNoTracking().Where(a => a.Id <= through).AsAsyncEnumerable().WithCancellation(ct))
+            if (!latest.TryGetValue(row.Id, out var link) || link.RowHash != RowHash(row)) return false;
+        return true;
     }
 }

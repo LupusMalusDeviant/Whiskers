@@ -61,8 +61,10 @@ Option B.
   reported at once and is never signed over by the next checkpoint. Links written before the key was adopted are
   covered by the genesis checkpoint written at adoption (the moment of trust); every link after it must be signed.
 - **Changing a row.** A row is changed only through `UpdateAsync`, which locks it (`FOR UPDATE` on PostgreSQL; the
-  SQLite write transaction holds the database lock) and checks it against its newest link — the same row hash and,
-  with the key, a valid link signature — before the change. A row changed in the database is refused, so the
+  SQLite write transaction holds the database lock) and checks it against its newest link — the link's fields still
+  give its hash, its signature is valid (required after the moment of trust), and its row hash is the row's — before
+  the change. A writer that computes the new version from a row it read earlier writes it only while the row is still
+  exactly what it read (recovery). A row changed in the database is refused, so the
   application never turns someone else's edit into an authenticated next version (completion, recovery). A plain
   `WriteAsync` that changes a row with a link fails.
 - **Verification** walks the chain from its anchor: each entry's `PrevHash` must be the previous entry's `Hash`, and
@@ -71,14 +73,16 @@ Option B.
   trusted checkpoint (valid MAC; the later of the database's and the file's) must lie on the chain with the same
   hash, and the chain must not end before it. Verification reads one database snapshot (a row and its link are always
   both in it or both out); the file is read first, so it never names a link the snapshot cannot have.
-- **Retention** (configurable, default 365 days, minimum 30; run daily): one transaction first verifies the whole
-  trail and removes nothing when it is not intact, incomplete, or key adoption is pending (else a tampered or
-  backdated prefix would be cut and its end signed as the new start); then it writes an `audit.retention` event
-  (counts, boundary), deletes the rows up to an id boundary and the chain prefix that only names such rows, and writes
+- **Retention** (configurable, default 365 days, minimum 30; run daily): the whole trail is verified first, in one
+  snapshot outside the chain lock, and nothing is removed when it is not intact, incomplete, or key adoption is
+  pending (else a tampered or backdated prefix would be cut and its end signed as the new start). Under the lock only
+  what may have changed since is checked again — the links written meanwhile continue the verified head, and the rows
+  of the batch and their links still hold — so audit writers are never held up for a scan of the whole trail. Then
+  one transaction writes an `audit.retention` event (counts, boundary), deletes the rows up to an id boundary and the chain prefix that only names such rows, and writes
   a signed *retention checkpoint* holding the new anchor (seq, hash) and the pruned id boundary. Rows past the
   boundary keep their entries; entries after the anchor that name pruned rows are allowed. The MCP call history
-  (`McpToolCalls`) shares the retention period and is removed in the same recorded transaction — never by a plain
-  delete elsewhere.
+  (`McpToolCalls`) shares the retention period and is removed in the same recorded transaction, also at most 10,000
+  rows per run — never by a plain delete elsewhere.
 - **Upgrade.** Rows written before R1-23 have no chain. On the first start the existing rows are sealed in id order
   and a checkpoint marks this genesis: they are protected from then on, not proven untouched before.
 - **Readers.** Audit data is Admin only (INV-50): the Audit log and Agent History pages, and `GET /audit/export`,
@@ -130,7 +134,8 @@ Option B.
   signature exists.
 - **Changing `VAULT_KEY`** invalidates every existing checkpoint signature: the trail then reports invalid signatures
   until a rotation path exists (R1-28).
-- A checkpoint file that cannot be read makes a verification *incomplete* (reported, not counted as tampering).
+- A checkpoint file that cannot be read makes a verification *incomplete* (reported, not counted as tampering). Only
+  a confirmed absence counts as "no file"; a denied access or any other failure counts as unreadable.
 - Pruning also removes the head checkpoints before the new start; retention and genesis checkpoints are kept. Only the
   newest 60 head checkpoints stay in the database (an older one adds nothing: a rewritten middle changes every later
   hash). A retention run removes at most 10,000 rows, so the chain lock is held briefly; the next daily run continues.

@@ -223,6 +223,47 @@ public sealed class AuditRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_row_changed_after_the_verification_is_caught_under_the_lock()
+    {
+        // Retention verifies the whole trail outside the chain lock; what changes after that is checked again inside.
+        var old = await _trail.LogAsync(2, DateTime.UtcNow.AddDays(-400));
+        await _trail.LogAsync(1);
+        var chain = (AuditChain)_trail.Chain;
+        var verified = await chain.VerifyAsync();
+        Assert.True(verified.Intact, string.Join("; ", verified.Problems));
+        using var scope = _trail.Scope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        Assert.True(await chain.UnchangedSinceAsync(db, verified, old[^1], default));
+
+        await _trail.LogAsync(1);   // written by Whiskers meanwhile: fine
+        Assert.True(await chain.UnchangedSinceAsync(db, verified, old[^1], default));
+
+        await _trail.SqlAsync($"UPDATE AuditLog SET Actor = 'x' WHERE Id = {old[0]}");   // an old row, edited meanwhile
+        Assert.False(await chain.UnchangedSinceAsync(db, verified, old[^1], default));
+    }
+
+    [Fact]
+    public async Task The_MCP_call_history_is_removed_in_batches_too()
+    {
+        await _trail.LogAsync(1);
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.McpToolCalls.AddRange(Enumerable.Range(0, AuditChain.MaxPruneRows + 5).Select(i =>
+                new McpToolCallEntity { Timestamp = DateTime.UtcNow.AddDays(-400), Actor = "a", ToolName = $"t{i}" }));
+            await db.SaveChangesAsync();
+        }
+
+        await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+        using (var scope = _trail.Scope())
+            Assert.Equal(5, await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().McpToolCalls.CountAsync());
+        await _trail.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+        using (var scope = _trail.Scope())
+            Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().McpToolCalls.CountAsync());
+        Assert.True((await _trail.Chain.VerifyAsync()).Intact);
+    }
+
+    [Fact]
     public async Task A_tampered_trail_keeps_its_MCP_call_history_too()
     {
         var ids = await _trail.LogAsync(1);
