@@ -182,6 +182,28 @@ public sealed class SinkRedactionTests
     }
 
     [Fact]
+    public async Task An_audit_row_redacted_on_save_is_chained_as_stored_and_the_trail_verifies()
+    {
+        // The chain hashes the row as it was stored: redaction on save must never look like tampering.
+        using var trail = new AuditTrailFixture(AuditHashChainTests.VaultKey, redacting: true);
+        Assert.True(await trail.Audit.TryLogAtAsync(DateTime.UtcNow, "admin@local.test", "mcp", "server.exec", "command",
+            $"export PGPASSWORD={Canary}", $"git clone https://deploy:{Canary}@git.example.org/r.git",
+            details: JsonSerializer.Serialize(new { output = SecretTexts[1] }), serverId: "s1"));
+        await trail.Chain.CheckpointAsync();
+
+        using (var scope = trail.Scope())
+        {
+            var row = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().SingleAsync();
+            AssertClean(row.TargetId);
+            AssertClean(row.TargetName);
+            AssertClean(row.Details);
+        }
+        var report = await trail.Chain.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Equal(1, report.LinksChecked);
+    }
+
+    [Fact]
     public void An_approval_keeps_its_payload_readable_for_the_approver()
     {
         using var db = Context();

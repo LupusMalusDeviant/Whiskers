@@ -878,13 +878,18 @@ internal sealed class AuditTrailFixture : IDisposable
     private readonly string _dbPath;
     private readonly ServiceProvider _sp;
 
-    public AuditTrailFixture(string? vaultKey, TimeProvider? time = null)
+    /// <param name="redacting">Register the sink-redaction interceptor, as the app's database registration does.</param>
+    public AuditTrailFixture(string? vaultKey, TimeProvider? time = null, bool redacting = false)
     {
         Directory.CreateDirectory(_dir);
         _dbPath = Path.Combine(_dir, "metrics.db");
         CheckpointFile = Path.Combine(_dir, "audit-checkpoint.json");
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}"));
+        services.AddDbContext<MetricsDbContext>(o =>
+        {
+            o.UseSqlite($"Data Source={_dbPath}");
+            if (redacting) o.AddInterceptors(SinkRedactionInterceptor.Instance);
+        });
         services.AddSingleton<IAuditChain>(sp =>
             new AuditChain(vaultKey, CheckpointFile, time: time, scopes: sp.GetRequiredService<IServiceScopeFactory>()));
         _sp = services.BuildServiceProvider();

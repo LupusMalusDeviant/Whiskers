@@ -331,7 +331,7 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   `ComposePlan.EnsureDecided` refuses a re-plan whose mounts were not decided.
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row
   ([`SinkRedaction.IsPayload`](../../Utils/SinkRedaction.cs): name parts such as `command`, `sql`, `compose`,
-  `content` in every spelling â€” `composeContent`, `compose_content`, `docker-compose` â€” only their length is stored, R1-24); the policy sees them, and so does the
+  `content` in every spelling — `composeContent`, `compose_content`, `docker-compose` — only their length is stored, R1-24); the policy sees them, and so does the
   approval card of a non-UI request (an agent's chat call, whose approver must read what the agent wants to run),
   with secrets masked by `SecretRedactor` — including SQL password literals (`PASSWORD '…'`, `IDENTIFIED BY …`) —
   a UI approval stores only their lengths.
