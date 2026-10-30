@@ -530,7 +530,7 @@ public sealed class AuditHashChainTests : IDisposable
         using (var scope = _trail.Scope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            await _trail.Chain.WriteAsync(db, async ct =>
+            await _trail.Chain.UpdateAsync(db, [ids[0]], async ct =>
             {
                 var changed = await db.AuditLog.Where(a => a.Id == ids[0])
                     .ExecuteUpdateAsync(s => s.SetProperty(a => a.Success, false).SetProperty(a => a.Details, "outcome: failed"), ct);
@@ -543,6 +543,73 @@ public sealed class AuditHashChainTests : IDisposable
         Assert.True(report.Intact, string.Join("; ", report.Problems));
         Assert.Equal(3, report.LinksChecked);
         Assert.Equal(2, report.RowsChecked);
+    }
+
+    [Fact]
+    public async Task A_row_changed_in_the_database_is_never_given_a_new_version()
+    {
+        // The application must not authenticate someone else's edit by writing the row's next version over it.
+        var ids = await _trail.LogAsync(1);
+        await _trail.SqlAsync($"UPDATE AuditLog SET Actor = 'someone-else' WHERE Id = {ids[0]}");
+        using (var scope = _trail.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => _trail.Chain.UpdateAsync(db, [ids[0]], async ct =>
+            {
+                var changed = await db.AuditLog.Where(a => a.Id == ids[0])
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, "outcome"), ct);
+                return (changed, (IReadOnlyCollection<long>)[ids[0]]);
+            }));
+            Assert.Equal(1, await db.AuditChain.CountAsync());   // no new link
+        }
+
+        var report = await _trail.Chain.VerifyAsync();
+        Assert.Contains($"Audit row {ids[0]} was changed after it was written.", report.Problems);
+    }
+
+    [Fact]
+    public async Task A_change_of_an_existing_row_outside_UpdateAsync_is_refused()
+    {
+        var ids = await _trail.LogAsync(1);
+        using var scope = _trail.Scope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _trail.Chain.WriteAsync(db, async ct =>
+        {
+            var changed = await db.AuditLog.Where(a => a.Id == ids[0])
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, "changed"), ct);
+            return (changed, (IReadOnlyCollection<long>)[ids[0]]);
+        }));
+        Assert.NotEqual("changed", (await db.AuditLog.AsNoTracking().SingleAsync()).Details);   // rolled back
+    }
+
+    [Fact]
+    public async Task Key_adoption_writes_the_signed_anchor_and_its_boundary_together()
+    {
+        // A trail pruned before the key: adoption signs the anchor and writes the genesis boundary in one go, so the
+        // unsigned links between them never become findings.
+        using var before = new AuditTrailFixture(vaultKey: null);
+        await before.LogAsync(2, DateTime.UtcNow.AddDays(-400));
+        await before.LogAsync(2);
+        await before.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+        await before.LogAsync(1);
+
+        var keyed = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
+        await keyed.SealExistingAsync();
+
+        using (var scope = before.Scope())
+        {
+            var signed = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditCheckpoints
+                .Where(c => c.Mac != null).Select(c => c.Kind).ToListAsync();
+            Assert.Contains(AuditChain.RetentionKind, signed);
+            Assert.Contains(AuditChain.GenesisKind, signed);
+        }
+        // The keyless process can no longer continue the now signed trail.
+        Assert.False(await before.Audit.TryLogAtAsync(DateTime.UtcNow, "admin@local.test", "web", "container.restart",
+            "container", "c9", "container-9", details: "late", serverId: "s1"));
+        var report = await keyed.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.True(report.CheckpointsSigned);
     }
 
     [Fact]

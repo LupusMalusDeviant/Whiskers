@@ -247,8 +247,10 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                     target = state is null
                         ? target.Where(a => !db.Operations.Any(o => o.AuditId == rowId))
                         : target.Where(a => db.Operations.Any(o => o.AuditId == rowId && o.State == state && o.Instance == instance));
-                    // The settled outcome is the row's next version: a link of the audit chain, same transaction (R1-23).
-                    var settled = await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).WriteAsync(db, async token =>
+                    // The settled outcome is the row's next version: a link of the audit chain, same transaction, and
+                    // only over an intent that is still what the chain recorded — a row changed in the database is
+                    // never settled into an authenticated version (R1-23).
+                    var settled = await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).UpdateAsync(db, [rowId], async token =>
                     {
                         var changed = await target
                             .ExecuteUpdateAsync(s => s

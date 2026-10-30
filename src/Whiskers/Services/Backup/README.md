@@ -9,6 +9,9 @@ Docker **volume backups**: create and manage backups of container volumes. Backu
 | File | Purpose |
 |---|---|
 | `IVolumeBackupService.cs` / `VolumeBackupService.cs` | Creates, lists and restores Docker volume backups; restore validates the archive and takes a safety backup before wiping. |
+| `IBackupService.cs` / `BackupService.cs` | Whiskers' own self-backup and restore of the data directory (F3). R1-23: the audit checkpoint file (`audit-checkpoint.json`) is staged *before* the database copy, so a restored database always reaches the restored checkpoint; the live checkpoint file and the restore note are not archived. |
+| `RestoreBootHandler.cs` / `RestoreMarker.cs` | The deferred restore applied at the next start, before the database opens. R1-23: an archive with a database but no checkpoint file (from before the chain) moves the live checkpoint file aside, so the restored rows start a new chain; the restore leaves a note (actor, archive, time) that the start writes as a chained `selfbackup.restored` event. |
+| `BackupArchiver.cs` / `BackupArchiveCipher.cs` / `SelfBackupManifest.cs` / `SelfBackupInfo.cs` | The self-backup archive (tar.gz), its VAULT_KEY-derived encryption and its manifest. |
 | `NoopVolumeBackupService.cs` | Core default `IVolumeBackupService` for when the **VolumeBackups module** is off. Keeps the Scheduler task executor's singleton graph resolvable; reads return empty but backup/restore **throw** (never fake a success) so a scheduled volume backup fails visibly. Real service wins by last-registration when the module is on (RoadToSAP Phase 1). |
 
 ## Wiring

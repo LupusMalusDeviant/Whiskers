@@ -90,8 +90,10 @@ contract than it says.
    rights are root on the host. The contract governs *who may reach* that power and *what is recorded*; it
    does not make the power smaller.
 2. **An Admin with shell access to the Whiskers host is outside the contract.** They can edit the database,
-   the JSON stores and the binaries. The audit hash chain (INV-49) makes database-only edits *detectable*;
-   a host that holds `VAULT_KEY`, the checkpoint file and the database can rewrite all three consistently
+   the JSON stores and the binaries. With `VAULT_KEY` set, the audit hash chain (INV-49) makes database-only
+   edits *detectable*, except that the events after the newest checkpoint (at most a minute) can be cut off
+   unnoticed. Without `VAULT_KEY` nothing is signed and a database writer can rewrite the trail consistently.
+   A host that holds `VAULT_KEY`, the checkpoint file and the database can rewrite all three consistently
    (ADR-0006).
 3. **Commands typed inside an interactive terminal are not policy-checked one by one.** The contract covers
    opening the session (authorization, kill switch, audit) and, depending on PC-D2, a transcript.

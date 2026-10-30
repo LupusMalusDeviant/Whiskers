@@ -60,6 +60,11 @@ Option B.
   forged "new version" of an old row, which the verifier would otherwise take as that row's latest state — is
   reported at once and is never signed over by the next checkpoint. Links written before the key was adopted are
   covered by the genesis checkpoint written at adoption (the moment of trust); every link after it must be signed.
+- **Changing a row.** A row is changed only through `UpdateAsync`, which locks it (`FOR UPDATE` on PostgreSQL; the
+  SQLite write transaction holds the database lock) and checks it against its newest link — the same row hash and,
+  with the key, a valid link signature — before the change. A row changed in the database is refused, so the
+  application never turns someone else's edit into an authenticated next version (completion, recovery). A plain
+  `WriteAsync` that changes a row with a link fails.
 - **Verification** walks the chain from its anchor: each entry's `PrevHash` must be the previous entry's `Hash`, and
   each `Hash` must recompute. Every audit row must have a latest chain entry whose `RowHash` matches the row now;
   every chain entry must name a row that exists, unless that row was pruned by a recorded retention. The newest
@@ -120,7 +125,9 @@ Option B.
 - Checkpoints written while `VAULT_KEY` was not set carry no signature; once a key is set they are not trusted, but
   not reported as tampering either. At the first start with a key, when no checkpoint anywhere (database or file)
   carries a signature, the newest unsigned retention anchor is signed once — the same moment of trust as a genesis —
-  so a trail pruned before the key was set still reaches its start. Never again once any signature exists.
+  so a trail pruned before the key was set still reaches its start. The signed anchor and the genesis boundary are
+  written in one transaction, so an interrupted start never leaves one without the other. Never again once any
+  signature exists.
 - **Changing `VAULT_KEY`** invalidates every existing checkpoint signature: the trail then reports invalid signatures
   until a rotation path exists (R1-28).
 - A checkpoint file that cannot be read makes a verification *incomplete* (reported, not counted as tampering).

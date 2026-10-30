@@ -16,10 +16,17 @@ namespace Whiskers.Services.AuditLog;
 /// file beside it, pin the chain's progress so a cut-off end is noticed too.</summary>
 public interface IAuditChain
 {
-    /// <summary>Runs <paramref name="write"/> — which adds or changes audit rows and returns their ids — and appends
-    /// each row's new version to the chain, in one transaction under the chain lock. Nothing is written when either
-    /// fails.</summary>
+    /// <summary>Runs <paramref name="write"/> — which adds audit rows and returns their ids — and appends each row to
+    /// the chain, in one transaction under the chain lock. Nothing is written when either fails. A changed existing row
+    /// is refused here: that is <see cref="UpdateAsync{T}"/>.</summary>
     Task<T> WriteAsync<T>(MetricsDbContext db,
+        Func<CancellationToken, Task<(T Result, IReadOnlyCollection<long> AuditIds)>> write, CancellationToken ct = default);
+
+    /// <summary>Like <see cref="WriteAsync{T}"/>, for a write that changes the existing rows <paramref name="rowIds"/>
+    /// (an intent turned into its outcome). Before <paramref name="write"/> runs, each of them is locked and checked
+    /// against its newest link — the same row hash, a valid link signature — and the write is refused (throws) when it
+    /// does not match: a row changed outside Whiskers is never turned into a new, authenticated version.</summary>
+    Task<T> UpdateAsync<T>(MetricsDbContext db, IReadOnlyCollection<long> rowIds,
         Func<CancellationToken, Task<(T Result, IReadOnlyCollection<long> AuditIds)>> write, CancellationToken ct = default);
 
     /// <summary>On the first start with the chain: seals the rows written before it, in id order, and marks that
@@ -230,8 +237,19 @@ public sealed class AuditChain : IAuditChain
 
     // ---------------------------------------------------------------------------------------------- writing
 
-    public async Task<T> WriteAsync<T>(MetricsDbContext db,
+    public Task<T> WriteAsync<T>(MetricsDbContext db,
+        Func<CancellationToken, Task<(T Result, IReadOnlyCollection<long> AuditIds)>> write, CancellationToken ct = default) =>
+        WriteAsync(db, [], write, ct);
+
+    public Task<T> UpdateAsync<T>(MetricsDbContext db, IReadOnlyCollection<long> rowIds,
         Func<CancellationToken, Task<(T Result, IReadOnlyCollection<long> AuditIds)>> write, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rowIds);
+        return WriteAsync(db, rowIds, write, ct);
+    }
+
+    private async Task<T> WriteAsync<T>(MetricsDbContext db, IReadOnlyCollection<long> updates,
+        Func<CancellationToken, Task<(T Result, IReadOnlyCollection<long> AuditIds)>> write, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(write);
@@ -244,8 +262,9 @@ public sealed class AuditChain : IAuditChain
                 // A retry starts over: the transaction before it was rolled back.
                 if (attempt++ > 0) db.ChangeTracker.Clear();
                 await using var tx = await db.Database.BeginTransactionAsync(ct);
+                var checkedRows = await CheckBeforeUpdateAsync(db, updates, ct);
                 var (result, ids) = await write(ct);
-                await AppendAsync(db, ids, ct);
+                await AppendAsync(db, ids, ct, checkedRows);
                 await tx.CommitAsync(ct);
                 return result;
             });
@@ -256,8 +275,35 @@ public sealed class AuditChain : IAuditChain
         }
     }
 
+    /// <summary>Locks each row about to be changed and checks it against its newest link: a row whose current state is
+    /// not what the chain last authenticated was changed outside Whiskers, and its next version would launder that.
+    /// SQLite: the write transaction already holds the database's write lock; PostgreSQL: <c>FOR UPDATE</c>.</summary>
+    private async Task<HashSet<long>> CheckBeforeUpdateAsync(MetricsDbContext db, IReadOnlyCollection<long> ids, CancellationToken ct)
+    {
+        var checkedRows = new HashSet<long>();
+        foreach (var id in ids.Distinct().Order())
+        {
+            if (!db.Database.IsSqlite())
+                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"AuditLog\" WHERE \"Id\" = {id} FOR UPDATE", ct);
+            var row = await db.AuditLog.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, ct);
+            if (row is null) continue;   // nothing to change: the write will match no row
+            var link = await db.AuditChain.AsNoTracking().Where(c => c.AuditId == id).OrderByDescending(c => c.Seq)
+                .FirstOrDefaultAsync(ct);
+            if (link is null || link.RowHash != RowHash(row) || (link.Mac is not null && _key is not null && !ValidLink(link)))
+            {
+                _logger?.LogError("AUDIT ROW CHANGED OUTSIDE WHISKERS: audit row {AuditId} does not match its newest " +
+                                  "link — not writing its next version; verify the audit trail", id);
+                throw new InvalidOperationException(
+                    $"Audit row {id} does not match its newest link: it was changed outside Whiskers. Its next version is not written.");
+            }
+            checkedRows.Add(id);
+        }
+        return checkedRows;
+    }
+
     /// <summary>Appends the current version of each row. Runs inside the caller's transaction, under the lock.</summary>
-    private async Task AppendAsync(MetricsDbContext db, IReadOnlyCollection<long> auditIds, CancellationToken ct)
+    private async Task AppendAsync(MetricsDbContext db, IReadOnlyCollection<long> auditIds, CancellationToken ct,
+        IReadOnlySet<long>? checkedRows = null)
     {
         if (auditIds.Count == 0) return;
         await RefuseUnsignedOnSignedTrailAsync(db, ct);
@@ -282,6 +328,10 @@ public sealed class AuditChain : IAuditChain
             var latest = await db.AuditChain.AsNoTracking().Where(c => c.AuditId == id)
                 .OrderByDescending(c => c.Seq).Select(c => c.RowHash).FirstOrDefaultAsync(ct);
             if (latest == rowHash) continue;
+            // A new version of an existing row only through UpdateAsync, which checked the row before it was changed.
+            if (latest is not null && checkedRows?.Contains(id) != true)
+                throw new InvalidOperationException(
+                    $"Audit row {id} already has a link: a change of an existing row goes through UpdateAsync.");
             seq++;
             var link = new AuditChainEntry
             {
@@ -392,22 +442,50 @@ public sealed class AuditChain : IAuditChain
                 _checkpointFile);
             return;
         }
-        var anchor = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
-            .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).FirstOrDefaultAsync(ct);
-        if (anchor is not null)
+        // The signed anchor and the genesis boundary in one transaction: a start that stopped between them would leave
+        // a signed trail without its boundary — adoption skipped for good, the older unsigned links reported.
+        AuditCheckpointEntity? genesis = null;
+        await _lock.WaitAsync(ct);
+        try
         {
-            var signed = new AuditCheckpointEntity
+            await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
             {
-                Kind = RetentionKind, Seq = anchor.Seq, Hash = anchor.Hash, PrunedThroughId = anchor.PrunedThroughId,
-                At = Truncate(_time.GetUtcNow().UtcDateTime),
-            };
-            signed.Mac = Sign(signed);
-            db.AuditCheckpoints.Add(signed);
-            await db.SaveChangesAsync(ct);
+                db.ChangeTracker.Clear();
+                await using var tx = await db.Database.BeginTransactionAsync(ct);
+                var anchor = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
+                    .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).FirstOrDefaultAsync(ct);
+                if (anchor is not null)
+                {
+                    var signed = new AuditCheckpointEntity
+                    {
+                        Kind = RetentionKind, Seq = anchor.Seq, Hash = anchor.Hash, PrunedThroughId = anchor.PrunedThroughId,
+                        At = Truncate(_time.GetUtcNow().UtcDateTime),
+                    };
+                    signed.Mac = Sign(signed);
+                    db.AuditCheckpoints.Add(signed);
+                    await db.SaveChangesAsync(ct);
+                }
+                // A genesis checkpoint (never thinned): the links before it were written without the key and are
+                // covered by its hash; every link after it must carry a signature.
+                var head = await db.AuditChain.AsNoTracking().OrderByDescending(c => c.Seq)
+                    .Select(c => new { c.Seq, c.Hash }).FirstOrDefaultAsync(ct);
+                var (seq, hash) = head is null ? await AnchorAsync(db, ct) : (head.Seq, head.Hash);
+                genesis = new AuditCheckpointEntity
+                {
+                    Kind = GenesisKind, Seq = seq, Hash = hash, At = Truncate(_time.GetUtcNow().UtcDateTime),
+                    PrunedThroughId = await TrustedPrunedThroughAsync(db, ct),
+                };
+                genesis.Mac = Sign(genesis);
+                db.AuditCheckpoints.Add(genesis);
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+            });
+            if (genesis is not null && await FileMayBeReplacedAsync(db, ct)) WriteFile(genesis);
         }
-        // A genesis checkpoint (never thinned): the links before it were written without the key and are covered by
-        // its hash; every link after it must carry a signature.
-        await CheckpointAsync(db, GenesisKind, ct);
+        finally
+        {
+            _lock.Release();
+        }
         _logger?.LogInformation("Audit chain: VAULT_KEY adopted, checkpoints and links are signed from now on");
     }
 

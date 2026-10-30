@@ -15,7 +15,8 @@ All notable changes to Whiskers are documented here. The format follows
   not tamper-evident against a database writer (the page says so); a compromised host can still rewrite everything,
   and a database writer can cut off the last minute before the next checkpoint (documented limits). **Once the trail
   is signed, a start without `VAULT_KEY` refuses audit writes — and with them every mutation — until the key is set
-  again** (fail closed). On the first start the existing rows are sealed once (genesis). New tables
+  again** (fail closed). An audit row changed in the database is never completed or settled into a new version: the
+  outcome write is refused and the change stays a finding. On the first start the existing rows are sealed once (genesis). New tables
   `AuditChain` and `AuditCheckpoints` (additive migration, both providers); the SQLite→PostgreSQL copy does not copy
   them, so PostgreSQL starts a new chain and the old checkpoint file is kept as `audit-checkpoint.json.sqlite-<time>`.
   **Retention changed: audit log and MCP call history are now kept 365 days (was 90)**, configurable with

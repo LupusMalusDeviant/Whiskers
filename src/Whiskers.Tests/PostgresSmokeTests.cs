@@ -128,10 +128,25 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
             Assert.True(exported.Intact, string.Join("; ", exported.Problems));
             Assert.Equal(2, exported.RowsChecked);   // the young row + the retention record
 
-            // A change made directly in the database is found.
+            // An outcome over an untouched row: checked and locked (FOR UPDATE) first, then its next version.
+            Task<int> Complete(MetricsDbContext db, long id) => chain.UpdateAsync(db, [id], async token =>
+            {
+                var changed = await db.AuditLog.Where(a => a.Id == id).ExecuteUpdateAsync(s => s.SetProperty(a => a.Phase, "outcome"), token);
+                return (changed, (IReadOnlyCollection<long>)[id]);
+            });
+            long young;
+            await using (var db = Pg())
+            {
+                young = await db.AuditLog.Where(a => a.TargetId == "c2").Select(a => a.Id).SingleAsync();
+                Assert.Equal(1, await Complete(db, young));
+            }
+
+            // A change made directly in the database is found, and never given a next version.
             await using (var db = Pg())
                 await db.Database.ExecuteSqlRawAsync("UPDATE \"AuditLog\" SET \"Details\" = 'rewritten' WHERE \"TargetId\" = 'c2'");
             Assert.Contains((await chain.VerifyAsync()).Problems, p => p.Contains("was changed after it was written"));
+            await using (var db = Pg())
+                await Assert.ThrowsAsync<InvalidOperationException>(() => Complete(db, young));
         }
         finally
         {

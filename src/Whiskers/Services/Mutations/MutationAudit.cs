@@ -161,8 +161,9 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            // The outcome is the row's next version: a new link of the audit chain, in the same transaction (R1-23).
-            await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).WriteAsync(db, async token =>
+            // The outcome is the row's next version: a new link of the audit chain, in the same transaction, and only
+            // over an intent that is still what the chain recorded (R1-23).
+            await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).UpdateAsync(db, [auditId], async token =>
             {
                 var entity = await db.AuditLog.FindAsync([auditId], token)
                              ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");

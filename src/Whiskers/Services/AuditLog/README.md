@@ -31,6 +31,8 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 - **Tamper evidence (R1-23):** every writer — `AuditLogService`, the gateway's intent and outcome rows, the outbox drain
   and settle in [`../Mutations/`](../Mutations/) — writes through `IAuditChain.WriteAsync`, so a row never exists
   without its link. Never write `AuditLog` directly: verification reports such a row as added outside the trail.
+  An existing row (an intent turned into its outcome) is changed only through `IAuditChain.UpdateAsync`, which locks
+  and checks it against its newest link first and refuses a row changed in the database.
   With `VAULT_KEY` every link and checkpoint is signed (HMAC); a link added outside Whiskers is reported at once. On a
   signed trail a process without `VAULT_KEY` refuses audit writes (fail closed), so mutations are refused until the
   key is back. Limits ([ADR-0006](../../../../docs/adr/0006-audit-hash-chain.md)): a host compromise holding

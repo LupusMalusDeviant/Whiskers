@@ -52,6 +52,9 @@ public sealed class AuditCheckpointServiceTests
         public Task<T> WriteAsync<T>(Whiskers.Services.Persistence.MetricsDbContext db,
             Func<CancellationToken, Task<(T Result, IReadOnlyCollection<long> AuditIds)>> write, CancellationToken ct = default) =>
             throw new InvalidOperationException();
+        public Task<T> UpdateAsync<T>(Whiskers.Services.Persistence.MetricsDbContext db, IReadOnlyCollection<long> rowIds,
+            Func<CancellationToken, Task<(T Result, IReadOnlyCollection<long> AuditIds)>> write, CancellationToken ct = default) =>
+            throw new InvalidOperationException();
         public Task SealExistingAsync(CancellationToken ct = default) => throw new InvalidOperationException();
         public Task CheckpointAsync(CancellationToken ct = default) => throw new InvalidOperationException("database is locked");
         public Task<AuditChainReport> VerifyAsync(CancellationToken ct = default) => throw new InvalidOperationException();

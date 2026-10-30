@@ -377,12 +377,18 @@ public sealed class AuditFailClosedTests : IDisposable
         using (var scope = _scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            db.AuditLog.Add(new AuditLogEntity
+            // Written as every intent is: through the chain (recovery never settles a row the chain does not know).
+            await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).WriteAsync(db, async token =>
             {
-                Action = "container.restart", Phase = "intent", OperationId = "op-never", EventId = "e-never",
-                Timestamp = _time.GetUtcNow().UtcDateTime, Details = "{}",
+                var intent = new AuditLogEntity
+                {
+                    Action = "container.restart", Phase = "intent", OperationId = "op-never", EventId = "e-never",
+                    Timestamp = _time.GetUtcNow().UtcDateTime, Details = "{}",
+                };
+                db.AuditLog.Add(intent);
+                await db.SaveChangesAsync(token);
+                return (0, (IReadOnlyCollection<long>)[intent.Id]);
             });
-            await db.SaveChangesAsync();
         }
         Assert.Equal(3, (await Events()).Count(e => e.Phase == "intent"));
 
@@ -400,6 +406,30 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.All(events.Values, e => Assert.Equal("outcome", e.Phase));
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
         running.SetResult(1);
+    }
+
+    [Fact]
+    public async Task Recovery_never_settles_an_intent_changed_in_the_database()
+    {
+        // Someone rewrites an intent's attribution and waits for recovery to settle it into a new, valid version.
+        var gateway = Gateway(journal: new DbOperationJournal(_scopes));
+        await gateway.ExecuteAsync(Restart("op-forged"), (_, _) =>
+        {
+            _writes.FailBefore = true;
+            return Task.FromResult(1);
+        });
+        _writes.FailBefore = false;
+        using (var scope = _scopes.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog
+                .Where(a => a.OperationId == "op-forged").ExecuteUpdateAsync(s => s.SetProperty(a => a.Actor, "someone-else"));
+
+        _sink = null;
+        var recovery = Recovery(new DbOperationJournal(_scopes));
+        await recovery.RecoverAsync();
+
+        var row = Assert.Single(await Events());
+        Assert.Equal("intent", row.Phase);   // left as it is: the change stays a finding
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
     }
 
     [Fact]
