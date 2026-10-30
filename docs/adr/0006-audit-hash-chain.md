@@ -137,6 +137,12 @@ Option B.
   signature exists.
 - **Changing `VAULT_KEY`** invalidates every existing checkpoint signature: the trail then reports invalid signatures
   until a rotation path exists (R1-28).
+- The last checkpoint is written once every hosted service has stopped (`ApplicationStopped`), so the rows other
+  services write while stopping are signed too.
+- A database without a chain beside a checkpoint file that cannot be read starts no chain (audit writes fail closed)
+  until a start can read the file: sealing or starting beside it could hide an earlier chain or leave old rows out.
+- Once the trail is signed, an unsigned retention checkpoint newer than every trusted one is a finding, and only
+  signed retention checkpoints are taken as the start.
 - A checkpoint file that cannot be read makes a verification *incomplete* (reported, not counted as tampering). Only
   a confirmed absence counts as "no file"; a denied access or any other failure counts as unreadable.
 - Pruning also removes the head checkpoints before the new start; retention and genesis checkpoints are kept. Only the

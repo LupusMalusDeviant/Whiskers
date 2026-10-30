@@ -360,7 +360,7 @@ public sealed class AuditHashChainTests : IDisposable
     {
         foreach (var code in new[] { "FileUnreadable", "AdoptionPending", "CheckpointSignature", "LinkBroken", "LinkChanged",
                      "LinkSignature", "LinkUnsigned", "CutOff", "CheckpointMismatch", "RowUnlinked", "RowChanged",
-                     "RowDeleted", "More" })
+                     "RowDeleted", "RetentionUnsigned", "More" })
         {
             foreach (var file in new[] { "SharedResource.resx", "SharedResource.de.resx" })
             {
@@ -628,6 +628,51 @@ public sealed class AuditHashChainTests : IDisposable
         await before.SqlAsync("UPDATE AuditChain SET Mac = NULL WHERE Seq = 1");
         var report = await keyed.VerifyAsync();
         Assert.Contains("Link 1 is not signed: it was added outside Whiskers.", report.Problems);
+    }
+
+    [Fact]
+    public async Task A_planted_unsigned_retention_checkpoint_is_a_finding_and_does_not_move_the_start()
+    {
+        await _trail.LogAsync(2);
+        await _trail.Chain.CheckpointAsync();
+        await _trail.SqlAsync("INSERT INTO AuditCheckpoints (Kind, Seq, Hash, PrunedThroughId, At, Mac) VALUES " +
+                              $"('retention', 999, '{AuditChain.Genesis}', 999, '2026-01-01 00:00:00', NULL)");
+
+        var report = await _trail.Chain.VerifyAsync();
+
+        Assert.False(report.Intact);
+        Assert.Contains("Retention checkpoint at link 999 is not signed: it was added outside Whiskers.", report.Problems);
+        using var scope = _trail.Scope();
+        var verified = await ((AuditChain)_trail.Chain).VerifyAsync();
+        Assert.True(await ((AuditChain)_trail.Chain).UnchangedSinceAsync(
+            scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), verified, 0, default));   // the start is still the real one
+    }
+
+    [Fact]
+    public async Task Without_a_readable_checkpoint_file_no_chain_is_started_beside_unsealed_rows()
+    {
+        // The upgrade start finds old rows and a checkpoint file it cannot read: it neither seals nor starts a chain.
+        using var fresh = new AuditTrailFixture(VaultKey);
+        using (var scope = fresh.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.AuditLog.Add(new AuditLogEntity { Actor = "a", Action = "legacy" });
+            await db.SaveChangesAsync();
+        }
+        await File.WriteAllTextAsync(fresh.CheckpointFile, "{ broken");
+        await fresh.Chain.SealExistingAsync();
+
+        Assert.False(await fresh.Audit.TryLogAtAsync(DateTime.UtcNow, "admin@local.test", "web", "container.restart",
+            "container", "c1", "c1", details: "x", serverId: "s1"));
+        using (var scope = fresh.Scope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditChain.AnyAsync());
+
+        // Readable again (here: gone): the next start seals the old rows first.
+        File.Delete(fresh.CheckpointFile);
+        await fresh.Chain.SealExistingAsync();
+        var report = await fresh.Chain.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Equal(1, report.RowsChecked);
     }
 
     [Fact]

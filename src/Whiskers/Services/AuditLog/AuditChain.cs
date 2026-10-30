@@ -317,6 +317,11 @@ public sealed class AuditChain : IAuditChain
         await RefuseUnsignedOnSignedTrailAsync(db, ct);
         var head = await db.AuditChain.AsNoTracking().OrderByDescending(c => c.Seq)
             .Select(c => new { c.Seq, c.Hash }).FirstOrDefaultAsync(ct);
+        if (head is null && !await db.AuditCheckpoints.AnyAsync(ct) && ReadFile() is { Kind: "unreadable" })
+            // No chain yet and no telling whether one was here: neither seal the rows nor start beside them (fail
+            // closed) — the next start with a readable file decides.
+            throw new InvalidOperationException(
+                "The audit checkpoint file cannot be read and the database has no chain yet: audit writes are refused until it can.");
         if (head is null && !await db.AuditCheckpoints.AnyAsync(ct) && ReadFile() is null)
         {
             // The chain's first link and no trace of an earlier chain: rows written before it (an audit write that ran
@@ -571,9 +576,10 @@ public sealed class AuditChain : IAuditChain
     /// without a key) — never copied from an unchecked row.</summary>
     private async Task<long> TrustedPrunedThroughAsync(MetricsDbContext db, CancellationToken ct)
     {
-        var starts = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
+        var keyed = _key is not null;
+        var starts = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind && (!keyed || c.Mac != null))
             .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).Take(KeptRetentionCheckpoints).ToListAsync(ct);
-        return starts.FirstOrDefault(c => _key is null || Valid(c))?.PrunedThroughId ?? 0;
+        return starts.FirstOrDefault(c => !keyed || Valid(c))?.PrunedThroughId ?? 0;
     }
 
     /// <summary>Whether the checkpoint file may be replaced: only while the database trail still reaches what the file
@@ -739,6 +745,16 @@ public sealed class AuditChain : IAuditChain
             else if (checkpoint.Kind != "unreadable" && checkpoint.Mac is not null)
                 Problem("CheckpointSignature", $"Checkpoint at link {checkpoint.Seq} ({checkpoint.Kind}) has an invalid signature.",
                     checkpoint.Seq, checkpoint.Kind);
+        }
+
+        // Once the trail is signed, an unsigned retention checkpoint newer than every trusted one was not written by
+        // Whiskers: a process without the key never prunes a signed trail.
+        if (trusted.Count > 0)
+        {
+            var newestTrusted = trusted.Max(c => c.Seq);
+            foreach (var planted in checkpoints.Where(c => c.Kind == RetentionKind && c.Mac is null && c.Seq > newestTrusted))
+                Problem("RetentionUnsigned", $"Retention checkpoint at link {planted.Seq} is not signed: it was added outside Whiskers.",
+                    planted.Seq);
         }
 
         // The anchor: the newest signed retention checkpoint (unsigned ones are taken only when nothing can be signed).
@@ -965,7 +981,8 @@ public sealed class AuditChain : IAuditChain
         }
 
         // The prefix from the trusted start, up to the first link naming a row that stays.
-        var start = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
+        var keyed = _key is not null;
+        var start = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind && (!keyed || c.Mac != null))
             .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).Take(KeptRetentionCheckpoints).ToListAsync(ct);
         var trustedStart = start.FirstOrDefault(c => _key is null || Valid(c));
         var (anchorSeq, prev) = trustedStart is null ? (0L, Genesis) : (trustedStart.Seq, trustedStart.Hash);

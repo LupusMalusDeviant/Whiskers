@@ -5078,4 +5078,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AuditFinding_More" xml:space="preserve">
     <value>… and {0} more.</value>
   </data>
+  <data name="AuditFinding_RetentionUnsigned" xml:space="preserve">
+    <value>The retention checkpoint at link {0} is not signed: it was added outside Whiskers.</value>
+  </data>
 </root>

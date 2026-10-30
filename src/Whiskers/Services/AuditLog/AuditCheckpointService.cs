@@ -10,18 +10,27 @@ public sealed class AuditCheckpointService : IHostedService, IAsyncDisposable
     private readonly IAuditChain _chain;
     private readonly ILogger<AuditCheckpointService> _logger;
     private readonly TimeProvider _time;
+    private readonly IHostApplicationLifetime? _lifetime;
     private ITimer? _timer;
     private int _running;
 
-    public AuditCheckpointService(IAuditChain chain, ILogger<AuditCheckpointService> logger, TimeProvider? time = null)
+    /// <summary>How long the last checkpoint may take once the host has stopped.</summary>
+    public static readonly TimeSpan FinalTimeout = TimeSpan.FromSeconds(10);
+
+    public AuditCheckpointService(IAuditChain chain, ILogger<AuditCheckpointService> logger, TimeProvider? time = null,
+        IHostApplicationLifetime? lifetime = null)
     {
         _chain = chain;
         _logger = logger;
         _time = time ?? TimeProvider.System;
+        _lifetime = lifetime;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        // The last checkpoint once every hosted service has stopped: the rows other services write while they stop
+        // (sign-in log, recovery, metrics) land before it, whatever order the services stop in.
+        _lifetime?.ApplicationStopped.Register(SignAfterStop);
         _timer = _time.CreateTimer(_ => _ = TickAsync(), null, Interval, Interval);
         return Task.CompletedTask;
     }
@@ -41,6 +50,24 @@ public sealed class AuditCheckpointService : IHostedService, IAsyncDisposable
         _timer = null;
         try { await _chain.CheckpointAsync(cancellationToken); }
         catch (Exception ex) { _logger.LogError(ex, "AUDIT CHECKPOINT NOT WRITTEN at shutdown"); }
+    }
+
+    private void SignAfterStop()
+    {
+        // Runs inside the host's shutdown: nothing may escape, not even a logger that is already gone.
+        try
+        {
+            if (!_chain.CheckpointAsync().Wait(FinalTimeout))
+                Log(null, "AUDIT CHECKPOINT NOT WRITTEN after shutdown: it took longer than the final timeout");
+        }
+        catch (Exception ex) { Log(ex, "AUDIT CHECKPOINT NOT WRITTEN after shutdown"); }
+    }
+
+    private void Log(Exception? ex, string message)
+    {
+        try { _logger.LogError(ex, message); }
+        catch (ObjectDisposedException) { /* the logging providers stopped before us */ }
+        catch (AggregateException) { /* the same, reported by the logger factory */ }
     }
 
     public async ValueTask DisposeAsync()

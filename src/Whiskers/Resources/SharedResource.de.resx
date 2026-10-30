@@ -5078,4 +5078,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AuditFinding_More" xml:space="preserve">
     <value>… und {0} weitere.</value>
   </data>
+  <data name="AuditFinding_RetentionUnsigned" xml:space="preserve">
+    <value>Der Retention-Checkpoint bei Kettenglied {0} ist nicht signiert: er wurde außerhalb von Whiskers angelegt.</value>
+  </data>
 </root>

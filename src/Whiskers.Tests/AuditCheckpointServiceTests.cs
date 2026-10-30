@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Services.AuditLog;
 using Whiskers.Tests.ComponentTests;
@@ -19,6 +20,33 @@ public sealed class AuditCheckpointServiceTests
         await service.DisposeAsync();
 
         Assert.Equal([nameof(IAuditChain.CheckpointAsync)], chain.Calls);
+    }
+
+    [Fact]
+    public async Task The_last_checkpoint_comes_after_every_hosted_service_has_stopped()
+    {
+        var chain = AuditPagesAccessTests.Recording<IAuditChain>.Create();
+        var lifetime = new Lifetime();
+        var service = new AuditCheckpointService((IAuditChain)(object)chain, NullLogger<AuditCheckpointService>.Instance,
+            lifetime: lifetime);
+        await service.StartAsync(CancellationToken.None);
+        await service.StopAsync(CancellationToken.None);
+        Assert.Single(chain.Calls);
+
+        lifetime.Stop();   // after every StopAsync: rows other services wrote while stopping are signed too
+
+        Assert.Equal(2, chain.Calls.Count);
+        await service.DisposeAsync();
+    }
+
+    private sealed class Lifetime : IHostApplicationLifetime
+    {
+        private readonly CancellationTokenSource _stopped = new();
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopped => _stopped.Token;
+        public void StopApplication() { }
+        public void Stop() => _stopped.Cancel();
     }
 
     [Fact]
