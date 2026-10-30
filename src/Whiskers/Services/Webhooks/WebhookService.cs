@@ -98,9 +98,18 @@ public class WebhookService : IWebhookService
         var changed = await db.Webhooks
             .Where(w => w.WebhookId == webhookId && w.Owner == expectedOwnerId)
             .ExecuteUpdateAsync(s => s.SetProperty(w => w.Owner, ownerId));
-        // The versioned, redacted change is part of the gateway's event (R1-22).
-        if (changed == 1) Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", new { Owner = expectedOwnerId }, new { Owner = ownerId });
-        return changed == 1;
+        if (changed != 1) return false;
+        // The versioned, redacted change is part of the gateway's event (R1-22), on the whole webhook like its other
+        // lifecycle steps, so the section's versions form one chain.
+        var webhook = await db.Webhooks.AsNoTracking().FirstOrDefaultAsync(w => w.WebhookId == webhookId);
+        if (webhook is not null)
+        {
+            webhook.Owner = ownerId;
+            var after = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
+            webhook.Owner = expectedOwnerId;
+            Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", Whiskers.Services.Mutations.ConfigChange.Capture(webhook), after);
+        }
+        return true;
     }
 
     public async Task<WebhookEntity> CreateWebhookAsync(WebhookEntity webhook)

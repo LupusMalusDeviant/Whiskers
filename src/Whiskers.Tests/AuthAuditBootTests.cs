@@ -107,11 +107,13 @@ public sealed class AuthAuditBootTests
 
     [Fact]
     public async Task A_stalled_audit_store_delays_no_sign_in_or_sign_out() =>
-        await BootAsync(async (_, client) =>
+        await BootAsync(async (services, client) =>
         {
             var token = await AntiforgeryTokenAsync(client);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var refused = await LoginAsync(client, token, Email, "wrong");
+            // The background writer is now stuck inside the store's write: every answer below comes regardless.
+            await ((StalledAudit)services.GetRequiredService<IAuditLogService>()).Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             var login = await LoginAsync(client, token, Email, Password);
             var logout = await client.GetAsync("/logout");
             clock.Stop();
@@ -186,13 +188,28 @@ public sealed class AuthAuditBootTests
     /// <summary>An audit store whose writes never complete, as a locked table or a stalled connection does.</summary>
     private sealed class StalledAudit : IAuditLogService
     {
+        /// <summary>Completes once a write has started (and hangs).</summary>
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
             string targetName, string? details = null, string? serverId = null, bool success = true) =>
-            Task.Delay(Timeout.Infinite);
+            Hang();
 
         public Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
             string targetName, string? details = null, string? serverId = null, bool success = true) =>
-            Task.FromResult(false);
+            Hang();
+
+        public Task<bool> TryLogAtAsync(DateTime occurredUtc, string actor, string actorType, string action,
+            string targetType, string targetId, string targetName, string? details = null, string? serverId = null,
+            bool success = true) =>
+            Hang();
+
+        private async Task<bool> Hang()
+        {
+            Entered.TrySetResult();
+            await Task.Delay(Timeout.Infinite);
+            return false;
+        }
 
         public Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0, string? actionFilter = null,
             string? targetTypeFilter = null) => Task.FromResult(new List<AuditLogEntity>());

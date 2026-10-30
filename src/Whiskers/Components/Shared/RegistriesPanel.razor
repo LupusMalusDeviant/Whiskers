@@ -100,6 +100,9 @@
             // A host with user info (user:password@host) would carry its password into the recorded arguments.
             if (form.Host.Contains('@'))
             {
+                await Mutations.RefuseAsync("registry.save",
+                    new { section = "registries", registryId = string.IsNullOrWhiteSpace(form.Id) ? null : form.Id, name = form.Name },
+                    "The host contains user info.");
                 Snackbar.Add(L["RegistriesPanel_Snackbar_HostUserInfo"].Value, Severity.Warning);
                 return;
             }

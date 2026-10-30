@@ -243,6 +243,8 @@ public sealed partial class AuditLoggingTests : IDisposable
             secret = await hooks.RegenerateSecretAsync(hook!.WebhookId);
             return 1;
         });
+        await Gateway().ExecuteAsync(Config("webhook.save", "webhook", "op-hook-take"), async (_, _) =>
+            await hooks.SetOwnerAsync(hook!.WebhookId, "user:ops@example.com", "user:admin@example.com"));
         await Gateway().ExecuteAsync(Config("webhook.set_enabled", "webhook", "op-hook-off"), async (_, _) =>
         {
             await hooks.SetEnabledAsync(hook!.WebhookId, false);
@@ -260,7 +262,11 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.Matches(@"^\[set #[0-9a-f]{6}\] → \[set #[0-9a-f]{6}\]$", rotated);
         Assert.Equal("true → false", Text(Setting(await ResultsOf("op-hook-off"), $"{section}:Enabled"), "details"));
         Assert.Equal("redeploy → (none)", Text(Setting(await ResultsOf("op-hook-del"), $"{section}:Name"), "details"));
-        foreach (var op in new[] { "op-hook-new", "op-hook-rotate", "op-hook-off", "op-hook-del" })
+        Assert.Equal("user:admin@example.com → user:ops@example.com",
+            Text(Setting(await ResultsOf("op-hook-take"), $"{section}:Owner"), "details"));
+        var steps = new[] { "op-hook-new", "op-hook-rotate", "op-hook-take", "op-hook-off", "op-hook-del" };
+        await AssertVersionsInOrder(steps);
+        foreach (var op in steps)
             Assert.DoesNotContain(secret!, await EventText(op));
     }
 
@@ -461,6 +467,67 @@ public sealed partial class AuditLoggingTests : IDisposable
             edges.Remove(next);
             current = next.To;
         }
+    }
+
+    /// <summary>The steps of one section, in the order they ran: each starts at the version the one before ended at.</summary>
+    private async Task AssertVersionsInOrder(IEnumerable<string> operations)
+    {
+        string? previous = null;
+        foreach (var op in operations)
+        {
+            var details = Text(Assert.Single(await ResultsOf(op), r => Text(r, "action") == ConfigChange.VersionAction), "details");
+            var match = System.Text.RegularExpressions.Regex.Match(details, "^([0-9a-f]{12}) → ([0-9a-f]{12});");
+            Assert.True(match.Success, details);
+            if (previous is not null) Assert.Equal(previous, match.Groups[1].Value);
+            previous = match.Groups[2].Value;
+        }
+    }
+
+    private sealed class MemoryVault : Whiskers.Services.Vault.IVaultService
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _secrets = new();
+        public bool IsEnabled => true;
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public List<VaultEntry> ListSecrets() => _secrets.Keys.Select(k => new VaultEntry { Key = k }).ToList();
+        public Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null,
+            int? rotateAfterDays = null) { _secrets[key] = plainValue; return Task.CompletedTask; }
+        public string? GetSecret(string key) => _secrets.TryGetValue(key, out var v) ? v : null;
+        public Task DeleteSecretAsync(string key) { _secrets.TryRemove(key, out _); return Task.CompletedTask; }
+        public List<VaultEntry> GetExpiringSecrets() => [];
+    }
+
+    [Fact]
+    public async Task A_git_token_rotation_is_a_change_and_neither_it_nor_a_url_path_moves_the_version()
+    {
+        var git = new Whiskers.Services.GitDeploy.GitDeployService(new ProtectedResourceResolutionTests.FakeHost(),
+            new MemoryVault(), Stub<IComposePlanner>(),
+            NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(_dir, "apps.json"));
+        var app = await git.SaveAppAsync(new GitDeployApp
+            { Id = "0123456789ab", Name = "shop", RepoUrl = "https://example.org/team/shop.git", ServerId = "local" },
+            token: "tok-first-q7", "user:admin@example.com");
+
+        await Gateway().ExecuteAsync(Config("gitdeploy.save", "gitdeploy", "op-git-token"), async (_, _) =>
+        {
+            app = await git.SaveAppAsync(app, token: "tok-second-m3", "user:admin@example.com");
+            return 1;
+        });
+        app.RepoUrl = "https://example.org/team/shop-renamed.git";
+        await Gateway().ExecuteAsync(Config("gitdeploy.save", "gitdeploy", "op-git-path"), async (_, _) =>
+        {
+            app = await git.SaveAppAsync(app, token: null, "user:admin@example.com");
+            return 1;
+        });
+
+        var token = await ResultsOf("op-git-token");
+        Assert.Matches(@"^\[set #[0-9a-f]{6}\] → \[set #[0-9a-f]{6}\]$", Text(Setting(token, "gitdeploy:0123456789ab:Token"), "details"));
+        Assert.Single(await ResultsOf("op-git-path"), r => Text(r, "targetId") == "gitdeploy:0123456789ab:RepoUrl");
+        foreach (var op in new[] { "op-git-token", "op-git-path" })
+        {
+            Assert.Matches(@"^([0-9a-f]{12}) → \1; 1 changed$",
+                Text(Assert.Single(await ResultsOf(op), r => Text(r, "action") == ConfigChange.VersionAction), "details"));
+            Assert.DoesNotContain("tok-", await EventText(op));
+        }
+        await AssertVersionsInOrder(["op-git-token", "op-git-path"]);
     }
 
     [Fact]
