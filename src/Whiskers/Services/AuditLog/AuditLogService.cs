@@ -25,9 +25,14 @@ public class AuditLogService : IAuditLogService
                          string? details = null, string? serverId = null, bool success = true) =>
         TryLogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
 
-    public async Task<bool> TryLogAsync(string actor, string actorType, string action,
-                                        string targetType, string targetId, string targetName,
-                                        string? details = null, string? serverId = null, bool success = true)
+    public Task<bool> TryLogAsync(string actor, string actorType, string action,
+                                  string targetType, string targetId, string targetName,
+                                  string? details = null, string? serverId = null, bool success = true) =>
+        TryLogAtAsync(DateTime.UtcNow, actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+
+    public async Task<bool> TryLogAtAsync(DateTime occurredUtc, string actor, string actorType, string action,
+                                          string targetType, string targetId, string targetName,
+                                          string? details = null, string? serverId = null, bool success = true)
     {
         try
         {
@@ -36,7 +41,7 @@ public class AuditLogService : IAuditLogService
 
             db.AuditLog.Add(new AuditLogEntity
             {
-                Timestamp = DateTime.UtcNow,
+                Timestamp = occurredUtc,
                 Actor = actor,
                 ActorType = actorType,
                 Action = action,

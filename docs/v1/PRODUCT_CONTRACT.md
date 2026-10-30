@@ -243,8 +243,8 @@ SaveConfig, ToggleSite, ReloadNginx; `SystemdManager` ManageService; `SslCerts` 
 `GitDeployView` SaveApp, DeleteApp, StartDeploy, AdoptApp; `ScheduledTasksView` CreateTask, RunNow, ToggleEnabled,
 AdoptTask, AdoptAll, DeleteTask; `VolumeBackupsView` CreateBackup, RestoreBackup, DeleteBackup. Since R1-22 the configuration
 pages (U-20–U-22, U-25, U-28, U-30–U-34) write no rows of their own either: their role checks record a Denied event and
-their writes carry a versioned, redacted diff. **Not through the gateway yet:** the unmarked actions of
-U-20, U-21, U-25.
+their writes carry a versioned, redacted diff; server onboarding (U-21) runs as `server.onboard` and its switch to
+mTLS carries the server's diff.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
@@ -268,7 +268,7 @@ U-20, U-21, U-25.
 | U-18 | Systemd start/stop/restart | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-19 | SSL certificate renew | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-20 | Servers add/update/delete (+ vault secrets, SSH keys) | Admin | — | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
-| U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | ❌ | INV-45 |
+| U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | GW ✅ (`server.onboard`; the switchover carries the server diff, R1-22) | INV-45 |
 | U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | — | GW ✅ (no page row since R1-22) | INV-17 |
 | U-23 | Cloud power / snapshot | Admin | ❌ | GW ✅ (R1-21) | INV-43, 52 |
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | GW ✅ (R1-21) | INV-43 |

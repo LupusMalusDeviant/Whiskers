@@ -214,8 +214,9 @@ public static class ConfigChange
                     ? new("[not set]", "[not set]", "[not set]")
                     : new($"[set #{Fingerprint(text)}]", Fingerprint(text), "[set]");
             case TextKind.Url:
-                var origin = OriginOf(text);
-                return new(origin, text, origin);
+                // The version holds scheme, host and port only, so a path or query edit alone never moves it.
+                var uri = new Uri(text);
+                return new(OriginOf(uri), text, $"{uri.Scheme}://{uri.Authority}");
             case TextKind.Opaque:
                 return unset ? new("", "", "") : new($"[text, {text.Length} chars #{Fingerprint(text)}]", text, "[text]");
             default:
@@ -249,9 +250,8 @@ public static class ConfigChange
     };
 
     /// <summary>Scheme, host and port of a URL — never its user info, path or query (a webhook's secret).</summary>
-    private static string OriginOf(string text)
+    private static string OriginOf(Uri uri)
     {
-        var uri = new Uri(text);
         return uri.PathAndQuery is "/" or "" ? $"{uri.Scheme}://{uri.Authority}" : $"{uri.Scheme}://{uri.Authority}/…";
     }
 

@@ -3758,6 +3758,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="RegistriesPanel_Snackbar_Deleted" xml:space="preserve">
     <value>Deleted.</value>
   </data>
+  <data name="RegistriesPanel_Snackbar_HostUserInfo" xml:space="preserve">
+    <value>The host must not contain user info (user:password@host). Enter the password or token in its own field.</value>
+  </data>
   <data name="RegistriesPanel_Snackbar_Error" xml:space="preserve">
     <value>Error: {0}</value>
   </data>

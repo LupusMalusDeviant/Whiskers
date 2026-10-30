@@ -65,7 +65,7 @@ public class OnboardingService : IOnboardingService
         var completed = new List<OnboardingStep>();
         var step = OnboardingStep.Bootstrap;
 
-        var server = _serverConfig.GetServer(serverId);
+        var server = _serverConfig.GetServer(serverId)?.Clone();   // edited below, saved once at the switchover
         if (server == null)
         {
             progress.Report("❌ Server nicht gefunden.");

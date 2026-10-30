@@ -442,6 +442,83 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.Contains("Roles[ops@example.com~2].Role", ConfigChange.Describe(roles.GetRoleData()).Settings.Keys);
     }
 
+    /// <summary>Each event's version entry as (from, to); the saves of one section must form one chain from
+    /// <paramref name="start"/>, so no event describes a state another save had already replaced.</summary>
+    private async Task AssertOneVersionChain(string start, IEnumerable<string> operations)
+    {
+        var edges = new List<(string From, string To)>();
+        foreach (var op in operations)
+        {
+            var details = Text(Assert.Single(await ResultsOf(op), r => Text(r, "action") == ConfigChange.VersionAction), "details");
+            var match = System.Text.RegularExpressions.Regex.Match(details, "^([0-9a-f]{12}) → ([0-9a-f]{12});");
+            Assert.True(match.Success, details);
+            edges.Add((match.Groups[1].Value, match.Groups[2].Value));
+        }
+        var current = start;
+        while (edges.Count > 0)
+        {
+            var next = Assert.Single(edges, e => e.From == current);
+            edges.Remove(next);
+            current = next.To;
+        }
+    }
+
+    [Fact]
+    public async Task Overlapping_role_and_whitelist_saves_each_record_the_change_they_made()
+    {
+        var roles = new RoleService(EmptyConfig(), NullLogger<RoleService>.Instance, Path.Combine(_dir, "roles.json"));
+        await roles.SetRoleAsync("admin@example.com", AppRole.Admin);
+        var whitelist = new WhitelistService(EmptyConfig(), roles, NullLogger<WhitelistService>.Instance, new DataPathOptions(_dir));
+        var rolesStart = ConfigChange.Describe(roles.GetRoleData()).Version;
+        var whitelistStart = ConfigChange.Describe(whitelist.GetWhitelist()).Version;
+        var ids = Enumerable.Range(0, 8).ToList();
+
+        await Task.WhenAll(ids.SelectMany(i => new[]
+        {
+            Gateway().ExecuteAsync(Config("config.roles", "roles", $"op-par-role-{i}"), async (_, _) =>
+            {
+                await roles.SaveRoleDataAsync(new UserRoleData { Roles =
+                [
+                    new() { Email = "admin@example.com", Role = AppRole.Admin },
+                    new() { Email = $"u{i}@example.com", Role = AppRole.Viewer },
+                ] });
+                return 1;
+            }),
+            Gateway().ExecuteAsync(Config("config.whitelist", "whitelist", $"op-par-wl-{i}"), async (_, _) =>
+            {
+                await whitelist.SaveWhitelistAsync(new WhitelistData { Emails = [$"u{i}@example.com"] });
+                return 1;
+            }),
+        }));
+
+        await AssertOneVersionChain(rolesStart, ids.Select(i => $"op-par-role-{i}"));
+        await AssertOneVersionChain(whitelistStart, ids.Select(i => $"op-par-wl-{i}"));
+    }
+
+    [Fact]
+    public async Task A_server_edited_in_place_and_saved_records_its_change()
+    {
+        var servers = new Whiskers.Services.ServerConfig.ServerConfigService(
+            Microsoft.Extensions.Options.Options.Create(new DockerSettings { SocketPath = "unix:///nope.sock" }),
+            NullLogger<Whiskers.Services.ServerConfig.ServerConfigService>.Instance, storePath: Path.Combine(_dir, "servers.json"));
+        await servers.InitializeAsync();
+        await servers.AddServerAsync(new ServerConfig { Id = "edge", Name = "edge", ConnectionType = ConnectionType.TCP, TcpHost = "10.0.0.1" });
+
+        // The pattern onboarding used: the cached instance itself is changed, then saved.
+        var cached = servers.GetServer("edge")!;
+        await Gateway().ExecuteAsync(Config("server.save", "server", "op-inplace"), async (_, _) =>
+        {
+            cached.TcpHost = "100.64.0.7";
+            cached.TcpUseTls = true;
+            await servers.UpdateServerAsync(cached);
+            return 1;
+        });
+
+        var results = await ResultsOf("op-inplace");
+        Assert.Equal("10.0.0.1 → 100.64.0.7", Text(Setting(results, "server:edge:TcpHost"), "details"));
+        Assert.Equal("false → true", Text(Setting(results, "server:edge:TcpUseTls"), "details"));
+    }
+
     // ---- ConfigChange in isolation ------------------------------------------------------------------------------
 
     private sealed record Notifier(string Name, string WebhookUrl, string? Password, string Homeserver);
@@ -535,6 +612,14 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.Equal(longBefore.Version, longAfter.Version);
         Assert.Equal(urlBefore.Version, urlAfter.Version);
         Assert.NotEqual(plainBefore.Version, plainAfter.Version);
+        // Also from the bare origin to a path or a query: the version holds scheme, host and port only.
+        var root = ConfigChange.Describe(new { WebhookUrl = "https://hooks.example.com/" });
+        foreach (var edited in new[] { "https://hooks.example.com/private", "https://hooks.example.com/?token=x" })
+        {
+            var after = ConfigChange.Describe(new { WebhookUrl = edited });
+            Assert.Equal(root.Version, after.Version);
+            Assert.Single(ConfigChange.Diff(root, after));
+        }
         var rotated = Assert.Single(ConfigChange.Diff(urlBefore, urlAfter));
         Assert.Matches(@"^https://hooks\.example\.com/… #[0-9a-f]{6}$", rotated.Before);
         Assert.NotEqual(rotated.Before, rotated.After);

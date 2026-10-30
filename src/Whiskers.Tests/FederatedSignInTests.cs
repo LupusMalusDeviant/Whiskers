@@ -108,6 +108,55 @@ public sealed class FederatedSignInTests
         public Task RecoverAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
+    /// <summary>An audit store whose writes wait for <see cref="Release"/>, as when its database stalls.</summary>
+    private sealed class StalledAudit : Whiskers.Services.AuditLog.IAuditLogService
+    {
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<DateTime> Stamps { get; } = [];
+        public void Release() => _gate.TrySetResult();
+
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) =>
+            TryLogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+
+        public Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) =>
+            TryLogAtAsync(DateTime.UtcNow, actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+
+        public async Task<bool> TryLogAtAsync(DateTime occurredUtc, string actor, string actorType, string action,
+            string targetType, string targetId, string targetName, string? details = null, string? serverId = null,
+            bool success = true)
+        {
+            await _gate.Task;
+            lock (Stamps) Stamps.Add(occurredUtc);
+            return true;
+        }
+
+        public Task<List<Whiskers.Models.AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
+            string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(new List<Whiskers.Models.AuditLogEntity>());
+
+        public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
+    }
+
+    [Fact]
+    public async Task A_row_written_late_keeps_the_time_it_happened()
+    {
+        var audit = new StalledAudit();
+        var log = new AuthAuditLog(audit, Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthAuditLog>.Instance);
+        await log.StartAsync(CancellationToken.None);
+        var from = DateTime.UtcNow;
+        await log.SignedInAsync(new DefaultHttpContext(), "local", "a@example.com");
+        await log.SignedInAsync(new DefaultHttpContext(), "local", "b@example.com");
+        var queued = DateTime.UtcNow;
+
+        await Task.Delay(TimeSpan.FromMilliseconds(400));
+        audit.Release();
+        await log.StopAsync(CancellationToken.None);
+
+        Assert.Equal(2, audit.Stamps.Count);
+        Assert.All(audit.Stamps, stamp => Assert.InRange(stamp, from, queued));
+    }
+
     [Fact]
     public async Task A_full_sign_in_queue_reports_every_row_it_cannot_take_and_never_blocks()
     {

@@ -32,7 +32,8 @@ All notable changes to Whiskers are documented here. The format follows
   provider_failure` and the client address; an unknown account name is never recorded) and `auth.logout`, for local,
   Google and OIDC sign-ins — hooks only, the login itself is unchanged; the rows are queued and written in the
   background, so a slow or locked audit database never delays a sign-in, and a lost row is reported to the `audit`
-  health check. Refusing an enabled whitelist without addresses is a Denied event. A self-backup
+  health check; a queued row keeps the time the sign-in happened. Saves of one section are serialized from capture
+  to diff, and a server's diff compares with what was stored, so every event describes the change it made. Refusing an enabled whitelist without addresses is a Denied event. A self-backup
   download (`selfbackup.download`) is recorded with the requester, archive and size before the first byte, and is
   refused with 503 when that row cannot be written; a signed-in non-Admin's attempt is recorded as refused.
   No migration.

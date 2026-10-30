@@ -3758,6 +3758,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="RegistriesPanel_Snackbar_Deleted" xml:space="preserve">
     <value>Gelöscht.</value>
   </data>
+  <data name="RegistriesPanel_Snackbar_HostUserInfo" xml:space="preserve">
+    <value>Der Host darf keine Zugangsdaten enthalten (benutzer:passwort@host). Passwort oder Token gehören in ihr eigenes Feld.</value>
+  </data>
   <data name="RegistriesPanel_Snackbar_Error" xml:space="preserve">
     <value>Fehler: {0}</value>
   </data>

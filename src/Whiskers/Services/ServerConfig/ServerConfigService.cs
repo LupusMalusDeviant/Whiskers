@@ -171,9 +171,12 @@ public class ServerConfigService : IServerConfigService, IInitializable
             var servers = new List<Models.ServerConfig>(_cached.Servers);
             servers[index] = server;
             var newData = new ServerConfigData { Servers = servers };
+            // The diff compares with what was persisted, not with the cached object: a caller that edited the cached
+            // instance in place (onboarding) would otherwise compare the new values with themselves.
+            var persisted = (await _store.LoadAsync()).Servers.FirstOrDefault(s => s.Id == server.Id);
             await _store.SaveAsync(newData);
             _cached = newData;
-            Whiskers.Services.Mutations.ConfigChange.Record($"server:{server.Id}", current, server);   // R1-22
+            Whiskers.Services.Mutations.ConfigChange.Record($"server:{server.Id}", persisted ?? current, server);   // R1-22
             return current;
         }
         finally

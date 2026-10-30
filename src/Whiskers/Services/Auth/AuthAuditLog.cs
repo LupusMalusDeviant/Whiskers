@@ -20,7 +20,11 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     /// <summary>Rows waiting to be written; beyond this a row is dropped (and reported), never waited for.</summary>
     public const int Capacity = 1024;
 
-    private sealed record Row(string Actor, string Action, string Method, string Details, bool Success);
+    /// <summary>A queued row keeps the time it happened: a stalled write must not move it behind later events.</summary>
+    private sealed record Row(string Actor, string Action, string Method, string Details, bool Success)
+    {
+        public DateTime OccurredUtc { get; } = DateTime.UtcNow;
+    }
 
     private readonly IAuditLogService _audit;
     private readonly ILogger<AuthAuditLog> _logger;
@@ -81,10 +85,10 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
         {
             // Reads until StopAsync completes the queue, so what is queued is still written on a clean shutdown.
             await foreach (var row in _queue.Reader.ReadAllAsync(CancellationToken.None))
-                // LogAsync never throws: a lost row is logged and reported to the audit health check there. A write
+                // TryLogAtAsync never throws: a lost row is logged and reported to the audit health check there. A write
                 // that hangs is abandoned once the shutdown's drain time is over.
-                await _audit.LogAsync(row.Actor, "web", row.Action, Target, row.Method, row.Method, row.Details,
-                    success: row.Success).WaitAsync(stoppingToken);
+                await _audit.TryLogAtAsync(row.OccurredUtc, row.Actor, "web", row.Action, Target, row.Method, row.Method,
+                    row.Details, success: row.Success).WaitAsync(stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

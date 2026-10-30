@@ -14,6 +14,13 @@ public interface IAuditLogService
                            string targetType, string targetId, string targetName,
                            string? details = null, string? serverId = null, bool success = true);
 
+    /// <summary>Like <see cref="TryLogAsync"/>, stamped with the time the event happened rather than the time the row
+    /// is written — for a row that waited in a queue (sign-ins, R1-22).</summary>
+    Task<bool> TryLogAtAsync(DateTime occurredUtc, string actor, string actorType, string action,
+                             string targetType, string targetId, string targetName,
+                             string? details = null, string? serverId = null, bool success = true) =>
+        TryLogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+
     Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
                                                string? actionFilter = null,
                                                string? targetTypeFilter = null);

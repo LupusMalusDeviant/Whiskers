@@ -97,6 +97,12 @@
             var cred = string.IsNullOrWhiteSpace(_formCredential) ? null : _formCredential;
             // Host and name only: the credential never goes into the arguments the audit keeps.
             var form = _form;
+            // A host with user info (user:password@host) would carry its password into the recorded arguments.
+            if (form.Host.Contains('@'))
+            {
+                Snackbar.Add(L["RegistriesPanel_Snackbar_HostUserInfo"].Value, Severity.Warning);
+                return;
+            }
             await Mutations.RunAsync("registry.save",
                 new { section = "registries", registryId = string.IsNullOrWhiteSpace(form.Id) ? null : form.Id, name = form.Name, host = form.Host },
                 async _ =>
