@@ -170,6 +170,9 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
             File.Move(temp, _path, overwrite: true);
             Volatile.Write(ref _entries, next);
             _loadFailed = false;
+            // The whole entry (owner, block and its reason) as a versioned diff in the gateway's event (R1-22): a
+            // takeover that lifts a suspension shows it, also when the owner stays the same.
+            ConfigChange.Record($"automation-owner:{feature}", replaced, next[feature]);
             return replaced;
         }
         finally

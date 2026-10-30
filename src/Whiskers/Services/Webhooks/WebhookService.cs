@@ -37,6 +37,9 @@ public class WebhookService : IWebhookService
     // Runs whose action outlived the run timeout: they keep their target, not a worker. Bounded too.
     private readonly SemaphoreSlim _overdue;
     private readonly ResourceLocks _locks;
+    // R1-22: one configuration writer at a time (create, rotate, enable, takeover, delete, automatic switch-off), so
+    // each recorded change starts where the one before ended.
+    private readonly SemaphoreSlim _config = new(1, 1);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<RunEnd>> _waiting = new(StringComparer.Ordinal);
     private readonly RateWindow _rates;
     private int _workersStarted;
@@ -92,24 +95,39 @@ public class WebhookService : IWebhookService
     public async Task<bool> SetOwnerAsync(string webhookId, string ownerId, string? expectedOwnerId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        // Compare-and-set in one statement: a takeover by someone else in between wins.
-        var changed = await db.Webhooks
-            .Where(w => w.WebhookId == webhookId && w.Owner == expectedOwnerId)
-            .ExecuteUpdateAsync(s => s.SetProperty(w => w.Owner, ownerId));
-        if (changed != 1) return false;
-        // The versioned, redacted change is part of the gateway's event (R1-22), on the whole webhook like its other
-        // lifecycle steps, so the section's versions form one chain.
-        var webhook = await db.Webhooks.AsNoTracking().FirstOrDefaultAsync(w => w.WebhookId == webhookId);
-        if (webhook is not null)
+        await _config.WaitAsync();
+        try
         {
-            webhook.Owner = ownerId;
-            var after = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
-            webhook.Owner = expectedOwnerId;
-            Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", Whiskers.Services.Mutations.ConfigChange.Capture(webhook), after);
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var before = await db.Webhooks.AsNoTracking().FirstOrDefaultAsync(w => w.WebhookId == webhookId);
+            // Compare-and-set in one statement: a takeover by someone else in between wins.
+            var changed = await db.Webhooks
+                .Where(w => w.WebhookId == webhookId && w.Owner == expectedOwnerId)
+                .ExecuteUpdateAsync(s => s.SetProperty(w => w.Owner, ownerId));
+            if (changed != 1) return false;
+            // The versioned, redacted change is part of the gateway's event (R1-22), on the whole webhook like its other
+            // lifecycle steps; read under the configuration lock, so no other change lies between before and after.
+            if (before is not null)
+            {
+                var from = AuditView(before);
+                before.Owner = ownerId;
+                Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", from, AuditView(before));
+            }
+            return true;
         }
-        return true;
+        finally { _config.Release(); }
+    }
+
+    /// <summary>What the audit compares and versions for a webhook (R1-22): its configuration, not its trigger
+    /// counters, which change with every delivery.</summary>
+    private static object? AuditView(WebhookEntity? webhook)
+    {
+        if (webhook is null) return null;
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(webhook)!.AsObject();
+        node.Remove(nameof(WebhookEntity.LastTriggered));
+        node.Remove(nameof(WebhookEntity.TriggerCount));
+        return System.Text.Json.JsonSerializer.SerializeToElement(node);
     }
 
     public async Task<WebhookEntity> CreateWebhookAsync(WebhookEntity webhook)
@@ -122,55 +140,75 @@ public class WebhookService : IWebhookService
         if (!WebhookSignatures.Providers.Contains(webhook.Provider))
             throw new ArgumentException($"Unknown signature scheme '{webhook.Provider}'.", nameof(webhook));
 
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        db.Webhooks.Add(webhook);
-        await db.SaveChangesAsync();
-        Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhook.WebhookId}", null, webhook);   // R1-22
-        return webhook;
+        await _config.WaitAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.Webhooks.Add(webhook);
+            await db.SaveChangesAsync();
+            Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhook.WebhookId}", null, AuditView(webhook));   // R1-22
+            return webhook;
+        }
+        finally { _config.Release(); }
     }
 
     public async Task<string> RegenerateSecretAsync(string webhookId)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
-            ?? throw new InvalidOperationException("Webhook not found");
-        var before = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
-        webhook.Secret = GenerateSecret();
-        await db.SaveChangesAsync();
-        Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, webhook);   // R1-22
-        return webhook.Secret;
+        await _config.WaitAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
+                ?? throw new InvalidOperationException("Webhook not found");
+            var before = AuditView(webhook);
+            webhook.Secret = GenerateSecret();
+            await db.SaveChangesAsync();
+            Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, AuditView(webhook));   // R1-22
+            return webhook.Secret;
+        }
+        finally { _config.Release(); }
     }
 
     public async Task SetEnabledAsync(string webhookId, bool enabled)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
-            ?? throw new InvalidOperationException("Webhook not found");
-        // A legacy webhook without a secret must not come back to life unauthenticated —
-        // force a secret regeneration first.
-        if (enabled && string.IsNullOrEmpty(webhook.Secret))
-            throw new InvalidOperationException("Webhook has no secret — regenerate its secret before enabling it.");
-        var before = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
-        webhook.Enabled = enabled;
-        await db.SaveChangesAsync();
-        Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, webhook);   // R1-22
+        await _config.WaitAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
+                ?? throw new InvalidOperationException("Webhook not found");
+            // A legacy webhook without a secret must not come back to life unauthenticated —
+            // force a secret regeneration first.
+            if (enabled && string.IsNullOrEmpty(webhook.Secret))
+                throw new InvalidOperationException("Webhook has no secret — regenerate its secret before enabling it.");
+            var before = AuditView(webhook);
+            webhook.Enabled = enabled;
+            await db.SaveChangesAsync();
+            Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, AuditView(webhook));   // R1-22
+        }
+        finally { _config.Release(); }
     }
 
     public async Task DeleteWebhookAsync(string webhookId)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId);
-        if (webhook != null)
+        await _config.WaitAsync();
+        try
         {
-            var before = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
-            db.Webhooks.Remove(webhook);
-            await db.SaveChangesAsync();
-            Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, null);   // R1-22
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId);
+            if (webhook != null)
+            {
+                var before = AuditView(webhook);
+                db.Webhooks.Remove(webhook);
+                await db.SaveChangesAsync();
+                Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, null);   // R1-22
+            }
         }
+        finally { _config.Release(); }
     }
 
     public WebhookReply? Admit(string webhookId)
@@ -877,6 +915,7 @@ public class WebhookService : IWebhookService
     /// <summary>Switches the webhook off if it still has the owner the call ran on; a takeover meanwhile wins.</summary>
     private async Task<bool> SuspendAsync(string webhookId, string? owner)
     {
+        await _config.WaitAsync();
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -889,6 +928,7 @@ public class WebhookService : IWebhookService
             _logger.LogWarning(ex, "Switching off webhook {WebhookId} failed", webhookId);
             return false;
         }
+        finally { _config.Release(); }
     }
 
     private async Task NotifyAsync(IServiceScope scope, string eventType, WebhookEntity webhook, string message)

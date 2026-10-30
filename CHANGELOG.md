@@ -23,7 +23,8 @@ All notable changes to Whiskers are documented here. The format follows
   occurrence (`a@example.com~2`), so neither hides a change of the other; a list of
   records such as API keys is classified field by field, so a key's level change is readable. An event keeps at most
   20 reports and counts the rest (`results.omitted`). Git-deploy takeovers carry the owner change; a replaced Git token is a changed setting (fingerprints only) and an
-  app's revision counter is not part of its version. The
+  app's revision counter and last deploy are not part of its version, nor are a webhook's trigger counters. An
+  automation takeover records the whole owner entry, so lifting a suspension shows even when the owner stays. The
   configuration pages (Settings, Servers, Webhooks, self-backup, log alerts, agent, AI operations, automation owners,
   registries) no longer write audit rows of their own: a refused attempt is the gateway's **Denied** event, and the old
   action names (`config.save`, `server.add`/`update`/`remove`, `webhook.create`/`enable`/`disable`/`delete`/`test`/

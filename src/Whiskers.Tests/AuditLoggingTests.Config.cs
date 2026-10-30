@@ -530,6 +530,107 @@ public sealed partial class AuditLoggingTests : IDisposable
         await AssertVersionsInOrder(["op-git-token", "op-git-path"]);
     }
 
+    /// <summary>A vault whose next write waits until <see cref="Release"/>; counts writes.</summary>
+    private sealed class GatedVault : Whiskers.Services.Vault.IVaultService
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _secrets = new();
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Gated { get; set; }
+        public int Writes;
+        public void Release() => _gate.TrySetResult();
+        public bool IsEnabled => true;
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public List<VaultEntry> ListSecrets() => [];
+        public async Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null,
+            int? rotateAfterDays = null)
+        {
+            Interlocked.Increment(ref Writes);
+            if (Gated)
+            {
+                Entered.TrySetResult();
+                await _gate.Task;
+            }
+            _secrets[key] = plainValue;
+        }
+        public string? GetSecret(string key) => _secrets.TryGetValue(key, out var v) ? v : null;
+        public Task DeleteSecretAsync(string key) { _secrets.TryRemove(key, out _); return Task.CompletedTask; }
+        public List<VaultEntry> GetExpiringSecrets() => [];
+    }
+
+    [Fact]
+    public async Task Of_two_overlapping_git_saves_the_loser_never_touches_the_token()
+    {
+        var vault = new GatedVault();
+        var git = new Whiskers.Services.GitDeploy.GitDeployService(new ProtectedResourceResolutionTests.FakeHost(),
+            vault, Stub<IComposePlanner>(),
+            NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(_dir, "apps.json"));
+        var app = await git.SaveAppAsync(new GitDeployApp
+            { Id = "0123456789ab", Name = "shop", RepoUrl = "https://example.org/shop.git", ServerId = "local" },
+            token: "tok-zero-k1", "user:admin@example.com");
+        vault.Gated = true;
+
+        var first = Gateway().ExecuteAsync(Config("gitdeploy.save", "gitdeploy", "op-git-a"), async (_, _) =>
+            await git.SaveAppAsync(app.Clone(), token: "tok-alpha-k2", "user:admin@example.com"));
+        await vault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));   // the first save holds the app, inside the vault
+        var second = git.SaveAppAsync(app.Clone(), token: "tok-beta-k3", "user:admin@example.com");
+        vault.Release();
+        await first;
+
+        await Assert.ThrowsAsync<Whiskers.Services.GitDeploy.GitDeployConflictException>(() => second);
+        Assert.Equal(2, vault.Writes);   // the initial save and the winner; the loser wrote nothing
+        Assert.Equal("tok-alpha-k2", vault.GetSecret("git-token:0123456789ab"));
+        Assert.Matches(@"^\[set #[0-9a-f]{6}\] → \[set #[0-9a-f]{6}\]$",
+            Text(Setting(await ResultsOf("op-git-a"), "gitdeploy:0123456789ab:Token"), "details"));
+    }
+
+    [Fact]
+    public async Task Overlapping_webhook_takeover_and_toggle_each_record_the_change_they_made()
+    {
+        var hooks = new Whiskers.Services.Webhooks.WebhookService(_db.Scopes, Stub<Whiskers.Services.Docker.IDockerService>(),
+            Stub<Whiskers.Services.Server.IHostCommandExecutor>(), Stub<IComposePlanner>(),
+            NullLogger<Whiskers.Services.Webhooks.WebhookService>.Instance);
+        var hook = await hooks.CreateWebhookAsync(new WebhookEntity
+            { Name = "redeploy", TargetId = "web", Action = "restart", Owner = "user:admin@example.com" });
+        var stored = (await hooks.GetWebhookAsync(hook.WebhookId))!;
+        var start = ConfigChange.Describe(RemoveCounters(JsonSerializer.SerializeToNode(stored)!.AsObject())).Version;
+
+        await Task.WhenAll(
+            Gateway().ExecuteAsync(Config("webhook.save", "webhook", "op-par-take"), async (_, _) =>
+                await hooks.SetOwnerAsync(hook.WebhookId, "user:ops@example.com", "user:admin@example.com")),
+            Gateway().ExecuteAsync(Config("webhook.set_enabled", "webhook", "op-par-off"), async (_, _) =>
+            {
+                await hooks.SetEnabledAsync(hook.WebhookId, false);
+                return 1;
+            }));
+
+        await AssertOneVersionChain(start, ["op-par-take", "op-par-off"]);
+    }
+
+    private static JsonElement RemoveCounters(System.Text.Json.Nodes.JsonObject webhook)
+    {
+        webhook.Remove(nameof(WebhookEntity.LastTriggered));
+        webhook.Remove(nameof(WebhookEntity.TriggerCount));
+        return JsonSerializer.SerializeToElement(webhook);
+    }
+
+    [Fact]
+    public async Task Taking_over_ones_own_suspended_automation_records_the_lifted_block()
+    {
+        var store = new AutomationOwnerStore(new DataPathOptions(_dir), NullLogger<AutomationOwnerStore>.Instance);
+        await store.SetAsync("auto-update", "user:admin@example.com");
+        Assert.Equal(SuspendResult.Suspended,
+            await store.SuspendAsync("auto-update", "user:admin@example.com", "owner lost the Admin role"));
+
+        await Gateway().ExecuteAsync(Config("automation.owner_set", "automation", "op-auto-take"), async (_, _) =>
+            await store.SetAsync("auto-update", "user:admin@example.com"));
+
+        var results = await ResultsOf("op-auto-take");
+        Assert.Equal("true → false", Text(Setting(results, "automation-owner:auto-update:Blocked"), "details"));
+        Assert.Contains(results, r => Text(r, "action") == ConfigChange.VersionAction
+                                      && Text(r, "targetId") == "automation-owner:auto-update");
+    }
+
     [Fact]
     public async Task Overlapping_role_and_whitelist_saves_each_record_the_change_they_made()
     {
