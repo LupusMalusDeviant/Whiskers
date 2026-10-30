@@ -1,6 +1,9 @@
 @page "/audit-log"
 @attribute [Authorize]
 @inject Whiskers.Services.AuditLog.IAuditLogService AuditLogService
+@inject Whiskers.Services.AuditLog.IAuditChain Chain
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject NavigationManager NavManager
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["AuditLog_PageTitle"]</PageTitle>
@@ -16,6 +19,57 @@
         </div>
     </MudStack>
 </div>
+
+@if (!_checked)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (!_isAdmin)
+{
+    @* R1-23: the trail names who did what to which server — Admin only, like its export. *@
+    <MudAlert Severity="Severity.Info">@L["AuditLog_AdminOnly"]</MudAlert>
+}
+else
+{
+<MudStack Row="true" Class="mb-3" Spacing="2" AlignItems="AlignItems.Center">
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.VerifiedUser"
+               Disabled="@_verifying" OnClick="VerifyAsync">@L["AuditLog_Verify"]</MudButton>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+               OnClick="Export">@L["AuditLog_Export"]</MudButton>
+</MudStack>
+
+@if (_report is not null)
+{
+    <MudAlert Severity="@(_report.Intact ? (_report.CheckpointsSigned && _report.Complete ? Severity.Success : Severity.Warning) : Severity.Error)"
+              Class="mb-3" Dense="true">
+        @if (_report.Intact)
+        {
+            @L["AuditLog_Verify_Intact", _report.RowsChecked, _report.LinksChecked]
+            @if (!_report.KeyConfigured)
+            {
+                <br />@L["AuditLog_Verify_Unsigned"]
+            }
+            else if (!_report.CheckpointsSigned)
+            {
+                <br />@L["AuditLog_Verify_NoTrustedCheckpoint"]
+            }
+            @foreach (var finding in _report.Findings ?? [])
+            {
+                <br />@L["AuditFinding_" + finding.Code, finding.Args]
+            }
+        }
+        else
+        {
+            @L["AuditLog_Verify_Broken", _report.Problems.Count]
+            <ul class="mb-0">
+                @foreach (var finding in _report.Findings ?? [])
+                {
+                    <li>@L["AuditFinding_" + finding.Code, finding.Args]</li>
+                }
+            </ul>
+        }
+    </MudAlert>
+}
 
 <MudStack Row="true" Class="mb-4" Spacing="2">
     <MudSelect T="string" Value="@_actionFilter" ValueChanged="OnActionFilterChanged"
@@ -112,6 +166,7 @@
                        SelectedChanged="OnPageChanged" />
     </MudStack>
 }
+}
 
 @code {
     private List<Whiskers.Models.AuditLogEntity> _entries = new();
@@ -121,14 +176,38 @@
     private int _totalCount;
     private int _currentPage;
     private const int _pageSize = 50;
+    private bool _checked;
+    private bool _isAdmin;
+    private bool _verifying;
+    private Whiskers.Services.AuditLog.AuditChainReport? _report;
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadData();
+        _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+        _checked = true;
+        if (_isAdmin) await LoadData();
     }
+
+    private async Task VerifyAsync()
+    {
+        if (!_isAdmin) return;
+        _verifying = true;
+        try
+        {
+            _report = await Chain.VerifyAsync();
+        }
+        finally
+        {
+            _verifying = false;
+        }
+    }
+
+    // A full load: the attachment response downloads the file without replacing the page.
+    private void Export() => NavManager.NavigateTo("audit/export", forceLoad: true);
 
     private async Task LoadData()
     {
+        if (!_isAdmin) return;
         _loading = true;
         _totalCount = await AuditLogService.GetTotalCountAsync(_actionFilter, _targetTypeFilter);
         _entries = await AuditLogService.GetRecentAsync(_pageSize, _currentPage * _pageSize, _actionFilter, _targetTypeFilter);

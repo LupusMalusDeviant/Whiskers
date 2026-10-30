@@ -84,7 +84,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            var id = await InsertOnceAsync(db, entity, ct);
+            var id = await InsertOnceAsync(db, entity, Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider), ct);
             _eventOf[id] = entity.EventId!;
             return id;
         }
@@ -124,15 +124,20 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     /// <summary>Whether this process wrote the intent with this event id and has not completed it yet.</summary>
     internal bool InFlight(string? eventId) => eventId is not null && _inFlight.ContainsKey(eventId);
 
-    /// <summary>Inserts the event once: when the insert throws but the row is there (its commit answer was lost), that
-    /// row is the event. Returns its id.</summary>
-    internal static async Task<long> InsertOnceAsync(MetricsDbContext db, AuditLogEntity row, CancellationToken ct)
+    /// <summary>Inserts the event once, with its link of the audit chain (R1-23): when the insert throws but the row is
+    /// there (its commit answer was lost), that row is the event — row and link commit together. Returns its id.</summary>
+    internal static async Task<long> InsertOnceAsync(MetricsDbContext db, AuditLogEntity row,
+        Whiskers.Services.AuditLog.IAuditChain chain, CancellationToken ct)
     {
-        db.AuditLog.Add(row);
         try
         {
-            await db.SaveChangesAsync(ct);
-            return row.Id;
+            return await chain.WriteAsync(db, async token =>
+            {
+                row.Id = 0;   // a retry inserts it again
+                db.AuditLog.Add(row);
+                await db.SaveChangesAsync(token);
+                return (row.Id, (IReadOnlyCollection<long>)[row.Id]);
+            }, ct);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
@@ -156,11 +161,17 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            var entity = await db.AuditLog.FindAsync([auditId], ct)
-                         ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
-            Complete(entity, operationId, status.ToString(), verification.ToString(), reason, (long)duration.TotalMilliseconds,
-                results);
-            await db.SaveChangesAsync(ct);
+            // The outcome is the row's next version: a new link of the audit chain, in the same transaction, and only
+            // over an intent that is still what the chain recorded (R1-23).
+            await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).UpdateAsync(db, [auditId], async token =>
+            {
+                var entity = await db.AuditLog.FindAsync([auditId], token)
+                             ?? throw new InvalidOperationException($"Audit intent {auditId} for operation {operationId} is missing.");
+                Complete(entity, operationId, status.ToString(), verification.ToString(), reason,
+                    (long)duration.TotalMilliseconds, results);
+                await db.SaveChangesAsync(token);
+                return (true, (IReadOnlyCollection<long>)[auditId]);
+            }, ct);
         }
         finally
         {
@@ -245,7 +256,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            await InsertOnceAsync(db, entity, ct);
+            await InsertOnceAsync(db, entity, Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider), ct);
         }
         catch (Exception) when (_outbox is not null)
         {

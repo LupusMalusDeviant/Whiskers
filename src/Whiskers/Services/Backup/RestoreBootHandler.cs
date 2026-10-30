@@ -55,11 +55,44 @@ public static class RestoreBootHandler
         // exits → restart retries from the (immutable) staging.
         SwapStagingOverLive(dataPaths, staging);
 
+        // R1-23: the restored database no longer holds the restore's own event; the note keeps who restored what
+        // until the start-up writes it as a chained audit row (RecordAppliedAsync). Written before the marker goes,
+        // so a crash in between repeats the (idempotent) swap and writes the note again.
+        parsed.AppliedAtUtc = DateTime.UtcNow;
+        var note = dataPaths.RestoreAppliedNote;
+        File.WriteAllText(note + ".tmp", JsonSerializer.Serialize(parsed));
+        File.Move(note + ".tmp", note, overwrite: true);
+
         // Success: remove the marker LAST (commit consumed), then staging + transient temps.
         TryDelete(marker);
         CleanupTransients(dataPaths, includeStaging: true);
         Console.Out.WriteLine(
             "[restore] Restore applied. Continuing normal startup (migrations + cache warm-up run against the restored data).");
+    }
+
+    /// <summary>The audit action of an applied restore.</summary>
+    public const string RestoredAction = "selfbackup.restored";
+
+    /// <summary>Writes the audit row of a restore applied at this start (after the audit chain is sealed), then removes
+    /// the note. Without the row the note stays and the next start tries again.</summary>
+    public static async Task RecordAppliedAsync(DataPathOptions dataPaths, Whiskers.Services.AuditLog.IAuditLogService audit,
+        ILogger? logger = null)
+    {
+        var note = dataPaths.RestoreAppliedNote;
+        if (!File.Exists(note)) return;
+        RestoreMarker? applied = null;
+        try { applied = JsonSerializer.Deserialize<RestoreMarker>(await File.ReadAllTextAsync(note), JsonOpts); }
+        catch (Exception ex) when (ex is IOException or JsonException) { logger?.LogError(ex, "Restore note unreadable: {Path}", note); }
+        var details = applied is null
+            ? "A restore was applied; its note could not be read."
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"Archive created {applied.SourceCreatedAtUtc:O}; restore committed {applied.CreatedAtUtc:O}; applied {applied.AppliedAtUtc:O}; provider={applied.Provider}. Audit events after the archive was taken are not in this database (the pre-restore safety backup holds them).");
+        var actor = string.IsNullOrEmpty(applied?.Actor) ? "(unknown)" : applied.Actor;
+        if (await audit.TryLogAsync(actor, "web", RestoredAction, "whiskers", "self-backup",
+                string.IsNullOrEmpty(applied?.Archive) ? "Self-backup" : applied.Archive, details))
+            TryDelete(note);
+        else
+            logger?.LogError("AUDIT ROW OF THE APPLIED RESTORE NOT WRITTEN — kept {Path} for the next start", note);
     }
 
     private static void SwapStagingOverLive(DataPathOptions dataPaths, string staging)
@@ -85,6 +118,19 @@ public static class RestoreBootHandler
                 TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-wal"));
                 TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-shm"));
             }
+        }
+
+        // R1-23: a restored database comes with the audit checkpoint taken with it. An archive from before the audit
+        // chain has none: the live file signs the replaced database's chain and would make the restored one look
+        // tampered with (and stop it from being sealed). Kept aside, never deleted.
+        var checkpointName = Path.GetFileName(dataPaths.AuditCheckpointJson);
+        if (File.Exists(Path.Combine(staging, SelfBackupFormat.DbEntryName))
+            && !File.Exists(Path.Combine(staging, checkpointName))
+            && File.Exists(dataPaths.AuditCheckpointJson))
+        {
+            var kept = $"{dataPaths.AuditCheckpointJson}.pre-restore-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            Retry(() => File.Move(dataPaths.AuditCheckpointJson, kept));
+            Console.Out.WriteLine($"[restore] The archive has no audit checkpoint; the current one was kept as {kept}.");
         }
     }
 

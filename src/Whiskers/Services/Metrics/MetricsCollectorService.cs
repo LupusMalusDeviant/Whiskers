@@ -26,6 +26,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     private readonly Whiskers.Services.Metrics.HostLoad.ApiLatencyEvaluator _apiLatency;
     private readonly Whiskers.Services.Metrics.HostLoad.RollingBaseline _baseline;
     private DateTime _lastPrune;                 // OPT-2: prune at most hourly, not every 30s cycle
+    private DateTime _lastAuditPrune;            // R1-23: the audit trail daily — each run verifies the whole trail first
     private const int MaxStatsConcurrency = 8;   // OPT-11.2: bound the per-container stats fan-out
 
     public MetricsCollectorService(
@@ -274,10 +275,21 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             await db.ServerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
             await db.AlertHistory.Where(a => a.Timestamp < cutoff).ExecuteDeleteAsync(ct);
 
-            // Audit log + MCP tool-call log have a longer retention (90 days). Timestamp is indexed.
-            var cutoff90d = now.AddDays(-90);
-            await db.AuditLog.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
-            await db.McpToolCalls.Where(e => e.Timestamp < cutoff90d).ExecuteDeleteAsync(ct);
+        }
+
+        // Audit log + MCP tool-call history: their own, configurable retention (R1-23), once a day. Both go through the
+        // chain — the trail is verified first, the removal is an event of its own and the chain's new start is
+        // signed — never a plain delete.
+        if (now - _lastAuditPrune > TimeSpan.FromDays(1))
+        {
+            _lastAuditPrune = now;
+            var auditDays = _services.GetService<IOptionsMonitor<AuditSettings>>()?.CurrentValue.EffectiveRetentionDays
+                            ?? new AuditSettings().EffectiveRetentionDays;
+            var auditCutoff = now.AddDays(-auditDays);
+            if (_services.GetService<Whiskers.Services.AuditLog.IAuditChain>() is { } chain)
+                await chain.PruneAsync(auditCutoff, auditDays, ct);
+            else
+                await Whiskers.Services.AuditLog.AuditChain.Shared.PruneAsync(db, auditCutoff, auditDays, ct);
         }
 
         // Bound the in-memory alert-state map: drop per-container entries whose container is gone.

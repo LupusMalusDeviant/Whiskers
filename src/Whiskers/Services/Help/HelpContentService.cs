@@ -382,7 +382,7 @@ public sealed class HelpContentService : IHelpContentService
                 new("Filtern & Details", """
                     Filtere nach **Akteur**, **Werkzeug**, **Zeitraum** oder nur **Schreibzugriffe/Ablehnungen**.
                     Ein Klick öffnet die Detailansicht mit Parametern und Ergebnis. Aufbewahrung wie das
-                    Audit-Protokoll (90 Tage).
+                    Audit-Protokoll (standardmäßig 365 Tage, `Audit__RetentionDays`). Nur für Admins.
                     """),
             }),
 

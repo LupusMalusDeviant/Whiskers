@@ -358,6 +358,55 @@ public static class WhiskersPipelineExtensions
             return false;
         }));
 
+        // R1-23: the whole audit trail as one JSON document — Admin only, like the trail itself. The hand-out is
+        // recorded before anything is read (503 without that record); a signed-in user refused by the role check is
+        // recorded too. Written to a temporary file first: a retried database read starts the document over, which a
+        // half-sent response could not.
+        app.MapGet("/audit/export", async (HttpContext ctx) =>
+        {
+            var audit = ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>();
+            var (actor, actorType) = Whiskers.Services.AuditLog.IAuditLogService.GetActorFromHttpContext(ctx);
+            if (!await audit.TryLogAsync(actor, actorType, Whiskers.Services.AuditLog.AuditExport.Action, "audit",
+                    "audit-log", "Audit log", details: $"ip={ctx.Connection.RemoteIpAddress}"))
+                return Results.Problem(ctx.RequestServices
+                        .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<Whiskers.SharedResource>>()
+                        ["AuditLog_Export_NotRecorded"].Value,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            // In the data directory's backup build folder, not /tmp (often RAM in a container); excluded from
+            // self-backups and deleted when the response is done.
+            var build = Path.Combine(ctx.RequestServices.GetRequiredService<Whiskers.Configuration.DataPathOptions>().SelfBackupsDir,
+                ".build");
+            Directory.CreateDirectory(build);
+            var temp = new FileStream(Path.Combine(build, $"audit-export-{Guid.NewGuid():N}.tmp"), FileMode.CreateNew,
+                FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+            try
+            {
+                await ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>()
+                    .ExportAsync(temp, ctx.RequestAborted);
+                temp.Position = 0;
+            }
+            catch
+            {
+                await temp.DisposeAsync();
+                throw;
+            }
+            return Results.File(temp, "application/json", $"whiskers-audit-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json");
+        }).RequireAuthorization(policy => policy.RequireAssertion(async context =>
+        {
+            var httpContext = context.Resource as HttpContext;
+            if (httpContext is null) return false;
+            if (httpContext.User.Identity?.AuthenticationType == Whiskers.Services.Auth.AuthConstants.AuthDisabledScheme)
+                return true;   // trusted-LAN bypass = admin, consistent with the rest of the app
+            var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
+            var roles = httpContext.RequestServices.GetService<Whiskers.Services.Auth.IRoleService>();
+            if (roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin) return true;
+            if (!string.IsNullOrEmpty(email))
+                await httpContext.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>()
+                    .LogAsync(email, "web", Whiskers.Services.AuditLog.AuditExport.Action, "audit", "audit-log", "Audit log",
+                        details: $"Requires the Admin role.; ip={httpContext.Connection.RemoteIpAddress}", success: false);
+            return false;
+        }));
+
         // Webhook API endpoint (no auth — uses HMAC signature validation). R1-10: bounded, deduplicated, queued.
         app.MapPost("/api/webhooks/{webhookId}", (string webhookId, HttpContext ctx) =>
             Whiskers.Services.Webhooks.WebhookEndpoint.HandleAsync(webhookId, ctx)).AllowAnonymous();
@@ -507,6 +556,15 @@ public static class WhiskersPipelineExtensions
             var dbLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInitializer");
             await Whiskers.Services.Persistence.DatabaseInitializer.InitializeAsync(db, dbLogger);
         }
+
+        // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis) — before
+        // anything else can write an audit row.
+        await app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>().SealExistingAsync(CancellationToken.None);
+        // A restore applied at this start rolled the trail back to the archive: that is recorded now, on the chain.
+        await Whiskers.Services.Backup.RestoreBootHandler.RecordAppliedAsync(
+            app.Services.GetRequiredService<Whiskers.Configuration.DataPathOptions>(),
+            app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>(),
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Restore"));
 
         // R1-14: the approvals live in the metrics database, so they load only once its schema is current. Pending
         // agent approvals are cancelled here (their sessions are gone); approve-then-retry approvals and unused

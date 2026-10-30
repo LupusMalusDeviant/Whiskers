@@ -161,7 +161,8 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
             {
                 row.Id = 0;
                 using var scope = _scopes.CreateScope();
-                await AuditLogMutationSink.InsertOnceAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), row, ct);
+                await AuditLogMutationSink.InsertOnceAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), row,
+                    Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider), ct);
                 _outbox.Remove(path);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -203,6 +204,9 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                 // This process is running it right now (between its intent and its outcome).
                 if (sink?.InFlight(row.EventId) == true) continue;
                 operations.TryGetValue(row.Id, out var operation);
+                // The row as this pass read it: its outcome below is computed from it, so it is written only while the
+                // row is still exactly that — and UpdateAsync has checked that against the chain (R1-23).
+                var scannedHash = Whiskers.Services.AuditLog.AuditChain.RowHash(row);
                 var operationId = row.OperationId ?? operation?.Id ?? "";
                 switch (operation?.State)
                 {
@@ -246,15 +250,25 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                     target = state is null
                         ? target.Where(a => !db.Operations.Any(o => o.AuditId == rowId))
                         : target.Where(a => db.Operations.Any(o => o.AuditId == rowId && o.State == state && o.Instance == instance));
-                    var settled = await target
-                        .ExecuteUpdateAsync(s => s
-                            .SetProperty(a => a.Phase, row.Phase)
-                            .SetProperty(a => a.Outcome, row.Outcome)
-                            .SetProperty(a => a.Verification, row.Verification)
-                            .SetProperty(a => a.DurationMs, row.DurationMs)
-                            .SetProperty(a => a.Success, row.Success)
-                            .SetProperty(a => a.OperationId, row.OperationId)
-                            .SetProperty(a => a.Details, row.Details), ct);
+                    // The settled outcome is the row's next version: a link of the audit chain, same transaction, and
+                    // only over an intent that is still what the chain recorded — a row changed in the database is
+                    // never settled into an authenticated version (R1-23).
+                    var settled = await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).UpdateAsync(db, [rowId], async token =>
+                    {
+                        var current = await db.AuditLog.AsNoTracking().FirstOrDefaultAsync(a => a.Id == rowId, token);
+                        if (current is null || Whiskers.Services.AuditLog.AuditChain.RowHash(current) != scannedHash)
+                            return (0, (IReadOnlyCollection<long>)[]);   // changed since it was read: the next pass
+                        var changed = await target
+                            .ExecuteUpdateAsync(s => s
+                                .SetProperty(a => a.Phase, row.Phase)
+                                .SetProperty(a => a.Outcome, row.Outcome)
+                                .SetProperty(a => a.Verification, row.Verification)
+                                .SetProperty(a => a.DurationMs, row.DurationMs)
+                                .SetProperty(a => a.Success, row.Success)
+                                .SetProperty(a => a.OperationId, row.OperationId)
+                                .SetProperty(a => a.Details, row.Details), token);
+                        return (changed, changed == 1 ? (IReadOnlyCollection<long>)[rowId] : []);
+                    }, ct);
                     // Skipped on stale evidence: unless the gateway completed it meanwhile, it is still incomplete.
                     if (settled == 0 && await db.AuditLog.AnyAsync(a => a.Id == rowId && a.Phase == "intent", ct))
                         left++;

@@ -4455,7 +4455,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>aktiv</value>
   </data>
   <data name="AiOps_AdminOnly" xml:space="preserve">
-    <value>Diese geführte Einrichtung ist Administratoren vorbehalten. Die Governance-Seiten (Guardrails, Freigaben, Agent-History) kannst du mit deiner Rolle trotzdem ansehen.</value>
+    <value>Diese geführte Einrichtung ist Administratoren vorbehalten. Die Seiten Guardrails und Freigaben kannst du mit deiner Rolle trotzdem ansehen.</value>
   </data>
   <data name="AiOps_Copied" xml:space="preserve">
     <value>In die Zwischenablage kopiert.</value>
@@ -5011,5 +5011,74 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Webhook_Run_Cancelled" xml:space="preserve">
     <value>Die Aktion wurde abgebrochen.</value>
+  </data>
+  <data name="AuditLog_AdminOnly" xml:space="preserve">
+    <value>Das Audit-Log ist Administratoren vorbehalten.</value>
+  </data>
+  <data name="AuditLog_Verify" xml:space="preserve">
+    <value>Integrität prüfen</value>
+  </data>
+  <data name="AuditLog_Export" xml:space="preserve">
+    <value>Exportieren</value>
+  </data>
+  <data name="AuditLog_Verify_Intact" xml:space="preserve">
+    <value>Der Audit-Pfad ist unversehrt: {0} Einträge und {1} Kettenglieder geprüft.</value>
+  </data>
+  <data name="AuditLog_Verify_Unsigned" xml:space="preserve">
+    <value>VAULT_KEY ist nicht gesetzt, daher sind die Checkpoints unsigniert: gegen jemanden mit Schreibzugriff auf die Datenbank ist der Pfad nicht manipulationssicher (Einträge und Kettenglieder lassen sich stimmig neu schreiben, ein abgeschnittenes Ende fällt nicht auf).</value>
+  </data>
+  <data name="AuditLog_Verify_Broken" xml:space="preserve">
+    <value>Der Audit-Pfad wurde verändert ({0} Befunde):</value>
+  </data>
+  <data name="AuditLog_Export_NotRecorded" xml:space="preserve">
+    <value>Der Export konnte nicht im Audit-Log festgehalten werden und wurde deshalb nicht gestartet. Bitte gleich noch einmal versuchen.</value>
+  </data>
+  <data name="AgentHistory_AdminOnly" xml:space="preserve">
+    <value>Die Agent-History ist Administratoren vorbehalten.</value>
+  </data>
+  <data name="AuditLog_Verify_NoTrustedCheckpoint" xml:space="preserve">
+    <value>VAULT_KEY ist gesetzt, aber noch kein Checkpoint ist signiert: das Ende des Pfads ist erst ab dem nächsten Checkpoint (binnen einer Minute) geschützt.</value>
+  </data>
+  <data name="AuditFinding_FileUnreadable" xml:space="preserve">
+    <value>Die Checkpoint-Datei war nicht lesbar, daher wurde das Ende des Pfads nicht gegen sie geprüft. Bitte gleich erneut prüfen; bleibt sie unlesbar, das Datenverzeichnis kontrollieren.</value>
+  </data>
+  <data name="AuditFinding_AdoptionPending" xml:space="preserve">
+    <value>VAULT_KEY wurde gesetzt, aber die Checkpoint-Datei war beim Start nicht lesbar: signiert wird erst, wenn sie bei einem Start lesbar ist. Datenverzeichnis prüfen und neu starten.</value>
+  </data>
+  <data name="AuditFinding_CheckpointSignature" xml:space="preserve">
+    <value>Der Checkpoint bei Kettenglied {0} ({1}) hat eine ungültige Signatur.</value>
+  </data>
+  <data name="AuditFinding_LinkBroken" xml:space="preserve">
+    <value>Kettenglied {0} setzt das vorige nicht fort (ein Glied wurde entfernt oder geändert).</value>
+  </data>
+  <data name="AuditFinding_LinkChanged" xml:space="preserve">
+    <value>Kettenglied {0} wurde geändert.</value>
+  </data>
+  <data name="AuditFinding_LinkSignature" xml:space="preserve">
+    <value>Kettenglied {0} hat eine ungültige Signatur.</value>
+  </data>
+  <data name="AuditFinding_LinkUnsigned" xml:space="preserve">
+    <value>Kettenglied {0} ist nicht signiert: es wurde außerhalb von Whiskers angefügt.</value>
+  </data>
+  <data name="AuditFinding_CutOff" xml:space="preserve">
+    <value>Der Pfad endet bei Kettenglied {0}, vor dem Checkpoint bei Kettenglied {1}: sein Ende wurde abgeschnitten.</value>
+  </data>
+  <data name="AuditFinding_CheckpointMismatch" xml:space="preserve">
+    <value>Der Pfad passt nicht zum Checkpoint bei Kettenglied {0}.</value>
+  </data>
+  <data name="AuditFinding_RowUnlinked" xml:space="preserve">
+    <value>Audit-Eintrag {0} hat kein Kettenglied: er wurde außerhalb des Pfads angelegt.</value>
+  </data>
+  <data name="AuditFinding_RowChanged" xml:space="preserve">
+    <value>Audit-Eintrag {0} wurde nach dem Schreiben geändert.</value>
+  </data>
+  <data name="AuditFinding_RowDeleted" xml:space="preserve">
+    <value>Audit-Eintrag {0} wurde gelöscht.</value>
+  </data>
+  <data name="AuditFinding_More" xml:space="preserve">
+    <value>… und {0} weitere.</value>
+  </data>
+  <data name="AuditFinding_RetentionUnsigned" xml:space="preserve">
+    <value>Der Retention-Checkpoint bei Kettenglied {0} ist nicht signiert: er wurde außerhalb von Whiskers angelegt.</value>
   </data>
 </root>

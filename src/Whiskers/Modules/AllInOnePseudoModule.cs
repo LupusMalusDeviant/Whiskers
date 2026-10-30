@@ -54,7 +54,7 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         new NavItem("graph",       "Nav_Topology",          Icons.Material.Filled.Hub,          "Übersicht",        AppRole.Viewer, 50),
         new NavItem("diff",        "Nav_Compare",        Icons.Material.Filled.Compare,      "Übersicht",        AppRole.Viewer, 60),
         new NavItem("notifications", "Nav_Notifications", Icons.Material.Filled.Notifications, "Übersicht",     AppRole.Viewer, 70),
-        new NavItem("audit-log",   "Nav_AuditLog",    Icons.Material.Filled.History,      "Übersicht",        AppRole.Viewer, 80),
+        new NavItem("audit-log",   "Nav_AuditLog",    Icons.Material.Filled.History,      "Übersicht",        AppRole.Admin, 80),   // R1-23
 
         // Deployment ("deploy" + "apps" extracted to Modules/Deployment; "compose" stays Core — RoadToSAP Phase 1)
         new NavItem("compose",     "Nav_ComposeEditor",     Icons.Material.Filled.EditNote,     "Deployment",       AppRole.Viewer, 120),
@@ -68,7 +68,7 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         // Automatisierung  ("tasks" → Modules/Scheduler, "webhooks" → Modules/Webhooks; agent + guardrails +
         // approvals + ai-triggers → Modules/Agent — RoadToSAP Phase 1). "agent-history" stays Core: it reads
         // the Core IMcpCallLogStore (MCP-call observability), which is independent of the acting agent.
-        new NavItem("agent-history", "Nav_AgentHistory",    Icons.Material.Filled.Policy,       "Automatisierung",  AppRole.Viewer, 330),
+        new NavItem("agent-history", "Nav_AgentHistory",    Icons.Material.Filled.Policy,       "Automatisierung",  AppRole.Admin, 330),   // R1-23
         // Guardrails + approvals are core since ADR-0005 step 2.1: they govern direct MCP calls with the agent off.
         new NavItem("guardrails",  "Nav_Guardrails", Icons.Material.Filled.Shield,    "Automatisierung", AppRole.Viewer, 350),
         new NavItem("approvals",   "Nav_Approvals",  Icons.Material.Filled.Approval,  "Automatisierung", AppRole.Viewer, 360),

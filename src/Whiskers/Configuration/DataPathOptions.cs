@@ -91,6 +91,8 @@ public sealed class DataPathOptions
     public string AiTriggersJson => P("ai-triggers.json");
     /// <summary>Owners an admin confirmed for AutoPatch and AutoUpdate (PC-D6).</summary>
     public string AutomationOwnersJson => P("automation-owners.json");
+    /// <summary>The newest signed audit checkpoint, kept outside the database (R1-23, ADR-0006).</summary>
+    public string AuditCheckpointJson => P("audit-checkpoint.json");
     /// <summary>Emails that had a local account, so a deleted one is noticed with federated sign-in too (R1-04).</summary>
     public string KnownLocalAccountsJson => P("known-local-accounts.json");
 
@@ -113,6 +115,10 @@ public sealed class DataPathOptions
     // Commit marker written last (atomic) once staging is fully populated. Its presence at boot — and only
     // its presence — triggers RestoreBootHandler to perform the swap. Absent staging without it is ignored.
     public string RestorePendingMarker => P(".restore-pending");
+
+    /// <summary>Left by an applied restore until its audit record is written (R1-23): the restore replaced the
+    /// database that held the restore's own event.</summary>
+    public string RestoreAppliedNote => P(".restore-applied");
 
     // --- Mesh-VPN state (VpnSettings defaults derive from these) ---
     public string TailscaleStateDir => P("tailscale");

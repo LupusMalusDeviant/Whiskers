@@ -67,6 +67,20 @@ public sealed class BackupService : IBackupService
             string[] identityMigrations;
             string? stagedDb = null;
 
+            // R1-23: the audit checkpoint file is taken BEFORE the database. A checkpoint reaches the file only after
+            // the database has it, so the restored database always reaches the restored checkpoint; taken after,
+            // a checkpoint written in between would make the restored trail look cut off.
+            string? stagedCheckpoint = null;
+            if (File.Exists(_dataPaths.AuditCheckpointJson))
+            {
+                stagedCheckpoint = Path.Combine(buildDir, Path.GetFileName(_dataPaths.AuditCheckpointJson));
+                for (var attempt = 1; ; attempt++)
+                {
+                    try { File.Copy(_dataPaths.AuditCheckpointJson, stagedCheckpoint, overwrite: true); break; }
+                    catch (IOException) when (attempt < 3) { await Task.Delay(50, ct); }   // being replaced right now
+                }
+            }
+
             using (var scope = _scopeFactory.CreateScope())
             {
                 var metrics = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -113,6 +127,11 @@ public sealed class BackupService : IBackupService
             var entries = new List<PackEntry> { new(SelfBackupFormat.ManifestEntryName, manifestPath) };
             if (stagedDb is not null)
                 entries.Add(new PackEntry(SelfBackupFormat.DbEntryName, stagedDb));
+            if (stagedCheckpoint is not null)
+                entries.Add(new PackEntry(
+                    Path.GetRelativePath(Path.GetFullPath(_dataPaths.RootDir), Path.GetFullPath(_dataPaths.AuditCheckpointJson))
+                        .Replace('\\', '/'),
+                    stagedCheckpoint));
             entries.AddRange(EnumerateDataFiles(Path.GetFullPath(_dataPaths.RootDir)));
 
             var tmpTarGz = Path.Combine(buildDir, "archive.tar.gz");
@@ -314,7 +333,9 @@ public sealed class BackupService : IBackupService
                     StagingDir = Path.GetFullPath(staging),
                     CreatedAtUtc = DateTime.UtcNow,
                     SourceCreatedAtUtc = prepared.Manifest.CreatedAtUtc,
-                    Provider = prepared.Manifest.Provider
+                    Provider = prepared.Manifest.Provider,
+                    Actor = actor,
+                    Archive = Path.GetFileName(uploadedPath),
                 };
                 var tmpMarker = _dataPaths.RestorePendingMarker + ".tmp";
                 await File.WriteAllTextAsync(tmpMarker, JsonSerializer.Serialize(marker, JsonOpts), ct);
@@ -461,6 +482,8 @@ public sealed class BackupService : IBackupService
             Path.GetFullPath(_dataPaths.DbPath + "-shm"),
             Path.GetFullPath(_dataPaths.RestorePendingMarker),
             Path.GetFullPath(_dataPaths.RestorePendingMarker + ".corrupt"),
+            Path.GetFullPath(_dataPaths.RestoreAppliedNote),   // a restore's pending audit record belongs to this install
+            Path.GetFullPath(_dataPaths.AuditCheckpointJson),   // staged before the database copy instead
             Path.GetFullPath(Path.Combine(rootFull, "vault.key"))
         };
 

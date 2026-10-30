@@ -45,7 +45,7 @@ SELECT ToolName,
        SUM(CASE WHEN Verdict <> 'allow' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS DeniedPct,
        COUNT(*) AS Calls
 FROM McpToolCalls
-WHERE Timestamp > datetime('now', '-90 days')
+WHERE Timestamp > datetime('now', '-90 days')   -- a look-back window; the history itself is kept Audit:RetentionDays (365)
 GROUP BY ToolName
 HAVING Calls > 5
 ORDER BY DeniedPct DESC;
@@ -53,7 +53,7 @@ ORDER BY DeniedPct DESC;
 -- 2. Tools nobody ever calls. A few are fine; many mean the catalog is bloated or the
 --    descriptions do not say what the tool is for — the agent picks by description.
 SELECT ToolName FROM McpToolCalls
-WHERE Timestamp > datetime('now', '-90 days')
+WHERE Timestamp > datetime('now', '-90 days')   -- look-back window, as above
 GROUP BY ToolName;   -- compare against docs/mcp-tool-catalog.md
 ```
 

@@ -9,3 +9,4 @@ MADR-artige Entscheidungsdokumente, fortlaufend nummeriert `NNNN-slug.md`.
 | [0003](0003-ef-core-migrations-baseline.md) | EF-Core-Migrations mit Baseline für Bestands-DBs | Akzeptiert (2026-07-07) |
 | [0004](0004-postgres-provider-support.md) | PostgreSQL-Provider + Multi-Provider-Migrations-Architektur | Akzeptiert, umgesetzt (Provider gemergt, `SqliteToPostgresMigrator`) |
 | [0005](0005-mutation-gateway.md) | Mutation Gateway: one enforcement point for every infrastructure mutation | Accepted (2026-10-26) |
+| [0006](0006-audit-hash-chain.md) | Tamper-evident audit trail: SHA-256 chain with HMAC checkpoints | Accepted (2026-10-30) |

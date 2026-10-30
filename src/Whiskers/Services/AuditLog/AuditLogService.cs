@@ -39,21 +39,26 @@ public class AuditLogService : IAuditLogService
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 
-            db.AuditLog.Add(new AuditLogEntity
+            // The row and its link of the audit chain are one transaction (R1-23).
+            await AuditChain.Of(scope.ServiceProvider).WriteAsync(db, async ct =>
             {
-                Timestamp = occurredUtc,
-                Actor = actor,
-                ActorType = actorType,
-                Action = action,
-                TargetType = targetType,
-                TargetId = targetId,
-                TargetName = targetName,
-                Details = details,
-                ServerId = serverId,
-                Success = success
+                var row = new AuditLogEntity
+                {
+                    Timestamp = occurredUtc,
+                    Actor = actor,
+                    ActorType = actorType,
+                    Action = action,
+                    TargetType = targetType,
+                    TargetId = targetId,
+                    TargetName = targetName,
+                    Details = details,
+                    ServerId = serverId,
+                    Success = success
+                };
+                db.AuditLog.Add(row);
+                await db.SaveChangesAsync(ct);
+                return (row.Id, (IReadOnlyCollection<long>)[row.Id]);
             });
-
-            await db.SaveChangesAsync();
 
             _logger.LogInformation("Audit: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} (success={Success})",
                 actorType, actor, action, targetType, targetName, success);

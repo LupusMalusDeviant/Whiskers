@@ -186,6 +186,72 @@ namespace Whiskers.Migrations
                     b.ToTable("Approvals", (string)null);
                 });
 
+            modelBuilder.Entity("Whiskers.Models.AuditChainEntry", b =>
+                {
+                    b.Property<long>("Seq")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AuditId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Mac")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrevHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RowHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Seq");
+
+                    b.HasIndex("AuditId");
+
+                    b.ToTable("AuditChain");
+                });
+
+            modelBuilder.Entity("Whiskers.Models.AuditCheckpointEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Mac")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PrunedThroughId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Seq")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Seq");
+
+                    b.ToTable("AuditCheckpoints");
+                });
+
             modelBuilder.Entity("Whiskers.Models.AuditLogEntity", b =>
                 {
                     b.Property<long>("Id")

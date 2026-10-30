@@ -73,6 +73,88 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on()
+    {
+        Skip.IfNot(_up, "Docker daemon not available");
+        // R1-23 with the production shape: retries on, so every chain transaction runs inside the execution strategy;
+        // verification and export read a RepeatableRead snapshot.
+        var dir = Path.Combine(Path.GetTempPath(), $"pg-chain-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions.AddDbContext<MetricsDbContext>(
+            services, o => o.UseNpgsql(_pg.GetConnectionString(), npg =>
+            {
+                npg.EnableRetryOnFailure(3);
+                npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
+            }));
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Whiskers.Services.AuditLog.IAuditChain>(
+            services, sp => new Whiskers.Services.AuditLog.AuditChain("pg-test-vault-key", Path.Combine(dir, "audit-checkpoint.json"),
+                scopes: Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                    .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp)));
+        await using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions
+            .BuildServiceProvider(services);
+        try
+        {
+            await using (var db = Pg()) await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
+            var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp);
+            var chain = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>(sp);
+            var audit = new Whiskers.Services.AuditLog.AuditLogService(scopes,
+                NullLogger<Whiskers.Services.AuditLog.AuditLogService>.Instance);
+
+            // Rows from before the chain: sealed at the first start, in pages.
+            await using (var db = Pg())
+            {
+                for (var i = 0; i < 3; i++)
+                    db.AuditLog.Add(new AuditLogEntity { Actor = "legacy", ActorType = "web", Action = "login", TargetType = "system",
+                        Timestamp = DateTime.UtcNow.AddDays(-500) });
+                await db.SaveChangesAsync();
+            }
+            await chain.SealExistingAsync();
+            Assert.True(await audit.TryLogAtAsync(DateTime.UtcNow.AddDays(-400), "a@example.com", "web", "container.restart",
+                "container", "c1", "old", details: "Ärger <&>"));
+            Assert.True(await audit.TryLogAsync("a@example.com", "web", "container.restart", "container", "c2", "young"));
+            await chain.CheckpointAsync();
+
+            var intact = await chain.VerifyAsync();
+            Assert.True(intact.Intact, string.Join("; ", intact.Problems));
+            Assert.Equal(5, intact.LinksChecked);
+            Assert.Equal(5, intact.TrustedCheckpointSeq);
+
+            Assert.Equal(4, await chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365));   // three legacy rows + the old one
+            using var output = new MemoryStream();
+            var exported = await chain.ExportAsync(output);
+            Assert.True(exported.Intact, string.Join("; ", exported.Problems));
+            Assert.Equal(2, exported.RowsChecked);   // the young row + the retention record
+
+            // An outcome over an untouched row: checked and locked (FOR UPDATE) first, then its next version.
+            Task<int> Complete(MetricsDbContext db, long id) => chain.UpdateAsync(db, [id], async token =>
+            {
+                var changed = await db.AuditLog.Where(a => a.Id == id).ExecuteUpdateAsync(s => s.SetProperty(a => a.Phase, "outcome"), token);
+                return (changed, (IReadOnlyCollection<long>)[id]);
+            });
+            long young;
+            await using (var db = Pg())
+            {
+                young = await db.AuditLog.Where(a => a.TargetId == "c2").Select(a => a.Id).SingleAsync();
+                Assert.Equal(1, await Complete(db, young));
+            }
+
+            // A change made directly in the database is found, and never given a next version.
+            await using (var db = Pg())
+                await db.Database.ExecuteSqlRawAsync("UPDATE \"AuditLog\" SET \"Details\" = 'rewritten' WHERE \"TargetId\" = 'c2'");
+            Assert.Contains((await chain.VerifyAsync()).Problems, p => p.Contains("was changed after it was written"));
+            await using (var db = Pg())
+                await Assert.ThrowsAsync<InvalidOperationException>(() => Complete(db, young));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
+        }
+    }
+
+    [SkippableFact]
     public async Task Migrate_crud_retention_and_markread_on_real_postgres()
     {
         Skip.IfNot(_up, "Docker daemon not available");
@@ -169,6 +251,37 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
             SqliteConnection.ClearAllPools();
             foreach (var f in new[] { srcPath, srcPath + "-wal", srcPath + "-shm" })
                 try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }
+        }
+    }
+
+    [SkippableFact]
+    public async Task The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside()
+    {
+        Skip.IfNot(_up, "Docker daemon not available");
+        // R1-23: PostgreSQL starts its own chain; a leftover checkpoint file would block it as a tampered trail.
+        var root = Path.Combine(Path.GetTempPath(), $"sw-smoke-cli-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var paths = new Whiskers.Configuration.DataPathOptions(root);
+        try
+        {
+            await using (var src = Sqlite(paths.DbPath))
+            {
+                await src.Database.EnsureCreatedAsync();
+                src.AuditLog.Add(new AuditLogEntity { Actor = "admin", ActorType = "web", Action = "login", TargetType = "system" });
+                await src.SaveChangesAsync();
+            }
+            await File.WriteAllTextAsync(paths.AuditCheckpointJson, "{}");
+
+            var rc = await SqliteToPostgresMigrator.RunAsync(paths, _pg.GetConnectionString(), TextWriter.Null);
+
+            Assert.Equal(0, rc);
+            Assert.False(File.Exists(paths.AuditCheckpointJson));
+            Assert.Single(Directory.GetFiles(root, "audit-checkpoint.json.sqlite-*"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir */ }
         }
     }
 

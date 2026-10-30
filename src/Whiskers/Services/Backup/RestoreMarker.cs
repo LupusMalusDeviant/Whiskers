@@ -19,4 +19,12 @@ public sealed class RestoreMarker
 
     /// <summary>Provider recorded in the restored backup's manifest ("sqlite"/"postgres"), for logging.</summary>
     public string Provider { get; set; } = "";
+
+    /// <summary>Who committed the restore, and the archive's file name — recorded after the restore (R1-23).</summary>
+    public string Actor { get; set; } = "";
+
+    public string Archive { get; set; } = "";
+
+    /// <summary>When the swap was applied (UTC); set in the note an applied restore leaves.</summary>
+    public DateTime? AppliedAtUtc { get; set; }
 }

@@ -74,7 +74,7 @@ Governance recording for the agent/MCP layer, **every** tool call Whiskers execu
 
 ## What gets recorded
 
-For each call: timestamp, actor + actor type, tool name, required permission level, secret-redacted parameters, the guardrail verdict (`allow` / `confirm` / `deny`), success, duration, an optional result summary, server id and any error. The entity is [`McpToolCallEntity`](../../Models/McpToolCall.cs); it lives in the `McpToolCalls` table of [`MetricsDbContext`](../Persistence/MetricsDbContext.cs) with the same 90-day retention as the audit log (pruned in [`MetricsCollectorService`](../Metrics/MetricsCollectorService.cs)).
+For each call: timestamp, actor + actor type, tool name, required permission level, secret-redacted parameters, the guardrail verdict (`allow` / `confirm` / `deny`), success, duration, an optional result summary, server id and any error. The entity is [`McpToolCallEntity`](../../Models/McpToolCall.cs); it lives in the `McpToolCalls` table of [`MetricsDbContext`](../Persistence/MetricsDbContext.cs) with the same retention as the audit log (`Audit:RetentionDays`, default 365 days, at least 30 — R1-23; pruned in [`MetricsCollectorService`](../Metrics/MetricsCollectorService.cs)).
 
 ## Two recording points (so nothing is missed)
 

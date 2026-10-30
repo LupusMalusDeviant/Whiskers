@@ -40,7 +40,7 @@ public sealed class AuditFailClosedTests : IDisposable
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o
             .UseSqlite($"Data Source={Path.Combine(_root, "metrics.db")};Pooling=False")
-            .AddInterceptors(_writes, _reads));
+            .AddInterceptors(_writes, _writes.Commits, _reads));
         _sp = services.BuildServiceProvider();
         _scopes = _sp.GetRequiredService<IServiceScopeFactory>();
         using (var scope = _scopes.CreateScope())
@@ -82,11 +82,24 @@ public sealed class AuditFailClosedTests : IDisposable
                 ? throw new InvalidOperationException("database is locked")
                 : base.SavingChangesAsync(eventData, result, cancellationToken);
 
+        // Outside a transaction the save is the commit; inside one (the audit chain's, R1-23) the commit is.
         public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result,
             CancellationToken cancellationToken = default) =>
-            FailAfter && eventData.Context?.ChangeTracker.Entries<AuditLogEntity>().Any() == true
+            FailAfter && eventData.Context?.Database.CurrentTransaction is null
+                      && eventData.Context.ChangeTracker.Entries<AuditLogEntity>().Any()
                 ? throw new InvalidOperationException("connection reset after commit")
                 : base.SavedChangesAsync(eventData, result, cancellationToken);
+
+        public DbTransactionInterceptor Commits => new CommitAnswers(this);
+
+        private sealed class CommitAnswers(AuditWrites writes) : DbTransactionInterceptor
+        {
+            public override Task TransactionCommittedAsync(System.Data.Common.DbTransaction transaction,
+                TransactionEndEventData eventData, CancellationToken cancellationToken = default) =>
+                writes.FailAfter && eventData.Context?.ChangeTracker.Entries<AuditLogEntity>().Any() == true
+                    ? throw new InvalidOperationException("connection reset after commit")
+                    : base.TransactionCommittedAsync(transaction, eventData, cancellationToken);
+        }
     }
 
     /// <summary>Runs <see cref="Before"/> once, right before the next read of the operation journal.</summary>
@@ -161,6 +174,17 @@ public sealed class AuditFailClosedTests : IDisposable
     {
         using var scope = _scopes.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().ToListAsync();
+    }
+
+    /// <summary>R1-23: every row the gateway, the outbox drain or recovery wrote is on the audit chain, in its
+    /// latest version.</summary>
+    private async Task AssertTrailIntact()
+    {
+        using var scope = _scopes.CreateScope();
+        var report = await Whiskers.Services.AuditLog.AuditChain.Shared.VerifyAsync(
+            scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), CancellationToken.None);
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.True(report.LinksChecked >= report.RowsChecked);
     }
 
     private static async Task<HealthStatus> Status(IAuditRecovery recovery) =>
@@ -258,6 +282,7 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.Equal("outcome", row.Phase);
         Assert.Equal("Executed", row.Outcome);
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
+        await AssertTrailIntact();
     }
 
     [Fact]
@@ -285,6 +310,7 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.Equal("op-3", row.OperationId);
         Assert.Equal(0, _outbox.Count);
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
+        await AssertTrailIntact();
     }
 
     [Fact]
@@ -315,6 +341,7 @@ public sealed class AuditFailClosedTests : IDisposable
         _writes.FailAfter = false;
         Assert.Single(await Events());
         Assert.Equal(0, _outbox.Count);
+        await AssertTrailIntact();
     }
 
     [Fact]
@@ -350,12 +377,18 @@ public sealed class AuditFailClosedTests : IDisposable
         using (var scope = _scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            db.AuditLog.Add(new AuditLogEntity
+            // Written as every intent is: through the chain (recovery never settles a row the chain does not know).
+            await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).WriteAsync(db, async token =>
             {
-                Action = "container.restart", Phase = "intent", OperationId = "op-never", EventId = "e-never",
-                Timestamp = _time.GetUtcNow().UtcDateTime, Details = "{}",
+                var intent = new AuditLogEntity
+                {
+                    Action = "container.restart", Phase = "intent", OperationId = "op-never", EventId = "e-never",
+                    Timestamp = _time.GetUtcNow().UtcDateTime, Details = "{}",
+                };
+                db.AuditLog.Add(intent);
+                await db.SaveChangesAsync(token);
+                return (0, (IReadOnlyCollection<long>)[intent.Id]);
             });
-            await db.SaveChangesAsync();
         }
         Assert.Equal(3, (await Events()).Count(e => e.Phase == "intent"));
 
@@ -373,6 +406,65 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.All(events.Values, e => Assert.Equal("outcome", e.Phase));
         Assert.Equal(HealthStatus.Healthy, await Status(recovery));
         running.SetResult(1);
+    }
+
+    [Fact]
+    public async Task Recovery_never_settles_an_intent_changed_in_the_database()
+    {
+        // Someone rewrites an intent's attribution and waits for recovery to settle it into a new, valid version.
+        var gateway = Gateway(journal: new DbOperationJournal(_scopes));
+        await gateway.ExecuteAsync(Restart("op-forged"), (_, _) =>
+        {
+            _writes.FailBefore = true;
+            return Task.FromResult(1);
+        });
+        _writes.FailBefore = false;
+        using (var scope = _scopes.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog
+                .Where(a => a.OperationId == "op-forged").ExecuteUpdateAsync(s => s.SetProperty(a => a.Actor, "someone-else"));
+
+        _sink = null;
+        var recovery = Recovery(new DbOperationJournal(_scopes));
+        await recovery.RecoverAsync();
+
+        var row = Assert.Single(await Events());
+        Assert.Equal("intent", row.Phase);   // left as it is: the change stays a finding
+        Assert.Equal(HealthStatus.Degraded, await Status(recovery));
+    }
+
+    [Fact]
+    public async Task Recovery_never_settles_from_a_row_put_back_after_it_read_it()
+    {
+        // Forged details while the pass reads the row, the genuine ones back before the settlement is checked: the
+        // outcome computed from what was read must not be written.
+        var gateway = Gateway(journal: new DbOperationJournal(_scopes));
+        await gateway.ExecuteAsync(Restart("op-swap"), (_, _) =>
+        {
+            _writes.FailBefore = true;
+            return Task.FromResult(1);
+        });
+        _writes.FailBefore = false;
+        string genuine;
+        using (var scope = _scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            genuine = (await db.AuditLog.AsNoTracking().SingleAsync()).Details!;
+            await db.AuditLog.ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, "{\"forged\":true}"));
+        }
+        _reads.OnceAfter(async () =>
+        {
+            using var scope = _scopes.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.Details, genuine));
+        });
+
+        _sink = null;
+        var recovery = Recovery(new DbOperationJournal(_scopes));
+        await recovery.RecoverAsync();
+
+        var row = Assert.Single(await Events());
+        Assert.Equal("intent", row.Phase);
+        Assert.DoesNotContain("forged", row.Details);
     }
 
     [Fact]
@@ -431,6 +523,7 @@ public sealed class AuditFailClosedTests : IDisposable
         Assert.Equal(1, _runs);
         Assert.Equal("Executed", Assert.Single(await Events()).Outcome);
         Assert.Equal(0, _outbox.Count);
+        await AssertTrailIntact();
     }
 
     [Fact]

@@ -4455,7 +4455,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>active</value>
   </data>
   <data name="AiOps_AdminOnly" xml:space="preserve">
-    <value>This guided setup is available to administrators. You can still read the governance pages (Guardrails, Approvals, Agent History) with your current role.</value>
+    <value>This guided setup is available to administrators. You can still read the Guardrails and Approvals pages with your current role.</value>
   </data>
   <data name="AiOps_Copied" xml:space="preserve">
     <value>Copied to clipboard.</value>
@@ -5011,5 +5011,74 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Webhook_Run_Cancelled" xml:space="preserve">
     <value>The action was cancelled.</value>
+  </data>
+  <data name="AuditLog_AdminOnly" xml:space="preserve">
+    <value>The audit log is available to administrators.</value>
+  </data>
+  <data name="AuditLog_Verify" xml:space="preserve">
+    <value>Verify integrity</value>
+  </data>
+  <data name="AuditLog_Export" xml:space="preserve">
+    <value>Export</value>
+  </data>
+  <data name="AuditLog_Verify_Intact" xml:space="preserve">
+    <value>The audit trail is intact: {0} rows and {1} chain links checked.</value>
+  </data>
+  <data name="AuditLog_Verify_Unsigned" xml:space="preserve">
+    <value>VAULT_KEY is not set, so checkpoints are unsigned: the trail is not tamper-evident against someone who can write the database (rows and links can be rewritten consistently, a cut-off end goes unnoticed).</value>
+  </data>
+  <data name="AuditLog_Verify_Broken" xml:space="preserve">
+    <value>The audit trail was tampered with ({0} findings):</value>
+  </data>
+  <data name="AuditLog_Export_NotRecorded" xml:space="preserve">
+    <value>The export could not be recorded in the audit log, so it was not started. Try again shortly.</value>
+  </data>
+  <data name="AgentHistory_AdminOnly" xml:space="preserve">
+    <value>The agent history is available to administrators.</value>
+  </data>
+  <data name="AuditLog_Verify_NoTrustedCheckpoint" xml:space="preserve">
+    <value>VAULT_KEY is set, but no checkpoint is signed yet: the end of the trail is not protected until the next checkpoint (within a minute).</value>
+  </data>
+  <data name="AuditFinding_FileUnreadable" xml:space="preserve">
+    <value>The checkpoint file could not be read, so the end of the trail was not checked against it. Verify again shortly; if it stays unreadable, check the data directory.</value>
+  </data>
+  <data name="AuditFinding_AdoptionPending" xml:space="preserve">
+    <value>VAULT_KEY was set, but the checkpoint file could not be read at start-up: nothing is signed until it can be read at a start. Check the data directory and restart.</value>
+  </data>
+  <data name="AuditFinding_CheckpointSignature" xml:space="preserve">
+    <value>The checkpoint at link {0} ({1}) has an invalid signature.</value>
+  </data>
+  <data name="AuditFinding_LinkBroken" xml:space="preserve">
+    <value>Link {0} does not continue the link before it (a link was removed or changed).</value>
+  </data>
+  <data name="AuditFinding_LinkChanged" xml:space="preserve">
+    <value>Link {0} was changed.</value>
+  </data>
+  <data name="AuditFinding_LinkSignature" xml:space="preserve">
+    <value>Link {0} has an invalid signature.</value>
+  </data>
+  <data name="AuditFinding_LinkUnsigned" xml:space="preserve">
+    <value>Link {0} is not signed: it was added outside Whiskers.</value>
+  </data>
+  <data name="AuditFinding_CutOff" xml:space="preserve">
+    <value>The trail ends at link {0}, before the checkpoint at link {1}: its end was cut off.</value>
+  </data>
+  <data name="AuditFinding_CheckpointMismatch" xml:space="preserve">
+    <value>The trail does not match the checkpoint at link {0}.</value>
+  </data>
+  <data name="AuditFinding_RowUnlinked" xml:space="preserve">
+    <value>Audit row {0} has no link: it was added outside the trail.</value>
+  </data>
+  <data name="AuditFinding_RowChanged" xml:space="preserve">
+    <value>Audit row {0} was changed after it was written.</value>
+  </data>
+  <data name="AuditFinding_RowDeleted" xml:space="preserve">
+    <value>Audit row {0} was deleted.</value>
+  </data>
+  <data name="AuditFinding_More" xml:space="preserve">
+    <value>… and {0} more.</value>
+  </data>
+  <data name="AuditFinding_RetentionUnsigned" xml:space="preserve">
+    <value>The retention checkpoint at link {0} is not signed: it was added outside Whiskers.</value>
   </data>
 </root>
