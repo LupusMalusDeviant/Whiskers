@@ -14,3 +14,6 @@ Managed in *Settings → Registries* ([`RegistriesPanel`](../../Components/Share
 
 **v1 scope note:** the image SEARCH providers (Docker Hub/GHCR/Harbor) still read their config from
 the `ImageSearch` settings section — feeding them from this store is the documented follow-up.
+
+**Audit (R1-22):** save and delete record the registry's versioned diff ([`../Mutations/ConfigChange.cs`](../Mutations/ConfigChange.cs)). A host carrying user info
+(`user:password@host`) is refused — on the page as a Denied event without the host, in the service as an error.

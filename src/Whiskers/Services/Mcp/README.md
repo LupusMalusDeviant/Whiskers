@@ -16,3 +16,5 @@ The **authorization layer for MCP tools**. Validates incoming MCP API keys and e
   level there first, then the tool's `[McpToolLevel]`; read tools are declared by the attribute alone
 - Agent inherits these rights: [`../Agent/AgentPrincipalResolver.cs`](../Agent/AgentPrincipalResolver.cs)
 - UI: *Settings > MCP*
+- Audit (R1-22): key, tool and level changes record the versioned diff ([`../Mutations/ConfigChange.cs`](../Mutations/ConfigChange.cs)); keys are classified field by field, so
+  a key's level change is readable and its hash never shown.

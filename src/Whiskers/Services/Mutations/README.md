@@ -237,13 +237,16 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   (`MutationScope.Record` / `Note`). A page's role check in front of its confirmation dialog records its refusal
   through `IUiMutationRunner.RefuseAsync` → `IMutationGateway.RefuseAsync` (one Denied event, nothing runs). Since
   R1-22 the configuration pages follow the same rule, and a configuration store calls `ConfigChange.Record(section,
-  before, after)` after a successful write (`ConfigChange.Capture` copies an entity before it is changed in place):
+  before, after)` after a successful write, under the store's own write lock so each change starts where the one
+  before ended (entity stores pass a projection without runtime counters such as trigger counts or deploy results):
   the event gets the section's version before/after (`config.version`, never shortened) and each changed setting
   (`setting`, at most `ConfigChange.MaxChanges` per operation, the rest counted). Comparison uses the complete
-  values (a secret by its per-process fingerprint); the version hashes only a safe projection — secrets as `[set]`,
+  values (a secret by its whole per-process HMAC); the version hashes only a safe projection — secrets as `[set]`,
   URLs as their origin, free text as `[text]` — so a change of those alone keeps the version and still appears as a
-  changed setting. What is shown is safe: secrets (also ntfy topics) as `[set #…]`/`[not set]`, URLs as their
-  origin, free text and addresses with user info as `[text, N chars #…]`. A repeated record identity is numbered
+  changed setting. What is shown is safe: secrets (also ntfy topics, kubeconfig references and SSH keys, the latter
+  as section `ssh-key:<server>`) as `[set #…]`/`[not set]` (a longer fingerprint where two short ones collide), URLs
+  as their origin, free text, addresses with user info and URL-named values that are no URL as `[text, N chars #…]`;
+  flags and counts named after a secret (`HasToken`, `MaxTokens`) stay readable. A repeated record identity is numbered
   by occurrence (`a@example.com~2`). A scope keeps at most 20 reports and counts the rest (`MutationScope.OmittedAction`).
   Outside a gateway scope `Record` does nothing.
 - **Failure reports.** The 25 mutating MCP tools mark their error answers with `MutationScope.Fail`. UI actions are

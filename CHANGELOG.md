@@ -6,6 +6,9 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-22 follow-up: a webhook switched off automatically writes its own `webhook.suspended` row with the version
+  before and after; a restore refused by archive validation is a Denied event; flags named after a secret
+  (`HasToken`) stay readable; the configuration pages' Admin gates are checked to record their refusals.
 - R1-22: **Configuration, sign-ins and backup downloads are audited.** A configuration or policy write — whitelist,
   roles, MCP keys and tool switches, guardrails and presets, AI triggers, agent settings, Settings sections, servers,
   registries, Git-deploy apps — is one gateway event that carries what changed: the section's version before and

@@ -46,3 +46,4 @@ Registration: [`Startup/WhiskersMutationGatewayExtensions.AddGuardrailPolicy`](.
 - Policy model: [`../../Configuration/GuardrailPolicy.cs`](../../Configuration/GuardrailPolicy.cs) (the configurable, restrictive-by-default policy)
 - Approvals: [`../Approvals/`](../Approvals/)
 - Tests: `GuardrailEngineTests`, `PolicyFailClosedTests`, `PolicyChangeAuditTests`, `DirectMcpCallGuardTests`, `GuardrailModuleIndependenceTests` in [`../../../Whiskers.Tests/`](../../../Whiskers.Tests/)
+- Audit (R1-22): every policy write records its versioned diff ([`../Mutations/ConfigChange.cs`](../Mutations/ConfigChange.cs)) after the new state is published.

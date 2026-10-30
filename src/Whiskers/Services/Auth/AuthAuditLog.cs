@@ -31,6 +31,7 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     private readonly IAuditRecovery? _recovery;
     private readonly CancellationTokenSource _abort = new();
     private Task? _writer;
+    private bool _stopped;   // set before the queue is completed: a later row is dropped because of the shutdown
     private readonly Channel<Row> _queue = Channel.CreateBounded<Row>(
         // Wait mode: TryWrite then answers false when the queue is full (DropWrite would report the dropped row as
         // written), so a lost row is always logged and reported.
@@ -62,8 +63,8 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     {
         if (!_queue.Writer.TryWrite(row))
         {
-            _logger.LogError("AUDIT WRITE FAILED: sign-in audit queue full, dropped [web] {Actor} → {Action} ({Method}, success={Success}, {Details})",
-                row.Actor, row.Action, row.Method, row.Success, row.Details);
+            _logger.LogError("AUDIT WRITE FAILED: sign-in audit queue {State}, dropped [web] {Actor} → {Action} ({Method}, success={Success}, {Details})",
+                Volatile.Read(ref _stopped) ? "stopped" : "full", row.Actor, row.Action, row.Method, row.Success, row.Details);
             _recovery?.LegacyWriteFailed();
         }
         return Task.CompletedTask;
@@ -99,6 +100,7 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        Volatile.Write(ref _stopped, true);
         _queue.Writer.TryComplete();
         if (_writer is not { } running) return;
         try { await running.WaitAsync(DrainTimeout, cancellationToken).ConfigureAwait(false); }

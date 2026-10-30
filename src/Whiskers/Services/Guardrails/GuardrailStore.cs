@@ -236,8 +236,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             if (next.Problem() is { } problem)
                 throw new GuardrailConfigException(problem);
             await _store.SaveAsync(next);
-            RecordChange(state, next);
             _state = new State(next, null);
+            RecordChange(state, next);
         }
         finally
         {

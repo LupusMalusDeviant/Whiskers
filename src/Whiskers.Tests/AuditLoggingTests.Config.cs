@@ -735,6 +735,11 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.NotEqual(limitBefore.Version, limitAfter.Version);
         // The credential itself stays a secret.
         Assert.Matches(@"^\[set #", ConfigChange.Describe(new { ApiToken = "abc" }).Settings["ApiToken"].Shown);
+        // A flag named after a secret holds none: it stays readable and moves the version.
+        var flagBefore = ConfigChange.Describe(new { HasToken = false, HasCredential = true });
+        var flagAfter = ConfigChange.Describe(new { HasToken = true, HasCredential = true });
+        Assert.Equal(("HasToken", "false", "true"), Assert.Single(ConfigChange.Diff(flagBefore, flagAfter)));
+        Assert.NotEqual(flagBefore.Version, flagAfter.Version);
     }
 
     [Fact]
