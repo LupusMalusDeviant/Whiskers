@@ -10,9 +10,14 @@ All notable changes to Whiskers are documented here. The format follows
   roles, MCP keys and tool switches, guardrails and presets, AI triggers, agent settings, Settings sections, servers,
   registries, Git-deploy apps — is one gateway event that carries what changed: the section's version before and
   after (`config.version`, the first 12 hex digits of a SHA-256 over the redacted content) and each changed setting
-  with its old and new value (target type `setting`, at most 8, the rest counted). Secrets never show a value: only
-  `[not set]` or `[set #<fingerprint>]`, keyed per process so a replaced secret is a visible change while nothing
-  stored lets anyone test a guess; a secret alone does not move the version. URLs show their origin only. The
+  with its old and new value (target type `setting`, at most 8 per operation over all its sections, the rest counted;
+  webhooks, log-alert rules, servers, registries and Git-deploy apps also on create, toggle, rotation and delete).
+  Changes are detected on the complete values, so an edit past the shown part or inside a URL's path counts. Secrets
+  never show a value: only `[not set]` or `[set #<fingerprint>]`, keyed per process so a replaced secret is a visible
+  change while nothing stored lets anyone test a guess; a secret alone does not move the version. URLs show their
+  origin only; free text (prompts, log patterns, long values) shows as `[text, N chars #<fingerprint>]`; a list of
+  records such as API keys is classified field by field, so a key's level change is readable. An event keeps at most
+  20 reports and counts the rest (`results.omitted`). The
   configuration pages (Settings, Servers, Webhooks, self-backup, log alerts, agent, AI operations, automation owners,
   registries) no longer write audit rows of their own: a refused attempt is the gateway's **Denied** event, and the old
   action names (`config.save`, `server.add`/`update`/`remove`, `webhook.create`/`enable`/`disable`/`delete`/`test`/
@@ -20,7 +25,9 @@ All notable changes to Whiskers are documented here. The format follows
   `selfbackup.create`/`delete`/`restore`, `automation.owner_set`) are replaced by the capability ids. New rows:
   `auth.login`, `auth.login_failed` (with `reason=unknown_account|wrong_password|locked_out|not_whitelisted|
   provider_failure` and the client address; an unknown account name is never recorded) and `auth.logout`, for local,
-  Google and OIDC sign-ins — hooks only, the login itself is unchanged and a lost row never blocks it. A self-backup
+  Google and OIDC sign-ins — hooks only, the login itself is unchanged; the rows are queued and written in the
+  background, so a slow or locked audit database never delays a sign-in, and a lost row is reported to the `audit`
+  health check. Refusing an enabled whitelist without addresses is a Denied event. A self-backup
   download (`selfbackup.download`) is recorded with the requester, archive and size before the first byte, and is
   refused with 503 when that row cannot be written; a signed-in non-Admin's attempt is recorded as refused.
   No migration.

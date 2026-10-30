@@ -281,8 +281,6 @@ public sealed class UiAuditCompletenessTests : IDisposable
         {
             ["Pages/ContainerDetail.razor"] = ["CheckMigrationStatus"],
             ["Pages/NginxManager.razor"] = ["TestConfig"],
-            // Hands out an archive through the download endpoint, which audits it before the first byte (R1-22).
-            ["Pages/SelfBackupPanel.razor"] = ["Download"],
             // Skips loading the admin-only settings into the circuit; changes nothing.
             ["Pages/Settings.razor"] = ["OnInitializedAsync"],
         }.GetValueOrDefault(page, []);

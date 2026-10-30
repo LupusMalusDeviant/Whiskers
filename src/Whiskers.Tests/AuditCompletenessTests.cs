@@ -266,7 +266,7 @@ public sealed class AuditCompletenessTests : IDisposable
     [Fact]
     public async Task Long_tool_reports_stay_within_the_details_cap()
     {
-        // A tool that names its target by a whole command (execute_command does), forty times over (R1-20); the scope keeps 32 (R1-22).
+        // A tool that names its target by a whole command (execute_command does), forty times over (R1-20); the scope keeps 20 and counts the rest (R1-22).
         var command = string.Concat(Enumerable.Repeat("echo restart the web container please; ", 200));
 
         await Gateway().ExecuteAsync(Restart("op-reports"), (_, _) =>
@@ -281,7 +281,9 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.Equal("Executed", row.Outcome);
         Assert.True(row.Details!.Length <= 4000, $"{row.Details.Length} chars");
         using var details = JsonDocument.Parse(row.Details);
-        Assert.Equal(32, details.RootElement.GetProperty("results").GetArrayLength());
+        var results = details.RootElement.GetProperty("results");
+        Assert.Equal(21, results.GetArrayLength());
+        Assert.Equal("20 further result(s) not recorded", results[20].GetProperty("details").GetString());
     }
 
     [Fact]

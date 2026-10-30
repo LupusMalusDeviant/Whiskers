@@ -1168,6 +1168,9 @@ else
         if (_whitelistEnabled && _whitelistEmails.Count == 0)
         {
             Snackbar.Add(L["Settings_Snackbar_WhitelistEmptyError"].Value, Severity.Error);
+            // The refused attempt is the gateway's Denied event (R1-22).
+            await Mutations.RefuseAsync("config.whitelist", new { section = "whitelist", enabled = true, emails = 0 },
+                "An enabled whitelist needs at least one address.");
             return;
         }
         _savingWhitelist = true;

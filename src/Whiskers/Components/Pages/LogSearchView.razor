@@ -229,14 +229,8 @@ else
                 CooldownMinutes = _ruleCooldown
             };
             await Mutations.RunAsync("logalert.create", new { name = rule.Name, containerName = rule.ContainerName },
-                async _ =>
-                {
-                    var created = await MonitorService.CreateRuleAsync(rule);
-                    // The new rule's id and what it matches are part of the gateway's event (R1-22).
-                    MutationScope.Note($"Rule {created.RuleId}: {(created.IsRegex ? "regex" : "text")} '{created.Pattern}', " +
-                                       $"severity {created.Severity}, cooldown {created.CooldownMinutes} min");
-                    return created;
-                });
+                // The new rule, its pattern as text only, is the store's versioned diff in the gateway's event (R1-22).
+                _ => MonitorService.CreateRuleAsync(rule));
             Snackbar.Add(L["LogSearchView_Snackbar_RuleCreated", _ruleName].Value, Severity.Success);
             _showRuleDialog = false;
             _rules = await MonitorService.GetRulesAsync();

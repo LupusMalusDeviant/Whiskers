@@ -1601,6 +1601,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="SelfBackupPanel_Snackbar_BackupDeleted" xml:space="preserve">
     <value>Backup gelöscht.</value>
   </data>
+  <data name="SelfBackup_Download_NotRecorded" xml:space="preserve">
+    <value>Der Download konnte nicht im Audit-Log vermerkt werden und wurde deshalb nicht gestartet.</value>
+  </data>
   <data name="SelfBackupPanel_Snackbar_BackupFailed" xml:space="preserve">
     <value>Backup fehlgeschlagen: {0}</value>
   </data>

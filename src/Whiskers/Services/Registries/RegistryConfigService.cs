@@ -121,6 +121,7 @@ public class RegistryConfigService : IRegistryConfigService
             var next = new RegistryConfigData { Registries = _cached.Registries.Where(r => r.Id != registryId).Select(Copy).ToList() };
             await _store.SaveAsync(next);
             _cached = next;
+            Whiskers.Services.Mutations.ConfigChange.Record($"registry:{registryId}", existing, null);   // R1-22
             if (existing is not null && _vault.IsEnabled)
                 try { await _vault.DeleteSecretAsync(CredentialKey(existing)); } catch { /* no registry names it any more */ }
         }

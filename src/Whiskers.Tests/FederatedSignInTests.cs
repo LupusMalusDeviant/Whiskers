@@ -1,0 +1,101 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Whiskers.Models;
+using Whiskers.Services.Auth;
+
+namespace Whiskers.Tests;
+
+/// <summary>R1-22: the Google/OIDC whitelist gate and the failed provider round trip are audited; the gate decides
+/// exactly as before.</summary>
+public sealed class FederatedSignInTests
+{
+    private sealed class Whitelist(params string[] allowed) : IWhitelistService
+    {
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public bool IsEmailAllowed(string? email) => email is not null && allowed.Contains(email);
+        public WhitelistData GetWhitelist() => new();
+        public Task SaveWhitelistAsync(WhitelistData data) => Task.CompletedTask;
+    }
+
+    private sealed class Recording : IAuthAuditLog
+    {
+        public List<(string Kind, string Method, string? Account, string? Reason)> Rows { get; } = [];
+
+        public Task SignedInAsync(HttpContext context, string method, string email)
+        {
+            Rows.Add(("in", method, email, null));
+            return Task.CompletedTask;
+        }
+
+        public Task SignInRefusedAsync(HttpContext context, string method, string? account, string reason)
+        {
+            Rows.Add(("refused", method, account, reason));
+            return Task.CompletedTask;
+        }
+
+        public Task SignedOutAsync(HttpContext context) => Task.CompletedTask;
+    }
+
+    private static (DefaultHttpContext Http, Recording Audit) Http(params string[] allowed)
+    {
+        var audit = new Recording();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddSingleton<IWhitelistService>(new Whitelist(allowed))
+                .AddSingleton<IAuthAuditLog>(audit)
+                .BuildServiceProvider(),
+        };
+        return (http, audit);
+    }
+
+    private static TicketReceivedContext Ticket(HttpContext http, string scheme, string email)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Email, email)], scheme));
+        return new TicketReceivedContext(http, new AuthenticationScheme(scheme, scheme, typeof(GoogleHandler)),
+            new GoogleOptions(), new AuthenticationTicket(principal, scheme));
+    }
+
+    [Theory]
+    [InlineData("Google", "google")]
+    [InlineData("oidc", "oidc")]
+    public async Task An_allowed_sign_in_passes_and_is_recorded(string scheme, string method)
+    {
+        var (http, audit) = Http("ops@example.com");
+        var context = Ticket(http, scheme, "ops@example.com");
+
+        await FederatedSignIn.WhitelistGateAsync(context, "/sw");
+
+        Assert.Null(context.Result);   // not handled: the cookie is issued as before
+        Assert.Equal(("in", method, "ops@example.com", null), Assert.Single(audit.Rows));
+    }
+
+    [Fact]
+    public async Task A_sign_in_off_the_whitelist_is_refused_as_before_and_recorded()
+    {
+        var (http, audit) = Http("ops@example.com");
+        var context = Ticket(http, "oidc", "intruder@example.com");
+
+        await FederatedSignIn.WhitelistGateAsync(context, "/sw");
+
+        Assert.True(context.Result!.Handled);
+        Assert.Equal("/sw/login?error=unauthorized", http.Response.Headers.Location.ToString());
+        Assert.Equal(("refused", "oidc", "intruder@example.com", AuthAuditReasons.NotWhitelisted), Assert.Single(audit.Rows));
+    }
+
+    [Fact]
+    public async Task A_failed_provider_round_trip_is_recorded_and_left_to_the_default_handling()
+    {
+        var (http, audit) = Http();
+        var context = new RemoteFailureContext(http, new AuthenticationScheme("oidc", "oidc", typeof(GoogleHandler)),
+            new GoogleOptions(), new AuthenticationFailureException("Correlation failed."));
+
+        await FederatedSignIn.RecordRemoteFailureAsync(context);
+
+        Assert.Null(context.Result);   // not handled: the default failure path still runs
+        Assert.Equal(("refused", "oidc", null, AuthAuditReasons.ProviderFailure), Assert.Single(audit.Rows));
+    }
+}

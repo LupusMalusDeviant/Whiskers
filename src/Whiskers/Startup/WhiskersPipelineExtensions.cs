@@ -329,7 +329,9 @@ public static class WhiskersPipelineExtensions
             var size = new FileInfo(path).Length;
             if (!await audit.TryLogAsync(actor, actorType, BackupDownloadAction, "whiskers", id, name,
                     details: $"{size} bytes; ip={ctx.Connection.RemoteIpAddress}"))
-                return Results.Problem("The download could not be recorded in the audit log, so it was not started.",
+                return Results.Problem(ctx.RequestServices
+                        .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<Whiskers.SharedResource>>()
+                        ["SelfBackup_Download_NotRecorded"].Value,
                     statusCode: StatusCodes.Status503ServiceUnavailable);
             return Results.File(path, "application/octet-stream", name, enableRangeProcessing: true);
         }).RequireAuthorization(policy => policy.RequireAssertion(async context =>

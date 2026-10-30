@@ -545,6 +545,8 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         db.LogAlertRules.Add(rule);
         await db.SaveChangesAsync();
+        // The versioned, redacted change is part of the gateway's event (R1-22); the pattern shows as text only.
+        Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{rule.RuleId}", null, rule);
         return rule;
     }
 
@@ -555,8 +557,10 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         var rule = await db.LogAlertRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
         if (rule != null)
         {
+            var before = Whiskers.Services.Mutations.ConfigChange.Capture(rule);
             db.LogAlertRules.Remove(rule);
             await db.SaveChangesAsync();
+            Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{ruleId}", before, null);   // R1-22
         }
     }
 
@@ -567,8 +571,10 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         var rule = await db.LogAlertRules.FirstOrDefaultAsync(r => r.RuleId == ruleId);
         if (rule != null)
         {
+            var before = Whiskers.Services.Mutations.ConfigChange.Capture(rule);
             rule.Enabled = enabled;
             await db.SaveChangesAsync();
+            Whiskers.Services.Mutations.ConfigChange.Record($"log-alert:{ruleId}", before, rule);   // R1-22
         }
     }
 }

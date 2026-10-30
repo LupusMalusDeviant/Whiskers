@@ -98,6 +98,8 @@ public class WebhookService : IWebhookService
         var changed = await db.Webhooks
             .Where(w => w.WebhookId == webhookId && w.Owner == expectedOwnerId)
             .ExecuteUpdateAsync(s => s.SetProperty(w => w.Owner, ownerId));
+        // The versioned, redacted change is part of the gateway's event (R1-22).
+        if (changed == 1) Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", new { Owner = expectedOwnerId }, new { Owner = ownerId });
         return changed == 1;
     }
 
@@ -115,6 +117,7 @@ public class WebhookService : IWebhookService
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         db.Webhooks.Add(webhook);
         await db.SaveChangesAsync();
+        Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhook.WebhookId}", null, webhook);   // R1-22
         return webhook;
     }
 
@@ -124,8 +127,10 @@ public class WebhookService : IWebhookService
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
             ?? throw new InvalidOperationException("Webhook not found");
+        var before = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
         webhook.Secret = GenerateSecret();
         await db.SaveChangesAsync();
+        Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, webhook);   // R1-22
         return webhook.Secret;
     }
 
@@ -139,8 +144,10 @@ public class WebhookService : IWebhookService
         // force a secret regeneration first.
         if (enabled && string.IsNullOrEmpty(webhook.Secret))
             throw new InvalidOperationException("Webhook has no secret — regenerate its secret before enabling it.");
+        var before = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
         webhook.Enabled = enabled;
         await db.SaveChangesAsync();
+        Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, webhook);   // R1-22
     }
 
     public async Task DeleteWebhookAsync(string webhookId)
@@ -150,8 +157,10 @@ public class WebhookService : IWebhookService
         var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId);
         if (webhook != null)
         {
+            var before = Whiskers.Services.Mutations.ConfigChange.Capture(webhook);
             db.Webhooks.Remove(webhook);
             await db.SaveChangesAsync();
+            Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, null);   // R1-22
         }
     }
 

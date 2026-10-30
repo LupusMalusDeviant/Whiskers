@@ -29,32 +29,11 @@ public static class WhiskersAuthenticationExtensions
         var oidcEnabled = oidcSection.GetValue<bool>("Enabled") && !string.IsNullOrWhiteSpace(oidcSection["Authority"]);
 
         // Shared gate: after a provider authenticates the user, enforce the email whitelist before issuing
-        // the local cookie. Used by both Google and OIDC (both deliver a TicketReceivedContext).
-        // R1-22: both outcomes are recorded in the audit log; the record never changes the decision.
-        async Task WhitelistGate(Microsoft.AspNetCore.Authentication.TicketReceivedContext context)
-        {
-            var whitelist = context.HttpContext.RequestServices.GetRequiredService<Whiskers.Services.Auth.IWhitelistService>();
-            var authAudit = context.HttpContext.RequestServices.GetRequiredService<Whiskers.Services.Auth.IAuthAuditLog>();
-            var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
-            var method = context.Scheme.Name.ToLowerInvariant();
-            if (!whitelist.IsEmailAllowed(email))
-            {
-                context.Response.Redirect(configuredPathBase + "/login?error=unauthorized");
-                context.HandleResponse();
-                await authAudit.SignInRefusedAsync(context.HttpContext, method, email, Whiskers.Services.Auth.AuthAuditReasons.NotWhitelisted);
-                return;
-            }
-            await authAudit.SignedInAsync(context.HttpContext, method, email ?? "");
-        }
-
-        // A provider round trip that failed (IdP error, correlation failure): recorded, then handled as before — the
-        // handler does not mark the response handled, so the default failure path still runs (R1-22).
-        async Task RecordRemoteFailure(Microsoft.AspNetCore.Authentication.RemoteFailureContext context)
-        {
-            var authAudit = context.HttpContext.RequestServices.GetRequiredService<Whiskers.Services.Auth.IAuthAuditLog>();
-            await authAudit.SignInRefusedAsync(context.HttpContext, context.Scheme.Name.ToLowerInvariant(), null,
-                Whiskers.Services.Auth.AuthAuditReasons.ProviderFailure);
-        }
+        // the local cookie. Used by both Google and OIDC; both outcomes and a failed round trip are audited (R1-22).
+        Task WhitelistGate(Microsoft.AspNetCore.Authentication.TicketReceivedContext context) =>
+            Whiskers.Services.Auth.FederatedSignIn.WhitelistGateAsync(context, configuredPathBase);
+        Task RecordRemoteFailure(Microsoft.AspNetCore.Authentication.RemoteFailureContext context) =>
+            Whiskers.Services.Auth.FederatedSignIn.RecordRemoteFailureAsync(context);
 
         if (authDisabled)
         {

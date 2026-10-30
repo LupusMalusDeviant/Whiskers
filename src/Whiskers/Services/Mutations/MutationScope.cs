@@ -16,9 +16,13 @@ public sealed record MutationDomainResult(string Action, string TargetType, stri
 public sealed class MutationScope : IDisposable
 {
     private const int MaxReasonChars = 500;
-    // A configuration write reports one entry per changed setting (R1-22, ConfigChange): room for its 20 plus the
-    // version and the overflow count. The audit fits them into the event's size budget.
-    private const int MaxResults = 32;
+    // What a tool or page reports beyond this is counted, not kept: more would not fit the event's capped details
+    // (each entry costs ~130 characters even when its texts shrink). A configuration write's version entries (R1-22,
+    // ConfigChange) are always kept: one per written section.
+    private const int MaxResults = 20;
+
+    /// <summary>The action of the last entry of <see cref="Results"/> when reports were left out: their count.</summary>
+    public const string OmittedAction = "results.omitted";
     private static readonly AsyncLocal<MutationScope?> CurrentScope = new();
 
     private readonly MutationScope? _parent;
@@ -27,6 +31,8 @@ public sealed class MutationScope : IDisposable
     private readonly string? _serverId;
     private readonly HashSet<string> _decided;
     private readonly List<MutationDomainResult> _results = [];
+    private int _dropped;
+    private int _settingsShown;
 
     private MutationScope(string capabilityId, string operationId, MutationPrincipal? principal, MutationScope? parent,
         MutationRequest? request)
@@ -105,10 +111,30 @@ public sealed class MutationScope : IDisposable
         return reason;
     }
 
-    /// <summary>What the tool reported with <see cref="Record"/>, oldest first (at most 32).</summary>
+    /// <summary>What the tool reported with <see cref="Record"/>, oldest first (at most 20, plus the version entries of
+    /// configuration writes); reports beyond that are counted in a last entry.</summary>
     public IReadOnlyList<MutationDomainResult> Results
     {
-        get { lock (_results) return _results.ToArray(); }
+        get
+        {
+            lock (_results)
+                return _dropped == 0
+                    ? _results.ToArray()
+                    : [.. _results, new MutationDomainResult(OmittedAction, "", "", "",
+                        $"{_dropped} further result(s) not recorded", _serverId, true)];
+        }
+    }
+
+    /// <summary>How many of <paramref name="wanted"/> changed settings a configuration write may still show in this
+    /// operation's event, out of <paramref name="max"/> for the whole operation (R1-22).</summary>
+    internal int TakeSettingBudget(int wanted, int max)
+    {
+        lock (_results)
+        {
+            var granted = Math.Clamp(max - _settingsShown, 0, wanted);
+            _settingsShown += granted;
+            return granted;
+        }
     }
 
     /// <summary>
@@ -122,7 +148,8 @@ public sealed class MutationScope : IDisposable
         ArgumentNullException.ThrowIfNull(result);
         if (Current is not { } scope) return false;
         lock (scope._results)
-            if (scope._results.Count < MaxResults) scope._results.Add(result);
+            if (scope._results.Count < MaxResults || result.Action == ConfigChange.VersionAction) scope._results.Add(result);
+            else scope._dropped++;
         if (!result.Success)
             Fail(string.IsNullOrWhiteSpace(result.Details) ? $"{result.Action} failed." : $"{result.Action} failed: {result.Details}");
         return true;

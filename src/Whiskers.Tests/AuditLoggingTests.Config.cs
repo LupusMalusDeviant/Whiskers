@@ -221,25 +221,157 @@ public sealed partial class AuditLoggingTests : IDisposable
         Assert.Equal("main → release", Text(Setting(results, "gitdeploy:0123456789ab:Branch"), "details"));
     }
 
-    [Theory]
-    [InlineData("webhook.save", "webhook")]
-    [InlineData("logalert.create", "log-alert")]
-    public async Task Refused_and_completed_writes_are_told_apart(string capability, string targetType)
-    {
-        var request = Config(capability, "x", "op-ok") with { Target = new MutationTarget(targetType, "x", "x", null) };
-        await Gateway().ExecuteAsync(request, (_, _) =>
-        {
-            MutationScope.Note("Webhook wh1 created");
-            return Task.FromResult(1);
-        });
-        await Gateway().RefuseAsync(request with { OperationId = "op-no" }, "Requires the Operator role.");
+    private T Stub<T>() where T : class => new ComponentTests.UiCreatedResourceAuditTests.Stub<T>().Object;
 
-        using var scope = _db.Scopes.CreateScope();
-        var rows = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking()
-            .Where(a => a.OperationId == "op-ok" || a.OperationId == "op-no").ToListAsync();
-        Assert.Equal("Executed", rows.Single(r => r.OperationId == "op-ok").Outcome);
-        Assert.Equal("Denied", rows.Single(r => r.OperationId == "op-no").Outcome);
-        Assert.Contains(await ResultsOf("op-ok"), r => Text(r, "details") == "Webhook wh1 created");
+    [Fact]
+    public async Task A_webhook_lifecycle_records_each_change_and_a_rotated_secret_only_as_fingerprints()
+    {
+        var hooks = new Whiskers.Services.Webhooks.WebhookService(_db.Scopes, Stub<Whiskers.Services.Docker.IDockerService>(),
+            Stub<Whiskers.Services.Server.IHostCommandExecutor>(), Stub<IComposePlanner>(),
+            NullLogger<Whiskers.Services.Webhooks.WebhookService>.Instance);
+        WebhookEntity? hook = null;
+        string? secret = null;
+
+        await Gateway().ExecuteAsync(Config("webhook.save", "webhook", "op-hook-new"), async (_, _) =>
+        {
+            hook = await hooks.CreateWebhookAsync(new WebhookEntity
+                { Name = "redeploy", TargetId = "web", Action = "restart", Owner = "user:admin@example.com" });
+            return 1;
+        });
+        await Gateway().ExecuteAsync(Config("webhook.rotate_secret", "webhook", "op-hook-rotate"), async (_, _) =>
+        {
+            secret = await hooks.RegenerateSecretAsync(hook!.WebhookId);
+            return 1;
+        });
+        await Gateway().ExecuteAsync(Config("webhook.set_enabled", "webhook", "op-hook-off"), async (_, _) =>
+        {
+            await hooks.SetEnabledAsync(hook!.WebhookId, false);
+            return 1;
+        });
+        await Gateway().ExecuteAsync(Config("webhook.delete", "webhook", "op-hook-del"), async (_, _) =>
+        {
+            await hooks.DeleteWebhookAsync(hook!.WebhookId);
+            return 1;
+        });
+
+        var section = $"webhook:{hook!.WebhookId}";
+        Assert.Equal("(none) → redeploy", Text(Setting(await ResultsOf("op-hook-new"), $"{section}:Name"), "details"));
+        var rotated = Text(Setting(await ResultsOf("op-hook-rotate"), $"{section}:Secret"), "details");
+        Assert.Matches(@"^\[set #[0-9a-f]{6}\] → \[set #[0-9a-f]{6}\]$", rotated);
+        Assert.Equal("true → false", Text(Setting(await ResultsOf("op-hook-off"), $"{section}:Enabled"), "details"));
+        Assert.Equal("redeploy → (none)", Text(Setting(await ResultsOf("op-hook-del"), $"{section}:Name"), "details"));
+        foreach (var op in new[] { "op-hook-new", "op-hook-rotate", "op-hook-off", "op-hook-del" })
+            Assert.DoesNotContain(secret!, await EventText(op));
+    }
+
+    [Fact]
+    public async Task A_log_alert_lifecycle_records_each_change_and_its_pattern_only_as_text()
+    {
+        var monitor = new Whiskers.Services.LogMonitor.LogMonitorService(_db.Scopes, Stub<Whiskers.Services.Docker.IDockerService>(),
+            Stub<Whiskers.Services.ServerConfig.IServerConfigService>(), Stub<Whiskers.Services.Notifications.INotificationService>(),
+            NullLogger<Whiskers.Services.LogMonitor.LogMonitorService>.Instance, Stub<Whiskers.Services.Docker.Budget.IServerBudget>(),
+            Stub<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>(), Stub<Whiskers.Services.LogMonitor.Hygiene.ILogScanExclusions>(),
+            Stub<Whiskers.Services.Observability.Outcomes.IActionOutcomeService>());
+        const string pattern = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.leaked";
+        LogAlertRuleEntity? rule = null;
+
+        await Gateway().ExecuteAsync(Config("logalert.create", "log-alert", "op-rule-new"), async (_, _) =>
+        {
+            rule = await monitor.CreateRuleAsync(new LogAlertRuleEntity { Name = "leak", Pattern = pattern, ContainerName = "web" });
+            return 1;
+        });
+        await Gateway().ExecuteAsync(Config("logalert.toggle", "log-alert", "op-rule-off"), async (_, _) =>
+        {
+            await monitor.ToggleRuleAsync(rule!.RuleId, false);
+            return 1;
+        });
+        await Gateway().ExecuteAsync(Config("logalert.delete", "log-alert", "op-rule-del"), async (_, _) =>
+        {
+            await monitor.DeleteRuleAsync(rule!.RuleId);
+            return 1;
+        });
+
+        var section = $"log-alert:{rule!.RuleId}";
+        // A new rule changes more settings than one event shows; the pattern, when shown, is text only.
+        Assert.Matches(@"^\[text, \d+ chars #[0-9a-f]{6}\]$", ConfigChange.Describe(rule).Shown["Pattern"]);
+        Assert.Contains(await ResultsOf("op-rule-new"), r => Text(r, "action") == ConfigChange.VersionAction
+                                                             && Text(r, "targetId") == section);
+        Assert.Equal("true → false", Text(Setting(await ResultsOf("op-rule-off"), $"{section}:Enabled"), "details"));
+        Assert.Contains(await ResultsOf("op-rule-del"), r => Text(r, "action") == ConfigChange.VersionAction
+                                                             && Text(r, "targetId") == section
+                                                             && Text(r, "details").EndsWith("15 changed", StringComparison.Ordinal));
+        foreach (var op in new[] { "op-rule-new", "op-rule-off", "op-rule-del" })
+            Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9", await EventText(op));
+    }
+
+    [Fact]
+    public async Task A_key_permission_change_is_readable_while_the_key_material_stays_hidden()
+    {
+        var mcp = new McpPermissionService(NullLogger<McpPermissionService>.Instance, new DataPathOptions(_dir));
+        await mcp.InitializeAsync();
+        var key = await mcp.AddApiKeyAsync("ci", McpPermissionLevels.Read);
+        var data = mcp.GetPermissionData();
+        data.ApiKeys.Single(k => k.Id == key.Id).PermissionLevel = McpPermissionLevels.Write;
+
+        await Gateway().ExecuteAsync(Config("config.mcp_permissions", "mcp-permissions", "op-level"), async (_, _) =>
+        {
+            await mcp.SavePermissionDataAsync(data);
+            return 1;
+        });
+
+        var results = await ResultsOf("op-level");
+        Assert.Equal($"{McpPermissionLevels.Read} → {McpPermissionLevels.Write}",
+            Text(Setting(results, $"mcp-permissions:ApiKeys[{key.Id}].PermissionLevel"), "details"));
+        Assert.Matches(@"^[0-9a-f]{12} → [0-9a-f]{12}; 1 changed$",
+            Text(Assert.Single(results, r => Text(r, "action") == ConfigChange.VersionAction), "details"));
+        var text = await EventText("op-level");
+        Assert.DoesNotContain(key.KeyHash, text);
+    }
+
+    [Fact]
+    public async Task Free_text_holding_a_webhook_url_never_reaches_the_event()
+    {
+        var triggers = new Whiskers.Services.Agent.Triggers.AiTriggerStore(Path.Combine(_dir, "ai-triggers.json"));
+        await triggers.InitializeAsync();
+        const string prompt = "On crash run curl https://hooks.slack.com/services/T0/B0/zzsecretpath and restart";
+
+        await Gateway().ExecuteAsync(Config("aitrigger.save", "ai-triggers", "op-prompt"), async (_, _) =>
+        {
+            await triggers.SaveAsync([new AiTrigger { Id = "t1", Name = "crash", EventTypes = ["unhealthy"], Prompt = prompt }],
+                Editor(), triggers.Revision);
+            return 1;
+        });
+
+        var text = await EventText("op-prompt");
+        Assert.DoesNotContain("zzsecretpath", text);
+        Assert.DoesNotContain("hooks.slack.com/services", text);
+        Assert.Matches(@"^\[text, \d+ chars #[0-9a-f]{6}\]$",
+            ConfigChange.Describe(new AiTrigger { Prompt = prompt }).Shown["Prompt"]);
+    }
+
+    [Fact]
+    public async Task A_save_of_many_sections_keeps_every_version_and_counts_what_it_leaves_out()
+    {
+        var store = new AppSettingsStore(Path.Combine(_dir, "appsettings.json"));
+        var sections = Enumerable.Range(1, 6).ToDictionary(n => $"Channel{n}",
+            n => (object)System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(
+                Enumerable.Range(0, 6).ToDictionary(i => $"Setting{i}", i => $"value-{n}-{i}")))!);
+
+        await Gateway().ExecuteAsync(Config("config.save", "settings", "op-sections"), async (_, _) =>
+        {
+            await store.SaveSectionsAsync(sections);
+            return 1;
+        });
+
+        var results = await ResultsOf("op-sections");
+        var versions = results.Where(r => Text(r, "action") == ConfigChange.VersionAction).ToList();
+        Assert.Equal(6, versions.Count);
+        Assert.All(versions, v => Assert.Matches(@"^[0-9a-f]{12} → [0-9a-f]{12}; 6 changed$", Text(v, "details")));
+        var shown = results.Count(r => Text(r, "targetType") == ConfigChange.SettingTarget && !Text(r, "targetId").EndsWith(":…", StringComparison.Ordinal));
+        Assert.Equal(ConfigChange.MaxChanges, shown);
+        var counted = results.Where(r => Text(r, "targetId").EndsWith(":…", StringComparison.Ordinal))
+            .Sum(r => int.Parse(Text(r, "details").Split(' ')[0], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(36 - ConfigChange.MaxChanges, counted);
     }
 
     // ---- ConfigChange in isolation ------------------------------------------------------------------------------
@@ -249,22 +381,22 @@ public sealed partial class AuditLoggingTests : IDisposable
     [Fact]
     public void Secrets_show_only_whether_they_are_set_and_a_secret_alone_keeps_the_version()
     {
-        var (before, v1) = ConfigChange.Describe(new Notifier("ops", "https://hooks.example.com/T0/B0/xyzsecret", "hunter2", "https://matrix.example.com"));
-        var (after, v2) = ConfigChange.Describe(new Notifier("ops", "https://hooks.example.com/T0/B0/xyzsecret", "correct-horse", "https://matrix.example.com"));
+        var before = ConfigChange.Describe(new Notifier("ops", "https://hooks.example.com/T0/B0/xyzsecret", "hunter2", "https://matrix.example.com"));
+        var after = ConfigChange.Describe(new Notifier("ops", "https://hooks.example.com/T0/B0/xyzsecret", "correct-horse", "https://matrix.example.com"));
 
-        Assert.Equal(v1, v2);
+        Assert.Equal(before.Version, after.Version);
         var change = Assert.Single(ConfigChange.Diff(before, after));
         Assert.Equal("Password", change.Path);
         Assert.Matches(@"^\[set #[0-9a-f]{6}\]$", change.Before);
         Assert.Matches(@"^\[set #[0-9a-f]{6}\]$", change.After);
         Assert.NotEqual(change.Before, change.After);
-        var all = string.Join("|", before.Values.Concat(after.Values));
+        var all = string.Join("|", before.Shown.Values.Concat(after.Shown.Values));
         Assert.DoesNotContain("hunter2", all);
         Assert.DoesNotContain("correct-horse", all);
         // A URL shows its origin only — a webhook carries its secret in the path.
-        Assert.Equal("https://hooks.example.com/…", before["WebhookUrl"]);
+        Assert.Equal("https://hooks.example.com/…", before.Shown["WebhookUrl"]);
         Assert.DoesNotContain("xyzsecret", all);
-        Assert.Equal("[not set]", ConfigChange.Describe(new Notifier("ops", "", null, "")).Settings["Password"]);
+        Assert.Equal("[not set]", ConfigChange.Describe(new Notifier("ops", "", null, "")).Shown["Password"]);
     }
 
     [Fact]
@@ -309,12 +441,41 @@ public sealed partial class AuditLoggingTests : IDisposable
     }
 
     [Fact]
-    public void Long_values_are_cut_and_credentials_in_a_url_are_removed()
+    public void Free_text_shows_only_its_length_and_fingerprint()
     {
-        var settings = ConfigChange.Describe(new
-            { Description = string.Join(" ", Enumerable.Repeat("plain", 100)), Note = "see https://user:pw@host/x" }).Settings;
+        var shown = ConfigChange.Describe(new
+            { Description = string.Join(" ", Enumerable.Repeat("plain", 100)), Note = "see https://user:pw@host/x", Label = "web 1" }).Shown;
 
-        Assert.Equal(ConfigChange.MaxValueChars + 1, settings["Description"].Length);
-        Assert.DoesNotContain("pw@", settings["Note"]);
+        Assert.Matches(@"^\[text, 599 chars #[0-9a-f]{6}\]$", shown["Description"]);
+        Assert.Matches(@"^\[text, \d+ chars #[0-9a-f]{6}\]$", shown["Note"]);
+        Assert.Equal("web 1", shown["Label"]);
+    }
+
+    [Fact]
+    public void Changes_past_the_shown_part_are_still_changes_and_move_the_version()
+    {
+        var longBefore = ConfigChange.Describe(new { Pattern = new string('a', 100) + "1" });
+        var longAfter = ConfigChange.Describe(new { Pattern = new string('a', 100) + "2" });
+        var urlBefore = ConfigChange.Describe(new { WebhookUrl = "https://hooks.example.com/T0/B0/one" });
+        var urlAfter = ConfigChange.Describe(new { WebhookUrl = "https://hooks.example.com/T0/B0/two" });
+
+        Assert.NotEqual(longBefore.Version, longAfter.Version);
+        Assert.Single(ConfigChange.Diff(longBefore, longAfter));
+        var rotated = Assert.Single(ConfigChange.Diff(urlBefore, urlAfter));
+        Assert.Matches(@"^https://hooks\.example\.com/… #[0-9a-f]{6}$", rotated.Before);
+        Assert.NotEqual(rotated.Before, rotated.After);
+    }
+
+    [Fact]
+    public async Task Reports_beyond_the_scope_cap_are_counted()
+    {
+        await Gateway().ExecuteAsync(Config("config.whitelist", "whitelist", "op-notes"), (_, _) =>
+        {
+            for (var i = 0; i < 40; i++) MutationScope.Note($"note {i}");
+            return Task.FromResult(1);
+        });
+
+        Assert.Contains(await ResultsOf("op-notes"), r => Text(r, "action") == MutationScope.OmittedAction
+                                                          && Text(r, "details") == "20 further result(s) not recorded");
     }
 }

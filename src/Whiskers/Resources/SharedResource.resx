@@ -1601,6 +1601,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="SelfBackupPanel_Snackbar_BackupDeleted" xml:space="preserve">
     <value>Backup deleted.</value>
   </data>
+  <data name="SelfBackup_Download_NotRecorded" xml:space="preserve">
+    <value>The download could not be recorded in the audit log, so it was not started.</value>
+  </data>
   <data name="SelfBackupPanel_Snackbar_BackupFailed" xml:space="preserve">
     <value>Backup failed: {0}</value>
   </data>

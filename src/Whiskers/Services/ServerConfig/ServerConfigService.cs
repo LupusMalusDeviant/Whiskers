@@ -198,6 +198,7 @@ public class ServerConfigService : IServerConfigService, IInitializable
             var newData = new ServerConfigData { Servers = servers };
             await _store.SaveAsync(newData);
             _cached = newData;
+            Whiskers.Services.Mutations.ConfigChange.Record($"server:{serverId}", server, null);   // R1-22
 
             // Clean up SSH keys
             var keyDir = Path.Combine(_sshKeysBasePath, serverId);

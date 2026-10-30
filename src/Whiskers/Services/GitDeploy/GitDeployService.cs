@@ -224,8 +224,10 @@ public class GitDeployService : IGitDeployService
         try
         {
             var data = await LoadAsync();
+            var removed = data.Apps.FirstOrDefault(a => a.Id == appId);
             data.Apps.RemoveAll(a => a.Id == appId);
             await _store.SaveAsync(data);
+            Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{appId}", removed, null);   // R1-22
         }
         finally { _lock.Release(); }
     }

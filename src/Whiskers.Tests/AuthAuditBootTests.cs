@@ -32,7 +32,8 @@ public sealed class AuthAuditBootTests
             Assert.Equal("/", ok.Headers.Location!.OriginalString);
             await client.GetAsync("/logout");
 
-            var rows = await RowsAsync(services, "auth.");
+            // Written in the background (a sign-in never waits for the audit): wait for all four.
+            var rows = await RowsAsync(services, "auth.", expected: 4);
             var unknown = Assert.Single(rows, r => r.Action == AuthAuditLog.LoginFailedAction && r.Actor == "anonymous");
             Assert.Contains($"reason={AuthAuditReasons.UnknownAccount}", unknown.Details);
             Assert.False(unknown.Success);
@@ -66,7 +67,7 @@ public sealed class AuthAuditBootTests
             var response = await client.GetAsync($"/backups/self/{backup.Id}/download");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var row = Assert.Single(await RowsAsync(services, WhiskersPipelineExtensions.BackupDownloadAction));
+            var row = Assert.Single(await RowsAsync(services, WhiskersPipelineExtensions.BackupDownloadAction, expected: 1));
             Assert.Equal(Email, row.Actor);
             Assert.Equal(backup.Id, row.TargetId);
             Assert.Equal(backup.FileName, row.TargetName);
@@ -89,10 +90,76 @@ public sealed class AuthAuditBootTests
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
             Assert.DoesNotContain(response.Content.Headers, h => h.Key == "Content-Disposition");
-        }, auditDown: true);
+        }, audit: AuditMode.Down);
 
-    private static async Task<List<AuditLogEntity>> RowsAsync(IServiceProvider services, string prefix) =>
-        await services.GetRequiredService<IAuditLogService>().GetRecentAsync(500, actionFilter: prefix);
+    [Fact]
+    public async Task A_locked_account_is_recorded_as_locked_out() =>
+        await BootAsync(async (services, client) =>
+        {
+            var token = await AntiforgeryTokenAsync(client);
+            for (var i = 0; i < 5; i++) await LoginAsync(client, token, Email, "wrong-" + i);
+            await LoginAsync(client, token, Email, Password);
+
+            var rows = await RowsAsync(services, AuthAuditLog.LoginFailedAction, expected: 6);
+            Assert.Equal(5, rows.Count(r => r.Details!.Contains($"reason={AuthAuditReasons.WrongPassword}")));
+            Assert.Single(rows, r => r.Details!.Contains($"reason={AuthAuditReasons.LockedOut}"));
+        });
+
+    [Fact]
+    public async Task A_stalled_audit_store_delays_no_sign_in_or_sign_out() =>
+        await BootAsync(async (_, client) =>
+        {
+            var token = await AntiforgeryTokenAsync(client);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var refused = await LoginAsync(client, token, Email, "wrong");
+            var login = await LoginAsync(client, token, Email, Password);
+            var logout = await client.GetAsync("/logout");
+            clock.Stop();
+
+            Assert.Contains("error=invalid", refused.Headers.Location!.OriginalString);
+            Assert.Equal("/", login.Headers.Location!.OriginalString);
+            Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
+            // The audit write never completes; the answers came anyway, well before any database timeout.
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"took {clock.Elapsed}");
+        }, audit: AuditMode.Stalled);
+
+    [Fact]
+    public async Task A_refused_download_by_a_signed_in_non_admin_is_recorded() =>
+        await BootAsync(async (services, client) =>
+        {
+            const string viewer = "viewer@local.test";
+            using (var scope = services.CreateScope())
+            {
+                var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Whiskers.Services.Persistence.AppUser>>();
+                Assert.True((await users.CreateAsync(new Whiskers.Services.Persistence.AppUser { UserName = viewer, Email = viewer }, Password)).Succeeded);
+            }
+            await services.GetRequiredService<IRoleService>().SetRoleAsync(viewer, AppRole.Viewer);
+            var backup = await services.GetRequiredService<IBackupService>().CreateBackupAsync("test");
+            var token = await AntiforgeryTokenAsync(client);
+            Assert.Equal("/", (await LoginAsync(client, token, viewer, Password)).Headers.Location!.OriginalString);
+
+            var response = await client.GetAsync($"/backups/self/{backup.Id}/download");
+
+            Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+            var row = Assert.Single(await RowsAsync(services, WhiskersPipelineExtensions.BackupDownloadAction, expected: 1));
+            Assert.Equal(viewer, row.Actor);
+            Assert.False(row.Success);
+            Assert.Equal(backup.Id, row.TargetId);
+        });
+
+    /// <summary>The audit rows whose action starts with <paramref name="prefix"/>, once at least
+    /// <paramref name="expected"/> are there (sign-in rows are written in the background) or after 10 seconds.</summary>
+    private static async Task<List<AuditLogEntity>> RowsAsync(IServiceProvider services, string prefix, int expected = 0)
+    {
+        var audit = services.GetRequiredService<IAuditLogService>();
+        var until = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            var rows = await audit.GetRecentAsync(500, actionFilter: prefix);
+            if (rows.Count >= expected || DateTime.UtcNow > until) return rows;
+            await Task.Delay(50);
+        }
+    }
 
     private static async Task<string> AntiforgeryTokenAsync(HttpClient client)
     {
@@ -107,6 +174,25 @@ public sealed class AuthAuditBootTests
         {
             ["email"] = email, ["password"] = password, ["__RequestVerificationToken"] = token,
         }));
+
+    public enum AuditMode { Working, Down, Stalled }
+
+    /// <summary>An audit store whose writes never complete, as a locked table or a stalled connection does.</summary>
+    private sealed class StalledAudit : IAuditLogService
+    {
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) =>
+            Task.Delay(Timeout.Infinite);
+
+        public Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) =>
+            Task.FromResult(false);
+
+        public Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0, string? actionFilter = null,
+            string? targetTypeFilter = null) => Task.FromResult(new List<AuditLogEntity>());
+
+        public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
+    }
 
     /// <summary>An audit store that loses every row, as a locked database or a full disk does.</summary>
     private sealed class DownAudit : IAuditLogService
@@ -123,7 +209,7 @@ public sealed class AuthAuditBootTests
         public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
     }
 
-    private static async Task BootAsync(Func<IServiceProvider, HttpClient, Task> body, bool auditDown = false)
+    private static async Task BootAsync(Func<IServiceProvider, HttpClient, Task> body, AuditMode audit = AuditMode.Working)
     {
         var dataDir = Path.Combine(Path.GetTempPath(), $"sw-authaudit-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dataDir);
@@ -147,7 +233,8 @@ public sealed class AuthAuditBootTests
             {
                 b.UseEnvironment("Development");
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(config));
-                if (auditDown) b.ConfigureTestServices(s => s.AddSingleton<IAuditLogService, DownAudit>());
+                if (audit == AuditMode.Down) b.ConfigureTestServices(s => s.AddSingleton<IAuditLogService, DownAudit>());
+                if (audit == AuditMode.Stalled) b.ConfigureTestServices(s => s.AddSingleton<IAuditLogService, StalledAudit>());
             });
             using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
             BootSettings.AssertBoot(factory.Services, config);

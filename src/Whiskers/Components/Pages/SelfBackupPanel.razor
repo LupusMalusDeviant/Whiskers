@@ -170,7 +170,8 @@ else
 
     private void Download(Whiskers.Services.Backup.SelfBackupInfo info)
     {
-        if (!Require(AppRole.Admin)) return;
+        // The endpoint decides and audits: it hands the archive to an Admin only after recording that, and records a
+        // refused attempt (R1-22). The page does not refuse on its own, so no refusal goes unrecorded.
         // Full browser navigation (bypasses the Blazor router) to the admin-only streaming endpoint; the
         // attachment response downloads the file without replacing the page.
         NavManager.NavigateTo($"backups/self/{info.Id}/download", forceLoad: true);
