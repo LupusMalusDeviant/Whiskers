@@ -921,7 +921,8 @@ public class WebhookService : IWebhookService
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             var before = await db.Webhooks.AsNoTracking().FirstOrDefaultAsync(w => w.WebhookId == webhookId);
-            if (await db.Webhooks.Where(w => w.WebhookId == webhookId && w.Owner == owner)
+            // Only a webhook that is still on: one an Admin switched off meanwhile needs no switch-off (and no row).
+            if (await db.Webhooks.Where(w => w.WebhookId == webhookId && w.Owner == owner && w.Enabled)
                     .ExecuteUpdateAsync(s => s.SetProperty(w => w.Enabled, false)) != 1)
                 return false;
             if (before is not null) await RecordSuspensionAsync(scope, before, operationId);

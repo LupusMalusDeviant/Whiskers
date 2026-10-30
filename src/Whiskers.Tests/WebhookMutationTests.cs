@@ -127,7 +127,8 @@ public sealed class WebhookMutationTests : IDisposable
         Assert.False(Stored(webhook.WebhookId).Enabled);
         Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended");
         // The switch-off is a configuration change of its own: one row, written after the run's event (R1-22).
-        Assert.Single(_rows.Rows, r => r == WebhookService.SuspendAction);
+        var row = Assert.Single(_rows.Entries, r => r.Action == WebhookService.SuspendAction);
+        Assert.Matches(@"^operation=[^;]+; config\.version ([0-9a-f]{12}) → (?!\1)[0-9a-f]{12}; Enabled: true → false$", row.Details);
     }
 
     [Theory]
