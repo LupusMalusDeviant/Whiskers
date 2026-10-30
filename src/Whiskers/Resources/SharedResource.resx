@@ -5025,7 +5025,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>The audit trail is intact: {0} rows and {1} chain links checked.</value>
   </data>
   <data name="AuditLog_Verify_Unsigned" xml:space="preserve">
-    <value>VAULT_KEY is not set, so checkpoints are unsigned: a cut-off end of the trail cannot be detected.</value>
+    <value>VAULT_KEY is not set, so checkpoints are unsigned: the trail is not tamper-evident against someone who can write the database (rows and links can be rewritten consistently, a cut-off end goes unnoticed).</value>
   </data>
   <data name="AuditLog_Verify_Broken" xml:space="preserve">
     <value>The audit trail was tampered with ({0} findings):</value>

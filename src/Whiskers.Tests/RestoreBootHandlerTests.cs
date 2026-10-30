@@ -93,6 +93,60 @@ public class RestoreBootHandlerTests
     }
 
     [Fact]
+    public async Task An_applied_restore_is_recorded_on_the_next_start_and_kept_until_it_is()
+    {
+        // R1-23: the restore's own event lived in the replaced database; the note carries it across the swap.
+        var p = NewRoot(out var root);
+        try
+        {
+            File.WriteAllText(p.DbPath, "OLD-DB");
+            Directory.CreateDirectory(p.RestoreStagingDir);
+            File.WriteAllText(Path.Combine(p.RestoreStagingDir, "metrics.db"), "NEW-DB");
+            File.WriteAllText(p.RestorePendingMarker, JsonSerializer.Serialize(new RestoreMarker
+            {
+                StagingDir = p.RestoreStagingDir, Provider = "sqlite", Actor = "admin@local.test", Archive = "abc.tar.gz.enc",
+                SourceCreatedAtUtc = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
+            }));
+
+            RestoreBootHandler.ApplyPendingRestore(p);
+            Assert.True(File.Exists(p.RestoreAppliedNote));
+
+            // The audit store is down: the note stays for the next start.
+            await RestoreBootHandler.RecordAppliedAsync(p, new Audit(works: false));
+            Assert.True(File.Exists(p.RestoreAppliedNote));
+
+            var audit = new Audit(works: true);
+            await RestoreBootHandler.RecordAppliedAsync(p, audit);
+            Assert.False(File.Exists(p.RestoreAppliedNote));
+            var row = Assert.Single(audit.Rows);
+            Assert.Equal(("admin@local.test", RestoreBootHandler.RestoredAction, "abc.tar.gz.enc"), (row.Actor, row.Action, row.Target));
+            Assert.Contains("Archive created 2026-10-01", row.Details);
+        }
+        finally { Cleanup(root); }
+    }
+
+    private sealed class Audit(bool works) : Whiskers.Services.AuditLog.IAuditLogService
+    {
+        public List<(string Actor, string Action, string Target, string? Details)> Rows { get; } = [];
+
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) =>
+            TryLogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+
+        public Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            if (works) Rows.Add((actor, action, targetName, details));
+            return Task.FromResult(works);
+        }
+
+        public Task<List<Whiskers.Models.AuditLogEntity>> GetRecentAsync(int count = 100, int skip = 0,
+            string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(new List<Whiskers.Models.AuditLogEntity>());
+
+        public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
+    }
+
+    [Fact]
     public void No_marker_is_a_no_op()
     {
         var p = NewRoot(out var root);

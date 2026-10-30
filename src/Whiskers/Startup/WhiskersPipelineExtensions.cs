@@ -560,6 +560,11 @@ public static class WhiskersPipelineExtensions
         // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis) — before
         // anything else can write an audit row.
         await app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>().SealExistingAsync(CancellationToken.None);
+        // A restore applied at this start rolled the trail back to the archive: that is recorded now, on the chain.
+        await Whiskers.Services.Backup.RestoreBootHandler.RecordAppliedAsync(
+            app.Services.GetRequiredService<Whiskers.Configuration.DataPathOptions>(),
+            app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>(),
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Restore"));
 
         // R1-14: the approvals live in the metrics database, so they load only once its schema is current. Pending
         // agent approvals are cancelled here (their sessions are gone); approve-then-retry approvals and unused

@@ -116,6 +116,10 @@ public sealed class DataPathOptions
     // its presence — triggers RestoreBootHandler to perform the swap. Absent staging without it is ignored.
     public string RestorePendingMarker => P(".restore-pending");
 
+    /// <summary>Left by an applied restore until its audit record is written (R1-23): the restore replaced the
+    /// database that held the restore's own event.</summary>
+    public string RestoreAppliedNote => P(".restore-applied");
+
     // --- Mesh-VPN state (VpnSettings defaults derive from these) ---
     public string TailscaleStateDir => P("tailscale");
     public string NetbirdConfigPath => P("netbird/config.json");

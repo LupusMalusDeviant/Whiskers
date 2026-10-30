@@ -333,7 +333,9 @@ public sealed class BackupService : IBackupService
                     StagingDir = Path.GetFullPath(staging),
                     CreatedAtUtc = DateTime.UtcNow,
                     SourceCreatedAtUtc = prepared.Manifest.CreatedAtUtc,
-                    Provider = prepared.Manifest.Provider
+                    Provider = prepared.Manifest.Provider,
+                    Actor = actor,
+                    Archive = Path.GetFileName(uploadedPath),
                 };
                 var tmpMarker = _dataPaths.RestorePendingMarker + ".tmp";
                 await File.WriteAllTextAsync(tmpMarker, JsonSerializer.Serialize(marker, JsonOpts), ct);
@@ -480,6 +482,7 @@ public sealed class BackupService : IBackupService
             Path.GetFullPath(_dataPaths.DbPath + "-shm"),
             Path.GetFullPath(_dataPaths.RestorePendingMarker),
             Path.GetFullPath(_dataPaths.RestorePendingMarker + ".corrupt"),
+            Path.GetFullPath(_dataPaths.RestoreAppliedNote),   // a restore's pending audit record belongs to this install
             Path.GetFullPath(_dataPaths.AuditCheckpointJson),   // staged before the database copy instead
             Path.GetFullPath(Path.Combine(rootFull, "vault.key"))
         };

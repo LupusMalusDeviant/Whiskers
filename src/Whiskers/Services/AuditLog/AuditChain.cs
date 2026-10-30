@@ -95,6 +95,7 @@ public sealed class AuditChain : IAuditChain
     public static readonly AuditChain Shared = new(vaultKey: null, checkpointFile: null);
 
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private volatile bool _adoptionPending;
     private readonly byte[]? _key;
     private readonly string? _checkpointFile;
     private readonly ILogger<AuditChain>? _logger;
@@ -347,8 +348,17 @@ public sealed class AuditChain : IAuditChain
     {
         if (_key is null) return;
         var file = ReadFile();
-        if (file is not null && (file.Kind == "unreadable" || file.Mac is not null)) return;
+        if (file is not null && file.Mac is not null) return;
         if (await db.AuditCheckpoints.AnyAsync(c => c.Mac != null, ct)) return;
+        if (file is { Kind: "unreadable" })
+        {
+            // Cannot tell whether the trail was signed before. Sign nothing until a start that can: a checkpoint
+            // signed now would make adoption impossible for good.
+            _adoptionPending = true;
+            _logger?.LogError("AUDIT KEY ADOPTION PENDING: {Path} cannot be read — no checkpoint is signed until it can",
+                _checkpointFile);
+            return;
+        }
         var anchor = await db.AuditCheckpoints.AsNoTracking().Where(c => c.Kind == RetentionKind)
             .OrderByDescending(c => c.Seq).ThenByDescending(c => c.Id).FirstOrDefaultAsync(ct);
         if (anchor is not null)
@@ -382,8 +392,13 @@ public sealed class AuditChain : IAuditChain
             var (seq, hash) = head is null ? await AnchorAsync(db, ct) : (head.Seq, head.Hash);
             var newest = await db.AuditCheckpoints.AsNoTracking().OrderByDescending(c => c.Seq)
                 .ThenByDescending(c => c.Id).FirstOrDefaultAsync(ct);
+            if (_adoptionPending)
+            {
+                _logger?.LogWarning("Audit checkpoint not signed: VAULT_KEY adoption is pending (checkpoint file unreadable at start)");
+                return;
+            }
             if (kind == HeadKind && newest is not null && newest.Seq == seq && newest.Hash == hash
-                && (_key is null || newest.Mac is not null))
+                && (_key is null || Valid(newest)))
             {
                 // Nothing new — but the file must name it too (a retention checkpoint is signed in the database first).
                 if ((ReadFile() is not { } file || file.Seq != newest.Seq || file.Hash != newest.Hash)

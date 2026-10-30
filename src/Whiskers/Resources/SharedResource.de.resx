@@ -5025,7 +5025,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Der Audit-Pfad ist unversehrt: {0} Einträge und {1} Kettenglieder geprüft.</value>
   </data>
   <data name="AuditLog_Verify_Unsigned" xml:space="preserve">
-    <value>VAULT_KEY ist nicht gesetzt, daher sind die Checkpoints unsigniert: ein abgeschnittenes Ende des Pfads lässt sich nicht erkennen.</value>
+    <value>VAULT_KEY ist nicht gesetzt, daher sind die Checkpoints unsigniert: gegen jemanden mit Schreibzugriff auf die Datenbank ist der Pfad nicht manipulationssicher (Einträge und Kettenglieder lassen sich stimmig neu schreiben, ein abgeschnittenes Ende fällt nicht auf).</value>
   </data>
   <data name="AuditLog_Verify_Broken" xml:space="preserve">
     <value>Der Audit-Pfad wurde verändert ({0} Befunde):</value>

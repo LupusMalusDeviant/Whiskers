@@ -27,6 +27,12 @@ public class NavLayoutTests
             overview.Items.Select(i => i.Href).ToArray());
     }
 
+    [Theory]
+    [InlineData("audit-log")]
+    [InlineData("agent-history")]
+    public void Audit_pages_are_offered_to_Admins_only(string href) =>
+        Assert.Equal(Whiskers.Models.AppRole.Admin, Nav.Single(i => i.Href == href).MinRole);   // R1-23
+
     [Fact]
     public void TopLevel_holds_the_ungrouped_entries_in_order()
     {

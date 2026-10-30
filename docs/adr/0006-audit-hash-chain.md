@@ -73,7 +73,9 @@ Option B.
 - **PostgreSQL migration.** The SQLite→PostgreSQL copy renumbers audit rows, so the chain is not copied: PostgreSQL
   seals the copied rows as a new genesis, and the old checkpoint file is kept under another name.
 - **Without `VAULT_KEY`** the chain still works, but checkpoints cannot be signed: the verifier reports
-  "checkpoints unsigned" and cannot detect a truncated end.
+  "checkpoints unsigned", trusts no checkpoint, and the trail is **not tamper-evident against a database writer** —
+  rows and links can be rewritten consistently, an unsigned retention checkpoint can hide deletions, and a truncated
+  end goes unnoticed. The chain then only catches inconsistent edits.
 
 ## Consequences
 
@@ -91,8 +93,10 @@ Option B.
   guesses no faster than the vault does. VAULT_KEY must still be a strong, generated secret.
 - **Findings expire with retention.** Once retention moves the start past a cut, that cut is no longer reported:
   verify at least once per retention period.
-- **Restore.** A self-backup restore rolls the trail back to the archive's state; the restore's own event is written
-  to the database that the restore replaces.
+- **Restore.** A self-backup restore rolls the trail back to the archive's state, and the restore's own event lived
+  in the database it replaced. The restore therefore leaves a note (who, which archive, when) that the next start
+  writes as a chained `selfbackup.restored` event; the events after the archive was taken survive only in the
+  pre-restore safety backup.
 - Each audit write takes the chain lock and a transaction: audit writes are serialized. Their rate is low (human and
   automation actions), and the gateway already writes one row at a time per operation.
 - A database restored from an older backup verifies as truncated against the checkpoint file: restoring self-backup

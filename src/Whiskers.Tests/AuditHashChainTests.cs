@@ -236,6 +236,46 @@ public sealed class AuditHashChainTests : IDisposable
     }
 
     [Fact]
+    public async Task A_planted_checkpoint_with_a_garbage_signature_never_reaches_the_file()
+    {
+        await _trail.LogAsync(2);
+        await _trail.Chain.CheckpointAsync();
+        var signed = await File.ReadAllTextAsync(_trail.CheckpointFile);
+        await _trail.SqlAsync("INSERT INTO AuditCheckpoints (Kind, Seq, Hash, PrunedThroughId, At, Mac) " +
+                              "SELECT 'head', Seq, Hash, 0, At, '" + new string('b', 64) + "' FROM AuditChain WHERE Seq = 2");
+
+        await _trail.Chain.CheckpointAsync();   // the head did not move: must still sign, not copy the planted row
+
+        var file = System.Text.Json.JsonSerializer.Deserialize<AuditCheckpointEntity>(await File.ReadAllTextAsync(_trail.CheckpointFile))!;
+        Assert.NotEqual(new string('b', 64), file.Mac);
+        Assert.False((await _trail.Chain.VerifyAsync()).Intact);   // the planted row is still reported
+        Assert.NotNull(signed);
+    }
+
+    [Fact]
+    public async Task Key_adoption_waits_while_the_checkpoint_file_cannot_be_read()
+    {
+        using var before = new AuditTrailFixture(vaultKey: null);
+        await before.LogAsync(2, DateTime.UtcNow.AddDays(-400));
+        await before.LogAsync(1);
+        await before.Chain.PruneAsync(DateTime.UtcNow.AddDays(-365), 365);
+        await File.WriteAllTextAsync(before.CheckpointFile, "{ broken");
+
+        var keyed = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
+        await keyed.SealExistingAsync();
+        await keyed.CheckpointAsync();   // pending: signs nothing
+        using (var scope = before.Scope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditCheckpoints.AnyAsync(c => c.Mac != null));
+
+        File.Delete(before.CheckpointFile);   // the file is readable again (here: gone) at the next start
+        var restarted = new AuditChain(VaultKey, before.CheckpointFile, scopes: before.Scopes);
+        await restarted.SealExistingAsync();
+        var report = await restarted.VerifyAsync();
+        Assert.True(report.Intact, string.Join("; ", report.Problems));
+        Assert.Equal(report.HeadSeq, report.TrustedCheckpointSeq);
+    }
+
+    [Fact]
     public async Task Only_the_newest_head_checkpoints_are_kept()
     {
         for (var i = 0; i < AuditChain.KeptHeadCheckpoints + 5; i++)
