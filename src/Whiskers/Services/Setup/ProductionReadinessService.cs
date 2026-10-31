@@ -101,7 +101,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 : $"Im Klartext gespeichert: {string.Join(", ", plaintextSettings)}. "
                   + (_vault.IsEnabled
                       ? "Sie sind noch nicht in den Vault übernommen (die Übernahme läuft beim Start; scheitert sie, nennt das Log den Grund) — "
-                        + "neu starten, oder die Einstellungen einmal speichern: das legt die Werte unter neuen Vault-Schlüsseln ab."
+                        + "neu starten, oder die Einstellungen einmal speichern: das legt die Werte unter neuen Vault-Schlüsseln ab. "
+                        + "Ein von Hand neben einen Vault-Verweis geschriebener Wert wird beim Start nicht übernommen; nur ein Speichern entfernt ihn."
                       : "Sie werden beim ersten Start mit gültigem VAULT_KEY in den Vault übernommen."),
             null, null));
 

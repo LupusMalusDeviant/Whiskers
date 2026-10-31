@@ -1965,7 +1965,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>A credential was changed meanwhile. Reload the page and save again.</value>
   </data>
   <data name="Settings_Snackbar_SecretCleanupFailed" xml:space="preserve">
-    <value>Saved. A previous credential could not be removed from the vault (it is disabled or locked); it stays encrypted and unused.</value>
+    <value>Saved. A previous credential could not be removed from the vault (the vault is unusable or the removal was refused or failed); it stays encrypted and unused.</value>
   </data>
   <data name="Servers_Error_CloudKeyChangedMeanwhile" xml:space="preserve">
     <value>The cloud API key of this server was changed meanwhile. Reload the page and save again.</value>

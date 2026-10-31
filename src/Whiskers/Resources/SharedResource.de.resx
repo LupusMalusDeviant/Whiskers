@@ -1965,7 +1965,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Zugangsdaten wurden inzwischen geändert. Seite neu laden und erneut speichern.</value>
   </data>
   <data name="Settings_Snackbar_SecretCleanupFailed" xml:space="preserve">
-    <value>Gespeichert. Ein bisheriger Zugangswert konnte nicht aus dem Vault gelöscht werden (er ist deaktiviert oder gesperrt); er bleibt verschlüsselt und ungenutzt.</value>
+    <value>Gespeichert. Ein bisheriger Zugangswert konnte nicht aus dem Vault gelöscht werden (der Vault ist nicht nutzbar, oder das Löschen wurde abgelehnt oder schlug fehl); er bleibt verschlüsselt und ungenutzt.</value>
   </data>
   <data name="Servers_Error_CloudKeyChangedMeanwhile" xml:space="preserve">
     <value>Der Cloud-API-Key dieses Servers wurde inzwischen geändert. Seite neu laden und erneut speichern.</value>
