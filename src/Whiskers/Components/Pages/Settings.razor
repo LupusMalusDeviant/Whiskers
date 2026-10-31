@@ -1029,7 +1029,7 @@ else
             await NotificationService.SendTestAsync();
             Snackbar.Add(L["Settings_Snackbar_TestSent"].Value, Severity.Success);
         }
-        catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", ex.Message].Value, Severity.Warning); }
+        catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Warning); }
     }
 
     /// <summary>The Admin check in front of a write: a refusal is also the gateway's Denied event for

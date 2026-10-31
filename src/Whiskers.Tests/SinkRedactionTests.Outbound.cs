@@ -154,6 +154,39 @@ public sealed partial class SinkRedactionTests
     }
 
     [Fact]
+    public void A_channel_url_with_user_info_is_withheld_whole_by_every_sink()
+    {
+        var path = $"/in/{Guid.NewGuid():N}";
+        KnownSecrets.Register($"https://hook:{Canary}@Inbox.Example.org{path}");
+
+        foreach (var text in new[]
+                 {
+                     $"POST https://hook:{Canary}@Inbox.Example.org{path} failed",
+                     $"POST https://hook:{Canary}@inbox.example.org{path} failed",
+                     $"POST https://inbox.example.org{path} failed",
+                 })
+        {
+            Assert.DoesNotContain(path, SinkRedaction.Text(text));
+            Assert.DoesNotContain(path, SecretRedactor.Redact(text));
+            AssertClean(SinkRedaction.Text(text));
+        }
+    }
+
+    [Fact]
+    public void A_dictionary_value_is_redacted_as_text()
+    {
+        var (factory, capture) = Logging();
+
+        var logger = factory.CreateLogger("Test");
+        using (logger.BeginScope("Connection {Values}", new Dictionary<string, string> { ["token"] = Canary }))
+            logger.LogWarning("Settings {Values} at {When:yyyy}", new Dictionary<string, object?> { ["host"] = "db", ["password"] = Canary },
+                new DateTime(2026, 10, 31));
+
+        Assert.Contains("Settings host=db, password=*** at 2026", capture.All);
+        AssertClean(capture.All);
+    }
+
+    [Fact]
     public async Task The_audit_fallback_log_is_redacted_even_without_the_redacting_provider()
     {
         var capture = new Capture();

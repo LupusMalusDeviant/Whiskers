@@ -42,11 +42,16 @@ public static class KnownSecrets
         }
     }
 
+    // As typed, normalized, and — since URL user info is removed before the known values are matched — without it.
     private static IEnumerable<string?> Spellings(string? value)
     {
         yield return value;
-        if (Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) && uri.AbsoluteUri != value?.Trim())
-            yield return uri.AbsoluteUri;
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri)) yield break;
+        yield return uri.AbsoluteUri;
+        if (uri.UserInfo.Length == 0) yield break;
+        yield return SinkRedaction.WithoutUrlCredentials(value!.Trim());
+        yield return SinkRedaction.WithoutUrlCredentials(uri.AbsoluteUri);
+        yield return new UriBuilder(uri) { UserName = "", Password = "" }.Uri.AbsoluteUri;
     }
 
     /// <summary>The text with every registered value replaced by <c>***</c>.</summary>
