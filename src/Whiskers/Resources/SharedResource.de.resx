@@ -1874,6 +1874,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Snackbar_NoPermission" xml:space="preserve">
     <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
   </data>
+  <data name="Servers_Snackbar_SecretCleanupFailed" xml:space="preserve">
+    <value>Der Server ist entfernt, aber seine kubeconfig oder sein Cloud-API-Key konnte nicht aus dem Vault gelöscht werden (er ist womöglich deaktiviert oder gesperrt). Das ungenutzte Secret bleibt verschlüsselt im Vault.</value>
+  </data>
   <data name="Servers_Snackbar_Removed" xml:space="preserve">
     <value>{0} entfernt</value>
   </data>

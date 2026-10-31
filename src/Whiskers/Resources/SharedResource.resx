@@ -1874,6 +1874,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Snackbar_NoPermission" xml:space="preserve">
     <value>No permission — {0} required (your role: {1}).</value>
   </data>
+  <data name="Servers_Snackbar_SecretCleanupFailed" xml:space="preserve">
+    <value>The server is removed, but its kubeconfig or cloud API key could not be removed from the vault (it may be disabled or locked). The unused secret stays encrypted in the vault.</value>
+  </data>
   <data name="Servers_Snackbar_Removed" xml:space="preserve">
     <value>{0} removed</value>
   </data>

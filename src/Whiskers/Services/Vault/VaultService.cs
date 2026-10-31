@@ -357,8 +357,9 @@ public class VaultService : IVaultService, IInitializable
         return await IsPersistedAsync(migrationKey, plaintext);
     }
 
-    /// <inheritdoc />
-    public async Task<bool> IsPersistedAsync(string key, string plainValue)
+    /// <summary>R1-29: whether vault.json holds <paramref name="key"/> with exactly <paramref name="plainValue"/> — read
+    /// back from the file and decrypted, not from memory. Private: no caller outside the vault gets an equality check.</summary>
+    private async Task<bool> IsPersistedAsync(string key, string plainValue)
     {
         if (!IsEnabled || !_store.Exists()) return false;
         var onDisk = await _store.LoadAsync();

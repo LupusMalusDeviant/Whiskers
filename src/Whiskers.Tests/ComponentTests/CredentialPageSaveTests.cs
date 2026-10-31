@@ -255,6 +255,21 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Settings_unwritable_settings_file_removes_the_new_dns_token_and_keeps_the_previous()
+    {
+        var original = Secret("DNSTOKEN");
+        await SaveDns(DnsPage(), original);
+        var before = await StoredDnsRef();
+        Directory.CreateDirectory(Path.Combine(_dir, "app-settings.json.tmp"));   // the settings cannot be written
+
+        await SaveDns(DnsPage(), Secret("DNSTOKEN"));   // reported on the page, not thrown
+
+        Assert.Equal(before, await StoredDnsRef());
+        Assert.Equal(original, _vault.GetSecret(before!));
+        Assert.Single(_vault.Keys);
+    }
+
+    [Fact]
     public async Task Settings_save_moves_a_legacy_plaintext_token_into_the_vault()
     {
         var legacy = Secret("DNSTOKEN");

@@ -20,11 +20,6 @@ public interface IVaultService
     Task DeleteSecretAsync(string key);
     List<VaultEntry> GetExpiringSecrets();
 
-    /// <summary>R1-29: whether vault.json on disk holds <paramref name="key"/> with exactly <paramref name="plainValue"/>
-    /// — read back from the file and decrypted, not from memory. A migration removes a plaintext credential only once
-    /// this is true. The default (test doubles) compares with <see cref="GetSecret"/>.</summary>
-    Task<bool> IsPersistedAsync(string key, string plainValue) => Task.FromResult(IsEnabled && GetSecret(key) == plainValue);
-
     /// <summary>
     /// R1-29 start-up migration: stores a credential that is already kept in plaintext elsewhere under its fixed
     /// migration key (<see cref="CredentialRefs.IsMigrationKey"/>) and returns whether vault.json on disk now holds

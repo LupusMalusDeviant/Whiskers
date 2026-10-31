@@ -617,7 +617,7 @@
         var cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Keep;
         if (_form.CloudProvider == Whiskers.Models.CloudProvider.None)
             cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Clear;
-        else if (!string.IsNullOrWhiteSpace(_cloudApiKey) || StoredPlaintextCloudKey() is not null)
+        else if ((!string.IsNullOrWhiteSpace(_cloudApiKey) ? _cloudApiKey.Trim() : StoredPlaintextCloudKey()) is { } apiKey)
         {
             if (!Vault.IsEnabled)
                 throw new InvalidOperationException(Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
@@ -625,8 +625,7 @@
                     : L["Servers_Error_CloudKeyNeedsVault"].Value);
             var id = _editingServer?.Id ?? _form.Id;
             var vaultKey = Whiskers.Services.Vault.CredentialRefs.NewCloudKey(id);
-            // A key entered now, or a plaintext one from before R1-29 that the save moves into the vault.
-            var apiKey = !string.IsNullOrWhiteSpace(_cloudApiKey) ? _cloudApiKey.Trim() : StoredPlaintextCloudKey()!;
+            // apiKey: a key entered now, or a plaintext one from before R1-29 that the save moves into the vault.
             await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
                 _ => Vault.SetSecretAsync(vaultKey, apiKey));
             _newCloudKey = vaultKey;
@@ -797,15 +796,16 @@
         if (confirmed != true) return;
         try
         {
-            await Mutations.RunAsync("server.remove", new { serverId = server.Id, name = server.Name }, async _ =>
+            var cleaned = await Mutations.RunAsync("server.remove", new { serverId = server.Id, name = server.Name }, _ =>
             {
-                // The server record first, then a Kubernetes server's kubeconfig, as one decision (R1-11): a failed
+                // The server record first, then its kubeconfig and cloud API key, as one decision (R1-11): a failed
                 // removal leaves a working server, a failed cleanup at most an unused secret.
                 ConnectionManager.InvalidateClient(server.Id);
-                await Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(ServerConfigService, Vault, server);
+                return Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(ServerConfigService, Vault, server);
             });
             _servers = ServerConfigService.GetServers();
             Snackbar.Add(L["Servers_Snackbar_Removed", server.Name].Value, Severity.Success);
+            if (!cleaned) Snackbar.Add(L["Servers_Snackbar_SecretCleanupFailed"].Value, Severity.Info);
         }
         catch (Exception ex)
         {

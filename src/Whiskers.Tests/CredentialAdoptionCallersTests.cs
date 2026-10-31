@@ -4,7 +4,7 @@ namespace Whiskers.Tests;
 
 // R1-29 (INV-38): the three adoption calls write vault.json, servers.json and app-settings.json outside the Mutation
 // Gateway. That is designed for the start-up migration only — so no other production code may name them, or a later
-// convenience call would be a silent gateway bypass.
+// convenience call would be a silent gateway bypass. (The vault's read-back check is private to VaultService.)
 public class CredentialAdoptionCallersTests
 {
     private static readonly Regex AdoptionCall = new(@"\bAdopt(LegacyCredential|CloudKeyRef|DnsTokenRef)Async\b", RegexOptions.Compiled);
