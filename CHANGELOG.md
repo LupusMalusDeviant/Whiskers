@@ -6,8 +6,8 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-- R1-25: **Logs and outbound notifications carry no secrets.** Every log provider (console, debug, event log) now
-  writes through a redacting wrapper: the message, each structured value, the message template, scopes and the full
+- R1-25: **Logs and outbound notifications carry no secrets.** Every logger now writes through a redacting logger
+  factory, in front of all providers (console, debug, event log): the message, each structured value, the message template, scopes and the full
   exception text are redacted before they reach it, and an entry that cannot be redacted is replaced by
   `<log entry withheld: redaction failed>` instead of being written as it was. Notifications are redacted once in the
   composite, before the in-app feed, the alert history, each channel (Mattermost, Matrix, Telegram, ntfy, Discord,
@@ -15,10 +15,12 @@ All notable changes to Whiskers are documented here. The format follows
   summary no longer goes out with a password or token in it. An AI trigger's summary is redacted before it is sent and
   cut at a complete word. Capability URLs (a Telegram bot token, a Discord, Slack or Mattermost webhook key) and every
   configured channel secret (bot token, webhook URL, ntfy topic URL, Matrix access token, SMTP password, webhook signing
-  secret) are replaced by `***` wherever they appear — log lines, exception texts and every stored text. The HttpClient
-  request log stays at Warning in code, whatever the configuration says. A failed channel test names no URL. The
-  audit-log fallback (database down) logs the entry redacted like the row. Log-level settings per provider
-  (`Logging:Console:LogLevel`) no longer apply; use the global `Logging:LogLevel` section.
+  secret) are replaced by `***` wherever they appear — log lines, exception texts and every stored text; a URL also in its
+  normalized form. The HttpClient request log stays at Warning by default in code (a more specific configuration rule
+  can still switch it on; the redaction catches what it lets through). The notification feed and the alert history are
+  redacted on save, whoever writes them. A failed channel test names no URL; a failed manual CVE scan or an unreadable
+  restore marker writes its error to stderr redacted. The audit-log fallback (database down) logs the entry redacted
+  like the row.
 - R1-24: **No persistent sink keeps a secret.** Every free-text column of the audit log, the MCP/agent call history,
   approvals, policy decisions and scheduled-task results is redacted on save by a database interceptor, whoever wrote
   the row (bulk updates excepted; they only copy redacted values or fixed texts). The agent transcript now redacts

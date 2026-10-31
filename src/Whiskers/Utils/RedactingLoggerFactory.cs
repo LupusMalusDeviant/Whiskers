@@ -4,24 +4,22 @@ using Microsoft.Extensions.Logging;
 namespace Whiskers.Utils;
 
 /// <summary>
-/// Stands in front of a log provider (INV-51, R1-25): every entry reaches it already redacted — the formatted
-/// message, each structured value, the message template, the scopes and the exception text. A caller that logs a
-/// raw value cannot write it out, and an entry that cannot be redacted is withheld whole, never written as it was.
+/// Stands in front of the logger factory (INV-51, R1-25): every entry reaches the providers already redacted — the
+/// formatted message, each structured value, the message template, the scopes and the exception text. A caller that
+/// logs a raw value cannot write it out, and an entry that cannot be redacted is withheld whole, never written as it
+/// was. The factory behind it keeps the real providers, so their filter rules, scopes and lifetimes are unchanged.
 /// </summary>
-public sealed class RedactingLoggerProvider(ILoggerProvider inner) : ILoggerProvider, ISupportExternalScope
+public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactory
 {
     /// <summary>What is written instead of an entry whose redaction failed.</summary>
     internal const string WithheldEntry = "<log entry withheld: redaction failed>";
 
-    /// <summary>The provider this one writes to.</summary>
-    internal ILoggerProvider Inner { get; } = inner ?? throw new ArgumentNullException(nameof(inner));
+    /// <summary>The factory this one writes to.</summary>
+    internal ILoggerFactory Inner { get; } = inner ?? throw new ArgumentNullException(nameof(inner));
 
     public ILogger CreateLogger(string categoryName) => new RedactingLogger(Inner.CreateLogger(categoryName));
 
-    public void SetScopeProvider(IExternalScopeProvider scopeProvider)
-    {
-        if (Inner is ISupportExternalScope scoped) scoped.SetScopeProvider(new RedactingScopes(scopeProvider));
-    }
+    public void AddProvider(ILoggerProvider provider) => Inner.AddProvider(provider);
 
     public void Dispose() => Inner.Dispose();
 
@@ -29,6 +27,7 @@ public sealed class RedactingLoggerProvider(ILoggerProvider inner) : ILoggerProv
     {
         public bool IsEnabled(LogLevel logLevel) => inner.IsEnabled(logLevel);
 
+        // Redacted before it is pushed: every provider, and the shared scope provider, holds the redacted state only.
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull =>
             inner.BeginScope(RedactedScope(state));
 
@@ -47,15 +46,6 @@ public sealed class RedactingLoggerProvider(ILoggerProvider inner) : ILoggerProv
             }
             inner.Log(logLevel, eventId, entry, entry.Exception, static (e, _) => e.Message);
         }
-    }
-
-    /// <summary>The scopes an external scope provider hands to the inner provider, each one redacted.</summary>
-    private sealed class RedactingScopes(IExternalScopeProvider scopes) : IExternalScopeProvider
-    {
-        public void ForEachScope<TState>(Action<object?, TState> callback, TState state) =>
-            scopes.ForEachScope((scope, s) => callback(scope is null ? null : RedactedScope(scope), s), state);
-
-        public IDisposable Push(object? state) => scopes.Push(state);
     }
 
     private static object RedactedScope(object state)
@@ -109,15 +99,12 @@ public sealed class RedactingLoggerProvider(ILoggerProvider inner) : ILoggerProv
     }
 }
 
-/// <summary>An exception as a log provider may see it: its type name, and its message and full text (stack trace and
-/// inner exceptions included) redacted.</summary>
+/// <summary>An exception as a log provider sees it: its message and its full text — type, stack trace and inner
+/// exceptions — redacted.</summary>
 public sealed class RedactedException(Exception original)
     : Exception(SinkRedaction.Text(original.Message))
 {
     private readonly string _text = SinkRedaction.Text(original.ToString()) ?? "";
-
-    /// <summary>The type of the exception that was logged.</summary>
-    public string OriginalType { get; } = original.GetType().FullName ?? original.GetType().Name;
 
     /// <summary>Part of <see cref="ToString"/>, redacted with it.</summary>
     public override string? StackTrace => null;

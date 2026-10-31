@@ -62,21 +62,65 @@ public sealed partial class SinkRedactionTests
         factory.CreateLogger("Test").Log(LogLevel.Error, default, new UnreadableState(), null,
             (_, _) => $"password={Canary}");
 
-        Assert.Equal(RedactingLoggerProvider.WithheldEntry, Assert.Single(capture.Messages));
+        Assert.Equal(RedactingLoggerFactory.WithheldEntry, Assert.Single(capture.Messages));
         AssertClean(capture.All);
     }
 
     [Fact]
-    public void Adding_log_redaction_wraps_every_registered_provider()
+    public void The_redaction_keeps_each_providers_own_filter_rules()
     {
-        var services = new ServiceCollection()
-            .AddLogging(b => b.AddProvider(new Capture()).AddDebug())
-            .AddLogRedaction();
-        using var sp = services.BuildServiceProvider();
+        var capture = new Capture();
+        using var sp = new ServiceCollection()
+            .AddLogging(b => b.AddProvider(capture).SetMinimumLevel(LogLevel.Trace).AddFilter<Capture>(null, LogLevel.Warning))
+            .AddLogRedaction()
+            .BuildServiceProvider();
+        var factory = sp.GetRequiredService<ILoggerFactory>();
+        var logger = sp.GetRequiredService<ILogger<SinkRedactionTests>>();
 
-        var providers = sp.GetServices<ILoggerProvider>().ToList();
-        Assert.Equal(2, providers.Count);
-        Assert.All(providers, p => Assert.IsType<RedactingLoggerProvider>(p));
+        logger.LogInformation("below the provider's floor");
+        logger.LogWarning("at the provider's floor password={Secret}", Canary);
+
+        Assert.IsType<RedactingLoggerFactory>(factory);
+        Assert.Equal("at the provider's floor password=***", Assert.Single(capture.Messages));
+    }
+
+    [Fact]
+    public void The_http_client_request_log_stays_at_warning_against_a_configured_default()
+    {
+        var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Logging:LogLevel:Default"] = "Trace", ["Logging:LogLevel:System.Net.Http.HttpClient"] = "Information",
+        });
+        builder.AddWhiskersLogRedaction();
+        using var sp = builder.Services.BuildServiceProvider();
+
+        var factory = sp.GetRequiredService<ILoggerFactory>();
+        Assert.False(factory.CreateLogger("System.Net.Http.HttpClient.MatrixNotificationService.LogicalHandler")
+            .IsEnabled(LogLevel.Information));
+        Assert.True(factory.CreateLogger("Whiskers.Services.Notifications.MatrixNotificationService")
+            .IsEnabled(LogLevel.Information));
+    }
+
+    [Fact]
+    public void A_channel_secret_saved_later_is_withheld_after_the_settings_reload()
+    {
+        var source = new Microsoft.Extensions.Configuration.Memory.MemoryConfigurationSource();
+        var config = new ConfigurationBuilder().Add(source).Build();
+        var services = new ServiceCollection();
+        new NotificationsModule().ConfigureServices(services, config);
+        using var sp = services.BuildServiceProvider();
+        var settings = sp.GetRequiredService<IOptionsMonitor<WebhookNotificationSettings>>();
+        _ = settings.CurrentValue;
+
+        var saved = $"https://Inbox.Example.org:443/later/{Guid.NewGuid():N}";
+        config["WebhookNotification:Url"] = saved;
+        config.Reload();
+        _ = settings.CurrentValue;
+
+        Assert.Equal("POST *** failed", SecretRedactor.Redact($"POST {saved} failed"));
+        // A request or an exception prints the normalized form: lower-case host, default port dropped.
+        Assert.Equal("POST *** failed", SecretRedactor.Redact($"POST {new Uri(saved).AbsoluteUri} failed"));
     }
 
     [Fact]

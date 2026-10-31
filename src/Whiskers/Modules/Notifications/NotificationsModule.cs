@@ -51,7 +51,7 @@ public sealed class NotificationsModule : IWhiskersModule
         services.PostConfigure<Whiskers.Configuration.MatrixSettings>(s => KnownSecrets.Register(s.AccessToken));
         services.PostConfigure<TelegramSettings>(s => KnownSecrets.Register(s.BotToken));
         services.PostConfigure<NtfySettings>(s => KnownSecrets.Register(
-            string.IsNullOrWhiteSpace(s.Topic) ? null : $"{s.ServerUrl.TrimEnd('/')}/{s.Topic}", s.Token));
+            string.IsNullOrWhiteSpace(s.Topic) ? null : $"{s.ServerUrl.TrimEnd('/')}/{s.Topic}", s.Topic, s.Token));
         services.PostConfigure<DiscordSettings>(s => KnownSecrets.Register(s.WebhookUrl));
         services.PostConfigure<SlackSettings>(s => KnownSecrets.Register(s.WebhookUrl));
         services.PostConfigure<EmailSettings>(s => KnownSecrets.Register(s.Password));

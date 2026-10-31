@@ -86,10 +86,9 @@ internal sealed class BootSettings : IDisposable
         }
         AssertAuthenticationSetup(services,
             disabled: given.TryGetValue("Auth:Disabled", out var auth) && auth is not null && bool.Parse(auth));
-        // R1-25: every log provider of the booted app writes through the redaction, none beside it.
-        var providers = services.GetServices<Microsoft.Extensions.Logging.ILoggerProvider>().ToList();
-        Assert.NotEmpty(providers);
-        Assert.All(providers, p => Assert.IsType<Whiskers.Utils.RedactingLoggerProvider>(p));
+        // R1-25: every logger of the booted app writes through the redaction.
+        Assert.IsType<Whiskers.Utils.RedactingLoggerFactory>(
+            services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>());
     }
 
     /// <summary>Asserts which authentication setup the booted app registered. The two branches of

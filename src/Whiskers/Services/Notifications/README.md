@@ -59,7 +59,7 @@ never throttled.
 
 ## Secret hygiene
 
-The capability-bearing channels put their secret in the request URL (Telegram bot token in the path; Discord/Slack/Mattermost/ntfy/webhook secret URLs). Those `System.Net.Http.HttpClient.*` logger categories are raised to Warning (`WhiskersHostingExtensions`, and the whole category in code by `WhiskersLoggingExtensions`), so the default HttpClient request logging can't write the token/URL to the app log. Behind that, every log line is redacted (`RedactingLoggerProvider`): the capability URL patterns and each channel's configured secret (`KnownSecrets`, registered by `NotificationsModule` when the settings are bound) are withheld wherever they appear, also in an exception's text (R1-25).
+The capability-bearing channels put their secret in the request URL (Telegram bot token in the path; Discord/Slack/Mattermost/ntfy/webhook secret URLs). Those `System.Net.Http.HttpClient.*` logger categories are raised to Warning (`WhiskersHostingExtensions`, and the whole category in code by `WhiskersLoggingExtensions`), so the default HttpClient request logging can't write the token/URL to the app log. A more specific configuration rule can still switch it on; behind it, every log line is redacted (`RedactingLoggerFactory`): the capability URL patterns and each channel's configured secret (`KnownSecrets`, registered by `NotificationsModule` when the settings are bound) are withheld wherever they appear, also in an exception's text (R1-25).
 
 ## Wiring
 

@@ -226,11 +226,13 @@ public sealed partial class SinkRedactionTests
         var decision = new PolicyDecisionEntity { Reason = secret };
         var run = new TaskRunHistoryEntity { Output = secret, Error = secret };
         var task = new ScheduledTaskEntity { LastResult = secret };
+        var notification = new NotificationEntity { Title = secret, Detail = secret };
+        var alert = new AlertHistoryEntity { ContainerName = secret, Message = secret };
         var identity = new AuditLogEntity
         {
             Action = "x", Details = JsonSerializer.Serialize(new { principal = new { kind = "ApiKey", id = "key:k1", keyId = "k1" } }),
         };
-        db.AddRange(audit, call, approval, decision, run, task, identity);
+        db.AddRange(audit, call, approval, decision, run, task, notification, alert, identity);
 
         SinkRedactionInterceptor.Redact(db);
 
@@ -241,7 +243,7 @@ public sealed partial class SinkRedactionTests
                  {
                      audit.Details, audit.TargetId, audit.TargetName, audit.Arguments, call.ParamsJson, call.ResultSummary, call.Error,
                      approval.ParamsJson, approval.Reason, approval.Diff, decision.Reason, run.Output, run.Error,
-                     task.LastResult,
+                     task.LastResult, notification.Title, notification.Detail, alert.ContainerName, alert.Message,
                  })
             AssertClean(value);
     }

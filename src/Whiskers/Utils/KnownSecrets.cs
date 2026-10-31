@@ -9,7 +9,7 @@ namespace Whiskers.Utils;
 public static class KnownSecrets
 {
     /// <summary>Shorter values are no secrets worth matching: replacing them would mangle ordinary text.</summary>
-    internal const int MinLength = 12;
+    internal const int MinLength = 8;
 
     /// <summary>Settings are re-bound on every reload; the oldest values give way so the set cannot grow forever.</summary>
     internal const int MaxCount = 256;
@@ -18,13 +18,15 @@ public static class KnownSecrets
     private static readonly List<string> Registered = [];
     private static string[] _longestFirst = [];
 
-    /// <summary>Registers values to withhold from now on; empty and short ones are ignored.</summary>
+    /// <summary>Registers values to withhold from now on; empty and short ones are ignored. A URL is registered as
+    /// typed and in its normalized form (lower-case host, default port dropped, as a request or an exception
+    /// prints it).</summary>
     public static void Register(params string?[] values)
     {
         lock (Gate)
         {
             var changed = false;
-            foreach (var raw in values)
+            foreach (var raw in values.SelectMany(Spellings))
             {
                 var value = raw?.Trim();
                 if (value is null || value.Length < MinLength || Registered.Contains(value)) continue;
@@ -36,6 +38,13 @@ public static class KnownSecrets
             // Longest first: a webhook URL is replaced whole before a token inside it is.
             Volatile.Write(ref _longestFirst, Registered.OrderByDescending(v => v.Length).ToArray());
         }
+    }
+
+    private static IEnumerable<string?> Spellings(string? value)
+    {
+        yield return value;
+        if (Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) && uri.AbsoluteUri != value?.Trim())
+            yield return uri.AbsoluteUri;
     }
 
     /// <summary>The text with every registered value replaced by <c>***</c>.</summary>
