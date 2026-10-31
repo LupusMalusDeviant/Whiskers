@@ -78,7 +78,7 @@ public class TrivyOutputTruncationTests
             new StringReader(payload), cap: 1_000, CancellationToken.None);
 
         Assert.True(truncated);
-        Assert.StartsWith(payload[..999], text);   // ten complete lines; the eleventh began inside the cap
+        Assert.StartsWith(payload[..999], text);   // the ten complete lines that fill the cap
         Assert.True(text.Length < payload.Length);
     }
 

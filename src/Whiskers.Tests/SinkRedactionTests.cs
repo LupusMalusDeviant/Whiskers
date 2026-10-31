@@ -131,6 +131,19 @@ public sealed class SinkRedactionTests
         Assert.Equal("refused: <withheld>", reason);
     }
 
+    [Fact]
+    public void Payload_values_that_overlap_without_containing_each_other_go_as_one()
+    {
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new
+        {
+            volumes = new[] { $"/srv/app-{Canary}", $"{Canary}:/data" },
+        }))!;
+
+        var reason = SinkRedaction.WithoutPayloadValues($"a /srv/app-{Canary}:/data b {Canary}:/data", arguments);
+
+        Assert.Equal("a <withheld> b <withheld>", reason);
+    }
+
     [Theory]
     [MemberData(nameof(Secrets))]
     public void A_secret_in_an_ordinary_argument_is_redacted(string secret) =>

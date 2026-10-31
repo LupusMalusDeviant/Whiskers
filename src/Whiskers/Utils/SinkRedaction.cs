@@ -191,12 +191,27 @@ public static class SinkRedaction
     public static string? WithoutPayloadValues(string? text, IReadOnlyDictionary<string, JsonElement> arguments)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        // Longest first: a value that contains another (/srv/app-data and /srv/app) must go whole, not leave a rest.
-        var payloads = arguments.Where(a => IsPayload(a.Key)).SelectMany(a => StringLeaves(a.Value))
-            .Where(p => p.Length >= 3).Distinct(StringComparer.Ordinal).OrderByDescending(p => p.Length);
-        foreach (var payload in payloads)
-            text = text.Replace(payload, "<withheld>", StringComparison.Ordinal);
-        return text;
+        // Every place any payload value occurs, found in the original text and merged where they overlap: values that
+        // contain or overlap each other (/srv/app-X and X:/data) go as one span, never leaving a rest.
+        var spans = new List<(int Start, int End)>();
+        foreach (var payload in arguments.Where(a => IsPayload(a.Key)).SelectMany(a => StringLeaves(a.Value))
+                     .Where(p => p.Length >= 3).Distinct(StringComparer.Ordinal))
+            for (var at = text.IndexOf(payload, StringComparison.Ordinal); at >= 0;
+                 at = text.IndexOf(payload, at + 1, StringComparison.Ordinal))
+                spans.Add((at, at + payload.Length));
+        if (spans.Count == 0) return text;
+        var result = new System.Text.StringBuilder(text.Length);
+        var copied = 0;
+        foreach (var (start, end) in spans.OrderBy(s => s.Start))
+        {
+            if (end <= copied) continue;   // inside the span already withheld
+            if (start >= copied)
+            {
+                result.Append(text, copied, start - copied).Append("<withheld>");
+            }
+            copied = end;
+        }
+        return result.Append(text, copied, text.Length - copied).ToString();
     }
 
     // Every string in a payload, also inside an object or a list (an env map's values, a list of mounts).

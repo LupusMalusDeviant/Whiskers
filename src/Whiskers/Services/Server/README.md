@@ -16,7 +16,9 @@ Host-level operations that go beyond Docker, the things you'd normally SSH into 
 ## Output cap
 
 Command output is buffered per stream up to a cap (default ~1 MB) so a runaway command cannot exhaust memory;
-anything beyond it is drained and discarded, and `… (Ausgabe gekürzt)` is appended.
+anything beyond it is drained and discarded, and `… (Ausgabe gekürzt)` is appended. The kept part ends at its last
+complete line (or word, for one long line); without any such boundary it is dropped, so no half-cut credential is
+stored (R1-24).
 
 Two things follow from that, both learned the hard way (2026-08-27):
 
