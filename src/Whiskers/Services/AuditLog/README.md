@@ -16,7 +16,7 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 ## Behaviour notes
 
 - **Fail-safe:** if the audit write fails (DB locked, disk full) the full entry (actor/action/target/server/success/details) is logged at **Error** in the app log — the fact is never silently dropped while the privileged action proceeds.
-- **Secret-safety:** entries store only key **names**, `SecretRedactor`-redacted commands, and never secret values, DB passwords, or issued credentials — e.g. `hetzner.rescue_enable` records that a root credential was issued, not the password.
+- **Secret-safety:** entries store only key **names**, commands as their length (R1-24; every free-text column is redacted on save by [`SinkRedactionInterceptor`](../Persistence/SinkRedactionInterceptor.cs)), and never secret values, DB passwords, or issued credentials — e.g. `hetzner.rescue_enable` records that a root credential was issued, not the password.
 - **Coverage** includes config saves, vault `vault.set`/`vault.delete`, scheduler `scheduler.create`/`run`/`delete`, `command.execute`, and `hetzner.rescue_enable`.
 
 - **One event per mutation (R1-20):** MCP tools take `IToolAuditLog`, not `IAuditLogService`, so a tool call through the gateway is exactly one audit event — the gateway's — carrying the tool's own details.

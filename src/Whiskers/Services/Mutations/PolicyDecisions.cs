@@ -232,10 +232,17 @@ public sealed class DbPolicyDecisionStore : IPolicyDecisionStore
 internal static class PolicyDecisions
 {
     // scheme://anything@host → scheme://***@host: a user name alone can be a token (https://<token>@github.com).
-    private static readonly System.Text.RegularExpressions.Regex UrlUserInfo =
-        new(@"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    // A text above 64 KB (task output) gets a larger budget, as SecretRedactor's patterns do.
+    private const string UrlUserInfoPattern = @"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@";
+    private static readonly System.Text.RegularExpressions.Regex UrlUserInfo = new(UrlUserInfoPattern,
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled,
+        TimeSpan.FromSeconds(1));
+    private static readonly System.Text.RegularExpressions.Regex UrlUserInfoLarge = new(UrlUserInfoPattern,
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled,
+        TimeSpan.FromSeconds(5));
 
-    /// <summary>The text with the user info of every URL in it replaced by <c>***</c>, nothing else changed.</summary>
+    /// <summary>The text with the user info of every URL in it replaced by <c>***</c>, nothing else changed. Input the
+    /// pattern cannot finish in time is withheld whole (fail closed).</summary>
     public static string? WithoutUrlCredentials(string? value) =>
-        value is null ? null : UrlUserInfo.Replace(value, "$1***@");
+        value is null ? null : Whiskers.Utils.SecretRedactor.FailClosed(value, v => (v.Length > 64 * 1024 ? UrlUserInfoLarge : UrlUserInfo).Replace(v, "$1***@"));
 }

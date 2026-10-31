@@ -235,11 +235,10 @@ public sealed class ApprovalGate : IApprovalGate
             ActorType: subject.ActorType,
             ToolName: subject.ToolName,
             Level: subject.Level,
-            ParamsJson: Cap(SecretRedactor.RedactJson(argsJson), MaxParamChars),
-            // A reason may quote what the caller sent; a UI payload never reaches the stored card (R1-16).
-            Reason: subject.WithholdPayloads
-                ? Whiskers.Services.Mutations.AuditLogMutationSink.WithoutPayloadValues(reason, subject.Arguments) ?? reason
-                : reason,
+            ParamsJson: Cap(SinkRedaction.Json(argsJson) ?? "", MaxParamChars),
+            // A reason may quote what the caller sent: payload values never reach the stored card (R1-16), and the
+            // rest is redacted like every sink (R1-24).
+            Reason: SinkRedaction.Text(SinkRedaction.WithoutPayloadValues(reason, subject.Arguments)) ?? "",
             CorrelationId: subject.OperationId,
             RiskLevel: ApprovalDisplay.RiskOf(subject.Level),
             TargetServer: server,
@@ -274,6 +273,6 @@ public sealed class ApprovalGate : IApprovalGate
         }
     }
 
-    private static string? Cap(string? s, int max) =>
-        s is null ? null : (s.Length > max ? s[..max] + "…" : s);
+    // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.
+    private static string? Cap(string? s, int max) => Whiskers.Utils.SinkRedaction.Cap(s, max);
 }

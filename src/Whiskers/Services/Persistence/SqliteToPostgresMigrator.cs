@@ -200,6 +200,8 @@ public static class SqliteToPostgresMigrator
             })
             .Options;
 
+        // No SinkRedactionInterceptor here, on purpose: the copy must be byte-identical (the rows are copied as they
+        // were stored); a rewrite on the way would change rows the audit chain already covers.
         await using var source = new MetricsDbContext(sqliteOptions);
         await using var target = new MetricsDbContext(pgOptions);
         await using var idSource = new WhiskersIdentityDbContext(idSqliteOptions);

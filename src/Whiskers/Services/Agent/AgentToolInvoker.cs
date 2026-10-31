@@ -250,19 +250,20 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 ToolName = tool,
                 Level = level,
                 CorrelationId = correlationId,
-                ParamsJson = Cap(SecretRedactor.Redact(rawArgs), 4000),
+                ParamsJson = Cap(SinkRedaction.Arguments(rawArgs) ?? "", 4000),
                 Verdict = decision.Verdict.ToString().ToLowerInvariant(),
                 Success = success,
                 DurationMs = (int)sw.ElapsedMilliseconds,
-                ResultSummary = output is null ? null : Cap(SecretRedactor.Redact(output), 2000),
-                Error = error is null ? null : Cap(error, 1000),
+                // Tool output is often JSON: redacted value by value (Json falls back to Text for other text).
+                ResultSummary = output is null ? null : Cap(SinkRedaction.Json(output)!, 2000),
+                Error = error is null ? null : Cap(SinkRedaction.Json(error)!, 1000),
             });
         }
         catch { /* observability must never break tool execution */ }
     }
 
-    private static string? Cap(string? s, int max) =>
-        s is null ? null : (s.Length > max ? s[..max] + "…" : s);
+    // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.
+    private static string? Cap(string? s, int max) => Whiskers.Utils.SinkRedaction.Cap(s, max);
 
     private async Task<string> ExecuteAsync(AgentToolEntry entry, IReadOnlyDictionary<string, JsonElement> args,
         AgentContext context, CancellationToken ct = default)
