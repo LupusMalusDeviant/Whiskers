@@ -542,7 +542,12 @@
         if (_oldKubeconfigKey is not null)
             await RemoveUnusedKubeconfigAsync(_oldKubeconfigKey);
         if (_oldCloudKey is not null)
-            await RemoveUnusedCloudKeyAsync(_oldCloudKey);
+        {
+            if (Vault.IsEnabled) await RemoveUnusedCloudKeyAsync(_oldCloudKey);
+            // Without a usable vault the entry cannot be removed: it stays encrypted and unused — say so.
+            else if (!ServerConfigService.GetServers().Any(s => s.CloudKeyRef == _oldCloudKey))
+                Snackbar.Add(L["Servers_Snackbar_CloudKeyCleanupFailed"].Value, Severity.Info);
+        }
         return saved;
     }
 

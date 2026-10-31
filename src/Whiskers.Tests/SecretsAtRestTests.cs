@@ -491,6 +491,35 @@ public class SecretsAtRestTests : IDisposable
         Assert.Equal(envToken, dns.ApiToken);
     }
 
+    [Fact]
+    public async Task A_legacy_to_vault_move_leaves_no_plaintext_in_the_recorded_audit_results()
+    {
+        WriteLegacyServers(_cloudKey);
+        WriteLegacyDns(_dnsToken);
+        var servers = await Servers();
+        var results = new List<Whiskers.Services.Mutations.MutationDomainResult>();
+
+        // What a page save records inside the gateway (R1-22 versions and setting diffs), before plaintext → after ref.
+        using (var scope = Whiskers.Services.Mutations.MutationScope.Begin("server.save", "op-cloud"))
+        {
+            var record = servers.GetServer("hetz")!.Clone();
+            await servers.UpdateServerAsync(record, null, CloudKeyChange.Set(CredentialRefs.NewCloudKey("hetz")));
+            results.AddRange(scope.Results);
+        }
+        using (var scope = Whiskers.Services.Mutations.MutationScope.Begin("config.save", "op-dns"))
+        {
+            var newRef = CredentialRefs.NewDnsToken();
+            await AppSettings().UpdateSectionAsync(DnsSettings.SectionName,
+                stored => Whiskers.Services.Dns.DnsSettingsSection.Next(stored, "infomaniak", newRef, ["example.org"], 300));
+            results.AddRange(scope.Results);
+        }
+
+        Assert.NotEmpty(results);
+        var recorded = System.Text.Json.JsonSerializer.Serialize(results);
+        Assert.DoesNotContain(_cloudKey, recorded);
+        Assert.DoesNotContain(_dnsToken, recorded);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /// <summary>A vault that stores nothing it could read back (the write was lost).</summary>

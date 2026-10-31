@@ -295,6 +295,23 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Settings_refused_vault_write_deletes_nothing()
+    {
+        var original = Secret("DNSTOKEN");
+        await SaveDns(DnsPage(), original);
+        var before = await StoredDnsRef();
+        var deletes = 0;
+        _runner.OnRun = id => { if (id == "vault.secret_delete") deletes++; };
+
+        _runner.RefuseOnce("vault.secret_set");
+        await SaveDns(DnsPage(), Secret("DNSTOKEN"));
+
+        Assert.Equal(0, deletes);   // nothing was written, so nothing is removed (no second gateway call)
+        Assert.Equal(before, await StoredDnsRef());
+        Assert.Equal(original, _vault.GetSecret(before!));
+    }
+
+    [Fact]
     public async Task Settings_refused_settings_write_removes_the_new_dns_token_and_keeps_the_previous()
     {
         var original = Secret("DNSTOKEN");
@@ -445,9 +462,11 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
 
         public void BeforeOnce(string capabilityId, Func<Task> action) => _before[capabilityId] = action;
         public void RefuseOnce(string capabilityId) => _refuse.Add(capabilityId);
+        public Action<string>? OnRun { get; set; }
 
         private async Task GateAsync(string capabilityId)
         {
+            OnRun?.Invoke(capabilityId);
             if (_refuse.Remove(capabilityId))
                 throw new MutationRefusedException("refused by the test", MutationStatus.Denied, "op");
             if (_before.Remove(capabilityId, out var before)) await before();

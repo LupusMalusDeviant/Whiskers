@@ -956,9 +956,9 @@ else
             if (token is not null)
             {
                 // A vault write of its own (R1-11): decided and audited by name, the token never in the arguments.
-                newRef = Whiskers.Services.Vault.CredentialRefs.NewDnsToken();
-                var key = newRef;
+                var key = Whiskers.Services.Vault.CredentialRefs.NewDnsToken();
                 await Mutations.RunAsync("vault.secret_set", new { section = "vault", key }, _ => VaultService.SetSecretAsync(key, token));
+                newRef = key;   // written: from here on a failure removes it again
             }
             var provider = _dnsProvider;
             var ttl = _dnsDefaultTtl;
