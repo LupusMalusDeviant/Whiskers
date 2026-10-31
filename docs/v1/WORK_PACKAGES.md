@@ -507,10 +507,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `SecretsAtRestTests` scans JSON/database/backups after cloud and DNS saves and finds no plaintext credentials.
-- [ ] Migration is restart-safe, preserves recovery and removes plaintext only after verified vault persistence.
-- [ ] Saves requiring encryption refuse an unavailable vault.
-- [ ] `ProductionReadinessServiceTests` reports actual migration/encryption state.
+- [x] `SecretsAtRestTests` scans JSON/database/backups after cloud and DNS saves and finds no plaintext credentials.
+- [x] Migration is restart-safe, preserves recovery and removes plaintext only after verified vault persistence.
+- [x] Saves requiring encryption refuse an unavailable vault.
+- [x] `ProductionReadinessServiceTests` reports actual migration/encryption state.
 
 **Out of scope:** Notification/AI settings and snapshot encryption.
 

@@ -6,6 +6,17 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-29: **Cloud API keys and the DNS token are kept in the vault.** A server's cloud API key (Hetzner, Hostinger) and
+  the DNS provider token are now stored encrypted in the vault; servers.json and app-settings.json only name the vault
+  key. Saving one needs a usable vault — with no `VAULT_KEY`, or a wrong one, the save is refused instead of writing
+  plaintext — and the stores refuse a plaintext key from any path. **Upgrade:** at the first start with a usable vault,
+  existing plaintext keys are moved automatically: each is stored in the vault, read back from vault.json on disk and
+  compared, and only then removed from its file; an interrupted start finishes at the next one, and without a vault
+  nothing changes and the keys keep working (the readiness check lists them); until then a server or DNS
+  save other than removing the credential is refused, since the save would have to move it. Removing a server also removes its cloud
+  key from the vault. The production-readiness card now reports where these credentials actually are and no longer
+  claims that every secret is encrypted: notification, chat and AI credentials and webhook secrets are still plaintext
+  (R1-30, R1-31). A token set by the environment (`Dns__ApiToken`) still works and is not moved.
 - R1-28: **A wrong `VAULT_KEY` no longer touches the vault.** `vault.json` now carries a key check; at start the key
   must open it (or, on a vault written before, one of its entries). A wrong key, a tampered check or entries without a
   salt lock the vault: no secret is read, written, deleted or migrated and the file stays exactly as it was. Settings

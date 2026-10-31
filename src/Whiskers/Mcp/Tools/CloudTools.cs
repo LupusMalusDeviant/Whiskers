@@ -55,10 +55,13 @@ public class CloudTools
 
         var sw = cloud.ResolveWhiskers(server);
         if (sw == null) return $"Whiskers-Server nicht gefunden: {server}";
-        if (sw.CloudProvider == Whiskers.Models.CloudProvider.None || string.IsNullOrWhiteSpace(sw.CloudApiKey))
+        if (sw.CloudProvider == Whiskers.Models.CloudProvider.None || !Whiskers.Services.Cloud.CloudCredentials.HasCloudKey(sw))
             return $"Für '{sw.Name}' ist kein Cloud-Provider/API-Key konfiguriert.";
 
-        var info = await cloud.ResolveAsync(sw);
+        Whiskers.Models.Cloud.CloudServerInfo? info;
+        try { info = await cloud.ResolveAsync(sw); }
+        // R1-29: a key kept in a disabled or locked vault — the reason, not a tool exception.
+        catch (InvalidOperationException ex) { return $"Fehler: {ex.Message}"; }
         if (info == null) return $"Kein passender {sw.CloudProvider}-Server zu '{sw.Name}' gefunden (IP-Abgleich).";
 
         var sb = new StringBuilder();

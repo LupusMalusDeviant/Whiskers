@@ -1874,6 +1874,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Snackbar_NoPermission" xml:space="preserve">
     <value>No permission — {0} required (your role: {1}).</value>
   </data>
+  <data name="Servers_Snackbar_SecretCleanupFailed" xml:space="preserve">
+    <value>The server is removed, but its kubeconfig or cloud API key could not be removed from the vault (it may be disabled or locked). The unused secret stays encrypted in the vault.</value>
+  </data>
   <data name="Servers_Snackbar_Removed" xml:space="preserve">
     <value>{0} removed</value>
   </data>
@@ -1936,6 +1939,30 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Vault_Error_KeyWrong" xml:space="preserve">
     <value>The vault is locked: VAULT_KEY does not match this vault. Set the right key and restart.</value>
+  </data>
+  <data name="Settings_Dns_Error_NeedsVault" xml:space="preserve">
+    <value>Storing a DNS token needs the vault: set VAULT_KEY (or VAULT_KEY_FILE) and restart. Without it the token would be kept in plaintext.</value>
+  </data>
+  <data name="Servers_Error_CloudKeyChangedMeanwhile" xml:space="preserve">
+    <value>The cloud API key of this server was changed meanwhile. Reload the page and save again.</value>
+  </data>
+  <data name="Servers_Snackbar_CloudKeyCleanupFailed" xml:space="preserve">
+    <value>The previous cloud API key is no longer used, but it could not be removed from the vault (it is disabled or locked). The unused secret stays encrypted in the vault.</value>
+  </data>
+  <data name="Servers_Error_PlaintextCloudKeyNeedsVault" xml:space="preserve">
+    <value>A cloud API key of this server is still stored in plaintext. Enable the vault (VAULT_KEY) so the save moves it there, or remove the cloud provider, before saving other changes.</value>
+  </data>
+  <data name="Settings_Dns_Error_ChangedMeanwhile" xml:space="preserve">
+    <value>The DNS settings were changed meanwhile. Reload the page and save again.</value>
+  </data>
+  <data name="Settings_Dns_Snackbar_TokenCleanupFailed" xml:space="preserve">
+    <value>The DNS token is no longer used, but it could not be removed from the vault (it is disabled or locked). The unused secret stays encrypted in the vault.</value>
+  </data>
+  <data name="Servers_Error_CloudKeyNeedsVault" xml:space="preserve">
+    <value>Storing a cloud API key needs the vault: set VAULT_KEY (or VAULT_KEY_FILE) and restart. Without it the key would be kept in plaintext.</value>
+  </data>
+  <data name="Settings_Dns_Error_PlaintextNeedsVault" xml:space="preserve">
+    <value>A DNS token is still stored in plaintext. Enable the vault (VAULT_KEY) to move it there, or clear the token, before saving other DNS settings.</value>
   </data>
   <data name="Settings_Alert_WhitelistEmpty" xml:space="preserve">
     <value>The whitelist is enabled but empty — nobody can sign in!</value>

@@ -16,7 +16,10 @@ servers through provider APIs (Hetzner, Hostinger). The `/cloud` page + the clou
 When **disabled**: the `cloud` nav entry + MCP tools disappear and `/cloud` shows a "module disabled" notice.
 A clean extraction — no Core page or service consumes these, so no no-op defaults are needed.
 
-Credentials: per-server cloud provider + API key are configured under *Server* (not a Settings panel here).
+Credentials: per-server cloud provider + API key are configured under *Server* (not a Settings panel here). Since
+R1-29 the API key is stored encrypted in the vault (saving one needs a usable `VAULT_KEY`); servers.json only names
+its vault key (`CloudKeyRef`). A plaintext key from before is moved into the vault at the first start with a usable
+vault; a key kept in a disabled or locked vault makes the cloud tools fail with that reason.
 
 **Deferred:** the §3.6 C10 `ICloudProvider` seam (Hetzner/Hostinger as pluggable providers behind a common
 contract) is a separate refactor of destructive power/snapshot dispatch — this module PR is a byte-identical

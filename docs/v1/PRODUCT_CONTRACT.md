@@ -270,7 +270,7 @@ mTLS carries the server's diff.
 | U-17 | Nginx reload | Admin | ❌ | GW ✅ (R1-21) | — |
 | U-18 | Systemd start/stop/restart | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-19 | SSL certificate renew | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-20 | Servers add/update/delete (+ vault secrets, SSH keys) | Admin | — | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
+| U-20 | Servers add/update/delete (+ vault secrets: kubeconfig, cloud API key; SSH keys) | Admin | — | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
 | U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | GW ✅ (`server.onboard`; the switchover carries the server diff, R1-22) | INV-45 |
 | U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | — | GW ✅ (no page row since R1-22) | INV-17 |
 | U-23 | Cloud power / snapshot | Admin | ❌ | GW ✅ (R1-21) | INV-43, 52 |

@@ -121,6 +121,8 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.Settings), "SaveImageUpdate", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveTerminal", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveDns", "config.save"),
+        (typeof(Whiskers.Components.Pages.Settings), "SaveDns", "vault.secret_set"),
+        (typeof(Whiskers.Components.Pages.Settings), "RemoveUnusedDnsTokenAsync", "vault.secret_delete"),
         (typeof(Whiskers.Components.Pages.Settings), "ClearDnsToken", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveAiChat", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveChannels", "config.save"),
@@ -138,6 +140,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.AiOperationsView), "ActivatePreset", "guardrails.save"),
         (typeof(Whiskers.Components.Pages.Servers), "PersistServerRecordAsync", "vault.secret_set"),
         (typeof(Whiskers.Components.Pages.Servers), "RemoveUnusedKubeconfigAsync", "vault.secret_delete"),
+        (typeof(Whiskers.Components.Pages.Servers), "RemoveUnusedCloudKeyAsync", "vault.secret_delete"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Save", "registry.save"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
     ];

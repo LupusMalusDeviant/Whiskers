@@ -19,6 +19,15 @@ public interface IVaultService
     [Whiskers.Services.Mutations.MutatingOperation("vault.secret_delete")]
     Task DeleteSecretAsync(string key);
     List<VaultEntry> GetExpiringSecrets();
+
+    /// <summary>
+    /// R1-29 start-up migration: stores a credential that is already kept in plaintext elsewhere under its fixed
+    /// migration key (<see cref="CredentialRefs.IsMigrationKey"/>) and returns whether vault.json on disk now holds
+    /// it. Not an operator's write: it accepts no other key, and it only adds to the vault what a file already holds in
+    /// plaintext — so it is not a <c>vault.secret_set</c> and needs no gateway decision. The default (test doubles)
+    /// stores nothing.
+    /// </summary>
+    Task<bool> AdoptLegacyCredentialAsync(string migrationKey, string plaintext) => Task.FromResult(false);
 }
 
 /// <summary>The vault key as the vault judged it at start (R1-28).</summary>

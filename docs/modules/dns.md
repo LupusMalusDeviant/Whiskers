@@ -13,15 +13,16 @@ no nav entry; the only UI is the *Settings → DNS (Infomaniak)* panel that hold
 | **Nav** | — |
 | **MCP tools** | `list_dns_records` (read), `set_dns_record` (write), `delete_dns_record` (write) — `DnsTools` |
 | **Services** | `IDnsRecordService` (provider-neutral, idempotent set), `IDnsProviderClient` → `InfomaniakDnsClient` |
-| **Settings** | section `Dns` in `app-settings.json`: `Provider`, `ApiToken`, `AllowedZones[]`, `DefaultTtl` |
+| **Settings** | section `Dns` in `app-settings.json`: `Provider`, `ApiTokenRef` (the vault key of the token, R1-29), `AllowedZones[]`, `DefaultTtl` |
 
 ## Configuring the token
 
 *Settings → DNS (Infomaniak)*: paste an Infomaniak API token (Manager → Developer → API tokens, scope
-**domain**), optionally restrict *Erlaubte Zonen* to the zones the tools may touch, save. The token is written
-to the `Dns` section of `/app/data/app-settings.json` (the same store as the AI-chat key), applies live via
-`IOptionsMonitor`, and is never shown again — the panel only reports "hinterlegt (…last4)". Equivalent
-environment configuration: `Dns__ApiToken`, `Dns__AllowedZones__0=lupusmalus.dev`, `Dns__DefaultTtl=300`.
+**domain**), optionally restrict *Erlaubte Zonen* to the zones the tools may touch, save. The token is stored
+encrypted in the vault (R1-29; saving one needs a usable `VAULT_KEY`); the `Dns` section of
+`/app/data/app-settings.json` only names its vault key (`ApiTokenRef`). It applies live via `IOptionsMonitor`, and
+is never shown again — the panel only reports "hinterlegt (…last4)". A plaintext token from before R1-29 is moved into the vault at the
+first start with a usable vault. Equivalent environment configuration (not stored by Whiskers): `Dns__ApiToken`, `Dns__AllowedZones__0=lupusmalus.dev`, `Dns__DefaultTtl=300`.
 
 Without a token every tool answers a one-line hint and calls nothing.
 

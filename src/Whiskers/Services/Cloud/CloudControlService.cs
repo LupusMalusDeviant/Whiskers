@@ -3,6 +3,7 @@ using Whiskers.Models.Cloud;
 using Whiskers.Models.Hetzner;
 using Whiskers.Services.Cloud.Providers;
 using Whiskers.Services.ServerConfig;
+using Whiskers.Services.Vault;
 
 namespace Whiskers.Services.Cloud;
 
@@ -20,13 +21,16 @@ public class CloudControlService : ICloudControlService
     private readonly IReadOnlyList<ICloudProvider> _providers;
     private readonly IHetznerExtensions? _hetznerExt;
     private readonly ILogger<CloudControlService> _logger;
+    private readonly IVaultService _vault;
 
     public CloudControlService(
         IServerConfigService serverConfig,
         IEnumerable<ICloudProvider> providers,
-        ILogger<CloudControlService> logger)
+        ILogger<CloudControlService> logger,
+        IVaultService vault)
     {
         _serverConfig = serverConfig;
+        _vault = vault;
         _providers = providers.ToList();
         _hetznerExt = _providers.OfType<IHetznerExtensions>().FirstOrDefault();
         _logger = logger;
@@ -37,8 +41,11 @@ public class CloudControlService : ICloudControlService
     /// <summary>All Whiskers servers that have a cloud provider + key configured.</summary>
     public List<Whiskers.Models.ServerConfig> CloudServers()
         => _serverConfig.GetServers()
-            .Where(c => c.CloudProvider != CloudProvider.None && !string.IsNullOrWhiteSpace(c.CloudApiKey))
+            .Where(c => c.CloudProvider != CloudProvider.None && c.HasCloudKey())
             .ToList();
+
+    /// <summary>The server's cloud API key, from the vault (R1-29) or a not yet migrated plaintext field.</summary>
+    private string? KeyOf(Whiskers.Models.ServerConfig sw) => CloudCredentials.KeyOf(sw, _vault);
 
     public Whiskers.Models.ServerConfig? ResolveWhiskers(string idOrName)
         => _serverConfig.GetServers().FirstOrDefault(c => c.Id == idOrName)
@@ -47,9 +54,10 @@ public class CloudControlService : ICloudControlService
     /// <summary>Resolves the provider VM/server matching this Whiskers server by public IP.</summary>
     public async Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw)
     {
-        var token = sw.CloudApiKey;
-        if (string.IsNullOrWhiteSpace(token) || sw.CloudProvider == CloudProvider.None)
+        if (sw.CloudProvider == CloudProvider.None || !sw.HasCloudKey())
             return null;
+        var token = KeyOf(sw);
+        if (string.IsNullOrWhiteSpace(token)) return null;
         var provider = ProviderFor(sw.CloudProvider);
         return provider == null ? null : await provider.ResolveAsync(sw, token);
     }
@@ -59,8 +67,27 @@ public class CloudControlService : ICloudControlService
         // Group by (provider, token) so an account with N Whiskers servers is listed ONCE instead of N times
         // (fewer API calls; kinder to the Hetzner rate limit). A no-match is omitted; an account-listing failure
         // marks all of that account's servers as errored — same observable result as the old per-server loop.
-        var tasks = CloudServers()
-            .GroupBy(sw => (sw.CloudProvider, sw.CloudApiKey))
+        // A key the vault cannot give (locked, missing) marks only that server as errored.
+        var keyed = new List<(Whiskers.Models.ServerConfig Server, string Key)>();
+        var unreadable = new List<CloudServerInfo>();
+        foreach (var sw in CloudServers())
+        {
+            try
+            {
+                keyed.Add((sw, KeyOf(sw)!));
+            }
+            catch (InvalidOperationException ex)
+            {
+                unreadable.Add(new CloudServerInfo
+                {
+                    WhiskersId = sw.Id, WhiskersName = sw.Name, Provider = sw.CloudProvider,
+                    Name = sw.Name, Status = "error", Note = ex.Message
+                });
+            }
+        }
+
+        var tasks = keyed
+            .GroupBy(k => (k.Server.CloudProvider, k.Key), k => k.Server)
             .Select(async account =>
             {
                 var (provider, token) = account.Key;
@@ -84,7 +111,7 @@ public class CloudControlService : ICloudControlService
                 return results;
             });
 
-        return (await Task.WhenAll(tasks)).SelectMany(r => r).ToList();
+        return (await Task.WhenAll(tasks)).SelectMany(r => r).Concat(unreadable).ToList();
     }
 
     // ─────────────────────────── Actions ───────────────────────────
@@ -96,49 +123,53 @@ public class CloudControlService : ICloudControlService
 
     public async Task<string> CreateSnapshotAsync(string idOrName, string? description)
     {
-        var (sw, info, provider) = await ContextAsync(idOrName);
-        return await provider.CreateSnapshotAsync(info, sw.CloudApiKey!, description);
+        var (_, info, provider, token) = await ContextAsync(idOrName);
+        return await provider.CreateSnapshotAsync(info, token, description);
     }
 
     public async Task<string> MetricsAsync(string idOrName, string type)
     {
-        var (sw, info, provider) = await ContextAsync(idOrName);
-        return await provider.MetricsAsync(info, sw.CloudApiKey!, type);
+        var (_, info, provider, token) = await ContextAsync(idOrName);
+        return await provider.MetricsAsync(info, token, type);
     }
 
     /// <summary>For Hetzner-only tools: returns the per-server token + resolved Hetzner server.</summary>
     public async Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName)
     {
         var sw = ResolveWhiskers(idOrName);
-        if (sw == null || sw.CloudProvider != CloudProvider.Hetzner || string.IsNullOrWhiteSpace(sw.CloudApiKey) || _hetznerExt == null)
+        if (sw == null || sw.CloudProvider != CloudProvider.Hetzner || !sw.HasCloudKey() || _hetznerExt == null)
             return null;
+        var token = KeyOf(sw);
+        if (string.IsNullOrWhiteSpace(token)) return null;
         var info = await ResolveAsync(sw);
         if (info == null) return null;
-        var full = await _hetznerExt.GetServerAsync(sw.CloudApiKey, info.CloudId);
-        return full == null ? null : (sw.CloudApiKey, full);
+        var full = await _hetznerExt.GetServerAsync(token, info.CloudId);
+        return full == null ? null : (token, full);
     }
 
     // ─────────────────────────── Internals ───────────────────────────
 
-    private async Task<(Whiskers.Models.ServerConfig sw, CloudServerInfo info, ICloudProvider provider)> ContextAsync(string idOrName)
+    private async Task<(Whiskers.Models.ServerConfig sw, CloudServerInfo info, ICloudProvider provider, string token)> ContextAsync(string idOrName)
     {
         var sw = ResolveWhiskers(idOrName)
                  ?? throw new InvalidOperationException($"Whiskers server not found: {idOrName}");
-        if (sw.CloudProvider == CloudProvider.None || string.IsNullOrWhiteSpace(sw.CloudApiKey))
+        if (sw.CloudProvider == CloudProvider.None || !sw.HasCloudKey())
             throw new InvalidOperationException($"No cloud provider/API key configured for '{sw.Name}'.");
+        var token = KeyOf(sw)
+                    ?? throw new InvalidOperationException($"No cloud provider/API key configured for '{sw.Name}'.");
         var provider = ProviderFor(sw.CloudProvider)
                        ?? throw new InvalidOperationException($"No provider registered for '{sw.CloudProvider}'.");
-        var info = await provider.ResolveAsync(sw, sw.CloudApiKey)
+        var info = await provider.ResolveAsync(sw, token)
                    ?? throw new InvalidOperationException($"No matching {sw.CloudProvider} server found for '{sw.Name}' (IP match failed).");
-        return (sw, info, provider);
+        return (sw, info, provider, token);
     }
 
     // Power ops share the same shape: resolve context, run the provider op, append the weak-resolution note
     // exactly where the former inline dispatch did (power ops + hard reset; snapshot/metrics carry no note).
     private async Task<string> DispatchAsync(string idOrName, Func<ICloudProvider, CloudServerInfo, string, Task<string>> op)
     {
-        var (sw, info, provider) = await ContextAsync(idOrName);
+        var (_, info, provider, token) = await ContextAsync(idOrName);
         var noteSuffix = info.Note != null ? $"\n⚠️ {info.Note}" : "";
-        return await op(provider, info, sw.CloudApiKey!) + noteSuffix;
+        return await op(provider, info, token) + noteSuffix;
     }
 }

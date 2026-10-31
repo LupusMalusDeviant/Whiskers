@@ -1874,6 +1874,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Snackbar_NoPermission" xml:space="preserve">
     <value>Keine Berechtigung — {0} erforderlich (deine Rolle: {1}).</value>
   </data>
+  <data name="Servers_Snackbar_SecretCleanupFailed" xml:space="preserve">
+    <value>Der Server ist entfernt, aber seine kubeconfig oder sein Cloud-API-Key konnte nicht aus dem Vault gelöscht werden (er ist womöglich deaktiviert oder gesperrt). Das ungenutzte Secret bleibt verschlüsselt im Vault.</value>
+  </data>
   <data name="Servers_Snackbar_Removed" xml:space="preserve">
     <value>{0} entfernt</value>
   </data>
@@ -1936,6 +1939,30 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Vault_Error_KeyWrong" xml:space="preserve">
     <value>Vault ist gesperrt: VAULT_KEY passt nicht zu diesem Vault. Den richtigen Schlüssel setzen und neu starten.</value>
+  </data>
+  <data name="Settings_Dns_Error_NeedsVault" xml:space="preserve">
+    <value>Ein DNS-Token braucht den Vault: VAULT_KEY (oder VAULT_KEY_FILE) setzen und neu starten. Ohne Vault läge der Token im Klartext.</value>
+  </data>
+  <data name="Servers_Error_CloudKeyChangedMeanwhile" xml:space="preserve">
+    <value>Der Cloud-API-Key dieses Servers wurde inzwischen geändert. Seite neu laden und erneut speichern.</value>
+  </data>
+  <data name="Servers_Snackbar_CloudKeyCleanupFailed" xml:space="preserve">
+    <value>Der bisherige Cloud-API-Key wird nicht mehr verwendet, konnte aber nicht aus dem Vault gelöscht werden (er ist deaktiviert oder gesperrt). Das ungenutzte Secret bleibt verschlüsselt im Vault.</value>
+  </data>
+  <data name="Servers_Error_PlaintextCloudKeyNeedsVault" xml:space="preserve">
+    <value>Der Cloud-API-Key dieses Servers liegt noch im Klartext. Den Vault aktivieren (VAULT_KEY), damit das Speichern ihn dorthin verschiebt, oder den Cloud-Provider entfernen, bevor andere Änderungen gespeichert werden.</value>
+  </data>
+  <data name="Settings_Dns_Error_ChangedMeanwhile" xml:space="preserve">
+    <value>Die DNS-Einstellungen wurden inzwischen geändert. Seite neu laden und erneut speichern.</value>
+  </data>
+  <data name="Settings_Dns_Snackbar_TokenCleanupFailed" xml:space="preserve">
+    <value>Der DNS-Token wird nicht mehr verwendet, konnte aber nicht aus dem Vault gelöscht werden (er ist deaktiviert oder gesperrt). Das ungenutzte Secret bleibt verschlüsselt im Vault.</value>
+  </data>
+  <data name="Servers_Error_CloudKeyNeedsVault" xml:space="preserve">
+    <value>Ein Cloud-API-Key braucht den Vault: VAULT_KEY (oder VAULT_KEY_FILE) setzen und neu starten. Ohne Vault läge der Key im Klartext.</value>
+  </data>
+  <data name="Settings_Dns_Error_PlaintextNeedsVault" xml:space="preserve">
+    <value>Ein DNS-Token liegt noch im Klartext. Den Vault aktivieren (VAULT_KEY), damit er dorthin wandert, oder den Token löschen, bevor andere DNS-Einstellungen gespeichert werden.</value>
   </data>
   <data name="Settings_Alert_WhitelistEmpty" xml:space="preserve">
     <value>Whitelist ist aktiviert aber leer — niemand kann sich anmelden!</value>
