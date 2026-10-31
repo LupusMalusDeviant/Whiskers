@@ -82,6 +82,21 @@ public class TrivyOutputTruncationTests
         Assert.True(text.Length < payload.Length);
     }
 
+    [Theory]
+    [InlineData("ok line\nclone https://deploy:canary-value-r124@git.example.org/r.git\n")]
+    [InlineData("one long line ending in https://deploy:canary-value-r124@git.example.org/r.git")]
+    public async Task A_credential_split_by_the_cut_is_dropped_whole(string output)
+    {
+        // R1-24: the cut must not leave the beginning of a secret the URL rule can no longer recognise.
+        var cap = output.IndexOf("canary", StringComparison.Ordinal) + 6;
+
+        var (text, truncated) = await HostCommandExecutor.ReadCappedAsync(new StringReader(output), cap, CancellationToken.None);
+
+        Assert.True(truncated);
+        Assert.DoesNotContain("canary", text);
+        Assert.DoesNotContain("deploy:", text);
+    }
+
     [Fact]
     public async Task The_marker_that_a_parser_chokes_on_is_still_the_marker_that_is_appended()
     {

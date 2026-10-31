@@ -95,6 +95,29 @@ public sealed class SinkRedactionTests
             JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new { command = payload }))!)["command"]?.ToString());
     }
 
+    [Fact]
+    public void Only_the_exact_marker_counts_as_withheld()
+    {
+        var stored = SinkRedaction.Arguments(JsonSerializer.Serialize(new { command = "<withheld: 3 chars>\n" }));
+        Assert.Contains("\"command\":\"<withheld: 20 chars>\"", stored);
+    }
+
+    [Fact]
+    public void A_reason_loses_the_values_of_object_and_list_payloads_too()
+    {
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new
+        {
+            envVars = new Dictionary<string, string> { ["DB_PASS"] = Canary },
+            volumes = new[] { $"/srv/{Canary}:/data" },
+            containerId = "web",
+        }))!;
+
+        var reason = SinkRedaction.WithoutPayloadValues($"refused: {Canary} and /srv/{Canary}:/data on web", arguments);
+
+        AssertClean(reason);
+        Assert.Contains("on web", reason);
+    }
+
     [Theory]
     [MemberData(nameof(Secrets))]
     public void A_secret_in_an_ordinary_argument_is_redacted(string secret) =>

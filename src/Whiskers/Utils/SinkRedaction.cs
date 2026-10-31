@@ -61,7 +61,7 @@ public static class SinkRedaction
 
     // Exactly the marker this class writes: a caller's "<withheld: …>" carrying anything else is a payload like any other.
     private static readonly System.Text.RegularExpressions.Regex WithheldMarker = new(
-        @"^<withheld: [0-9]{1,10} chars>$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        @"\A<withheld: [0-9]{1,10} chars>\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static bool IsWithheld(string text) => WithheldMarker.IsMatch(text);
 
@@ -192,13 +192,30 @@ public static class SinkRedaction
     {
         if (string.IsNullOrEmpty(text)) return text;
         foreach (var (key, value) in arguments)
-        {
-            if (!IsPayload(key) || value.ValueKind != JsonValueKind.String) continue;
-            var payload = value.GetString();
-            if (!string.IsNullOrEmpty(payload) && payload.Length >= 3)
-                text = text.Replace(payload, "<withheld>", StringComparison.Ordinal);
-        }
+            if (IsPayload(key))
+                foreach (var payload in StringLeaves(value))
+                    if (payload.Length >= 3)
+                        text = text.Replace(payload, "<withheld>", StringComparison.Ordinal);
         return text;
+    }
+
+    // Every string in a payload, also inside an object or a list (an env map's values, a list of mounts).
+    private static IEnumerable<string> StringLeaves(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                if (value.GetString() is { } text) yield return text;
+                break;
+            case JsonValueKind.Object:
+                foreach (var property in value.EnumerateObject())
+                    foreach (var leaf in StringLeaves(property.Value)) yield return leaf;
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                    foreach (var leaf in StringLeaves(item)) yield return leaf;
+                break;
+        }
     }
 
     /// <summary>A URL's user info (<c>https://user:token@host</c>, also a token alone in front of the host) as
