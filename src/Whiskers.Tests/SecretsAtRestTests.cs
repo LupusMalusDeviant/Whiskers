@@ -20,7 +20,7 @@ namespace Whiskers.Tests;
 
 // R1-29 (INV-52): cloud API keys and the DNS token are kept in the vault. After a save or the start-up migration no
 // file of the data directory — servers.json, app-settings.json, the database, a self-backup — holds them in plaintext.
-public class SecretsAtRestTests : IDisposable
+public partial class SecretsAtRestTests : IDisposable
 {
     private const string VaultKey = "secrets-at-rest-test-passphrase";
 

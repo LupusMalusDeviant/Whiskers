@@ -25,7 +25,12 @@ nav entry — so the bell and `/notifications` page keep working when the module
 prefs (`IContainerNotificationPrefsService`, a startup `IInitializable`) and the HttpClient log-filter block.
 
 Settings: the 8 channel sections (`Mattermost`, `Matrix`, `Telegram`, `Ntfy`, `Discord`, `Slack`, `Email`,
-`WebhookNotification` config sections) — enable/URLs/tokens/throttle per channel.
+`WebhookNotification` config sections) — enable/URLs/tokens/throttle per channel. Since R1-30 the credentials among
+them (SMTP password, Matrix/Telegram/ntfy tokens, the ntfy topic, the Mattermost/Discord/Slack/custom webhook URLs and
+the signing secret) are stored in the vault: saving one needs a usable `VAULT_KEY`, the settings file only names its
+vault key (`<Property>Ref`), and the editor never shows a stored value (empty keeps it). With the vault disabled or
+locked a channel whose credential is in it stays silent and the log says why. Plaintext values from before move into
+the vault at the first start with a usable vault.
 
 Code: [`src/Whiskers/Modules/Notifications/`](../../src/Whiskers/Modules/Notifications/) · channel
 implementations in [`src/Whiskers/Services/Notifications/`](../../src/Whiskers/Services/Notifications/).

@@ -6,6 +6,16 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-30: **Notification and AI credentials are kept in the vault.** The SMTP password, the Matrix, Telegram and ntfy
+  tokens, the ntfy topic, the Mattermost, Discord, Slack and custom-webhook URLs, the custom webhook's signing secret,
+  and the API keys of the AI chat and the agent are now stored encrypted in the vault; app-settings.json and
+  agent-settings.json only name the vault key. The editors never show a stored value again: an empty field keeps it,
+  a new value replaces it, the delete icon removes it. Saving a credential needs a usable vault (refused otherwise),
+  and a failed save leaves the previous credentials in use. With the vault disabled or locked, a credential kept in it
+  counts as not set (the channel stays silent and the log says why). **Upgrade:** existing plaintext values move into
+  the vault at the first start with a usable vault, like the cloud and DNS keys; until then a save of those settings is
+  refused. A second readiness line lists any credential still in plaintext. Credentials set by environment variables
+  still work and are not moved.
 - R1-29: **Cloud API keys and the DNS token are kept in the vault.** A server's cloud API key (Hetzner, Hostinger) and
   the DNS provider token are now stored encrypted in the vault; servers.json and app-settings.json only name the vault
   key. Saving one needs a usable vault — with no `VAULT_KEY`, or a wrong one, the save is refused instead of writing

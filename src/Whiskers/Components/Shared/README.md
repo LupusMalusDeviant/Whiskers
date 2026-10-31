@@ -9,6 +9,7 @@ Reusable UI widgets used across multiple pages.
 | `ResourceGauge.razor` | A progress bar that changes colour at thresholds (CPU/RAM/disk usage). |
 | `HealthBadge.razor` | A small status badge rendering a container's health state. |
 | `LogViewer.razor` | A scrolling log display component. |
+| `SecretTextField.razor` | R1-30: an editor field for a credential kept in the vault: never shows the stored value; empty keeps it, a new value replaces it, the delete icon removes it with the next save. |
 | `RegistriesPanel.razor` | Settings panel for container registries (F8): save/delete run through the Mutation Gateway as `registry.save` / `registry.delete` (Admin, R1-11); the credential goes to the vault and is never a gateway argument. |
 | `RoleGuard.razor` | Renders its child content only if the current user holds the required role. |
 | `AiChat.razor` | The site-wide floating chat widget. A **hybrid**: a read-only advisor (see [`../../Services/AiChat/`](../../Services/AiChat/)) while the agent is disabled; when `Agent.Enabled`, it becomes the **acting agent** (tools + guardrails) and feeds the current page's context (route + visible text via `swAgent.getPageContext`), plus an optional screenshot (html2canvas > vision model), into each turn. Confirmations route through the central approvals (bell + Approvals page), decided as the signed-in user at their current role; closing or clearing the chat, or a dropped connection, ends its run and cancels its pending approvals (`AgentChatLifetime`, R1-15); the conversation stays, the next message starts a new run. |

@@ -439,7 +439,7 @@ Whiskers is configured entirely through environment variables (`.env`); **everyt
 | Local login | `WHISKERS_ADMIN_PASSWORD_FILE`, `Auth__LocalLogin__Enabled` | Username/password login without an IdP (ASP.NET Identity, its own tables in the same DB). On by default; set `Auth__LocalLogin__Enabled=false` for federated-only. Password policy: min 12 chars. |
 | Secrets vault | `VAULT_KEY`, `VAULT_KEY_FILE` | Passphrase that encrypts stored secrets at rest (AES-256-GCM); or mount it as a file and point `_FILE` at it (wins; a missing or empty file stops the start). Empty = vault disabled. Keep it stable — losing it makes stored secrets undecryptable; a key that does not match the vault is detected at start and locks the vault without changing it |
 | OIDC (optional) | `OIDC_ENABLED`, `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, ... | Generic OpenID Connect (Authentik, Keycloak, Authelia, Zitadel, ...) for real 2FA/passkeys from your IdP |
-| Notifications | `MATTERMOST_WEBHOOK_URL`, `MATTERMOST_ENABLED` | Matrix is configured in the UI |
+| Notifications | `MATTERMOST_WEBHOOK_URL`, `MATTERMOST_ENABLED` | The other channels are configured in the UI; their credentials are stored in the vault (needs `VAULT_KEY`) |
 | Routing | `PATH_BASE` | Path prefix when reverse-proxied under a subpath |
 | AI chat | `AICHAT_ENABLED`, `AICHAT_API_KEY`, `AICHAT_API_URL`, `AICHAT_MODEL`, `AICHAT_PROVIDER` | Read-only advisor chat |
 | Agent | `AGENT_ENABLED`, `AGENT_PROVIDER`, `AGENT_MODEL`, `AGENT_API_KEY`, ... | Acting agent (see above) |

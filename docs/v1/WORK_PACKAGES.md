@@ -522,10 +522,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `SecretsAtRestTests` covers SMTP, chat/bot tokens, notification URLs/secrets and both AI clients.
-- [ ] Empty editor fields preserve existing references without revealing secret values.
-- [ ] Migration and failed saves cannot leave mixed live/disk credentials.
-- [ ] Update credential inventory and deployment secret instructions.
+- [x] `SecretsAtRestTests` covers SMTP, chat/bot tokens, notification URLs/secrets and both AI clients.
+- [x] Empty editor fields preserve existing references without revealing secret values.
+- [x] Migration and failed saves cannot leave mixed live/disk credentials.
+- [x] Update credential inventory and deployment secret instructions.
 
 **Out of scope:** Inbound webhook secrets and rollback snapshots.
 
