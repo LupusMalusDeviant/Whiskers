@@ -48,6 +48,7 @@ public static class KnownSecrets
         yield return value;
         if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri)) yield break;
         yield return uri.AbsoluteUri;
+        yield return uri.ToString();   // unescaped, as an exception prints it
         if (uri.UserInfo.Length == 0) yield break;
         yield return SinkRedaction.WithoutUrlCredentials(value!.Trim());
         yield return SinkRedaction.WithoutUrlCredentials(uri.AbsoluteUri);

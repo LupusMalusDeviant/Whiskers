@@ -187,6 +187,25 @@ public sealed partial class SinkRedactionTests
     }
 
     [Fact]
+    public void A_template_that_looks_like_a_secret_never_falls_back_to_the_raw_formatter()
+    {
+        var (factory, capture) = Logging();
+        var logger = factory.CreateLogger("Test");
+
+        logger.LogWarning("mysql -p{Password} on {Host} with {Env}", Canary, "db",
+            new Dictionary<string, string> { ["MYSQL_PWD"] = Canary });
+        logger.LogWarning("Path {Path,-12}| end", "/var/data");
+        logger.LogWarning("one {A} two {B}", $"password={Canary}");   // a hole without a value: withheld, not raw
+        logger.LogWarning("no arguments, {literal} braces");
+
+        Assert.Contains("on db with", capture.All);
+        Assert.Contains("Path /var/data   | end", capture.All);
+        Assert.Contains(RedactingLoggerFactory.WithheldEntry, capture.Messages);
+        Assert.Contains("no arguments, {literal} braces", capture.All);
+        AssertClean(capture.All);
+    }
+
+    [Fact]
     public async Task The_audit_fallback_log_is_redacted_even_without_the_redacting_provider()
     {
         var capture = new Capture();
@@ -227,6 +246,8 @@ public sealed partial class SinkRedactionTests
         Assert.All(handler.Requests, r => Assert.Contains("***", r.Body));
         AssertClean(Assert.Single(inApp.Events).ImageInfo);
         AssertClean(Assert.Single(dispatcher.Events).ImageInfo);
+        // The e-mail body is this text of the same redacted copy (SMTP itself is not stubbed here).
+        AssertClean(NotificationFormatter.PlainText(CompositeNotificationService.Redacted(evt)));
         Assert.Contains("matched", evt.ImageInfo);   // the producer's own object is left as it was
         Assert.Contains(Canary, evt.ImageInfo);
 

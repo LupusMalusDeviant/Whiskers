@@ -53,8 +53,9 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
         try
         {
             if (state is not IEnumerable<KeyValuePair<string, object?>> pairs) return Text(state.ToString());
-            var values = pairs.Select(Redacted).ToList();
-            return new Entry(Text(Formatted(values) ?? state.ToString()), values, null);
+            var raw = pairs.ToList();
+            var values = raw.Select(Redacted).ToList();
+            return new Entry(Text(Message(raw, values, () => state.ToString())), values, null);
         }
         catch (Exception)
         {
@@ -62,8 +63,12 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
         }
     }
 
+    // A value logged under a secret's name ({Password}, {ApiKey}) is *** whatever it looks like: a structured provider
+    // writes it next to its name, where no pattern would see a bare value as a secret.
     private static KeyValuePair<string, object?> Redacted(KeyValuePair<string, object?> pair) =>
-        new(pair.Key, Value(pair.Value));
+        new(pair.Key, pair.Value is not null && pair.Key != "{OriginalFormat}" && SinkRedaction.IsSecretName(pair.Key)
+            ? "***"
+            : Value(pair.Value));
 
     // Numbers, flags, times and ids carry no secret and stay typed; everything else is redacted as text. A list is
     // joined, its pairs (a dictionary) as key=value, so a secret-named key marks its value for the patterns.
@@ -86,14 +91,22 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
         return item?.ToString();
     }
 
-    /// <summary>The message rebuilt from its template and the redacted values — never from the raw state, whose
-    /// formatter would render a value the patterns cannot see (a dictionary as <c>[password, x]</c>). Null when the
-    /// template does not match the values.</summary>
-    private static string? Formatted(IReadOnlyList<KeyValuePair<string, object?>> values)
+    /// <summary>The message of an entry. With a template it is rebuilt from the raw template's holes and the redacted
+    /// values — never formatted from the raw state, whose formatter would render a value the patterns cannot see (a
+    /// dictionary as <c>[password, x]</c>); a template whose holes do not match the values is withheld. Only a state
+    /// without a template is formatted by its own formatter (and redacted after it, like every message).</summary>
+    private static string? Message(IReadOnlyList<KeyValuePair<string, object?>> raw,
+                                   IReadOnlyList<KeyValuePair<string, object?>> redacted, Func<string?> formatter)
     {
-        var template = values.FirstOrDefault(v => v.Key == "{OriginalFormat}").Value as string;
-        if (template is null) return null;
-        var args = values.Where(v => v.Key != "{OriginalFormat}").Select(v => v.Value).ToList();
+        if (raw.FirstOrDefault(v => v.Key == "{OriginalFormat}").Value is not string template) return formatter();
+        var args = redacted.Where(v => v.Key != "{OriginalFormat}").Select(v => v.Value).ToList();
+        // Without arguments the template is the message as it stands, braces and all (as the framework writes it).
+        return args.Count == 0 ? template : Formatted(template, args) ?? WithheldEntry;
+    }
+
+    /// <summary>The template with each hole filled; null when it has more holes than values or an open brace.</summary>
+    private static string? Formatted(string template, IReadOnlyList<object?> args)
+    {
         var sb = new System.Text.StringBuilder(template.Length);
         var next = 0;
         for (var i = 0; i < template.Length; i++)
@@ -117,13 +130,13 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
             sb.Append(Render(args[next++], spec));
             i = end;
         }
-        return next == args.Count ? sb.ToString() : null;
+        return sb.ToString();
     }
 
     private static string Render(object? value, string spec)
     {
         if (value is null) return "(null)";
-        if (spec.Length == 0 || value is string) return value.ToString() ?? "";
+        if (spec.Length == 0) return value.ToString() ?? "";
         try
         {
             return string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0" + spec + "}", value);
@@ -148,10 +161,11 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
 
         public static Entry Of<TState>(TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
-            var values = state is IEnumerable<KeyValuePair<string, object?>> pairs
-                ? pairs.Select(Redacted).ToList()
+            var raw = state is IEnumerable<KeyValuePair<string, object?>> pairs
+                ? pairs.ToList()
                 : new List<KeyValuePair<string, object?>>();
-            return new(Text(Formatted(values) ?? formatter(state, exception)), values,
+            var values = raw.Select(Redacted).ToList();
+            return new(Text(Message(raw, values, () => formatter(state, exception))), values,
                 exception is null ? null : new RedactedException(exception));
         }
 

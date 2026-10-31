@@ -104,6 +104,22 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_matched_line_is_redacted_before_it_is_cut_and_sent()
+    {
+        SeedRule();
+        var docker = new FakeDocker(Container("c-remote", "burg-web", "infomaniak", "LupusMalus"));
+        docker.Logs["infomaniak/c-remote"] =
+            $"FATAL: login failed password=canary-value-r125 {string.Join(" ", Enumerable.Repeat("noise", 60))}" + Environment.NewLine;
+        var notifications = new FakeNotifications();
+
+        await Monitor(docker, notifications, TwoServers()).RunScanCycleAsync(CancellationToken.None);
+
+        var evt = Assert.Single(notifications.Events);
+        Assert.Contains("password=***", evt.ImageInfo);
+        Assert.DoesNotContain("canary-va", evt.ImageInfo);
+    }
+
+    [Fact]
     public async Task Fetches_each_container_log_from_its_own_server()
     {
         SeedRule();
