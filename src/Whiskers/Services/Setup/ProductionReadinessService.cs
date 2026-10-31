@@ -81,7 +81,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 : $"Im Klartext gespeichert: {plaintextCloud} Cloud-API-Key(s) in servers.json"
                   + (plaintextDns ? " und der DNS-Token in app-settings.json" : "") + ". "
                   + (_vault.IsEnabled
-                      ? "Sie sind noch nicht in den Vault übernommen (die Übernahme läuft beim Start; scheitert sie, nennt das Log den Grund) — neu starten."
+                      ? "Sie sind noch nicht in den Vault übernommen (die Übernahme läuft beim Start; scheitert sie, nennt das Log den Grund) — "
+                        + "neu starten, oder den Server bzw. die DNS-Einstellungen einmal speichern: das legt den Wert unter einem neuen Vault-Schlüssel ab."
                       : "Sie werden beim ersten Start mit gültigem VAULT_KEY in den Vault übernommen."),
             null, null));
 

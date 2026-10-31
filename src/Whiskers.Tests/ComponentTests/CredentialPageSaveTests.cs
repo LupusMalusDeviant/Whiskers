@@ -142,6 +142,18 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Servers_clearing_the_provider_removes_the_cloud_key()
+    {
+        var server = await AddCloudServer(Secret("CLOUDKEY"));
+        var page = OpenServer(server.Id);
+        Get<ServerConfig>(page, "_form").CloudProvider = CloudProvider.None;
+        await Persist(page);
+
+        Assert.Null(_servers.GetServer(server.Id)!.CloudKeyRef);
+        Assert.Empty(_vault.Keys);
+    }
+
+    [Fact]
     public async Task Servers_failed_record_write_removes_the_new_cloud_key()
     {
         var original = Secret("CLOUDKEY");

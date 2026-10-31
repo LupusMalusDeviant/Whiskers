@@ -404,6 +404,20 @@ public class SecretsAtRestTests : IDisposable
     }
 
     [Fact]
+    public async Task Removing_a_server_with_a_vault_key_and_no_usable_vault_reports_the_cleanup_as_failed()
+    {
+        var vault = await Vault(key: null);
+        var servers = await Servers();
+        await servers.AddServerAsync(new ServerConfig { Id = "a", Name = "a", IsDefault = true });
+        await servers.AddServerAsync(new ServerConfig { Id = "b", Name = "b" });
+        await servers.AddServerAsync(new ServerConfig { Id = "c", Name = "c", CloudProvider = CloudProvider.Hetzner, CloudKeyRef = CredentialRefs.NewCloudKey("c") });
+
+        Assert.False(await ServerRemoval.RemoveAsync(servers, vault, servers.GetServer("c")!));   // its key stays, unused
+        Assert.Null(servers.GetServer("c"));
+        Assert.True(await ServerRemoval.RemoveAsync(servers, vault, servers.GetServer("b")!));    // nothing in the vault
+    }
+
+    [Fact]
     public async Task Cloud_listing_marks_only_the_server_whose_key_the_locked_vault_holds()
     {
         var vault = await Vault();
