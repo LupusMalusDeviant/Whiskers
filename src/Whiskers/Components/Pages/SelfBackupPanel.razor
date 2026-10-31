@@ -122,7 +122,9 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
-        _encrypted = Whiskers.Configuration.SecretSource.VaultKey(Configuration) is not null;
+        // The running backup service read the key at start; a secret file removed since then must not break the page.
+        try { _encrypted = Whiskers.Configuration.SecretSource.VaultKey(Configuration) is not null; }
+        catch (Whiskers.Configuration.SecretFileException) { _encrypted = false; }
         _vaultKeyWrong = Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong;
         _provider = (Configuration["WHISKERS_DB_PROVIDER"] ?? Configuration["Database:Provider"] ?? "sqlite").ToLowerInvariant();
         await LoadBackups();

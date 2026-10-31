@@ -220,6 +220,8 @@ public class VaultService : IVaultService, IInitializable
 
     public List<VaultEntry> ListSecrets()
     {
+        // A locked vault shows nothing: its entries belong to a key that is not the one configured.
+        if (KeyState == VaultKeyState.Wrong) return [];
         // Read under the same lock the writers use, so the enumeration never observes a concurrent
         // Add/Remove mid-flight. Return metadata only — values are never exposed in the list.
         _lock.Wait();

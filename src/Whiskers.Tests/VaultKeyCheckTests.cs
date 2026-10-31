@@ -115,6 +115,7 @@ public class VaultKeyCheckTests : IDisposable
         Assert.Equal(VaultKeyState.Wrong, wrong.KeyState);
         Assert.False(wrong.IsEnabled);
         Assert.Null(wrong.GetSecret("token"));
+        Assert.Empty(wrong.ListSecrets());
         var set = await Assert.ThrowsAsync<InvalidOperationException>(() => wrong.SetSecretAsync("other", "x"));
         Assert.Contains("passt nicht", set.Message);
         await Assert.ThrowsAsync<InvalidOperationException>(() => wrong.DeleteSecretAsync("token"));
