@@ -236,10 +236,10 @@ internal static class PolicyDecisions
     private const string UrlUserInfoPattern = @"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@";
     private static readonly System.Text.RegularExpressions.Regex UrlUserInfo = new(UrlUserInfoPattern,
         System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(100));
+        TimeSpan.FromSeconds(1));
     private static readonly System.Text.RegularExpressions.Regex UrlUserInfoLarge = new(UrlUserInfoPattern,
         System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled,
-        TimeSpan.FromSeconds(2));
+        TimeSpan.FromSeconds(5));
 
     /// <summary>The text with the user info of every URL in it replaced by <c>***</c>, nothing else changed. Input the
     /// pattern cannot finish in time is withheld whole (fail closed).</summary>

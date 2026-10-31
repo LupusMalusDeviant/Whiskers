@@ -10,11 +10,14 @@ namespace Whiskers.Utils;
 /// </summary>
 public static class SecretRedactor
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(100);
+    // The budget guards against catastrophic backtracking, it is no speed limit: a timeout withholds the whole text,
+    // so it must not fire on ordinary input on a loaded host (thread preemption, the first run's JIT of a compiled
+    // pattern) — 100 ms did, under parallel load, and turned short values into "***".
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(1);
 
     // A large text (task output, up to the executor's 1 MB) gets a budget that scales with it: a timeout withholds
     // the whole text, which must stay the answer to pathological input, not to an ordinary long log.
-    private static readonly TimeSpan LargeTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan LargeTimeout = TimeSpan.FromSeconds(5);
     private const int LargeText = 64 * 1024;
 
     // A value this redactor already wrote ("***" followed by whitespace or the end — "\S+" below always ends there)
