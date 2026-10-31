@@ -197,9 +197,17 @@ public sealed partial class SinkRedactionTests
         logger.LogWarning("Path {Path,-12}| end", "/var/data");
         logger.LogWarning("one {A} two {B}", $"password={Canary}");   // a hole without a value: withheld, not raw
         logger.LogWarning("no arguments, {literal} braces");
+        // A source-generated state lists its values in parameter order: each hole takes its own name's value.
+        logger.Log(LogLevel.Warning, default, new List<KeyValuePair<string, object?>>
+        {
+            new("Place", "Ulm"), new("Name", "Ada"), new("InputTokens", 42),
+            new("{OriginalFormat}", "Hello {Name} from {Place}, {InputTokens} tokens"),
+        }, null, (_, _) => "unused");
 
         Assert.Contains("on db with", capture.All);
         Assert.Contains("Path /var/data   | end", capture.All);
+        Assert.Contains("Hello Ada from Ulm, 42 tokens", capture.All);
+        Assert.Contains("InputTokens=42", capture.All);
         Assert.Contains(RedactingLoggerFactory.WithheldEntry, capture.Messages);
         Assert.Contains("no arguments, {literal} braces", capture.All);
         AssertClean(capture.All);

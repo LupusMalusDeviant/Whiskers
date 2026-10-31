@@ -64,11 +64,13 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
     }
 
     // A value logged under a secret's name ({Password}, {ApiKey}) is *** whatever it looks like: a structured provider
-    // writes it next to its name, where no pattern would see a bare value as a secret.
+    // writes it next to its name, where no pattern would see a bare value as a secret. Numbers, flags, times and ids
+    // stay typed ({InputTokens} is a count).
     private static KeyValuePair<string, object?> Redacted(KeyValuePair<string, object?> pair) =>
-        new(pair.Key, pair.Value is not null && pair.Key != "{OriginalFormat}" && SinkRedaction.IsSecretName(pair.Key)
+        new(pair.Key, Value(pair.Value) is var value && value is string && pair.Key != "{OriginalFormat}"
+                      && SinkRedaction.IsSecretName(pair.Key)
             ? "***"
-            : Value(pair.Value));
+            : value);
 
     // Numbers, flags, times and ids carry no secret and stay typed; everything else is redacted as text. A list is
     // joined, its pairs (a dictionary) as key=value, so a secret-named key marks its value for the patterns.
@@ -99,14 +101,17 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
                                    IReadOnlyList<KeyValuePair<string, object?>> redacted, Func<string?> formatter)
     {
         if (raw.FirstOrDefault(v => v.Key == "{OriginalFormat}").Value is not string template) return formatter();
-        var args = redacted.Where(v => v.Key != "{OriginalFormat}").Select(v => v.Value).ToList();
+        var args = redacted.Where(v => v.Key != "{OriginalFormat}").ToList();
         // Without arguments the template is the message as it stands, braces and all (as the framework writes it).
         return args.Count == 0 ? template : Formatted(template, args) ?? WithheldEntry;
     }
 
     /// <summary>The template with each hole filled; null when it has more holes than values or an open brace.</summary>
-    private static string? Formatted(string template, IReadOnlyList<object?> args)
+    /// <remarks>A hole takes the value of its own name (a source-generated state lists its values in parameter order,
+    /// not in template order), else the next unused one.</remarks>
+    private static string? Formatted(string template, IReadOnlyList<KeyValuePair<string, object?>> args)
     {
+        var used = new bool[args.Count];
         var sb = new System.Text.StringBuilder(template.Length);
         var next = 0;
         for (var i = 0; i < template.Length; i++)
@@ -124,10 +129,18 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
                 continue;
             }
             var end = template.IndexOf('}', i);
-            if (end < 0 || next >= args.Count) return null;
+            if (end < 0) return null;
             var hole = template[(i + 1)..end];
             var spec = hole.IndexOfAny([',', ':']) is var at and >= 0 ? hole[at..] : "";
-            sb.Append(Render(args[next++], spec));
+            var name = spec.Length > 0 ? hole[..^spec.Length] : hole;
+            var slot = -1;
+            for (var k = 0; k < args.Count && slot < 0; k++)
+                if (!used[k] && args[k].Key == name) slot = k;
+            while (slot < 0 && next < args.Count)
+                if (!used[next++]) slot = next - 1;
+            if (slot < 0) return null;
+            used[slot] = true;
+            sb.Append(Render(args[slot].Value, spec));
             i = end;
         }
         return sb.ToString();
