@@ -40,7 +40,8 @@ public sealed class AuditFailClosedTests : IDisposable
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o
             .UseSqlite($"Data Source={Path.Combine(_root, "metrics.db")};Pooling=False")
-            .AddInterceptors(_writes, _writes.Commits, _reads));
+            // The sink redaction as the app registers it (R1-24), then the fault injectors.
+            .AddInterceptors(SinkRedactionInterceptor.Instance, _writes, _writes.Commits, _reads));
         _sp = services.BuildServiceProvider();
         _scopes = _sp.GetRequiredService<IServiceScopeFactory>();
         using (var scope = _scopes.CreateScope())
@@ -174,17 +175,6 @@ public sealed class AuditFailClosedTests : IDisposable
     {
         using var scope = _scopes.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().ToListAsync();
-    }
-
-    /// <summary>Waits until the operation's intent row is written (a fixed delay was too short under a loaded run).</summary>
-    private async Task IntentWrittenAsync(string operationId)
-    {
-        var until = DateTime.UtcNow.AddSeconds(15);
-        while (!(await Events()).Any(e => e.OperationId == operationId && e.Phase == "intent"))
-        {
-            Assert.True(DateTime.UtcNow < until, $"the intent of {operationId} was not written");
-            await Task.Delay(20);
-        }
     }
 
     /// <summary>R1-23: every row the gateway, the outbox drain or recovery wrote is on the audit chain, in its
@@ -345,7 +335,7 @@ public sealed class AuditFailClosedTests : IDisposable
     [Fact]
     public async Task A_refusal_kept_in_the_outbox_holds_no_secret_in_its_target_or_payload()
     {
-        // R1-24: the outbox file is written as the row was built â€” the interceptor never sees it.
+        // R1-24: the outbox file is written as the row was built — the interceptor never sees it.
         _writes.FailBefore = true;
         var request = Restart("op-sec2") with
         {
@@ -361,6 +351,27 @@ public sealed class AuditFailClosedTests : IDisposable
         var text = await File.ReadAllTextAsync(kept);
         Assert.DoesNotContain("hunter", text);
         Assert.Contains("git.example.org", text);
+    }
+
+    [Fact]
+    public async Task An_event_keeps_every_argument_through_the_save_redaction()
+    {
+        // R1-24: the arguments are a JSON string inside the details; redacting them again on save must not run a
+        // pattern across their quotes and drop what follows a "token: …" or a bare "password=".
+        var request = Restart("op-args") with
+        {
+            CapabilityId = "no.such",
+            Arguments = Args(new { description = "rotate token: monthly", pattern = "password=", containerId = "web", serverId = "local" }),
+        };
+
+        await Gateway().ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        var details = Assert.Single(await Events()).Details!;
+        Assert.Contains("rotate token=***", details);
+        Assert.Contains("password=", details);
+        Assert.Contains("containerId", details);
+        Assert.Contains("serverId", details);
+        await AssertTrailIntact();
     }
 
     [Fact]
@@ -404,8 +415,9 @@ public sealed class AuditFailClosedTests : IDisposable
         });
         _writes.FailBefore = false;
         var running = new TaskCompletionSource<int>();
-        _ = gateway.ExecuteAsync(Restart("op-cut"), (_, _) => running.Task);
-        await IntentWrittenAsync("op-cut");
+        var started = new TaskCompletionSource();
+        _ = gateway.ExecuteAsync(Restart("op-cut"), (_, _) => { started.TrySetResult(); return running.Task; });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(15));   // intent and journal claim are written by then
         using (var scope = _scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -505,8 +517,9 @@ public sealed class AuditFailClosedTests : IDisposable
         var journal = new DbOperationJournal(_scopes);
         var recovery = Recovery(journal);
         var running = new TaskCompletionSource<int>();
-        var run = Gateway(recovery, journal).ExecuteAsync(Restart("op-live"), (_, _) => running.Task);
-        await IntentWrittenAsync("op-live");
+        var started = new TaskCompletionSource();
+        var run = Gateway(recovery, journal).ExecuteAsync(Restart("op-live"), (_, _) => { started.TrySetResult(); return running.Task; });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(15));   // intent and journal claim are written by then
 
         _time.Advance(AuditRecovery.IntentGrace + TimeSpan.FromMinutes(1));
         await recovery.RecoverAsync();

@@ -178,7 +178,10 @@ public static class SinkRedaction
                 writer.WriteEndArray();
                 break;
             case JsonValueKind.String:
-                writer.WriteStringValue(Text(value.GetString()));
+                // A string that is itself a JSON document (a gateway event's arguments) is redacted value by value, as
+                // its writer did: a pattern run over its text would cross its quotes and commas.
+                var text = value.GetString();
+                writer.WriteStringValue(text is ['{' or '[', ..] ? Json(text) : Text(text));
                 break;
             default:
                 value.WriteTo(writer);

@@ -18,7 +18,8 @@ All notable changes to Whiskers are documented here. The format follows
   history's error column is redacted too (it was stored as it came). The audit log shows an executed shell command
   (`command.execute`) and a scheduled custom command only as their length (it showed the pattern-redacted command).
   Stored JSON keeps quotes readable (`'`, not `\u0027`). In a gateway event's `principal`, the credential's id is now
-  `keyId` (was `credential`, a name the secret rule hides). Rows written before this version stay as they are.
+  `keyId` (was `credential`, a name the secret rule hides). An approval's reason no longer quotes a payload argument
+  (the card's arguments still show it). Rows written before this version stay as they are.
 - R1-23 follow-up: an unreadable checkpoint file and a pending VAULT_KEY adoption are logged as what they are (not as
   tampering); the page counts every finding, also above the display cap; export scratch files left by a crash are
   removed by the next export.

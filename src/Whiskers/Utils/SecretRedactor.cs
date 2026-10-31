@@ -12,17 +12,22 @@ public static class SecretRedactor
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(100);
 
+    // A value this redactor already wrote ("***" followed by a delimiter or the end) is left alone, so redacting twice
+    // changes nothing — the "\S+" below would otherwise run on from "***" across the quotes and commas of the JSON
+    // around it. A secret that merely starts with "***" is still redacted.
+    private const string NotRedacted = @"(?!\*\*\*(?:[\s""',;)\]}]|$))";
+
     // mysql -p<secret>, "-p<secret>", '-p<secret>'  →  -p***  — a flag, so not inside a word: "web-prod" is a name.
     private static readonly Regex MysqlPwFlag = new(
-        @"(?<![\w-])-p\S+", RegexOptions.Compiled, Timeout);
+        $@"(?<![\w-])-p{NotRedacted}\S+", RegexOptions.Compiled, Timeout);
 
     // redis-cli -a <secret>  →  -a ***  — a flag, so not inside a word: "data-a daily" is a name.
     private static readonly Regex RedisAuthFlag = new(
-        @"(?<![\w-])-a\s+\S+", RegexOptions.Compiled, Timeout);
+        $@"(?<![\w-])-a\s+{NotRedacted}\S+", RegexOptions.Compiled, Timeout);
 
     // PGPASSWORD=x / MYSQL_PWD=x / REDISCLI_AUTH=x  →  NAME=***
     private static readonly Regex EnvPassword = new(
-        @"(MYSQL_PWD|PGPASSWORD|REDISCLI_AUTH)=\S+", RegexOptions.Compiled, Timeout);
+        $@"(MYSQL_PWD|PGPASSWORD|REDISCLI_AUTH)={NotRedacted}\S+", RegexOptions.Compiled, Timeout);
 
     // Secret-bearing key names, English and German (UI strings and tool output are partly German:
     // "Temporäres root-Passwort: …" passed straight through before).
@@ -31,7 +36,7 @@ public static class SecretRedactor
 
     // password=x, token: x, api_key=x, Passwort: x, etc.  →  $1=***
     private static readonly Regex KeyedSecret = new(
-        $@"(?i)({SecretKeys})\s*[=:]\s*\S+",
+        $@"(?i)({SecretKeys})\s*[=:]\s*{NotRedacted}\S+",
         RegexOptions.Compiled, Timeout);
 
     // JSON form: "password": "x"  →  "password":"***"  (the key is followed by a quote, so KeyedSecret misses it)
