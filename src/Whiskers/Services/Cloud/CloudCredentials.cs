@@ -25,10 +25,10 @@ public static class CloudCredentials
         {
             if (!vault.IsEnabled)
                 throw new InvalidOperationException(vault.KeyState == VaultKeyState.Wrong
-                    ? $"The cloud API key of '{server.Name}' is in the vault, and the vault is locked (VAULT_KEY does not match it)."
-                    : $"The cloud API key of '{server.Name}' is in the vault, and the vault is disabled (VAULT_KEY is not set).");
+                    ? $"Der Cloud-API-Key von '{server.Name}' liegt im Vault, und der Vault ist gesperrt (VAULT_KEY passt nicht)."
+                    : $"Der Cloud-API-Key von '{server.Name}' liegt im Vault, und der Vault ist deaktiviert (VAULT_KEY fehlt).");
             return vault.GetSecret(server.CloudKeyRef)
-                   ?? throw new InvalidOperationException($"The cloud API key of '{server.Name}' is missing from the vault.");
+                   ?? throw new InvalidOperationException($"Der Cloud-API-Key von '{server.Name}' fehlt im Vault. Key unter Server neu hinterlegen.");
         }
         return string.IsNullOrWhiteSpace(server.CloudApiKey) ? null : server.CloudApiKey;
     }

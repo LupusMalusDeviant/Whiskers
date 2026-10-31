@@ -96,7 +96,7 @@ public sealed class CredentialVaultMigration : IInitializable
             if (await _vault.AdoptLegacyCredentialAsync(vaultKey, value)) return true;
             _logger.LogError("Vault migration: the {What} could not be read back from vault.json; it stays in plaintext", what);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Vault migration: the {What} could not be stored in the vault; it stays in plaintext", what);
         }

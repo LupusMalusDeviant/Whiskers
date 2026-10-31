@@ -347,6 +347,48 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
             _appSettings.UpdateSectionAsync(DnsSettings.SectionName, _ => next).GetAwaiter().GetResult());
     }
 
+    private static async Task ClearDns(Settings page)
+        => await (Task)typeof(Settings).GetMethod("ClearDnsToken", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+
+    [Fact]
+    public async Task Settings_clear_removes_the_named_dns_token()
+    {
+        await SaveDns(DnsPage(), Secret("DNSTOKEN"));
+
+        await ClearDns(DnsPage());
+
+        Assert.Null(await StoredDnsRef());
+        Assert.Empty(_vault.Keys);
+    }
+
+    [Fact]
+    public async Task Settings_clear_without_a_usable_vault_drops_the_reference_and_keeps_the_entry_unused()
+    {
+        await SaveDns(DnsPage(), Secret("DNSTOKEN"));
+        _vault.Enabled = false;
+
+        await ClearDns(DnsPage());
+
+        Assert.Null(await StoredDnsRef());
+        Assert.Single(_vault.Keys);   // encrypted, unused; the page says so
+    }
+
+    [Fact]
+    public async Task Settings_legacy_move_does_not_bring_back_a_token_cleared_meanwhile()
+    {
+        var legacy = Secret("DNSTOKEN");
+        File.WriteAllText(Path.Combine(_dir, "app-settings.json"),
+            new JsonObject { ["Dns"] = new JsonObject { ["Provider"] = "infomaniak", ["ApiToken"] = legacy } }.ToJsonString());
+
+        // A zones-only save that would move the plaintext; before it lands, another admin clears the token.
+        _runner.BeforeOnce("config.save", () => ClearDns(DnsPage(new DnsSettings { ApiToken = legacy })));
+        await SaveDns(DnsPage(new DnsSettings { ApiToken = legacy }));
+
+        Assert.Null(await StoredDnsRef());
+        Assert.Empty(_vault.Keys);   // the staged copy was removed
+        Assert.DoesNotContain(legacy, AllFiles());
+    }
+
     [Fact]
     public async Task Settings_save_moves_a_legacy_plaintext_token_into_the_vault()
     {

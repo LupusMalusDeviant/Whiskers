@@ -431,7 +431,7 @@ public class SecretsAtRestTests : IDisposable
         var listed = Assert.Single(await cloud.ListAllAsync());
         Assert.Equal("error", listed.Status);
         Assert.Equal("hetz", listed.WhiskersId);
-        Assert.Contains("vault", listed.Note);
+        Assert.Contains("vault", listed.Note, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(_cloudKey, listed.Note);
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => cloud.RebootAsync("hetz"));
         Assert.DoesNotContain(_cloudKey, ex.Message);
@@ -471,23 +471,24 @@ public class SecretsAtRestTests : IDisposable
     [Fact]
     public async Task Migration_leaves_an_environment_dns_token_alone()
     {
-        // The environment's token is not in app-settings.json: there is nothing for the migration to read or move.
+        // The environment's token is not in app-settings.json: there is nothing for the migration to read or move, and
+        // the configuration (environment, then app-settings.json on top, as the app layers them) still resolves to it.
         File.WriteAllText(_paths.AppSettingsJson, new JsonObject { ["Dns"] = new JsonObject { ["Provider"] = "infomaniak" } }.ToJsonString());
         var settingsBefore = File.ReadAllBytes(_paths.AppSettingsJson);
         var vault = await Vault();
         var envToken = "DNSTOKEN-" + Guid.NewGuid().ToString("N");
-        Environment.SetEnvironmentVariable("Dns__ApiToken", envToken);
-        try
-        {
-            await Migrate(vault, await Servers());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("Dns__ApiToken", null);
-        }
+
+        await Migrate(vault, await Servers());
 
         Assert.Equal(settingsBefore, File.ReadAllBytes(_paths.AppSettingsJson));
         Assert.Empty(vault.ListSecrets());
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Dns:ApiToken"] = envToken })   // the environment layer
+            .AddJsonFile(_paths.AppSettingsJson, optional: false)
+            .Build();
+        var dns = configuration.GetSection(DnsSettings.SectionName).Get<DnsSettings>()!;
+        Assert.Null(dns.ApiTokenRef);
+        Assert.Equal(envToken, dns.ApiToken);
     }
 
     // ---------------------------------------------------------------- helpers

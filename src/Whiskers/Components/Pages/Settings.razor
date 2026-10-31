@@ -962,9 +962,17 @@ else
             }
             var provider = _dnsProvider;
             var ttl = _dnsDefaultTtl;
+            var changedMeanwhile = L["Settings_Dns_Error_ChangedMeanwhile"].Value;
             previous = await Mutations.RunAsync("config.save", new { section = "dns" }, _ =>
-                AppSettings.UpdateSectionAsync(DnsSettings.SectionName,
-                    inLock => Whiskers.Services.Dns.DnsSettingsSection.Next(inLock, provider, newRef, zones, ttl)));
+                AppSettings.UpdateSectionAsync(DnsSettings.SectionName, inLock =>
+                {
+                    // Moving a plaintext token read before: only while the file still holds exactly it — another admin
+                    // may have cleared or replaced it meanwhile, and the save must not bring it back.
+                    if (entered is null && filePlaintext is not null
+                        && Whiskers.Services.Dns.DnsSettingsSection.PlaintextToken(inLock) != filePlaintext)
+                        throw new InvalidOperationException(changedMeanwhile);
+                    return Whiskers.Services.Dns.DnsSettingsSection.Next(inLock, provider, newRef, zones, ttl);
+                }));
         }
         catch (Exception ex) when (newRef is not null || ex is MutationRefusedException or InvalidOperationException
                                        or IOException or UnauthorizedAccessException)

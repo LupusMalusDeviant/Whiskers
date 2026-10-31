@@ -1946,6 +1946,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Error_PlaintextCloudKeyNeedsVault" xml:space="preserve">
     <value>Der Cloud-API-Key dieses Servers liegt noch im Klartext. Den Vault aktivieren (VAULT_KEY), damit das Speichern ihn dorthin verschiebt, oder den Cloud-Provider entfernen, bevor andere Änderungen gespeichert werden.</value>
   </data>
+  <data name="Settings_Dns_Error_ChangedMeanwhile" xml:space="preserve">
+    <value>Die DNS-Einstellungen wurden inzwischen geändert. Seite neu laden und erneut speichern.</value>
+  </data>
   <data name="Settings_Dns_Snackbar_TokenCleanupFailed" xml:space="preserve">
     <value>Der DNS-Token wird nicht mehr verwendet, konnte aber nicht aus dem Vault gelöscht werden (er ist deaktiviert oder gesperrt). Das ungenutzte Secret bleibt verschlüsselt im Vault.</value>
   </data>
