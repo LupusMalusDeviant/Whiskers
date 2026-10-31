@@ -81,7 +81,7 @@ public sealed class HealthCheckTests : IDisposable
     {
         foreach (var f in _tempFiles)
         {
-            TestSqlite.ClearPool(f);
+            if (f.EndsWith(".db")) TestSqlite.ClearPool(f);
             try { if (File.Exists(f)) File.Delete(f); }
             catch { /* best-effort temp cleanup */ }
         }
