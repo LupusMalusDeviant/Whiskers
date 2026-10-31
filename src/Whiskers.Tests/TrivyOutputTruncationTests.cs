@@ -72,15 +72,58 @@ public class TrivyOutputTruncationTests
         // The half that was missing. Cutting was always correct — a runaway command must not exhaust memory.
         // Failing to SAY so is what turned a raised-limit problem into a parser mystery, so the flag matters
         // more here than the text does.
-        var payload = new string('x', 5_000);
+        var payload = string.Concat(Enumerable.Repeat(new string('x', 99) + "\n", 50));
 
         var (text, truncated) = await HostCommandExecutor.ReadCappedAsync(
             new StringReader(payload), cap: 1_000, CancellationToken.None);
 
         Assert.True(truncated);
-        Assert.StartsWith(new string('x', 1_000), text);
+        Assert.StartsWith(payload[..999], text);   // the ten complete lines that fill the cap
         Assert.True(text.Length < payload.Length);
     }
+
+    [Theory]
+    [InlineData("ok line\nclone https://deploy:canary-value-r124@git.example.org/r.git\n")]
+    [InlineData("one long line ending in https://deploy:canary-value-r124@git.example.org/r.git")]
+    [InlineData("{\"repo\":\"https://deploy:canary-value-r124@git.example.org/r.git\"}")]   // no boundary: dropped whole
+    public async Task A_credential_split_by_the_cut_is_dropped_whole(string output)
+    {
+        // R1-24: the cut must not leave the beginning of a secret the URL rule can no longer recognise.
+        var cap = output.IndexOf("canary", StringComparison.Ordinal) + 6;
+
+        var (text, truncated) = await HostCommandExecutor.ReadCappedAsync(new StringReader(output), cap, CancellationToken.None);
+
+        Assert.True(truncated);
+        Assert.DoesNotContain("canary", text);
+        Assert.DoesNotContain("deploy:", text);
+    }
+
+    [Theory]
+    [InlineData("origin\thttps://deploy:canary-value-r124@git.example.org/r.git (fetch)\n", "origin")]
+    [InlineData("a b https://deploy:canary-value-r124@x", "a b")]
+    [InlineData("https://deploy:canary-value-r124@x", "")]
+    public void Every_output_cut_drops_an_incomplete_last_token(string output, string kept)
+    {
+        // R1-24: the agent's 8000-character cut and execute_command's 50 000-character cut use the same rule.
+        var limit = output.IndexOf("canary", StringComparison.Ordinal) + 6;
+
+        Assert.Equal(kept, Whiskers.Utils.ShellUtils.CutAtBoundary(output, limit).TrimEnd());
+        Assert.DoesNotContain("canary", Whiskers.Utils.ShellUtils.Truncate(output, limit));
+    }
+
+    [Fact]
+    public async Task A_cap_just_before_a_line_break_keeps_the_complete_line()
+    {
+        var (text, truncated) = await HostCommandExecutor.ReadCappedAsync(
+            new StringReader("first line\nsecond line\nthird"), cap: 22, CancellationToken.None);
+
+        Assert.True(truncated);
+        Assert.StartsWith("first line\nsecond line\n", text);
+    }
+
+    [Fact]
+    public void A_cut_just_before_whitespace_keeps_the_complete_token() =>
+        Assert.Equal("one two", Whiskers.Utils.ShellUtils.CutAtBoundary("one two three", 7));
 
     [Fact]
     public async Task The_marker_that_a_parser_chokes_on_is_still_the_marker_that_is_appended()
@@ -88,9 +131,9 @@ public class TrivyOutputTruncationTests
         // Pins the actual byte from the incident. If the marker ever changes, this test is where somebody
         // learns that the character a JSON reader reported as "0xE2" came from us, not from Trivy.
         var (text, _) = await HostCommandExecutor.ReadCappedAsync(
-            new StringReader(new string('x', 100)), cap: 10, CancellationToken.None);
+            new StringReader(new string('x', 9) + "\n" + new string('x', 90)), cap: 12, CancellationToken.None);
 
-        var marker = text[10..];
+        var marker = text[9..];
         Assert.Contains('…', marker);
         Assert.Equal(0xE2, System.Text.Encoding.UTF8.GetBytes(marker.TrimStart('\n'))[0]);
     }

@@ -6,7 +6,7 @@ Host-level operations that go beyond Docker, the things you'd normally SSH into 
 
 | File | Purpose |
 |---|---|
-| `IHostCommandExecutor.cs` / `HostCommandExecutor.cs` | Runs a shell command on a host and returns a `CommandResult` (stdout/stderr/exit code, plus `OutputTruncated`). The shared primitive every other service in this folder builds on. |
+| `IHostCommandExecutor.cs` / `HostCommandExecutor.cs` | Runs a shell command on a host and returns a `CommandResult` (stdout/stderr/exit code, plus `OutputTruncated`; a cut output ends at its last complete line or word — without any boundary the cut part is dropped — so no half-cut credential remains, R1-24). The shared primitive every other service in this folder builds on. |
 | `IFirewallService.cs` / `FirewallService.cs` | Inspects and manages the host firewall (ufw), list, add, remove rules. |
 | `INginxService.cs` / `NginxService.cs` | Lists and edits Nginx site configurations on a host. |
 | `ISystemdService.cs` / `SystemdService.cs` | Lists and controls systemd units (start/stop/restart/status). |
@@ -16,7 +16,9 @@ Host-level operations that go beyond Docker, the things you'd normally SSH into 
 ## Output cap
 
 Command output is buffered per stream up to a cap (default ~1 MB) so a runaway command cannot exhaust memory;
-anything beyond it is drained and discarded, and `… (Ausgabe gekürzt)` is appended.
+anything beyond it is drained and discarded, and `… (Ausgabe gekürzt)` is appended. The kept part ends at its last
+complete line (or word, for one long line); without any such boundary it is dropped, so no half-cut credential is
+stored (R1-24).
 
 Two things follow from that, both learned the hard way (2026-08-27):
 

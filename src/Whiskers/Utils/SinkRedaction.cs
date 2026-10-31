@@ -61,7 +61,7 @@ public static class SinkRedaction
 
     // Exactly the marker this class writes: a caller's "<withheld: …>" carrying anything else is a payload like any other.
     private static readonly System.Text.RegularExpressions.Regex WithheldMarker = new(
-        @"^<withheld: [0-9]{1,10} chars>$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        @"\A<withheld: [0-9]{1,10} chars>\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static bool IsWithheld(string text) => WithheldMarker.IsMatch(text);
 
@@ -191,14 +191,46 @@ public static class SinkRedaction
     public static string? WithoutPayloadValues(string? text, IReadOnlyDictionary<string, JsonElement> arguments)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        foreach (var (key, value) in arguments)
+        // Every place any payload value occurs, found in the original text and merged where they overlap: values that
+        // contain or overlap each other (/srv/app-X and X:/data) go as one span, never leaving a rest.
+        var spans = new List<(int Start, int End)>();
+        foreach (var payload in arguments.Where(a => IsPayload(a.Key)).SelectMany(a => StringLeaves(a.Value))
+                     .Where(p => p.Length >= 3).Distinct(StringComparer.Ordinal))
+            for (var at = text.IndexOf(payload, StringComparison.Ordinal); at >= 0;
+                 at = text.IndexOf(payload, at + 1, StringComparison.Ordinal))
+                spans.Add((at, at + payload.Length));
+        if (spans.Count == 0) return text;
+        var result = new System.Text.StringBuilder(text.Length);
+        var copied = 0;
+        foreach (var (start, end) in spans.OrderBy(s => s.Start))
         {
-            if (!IsPayload(key) || value.ValueKind != JsonValueKind.String) continue;
-            var payload = value.GetString();
-            if (!string.IsNullOrEmpty(payload) && payload.Length >= 3)
-                text = text.Replace(payload, "<withheld>", StringComparison.Ordinal);
+            if (end <= copied) continue;   // inside the span already withheld
+            if (start >= copied)
+            {
+                result.Append(text, copied, start - copied).Append("<withheld>");
+            }
+            copied = end;
         }
-        return text;
+        return result.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    // Every string in a payload, also inside an object or a list (an env map's values, a list of mounts).
+    private static IEnumerable<string> StringLeaves(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                if (value.GetString() is { } text) yield return text;
+                break;
+            case JsonValueKind.Object:
+                foreach (var property in value.EnumerateObject())
+                    foreach (var leaf in StringLeaves(property.Value)) yield return leaf;
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                    foreach (var leaf in StringLeaves(item)) yield return leaf;
+                break;
+        }
     }
 
     /// <summary>A URL's user info (<c>https://user:token@host</c>, also a token alone in front of the host) as

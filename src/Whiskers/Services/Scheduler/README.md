@@ -32,3 +32,4 @@ the background loop doesn't run, the tools/nav disappear and `/tasks` shows a di
 **Stored results (R1-24):** a run's output and error and a task's last result are redacted on save by
 [`SinkRedactionInterceptor`](../Persistence/SinkRedactionInterceptor.cs). JSON output is redacted value by value and
 re-written compactly; a key named after a secret (`token`, `maxTokens`, `password` …) shows `***`.
+The executor cuts a run's output at 1 MB at the last complete line (or word), so no half-cut credential is stored.

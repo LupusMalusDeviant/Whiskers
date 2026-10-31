@@ -246,6 +246,7 @@ public class HostCommandExecutor : IHostCommandExecutor
         var buffer = new char[8192];
         var sb = new System.Text.StringBuilder();
         var truncated = false;
+        var cutBeforeWhitespace = false;
 
         int read;
         while ((read = await reader.ReadAsync(buffer, ct)) > 0)
@@ -261,6 +262,8 @@ public class HostCommandExecutor : IHostCommandExecutor
                 {
                     if (remaining > 0)
                         sb.Append(buffer, 0, remaining);
+                    // The first character beyond the cap: whitespace there means the kept text ends on a complete token.
+                    cutBeforeWhitespace = char.IsWhiteSpace(buffer[Math.Max(remaining, 0)]);
                     truncated = true;
                 }
             }
@@ -268,7 +271,14 @@ public class HostCommandExecutor : IHostCommandExecutor
         }
 
         if (truncated)
-            sb.Append('\n').Append(TruncationMarker);
+        {
+            // The cut falls anywhere — also inside a credential (https://user:secr…), where no redaction pattern can
+            // recognise what is left (R1-24). The incomplete last line goes (or the incomplete last word, for one
+            // long line); text without any boundary (a minified document) is dropped whole — fail closed, the
+            // caller sees OutputTruncated.
+            var kept = cutBeforeWhitespace ? sb.ToString() : Whiskers.Utils.ShellUtils.DropIncompleteTail(sb.ToString());
+            sb.Clear().Append(kept).Append('\n').Append(TruncationMarker);
+        }
 
         return (sb.ToString(), truncated);
     }

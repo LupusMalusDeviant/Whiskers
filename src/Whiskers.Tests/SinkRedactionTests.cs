@@ -95,6 +95,55 @@ public sealed class SinkRedactionTests
             JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new { command = payload }))!)["command"]?.ToString());
     }
 
+    [Fact]
+    public void Only_the_exact_marker_counts_as_withheld()
+    {
+        var stored = SinkRedaction.Arguments(JsonSerializer.Serialize(new { command = "<withheld: 3 chars>\n" }));
+        Assert.Contains("\"command\":\"<withheld: 20 chars>\"", stored);
+    }
+
+    [Fact]
+    public void A_reason_loses_the_values_of_object_and_list_payloads_too()
+    {
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new
+        {
+            envVars = new Dictionary<string, string> { ["DB_PASS"] = Canary },
+            volumes = new[] { $"/srv/{Canary}:/data" },
+            containerId = "web",
+        }))!;
+
+        var reason = SinkRedaction.WithoutPayloadValues($"refused: {Canary} and /srv/{Canary}:/data on web", arguments);
+
+        AssertClean(reason);
+        Assert.Contains("on web", reason);
+    }
+
+    [Fact]
+    public void Overlapping_payload_values_leave_no_rest_in_a_reason()
+    {
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new
+        {
+            volumes = new[] { "/srv/app", $"/srv/app-{Canary}:/data" },
+        }))!;
+
+        var reason = SinkRedaction.WithoutPayloadValues($"refused: /srv/app-{Canary}:/data", arguments);
+
+        Assert.Equal("refused: <withheld>", reason);
+    }
+
+    [Fact]
+    public void Payload_values_that_overlap_without_containing_each_other_go_as_one()
+    {
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new
+        {
+            volumes = new[] { $"/srv/app-{Canary}", $"{Canary}:/data" },
+        }))!;
+
+        var reason = SinkRedaction.WithoutPayloadValues($"a /srv/app-{Canary}:/data b {Canary}:/data", arguments);
+
+        Assert.Equal("a <withheld> b <withheld>", reason);
+    }
+
     [Theory]
     [MemberData(nameof(Secrets))]
     public void A_secret_in_an_ordinary_argument_is_redacted(string secret) =>
