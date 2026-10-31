@@ -15,21 +15,25 @@ public static class SecretSource
         ArgumentNullException.ThrowIfNull(configuration);
         var setting = name + "_FILE";
         var path = configuration[setting] ?? Environment.GetEnvironmentVariable(setting);
-        if (!string.IsNullOrWhiteSpace(path))
-        {
-            string value;
-            try
-            {
-                value = File.ReadAllText(path).Trim();
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-            {
-                throw new SecretFileException(setting, ex);
-            }
-            return value.Length > 0 ? value : throw new SecretFileException(setting, null);
-        }
+        if (!string.IsNullOrWhiteSpace(path)) return ReadFile(setting, path);
         var plain = configuration[name] ?? Environment.GetEnvironmentVariable(name);
         return string.IsNullOrEmpty(plain) ? null : plain;
+    }
+
+    /// <summary>The trimmed content of the secret file <paramref name="path"/>, named by <paramref name="setting"/>.</summary>
+    /// <exception cref="SecretFileException">The file cannot be read or is empty.</exception>
+    public static string ReadFile(string setting, string path)
+    {
+        string value;
+        try
+        {
+            value = File.ReadAllText(path).Trim();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            throw new SecretFileException(setting, ex);
+        }
+        return value.Length > 0 ? value : throw new SecretFileException(setting, null);
     }
 
     /// <summary>The vault passphrase: <c>VAULT_KEY_FILE</c> or <c>VAULT_KEY</c>.</summary>

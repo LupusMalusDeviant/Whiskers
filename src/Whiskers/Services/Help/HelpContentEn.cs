@@ -290,7 +290,7 @@ internal static class HelpContentEn
                 new("Self-Backup", """
                     Under **Settings > Backup**, Whiskers backs up its **own data directory**
                     (server list, vault, metrics, keys) as a tar.gz — optionally **encrypted**
-                    (AES-256-GCM, derived from the `VAULT_KEY`). Also available as a **scheduled task**
+                    (AES-256-GCM, derived from the `VAULT_KEY` or the file named by `VAULT_KEY_FILE`; while the key does not match the vault no backup is created). Also available as a **scheduled task**
                     with a retention rule. Separate from this, **volume backups** for your containers'
                     data continue to exist.
                     """),

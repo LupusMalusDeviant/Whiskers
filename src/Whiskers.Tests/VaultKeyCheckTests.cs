@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -270,6 +271,48 @@ public class VaultKeyCheckTests : IDisposable
         Assert.Equal("WHISKERS_DB_CONNECTION_FILE", ex.Setting);
     }
 
+    [Fact]
+    public async Task Key_check_replaced_by_one_of_the_vaults_own_entries_locks_the_vault()
+    {
+        var vault = await Open(RightKey);
+        await vault.SetSecretAsync("token", "value-1");
+        var data = ReadFile();
+        data.KeyCheck = data.Entries.Single().EncryptedValue;   // opens under the key, but is not the check text
+        WriteFile(data);
+        var before = File.ReadAllBytes(VaultPath);
+
+        var reopened = await Open(RightKey);
+        Assert.Equal(VaultKeyState.Wrong, reopened.KeyState);
+        Assert.Equal(before, File.ReadAllBytes(VaultPath));
+    }
+
+    private sealed class NoLifetime : Microsoft.Extensions.Hosting.IHostApplicationLifetime
+    {
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+        public void StopApplication() { }
+    }
+
+    [Fact]
+    public async Task No_self_backup_is_sealed_with_a_key_the_vault_rejected()
+    {
+        var vault = await Open(RightKey);
+        await vault.SetSecretAsync("token", "value-1");
+        var wrong = await Open(WrongKey);
+        var paths = new DataPathOptions(_dir);
+        using var sp = new ServiceCollection().BuildServiceProvider();
+
+        var backup = new Whiskers.Services.Backup.BackupService(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            new Whiskers.Services.Maintenance.MaintenanceStateService(), new NoLifetime(),
+            Config(("VAULT_KEY", WrongKey)), NullLogger<Whiskers.Services.Backup.BackupService>.Instance, paths, wrong);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => backup.CreateBackupAsync("manual"));
+        Assert.Contains("does not match", ex.Message);
+        Assert.False(Directory.Exists(paths.SelfBackupsDir) && Directory.EnumerateFiles(paths.SelfBackupsDir).Any());
+    }
+
     // ---------------------------------------------------------------- legacy CBC
 
     [Fact]
@@ -400,6 +443,26 @@ public class VaultKeyCheckTests : IDisposable
         Assert.Equal(VaultKeyState.Wrong, vault.KeyState);
         Assert.Equal(before, File.ReadAllBytes(VaultPath));
         Assert.False(File.Exists(CopyPath));
+    }
+
+    [Fact]
+    public async Task Legacy_entry_that_never_decrypts_in_a_proven_vault_gets_no_copy_on_any_start()
+    {
+        var vault = await Open(RightKey);
+        await vault.SetSecretAsync("new", "gcm value");
+        var data = ReadFile();
+        data.Entries.Add(new VaultEntry { Key = "broken", EncryptedValue = LegacyCbc(WrongKey, "legacy value — long enough text") });
+        WriteFile(data);
+        var before = File.ReadAllBytes(VaultPath);
+
+        for (var i = 0; i < 2; i++)
+        {
+            var reopened = await Open(RightKey);
+            Assert.Equal(VaultKeyState.Verified, reopened.KeyState);
+            Assert.Equal("gcm value", reopened.GetSecret("new"));
+        }
+        Assert.Empty(Directory.GetFiles(_dir, "vault.json.legacy-cbc*"));
+        Assert.Equal(before, File.ReadAllBytes(VaultPath));
     }
 
     [Fact]

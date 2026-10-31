@@ -293,7 +293,7 @@ public sealed class HelpContentService : IHelpContentService
                 new("Selbst-Backup", """
                     Unter **Einstellungen > Backup** sichert Whiskers sein **eigenes Datenverzeichnis**
                     (Server-Liste, Vault, Metriken, Schlüssel) als tar.gz — auf Wunsch **verschlüsselt**
-                    (AES-256-GCM, abgeleitet vom `VAULT_KEY`). Auch als **geplante Aufgabe** mit
+                    (AES-256-GCM, abgeleitet vom `VAULT_KEY` bzw. aus der Datei in `VAULT_KEY_FILE`; passt der Schlüssel nicht zum Vault, wird kein Backup erstellt). Auch als **geplante Aufgabe** mit
                     Aufbewahrungsregel. Davon getrennt gibt es weiterhin **Volume-Backups** für die Daten
                     deiner Container.
                     """),

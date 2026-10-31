@@ -149,6 +149,18 @@ public class VaultService : IVaultService, IInitializable
     /// untouched copy of vault.json is kept beside it.</summary>
     private bool MigrateLegacy(VaultData next, bool provenByKeyCheck)
     {
+        // Decrypt every legacy entry first: a vault that cannot be converted gets no copy (one per start would pile up).
+        var plains = new Dictionary<VaultEntry, string>();
+        foreach (var e in next.Entries.Where(e => !string.IsNullOrEmpty(e.EncryptedValue) && !IsGcm(e.EncryptedValue)))
+        {
+            if (!TryLegacy(e.EncryptedValue, out var plain))
+            {
+                _logger.LogError("Vault: legacy entry {Key} does not decrypt — no legacy entry converted", e.Key);
+                return false;
+            }
+            plains[e] = plain;
+        }
+
         string copy;
         try
         {
@@ -160,16 +172,7 @@ public class VaultService : IVaultService, IInitializable
             return false;
         }
 
-        var converted = new Dictionary<VaultEntry, string>();
-        foreach (var e in next.Entries.Where(e => !string.IsNullOrEmpty(e.EncryptedValue) && !IsGcm(e.EncryptedValue)))
-        {
-            if (!TryLegacy(e.EncryptedValue, out var plain))
-            {
-                _logger.LogError("Vault: legacy entry {Key} does not decrypt — no legacy entry converted", e.Key);
-                return false;
-            }
-            converted[e] = Encrypt(_masterKey!, plain);
-        }
+        var converted = plains.ToDictionary(p => p.Key, p => Encrypt(_masterKey!, p.Value));
         foreach (var (entry, value) in converted) entry.EncryptedValue = value;
         if (!provenByKeyCheck)
             _logger.LogWarning("Vault: {Count} legacy entries converted with a key that only their padding and text could "
