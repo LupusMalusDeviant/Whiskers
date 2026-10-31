@@ -278,6 +278,21 @@ public partial class SecretsAtRestTests
     }
 
     [Fact]
+    public async Task Passwords_and_keys_are_stored_as_typed_and_urls_and_tokens_trimmed()
+    {
+        var vault = await Vault();
+        var password = "  pass word " + Guid.NewGuid().ToString("N") + " ";
+        var token = "BOT-" + Guid.NewGuid().ToString("N");
+        await VaultBackedSettingsSave.SaveAppSettingsAsync(new SettingsRunner(), vault, AppSettings(), "notifications",
+            PlainSections(), [new SecretInput("Email", "Password", password), new SecretInput("Telegram", "BotToken", "  " + token + " ")],
+            "needs vault");
+
+        var values = Materialized(SettingsConfiguration(), vault);
+        Assert.Equal(password, values[("Email", "Password")]);
+        Assert.Equal(token, values[("Telegram", "BotToken")]);
+    }
+
+    [Fact]
     public void A_plaintext_value_next_to_a_reference_still_counts_as_plaintext()
     {
         var section = new JsonObject { ["Password"] = "hand-edited", ["PasswordRef"] = "settings:email:password:x" };

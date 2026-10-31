@@ -29,6 +29,16 @@ public static class VaultBackedSettings
         [AgentSection] = ["ApiKey"],
     };
 
+    /// <summary>Section:Property of the values stored as typed — passwords, secrets and API keys may carry leading or
+    /// trailing spaces, as before R1-30; URLs, tokens and the topic are trimmed.</summary>
+    private static readonly HashSet<string> Verbatim = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Matrix:AccessToken", "Email:Password", "WebhookNotification:Secret", "AiChat:ApiKey", $"{AgentSection}:ApiKey",
+    };
+
+    /// <summary>Whether an entered value of <paramref name="property"/> is stored exactly as typed (not trimmed).</summary>
+    public static bool IsVerbatim(string section, string property) => Verbatim.Contains($"{section}:{property}");
+
     /// <summary>The sections of app-settings.json (every one but the agent's).</summary>
     public static IEnumerable<string> AppSettingsSections => Fields.Keys.Where(s => !IsAgent(s));
 

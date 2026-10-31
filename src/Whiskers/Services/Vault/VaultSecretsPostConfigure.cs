@@ -49,7 +49,7 @@ public sealed class VaultSecretsPostConfigure<T> : IPostConfigureOptions<T> wher
                     _logger.LogWarning("{Section}:{Property} is kept in the vault, and the vault is {State}; it is treated as not set",
                         _section, property.Name, state);
             }
-            else if ((value = _vault.GetSecret(vaultKey)) is null)
+            else if ((value = _vault.GetSecret(vaultKey)) is null && Warned.TryAdd($"{_section}:{property.Name}:missing:{vaultKey}", 0))
                 _logger.LogWarning("{Section}:{Property} names a vault entry that is missing; it is treated as not set",
                     _section, property.Name);
             property.SetValue(options, value ?? "");

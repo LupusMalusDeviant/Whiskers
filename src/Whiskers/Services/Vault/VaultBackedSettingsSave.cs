@@ -83,7 +83,8 @@ public static class VaultBackedSettingsSave
         foreach (var input in secrets)
         {
             if (input.Clear) changes[(input.Section, input.Property)] = SecretFieldChange.Clear;
-            else if (!string.IsNullOrWhiteSpace(input.Entered)) plan.Add((input, input.Entered.Trim(), false));
+            else if (!string.IsNullOrWhiteSpace(input.Entered))
+                plan.Add((input, VaultBackedSettings.IsVerbatim(input.Section, input.Property) ? input.Entered : input.Entered.Trim(), false));
             else if (VaultBackedSettings.PlaintextValue(stored(input.Section), input.Property) is { } legacy) plan.Add((input, legacy, true));
         }
         if (plan.Count > 0 && !vault.IsEnabled) throw new InvalidOperationException(needsVault);
