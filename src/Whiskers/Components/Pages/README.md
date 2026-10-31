@@ -20,7 +20,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Servers.razor` | The fleet: configured servers, add/edit, onboarding. Saving a Kubernetes server writes a changed kubeconfig as its own gateway decision (`vault.secret_set`, R1-11) under a new vault key (`ServerConfig.KubeconfigRef`) that takes effect only with the saved server record; the unused key is then removed (`vault.secret_delete`). Removing a server removes its kubeconfig within the one `server.remove` decision (`ServerRemoval`). |
+| `Servers.razor` | The fleet: configured servers, add/edit, onboarding. Saving a Kubernetes server writes a changed kubeconfig as its own gateway decision (`vault.secret_set`, R1-11) under a new vault key (`ServerConfig.KubeconfigRef`) that takes effect only with the saved server record; the unused key is then removed (`vault.secret_delete`). Removing a server removes its kubeconfig within the one `server.remove` decision (`ServerRemoval`). The cloud API key (R1-29) follows the same pattern: written to the vault under a new key (`ServerConfig.CloudKeyRef`), the old key removed after the save; a save needs a usable vault (refused otherwise), a legacy plaintext key moves into the vault with the next save (only while the record still holds it), and removal also removes the cloud key. A key that cannot be removed because the vault is disabled or locked is reported. |
 | `Terminal.razor` / `ServerTerminal.razor` | Web terminal (container / host); the views open the session through the gateway (`terminal.container_open` / `terminal.host_open`, R1-17). |
 | `Firewall.razor` (+ `AddFirewallRuleDialog.razor`) | ufw firewall management. |
 | `NginxManager.razor` | Nginx site configuration editor. |
@@ -58,7 +58,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Settings.razor` | All configuration, auth, whitelist, MCP keys, notifications, integrations, agent, guardrails, vault. Every save runs through the Mutation Gateway as an Admin-only capability (`config.*`, `mcp.key_*`, `vault.secret_*`, R1-11); `GuardrailsView`/`AiOperationsView` use `guardrails.save`, `guardrails.kill_switch_off` and `mcp.key_create`. |
+| `Settings.razor` | All configuration, auth, whitelist, MCP keys, notifications, integrations, agent, guardrails, vault. Every save runs through the Mutation Gateway as an Admin-only capability (`config.*`, `mcp.key_*`, `vault.secret_*`, R1-11); `GuardrailsView`/`AiOperationsView` use `guardrails.save`, `guardrails.kill_switch_off` and `mcp.key_create`. The DNS token (R1-29) is written to the vault under a new key (`vault.secret_set`), then the `Dns` section is rebuilt under the store's lock naming that key (`config.save`), and the old key is removed (`vault.secret_delete`); without a usable vault a save that would store a token is refused. |
 | `Login.razor` | Sign-in page. |
 | `Error.razor` | Error page. |
 

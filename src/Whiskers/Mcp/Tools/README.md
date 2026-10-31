@@ -16,8 +16,8 @@ The authoritative level of every mutating tool is the capability table [`../../S
 | `LogTools.cs` | Log search and log alerts |
 | `SchedulerTools.cs` | Scheduled tasks, list/create/delete/run |
 | `CveTools.cs` | CVE summaries (server/container) + `list_cve_groups` (de-duplicated: one CVE-ID with all affected targets, age, fix availability) |
-| `CloudTools.cs` | Out-of-band cloud control (provider-agnostic) |
-| `HetznerTools.cs` | Hetzner-specific extras (rescue, backups, snapshots, server type) |
+| `CloudTools.cs` | Out-of-band cloud control (provider-agnostic). A cloud API key kept in a disabled or locked vault (R1-29) is answered with that reason, never a tool exception or a silent "no key". |
+| `HetznerTools.cs` | Hetzner-specific extras (rescue, backups, snapshots, server type). Same locked-vault answer as `CloudTools` (R1-29). |
 | `DnsTools.cs` | `list_dns_records`, `set_dns_record`, `delete_dns_record` — zone records at the configured DNS provider (Infomaniak); one global token under *Settings > DNS*, zone-fenced, A/AAAA/CNAME/TXT only, `set` is idempotent |
 | `AgentTools.cs` | `instruct_agent`, delegate a natural-language task to the in-process agent |
 | `GitDeployTools.cs` | `list_git_deploy_apps` — repos, branches, last deploy outcome. **Read-only** (Plan-0013 WP4) |

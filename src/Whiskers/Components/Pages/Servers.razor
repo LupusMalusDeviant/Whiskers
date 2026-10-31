@@ -636,7 +636,10 @@
             await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
                 _ => Vault.SetSecretAsync(vaultKey, apiKey));
             _newCloudKey = vaultKey;
-            cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Set(vaultKey);
+            // A moved plaintext key applies only while the stored record still holds it (decided under the store lock).
+            cloudKey = string.IsNullOrWhiteSpace(_cloudApiKey)
+                ? Whiskers.Services.ServerConfig.CloudKeyChange.Move(vaultKey, apiKey)
+                : Whiskers.Services.ServerConfig.CloudKeyChange.Set(vaultKey);
         }
         _form.CloudApiKey = null;
 

@@ -209,6 +209,24 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void Moving_a_plaintext_cloud_key_applies_only_while_the_record_still_holds_it()
+    {
+        var legacy = Secret("CLOUDKEY");
+        var move = CloudKeyChange.Move(CredentialRefs.NewCloudKey("hetz"), legacy);
+        var stored = new ServerConfig { Id = "hetz", CloudProvider = CloudProvider.Hetzner, CloudApiKey = legacy };
+
+        var record = stored.Clone();
+        move.ApplyTo(record, stored);
+        Assert.Null(record.CloudApiKey);
+        Assert.NotNull(record.CloudKeyRef);
+
+        // Cleared or replaced by another save meanwhile: the move is refused instead of bringing the key back.
+        Assert.Throws<InvalidOperationException>(() => move.ApplyTo(stored.Clone(), new ServerConfig { Id = "hetz" }));
+        Assert.Throws<InvalidOperationException>(() => move.ApplyTo(stored.Clone(),
+            new ServerConfig { Id = "hetz", CloudKeyRef = CredentialRefs.NewCloudKey("hetz") }));
+    }
+
+    [Fact]
     public async Task Servers_failed_record_write_removes_the_new_cloud_key()
     {
         var original = Secret("CLOUDKEY");

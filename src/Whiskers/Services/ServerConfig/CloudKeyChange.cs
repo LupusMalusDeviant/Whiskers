@@ -7,11 +7,15 @@ namespace Whiskers.Services.ServerConfig;
 /// </summary>
 public sealed record CloudKeyChange
 {
-    private CloudKeyChange(string? newRef, bool clear)
+    private CloudKeyChange(string? newRef, bool clear, string? movedPlaintext = null)
     {
         NewRef = newRef;
         Clears = clear;
+        _movedPlaintext = movedPlaintext;
     }
+
+    // Set by Move: the plaintext the save read and moved into the vault.
+    private readonly string? _movedPlaintext;
 
     /// <summary>The vault key that holds the new API key, or null.</summary>
     public string? NewRef { get; }
@@ -32,11 +36,25 @@ public sealed record CloudKeyChange
         return new(vaultRef, false);
     }
 
+    /// <summary>Use the key stored under <paramref name="vaultRef"/>, which holds the plaintext key
+    /// <paramref name="movedPlaintext"/> the save read from the stored record — only while the record still holds exactly
+    /// it, so a key another admin cleared or replaced meanwhile is not brought back.</summary>
+    public static CloudKeyChange Move(string vaultRef, string movedPlaintext)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(vaultRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(movedPlaintext);
+        return new(vaultRef, false, movedPlaintext);
+    }
+
     /// <summary>Applies the change to <paramref name="server"/>, against <paramref name="stored"/> (the record as it is
     /// stored now). The plaintext field is only ever kept or removed, never set.</summary>
     public void ApplyTo(Models.ServerConfig server, Models.ServerConfig? stored)
     {
         ArgumentNullException.ThrowIfNull(server);
+        if (_movedPlaintext is not null
+            && (stored is null || stored.CloudKeyRef is not null || stored.CloudApiKey != _movedPlaintext))
+            throw new InvalidOperationException(
+                "Der Cloud-API-Key dieses Servers wurde inzwischen geändert. Seite neu laden und erneut speichern.");
         if (NewRef is not null)
         {
             server.CloudKeyRef = NewRef;
