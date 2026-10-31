@@ -149,7 +149,8 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
     private static string Render(object? value, string spec)
     {
         if (value is null) return "(null)";
-        if (spec.Length == 0) return value.ToString() ?? "";
+        // Invariant, as the framework formats a log message, whatever culture the logging thread runs in.
+        if (spec.Length == 0) return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "";
         try
         {
             return string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0" + spec + "}", value);

@@ -187,6 +187,24 @@ public sealed partial class SinkRedactionTests
     }
 
     [Fact]
+    public void A_rebuilt_message_formats_numbers_and_dates_invariantly()
+    {
+        var (factory, capture) = Logging();
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+        try
+        {
+            factory.CreateLogger("Test").LogWarning("Load {Percent} since {Since}", 12.5, new DateTime(2026, 10, 31, 8, 0, 0));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = culture;
+        }
+
+        Assert.Equal("Load 12.5 since 10/31/2026 08:00:00", Assert.Single(capture.Messages));
+    }
+
+    [Fact]
     public void A_template_that_looks_like_a_secret_never_falls_back_to_the_raw_formatter()
     {
         var (factory, capture) = Logging();
