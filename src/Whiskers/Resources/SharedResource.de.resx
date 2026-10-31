@@ -1931,6 +1931,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Settings_Alert_VaultDisabled" xml:space="preserve">
     <value>Vault ist deaktiviert. Setze die Umgebungsvariable &lt;code&gt;VAULT_KEY&lt;/code&gt; um Secrets verschlüsselt zu speichern.</value>
   </data>
+  <data name="Settings_Alert_VaultKeyWrong" xml:space="preserve">
+    <value>Vault ist gesperrt: &lt;code&gt;VAULT_KEY&lt;/code&gt; passt nicht zu diesem Vault. Secrets werden weder gelesen noch geschrieben, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.</value>
+  </data>
+  <data name="Vault_Error_KeyWrong" xml:space="preserve">
+    <value>Vault ist gesperrt: VAULT_KEY passt nicht zu diesem Vault. Den richtigen Schlüssel setzen und neu starten.</value>
+  </data>
   <data name="Settings_Alert_WhitelistEmpty" xml:space="preserve">
     <value>Whitelist ist aktiviert aber leer — niemand kann sich anmelden!</value>
   </data>

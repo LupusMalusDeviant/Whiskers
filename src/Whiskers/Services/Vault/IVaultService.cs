@@ -6,6 +6,11 @@ namespace Whiskers.Services.Vault;
 public interface IVaultService
 {
     bool IsEnabled { get; }
+
+    /// <summary>R1-28: whether the configured key is this vault's key. Only <see cref="VaultKeyState.Verified"/>
+    /// reads and writes; a wrong or unprovable key leaves the file exactly as it is.</summary>
+    VaultKeyState KeyState => IsEnabled ? VaultKeyState.Verified : VaultKeyState.NotConfigured;
+
     Task InitializeAsync(CancellationToken ct = default);
     List<VaultEntry> ListSecrets();
     [Whiskers.Services.Mutations.MutatingOperation("vault.secret_set")]
@@ -14,4 +19,17 @@ public interface IVaultService
     [Whiskers.Services.Mutations.MutatingOperation("vault.secret_delete")]
     Task DeleteSecretAsync(string key);
     List<VaultEntry> GetExpiringSecrets();
+}
+
+/// <summary>The vault key as the vault judged it at start (R1-28).</summary>
+public enum VaultKeyState
+{
+    /// <summary>Neither VAULT_KEY nor VAULT_KEY_FILE is set: the vault is off.</summary>
+    NotConfigured,
+
+    /// <summary>The key decrypts the vault's key check (or an existing entry, or the vault is new).</summary>
+    Verified,
+
+    /// <summary>The key decrypts neither the key check nor any entry: nothing is read, written or migrated.</summary>
+    Wrong,
 }

@@ -492,10 +492,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `VaultKeyCheckTests` covers correct/wrong key, tampering, restart, salt persistence and disabled-vault writes.
-- [ ] Wrong keys prevent writes and legacy migration without altering ciphertext.
-- [ ] `VAULT_KEY_FILE` is supported; explicitly configured unreadable secret files fail closed.
-- [ ] Legacy CBC conversion preserves an untouched recovery copy and never treats padding success as proof of the correct key.
+- [x] `VaultKeyCheckTests` covers correct/wrong key, tampering, restart, salt persistence and disabled-vault writes.
+- [x] Wrong keys prevent writes and legacy migration without altering ciphertext.
+- [x] `VAULT_KEY_FILE` is supported; explicitly configured unreadable secret files fail closed.
+- [x] Legacy CBC conversion preserves an untouched recovery copy and never treats padding success as proof of the correct key.
 
 **Out of scope:** New custom cryptography or changing the established AEAD format unnecessarily.
 

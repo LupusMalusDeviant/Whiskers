@@ -561,7 +561,15 @@ else
     @* Secret Vault *@
     <MudExpansionPanel Text="Secret Vault" Icon="@Icons.Material.Filled.VpnKey">
         <MudGrid>
-            @if (!VaultService.IsEnabled)
+            @if (VaultService.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong)
+            {
+                <MudItem xs="12">
+                    <MudAlert Severity="Severity.Error" Dense="true">
+                        @((MarkupString)L["Settings_Alert_VaultKeyWrong"].Value)
+                    </MudAlert>
+                </MudItem>
+            }
+            else if (!VaultService.IsEnabled)
             {
                 <MudItem xs="12">
                     <MudAlert Severity="Severity.Warning" Dense="true">

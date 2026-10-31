@@ -50,9 +50,12 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         checks.Add(new ReadinessCheck(
             "Secret-Vault aktiv (VAULT_KEY)",
             _vault.IsEnabled,
-            _vault.IsEnabled
-                ? "Secrets werden verschlüsselt gespeichert; Backups sind verschlüsselbar."
-                : "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
+            _vault.KeyState switch
+            {
+                VaultKeyState.Verified => "Secrets werden verschlüsselt gespeichert; Backups sind verschlüsselbar.",
+                VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
+                _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
+            },
             null, null));
 
         // 3) Self-backup schedule (F3) + 4) update policy — one scope, two cheap queries.

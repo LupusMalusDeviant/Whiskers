@@ -32,8 +32,11 @@ services:
     environment:
       # Container timezone — drives .NET's TimeZoneInfo.Local / ToLocalTime() and log timestamps.
       - TZ=${TZ:-Europe/Berlin}
-      # Secrets-vault passphrase (empty = vault disabled). See .env.example — set a long random value.
+      # Secrets-vault passphrase (empty = vault disabled). See .env.example — set a long random value. Or mount it as a
+      # secret file and set VAULT_KEY_FILE to its path (wins over VAULT_KEY; a missing or empty file stops the start).
       - VAULT_KEY=${VAULT_KEY:-}
+      # Path inside the container (mount the secret file there too); empty = not set.
+      - VAULT_KEY_FILE=${VAULT_KEY_FILE:-}
       # Admin bootstrap: seeded as Admin on first run + flips the whitelist fail-closed. See .env.example.
       - WHISKERS_ADMIN_EMAIL=${WHISKERS_ADMIN_EMAIL:-}
       # Local login (F1): path to a mounted secret file with the admin password → unattended local admin. See .env.example.

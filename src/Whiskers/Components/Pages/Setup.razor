@@ -58,6 +58,11 @@ else if (_step == 2)
     {
         <MudAlert Severity="Severity.Success" Dense="true">@L["Setup_Security_VaultOn"]</MudAlert>
     }
+    else if (_vaultKeyWrong)
+    {
+        @* A new key would lock the existing vault for good: point at the right one instead of offering another. *@
+        <MudAlert Severity="Severity.Error" Dense="true">@((MarkupString)L["Settings_Alert_VaultKeyWrong"].Value)</MudAlert>
+    }
     else
     {
         <MudText Typo="Typo.subtitle2">@L["Setup_Security_VaultKey"]</MudText>
@@ -119,6 +124,7 @@ else
     private string _password = "";
     private string _passwordConfirm = "";
     private bool _vaultEnabled;
+    private bool _vaultKeyWrong;
     private string? _generatedVaultKey;
     private bool _busy;
     private string? _error;
@@ -133,7 +139,8 @@ else
         }
 
         _vaultEnabled = Vault.IsEnabled;
-        if (!_vaultEnabled)
+        _vaultKeyWrong = Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong;
+        if (!_vaultEnabled && !_vaultKeyWrong)
             _generatedVaultKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     }
 

@@ -6,6 +6,21 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-28: **A wrong `VAULT_KEY` no longer touches the vault.** `vault.json` now carries a key check; at start the key
+  must open it (or, on a vault written before, one of its entries). A wrong key, a tampered check or entries without a
+  salt lock the vault: no secret is read, written, deleted or migrated and the file stays exactly as it was. Settings
+  and the production-readiness check show that the key does not match. Legacy AES-CBC entries are converted only when
+  every one of them decrypts to valid text — a padding that happens to fit is no proof of the key — and only after an
+  untouched copy `vault.json.legacy-cbc.bak` is written next to the vault (never overwritten); they are converted all or
+  none. **New:** `VAULT_KEY_FILE` (Docker/Kubernetes secret file) wins over `VAULT_KEY` for the vault, the backup
+  encryption and the audit chain. A configured `VAULT_KEY_FILE` or `WHISKERS_DB_CONNECTION_FILE` that is missing,
+  unreadable or empty now stops the start (it fell back silently before); so does a configured
+  `WHISKERS_ADMIN_PASSWORD_FILE` unless `AUTH_DISABLED` is set, while the admin it seeds does not exist yet (it skipped the seed with a warning). The
+  setup wizard no longer offers a new key when the configured one does not match, every vault-dependent page names a
+  wrong key as such, and no self-backup is created while the vault rejects the key (it would be sealed with the typo). **Recovery:** if a converted legacy vault is later reported as locked with
+  the right key, stop Whiskers, put `vault.json.legacy-cbc.bak` (or the newest `vault.json.legacy-cbc.<time>-<n>.bak`)
+  back as `vault.json`, set the right key and start again. Delete the copy once the converted secrets read correctly —
+  it holds the old unauthenticated ciphertext and is part of every self-backup.
 - R1-25: **Logs and outbound notifications carry no secrets.** Every logger now writes through a redacting logger
   factory, in front of all providers (console, debug, event log): the message, each structured value, the message template, scopes and the full
   exception text are redacted before they reach it, and an entry that cannot be redacted is replaced by

@@ -155,6 +155,41 @@ public sealed class LocalAuthIdentityTests : IDisposable
         Assert.Empty(await users.Users.ToListAsync());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Seeder_stops_the_start_when_the_password_file_is_unusable_and_no_admin_exists(bool exists)
+    {
+        var path = NewDbPath();
+        var pwFile = exists ? NewPwFile("  ") : Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N"));
+        await using var sp = IdentityServices(path);
+        using var scope = sp.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.MigrateAsync();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+
+        var ex = await Assert.ThrowsAsync<Whiskers.Configuration.SecretFileException>(() =>
+            LocalAdminSeeder.SeedAsync(users, Cfg(("WHISKERS_ADMIN_EMAIL", "a@x"), ("WHISKERS_ADMIN_PASSWORD_FILE", pwFile)), NullLogger.Instance));
+        Assert.Equal("WHISKERS_ADMIN_PASSWORD_FILE", ex.Setting);
+        Assert.Empty(await users.Users.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Seeder_ignores_a_removed_password_file_once_the_admin_exists()
+    {
+        var path = NewDbPath();
+        var pwFile = NewPwFile("Str0ngPassw0rd!!");
+        var cfg = Cfg(("WHISKERS_ADMIN_EMAIL", "admin@x"), ("WHISKERS_ADMIN_PASSWORD_FILE", pwFile));
+        await using var sp = IdentityServices(path);
+        using var scope = sp.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.MigrateAsync();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+        await LocalAdminSeeder.SeedAsync(users, cfg, NullLogger.Instance);
+
+        File.Delete(pwFile);   // removed after the first seed, as is common
+        await LocalAdminSeeder.SeedAsync(users, cfg, NullLogger.Instance);
+        Assert.Single(await users.Users.ToListAsync());
+    }
+
     // ---------------------------------------------------------------- DI shape (no parallel role system)
 
     [Fact]

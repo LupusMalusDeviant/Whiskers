@@ -44,7 +44,9 @@ public class RegistryConfigService : IRegistryConfigService
         if (string.IsNullOrWhiteSpace(registry.Name)) throw new ArgumentException("Name is required.");
         if (string.IsNullOrWhiteSpace(registry.Host)) throw new ArgumentException("Host is required.");
         if (credential is { Length: > 0 } && !_vault.IsEnabled)
-            throw new InvalidOperationException("Registry-Credentials benötigen den Vault — VAULT_KEY setzen und neu starten.");
+            throw new InvalidOperationException(_vault.KeyState == VaultKeyState.Wrong
+                ? "Registry-Credentials benötigen den Vault — der Vault ist gesperrt, VAULT_KEY passt nicht zu ihm. Den richtigen Schlüssel setzen und neu starten."
+                : "Registry-Credentials benötigen den Vault — VAULT_KEY setzen und neu starten.");
 
         // R1-11: a failed save leaves the live configuration as it was. A new credential is written under a NEW vault
         // key that no registry names yet, so it takes effect only together with the registry entry that names it —

@@ -19,6 +19,7 @@ namespace Whiskers.Services.Backup;
 public sealed class BackupService : IBackupService
 {
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly Whiskers.Services.Vault.IVaultService? _vault;
     private readonly DataPathOptions _dataPaths;
     private readonly IMaintenanceStateService _maintenance;
     private readonly IHostApplicationLifetime _lifetime;
@@ -38,20 +39,31 @@ public sealed class BackupService : IBackupService
         IHostApplicationLifetime lifetime,
         IConfiguration configuration,
         ILogger<BackupService> logger,
-        DataPathOptions? dataPaths = null)
+        DataPathOptions? dataPaths = null,
+        Whiskers.Services.Vault.IVaultService? vault = null)
     {
+        _vault = vault;
         _scopeFactory = scopeFactory;
         _maintenance = maintenance;
         _lifetime = lifetime;
         _logger = logger;
         _dataPaths = dataPaths ?? DataPathOptions.Default;
-        _vaultKey = configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY");
+        _vaultKey = SecretSource.VaultKey(configuration);
     }
 
     // ---------------------------------------------------------------- create
 
     public async Task<SelfBackupInfo> CreateBackupAsync(string label, CancellationToken ct = default)
     {
+        // R1-28: the archive key is VAULT_KEY. When the vault rejected it, it is a mistyped or changed key — an archive
+        // sealed with it would need that very typo to restore, and the panel would call it encrypted. No backup then.
+        if (_vault?.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong)
+        {
+            _logger.LogError("Self-backup refused: VAULT_KEY does not match the vault, an archive would be sealed with a wrong key");
+            throw new InvalidOperationException(
+                "Self-backup refused: VAULT_KEY does not match the vault. Set the right key and restart, then back up.");
+        }
+
         var id = Guid.NewGuid().ToString("N")[..12];
         var selfDir = _dataPaths.SelfBackupsDir;
         Directory.CreateDirectory(selfDir);

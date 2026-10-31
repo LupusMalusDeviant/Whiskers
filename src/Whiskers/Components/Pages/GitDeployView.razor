@@ -131,7 +131,13 @@ else
         <MudTextField @bind-Value="_formToken" Label="@L["GitDeployView_Field_AccessToken"]" Variant="Variant.Outlined"
                       InputType="InputType.Password" Class="mb-1"
                       HelperText="@(_editing?.HasToken == true ? L["GitDeployView_HelperText_TokenKeep"].Value : L["GitDeployView_HelperText_TokenNew"].Value)" />
-        @if (!Vault.IsEnabled)
+        @if (Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">
+                @((MarkupString)L["Settings_Alert_VaultKeyWrong"].Value)
+            </MudAlert>
+        }
+        else if (!Vault.IsEnabled)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
                 @((MarkupString)L["GitDeployView_Alert_NoVault"].Value)

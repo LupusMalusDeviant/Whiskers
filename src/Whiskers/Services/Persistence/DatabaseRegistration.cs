@@ -22,8 +22,8 @@ public static class DatabaseRegistration
         // ENV aliases win over the config section. A *_FILE secret (Docker/K8s) wins over the plain env var.
         var provider = (builder.Configuration["WHISKERS_DB_PROVIDER"] ?? configured.Provider)
             .Trim().ToLowerInvariant();
-        var connectionString = ReadSecretFile(builder.Configuration["WHISKERS_DB_CONNECTION_FILE"])
-                               ?? builder.Configuration["WHISKERS_DB_CONNECTION"]
+        // A WHISKERS_DB_CONNECTION_FILE that cannot be read stops the start (SecretSource, R1-28).
+        var connectionString = SecretSource.Read(builder.Configuration, "WHISKERS_DB_CONNECTION")
                                ?? configured.ConnectionString;
 
         // Publish the resolved values so services can read them via IOptions if needed.
@@ -85,9 +85,4 @@ public static class DatabaseRegistration
 
         return builder;
     }
-
-    private static string? ReadSecretFile(string? path)
-        => !string.IsNullOrWhiteSpace(path) && File.Exists(path)
-            ? File.ReadAllText(path).Trim()
-            : null;
 }

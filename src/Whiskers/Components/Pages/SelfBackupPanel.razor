@@ -5,6 +5,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject Whiskers.Modules.IModuleRegistry ModuleRegistry
 @inject IConfiguration Configuration
+@inject Whiskers.Services.Vault.IVaultService Vault
 @inject Microsoft.AspNetCore.Components.NavigationManager NavManager
 @inject IStringLocalizer<SharedResource> L
 
@@ -16,7 +17,14 @@
     @((MarkupString)L["SelfBackupPanel_Text_Intro"].Value)
 </MudText>
 
-@if (_encrypted)
+@if (_vaultKeyWrong)
+{
+    @* R1-28: no backup is created while the vault rejects the key it would be sealed with. *@
+    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+        @((MarkupString)L["Settings_Alert_VaultKeyWrong"].Value)
+    </MudAlert>
+}
+else if (_encrypted)
 {
     <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
         @((MarkupString)L["SelfBackupPanel_Alert_Encrypted"].Value)
@@ -108,12 +116,16 @@ else
     private AppRole _role = AppRole.Viewer;
     private bool _busy;
     private bool _encrypted;
+    private bool _vaultKeyWrong;
     private string _provider = "sqlite";
 
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
-        _encrypted = !string.IsNullOrEmpty(Configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY"));
+        // The running backup service read the key at start; a secret file removed since then must not break the page.
+        try { _encrypted = Whiskers.Configuration.SecretSource.VaultKey(Configuration) is not null; }
+        catch (Whiskers.Configuration.SecretFileException) { _encrypted = false; }
+        _vaultKeyWrong = Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong;
         _provider = (Configuration["WHISKERS_DB_PROVIDER"] ?? Configuration["Database:Provider"] ?? "sqlite").ToLowerInvariant();
         await LoadBackups();
     }

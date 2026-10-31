@@ -8,7 +8,7 @@ The storage primitives every other service builds on. Whiskers persists two ways
 
 | File | Purpose |
 |---|---|
-| `DatabaseRegistration.cs` | `AddWhiskersDatabase` — reads `Database:Provider` / `WHISKERS_DB_PROVIDER` (+ `_CONNECTION` / `_CONNECTION_FILE` secret) and registers `MetricsDbContext` for SQLite or PostgreSQL, pinning the matching `MigrationsAssembly`. An unknown provider fails fast at startup. |
+| `DatabaseRegistration.cs` | `AddWhiskersDatabase` — reads `Database:Provider` / `WHISKERS_DB_PROVIDER` (+ `_CONNECTION` / `_CONNECTION_FILE` secret) and registers `MetricsDbContext` for SQLite or PostgreSQL, pinning the matching `MigrationsAssembly`. An unknown provider fails fast at startup; so does a configured `WHISKERS_DB_CONNECTION_FILE` that is missing, unreadable or empty (`SecretSource`, R1-28). |
 | `SinkRedactionInterceptor.cs` | R1-24 (INV-51): an EF `SaveChangesInterceptor` registered on `MetricsDbContext` for both providers. On save it redacts every free-text column of the audit log, MCP/agent call history, approvals, policy decisions, task results and (R1-25) the notification feed and alert history ([`SinkRedaction`](../../Utils/SinkRedaction.cs)), whoever wrote the row. Bulk `ExecuteUpdate` bypasses it (its values come from rows that went through it, or are fixed texts). |
 | `DatabaseInitializer.cs` | Brings the schema up to date on startup. The SQLite path baselines legacy `EnsureCreated` databases onto migrations + enables WAL; the PostgreSQL path is a straight `MigrateAsync` (see below). |
 | `MetricsDbContextFactory.cs` | Design-time `IDesignTimeDbContextFactory` used only by `dotnet ef`; branches on `WHISKERS_DB_PROVIDER` so scaffolding targets the right migration assembly without booting the app host. |
@@ -21,7 +21,7 @@ The storage primitives every other service builds on. Whiskers persists two ways
 Chosen at startup, SQLite by default:
 
 - **SQLite** (default): nothing to configure — the DB file lives under `WHISKERS_DATA_DIR`.
-- **PostgreSQL**: `WHISKERS_DB_PROVIDER=postgres` + a connection string (`WHISKERS_DB_CONNECTION`, or `WHISKERS_DB_CONNECTION_FILE` for a mounted secret — the file wins). Ready-to-run overlay: [`deploy/docker-compose.postgres.yml`](../../../../deploy/docker-compose.postgres.yml).
+- **PostgreSQL**: `WHISKERS_DB_PROVIDER=postgres` + a connection string (`WHISKERS_DB_CONNECTION`, or `WHISKERS_DB_CONNECTION_FILE` for a mounted secret — the file wins; a missing or empty file stops the start). Ready-to-run overlay: [`deploy/docker-compose.postgres.yml`](../../../../deploy/docker-compose.postgres.yml).
 
 `DatabaseInitializer` branches on `db.Database.IsSqlite()`: SQLite keeps the legacy-baseline heal + WAL pragma; PostgreSQL just migrates (transient connect failures are absorbed by the provider's `EnableRetryOnFailure`). All `DateTime`s are normalized to UTC end-to-end so Npgsql's `timestamptz` mapping is happy — see `UtcDateTimeConverter` in `Whiskers.Data`.
 
