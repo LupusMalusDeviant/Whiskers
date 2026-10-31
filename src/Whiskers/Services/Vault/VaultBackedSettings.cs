@@ -68,6 +68,12 @@ public static class VaultBackedSettings
     public static string? PlaintextValue(JsonObject? section, string property)
         => StoredRef(section, property) is null && Field(section, property) is { } v && !string.IsNullOrWhiteSpace(v) ? v : null;
 
+    /// <summary>Any non-empty plaintext value of <paramref name="property"/>, also next to a vault reference (only by hand
+    /// editing) — what a report of plaintext at rest must count. The migration moves only <see cref="PlaintextValue"/>; a
+    /// save of the editor drops a stray value next to a reference.</summary>
+    public static bool HasPlaintext(JsonObject? section, string property)
+        => Field(section, property) is { } v && !string.IsNullOrWhiteSpace(v);
+
     /// <summary>Removes <paramref name="name"/> from <paramref name="section"/> under every spelling.</summary>
     public static void Remove(JsonObject section, string name)
     {

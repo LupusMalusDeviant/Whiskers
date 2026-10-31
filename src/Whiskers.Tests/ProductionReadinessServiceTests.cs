@@ -116,7 +116,7 @@ public class ProductionReadinessServiceTests : IDisposable
         WriteLegacyCredentials();
         var (vault, servers) = await Stores("readiness-test-passphrase");
         await new CredentialVaultMigration(vault, servers, new AppSettingsStore(dataPaths: _paths),
-            NullLogger<CredentialVaultMigration>.Instance).InitializeAsync();
+            NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths).InitializeAsync();
 
         var credentials = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == CredentialsTitle);
         Assert.True(credentials.Ok);
@@ -144,6 +144,14 @@ public class ProductionReadinessServiceTests : IDisposable
         await new CredentialVaultMigration(vault, servers, new AppSettingsStore(dataPaths: _paths),
             NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths).InitializeAsync();
         Assert.True((await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle).Ok);
+
+        // A plaintext value written by hand next to the reference is at rest all the same.
+        var agent = JsonNode.Parse(File.ReadAllText(_paths.AgentSettingsJson))!.AsObject();
+        agent["Agent"]!["ApiKey"] = "AGENT-" + Guid.NewGuid().ToString("N");
+        File.WriteAllText(_paths.AgentSettingsJson, agent.ToJsonString());
+        var stray = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle);
+        Assert.False(stray.Ok);
+        Assert.Contains("Agent:ApiKey", stray.Detail);
     }
 
     [Fact]

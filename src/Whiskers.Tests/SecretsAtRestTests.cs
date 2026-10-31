@@ -66,7 +66,7 @@ public partial class SecretsAtRestTests : IDisposable
     private AppSettingsStore AppSettings() => new(dataPaths: _paths);
 
     private async Task Migrate(IVaultService vault, IServerConfigService servers)
-        => await new CredentialVaultMigration(vault, servers, AppSettings(), NullLogger<CredentialVaultMigration>.Instance)
+        => await new CredentialVaultMigration(vault, servers, AppSettings(), NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths)
             .InitializeAsync();
 
     /// <summary>Every file below the data directory — gzip archives unpacked — must not contain <paramref name="secrets"/>.</summary>

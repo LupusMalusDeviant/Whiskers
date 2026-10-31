@@ -163,7 +163,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             var stored = VaultBackedSettings.IsAgent(section)
                 ? _agentSettings is null ? null : await _agentSettings.ReadSectionAsync()
                 : _appSettings is null ? null : await _appSettings.ReadSectionAsync(section);
-            found.AddRange(properties.Where(p => VaultBackedSettings.PlaintextValue(stored, p) is not null).Select(p => $"{section}:{p}"));
+            // Also a value next to a vault reference (hand-edited): it is at rest in plaintext all the same.
+            found.AddRange(properties.Where(p => VaultBackedSettings.HasPlaintext(stored, p)).Select(p => $"{section}:{p}"));
         }
         return found;
     }

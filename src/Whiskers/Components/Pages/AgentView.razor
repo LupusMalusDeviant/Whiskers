@@ -291,7 +291,10 @@
     private string _llmKey = "";
     private bool _llmKeyClear;
 
-    private bool AgentKeyStored => !string.IsNullOrWhiteSpace(Configuration["Agent:ApiKeyRef"])
+    // Stored or not since this page's last save (the configuration reloads a moment later).
+    private bool? _llmKeyStoredNow;
+
+    private bool AgentKeyStored => _llmKeyStoredNow ?? !string.IsNullOrWhiteSpace(Configuration["Agent:ApiKeyRef"])
                                    || !string.IsNullOrWhiteSpace(Configuration["Agent:ApiKey"]);
 
     /// <summary>The key a connection test uses: the one typed now, else the stored one — read on the server, never shown.</summary>
@@ -589,6 +592,8 @@
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
+        if (_llmKeyClear) _llmKeyStoredNow = false;
+        else if (!string.IsNullOrWhiteSpace(_llmKey)) _llmKeyStoredNow = true;
         _llmKey = "";
         _llmKeyClear = false;
         if (result.UnremovedSecrets > 0) Snackbar.Add(L["Settings_Snackbar_SecretCleanupFailed"].Value, Severity.Info);
@@ -615,7 +620,7 @@
         }
     }
 
-    private string Signature() => $"{_llmProvider}|{_llmEndpoint}|{_llmKey}";
+    private string Signature() => $"{_llmProvider}|{_llmEndpoint}|{_llmKey}|{_llmKeyClear}";
 
     /// <summary>Auto-test when a relevant field changed and a key is present (avoids redundant probes).</summary>
     private async Task MaybeTestAsync()

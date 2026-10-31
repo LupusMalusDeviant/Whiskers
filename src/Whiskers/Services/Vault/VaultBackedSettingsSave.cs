@@ -127,21 +127,24 @@ public static class VaultBackedSettingsSave
             .ToList();
         if (replaced.Count == 0) return new SecretSaveResult(0);
         if (!vault.IsEnabled) return new SecretSaveResult(replaced.Count);
-        await RemoveAsync(mutations, vault, replaced);
-        return new SecretSaveResult(0);
+        return new SecretSaveResult(await RemoveAsync(mutations, vault, replaced));
     }
 
-    /// <summary>Removes vault entries no setting names — tidying up, so a failure only leaves an unused secret.</summary>
-    private static async Task RemoveAsync(IUiMutationRunner mutations, IVaultService vault, IEnumerable<string?> keys)
+    /// <summary>Removes vault entries no setting names — tidying up, so a failure only leaves an unused secret. Returns
+    /// how many could not be removed.</summary>
+    private static async Task<int> RemoveAsync(IUiMutationRunner mutations, IVaultService vault, IEnumerable<string?> keys)
     {
-        if (!vault.IsEnabled) return;
-        foreach (var key in keys.OfType<string>())
+        var all = keys.OfType<string>().ToList();
+        if (!vault.IsEnabled) return all.Count;
+        var failed = 0;
+        foreach (var key in all)
         {
             try
             {
                 await mutations.RunAsync("vault.secret_delete", new { section = "vault", key }, _ => vault.DeleteSecretAsync(key));
             }
-            catch { /* an unused secret at worst; no setting names it */ }
+            catch { failed++; /* an unused secret at worst; no setting names it */ }
         }
+        return failed;
     }
 }

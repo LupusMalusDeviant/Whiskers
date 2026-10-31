@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models.Agent;
@@ -244,6 +245,45 @@ public partial class SecretsAtRestTests
         Assert.Equal(VaultKeyState.Wrong, locked.KeyState);
         Assert.All(Materialized(SettingsConfiguration(), locked).Values, v => Assert.Equal("", v));
         Assert.All(Materialized(SettingsConfiguration(), await Vault(key: null)).Values, v => Assert.Equal("", v));
+    }
+
+    [Fact]
+    public async Task Options_bound_before_the_vault_started_read_the_value_after_the_migration_and_redact_it()
+    {
+        var token = "BOTTOKEN-" + Guid.NewGuid().ToString("N");
+        var key = VaultBackedSettings.MigratedKey("Telegram", "BotToken");
+        await (await Vault()).SetSecretAsync(key, token);
+
+        // The module's own registrations, against a vault that has not started yet — as the app binds early.
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["VAULT_KEY"] = VaultKey, ["Telegram:Enabled"] = "true", ["Telegram:BotTokenRef"] = key,
+        }).Build();
+        var vault = new VaultService(config, NullLogger<VaultService>.Instance, dataPaths: _paths);
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddSingleton<IVaultService>(vault);
+        new Whiskers.Modules.Notifications.NotificationsModule().ConfigureServices(services, config);
+        using var provider = services.BuildServiceProvider();
+        var monitor = provider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<TelegramSettings>>();
+        Assert.Equal("", monitor.CurrentValue.BotToken);
+
+        await vault.InitializeAsync();
+        foreach (var cache in provider.GetServices<IVaultBackedOptionsCache>()) cache.Invalidate();
+
+        Assert.Equal(token, monitor.CurrentValue.BotToken);
+        // Read from the vault before the redaction registered it: the token never reaches a log line.
+        Assert.DoesNotContain(token, Whiskers.Utils.KnownSecrets.Replace($"POST https://api.telegram.org/bot{token}/sendMessage"));
+    }
+
+    [Fact]
+    public void A_plaintext_value_next_to_a_reference_still_counts_as_plaintext()
+    {
+        var section = new JsonObject { ["Password"] = "hand-edited", ["PasswordRef"] = "settings:email:password:x" };
+        Assert.Null(VaultBackedSettings.PlaintextValue(section, "Password"));
+        Assert.True(VaultBackedSettings.HasPlaintext(section, "Password"));
+        Assert.False(VaultBackedSettings.HasPlaintext(new JsonObject { ["PasswordRef"] = "k" }, "Password"));
     }
 
     [Fact]

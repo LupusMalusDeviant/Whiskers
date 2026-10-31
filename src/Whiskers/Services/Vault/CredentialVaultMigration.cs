@@ -27,7 +27,7 @@ public sealed class CredentialVaultMigration : IInitializable
     private readonly IServerConfigService _servers;
     private readonly IAppSettingsStore _appSettings;
     private readonly ILogger<CredentialVaultMigration> _logger;
-    private readonly Whiskers.Services.Agent.IAgentSettingsStore _agentSettings;
+    private readonly Whiskers.Services.Agent.IAgentSettingsStore? _agentSettings;
     private readonly IEnumerable<IVaultBackedOptionsCache> _optionCaches;
 
     public CredentialVaultMigration(IVaultService vault, IServerConfigService servers, IAppSettingsStore appSettings,
@@ -39,8 +39,9 @@ public sealed class CredentialVaultMigration : IInitializable
         _appSettings = appSettings;
         _logger = logger;
         _optionCaches = optionCaches ?? [];
-        // The agent's file is migrated also while the agent module is off (its store is then not registered).
-        _agentSettings = agentSettings ?? new Whiskers.Services.Agent.AgentSettingsStore(dataPaths: dataPaths);
+        // The agent's file is migrated also while the agent module is off (its store is then not registered) — but only
+        // in a data directory named here: without one the agent's file is left alone, never a guessed directory.
+        _agentSettings = agentSettings ?? (dataPaths is null ? null : new Whiskers.Services.Agent.AgentSettingsStore(dataPaths: dataPaths));
     }
 
     /// <summary>After the vault (40) and the server registry (50).</summary>
@@ -84,7 +85,7 @@ public sealed class CredentialVaultMigration : IInitializable
             var what = $"{section}:{property}";
             if (!await StoreAsync(vaultKey, plaintext, what)) continue;
             var adopted = VaultBackedSettings.IsAgent(section)
-                ? await AdoptAsync(() => _agentSettings.AdoptApiKeyRefAsync(plaintext, vaultKey), what)
+                ? await AdoptAsync(() => _agentSettings!.AdoptApiKeyRefAsync(plaintext, vaultKey), what)
                 : await AdoptAsync(() => _appSettings.AdoptSettingRefAsync(section, property, plaintext, vaultKey), what);
             if (adopted) _logger.LogInformation("{Setting} moved into the vault", what);
         }
@@ -143,8 +144,9 @@ public sealed class CredentialVaultMigration : IInitializable
         var found = new List<(string, string, string)>();
         foreach (var (section, properties) in VaultBackedSettings.Fields)
         {
+            if (VaultBackedSettings.IsAgent(section) && _agentSettings is null) continue;
             var stored = VaultBackedSettings.IsAgent(section)
-                ? await _agentSettings.ReadSectionAsync()
+                ? await _agentSettings!.ReadSectionAsync()
                 : await _appSettings.ReadSectionAsync(section);
             foreach (var property in properties)
                 if (VaultBackedSettings.PlaintextValue(stored, property) is { } plaintext)

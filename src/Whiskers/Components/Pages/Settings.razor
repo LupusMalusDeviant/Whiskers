@@ -813,6 +813,9 @@ else
 
     // ---- R1-30: settings with credentials kept in the vault ----
 
+    // Section:Property → stored or not since this page's last save (the configuration reloads a moment later).
+    private readonly Dictionary<string, bool> _secretStoredNow = new(StringComparer.OrdinalIgnoreCase);
+
     // Section:Property → the next save removes the stored value.
     private readonly Dictionary<string, bool> _secretClear = Whiskers.Services.Vault.VaultBackedSettings.Fields
         .Where(f => !Whiskers.Services.Vault.VaultBackedSettings.IsAgent(f.Key))
@@ -822,7 +825,8 @@ else
     /// <summary>Whether a value is stored for the setting (in the vault, in plaintext from before, or by the environment)
     /// — read from the configuration, never shown.</summary>
     private bool SecretStored(string section, string property)
-        => !string.IsNullOrWhiteSpace(Configuration[$"{section}:{Whiskers.Services.Vault.VaultBackedSettings.RefName(property)}"])
+        => _secretStoredNow.TryGetValue($"{section}:{property}", out var now) ? now
+         : !string.IsNullOrWhiteSpace(Configuration[$"{section}:{Whiskers.Services.Vault.VaultBackedSettings.RefName(property)}"])
            || !string.IsNullOrWhiteSpace(Configuration[$"{section}:{property}"]);
 
     private Whiskers.Services.Vault.SecretInput Secret(string section, string property, string? entered)
@@ -839,7 +843,13 @@ else
                 s => (System.Text.Json.Nodes.JsonObject)System.Text.Json.JsonSerializer.SerializeToNode(s.Value, s.Value.GetType())!);
             var result = await Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAppSettingsAsync(Mutations, VaultService,
                 AppSettings, scope, plain, secrets, SecretNeedsVault());
-            foreach (var input in secrets) _secretClear[$"{input.Section}:{input.Property}"] = false;
+            foreach (var input in secrets)
+            {
+                var name = $"{input.Section}:{input.Property}";
+                if (input.Clear) _secretStoredNow[name] = false;
+                else if (!string.IsNullOrWhiteSpace(input.Entered)) _secretStoredNow[name] = true;
+                _secretClear[name] = false;
+            }
             if (result.UnremovedSecrets > 0) Snackbar.Add(L["Settings_Snackbar_SecretCleanupFailed"].Value, Severity.Info);
             return true;
         }

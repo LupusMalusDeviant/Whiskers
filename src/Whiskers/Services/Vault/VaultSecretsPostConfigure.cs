@@ -16,6 +16,7 @@ public sealed class VaultSecretsPostConfigure<T> : IPostConfigureOptions<T> wher
     private readonly ILogger _logger;
     private readonly string _section;
     private readonly PropertyInfo[] _properties;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> Warned = new();
 
     /// <param name="configuration">Null in a container without configuration (a module test): nothing names a vault key.</param>
     /// <param name="vault">Null without a vault service: a value kept in the vault is treated as not set.</param>
@@ -41,8 +42,13 @@ public sealed class VaultSecretsPostConfigure<T> : IPostConfigureOptions<T> wher
             if (string.IsNullOrWhiteSpace(vaultKey)) continue;   // plaintext from before, or set by the environment
             string? value = null;
             if (_vault is not { IsEnabled: true })
-                _logger.LogWarning("{Section}:{Property} is kept in the vault, and the vault is {State}; it is treated as not set",
-                    _section, property.Name, _vault?.KeyState == VaultKeyState.Wrong ? "locked" : "disabled");
+            {
+                var state = _vault?.KeyState == VaultKeyState.Wrong ? "locked" : "disabled";
+                // Options can be bound before the vault has started (they are bound again afterwards): say it once per state.
+                if (Warned.TryAdd($"{_section}:{property.Name}:{state}", 0))
+                    _logger.LogWarning("{Section}:{Property} is kept in the vault, and the vault is {State}; it is treated as not set",
+                        _section, property.Name, state);
+            }
             else if ((value = _vault.GetSecret(vaultKey)) is null)
                 _logger.LogWarning("{Section}:{Property} names a vault entry that is missing; it is treated as not set",
                     _section, property.Name);
