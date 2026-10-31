@@ -238,6 +238,38 @@ public class VaultKeyCheckTests : IDisposable
         Assert.Null(SecretSource.Read(Config(("SOME_SECRET", "")), "SOME_SECRET"));
     }
 
+    [Fact]
+    public async Task Key_state_reaches_the_pages_through_the_mutation_scope_proxy()
+    {
+        // The app resolves IVaultService through MutationScopeProxy; KeyState is a default interface member.
+        var vault = await Open(RightKey);
+        await vault.SetSecretAsync("token", "value-1");
+        var wrong = await Open(WrongKey);
+
+        var monitor = new Whiskers.Services.Mutations.MutationScopeMonitor(
+            NullLogger<Whiskers.Services.Mutations.MutationScopeMonitor>.Instance);
+        IVaultService guarded = Whiskers.Services.Mutations.MutationScopeProxy<IVaultService>.Wrap(wrong, monitor);
+        Assert.NotSame(wrong, guarded);
+        Assert.Equal(VaultKeyState.Wrong, guarded.KeyState);
+        Assert.False(guarded.IsEnabled);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Unreadable_database_connection_file_stops_the_start(bool exists)
+    {
+        var file = Path.Combine(_dir, "db_connection");
+        if (exists) File.WriteAllText(file, "");
+        var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+        builder.Configuration["WHISKERS_DB_CONNECTION_FILE"] = file;
+        builder.Configuration["WHISKERS_DB_CONNECTION"] = "Data Source=" + Path.Combine(_dir, "x.db");
+
+        var ex = Assert.Throws<SecretFileException>(() =>
+            Whiskers.Services.Persistence.DatabaseRegistration.AddWhiskersDatabase(builder, new DataPathOptions(_dir)));
+        Assert.Equal("WHISKERS_DB_CONNECTION_FILE", ex.Setting);
+    }
+
     // ---------------------------------------------------------------- legacy CBC
 
     [Fact]

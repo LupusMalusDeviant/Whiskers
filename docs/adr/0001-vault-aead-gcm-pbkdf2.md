@@ -44,3 +44,7 @@ Das verletzt die Projekt-Leitplanke aus dem Audit 2026-07-04 („kein AES-CBC oh
 - Der Legacy-CBC-Pfad muss im Code verbleiben, solange nicht-migrierte Vaults existieren könnten. Entfernen erst nach gesicherter Migration aller Instanzen (Folge-ADR).
 - GCM-Format `g1:` ist versioniert; ein künftiger Wechsel braucht ein neues Präfix + Migration.
 - Bei falschem `VAULT_KEY` nach Container-Neuerstellung schlägt die Migration/Entschlüsselung fehl und wird geloggt (vorher: stilles `null`).
+
+## Nachtrag: ergänzt durch R1-28 (INV-54)
+
+Die Aussagen „Migration ist transparent, ohne manuellen Schritt“ und „bei falschem `VAULT_KEY` schlägt die Entschlüsselung fehl und wird geloggt“ gelten so nicht mehr. Seit R1-28 trägt `vault.json` einen Schlüsselprüfwert (`KeyCheck`, ein fester Text mit dem abgeleiteten Schlüssel per AES-GCM versiegelt); ein Schlüssel, der weder ihn noch (bei älteren Vaults) einen GCM-Eintrag öffnet, sperrt den Vault: nichts wird gelesen, geschrieben oder migriert, die Datei bleibt unverändert. Legacy-CBC-Einträge werden nur umgewandelt, wenn jeder davon zu gültigem UTF-8 entschlüsselt, und erst nachdem eine byte-gleiche Wiederherstellungskopie `vault.json.legacy-cbc.bak` geschrieben ist; die Wiederherstellungsschritte stehen in `src/Whiskers/Services/Vault/README.md`. Format, Ableitung und Algorithmen bleiben wie oben entschieden.

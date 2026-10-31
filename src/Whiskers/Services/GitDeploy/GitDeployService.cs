@@ -86,7 +86,9 @@ public class GitDeployService : IGitDeployService
             throw new ArgumentException("Compose path must be relative to the repo root.");
 
         if (token is { Length: > 0 } && !_vault.IsEnabled)
-            throw new InvalidOperationException("Private repositories require the vault — set VAULT_KEY and restart.");
+            throw new InvalidOperationException(_vault.KeyState == VaultKeyState.Wrong
+                ? "Private repositories require the vault — it is locked because VAULT_KEY does not match it. Set the right key and restart."
+                : "Private repositories require the vault — set VAULT_KEY and restart.");
 
         var data = await LoadAsync();
         await _lock.WaitAsync();
