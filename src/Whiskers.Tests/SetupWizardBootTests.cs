@@ -44,6 +44,7 @@ public sealed class SetupWizardBootTests
         finally
         {
             Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", prev);
+            TestSqlite.ClearPools(dataDir);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort */ }
         }
     }

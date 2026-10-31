@@ -78,6 +78,7 @@ public class MutationGatewayBootTests
         finally
         {
             Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", previousDataDir);
+            TestSqlite.ClearPools(dataDir);
             try { Directory.Delete(dataDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }

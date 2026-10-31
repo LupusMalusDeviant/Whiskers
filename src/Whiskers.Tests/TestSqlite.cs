@@ -18,12 +18,13 @@ public static class TestSqlite
     /// <remarks>The app names its files <c>{dataDir}/metrics.db</c> (a forward slash on every OS); both spellings are cleared.</remarks>
     public static void ClearPools(string directory)
     {
-        directory = directory.TrimEnd('/', Path.DirectorySeparatorChar); // as DataPathOptions trims its root
+        directory = directory.TrimEnd('/', (char)92); // '/' and the backslash, as DataPathOptions trims its root
         if (!Directory.Exists(directory)) return;
         foreach (var file in Directory.EnumerateFiles(directory, "*.db", SearchOption.AllDirectories))
         {
+            var appSpelling = directory + "/" + Path.GetRelativePath(directory, file).Replace(Path.DirectorySeparatorChar, '/');
             ClearPool(file);
-            ClearPool(directory + "/" + Path.GetRelativePath(directory, file).Replace(Path.DirectorySeparatorChar, '/'));
+            if (appSpelling != file) ClearPool(appSpelling);
         }
     }
 }
