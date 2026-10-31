@@ -154,6 +154,34 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Servers_save_moves_a_legacy_plaintext_cloud_key_into_the_vault()
+    {
+        var legacy = Secret("CLOUDKEY");
+        File.WriteAllText(Path.Combine(_dir, "servers.json"), new JsonObject
+        {
+            ["Servers"] = new JsonArray(new JsonObject
+            {
+                ["Id"] = "hetz", ["Name"] = "Hetzner box", ["ConnectionType"] = 0, ["Enabled"] = true, ["IsDefault"] = true,
+                ["CloudProvider"] = (int)CloudProvider.Hetzner, ["CloudApiKey"] = legacy,
+            }),
+        }.ToJsonString());
+        await _servers.InitializeAsync();
+        var before = _servers.GetServer("hetz")!.Clone();   // what the audit diff starts from
+
+        await Persist(OpenServer("hetz"));   // key field blank
+
+        var live = _servers.GetServer("hetz")!;
+        Assert.NotNull(live.CloudKeyRef);
+        Assert.Null(live.CloudApiKey);
+        Assert.Equal(legacy, CloudCredentials.KeyOf(live, _vault));
+        Assert.DoesNotContain(legacy, AllFiles());
+        // The audit diff of this save shows the old plaintext only as a redacted fingerprint.
+        var described = ConfigChange.Describe(before);
+        Assert.DoesNotContain(described.Settings.Values,
+            s => s.Shown.Contains(legacy, StringComparison.Ordinal) || s.Versioned.Contains(legacy, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Servers_failed_record_write_removes_the_new_cloud_key()
     {
         var original = Secret("CLOUDKEY");
@@ -267,6 +295,29 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
         Assert.Equal(before, await StoredDnsRef());
         Assert.Equal(original, _vault.GetSecret(before!));
         Assert.Single(_vault.Keys);
+    }
+
+    [Fact]
+    public async Task Settings_zones_only_save_with_an_unwritable_file_is_reported_not_thrown()
+    {
+        await SaveDns(DnsPage(), Secret("DNSTOKEN"));
+        var before = await StoredDnsRef();
+        Directory.CreateDirectory(Path.Combine(_dir, "app-settings.json.tmp"));
+
+        await SaveDns(DnsPage(), token: null, zones: "example.net");
+
+        Assert.Equal(before, await StoredDnsRef());
+        Assert.Single(_vault.Keys);
+    }
+
+    [Fact]
+    public void Dns_section_never_drops_a_plaintext_token_it_did_not_move()
+    {
+        var stored = new JsonObject { ["Provider"] = "infomaniak", ["ApiToken"] = Secret("DNSTOKEN") };
+        var next = Whiskers.Services.Dns.DnsSettingsSection.Next(stored, "infomaniak", newRef: null, ["example.org"], 300);
+        // Carried over, so the store refuses the write rather than lose the token.
+        Assert.Throws<InvalidOperationException>(() =>
+            _appSettings.UpdateSectionAsync(DnsSettings.SectionName, _ => next).GetAwaiter().GetResult());
     }
 
     [Fact]

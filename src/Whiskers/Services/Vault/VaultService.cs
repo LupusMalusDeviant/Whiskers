@@ -347,6 +347,7 @@ public class VaultService : IVaultService, IInitializable
         EnsureWritable();
         // An entry under this key is never replaced: it is either this very credential from an interrupted run (done)
         // or a different value — then the plaintext stays where it is and is reported, never a live key overwritten.
+        // Read without the lock: the migration runs once at start-up, before anything is served or writes the vault.
         if (_data.Entries.Any(e => e.Key == migrationKey) || (await _store.LoadAsync()).Entries.Any(e => e.Key == migrationKey))
         {
             if (await IsPersistedAsync(migrationKey, plaintext)) return true;

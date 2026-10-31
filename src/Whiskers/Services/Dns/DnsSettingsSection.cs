@@ -22,7 +22,9 @@ public static class DnsSettingsSection
         => Field(stored, nameof(DnsSettings.ApiToken)) is { } t && string.IsNullOrWhiteSpace(t);
 
     /// <summary>The section to write: provider, zones, TTL and the vault key — <paramref name="newRef"/> or the stored one.
-    /// Never a plaintext token; an empty one only where the stored section already hid the environment's.</summary>
+    /// Never a new plaintext token; an empty one only where the stored section already hid the environment's. A plaintext
+    /// token found in the stored section without a new vault key is carried over, so the store refuses the write instead
+    /// of the token silently leaving the file without being in the vault.</summary>
     public static JsonObject Next(JsonObject? stored, string provider, string? newRef, IEnumerable<string> zones, int defaultTtl)
     {
         var section = new JsonObject
@@ -33,6 +35,7 @@ public static class DnsSettingsSection
             [nameof(DnsSettings.DefaultTtl)] = Math.Clamp(defaultTtl, 60, 86400),
         };
         if (HidesEnvironmentToken(stored)) section[nameof(DnsSettings.ApiToken)] = "";
+        else if (newRef is null && PlaintextToken(stored) is { } plaintext) section[nameof(DnsSettings.ApiToken)] = plaintext;
         return section;
     }
 

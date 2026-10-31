@@ -966,7 +966,8 @@ else
                 AppSettings.UpdateSectionAsync(DnsSettings.SectionName,
                     inLock => Whiskers.Services.Dns.DnsSettingsSection.Next(inLock, provider, newRef, zones, ttl)));
         }
-        catch (Exception ex) when (newRef is not null || ex is MutationRefusedException or InvalidOperationException)
+        catch (Exception ex) when (newRef is not null || ex is MutationRefusedException or InvalidOperationException
+                                       or IOException or UnauthorizedAccessException)
         {
             // The settings were not written: a new token never took effect.
             if (newRef is not null) await RemoveUnusedDnsTokenAsync(newRef);
@@ -1003,7 +1004,11 @@ else
             previous = await Mutations.RunAsync("config.save", new { section = "dns" }, _ =>
                 AppSettings.UpdateSectionAsync(DnsSettings.SectionName, _ => cleared));
         }
-        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
         if (Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous) is { } previousRef) await RemoveUnusedDnsTokenAsync(previousRef);
         _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
         Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
