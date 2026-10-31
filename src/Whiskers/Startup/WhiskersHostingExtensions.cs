@@ -232,7 +232,7 @@ public static class WhiskersHostingExtensions
         foreach (var httpClientName in new[]
                  {
                      "TelegramNotificationService", "MattermostNotificationService", "DiscordNotificationService",
-                     "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService"
+                     "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService", "MatrixNotificationService"
                  })
             builder.Logging.AddFilter($"System.Net.Http.HttpClient.{httpClientName}", Microsoft.Extensions.Logging.LogLevel.Warning);
 

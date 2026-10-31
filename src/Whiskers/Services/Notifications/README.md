@@ -35,6 +35,10 @@ Each channel has its own interface (distinct strategies) so the composite can en
 - **Every delivered event is persisted to `AlertHistory`** (server id, container, type, message) — the
   queryable, fleet-aware record behind the in-app feed. Retention is handled by the metrics collector's
   hourly prune. A failing history write never blocks the notification itself.
+- **Redacted once, before anything else (R1-25, INV-51).** After the mute check the composite redacts a copy of the
+  event (`CompositeNotificationService.Redacted`: container, image, server names and the free-text `ImageInfo`) —
+  the in-app feed, the alert history, every channel and the AI-trigger dispatcher see only that copy, whoever
+  produced it (a matched log line, a connection error, a model's summary). A failed channel test names no URL.
 - **HTML encoding.** Matrix renders `formatted_body` as HTML, so its message is built from an escaped copy
   of the event (`MatrixNotificationService.HtmlEscaped`) — the log-alert detail carries raw log lines, which
   are third-party text. The plain-text body stays verbatim.
@@ -55,7 +59,7 @@ never throttled.
 
 ## Secret hygiene
 
-The capability-bearing channels put their secret in the request URL (Telegram bot token in the path; Discord/Slack/Mattermost/ntfy/webhook secret URLs). Those `System.Net.Http.HttpClient.*` logger categories are raised to Warning in `Program.cs`, so the default HttpClient request logging can't write the token/URL to the app log.
+The capability-bearing channels put their secret in the request URL (Telegram bot token in the path; Discord/Slack/Mattermost/ntfy/webhook secret URLs). Those `System.Net.Http.HttpClient.*` logger categories are raised to Warning (`WhiskersHostingExtensions`, and the whole category in code by `WhiskersLoggingExtensions`), so the default HttpClient request logging can't write the token/URL to the app log. Behind that, every log line is redacted (`RedactingLoggerProvider`): the capability URL patterns and each channel's configured secret (`KnownSecrets`, registered by `NotificationsModule` when the settings are bound) are withheld wherever they appear, also in an exception's text (R1-25).
 
 ## Wiring
 

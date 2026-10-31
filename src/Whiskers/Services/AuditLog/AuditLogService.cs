@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
+using Whiskers.Utils;
 
 namespace Whiskers.Services.AuditLog;
 
@@ -67,12 +68,13 @@ public class AuditLogService : IAuditLogService
         catch (Exception ex)
         {
             // Fail-safe: the audit backend is down (DB locked, disk full) but the destructive action already
-            // happened — the full entry must survive in the app log instead of vanishing. Callers never put
-            // raw secrets into `details` (key names / redacted commands only), so echoing it here is safe.
+            // happened — the entry must survive in the app log instead of vanishing. It is redacted exactly as the
+            // row would have been (R1-25): the database sink never ran, so nothing else withheld its payloads.
             _logger.LogError(ex,
                 "AUDIT WRITE FAILED: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} " +
                 "(target={TargetId}, server={ServerId}, success={Success}, details={Details})",
-                actorType, actor, action, targetType, targetName, targetId, serverId, success, details);
+                actorType, actor, action, targetType,
+                SinkRedaction.Text(targetName), SinkRedaction.Text(targetId), serverId, success, SinkRedaction.Json(details));
             _recovery?.LegacyWriteFailed();
             return false;
         }

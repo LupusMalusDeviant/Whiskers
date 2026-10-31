@@ -20,4 +20,7 @@ public class NotificationEvent
     /// <summary>R1-15: for agent-approval events, the approval to open (the in-app link goes to its card).</summary>
     public string? ApprovalId { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+    /// <summary>A shallow copy (every member is a value or an immutable string).</summary>
+    public NotificationEvent Copy() => (NotificationEvent)MemberwiseClone();
 }

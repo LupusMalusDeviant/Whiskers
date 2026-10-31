@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Services.Persistence;
 using Whiskers.Models;
 using Whiskers.Services.Agent.Triggers;
+using Whiskers.Utils;
 
 namespace Whiskers.Services.Notifications;
 
@@ -53,6 +54,11 @@ public class CompositeNotificationService : INotificationService
             return;
         }
 
+        // Redacted once, before anything is formatted, stored or sent (INV-51, R1-25): every producer's free text
+        // (a matched log line, a connection error, a model's summary) reaches the in-app feed, the alert history,
+        // each channel and the AI-trigger dispatcher without the secrets in it.
+        evt = Redacted(evt);
+
         // Always record in the in-app feed (no external channel needed).
         try { _inApp.Add(evt); } catch (Exception ex) { _logger.LogWarning(ex, "In-app notification failed"); }
         await PersistHistoryAsync(evt);
@@ -70,11 +76,24 @@ public class CompositeNotificationService : INotificationService
         foreach (var channel in _channels)
         {
             try { await channel.SendTestAsync(); }
-            catch (Exception ex) { errors.Add($"{channel.Name}: {ex.Message}"); }
+            catch (Exception ex) { errors.Add($"{channel.Name}: {SinkRedaction.Text(ex.Message)}"); }
         }
 
         if (errors.Count > 0)
             throw new AggregateException($"Some providers failed: {string.Join("; ", errors)}");
+    }
+
+    /// <summary>A copy of the event with every text field redacted; the producer's object is left as it is.</summary>
+    internal static NotificationEvent Redacted(NotificationEvent evt)
+    {
+        var copy = evt.Copy();
+        copy.ContainerId = SinkRedaction.Text(evt.ContainerId) ?? "";
+        copy.ContainerName = SinkRedaction.Text(evt.ContainerName) ?? "";
+        copy.Image = SinkRedaction.Text(evt.Image) ?? "";
+        copy.ImageName = SinkRedaction.Text(evt.ImageName) ?? "";
+        copy.ImageInfo = SinkRedaction.Text(evt.ImageInfo);
+        copy.ServerName = SinkRedaction.Text(evt.ServerName);
+        return copy;
     }
 
     /// <summary>Persists the event to <c>AlertHistory</c> — the queryable, server-scoped record behind the

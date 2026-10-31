@@ -15,7 +15,7 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 
 ## Behaviour notes
 
-- **Fail-safe:** if the audit write fails (DB locked, disk full) the full entry (actor/action/target/server/success/details) is logged at **Error** in the app log — the fact is never silently dropped while the privileged action proceeds.
+- **Fail-safe:** if the audit write fails (DB locked, disk full) the full entry (actor/action/target/server/success/details) is logged at **Error** in the app log — the fact is never silently dropped while the privileged action proceeds. The logged entry is redacted like the row would have been (target and details, R1-25).
 - **Secret-safety:** entries store only key **names**, commands as their length (R1-24; every free-text column is redacted on save by [`SinkRedactionInterceptor`](../Persistence/SinkRedactionInterceptor.cs)), and never secret values, DB passwords, or issued credentials — e.g. `hetzner.rescue_enable` records that a root credential was issued, not the password.
 - **Coverage** includes config saves, vault `vault.set`/`vault.delete`, scheduler `scheduler.create`/`run`/`delete`, `command.execute`, and `hetzner.rescue_enable`.
 

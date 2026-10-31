@@ -23,7 +23,7 @@ namespace Whiskers.Tests;
 /// <summary>R1-24 (INV-51): no persistent sink keeps a secret — neither whole nor a prefix of it — whoever wrote the
 /// row: the database tables through the save interceptor, the agent transcript and the chat history in their stores.
 /// Free-text payloads keep only their length; the classification covers every real MCP parameter name.</summary>
-public sealed class SinkRedactionTests
+public sealed partial class SinkRedactionTests
 {
     // Not token-shaped on purpose: the secret guard must not mistake the test data for a real secret.
     private const string Canary = "canary-value-r124";

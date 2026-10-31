@@ -447,10 +447,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `SinkRedactionTests` captures ILogger and every outbound channel with sentinel secrets in exceptions, URLs, arguments and summaries.
-- [ ] Redaction precedes formatting/transmission; provider exception logging cannot leak token-bearing URLs.
-- [ ] Logging failures do not cause unredacted fallback output.
-- [ ] Approval notifications contain safe context without sending secret arguments.
+- [x] `SinkRedactionTests` captures ILogger and every outbound channel with sentinel secrets in exceptions, URLs, arguments and summaries.
+- [x] Redaction precedes formatting/transmission; provider exception logging cannot leak token-bearing URLs.
+- [x] Logging failures do not cause unredacted fallback output.
+- [x] Approval notifications contain safe context without sending secret arguments.
 
 **Out of scope:** Delivery retries and secret encryption at rest.
 

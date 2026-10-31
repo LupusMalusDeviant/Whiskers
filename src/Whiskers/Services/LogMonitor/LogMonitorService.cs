@@ -321,8 +321,9 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
                         if (hit)
                         {
-                            // At a complete word (R1-24): a raw cut can leave the beginning of a credential.
-                            matchedLine = Whiskers.Utils.ShellUtils.CutAtBoundary(line, 200);
+                            // Redacted whole, then cut at a complete word (R1-24/R1-25): the line goes to the log, every
+                            // notification channel and the AI trigger; a raw cut can leave the beginning of a credential.
+                            matchedLine = Whiskers.Utils.ShellUtils.CutAtBoundary(Whiskers.Utils.SinkRedaction.Text(line) ?? "", 200);
                             break;
                         }
                     }
