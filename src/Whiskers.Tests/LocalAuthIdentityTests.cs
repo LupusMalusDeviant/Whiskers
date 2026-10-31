@@ -223,6 +223,7 @@ public sealed class LocalAuthIdentityTests : IDisposable
         finally
         {
             Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", prev);
+            TestSqlite.ClearPools(dataDir);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort */ }
         }
     }
