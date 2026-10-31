@@ -924,12 +924,13 @@ else
 
     // R1-29: the DNS token lives in the vault only. A save writes a new token under a NEW vault key and then names that
     // key in app-settings.json (never the token); a plaintext token still in the file moves into the vault with the save.
-    // Without a usable vault a save that would have to store a token is refused.
+    // Without a usable vault a save that would have to store a token is refused. The section is rebuilt from what is
+    // stored at the moment of writing, so a save that keeps the token keeps the key named then — not one another save
+    // has since replaced and removed.
     private async Task SaveDns()
     {
         var current = DnsOptions.CurrentValue;
         var stored = await AppSettings.ReadSectionAsync(DnsSettings.SectionName);
-        var storedRef = Whiskers.Services.Dns.DnsSettingsSection.StoredRef(stored);
         var filePlaintext = Whiskers.Services.Dns.DnsSettingsSection.PlaintextToken(stored);
         var entered = !string.IsNullOrWhiteSpace(_dnsApiToken) ? _dnsApiToken.Trim() : null;
         var token = entered ?? filePlaintext;
@@ -949,6 +950,7 @@ else
         }
 
         string? newRef = null;
+        System.Text.Json.Nodes.JsonObject? previous;
         try
         {
             if (token is not null)
@@ -958,9 +960,11 @@ else
                 var key = newRef;
                 await Mutations.RunAsync("vault.secret_set", new { section = "vault", key }, _ => VaultService.SetSecretAsync(key, token));
             }
-            var section = Whiskers.Services.Dns.DnsSettingsSection.Next(stored, _dnsProvider, newRef, zones, _dnsDefaultTtl);
-            await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
-                await AppSettings.SaveSectionAsync(DnsSettings.SectionName, section));
+            var provider = _dnsProvider;
+            var ttl = _dnsDefaultTtl;
+            previous = await Mutations.RunAsync("config.save", new { section = "dns" }, _ =>
+                AppSettings.UpdateSectionAsync(DnsSettings.SectionName,
+                    inLock => Whiskers.Services.Dns.DnsSettingsSection.Next(inLock, provider, newRef, zones, ttl)));
         }
         catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException)
         {
@@ -969,11 +973,12 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
-        // The settings name the new token now; the old one is unused.
-        if (newRef is not null && !string.IsNullOrWhiteSpace(storedRef)) await RemoveUnusedDnsTokenAsync(storedRef);
+        // The settings name the new token now; the one they named before is unused.
+        var previousRef = Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous);
+        if (newRef is not null && previousRef is not null && previousRef != newRef) await RemoveUnusedDnsTokenAsync(previousRef);
 
         _dnsApiToken = "";
-        _dnsHasToken = token is not null || !string.IsNullOrWhiteSpace(storedRef) || !string.IsNullOrWhiteSpace(current.ApiToken);
+        _dnsHasToken = token is not null || previousRef is not null || !string.IsNullOrWhiteSpace(current.ApiToken);
         var shown = token ?? CurrentDnsToken(current);
         _dnsTokenTail = shown is { Length: >= 4 } ? shown[^4..] : "";
         Snackbar.Add(L["Settings_Dns_Snackbar_Saved"].Value, Severity.Success);
@@ -982,25 +987,24 @@ else
     private async Task ClearDnsToken()
     {
         var current = DnsOptions.CurrentValue;
-        var stored = await AppSettings.ReadSectionAsync(DnsSettings.SectionName);
-        var storedRef = Whiskers.Services.Dns.DnsSettingsSection.StoredRef(stored);
+        System.Text.Json.Nodes.JsonObject? previous;
         try
         {
-            // An empty ApiToken also hides a token set by the environment, as before.
-            await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
+            // An empty ApiToken also hides a token set by the environment, as before. The key to remove is the one the
+            // section named at the moment of writing.
+            var cleared = (System.Text.Json.Nodes.JsonObject)System.Text.Json.JsonSerializer.SerializeToNode(new DnsSettings
             {
-                await AppSettings.SaveSectionAsync(DnsSettings.SectionName, new DnsSettings
-                {
-                    Provider = current.Provider,
-                    ApiToken = "",
-                    ApiTokenRef = null,
-                    AllowedZones = current.AllowedZones,
-                    DefaultTtl = current.DefaultTtl,
-                });
-            });
+                Provider = current.Provider,
+                ApiToken = "",
+                ApiTokenRef = null,
+                AllowedZones = current.AllowedZones,
+                DefaultTtl = current.DefaultTtl,
+            })!;
+            previous = await Mutations.RunAsync("config.save", new { section = "dns" }, _ =>
+                AppSettings.UpdateSectionAsync(DnsSettings.SectionName, _ => cleared));
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
-        if (!string.IsNullOrWhiteSpace(storedRef)) await RemoveUnusedDnsTokenAsync(storedRef);
+        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        if (Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous) is { } previousRef) await RemoveUnusedDnsTokenAsync(previousRef);
         _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
         Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
     }

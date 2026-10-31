@@ -14,7 +14,9 @@ namespace Whiskers.Services.ServerConfig;
 [MutationHandler]
 public static class ServerRemoval
 {
-    /// <summary>Removes <paramref name="server"/>; returns false when its kubeconfig could not be removed afterwards.</summary>
+    /// <summary>Removes <paramref name="server"/>; returns false when its kubeconfig or cloud API key could not be removed
+    /// from the vault afterwards — including when the vault is disabled or locked and the server named such a secret
+    /// (the secret then stays in vault.json, unused).</summary>
     public static async Task<bool> RemoveAsync(IServerConfigService servers, IVaultService vault, Models.ServerConfig server)
     {
         ArgumentNullException.ThrowIfNull(servers);

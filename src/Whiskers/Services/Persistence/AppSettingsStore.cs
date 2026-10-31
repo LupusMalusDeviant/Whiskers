@@ -20,6 +20,12 @@ public interface IAppSettingsStore
     /// <summary>The section as stored in app-settings.json (not merged with other configuration layers), or null.</summary>
     Task<JsonObject?> ReadSectionAsync(string section);
 
+    /// <summary>Replaces one section by what <paramref name="build"/> makes of the section as stored, read and written under
+    /// the store's lock (R1-29): a decision that depends on the stored section — which vault key it names — cannot act on a
+    /// copy another save has replaced meanwhile. Returns the section as it was before.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("config.save")]
+    Task<JsonObject?> UpdateSectionAsync(string section, Func<JsonObject?, JsonObject> build);
+
     /// <summary>R1-29 start-up migration: replaces the plaintext DNS token of app-settings.json by the vault key
     /// <paramref name="vaultRef"/> — only while the file still holds exactly <paramref name="plaintext"/> and names no
     /// vault key. It changes nothing else and can only remove a secret from the file, never write one, so it is not a
@@ -52,6 +58,28 @@ public sealed class AppSettingsStore : IAppSettingsStore
         try
         {
             return (await ReadRootAsync())[section]?.DeepClone() as JsonObject;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<JsonObject?> UpdateSectionAsync(string section, Func<JsonObject?, JsonObject> build)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        await _lock.WaitAsync();
+        try
+        {
+            var root = await ReadRootAsync();
+            var before = root[section]?.DeepClone();
+            var after = build(before as JsonObject);
+            EnsureNoVaultOnlyValue(section, after);
+            root[section] = after.DeepClone();
+            await WriteRootAsync(root);
+            Whiskers.Services.Mutations.ConfigChange.Record(section, ToElement(before), ToElement(after));
+            return before as JsonObject;
         }
         finally
         {

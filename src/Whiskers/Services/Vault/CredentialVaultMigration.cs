@@ -59,14 +59,32 @@ public sealed class CredentialVaultMigration : IInitializable
         {
             ct.ThrowIfCancellationRequested();
             var vaultKey = CredentialRefs.MigratedCloudKey(server.Id);
-            if (!await StoreAsync(vaultKey, server.CloudApiKey!, $"cloud API key of server {server.Id}")) continue;
-            if (await _servers.AdoptCloudKeyRefAsync(server.Id, server.CloudApiKey!, vaultKey))
+            var what = $"cloud API key of server {server.Id}";
+            if (!await StoreAsync(vaultKey, server.CloudApiKey!, what)) continue;
+            var key = server.CloudApiKey!;
+            if (await AdoptAsync(() => _servers.AdoptCloudKeyRefAsync(server.Id, key, vaultKey), what))
                 _logger.LogInformation("Cloud API key of server {ServerId} moved into the vault", server.Id);
         }
 
         if (dnsPlaintext is not null && await StoreAsync(CredentialRefs.MigratedDnsToken, dnsPlaintext, "DNS token")
-            && await _appSettings.AdoptDnsTokenRefAsync(dnsPlaintext, CredentialRefs.MigratedDnsToken))
+            && await AdoptAsync(() => _appSettings.AdoptDnsTokenRefAsync(dnsPlaintext, CredentialRefs.MigratedDnsToken), "DNS token"))
             _logger.LogInformation("DNS token moved into the vault");
+    }
+
+    /// <summary>Replaces the plaintext in its file by the vault key. A file that cannot be rewritten leaves the plaintext
+    /// where it was (still usable, reported, retried at the next start) and does not stop the start.</summary>
+    private async Task<bool> AdoptAsync(Func<Task<bool>> adopt, string what)
+    {
+        try
+        {
+            return await adopt();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(ex, "Vault migration: the {What} is in the vault, but its file could not be rewritten; it stays in "
+                                 + "plaintext until the next start", what);
+            return false;
+        }
     }
 
     /// <summary>Writes <paramref name="value"/> to the vault and reads it back from vault.json on disk.</summary>

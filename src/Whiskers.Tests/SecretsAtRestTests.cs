@@ -267,6 +267,36 @@ public class SecretsAtRestTests : IDisposable
     }
 
     [Fact]
+    public async Task A_file_that_cannot_be_rewritten_keeps_its_plaintext_and_does_not_stop_the_start()
+    {
+        WriteLegacyServers(_cloudKey);
+        WriteLegacyDns(_dnsToken);
+        var serversBefore = File.ReadAllBytes(_paths.ServersJson);
+        var settingsBefore = File.ReadAllBytes(_paths.AppSettingsJson);
+        var vault = await Vault();
+        var servers = await Servers();
+        // Neither file can be replaced: the temporary file each write goes through is a directory.
+        Directory.CreateDirectory(_paths.ServersJson + ".tmp");
+        Directory.CreateDirectory(_paths.AppSettingsJson + ".tmp");
+
+        await Migrate(vault, servers);   // no exception: the start goes on
+
+        Assert.Equal(serversBefore, File.ReadAllBytes(_paths.ServersJson));
+        Assert.Equal(settingsBefore, File.ReadAllBytes(_paths.AppSettingsJson));
+        Assert.Equal(_cloudKey, CloudCredentials.KeyOf(servers.GetServer("hetz")!, vault));
+
+        // Fixed by the next start: the vault already holds both credentials under the same keys.
+        Directory.Delete(_paths.ServersJson + ".tmp");
+        Directory.Delete(_paths.AppSettingsJson + ".tmp");
+        var restartedVault = await Vault();
+        var restarted = await Servers();
+        await Migrate(restartedVault, restarted);
+        Assert.Equal(_cloudKey, CloudCredentials.KeyOf(restarted.GetServer("hetz")!, restartedVault));
+        Assert.Equal(_dnsToken, restartedVault.GetSecret(CredentialRefs.MigratedDnsToken));
+        AssertNoPlaintext(_cloudKey, _dnsToken);
+    }
+
+    [Fact]
     public async Task Vault_adopts_only_migration_keys()
     {
         var vault = await Vault();
