@@ -29,7 +29,8 @@ public class HetznerTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_rescue");
         if (denied != null) return denied;
 
-        var ctx = await cloud.HetznerContextAsync(server);
+        var (ctx, error) = await ContextAsync(cloud, server);
+        if (error != null) return error;
         if (ctx == null) return NotHetzner(server);
         var resp = await hetzner.EnableRescueAsync(ctx.Value.token, ctx.Value.server.Id);
 
@@ -52,7 +53,8 @@ public class HetznerTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_disable_rescue");
         if (denied != null) return denied;
 
-        var ctx = await cloud.HetznerContextAsync(server);
+        var (ctx, error) = await ContextAsync(cloud, server);
+        if (error != null) return error;
         if (ctx == null) return NotHetzner(server);
         await hetzner.DisableRescueAsync(ctx.Value.token, ctx.Value.server.Id);
         return $"Rescue-Mode für {ctx.Value.server.Name} deaktiviert.";
@@ -68,7 +70,8 @@ public class HetznerTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_backups");
         if (denied != null) return denied;
 
-        var ctx = await cloud.HetznerContextAsync(server);
+        var (ctx, error) = await ContextAsync(cloud, server);
+        if (error != null) return error;
         if (ctx == null) return NotHetzner(server);
         await hetzner.EnableBackupsAsync(ctx.Value.token, ctx.Value.server.Id);
         return $"Backups für {ctx.Value.server.Name} aktiviert.";
@@ -84,7 +87,8 @@ public class HetznerTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_disable_backups");
         if (denied != null) return denied;
 
-        var ctx = await cloud.HetznerContextAsync(server);
+        var (ctx, error) = await ContextAsync(cloud, server);
+        if (error != null) return error;
         if (ctx == null) return NotHetzner(server);
         await hetzner.DisableBackupsAsync(ctx.Value.token, ctx.Value.server.Id);
         return $"Backups für {ctx.Value.server.Name} deaktiviert.";
@@ -102,7 +106,8 @@ public class HetznerTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_change_server_type");
         if (denied != null) return denied;
 
-        var ctx = await cloud.HetznerContextAsync(server);
+        var (ctx, error) = await ContextAsync(cloud, server);
+        if (error != null) return error;
         if (ctx == null) return NotHetzner(server);
         if (ctx.Value.server.Status != "off")
             return $"{ctx.Value.server.Name} ist '{ctx.Value.server.Status}'. Für einen Typ-Wechsel muss der Server aus sein (erst cloud_shutdown).";
@@ -121,7 +126,8 @@ public class HetznerTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_list_snapshots");
         if (denied != null) return denied;
 
-        var ctx = await cloud.HetznerContextAsync(server);
+        var (ctx, error) = await ContextAsync(cloud, server);
+        if (error != null) return error;
         if (ctx == null) return NotHetzner(server);
         var images = await hetzner.ListSnapshotsAsync(ctx.Value.token);
         if (images.Count == 0) return "Keine Snapshots gefunden.";
@@ -141,7 +147,8 @@ public class HetznerTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_delete_snapshot");
         if (denied != null) return denied;
 
-        var ctx = await cloud.HetznerContextAsync(server);
+        var (ctx, error) = await ContextAsync(cloud, server);
+        if (error != null) return error;
         if (ctx == null) return NotHetzner(server);
 
         // Load the image first and refuse anything that isn't a snapshot — a mistyped id must never delete
@@ -158,6 +165,14 @@ public class HetznerTools
 
     /// <summary>Only a Hetzner image of type "snapshot" may be deleted here — backups/system images are protected.</summary>
     public static bool IsDeletableSnapshot(HetznerImage? img) => img is not null && img.Type == "snapshot";
+
+    /// <summary>R1-29: a key kept in a disabled or locked vault is a readable answer naming the vault (and, inside a
+    /// gateway call, a failed operation) — never a tool exception, never a silent "no key".</summary>
+    private static async Task<((string token, HetznerServer server)? Ctx, string? Error)> ContextAsync(ICloudControlService cloud, string server)
+    {
+        try { return (await cloud.HetznerContextAsync(server), null); }
+        catch (InvalidOperationException ex) { return (null, Whiskers.Services.Mutations.MutationScope.Fail($"Fehler: {ex.Message}")); }
+    }
 
     private static string NotHetzner(string server)
         => $"'{server}' ist kein konfigurierter Hetzner-Server (Provider/Key prüfen, oder IP-Abgleich fehlgeschlagen).";

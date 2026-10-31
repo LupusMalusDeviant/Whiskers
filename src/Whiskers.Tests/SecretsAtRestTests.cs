@@ -437,6 +437,59 @@ public class SecretsAtRestTests : IDisposable
         Assert.DoesNotContain(_cloudKey, ex.Message);
     }
 
+    [Fact]
+    public async Task Cloud_tools_answer_a_locked_vault_with_the_reason_not_an_exception()
+    {
+        var vault = await Vault();
+        var servers = await Servers();
+        var cloudRef = CredentialRefs.NewCloudKey("hetz");
+        await vault.SetSecretAsync(cloudRef, _cloudKey);
+        await servers.AddServerAsync(new ServerConfig { Id = "hetz", Name = "Hetzner box", CloudProvider = CloudProvider.Hetzner, CloudKeyRef = cloudRef, IsDefault = true });
+        // The real Hetzner provider; it is never reached, since the key cannot be read.
+        var cloud = new CloudControlService(servers, [new Whiskers.Services.Cloud.Providers.HetznerCloudProvider(null!)],
+            NullLogger<CloudControlService>.Instance, await Vault(key: null));
+        // AUTH_DISABLED cookie caller (maps to admin) — only gets past the permission gate.
+        var caller = new Microsoft.AspNetCore.Http.HttpContextAccessor
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                    Array.Empty<System.Security.Claims.Claim>(), Whiskers.Services.Auth.AuthConstants.AuthDisabledScheme)),
+            },
+        };
+
+        var status = await Whiskers.Mcp.Tools.CloudTools.CloudStatus(caller, null!, cloud, "hetz");
+        var rescue = await Whiskers.Mcp.Tools.HetznerTools.HetznerDisableRescue(caller, null!, cloud, null!, "hetz");
+
+        foreach (var answer in new[] { status, rescue })
+        {
+            Assert.Contains("vault", answer, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(_cloudKey, answer);
+        }
+    }
+
+    [Fact]
+    public async Task Migration_leaves_an_environment_dns_token_alone()
+    {
+        // The environment's token is not in app-settings.json: there is nothing for the migration to read or move.
+        File.WriteAllText(_paths.AppSettingsJson, new JsonObject { ["Dns"] = new JsonObject { ["Provider"] = "infomaniak" } }.ToJsonString());
+        var settingsBefore = File.ReadAllBytes(_paths.AppSettingsJson);
+        var vault = await Vault();
+        var envToken = "DNSTOKEN-" + Guid.NewGuid().ToString("N");
+        Environment.SetEnvironmentVariable("Dns__ApiToken", envToken);
+        try
+        {
+            await Migrate(vault, await Servers());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Dns__ApiToken", null);
+        }
+
+        Assert.Equal(settingsBefore, File.ReadAllBytes(_paths.AppSettingsJson));
+        Assert.Empty(vault.ListSecrets());
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /// <summary>A vault that stores nothing it could read back (the write was lost).</summary>

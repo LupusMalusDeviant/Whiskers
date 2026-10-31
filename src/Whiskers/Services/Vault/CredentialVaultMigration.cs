@@ -79,8 +79,9 @@ public sealed class CredentialVaultMigration : IInitializable
         {
             return await adopt();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Any failure of the rewrite: the plaintext is where it was, the start goes on.
             _logger.LogError(ex, "Vault migration: the {What} is in the vault, but its file could not be rewritten; it stays in "
                                  + "plaintext until the next start", what);
             return false;
