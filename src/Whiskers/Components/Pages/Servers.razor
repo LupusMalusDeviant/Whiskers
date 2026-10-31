@@ -531,11 +531,13 @@
         {
             saved = await PersistServerRecordAsync();
         }
-        catch when (_newKubeconfigKey is not null || _newCloudKey is not null)
+        catch (Exception ex) when (_newKubeconfigKey is not null || _newCloudKey is not null)
         {
             // The server record was not written: the new kubeconfig / cloud key never took effect.
             if (_newKubeconfigKey is not null) await RemoveUnusedKubeconfigAsync(_newKubeconfigKey);
             if (_newCloudKey is not null) await RemoveUnusedCloudKeyAsync(_newCloudKey);
+            if (ex is Whiskers.Services.ServerConfig.CloudKeyChange.CloudKeyChangedException)
+                throw new InvalidOperationException(L["Servers_Error_CloudKeyChangedMeanwhile"].Value, ex);
             throw;
         }
         // The record names the new kubeconfig / cloud key now; the old ones are unused, removing them is tidying up.

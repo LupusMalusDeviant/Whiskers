@@ -221,8 +221,8 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
         Assert.NotNull(record.CloudKeyRef);
 
         // Cleared or replaced by another save meanwhile: the move is refused instead of bringing the key back.
-        Assert.Throws<InvalidOperationException>(() => move.ApplyTo(stored.Clone(), new ServerConfig { Id = "hetz" }));
-        Assert.Throws<InvalidOperationException>(() => move.ApplyTo(stored.Clone(),
+        Assert.Throws<CloudKeyChange.CloudKeyChangedException>(() => move.ApplyTo(stored.Clone(), new ServerConfig { Id = "hetz" }));
+        Assert.Throws<CloudKeyChange.CloudKeyChangedException>(() => move.ApplyTo(stored.Clone(),
             new ServerConfig { Id = "hetz", CloudKeyRef = CredentialRefs.NewCloudKey("hetz") }));
     }
 

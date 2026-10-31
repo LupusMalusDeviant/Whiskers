@@ -404,6 +404,27 @@ public class SecretsAtRestTests : IDisposable
     }
 
     [Fact]
+    public async Task Removing_a_kubernetes_server_with_a_cloud_key_removes_both_secrets()
+    {
+        var vault = await Vault();
+        var servers = await Servers();
+        await servers.AddServerAsync(new ServerConfig { Id = "a", Name = "a", IsDefault = true });
+        var cloudRef = CredentialRefs.NewCloudKey("k");
+        var kubeRef = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey("k") + ":" + Guid.NewGuid().ToString("N");
+        await vault.SetSecretAsync(cloudRef, _cloudKey);
+        await vault.SetSecretAsync(kubeRef, "kubeconfig-" + Guid.NewGuid().ToString("N"));
+        await servers.AddServerAsync(new ServerConfig
+        {
+            Id = "k", Name = "k", ConnectionType = ConnectionType.Kubernetes, KubeconfigRef = kubeRef,
+            CloudProvider = CloudProvider.Hetzner, CloudKeyRef = cloudRef,
+        });
+
+        Assert.True(await ServerRemoval.RemoveAsync(servers, vault, servers.GetServer("k")!));
+        Assert.Null(vault.GetSecret(cloudRef));
+        Assert.Null(vault.GetSecret(kubeRef));
+    }
+
+    [Fact]
     public async Task Removing_a_server_with_a_vault_key_and_no_usable_vault_reports_the_cleanup_as_failed()
     {
         var vault = await Vault(key: null);

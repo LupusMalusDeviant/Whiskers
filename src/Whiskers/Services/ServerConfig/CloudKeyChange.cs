@@ -7,6 +7,10 @@ namespace Whiskers.Services.ServerConfig;
 /// </summary>
 public sealed record CloudKeyChange
 {
+    /// <summary>A moved plaintext key no longer matches the stored record: another save changed it meanwhile.</summary>
+    public sealed class CloudKeyChangedException()
+        : InvalidOperationException("The server's cloud API key was changed meanwhile; reload and save again.");
+
     private CloudKeyChange(string? newRef, bool clear, string? movedPlaintext = null)
     {
         NewRef = newRef;
@@ -53,8 +57,7 @@ public sealed record CloudKeyChange
         ArgumentNullException.ThrowIfNull(server);
         if (_movedPlaintext is not null
             && (stored is null || stored.CloudKeyRef is not null || stored.CloudApiKey != _movedPlaintext))
-            throw new InvalidOperationException(
-                "Der Cloud-API-Key dieses Servers wurde inzwischen geändert. Seite neu laden und erneut speichern.");
+            throw new CloudKeyChangedException();
         if (NewRef is not null)
         {
             server.CloudKeyRef = NewRef;
