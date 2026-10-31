@@ -102,6 +102,10 @@ public sealed class AppSettingsStore : IAppSettingsStore
             var tokenName = dns.FirstOrDefault(p => string.Equals(p.Key, nameof(DnsSettings.ApiToken), StringComparison.OrdinalIgnoreCase)).Key;
             if (tokenName is null || Field(dns, tokenName) != plaintext) return false;
             dns.Remove(tokenName);
+            // An empty reference under another spelling ("apitokenref") goes too: two keys differing only by case are a
+            // duplicate for the configuration reader.
+            if (dns.FirstOrDefault(p => string.Equals(p.Key, nameof(DnsSettings.ApiTokenRef), StringComparison.OrdinalIgnoreCase)).Key is { } refName)
+                dns.Remove(refName);
             dns[nameof(DnsSettings.ApiTokenRef)] = vaultRef;
             await WriteRootAsync(root);
             return true;

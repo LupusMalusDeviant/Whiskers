@@ -546,10 +546,10 @@
         return saved;
     }
 
-    /// <summary>The legacy plaintext key of the server being edited, as stored now — only while a vault can take it;
-    /// without one the save keeps it as it is (the store never writes a new plaintext key).</summary>
+    /// <summary>The legacy plaintext key of the server being edited, as stored now. A save moves it into the vault; without
+    /// a usable vault the save is refused (as the DNS panel does), unless it removes the cloud provider.</summary>
     private string? StoredPlaintextCloudKey()
-        => Vault.IsEnabled && _editingServer is not null
+        => _editingServer is not null
            && ServerConfigService.GetServer(_editingServer.Id) is { } stored
            && Whiskers.Services.Cloud.CloudCredentials.HasPlaintextCloudKey(stored)
             ? stored.CloudApiKey
@@ -622,7 +622,9 @@
             if (!Vault.IsEnabled)
                 throw new InvalidOperationException(Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
                     ? L["Vault_Error_KeyWrong"].Value
-                    : L["Servers_Error_CloudKeyNeedsVault"].Value);
+                    : string.IsNullOrWhiteSpace(_cloudApiKey)
+                        ? L["Servers_Error_PlaintextCloudKeyNeedsVault"].Value
+                        : L["Servers_Error_CloudKeyNeedsVault"].Value);
             var id = _editingServer?.Id ?? _form.Id;
             var vaultKey = Whiskers.Services.Vault.CredentialRefs.NewCloudKey(id);
             // apiKey: a key entered now, or a plaintext one from before R1-29 that the save moves into the vault.

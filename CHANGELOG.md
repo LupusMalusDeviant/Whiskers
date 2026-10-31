@@ -12,7 +12,8 @@ All notable changes to Whiskers are documented here. The format follows
   plaintext — and the stores refuse a plaintext key from any path. **Upgrade:** at the first start with a usable vault,
   existing plaintext keys are moved automatically: each is stored in the vault, read back from vault.json on disk and
   compared, and only then removed from its file; an interrupted start finishes at the next one, and without a vault
-  nothing changes and the keys keep working (the readiness check lists them). Removing a server also removes its cloud
+  nothing changes and the keys keep working (the readiness check lists them); until then a server or DNS
+  save other than removing the credential is refused, since the save would have to move it. Removing a server also removes its cloud
   key from the vault. The production-readiness card now reports where these credentials actually are and no longer
   claims that every secret is encrypted: notification, chat and AI credentials and webhook secrets are still plaintext
   (R1-30, R1-31). A token set by the environment (`Dns__ApiToken`) still works and is not moved.

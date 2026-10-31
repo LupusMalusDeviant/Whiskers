@@ -182,6 +182,33 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Servers_refuses_other_changes_while_a_plaintext_cloud_key_has_no_vault_to_go_to()
+    {
+        var legacy = Secret("CLOUDKEY");
+        File.WriteAllText(Path.Combine(_dir, "servers.json"), new JsonObject
+        {
+            ["Servers"] = new JsonArray(new JsonObject
+            {
+                ["Id"] = "hetz", ["Name"] = "Hetzner box", ["ConnectionType"] = 0, ["Enabled"] = true, ["IsDefault"] = true,
+                ["CloudProvider"] = (int)CloudProvider.Hetzner, ["CloudApiKey"] = legacy,
+            }),
+        }.ToJsonString());
+        await _servers.InitializeAsync();
+        _vault.Enabled = false;
+
+        var page = OpenServer("hetz");
+        Get<ServerConfig>(page, "_form").Name = "renamed";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
+        Assert.Equal("Hetzner box", _servers.GetServer("hetz")!.Name);
+
+        // Removing the cloud provider is the way out without a vault: it removes the plaintext key.
+        Get<ServerConfig>(page, "_form").CloudProvider = CloudProvider.None;
+        await Persist(page);
+        Assert.Equal("renamed", _servers.GetServer("hetz")!.Name);
+        Assert.DoesNotContain(legacy, AllFiles());
+    }
+
+    [Fact]
     public async Task Servers_failed_record_write_removes_the_new_cloud_key()
     {
         var original = Secret("CLOUDKEY");

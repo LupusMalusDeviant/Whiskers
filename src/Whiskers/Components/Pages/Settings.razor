@@ -1009,7 +1009,12 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
-        if (Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous) is { } previousRef) await RemoveUnusedDnsTokenAsync(previousRef);
+        if (Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous) is { } previousRef)
+        {
+            // Without a usable vault the entry cannot be removed: it stays encrypted and unused — say so.
+            if (VaultService.IsEnabled) await RemoveUnusedDnsTokenAsync(previousRef);
+            else Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleanupFailed"].Value, Severity.Info);
+        }
         _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
         Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
     }
