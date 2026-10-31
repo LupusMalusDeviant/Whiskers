@@ -151,6 +151,6 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
         return (actor, type);
     }
 
-    private static string? Cap(string? s, int max) =>
-        s is null ? null : (s.Length > max ? s[..max] + "…" : s);
+    // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.
+    private static string? Cap(string? s, int max) => Whiskers.Utils.SinkRedaction.Cap(s, max);
 }

@@ -19,7 +19,8 @@ All notable changes to Whiskers are documented here. The format follows
   (`command.execute`) and a scheduled custom command only as their length (it showed the pattern-redacted command).
   Stored JSON keeps quotes readable (`'`, not `\u0027`). In a gateway event's `principal`, the credential's id is now
   `keyId` (was `credential`, a name the secret rule hides). An approval's reason no longer quotes a payload argument
-  (the card's arguments still show it). Rows written before this version stay as they are.
+  (the card's arguments still show it). A stored JSON field that is too long is shortened by its values and stays valid
+  JSON. Long texts (task output up to 1 MB) get a larger redaction time budget instead of being withheld whole. Rows written before this version stay as they are.
 - R1-23 follow-up: an unreadable checkpoint file and a pending VAULT_KEY adoption are logged as what they are (not as
   tampering); the page counts every finding, also above the display cap; export scratch files left by a crash are
   removed by the next export.

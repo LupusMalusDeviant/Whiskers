@@ -261,8 +261,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         catch { /* observability must never break tool execution */ }
     }
 
-    private static string? Cap(string? s, int max) =>
-        s is null ? null : (s.Length > max ? s[..max] + "…" : s);
+    // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.
+    private static string? Cap(string? s, int max) => Whiskers.Utils.SinkRedaction.Cap(s, max);
 
     private async Task<string> ExecuteAsync(AgentToolEntry entry, IReadOnlyDictionary<string, JsonElement> args,
         AgentContext context, CancellationToken ct = default)

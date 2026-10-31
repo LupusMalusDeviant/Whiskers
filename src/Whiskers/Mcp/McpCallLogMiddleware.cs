@@ -192,6 +192,6 @@ public sealed class McpCallLogMiddleware
     // The sinks' one rule (R1-24): URL user info first, then the patterns; fail closed on a timeout.
     private static string? Redact(string? text) => SinkRedaction.Text(text);
 
-    private static string? Cap(string? s, int max) =>
-        s is null ? null : (s.Length > max ? s[..max] + "…" : s);
+    // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.
+    private static string? Cap(string? s, int max) => Whiskers.Utils.SinkRedaction.Cap(s, max);
 }

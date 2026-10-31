@@ -365,8 +365,9 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
     }
 
     /// <summary>Shortens one text field, so the document around it stays valid JSON. A negative budget drops it.</summary>
+    // A JSON field (the arguments, an embedded intent) stays valid JSON when shortened (R1-24).
     private static string? Field(string? text, int max) =>
-        text is null || max < 0 ? null : text.Length <= max ? text : text[..Math.Max(0, max - 1)] + "…";
+        text is null || max < 0 ? null : text.Length <= max ? text : max == 0 ? "" : SinkRedaction.Cap(text, max);
 
     /// <summary>Builds the details with a shrinking budget for their variable-length fields until the serialized
     /// document fits <see cref="MaxDetailChars"/> — always complete JSON, never a cut-off document.</summary>

@@ -121,6 +121,63 @@ public static class SinkRedaction
             writer.WriteEndObject();
         });
 
+    /// <summary>Shortens a stored text to at most <paramref name="max"/> characters. A JSON document is shortened by
+    /// its string values (then, if still too long, replaced by a valid stub) so it stays valid JSON — redacting it again
+    /// on save then runs value by value, never a pattern across a cut document's quotes.</summary>
+    public static string? Cap(string? text, int max)
+    {
+        if (text is null || text.Length <= max) return text;
+        if (max < 2) return "…";
+        if (text is ['{' or '[', ..])
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(text);
+                for (var limit = max; limit >= 16; limit /= 2)
+                {
+                    var shortened = Write(writer => WriteShortened(writer, document.RootElement, limit));
+                    if (shortened.Length <= max) return shortened;
+                }
+                var stub = $"{{\"cut\":\"{text.Length} chars\"}}";
+                if (stub.Length <= max) return stub;
+            }
+            catch (JsonException)
+            {
+                // not JSON: cut as text below
+            }
+        }
+        var end = max - 1;
+        if (char.IsHighSurrogate(text[end - 1])) end--;
+        return text[..end] + "…";
+    }
+
+    private static void WriteShortened(Utf8JsonWriter writer, JsonElement value, int limit)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in value.EnumerateObject())
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteShortened(writer, property.Value, limit);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in value.EnumerateArray()) WriteShortened(writer, item, limit);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.String when value.GetString() is { Length: > 0 } text && text.Length > limit:
+                writer.WriteStringValue(Cap(text, limit));
+                break;
+            default:
+                value.WriteTo(writer);
+                break;
+        }
+    }
+
     /// <summary>The arguments with every payload replaced by its length (for display and approval cards).</summary>
     public static IReadOnlyDictionary<string, object?> WithoutPayloads(IReadOnlyDictionary<string, JsonElement> arguments) =>
         arguments.ToDictionary(a => a.Key, a => IsPayload(a.Key) ? (object?)Withheld(a.Value) : a.Value);

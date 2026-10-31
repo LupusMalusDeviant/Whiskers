@@ -114,6 +114,33 @@ public sealed class SinkRedactionTests
     }
 
     [Fact]
+    public void A_shortened_json_document_stays_valid_and_redacts_again_to_itself()
+    {
+        var arguments = SinkRedaction.Arguments(JsonSerializer.Serialize(new
+        {
+            description = "rotate token: monthly " + new string('d', 3000),
+            pattern = "password=",
+            command = new string('c', 5000),
+            serverId = "local",
+        }))!;
+
+        var capped = SinkRedaction.Cap(arguments, 400)!;
+
+        Assert.True(capped.Length <= 400);
+        using (var document = JsonDocument.Parse(capped))
+            Assert.Equal("local", document.RootElement.GetProperty("serverId").GetString());
+        Assert.Equal(capped, SinkRedaction.Json(capped));
+        Assert.Equal(capped, SinkRedaction.Arguments(capped));
+    }
+
+    [Theory]
+    [InlineData("plain text that is far too long for the column", 20)]
+    [InlineData("{not json but starts like it, and it is long enough", 20)]
+    [InlineData("[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]", 12)]
+    public void Cap_never_exceeds_its_limit(string text, int max) =>
+        Assert.True(SinkRedaction.Cap(text, max)!.Length <= max);
+
+    [Fact]
     public void Redaction_is_idempotent()
     {
         var once = SinkRedaction.Arguments(JsonSerializer.Serialize(new { command = $"echo {Canary}", note = SecretTexts[1] }));

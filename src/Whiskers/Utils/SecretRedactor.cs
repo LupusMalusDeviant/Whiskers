@@ -12,22 +12,28 @@ public static class SecretRedactor
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(100);
 
-    // A value this redactor already wrote ("***" followed by a delimiter or the end) is left alone, so redacting twice
-    // changes nothing — the "\S+" below would otherwise run on from "***" across the quotes and commas of the JSON
-    // around it. A secret that merely starts with "***" is still redacted.
-    private const string NotRedacted = @"(?!\*\*\*(?:[\s""',;)\]}]|$))";
+    // A large text (task output, up to the executor's 1 MB) gets a budget that scales with it: a timeout withholds
+    // the whole text, which must stay the answer to pathological input, not to an ordinary long log.
+    private static readonly TimeSpan LargeTimeout = TimeSpan.FromSeconds(2);
+    private const int LargeText = 64 * 1024;
+
+    // A value this redactor already wrote ("***" followed by whitespace or the end — "\S+" below always ends there)
+    // is left alone, so redacting twice changes nothing. Any other value starting with "***" ("***;x") is a secret
+    // like any other. Sinks never run these patterns over JSON text (they redact JSON value by value and shorten it
+    // structurally), so a written "***" is never followed by a quote.
+    private const string NotRedacted = @"(?!\*\*\*(?:\s|$))";
 
     // mysql -p<secret>, "-p<secret>", '-p<secret>'  →  -p***  — a flag, so not inside a word: "web-prod" is a name.
-    private static readonly Regex MysqlPwFlag = new(
-        $@"(?<![\w-])-p{NotRedacted}\S+", RegexOptions.Compiled, Timeout);
+    private static readonly Pair MysqlPwFlag = new(
+        $@"(?<![\w-])-p{NotRedacted}\S+", RegexOptions.Compiled);
 
     // redis-cli -a <secret>  →  -a ***  — a flag, so not inside a word: "data-a daily" is a name.
-    private static readonly Regex RedisAuthFlag = new(
-        $@"(?<![\w-])-a\s+{NotRedacted}\S+", RegexOptions.Compiled, Timeout);
+    private static readonly Pair RedisAuthFlag = new(
+        $@"(?<![\w-])-a\s+{NotRedacted}\S+", RegexOptions.Compiled);
 
     // PGPASSWORD=x / MYSQL_PWD=x / REDISCLI_AUTH=x  →  NAME=***
-    private static readonly Regex EnvPassword = new(
-        $@"(MYSQL_PWD|PGPASSWORD|REDISCLI_AUTH)={NotRedacted}\S+", RegexOptions.Compiled, Timeout);
+    private static readonly Pair EnvPassword = new(
+        $@"(MYSQL_PWD|PGPASSWORD|REDISCLI_AUTH)={NotRedacted}\S+", RegexOptions.Compiled);
 
     // Secret-bearing key names, English and German (UI strings and tool output are partly German:
     // "Temporäres root-Passwort: …" passed straight through before).
@@ -35,24 +41,24 @@ public static class SecretRedactor
         @"password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer";
 
     // password=x, token: x, api_key=x, Passwort: x, etc.  →  $1=***
-    private static readonly Regex KeyedSecret = new(
+    private static readonly Pair KeyedSecret = new(
         $@"(?i)({SecretKeys})\s*[=:]\s*{NotRedacted}\S+",
-        RegexOptions.Compiled, Timeout);
+        RegexOptions.Compiled);
 
     // JSON form: "password": "x"  →  "password":"***"  (the key is followed by a quote, so KeyedSecret misses it)
-    private static readonly Regex JsonSecret = new(
+    private static readonly Pair JsonSecret = new(
         $@"(?i)""([\w-]*(?:{SecretKeys})[\w-]*)""\s*:\s*""(?:[^""\\]|\\.)*""",
-        RegexOptions.Compiled, Timeout);
+        RegexOptions.Compiled);
 
     // Authorization: Bearer <token> without a colon after "Bearer"  →  Bearer ***
-    private static readonly Regex BearerToken = new(
+    private static readonly Pair BearerToken = new(
         @"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}",
-        RegexOptions.Compiled, Timeout);
+        RegexOptions.Compiled);
 
     // Credentials in a URL: scheme://user:pass@host  →  scheme://user:***@host
-    private static readonly Regex UrlCredentials = new(
+    private static readonly Pair UrlCredentials = new(
         @"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@/]+@",
-        RegexOptions.Compiled, Timeout);
+        RegexOptions.Compiled);
 
     // SQL password literals: PASSWORD 'x', PASSWORD E'x', IDENTIFIED BY "x" (MySQL; after a space, = or ( only, so
     // a JSON key "password": "x" stays for JsonSecret), ENCRYPTED PASSWORD $$x$$, SET PASSWORD = 'x',
@@ -61,21 +67,21 @@ public static class SecretRedactor
     // the end. Comments between the tokens (/* … */, -- …, # …) count as space. Meant for decoded text: for JSON,
     // use RedactJson.
     private const string SqlGap = @"(?:\s|/\*.*?(?:\*/|$)|(?:--|\#)[^\n]*(?:\n|$))";
-    private static readonly Regex SqlPassword = new(
+    private static readonly Pair SqlPassword = new(
         $@"(?is)\b(PASSWORD|IDENTIFIED(?:{SqlGap}+WITH{SqlGap}+\S+)?{SqlGap}+(?:BY|AS))({SqlGap}*(?:={SqlGap}*|\({SqlGap}*)?)" +
         $@"(?:(?:[EBNX]|U&)?'(?:[^'\\]|''|\\.)*(?:'|$)|(?<=\s|=|\(|\*/)""(?:[^""\\]|""""|\\.)*(?:""|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS){SqlGap}*)[^\s;'""\\]+)",
-        RegexOptions.Compiled, Timeout);
+        RegexOptions.Compiled);
 
     // PEM private keys (certificates are public and stay readable).
-    private static readonly Regex PemPrivateKey = new(
+    private static readonly Pair PemPrivateKey = new(
         @"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)",
-        RegexOptions.Compiled, Timeout);
+        RegexOptions.Compiled);
 
     // A long base64 run is almost always an encoded blob — e.g. a key shipped as `echo <b64> | base64 -d`.
     // 200+ characters keeps image digests (64 hex) and ordinary tokens in log lines readable.
-    private static readonly Regex LongBase64 = new(
+    private static readonly Pair LongBase64 = new(
         @"[A-Za-z0-9+/]{200,}={0,2}",
-        RegexOptions.Compiled, Timeout);
+        RegexOptions.Compiled);
 
     private static readonly JsonSerializerOptions Relaxed =
         new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -142,6 +148,17 @@ public static class SecretRedactor
         {
             return "***";
         }
+    }
+
+    /// <summary>One pattern, compiled with the normal and with the large-text budget.</summary>
+    private sealed class Pair(string pattern, RegexOptions options = RegexOptions.None)
+    {
+        private readonly Regex _normal = new(pattern, options | RegexOptions.Compiled, Timeout);
+        private readonly Regex _large = new(pattern, options | RegexOptions.Compiled, LargeTimeout);
+
+        public string Replace(string input, string replacement) => For(input).Replace(input, replacement);
+        public string Replace(string input, MatchEvaluator evaluator) => For(input).Replace(input, evaluator);
+        private Regex For(string input) => input.Length > LargeText ? _large : _normal;
     }
 
     private static string Patterns(string input)

@@ -74,6 +74,38 @@ public sealed class SecretRedactorTests
         Assert.Equal(8, redacted.Split('\n').Length);
     }
 
+    [Theory]
+    [InlineData("password=***;canary-value-r124")]
+    [InlineData("PGPASSWORD=***)canary-value-r124 psql")]
+    [InlineData("redis-cli -a ***'canary-value-r124 ping")]
+    [InlineData("mysql -p***,canary-value-r124 db")]
+    public void A_secret_that_starts_with_the_mask_is_still_redacted(string text) =>
+        Assert.DoesNotContain(Canary, SecretRedactor.Redact(text));
+
+    [Theory]
+    [InlineData("password=x token: y PGPASSWORD=z mysql -pq redis-cli -a r")]
+    [InlineData("line\nexport PGPASSWORD=a\nmysql -p'b' -e 'select 1'")]
+    public void Redacting_twice_changes_nothing(string text)
+    {
+        var once = SecretRedactor.Redact(text);
+        Assert.Equal(once, SecretRedactor.Redact(once));
+    }
+
+    [Fact]
+    public void A_long_ordinary_log_is_redacted_not_withheld()
+    {
+        // Task output runs to the executor's 1 MB: it gets the large-text budget, so only real secrets go.
+        var log = string.Join('\n', Enumerable.Range(0, 20_000)
+            .Select(i => $"2026-10-31 backup chunk {i} ok, 4096 bytes written to /var/backups/x-{i}.tar"))
+            + $"\nexport PGPASSWORD={Canary}\n";
+
+        var redacted = SinkRedaction.Text(log);
+
+        Assert.NotEqual("***", redacted);
+        Assert.DoesNotContain(Canary, redacted);
+        Assert.Contains("backup chunk 19999 ok", redacted);
+    }
+
     [Fact]
     public void A_pattern_that_times_out_withholds_the_whole_text()
     {

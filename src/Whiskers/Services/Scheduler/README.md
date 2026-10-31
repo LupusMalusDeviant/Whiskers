@@ -28,3 +28,7 @@ the background loop doesn't run, the tools/nav disappear and `/tasks` shows a di
 - UI: [`../../Components/Pages/ScheduledTasks.razor`](../../Components/Pages/ScheduledTasks.razor) (thin
   `ModuleGuard` wrapper) → [`../../Components/Pages/ScheduledTasksView.razor`](../../Components/Pages/ScheduledTasksView.razor)
 - MCP tools: `list_scheduled_tasks`, `create_scheduled_task`, `delete_scheduled_task`, `run_scheduled_task`
+
+**Stored results (R1-24):** a run's output and error and a task's last result are redacted on save by
+[`SinkRedactionInterceptor`](../Persistence/SinkRedactionInterceptor.cs). JSON output is redacted value by value and
+re-written compactly; a key named after a secret (`token`, `maxTokens`, `password` …) shows `***`.
