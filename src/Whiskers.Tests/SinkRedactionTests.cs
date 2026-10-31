@@ -402,7 +402,7 @@ public sealed class SinkRedactionTests
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(data.FullName);
             data.Delete(recursive: true);
         }
     }
@@ -447,7 +447,7 @@ public sealed class SinkRedactionTests
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(data.FullName);
             data.Delete(recursive: true);
         }
     }

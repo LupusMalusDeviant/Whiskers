@@ -38,7 +38,7 @@ public sealed class McpCallLogStoreFilterTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        TestSqlite.ClearPool(_db);
         foreach (var f in new[] { _db, _db + "-wal", _db + "-shm" })
             try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }
     }

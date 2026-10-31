@@ -13,4 +13,16 @@ public static class TestSqlite
         using var connection = new SqliteConnection($"Data Source={path}");
         SqliteConnection.ClearPool(connection);
     }
+
+    /// <summary>Releases the pools of every database file under <paramref name="directory"/> (an app data dir).</summary>
+    /// <remarks>The app names its files <c>{dataDir}/metrics.db</c> (a forward slash on every OS); both spellings are cleared.</remarks>
+    public static void ClearPools(string directory)
+    {
+        if (!Directory.Exists(directory)) return;
+        foreach (var file in Directory.EnumerateFiles(directory, "*.db", SearchOption.AllDirectories))
+        {
+            ClearPool(file);
+            ClearPool(directory + "/" + Path.GetRelativePath(directory, file).Replace(Path.DirectorySeparatorChar, '/'));
+        }
+    }
 }

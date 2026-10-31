@@ -734,6 +734,8 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   already be published. A test keeps the version, image tag and label in step with the app version.
 
 ### Fixed
+- Tests: no test empties the SQLite connection pools of other tests any more (`ClearAllPools`); each clears only
+  its own database files. This removes the random "cannot start a transaction within a transaction" failures.
 - A refused container update on the Dashboard no longer overwrites the saved rollback point; the snapshot is taken
   only once the update has been allowed.
 - The installer no longer recommends `Auth__Disabled=true` for first sign-in. It prints the setup token and

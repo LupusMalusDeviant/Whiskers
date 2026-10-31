@@ -516,7 +516,7 @@ public sealed class TargetResolutionTests : IDisposable
     public void Dispose()
     {
         _db?.Dispose();
-        SqliteConnection.ClearAllPools();
+        TestSqlite.ClearPool(_dbPath);
         foreach (var f in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm" })
             try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }
     }
