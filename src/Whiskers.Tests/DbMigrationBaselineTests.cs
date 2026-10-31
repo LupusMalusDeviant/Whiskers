@@ -45,7 +45,7 @@ public sealed class DbMigrationBaselineTests : IDisposable
             """;
         await cmd.ExecuteNonQueryAsync();
         conn.Close();
-        SqliteConnection.ClearAllPools(); // release the seed file handle before the initializer opens the DB
+        TestSqlite.ClearPool(path); // release the seed file handle before the initializer opens the DB
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public sealed class DbMigrationBaselineTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        foreach (var p in _files) TestSqlite.ClearPool(p);
         foreach (var p in _files)
             foreach (var f in new[] { p, p + "-wal", p + "-shm" })
                 try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }

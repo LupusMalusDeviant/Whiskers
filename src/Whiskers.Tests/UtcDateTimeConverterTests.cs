@@ -45,6 +45,7 @@ public sealed class UtcDateTimeConverterTests : IDisposable
     public void Dispose()
     {
         _sp.Dispose();
+        TestSqlite.ClearPool(_dbPath);
         try { File.Delete(_dbPath); } catch { /* best-effort temp cleanup */ }
     }
 }

@@ -209,7 +209,7 @@ public sealed class SetupStateServiceTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        TestSqlite.ClearPools(_dir);
         try { Directory.Delete(_dir, recursive: true); } catch { /* temp */ }
     }
 }

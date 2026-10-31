@@ -223,6 +223,7 @@ public sealed class LocalAuthIdentityTests : IDisposable
         finally
         {
             Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", prev);
+            TestSqlite.ClearPools(dataDir);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort */ }
         }
     }
@@ -232,7 +233,7 @@ public sealed class LocalAuthIdentityTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        foreach (var p in _files.Where(f => f.EndsWith(".db"))) TestSqlite.ClearPool(p);
         foreach (var p in _files)
             foreach (var f in new[] { p, p + "-wal", p + "-shm" })
                 try { if (File.Exists(f)) File.Delete(f); } catch { /* temp */ }

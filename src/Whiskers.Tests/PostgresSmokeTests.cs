@@ -248,7 +248,7 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPool(srcPath);
             foreach (var f in new[] { srcPath, srcPath + "-wal", srcPath + "-shm" })
                 try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }
         }
@@ -280,7 +280,7 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(root);
             try { Directory.Delete(root, recursive: true); } catch { /* temp dir */ }
         }
     }

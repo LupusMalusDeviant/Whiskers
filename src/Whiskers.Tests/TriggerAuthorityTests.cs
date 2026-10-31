@@ -40,7 +40,7 @@ public sealed class TriggerAuthorityTests : IDisposable
     public void Dispose()
     {
         _sp.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        TestSqlite.ClearPools(_dir);
         try { Directory.Delete(_dir, true); } catch (IOException) { }
     }
 

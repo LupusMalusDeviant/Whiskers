@@ -56,7 +56,8 @@ public class BackupServiceTests
     private static void Cleanup(ServiceProvider sp, string root)
     {
         sp.Dispose();
-        try { Directory.Delete(root, recursive: true); } catch { /* best-effort (SQLite pool may hold the file) */ }
+        TestSqlite.ClearPools(root);
+        try { Directory.Delete(root, recursive: true); } catch { /* best-effort temp cleanup */ }
     }
 
     [Fact]

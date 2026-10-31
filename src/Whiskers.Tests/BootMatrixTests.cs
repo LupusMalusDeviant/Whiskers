@@ -62,6 +62,7 @@ public class BootMatrixTests
         finally
         {
             Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", prev);
+            TestSqlite.ClearPools(dataDir);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort temp cleanup */ }
         }
     }
@@ -121,6 +122,7 @@ public class BootMatrixTests
         }
         finally
         {
+            TestSqlite.ClearPools(dataDir);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort temp cleanup */ }
         }
 

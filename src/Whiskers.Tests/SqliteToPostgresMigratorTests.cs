@@ -397,7 +397,7 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        foreach (var p in _files) TestSqlite.ClearPool(p);
         foreach (var p in _files)
             foreach (var f in new[] { p, p + "-wal", p + "-shm" })
                 try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }

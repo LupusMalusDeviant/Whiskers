@@ -303,7 +303,7 @@ public sealed class PrincipalPropagationTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        foreach (var dir in _dirs) TestSqlite.ClearPools(dir);
         foreach (var dir in _dirs)
         {
             try { Directory.Delete(dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
