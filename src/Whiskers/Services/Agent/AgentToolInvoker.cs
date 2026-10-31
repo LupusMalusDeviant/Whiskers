@@ -99,7 +99,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var output = await ExecuteAsync(entry, args, context);
             if (output.Length > MaxOutputChars)
-                output = output[..MaxOutputChars] + $"\n… [truncated, {output.Length - MaxOutputChars} more characters]";
+                output = Truncated(output);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null, call.CorrelationId);
             return new AgentToolResult(call.Id, output, false, decision);
         }
@@ -151,7 +151,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var output = outcome.Value ?? "";
             if (output.Length > MaxOutputChars)
-                output = output[..MaxOutputChars] + $"\n… [truncated, {output.Length - MaxOutputChars} more characters]";
+                output = Truncated(output);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null, call.CorrelationId);
             return new AgentToolResult(call.Id, output, false, decision);
         }
@@ -160,7 +160,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             // The tool answered but reported a failure (MutationScope.Fail): the agent sees the tool's own text.
             if (answer.Length > MaxOutputChars)
-                answer = answer[..MaxOutputChars] + $"\n… [truncated, {answer.Length - MaxOutputChars} more characters]";
+                answer = Truncated(answer);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, false, answer,
                 outcome.Reason, call.CorrelationId);
             return Error(call.Id, answer, decision);
@@ -260,6 +260,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             });
         }
         catch { /* observability must never break tool execution */ }
+    }
+
+    // At a complete line or word (R1-24): a raw cut can leave the beginning of a credential no pattern recognises.
+    private static string Truncated(string output)
+    {
+        var kept = Whiskers.Utils.ShellUtils.CutAtBoundary(output, MaxOutputChars);
+        return kept + $"\n… [truncated, {output.Length - kept.Length} more characters]";
     }
 
     // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.

@@ -98,6 +98,23 @@ public class TrivyOutputTruncationTests
         Assert.DoesNotContain("deploy:", text);
     }
 
+    [Theory]
+    [InlineData("origin\thttps://deploy:canary-value-r124@git.example.org/r.git (fetch)\n", "origin")]
+    [InlineData("a b https://deploy:canary-value-r124@x", "a b")]
+    [InlineData("https://deploy:canary-value-r124@x", "")]
+    public void Every_output_cut_drops_an_incomplete_last_token(string output, string kept)
+    {
+        // R1-24: the agent's 8000-character cut and execute_command's 50 000-character cut use the same rule.
+        var limit = output.IndexOf("canary", StringComparison.Ordinal) + 6;
+
+        Assert.Equal(kept, Whiskers.Utils.ShellUtils.CutAtBoundary(output, limit).TrimEnd());
+        Assert.DoesNotContain("canary", Whiskers.Utils.ShellUtils.Truncate(output, limit));
+    }
+
+    [Fact]
+    public void A_cut_just_before_whitespace_keeps_the_complete_token() =>
+        Assert.Equal("one two", Whiskers.Utils.ShellUtils.CutAtBoundary("one two three", 7));
+
     [Fact]
     public async Task The_marker_that_a_parser_chokes_on_is_still_the_marker_that_is_appended()
     {

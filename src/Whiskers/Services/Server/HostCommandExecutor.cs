@@ -273,11 +273,8 @@ public class HostCommandExecutor : IHostCommandExecutor
             // recognise what is left (R1-24). The incomplete last line goes (or the incomplete last word, for one
             // long line); text without any boundary (a minified document) is dropped whole — fail closed, the
             // caller sees OutputTruncated.
-            var text = sb.ToString();
-            var end = text.LastIndexOf('\n');
-            if (end < 0) end = text.AsSpan().LastIndexOfAny(" \t\r\f\v");
-            sb.Clear().Append(text, 0, Math.Max(end, 0));
-            sb.Append('\n').Append(TruncationMarker);
+            var kept = Whiskers.Utils.ShellUtils.DropIncompleteTail(sb.ToString());
+            sb.Clear().Append(kept).Append('\n').Append(TruncationMarker);
         }
 
         return (sb.ToString(), truncated);
