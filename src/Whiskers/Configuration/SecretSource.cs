@@ -3,7 +3,8 @@ namespace Whiskers.Configuration;
 /// <summary>
 /// Reads a secret setting (R1-28): <c>NAME_FILE</c> (a Docker/Kubernetes secret file) wins over <c>NAME</c>, as for
 /// <c>WHISKERS_DB_CONNECTION_FILE</c>. A file that is configured but missing, unreadable or empty is an error — never
-/// a silent fall back to the plain variable or to no secret at all.
+/// a silent fall back to the plain variable or to no secret at all. A file's content is trimmed (a trailing newline is
+/// not part of the secret); a plain variable is used as it is.
 /// </summary>
 public static class SecretSource
 {

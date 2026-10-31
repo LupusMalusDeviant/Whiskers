@@ -72,7 +72,9 @@ public sealed class KubernetesClientCache : IKubernetesClientCache, IDisposable
             if (server.ConnectionType != ConnectionType.Kubernetes)
                 throw new InvalidOperationException($"Server '{server.Name}' is not a Kubernetes cluster.");
             if (!_vault.IsEnabled)
-                throw new InvalidOperationException("Vault ist deaktiviert (VAULT_KEY fehlt) — das kubeconfig kann nicht gelesen werden.");
+                throw new InvalidOperationException(_vault.KeyState == VaultKeyState.Wrong
+                    ? "Vault ist gesperrt (VAULT_KEY passt nicht zu diesem Vault) — das kubeconfig kann nicht gelesen werden."
+                    : "Vault ist deaktiviert (VAULT_KEY fehlt) — das kubeconfig kann nicht gelesen werden.");
 
             var key = KubeconfigKeyOf(server);
             var yaml = _vault.GetSecret(key);

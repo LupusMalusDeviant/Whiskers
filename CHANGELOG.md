@@ -14,7 +14,11 @@ All notable changes to Whiskers are documented here. The format follows
   untouched copy `vault.json.legacy-cbc.bak` is written next to the vault (never overwritten); they are converted all or
   none. **New:** `VAULT_KEY_FILE` (Docker/Kubernetes secret file) wins over `VAULT_KEY` for the vault, the backup
   encryption and the audit chain. A configured `VAULT_KEY_FILE` or `WHISKERS_DB_CONNECTION_FILE` that is missing,
-  unreadable or empty now stops the start (it fell back silently before).
+  unreadable or empty now stops the start (it fell back silently before). The setup wizard no longer offers a new key
+  when the configured one does not match. **Recovery:** if a converted legacy vault is later reported as locked with
+  the right key, stop Whiskers, put `vault.json.legacy-cbc.bak` (or the newest `vault.json.legacy-cbc.<time>-<n>.bak`)
+  back as `vault.json`, set the right key and start again. Delete the copy once the converted secrets read correctly —
+  it holds the old unauthenticated ciphertext and is part of every self-backup.
 - R1-25: **Logs and outbound notifications carry no secrets.** Every logger now writes through a redacting logger
   factory, in front of all providers (console, debug, event log): the message, each structured value, the message template, scopes and the full
   exception text are redacted before they reach it, and an entry that cannot be redacted is replaced by

@@ -267,15 +267,68 @@ public class VaultKeyCheckTests : IDisposable
     }
 
     [Fact]
-    public async Task Existing_recovery_copy_is_never_overwritten()
+    public async Task Differing_recovery_copy_is_never_overwritten_and_a_new_one_keeps_this_vault()
     {
-        await File.WriteAllTextAsync(CopyPath, "the first original");
+        // A copy cut short by a crash, or the copy of another vault that a restore replaced.
+        await File.WriteAllTextAsync(CopyPath, "{\"Entries\":[");
         WriteFile(new VaultData { Entries = { new VaultEntry { Key = "a", EncryptedValue = LegacyCbc(RightKey, "legacy value a") } } });
+        var original = File.ReadAllBytes(VaultPath);
 
         var vault = await Open(RightKey);
         Assert.Equal(VaultKeyState.Verified, vault.KeyState);
-        Assert.Equal("the first original", await File.ReadAllTextAsync(CopyPath));
+        Assert.Equal("{\"Entries\":[", await File.ReadAllTextAsync(CopyPath));
+        var copies = Directory.GetFiles(_dir, "vault.json.legacy-cbc.*-*.bak");
+        Assert.Single(copies);
+        Assert.Equal(original, File.ReadAllBytes(copies[0]));
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
         Assert.Equal("legacy value a", vault.GetSecret("a"));
+    }
+
+    [Fact]
+    public async Task Identical_recovery_copy_from_an_earlier_attempt_is_used_as_it_is()
+    {
+        WriteFile(new VaultData { Entries = { new VaultEntry { Key = "a", EncryptedValue = LegacyCbc(RightKey, "legacy value a") } } });
+        File.Copy(VaultPath, CopyPath);
+        var original = File.ReadAllBytes(VaultPath);
+
+        var vault = await Open(RightKey);
+        Assert.Equal(VaultKeyState.Verified, vault.KeyState);
+        Assert.Equal(original, File.ReadAllBytes(CopyPath));
+        Assert.Empty(Directory.GetFiles(_dir, "vault.json.legacy-cbc.*-*.bak"));
+        Assert.StartsWith("g1:", ReadFile().Entries.Single().EncryptedValue);
+    }
+
+    [Fact]
+    public async Task Legacy_entries_stay_unconverted_and_readable_when_no_copy_can_be_written()
+    {
+        WriteFile(new VaultData { Entries = { new VaultEntry { Key = "a", EncryptedValue = LegacyCbc(RightKey, "legacy value a") } } });
+        Directory.CreateDirectory(CopyPath + ".tmp");   // the temporary copy cannot be created
+
+        var vault = await Open(RightKey);
+        Assert.Equal(VaultKeyState.Verified, vault.KeyState);
+        Assert.False(File.Exists(CopyPath));
+        var stored = ReadFile();
+        Assert.False(stored.Entries.Single().EncryptedValue.StartsWith("g1:", StringComparison.Ordinal));
+        Assert.Null(stored.KeyCheck);   // no check while legacy entries remain
+        Assert.Equal("legacy value a", vault.GetSecret("a"));
+    }
+
+    [Theory]
+    [InlineData("not base64!")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAA==")]
+    public async Task Altered_salt_locks_the_vault(string salt)
+    {
+        var vault = await Open(RightKey);
+        await vault.SetSecretAsync("token", "value-1");
+        var data = ReadFile();
+        data.KdfSalt = salt;
+        WriteFile(data);
+        var before = File.ReadAllBytes(VaultPath);
+
+        var reopened = await Open(RightKey);
+        Assert.Equal(VaultKeyState.Wrong, reopened.KeyState);
+        Assert.Empty(reopened.GetExpiringSecrets());
+        Assert.Equal(before, File.ReadAllBytes(VaultPath));
     }
 
     [Fact]

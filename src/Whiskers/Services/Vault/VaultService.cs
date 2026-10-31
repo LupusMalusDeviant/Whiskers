@@ -149,15 +149,14 @@ public class VaultService : IVaultService, IInitializable
     /// untouched copy of vault.json is kept beside it.</summary>
     private bool MigrateLegacy(VaultData next, bool provenByKeyCheck)
     {
-        var copy = _path + LegacyCopySuffix;
+        string copy;
         try
         {
-            // Never overwritten: a copy from an earlier attempt is the original as it was before any conversion.
-            if (!File.Exists(copy)) File.Copy(_path, copy, overwrite: false);
+            copy = KeepRecoveryCopy();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogError(ex, "Vault: legacy entries not converted, the recovery copy {Copy} could not be written", copy);
+            _logger.LogError(ex, "Vault: legacy entries not converted, the recovery copy of {Path} could not be written", _path);
             return false;
         }
 
@@ -176,6 +175,33 @@ public class VaultService : IVaultService, IInitializable
             _logger.LogWarning("Vault: {Count} legacy entries converted with a key that only their padding and text could "
                                + "confirm; the original file is kept as {Copy}", converted.Count, copy);
         return converted.Count > 0;
+    }
+
+    /// <summary>Keeps a byte-identical copy of vault.json as it is now and returns its path. A copy is never
+    /// overwritten: one that holds exactly this file is used as it is; one that differs (cut short by a crash, or the
+    /// copy of another vault that a restore replaced) stays, and the copy is written under a new name beside it. The
+    /// copy is written to a temporary file, flushed and then moved into place, so it is complete or absent.</summary>
+    private string KeepRecoveryCopy()
+    {
+        var original = File.ReadAllBytes(_path);
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
+        for (var n = 0; ; n++)
+        {
+            var copy = n == 0 ? _path + LegacyCopySuffix : $"{_path}.legacy-cbc.{stamp}-{n}.bak";
+            if (File.Exists(copy))
+            {
+                if (File.ReadAllBytes(copy).AsSpan().SequenceEqual(original)) return copy;
+                continue;
+            }
+            var tmp = copy + ".tmp";
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                fs.Write(original);
+                fs.Flush(flushToDisk: true);
+            }
+            File.Move(tmp, copy, overwrite: false);
+            return copy;
+        }
     }
 
     private void Reject(string reason)
@@ -302,6 +328,8 @@ public class VaultService : IVaultService, IInitializable
 
     public List<VaultEntry> GetExpiringSecrets()
     {
+        // A locked vault cannot rotate anything: no reminders for secrets nobody can write.
+        if (KeyState == VaultKeyState.Wrong) return [];
         _lock.Wait();
         try
         {
