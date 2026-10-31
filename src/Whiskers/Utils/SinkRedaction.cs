@@ -191,11 +191,11 @@ public static class SinkRedaction
     public static string? WithoutPayloadValues(string? text, IReadOnlyDictionary<string, JsonElement> arguments)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        foreach (var (key, value) in arguments)
-            if (IsPayload(key))
-                foreach (var payload in StringLeaves(value))
-                    if (payload.Length >= 3)
-                        text = text.Replace(payload, "<withheld>", StringComparison.Ordinal);
+        // Longest first: a value that contains another (/srv/app-data and /srv/app) must go whole, not leave a rest.
+        var payloads = arguments.Where(a => IsPayload(a.Key)).SelectMany(a => StringLeaves(a.Value))
+            .Where(p => p.Length >= 3).Distinct(StringComparer.Ordinal).OrderByDescending(p => p.Length);
+        foreach (var payload in payloads)
+            text = text.Replace(payload, "<withheld>", StringComparison.Ordinal);
         return text;
     }
 

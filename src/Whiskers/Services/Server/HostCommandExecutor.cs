@@ -271,27 +271,15 @@ public class HostCommandExecutor : IHostCommandExecutor
         {
             // The cut falls anywhere — also inside a credential (https://user:secr…), where no redaction pattern can
             // recognise what is left (R1-24). The incomplete last line goes (or the incomplete last word, for one
-            // long line), so nothing half-cut is stored.
-            var end = LastIndexOf(sb, '\n');
-            if (end < 0) end = LastWhitespace(sb);
-            if (end >= 0) sb.Length = end;
+            // long line); text without any boundary (a minified document) is dropped whole — fail closed, the
+            // caller sees OutputTruncated.
+            var text = sb.ToString();
+            var end = text.LastIndexOf('\n');
+            if (end < 0) end = text.AsSpan().LastIndexOfAny(" \t\r\f\v");
+            sb.Clear().Append(text, 0, Math.Max(end, 0));
             sb.Append('\n').Append(TruncationMarker);
         }
 
         return (sb.ToString(), truncated);
-    }
-
-    private static int LastIndexOf(System.Text.StringBuilder sb, char c)
-    {
-        for (var i = sb.Length - 1; i >= 0; i--)
-            if (sb[i] == c) return i;
-        return -1;
-    }
-
-    private static int LastWhitespace(System.Text.StringBuilder sb)
-    {
-        for (var i = sb.Length - 1; i >= 0; i--)
-            if (char.IsWhiteSpace(sb[i])) return i;
-        return -1;
     }
 }

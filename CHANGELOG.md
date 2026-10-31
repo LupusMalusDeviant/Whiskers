@@ -21,8 +21,9 @@ All notable changes to Whiskers are documented here. The format follows
   `keyId` (was `credential`, a name the secret rule hides). An approval's reason no longer quotes a payload argument
   (the card's arguments still show it). A stored JSON field that is too long is shortened by its values and stays valid
   JSON. Long texts (task output up to 1 MB) get a larger redaction time budget instead of being withheld whole; the
-  pattern budget is 1 s per pattern (was 100 ms, which a loaded host could exceed on ordinary text). Rows written
-  before this version stay as they are.
+  pattern budget is 1 s per pattern (was 100 ms, which a loaded host could exceed on ordinary text). A command output
+  cut at 1 MB now ends at its last complete line or word (one long line without any is dropped), so no half-cut
+  credential is stored. Rows written before this version stay as they are.
 - R1-23 follow-up: an unreadable checkpoint file and a pending VAULT_KEY adoption are logged as what they are (not as
   tampering); the page counts every finding, also above the display cap; export scratch files left by a crash are
   removed by the next export.

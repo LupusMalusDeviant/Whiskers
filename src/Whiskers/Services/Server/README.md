@@ -6,7 +6,7 @@ Host-level operations that go beyond Docker, the things you'd normally SSH into 
 
 | File | Purpose |
 |---|---|
-| `IHostCommandExecutor.cs` / `HostCommandExecutor.cs` | Runs a shell command on a host and returns a `CommandResult` (stdout/stderr/exit code, plus `OutputTruncated`; a cut output ends at its last complete line or word, so no half-cut credential remains, R1-24). The shared primitive every other service in this folder builds on. |
+| `IHostCommandExecutor.cs` / `HostCommandExecutor.cs` | Runs a shell command on a host and returns a `CommandResult` (stdout/stderr/exit code, plus `OutputTruncated`; a cut output ends at its last complete line or word — without any boundary the cut part is dropped — so no half-cut credential remains, R1-24). The shared primitive every other service in this folder builds on. |
 | `IFirewallService.cs` / `FirewallService.cs` | Inspects and manages the host firewall (ufw), list, add, remove rules. |
 | `INginxService.cs` / `NginxService.cs` | Lists and edits Nginx site configurations on a host. |
 | `ISystemdService.cs` / `SystemdService.cs` | Lists and controls systemd units (start/stop/restart/status). |

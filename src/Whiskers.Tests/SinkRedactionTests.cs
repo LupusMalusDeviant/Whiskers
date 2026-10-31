@@ -118,6 +118,19 @@ public sealed class SinkRedactionTests
         Assert.Contains("on web", reason);
     }
 
+    [Fact]
+    public void Overlapping_payload_values_leave_no_rest_in_a_reason()
+    {
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new
+        {
+            volumes = new[] { "/srv/app", $"/srv/app-{Canary}:/data" },
+        }))!;
+
+        var reason = SinkRedaction.WithoutPayloadValues($"refused: /srv/app-{Canary}:/data", arguments);
+
+        Assert.Equal("refused: <withheld>", reason);
+    }
+
     [Theory]
     [MemberData(nameof(Secrets))]
     public void A_secret_in_an_ordinary_argument_is_redacted(string secret) =>
