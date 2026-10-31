@@ -1029,7 +1029,7 @@ else
             await NotificationService.SendTestAsync();
             Snackbar.Add(L["Settings_Snackbar_TestSent"].Value, Severity.Success);
         }
-        catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", ex.Message].Value, Severity.Warning); }
+        catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Warning); }
     }
 
     /// <summary>The Admin check in front of a write: a refusal is also the gateway's Denied event for
@@ -1207,7 +1207,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
         }
     }
 
@@ -1228,7 +1228,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
         }
     }
 
@@ -1316,7 +1316,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
         }
     }
 
@@ -1338,7 +1338,7 @@ else
             catch (Exception ex)
             {
                 error = ex.Message;
-                Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}");
+                Console.Error.WriteLine($"Manual CVE scan failed: {Whiskers.Utils.SinkRedaction.Text(ex.Message)}");
             }
 
             // Report completion and refresh the "last scan" line / button state.

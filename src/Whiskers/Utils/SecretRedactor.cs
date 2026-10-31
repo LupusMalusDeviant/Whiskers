@@ -87,6 +87,18 @@ public static class SecretRedactor
         @"[A-Za-z0-9+/]{200,}={0,2}",
         RegexOptions.Compiled);
 
+    // Capability URLs: the path itself is the secret (R1-25). A Telegram bot token (/bot<id>:<token>/), a Discord
+    // webhook token (/api/webhooks/<id>/<token>), a Slack webhook (hooks.slack.com/services/…) and a Mattermost or
+    // other incoming-webhook key (/hooks/<key>)  →  the secret part becomes ***.
+    private static readonly Pair TelegramBotToken = new(
+        @"(?i)(/bot)\d{5,}:[A-Za-z0-9_-]{20,}", RegexOptions.Compiled);
+    private static readonly Pair DiscordWebhook = new(
+        @"(?i)(/api/webhooks/\d+/)[A-Za-z0-9_-]{20,}", RegexOptions.Compiled);
+    private static readonly Pair SlackWebhook = new(
+        @"(?i)(hooks\.slack\.com/services/)[A-Za-z0-9_/-]{8,}", RegexOptions.Compiled);
+    private static readonly Pair HookKey = new(
+        @"(?i)(/hooks/)[A-Za-z0-9]{20,}", RegexOptions.Compiled);
+
     private static readonly JsonSerializerOptions Relaxed =
         new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -167,7 +179,7 @@ public static class SecretRedactor
 
     private static string Patterns(string input)
     {
-        var s = input;
+        var s = KnownSecrets.Replace(input);
         s = EnvPassword.Replace(s, m => $"{m.Groups[1].Value}=***");
         s = MysqlPwFlag.Replace(s, "-p***");
         s = RedisAuthFlag.Replace(s, "-a ***");
@@ -175,6 +187,10 @@ public static class SecretRedactor
         s = PemPrivateKey.Replace(s, "[REDACTED PRIVATE KEY]");
         s = LongBase64.Replace(s, "[REDACTED BASE64]");
         s = UrlCredentials.Replace(s, m => $"{m.Groups[1].Value}:***@");
+        s = TelegramBotToken.Replace(s, m => $"{m.Groups[1].Value}***");
+        s = DiscordWebhook.Replace(s, m => $"{m.Groups[1].Value}***");
+        s = SlackWebhook.Replace(s, m => $"{m.Groups[1].Value}***");
+        s = HookKey.Replace(s, m => $"{m.Groups[1].Value}***");
         s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
         s = BearerToken.Replace(s, "Bearer ***");
         s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");

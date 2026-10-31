@@ -63,6 +63,16 @@ public sealed class SinkRedactionInterceptor : SaveChangesInterceptor
                     run.Output = SinkRedaction.Json(run.Output);
                     run.Error = SinkRedaction.Json(run.Error);
                     break;
+                // The notification feed and the alert history (R1-25): the composite redacts the event before it
+                // writes them, and so does the sink for any other writer.
+                case NotificationEntity notification:
+                    notification.Title = SinkRedaction.Text(notification.Title) ?? "";
+                    notification.Detail = SinkRedaction.Text(notification.Detail) ?? "";
+                    break;
+                case AlertHistoryEntity alert:
+                    alert.ContainerName = SinkRedaction.Text(alert.ContainerName) ?? "";
+                    alert.Message = SinkRedaction.Text(alert.Message) ?? "";
+                    break;
                 case ScheduledTaskEntity task:
                     // Only the last result: the task's own fields (its command) are what it runs.
                     task.LastResult = SinkRedaction.Json(task.LastResult);

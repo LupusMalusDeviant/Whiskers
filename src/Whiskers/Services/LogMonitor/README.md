@@ -7,7 +7,7 @@ Log search and **pattern-based log alerts**. Search container logs on demand, an
 | File | Purpose |
 |---|---|
 | `ILogSearchService.cs` / `LogSearchService.cs` | Full-text / regex search across container logs. A long matched line is shortened at a complete word (`ShellUtils.CutAtBoundary`, also for an alert's matched line), never inside a credential (R1-24). |
-| `ILogMonitorService.cs` / `LogMonitorService.cs` | Background log-pattern monitor; manages the alert rules and raises notifications on matches. |
+| `ILogMonitorService.cs` / `LogMonitorService.cs` | Background log-pattern monitor; manages the alert rules and raises notifications on matches. The matched line is redacted before it is cut, logged or sent (R1-25). |
 | `NoopLogMonitorService.cs` | Core default `ILogMonitorService` (no rules, no monitor). Registered before the module loop so the AI-triggers page still resolves it when the **LogMonitor module** is off; the real `LogMonitorService` wins by last-registration when on (RoadToSAP Phase 1). |
 
 ## Scan scope

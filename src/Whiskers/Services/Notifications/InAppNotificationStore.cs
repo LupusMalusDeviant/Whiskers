@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
+using Whiskers.Utils;
 
 namespace Whiskers.Services.Notifications;
 
@@ -172,11 +173,13 @@ public sealed class InAppNotificationStore : IInAppNotificationStore
     private static InAppNotification ToModel(NotificationEntity e) =>
         new(e.NotificationId, e.Timestamp, e.EventType, e.Title, e.Detail, e.Severity, e.Link);
 
+    // The bell shows the item from memory until a restart reads it back from the table: redacted here too, so the
+    // feed is a redacting sink whoever adds to it (R1-25).
     private static InAppNotification Format(NotificationEvent e)
     {
         var (title, severity) = NotificationFormatter.Describe(e);
         return new InAppNotification(
-            Guid.NewGuid().ToString("N")[..8], e.Timestamp, e.EventType, title,
-            NotificationFormatter.Detail(e), severity, NotificationFormatter.LinkFor(e));
+            Guid.NewGuid().ToString("N")[..8], e.Timestamp, e.EventType, SinkRedaction.Text(title) ?? "",
+            SinkRedaction.Text(NotificationFormatter.Detail(e)) ?? "", severity, NotificationFormatter.LinkFor(e));
     }
 }

@@ -117,7 +117,7 @@ of the third.
 
 | ID | Invariant | Status | Evidence / gap | Test | WP |
 |---|---|---|---|---|---|
-| INV-51 | Secrets never reach a persistent or outbound sink in plaintext: logs, AuditLog, Agent History, approvals, transcripts, notifications. Redaction runs before persistence on every sink. | ⚠️ | Persistent sinks done (R1-24): `SinkRedactionInterceptor` redacts every free-text column of AuditLog, Agent History, approvals, policy decisions and task results on save, whoever wrote the row; the agent transcript redacts every role and the kept tool-call arguments, the chat history every message (`SinkRedaction`). Free-text payload arguments keep only their length, a secret-named key is `***` at any depth, URL user info is removed; never a prefix. Approval cards keep a payload readable for the approver (secrets in it redacted). Open: the logging layer and outbound notifications (D-12, R1-25). | `SecretRedactorTests`, `SinkRedactionTests`, `SecretHygieneTests` | WP5 |
+| INV-51 | Secrets never reach a persistent or outbound sink in plaintext: logs, AuditLog, Agent History, approvals, transcripts, notifications. Redaction runs before persistence on every sink. | ✅ | Persistent sinks (R1-24): `SinkRedactionInterceptor` redacts every free-text column of AuditLog, Agent History, approvals, policy decisions and task results on save, whoever wrote the row; the agent transcript redacts every role and the kept tool-call arguments, the chat history every message (`SinkRedaction`). Free-text payload arguments keep only their length, a secret-named key is `***` at any depth, URL user info is removed; never a prefix. Approval cards keep a payload readable for the approver (secrets in it redacted). Logging and outbound notifications (R1-25): every logger writes through `RedactingLoggerFactory` in front of all providers (message, structured values, template, scopes and exception text redacted; an entry that cannot be redacted is withheld, never written raw); the notification composite redacts each event before the in-app feed, the alert history, every channel and the AI-trigger dispatcher see it, and the feed and history tables are redacted on save as well; a trigger's model summary is redacted before it is sent; capability URLs (Telegram bot token, Discord/Slack/Mattermost webhook keys) and every configured channel secret (`KnownSecrets`, e.g. an ntfy topic URL or a custom webhook URL) are withheld wherever they appear; the HttpClient request log stays at Warning by default in code; approval notifications carry no arguments. D-12. | `SecretRedactorTests`, `SinkRedactionTests`, `SecretHygieneTests`, `BootMatrixTests` | WP5 |
 | INV-52 | Every credential for managed infrastructure (cloud, DNS, SMTP, chat, AI provider, git tokens, webhook secrets) is encrypted at rest by the vault. | ❌ | Stored as plaintext JSON. TA-12, D-01. | `SecretsAtRestTests` *(planned, WP7)* | WP7 |
 | INV-53 | Rollback snapshots and other stored container configs contain no plaintext secrets. | ❌ | Full env stored and replayed. TA-40, D-11. | `SecretsAtRestTests` *(planned, WP7)* | WP7 |
 | INV-54 | A wrong or changed `VAULT_KEY` is detected at startup and the app refuses to write to the vault with it. | ❌ | TA-36, D-03. | `VaultKeyCheckTests` *(planned, WP7)* | WP7 |
@@ -137,8 +137,8 @@ of the third.
 
 | Status | Count |
 |---|---|
-| ✅ | 34 |
-| ⚠️ | 12 (INV-01, 08, 13, 17, 19, 20, 21, 25, 41, 45, 51, 57) |
+| ✅ | 35 |
+| ⚠️ | 11 (INV-01, 08, 13, 17, 19, 20, 21, 25, 41, 45, 57) |
 | ❌ | 14 (INV-05, 09, 18, 38, 40, 43, 44, 52, 53, 54, 55, 56, 58, 60) |
 | ❓ | 0 |
 | **Total** | **60** |

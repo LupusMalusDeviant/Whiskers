@@ -361,7 +361,7 @@
             catch (Exception ex)
             {
                 error = ex.Message;
-                Console.Error.WriteLine($"Manual CVE scan failed: {ex.Message}");
+                Console.Error.WriteLine($"Manual CVE scan failed: {Whiskers.Utils.SinkRedaction.Text(ex.Message)}");
             }
 
             try

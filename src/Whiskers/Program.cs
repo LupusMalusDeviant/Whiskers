@@ -32,7 +32,8 @@ builder.AddWhiskersModules();                  // Core no-op defaults + module p
 builder.AddWhiskersCoreServices(dataPaths);    // Docker, health, metrics, VPN, database, audit, startup initializers
 builder.AddWhiskersAuthentication();           // cookie session + Google/OIDC providers, or LAN bypass (Off-Limits zone)
 builder.AddWhiskersUi();                       // localization, MudBlazor, Blazor server components, SignalR
-builder.AddWhiskersMutationGateway();         // ADR-0005: gateway + scope guard around mutating services (last)
+builder.AddWhiskersMutationGateway();         // ADR-0005: gateway + scope guard around mutating services
+builder.AddWhiskersLogRedaction();            // R1-25: every log provider writes redacted entries only (last)
 
 var app = builder.Build();
 

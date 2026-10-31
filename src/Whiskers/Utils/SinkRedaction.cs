@@ -293,6 +293,10 @@ public static class SinkRedaction
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
 
+    /// <summary>Whether a name (a JSON key, a log template's hole) names a secret: its value is <c>***</c> whatever it
+    /// looks like.</summary>
+    public static bool IsSecretName(string name) => SecretKeyName.IsMatch(name);
+
     private static readonly System.Text.RegularExpressions.Regex SecretKeyName = new(
         "(?i)password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer|credential|private[_-]?key",
         System.Text.RegularExpressions.RegexOptions.Compiled);

@@ -228,11 +228,12 @@ public static class WhiskersHostingExtensions
 
         // Keep capability-bearing notification URLs (Telegram bot token in the path, Discord/Slack/Mattermost/
         // ntfy/webhook secret URLs) out of the HttpClient request log — the default HttpClient logger writes the
-        // full request URI at Information level. Raise these categories to Warning so the URL isn't logged.
+        // full request URI at Information level. Raise these categories to Warning so the URL isn't logged. (Since R1-25
+        // WhiskersLoggingExtensions raises the whole HttpClient category as well; these stay as the explicit list.)
         foreach (var httpClientName in new[]
                  {
                      "TelegramNotificationService", "MattermostNotificationService", "DiscordNotificationService",
-                     "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService"
+                     "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService", "MatrixNotificationService"
                  })
             builder.Logging.AddFilter($"System.Net.Http.HttpClient.{httpClientName}", Microsoft.Extensions.Logging.LogLevel.Warning);
 

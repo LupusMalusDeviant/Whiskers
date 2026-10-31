@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Configuration;
 using Whiskers.Services.Notifications;
+using Whiskers.Utils;
 
 namespace Whiskers.Modules.Notifications;
 
@@ -43,6 +44,22 @@ public sealed class NotificationsModule : IWhiskersModule
         services.Configure<SlackSettings>(config.GetSection(SlackSettings.SectionName));
         services.Configure<EmailSettings>(config.GetSection(EmailSettings.SectionName));
         services.Configure<WebhookNotificationSettings>(config.GetSection(WebhookNotificationSettings.SectionName));
+
+        // The secrets of each channel, withheld from every log line and sink from the moment they are bound (R1-25):
+        // an ntfy topic URL or a custom webhook URL looks like any other URL, so no pattern could recognize it.
+        services.PostConfigure<MattermostSettings>(s => KnownSecrets.Register(s.WebhookUrl));
+        services.PostConfigure<Whiskers.Configuration.MatrixSettings>(s => KnownSecrets.Register(s.AccessToken));
+        services.PostConfigure<TelegramSettings>(s => KnownSecrets.Register(s.BotToken));
+        services.PostConfigure<NtfySettings>(s => KnownSecrets.Register(
+            string.IsNullOrWhiteSpace(s.Topic) ? null : $"{s.ServerUrl.TrimEnd('/')}/{s.Topic}",
+            // The bare topic only when it looks like a capability: a plain word ("production") would vanish from
+            // every audit row and notification.
+            s.Topic is { Length: >= 16 } topic && topic.Any(c => char.IsDigit(c) || c is '-' or '_') ? topic : null,
+            s.Token));
+        services.PostConfigure<DiscordSettings>(s => KnownSecrets.Register(s.WebhookUrl));
+        services.PostConfigure<SlackSettings>(s => KnownSecrets.Register(s.WebhookUrl));
+        services.PostConfigure<EmailSettings>(s => KnownSecrets.Register(s.Password));
+        services.PostConfigure<WebhookNotificationSettings>(s => KnownSecrets.Register(s.Url, s.Secret));
 
         // Notifications (Mattermost + Matrix via composite)
         services.AddHttpClient<MattermostNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));

@@ -42,6 +42,9 @@ the gateway's `MutationScope`. A trigger whose preset does not exist (renamed or
 fallback to another preset; the refusal is audited (`agent.run`, unsuccessful) and the AI triggers page marks the
 missing preset.
 
+**Summary (R1-25).** What the run reports — the model's text, provider errors, refused calls — is redacted whole and
+then cut at a complete word (1500 characters) before it is sent as the `agent_action` notification.
+
 Safety: recursion guard (ignores its own `agent_action` events), per-container cooldown, and a
 concurrency cap. Runs only when the agent is enabled.
 

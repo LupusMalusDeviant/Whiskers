@@ -11,6 +11,7 @@ using Whiskers.Models.Agent;
 using Whiskers.Services.AuditLog;
 using Whiskers.Services.Guardrails;
 using Whiskers.Services.Notifications;
+using Whiskers.Utils;
 
 namespace Whiskers.Services.Agent.Triggers;
 
@@ -159,8 +160,10 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
                 }
             }
 
-            var summary = sb.ToString().Trim();
-            if (summary.Length > MaxSummaryChars) summary = summary[..MaxSummaryChars] + "…";
+            // The summary is model output (and provider error text): redacted whole, then cut at a complete word
+            // (R1-25), before it is formatted into a notification.
+            var summary = SinkRedaction.Text(sb.ToString().Trim()) ?? "";
+            if (summary.Length > MaxSummaryChars) summary = ShellUtils.CutAtBoundary(summary, MaxSummaryChars) + "…";
             _logger?.LogInformation("AI trigger '{Name}' ran ({Event} @ {Container}).", t.Name, evt.EventType, evt.ContainerName);
 
             await TryAuditAsync(t, evt);

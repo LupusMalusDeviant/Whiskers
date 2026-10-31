@@ -38,7 +38,7 @@ public static class RestoreBootHandler
         // A corrupt/unreadable marker must never brick boot — set it aside and continue on the current state.
         RestoreMarker? parsed = null;
         try { parsed = JsonSerializer.Deserialize<RestoreMarker>(File.ReadAllText(marker), JsonOpts); }
-        catch (Exception ex) { Console.Error.WriteLine($"[restore] Ignoring unreadable restore marker: {ex.Message}"); }
+        catch (Exception ex) { Console.Error.WriteLine($"[restore] Ignoring unreadable restore marker: {Whiskers.Utils.SinkRedaction.Text(ex.Message)}"); }
 
         if (parsed is null || !Directory.Exists(staging) || IsEmptyDir(staging))
         {
