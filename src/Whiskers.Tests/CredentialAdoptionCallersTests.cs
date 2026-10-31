@@ -7,7 +7,7 @@ namespace Whiskers.Tests;
 // convenience call would be a silent gateway bypass. (The vault's read-back check is private to VaultService.)
 public class CredentialAdoptionCallersTests
 {
-    private static readonly Regex AdoptionCall = new(@"\bAdopt(LegacyCredential|CloudKeyRef|DnsTokenRef)Async\b", RegexOptions.Compiled);
+    private static readonly Regex AdoptionCall = new(@"\bAdopt(LegacyCredential|CloudKeyRef|DnsTokenRef|SettingRef|ApiKeyRef)Async\b", RegexOptions.Compiled);
 
     // Where they are declared and implemented, and their one caller.
     private static readonly string[] Allowed =
@@ -17,6 +17,7 @@ public class CredentialAdoptionCallersTests
         "Services/ServerConfig/IServerConfigService.cs",
         "Services/ServerConfig/ServerConfigService.cs",
         "Services/Persistence/AppSettingsStore.cs",
+        "Services/Agent/AgentSettingsStore.cs",
         "Services/Vault/CredentialVaultMigration.cs",
     ];
 

@@ -402,17 +402,19 @@ public sealed partial class AuditLoggingTests : IDisposable
     [Fact]
     public async Task An_ntfy_topic_is_a_secret_in_the_event()
     {
+        // The rule is the setting's name: the ntfy section itself keeps its topic in the vault since R1-30, so a section
+        // of the same shape that is not vault-backed carries the topic here.
         var store = new AppSettingsStore(Path.Combine(_dir, "appsettings.json"));
-        await store.SaveSectionAsync(NtfySettings.SectionName, new NtfySettings { Topic = "alerts-q7wz" });
+        await store.SaveSectionAsync("NtfyLike", new NtfySettings { Topic = "alerts-q7wz" });
 
         await Gateway().ExecuteAsync(Config("config.save", "settings", "op-topic"), async (_, _) =>
         {
-            await store.SaveSectionAsync(NtfySettings.SectionName, new NtfySettings { Topic = "alerts-m3vx" });
+            await store.SaveSectionAsync("NtfyLike", new NtfySettings { Topic = "alerts-m3vx" });
             return 1;
         });
 
         var results = await ResultsOf("op-topic");
-        Assert.Matches(@"^\[set #[0-9a-f]{6}\] → \[set #[0-9a-f]{6}\]$", Text(Setting(results, "Ntfy:Topic"), "details"));
+        Assert.Matches(@"^\[set #[0-9a-f]{6}\] → \[set #[0-9a-f]{6}\]$", Text(Setting(results, "NtfyLike:Topic"), "details"));
         // A topic-only rotation keeps the version: no hash of the topic is stored.
         Assert.Matches(@"^([0-9a-f]{12}) → \1; 1 changed$",
             Text(Assert.Single(results, r => Text(r, "action") == ConfigChange.VersionAction), "details"));
@@ -660,18 +662,19 @@ public sealed partial class AuditLoggingTests : IDisposable
     [InlineData("not a url q7Secret")]
     public async Task A_url_setting_that_is_no_absolute_url_is_never_shown_or_versioned(string value)
     {
+        // A section that is not vault-backed (Slack keeps its webhook URL in the vault since R1-30): the rule is the name.
         var store = new AppSettingsStore(Path.Combine(_dir, "appsettings.json"));
-        await store.SaveSectionAsync("Slack", new { WebhookUrl = "https://hooks.slack.com/services/T0/B0/first" });
+        await store.SaveSectionAsync("Hook", new { WebhookUrl = "https://hooks.slack.com/services/T0/B0/first" });
 
         await Gateway().ExecuteAsync(Config("config.save", "settings", "op-bare-url"), async (_, _) =>
         {
-            await store.SaveSectionAsync("Slack", new { WebhookUrl = value });
+            await store.SaveSectionAsync("Hook", new { WebhookUrl = value });
             return 1;
         });
 
         Assert.DoesNotContain("q7Secret", await EventText("op-bare-url"));
         Assert.Matches(@"^\[text, \d+ chars #[0-9a-f]{6}\]$",
-            Text(Setting(await ResultsOf("op-bare-url"), "Slack:WebhookUrl"), "details").Split(" → ")[1]);
+            Text(Setting(await ResultsOf("op-bare-url"), "Hook:WebhookUrl"), "details").Split(" → ")[1]);
         Assert.Equal(ConfigChange.Describe(new { WebhookUrl = "other q7Other" }).Version,
             ConfigChange.Describe(new { WebhookUrl = value }).Version);
     }

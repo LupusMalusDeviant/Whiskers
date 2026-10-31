@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using Whiskers.Configuration;
+using Whiskers.Services.Vault;
 using Whiskers.Mcp.Tools;
 using Whiskers.Models;
 
@@ -50,6 +51,8 @@ public sealed class AgentModule : IWhiskersModule
 
         // AI Chat
         services.Configure<Whiskers.Configuration.AiChatSettings>(config.GetSection(Whiskers.Configuration.AiChatSettings.SectionName));
+        // The API keys of both AI clients are kept in the vault (R1-30).
+        services.AddVaultBackedSecrets<Whiskers.Configuration.AiChatSettings>(Whiskers.Configuration.AiChatSettings.SectionName);
         services.AddHttpClient<Whiskers.Services.AiChat.AiChatService>();
         services.AddSingleton<Whiskers.Services.AiChat.AiChatService>();
         services.AddSingleton<Whiskers.Services.AiChat.IAiChatService>(sp => sp.GetRequiredService<Whiskers.Services.AiChat.AiChatService>());
@@ -58,6 +61,7 @@ public sealed class AgentModule : IWhiskersModule
         // Agent (acting multi-provider agent with inescapable guardrails)
         services.Configure<Whiskers.Configuration.AgentSettings>(
             config.GetSection(Whiskers.Configuration.AgentSettings.SectionName));
+        services.AddVaultBackedSecrets<Whiskers.Configuration.AgentSettings>(Whiskers.Configuration.AgentSettings.SectionName);
         // Guardrail engine + store, tool registry, approval store + gate, direct-MCP guard and principal resolver
         // are core since ADR-0005 step 2.1 (PC-D8): see Startup/WhiskersMutationGatewayExtensions.AddGuardrailPolicy.
         services.AddSingleton<Whiskers.Services.Agent.Providers.IAgentProviderFactory,

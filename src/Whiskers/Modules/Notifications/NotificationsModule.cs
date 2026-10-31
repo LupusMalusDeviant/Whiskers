@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Configuration;
+using Whiskers.Services.Vault;
 using Whiskers.Services.Notifications;
 using Whiskers.Utils;
 
@@ -44,6 +45,17 @@ public sealed class NotificationsModule : IWhiskersModule
         services.Configure<SlackSettings>(config.GetSection(SlackSettings.SectionName));
         services.Configure<EmailSettings>(config.GetSection(EmailSettings.SectionName));
         services.Configure<WebhookNotificationSettings>(config.GetSection(WebhookNotificationSettings.SectionName));
+
+        // The channels' credentials are kept in the vault (R1-30): read from it when the options are bound — before the
+        // log redaction below registers them.
+        services.AddVaultBackedSecrets<MattermostSettings>(MattermostSettings.SectionName);
+        services.AddVaultBackedSecrets<Whiskers.Configuration.MatrixSettings>(Whiskers.Configuration.MatrixSettings.SectionName);
+        services.AddVaultBackedSecrets<TelegramSettings>(TelegramSettings.SectionName);
+        services.AddVaultBackedSecrets<NtfySettings>(NtfySettings.SectionName);
+        services.AddVaultBackedSecrets<DiscordSettings>(DiscordSettings.SectionName);
+        services.AddVaultBackedSecrets<SlackSettings>(SlackSettings.SectionName);
+        services.AddVaultBackedSecrets<EmailSettings>(EmailSettings.SectionName);
+        services.AddVaultBackedSecrets<WebhookNotificationSettings>(WebhookNotificationSettings.SectionName);
 
         // The secrets of each channel, withheld from every log line and sink from the moment they are bound (R1-25):
         // an ntfy topic URL or a custom webhook URL looks like any other URL, so no pattern could recognize it.
