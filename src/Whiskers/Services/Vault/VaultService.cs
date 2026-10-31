@@ -127,11 +127,14 @@ public class VaultService : IVaultService, IInitializable
             next.KdfSalt = Convert.ToBase64String(salt);
             dirty = true;
         }
+        var provenStrongly = data.KeyCheck is not null || gcm.Count > 0;
         if (legacy.Count > 0)
-            dirty |= MigrateLegacy(next, provenByKeyCheck: data.KeyCheck is not null || gcm.Count > 0);
-        // The key check is written once the key is the vault's: proven, new, or converted from legacy entries (whose
-        // original stays in the recovery copy). A failed conversion leaves the legacy entries and adds no check.
-        if (next.KeyCheck is null && next.Entries.All(e => string.IsNullOrEmpty(e.EncryptedValue) || IsGcm(e.EncryptedValue)))
+            dirty |= MigrateLegacy(next, provenByKeyCheck: provenStrongly);
+        // The key check is written once the key is the vault's: proven by an authenticated value, new, or converted
+        // from legacy entries (whose original stays in the recovery copy). Only a legacy-only vault whose conversion
+        // failed gets no check: its key is not proven, and a check would bind the vault to it.
+        if (next.KeyCheck is null
+            && (provenStrongly || next.Entries.All(e => string.IsNullOrEmpty(e.EncryptedValue) || IsGcm(e.EncryptedValue))))
         {
             next.KeyCheck = Encrypt(key, KeyCheckText);
             dirty = true;

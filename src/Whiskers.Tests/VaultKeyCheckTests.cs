@@ -451,9 +451,10 @@ public class VaultKeyCheckTests : IDisposable
         var vault = await Open(RightKey);
         await vault.SetSecretAsync("new", "gcm value");
         var data = ReadFile();
-        data.Entries.Add(new VaultEntry { Key = "broken", EncryptedValue = LegacyCbc(WrongKey, "legacy value — long enough text") });
+        var broken = LegacyCbc(WrongKey, "legacy value — long enough text");
+        data.Entries.Add(new VaultEntry { Key = "broken", EncryptedValue = broken });
+        data.KeyCheck = null;   // written before R1-28: proven by its GCM entry only
         WriteFile(data);
-        var before = File.ReadAllBytes(VaultPath);
 
         for (var i = 0; i < 2; i++)
         {
@@ -462,7 +463,12 @@ public class VaultKeyCheckTests : IDisposable
             Assert.Equal("gcm value", reopened.GetSecret("new"));
         }
         Assert.Empty(Directory.GetFiles(_dir, "vault.json.legacy-cbc*"));
-        Assert.Equal(before, File.ReadAllBytes(VaultPath));
+        var stored = ReadFile();
+        Assert.Equal(broken, stored.Entries.Single(e => e.Key == "broken").EncryptedValue);
+        Assert.NotNull(stored.KeyCheck);   // the key was proven: the check survives the loss of every GCM entry
+
+        await (await Open(RightKey)).DeleteSecretAsync("new");
+        Assert.Equal(VaultKeyState.Verified, (await Open(RightKey)).KeyState);
     }
 
     [Fact]

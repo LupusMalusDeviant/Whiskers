@@ -15,7 +15,7 @@ All notable changes to Whiskers are documented here. The format follows
   none. **New:** `VAULT_KEY_FILE` (Docker/Kubernetes secret file) wins over `VAULT_KEY` for the vault, the backup
   encryption and the audit chain. A configured `VAULT_KEY_FILE` or `WHISKERS_DB_CONNECTION_FILE` that is missing,
   unreadable or empty now stops the start (it fell back silently before); so does a configured
-  `WHISKERS_ADMIN_PASSWORD_FILE` while the admin it seeds does not exist yet (it skipped the seed with a warning). The
+  `WHISKERS_ADMIN_PASSWORD_FILE` while local login is on and the admin it seeds does not exist yet (it skipped the seed with a warning). The
   setup wizard no longer offers a new key when the configured one does not match, every vault-dependent page names a
   wrong key as such, and no self-backup is created while the vault rejects the key (it would be sealed with the typo). **Recovery:** if a converted legacy vault is later reported as locked with
   the right key, stop Whiskers, put `vault.json.legacy-cbc.bak` (or the newest `vault.json.legacy-cbc.<time>-<n>.bak`)
