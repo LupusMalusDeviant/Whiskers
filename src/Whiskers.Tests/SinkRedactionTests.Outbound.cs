@@ -67,6 +67,36 @@ public sealed partial class SinkRedactionTests
     }
 
     [Fact]
+    public void Plain_scopes_and_list_values_are_redacted_and_disposal_reaches_the_real_factory()
+    {
+        var capture = new Capture();
+        var sp = new ServiceCollection().AddLogging(b => b.AddProvider(capture)).AddLogRedaction().BuildServiceProvider();
+        var factory = Assert.IsType<RedactingLoggerFactory>(sp.GetRequiredService<ILoggerFactory>());
+        var logger = factory.CreateLogger("Test");
+
+        using (logger.BeginScope($"session token={Canary}"))
+            logger.LogWarning("Arguments {Args}", (object)new[] { "kept", $"password={Canary}" });
+
+        Assert.Contains("kept", capture.All);
+        AssertClean(capture.All);
+        sp.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => factory.Inner.CreateLogger("after"));
+    }
+
+    [Fact]
+    public void The_in_app_feed_redacts_what_it_is_given_directly()
+    {
+        var store = new InAppNotificationStore(new ThrowingScopes(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<InAppNotificationStore>.Instance);
+
+        store.Add(new NotificationEvent { EventType = "log_alert", ContainerName = "web", ImageInfo = string.Join(" ", SecretTexts) });
+
+        var item = Assert.Single(store.Recent);
+        AssertClean(item.Detail);
+        AssertClean(item.Title);
+    }
+
+    [Fact]
     public void The_redaction_keeps_each_providers_own_filter_rules()
     {
         var capture = new Capture();

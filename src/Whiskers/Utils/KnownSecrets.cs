@@ -29,7 +29,9 @@ public static class KnownSecrets
             foreach (var raw in values.SelectMany(Spellings))
             {
                 var value = raw?.Trim();
-                if (value is null || value.Length < MinLength || Registered.Contains(value)) continue;
+                if (value is null || value.Length < MinLength) continue;
+                // A value registered again is current: it moves to the end, so eviction drops the oldest unused one.
+                Registered.Remove(value);
                 Registered.Add(value);
                 changed = true;
             }

@@ -1207,7 +1207,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
         }
     }
 
@@ -1228,7 +1228,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
         }
     }
 
@@ -1316,7 +1316,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_Error", ex.Message].Value, Severity.Error);
+            Snackbar.Add(L["Settings_Snackbar_Error", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
         }
     }
 

@@ -16,9 +16,9 @@ All notable changes to Whiskers are documented here. The format follows
   cut at a complete word. Capability URLs (a Telegram bot token, a Discord, Slack or Mattermost webhook key) and every
   configured channel secret (bot token, webhook URL, ntfy topic URL, Matrix access token, SMTP password, webhook signing
   secret) are replaced by `***` wherever they appear — log lines, exception texts and every stored text; a URL also in its
-  normalized form. The HttpClient request log stays at Warning by default in code (a more specific configuration rule
-  can still switch it on; the redaction catches what it lets through). The notification feed and the alert history are
-  redacted on save, whoever writes them. A failed channel test names no URL; a failed manual CVE scan or an unreadable
+  normalized form. The HttpClient request log stays at Warning by default in code (a configuration rule bound to a
+  provider or to a more specific category can still switch it on; the redaction catches what it lets through). The notification feed and the alert history are
+  redacted on save, whoever writes them. A failed channel test (also from the Settings page) names no URL; the in-app bell shows redacted text too; a failed manual CVE scan or an unreadable
   restore marker writes its error to stderr redacted. The audit-log fallback (database down) logs the entry redacted
   like the row.
 - R1-24: **No persistent sink keeps a secret.** Every free-text column of the audit log, the MCP/agent call history,
