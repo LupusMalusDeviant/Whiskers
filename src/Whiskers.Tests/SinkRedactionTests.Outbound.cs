@@ -261,6 +261,8 @@ public sealed partial class SinkRedactionTests
 
         // Three providers failed, with the token-bearing URL in the exception text; the log shows none of them.
         Assert.Contains("Failed to send Telegram notification", capture.All);
+        // The HttpClient request log is on in this provider (Trace): it names each request URI, redacted.
+        Assert.Contains("HTTP request", capture.All);
         Assert.Contains("Failed to send ntfy notification", capture.All);
         Assert.Contains("Failed to send webhook notification", capture.All);
         AssertClean(capture.All);

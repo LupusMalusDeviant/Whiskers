@@ -65,9 +65,9 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
 
     // A value logged under a secret's name ({Password}, {ApiKey}) is *** whatever it looks like: a structured provider
     // writes it next to its name, where no pattern would see a bare value as a secret. Numbers, flags, times and ids
-    // stay typed ({InputTokens} is a count).
+    // stay typed ({InputTokens} is a count); a Guid under a secret's name is withheld like text.
     private static KeyValuePair<string, object?> Redacted(KeyValuePair<string, object?> pair) =>
-        new(pair.Key, Value(pair.Value) is var value && value is string && pair.Key != "{OriginalFormat}"
+        new(pair.Key, Value(pair.Value) is var value && value is string or Guid && pair.Key != "{OriginalFormat}"
                       && SinkRedaction.IsSecretName(pair.Key)
             ? "***"
             : value);
@@ -135,7 +135,7 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
             var name = spec.Length > 0 ? hole[..^spec.Length] : hole;
             var slot = -1;
             for (var k = 0; k < args.Count && slot < 0; k++)
-                if (!used[k] && args[k].Key == name) slot = k;
+                if (!used[k] && string.Equals(args[k].Key, name, StringComparison.OrdinalIgnoreCase)) slot = k;
             while (slot < 0 && next < args.Count)
                 if (!used[next++]) slot = next - 1;
             if (slot < 0) return null;

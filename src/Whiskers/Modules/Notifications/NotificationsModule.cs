@@ -51,7 +51,11 @@ public sealed class NotificationsModule : IWhiskersModule
         services.PostConfigure<Whiskers.Configuration.MatrixSettings>(s => KnownSecrets.Register(s.AccessToken));
         services.PostConfigure<TelegramSettings>(s => KnownSecrets.Register(s.BotToken));
         services.PostConfigure<NtfySettings>(s => KnownSecrets.Register(
-            string.IsNullOrWhiteSpace(s.Topic) ? null : $"{s.ServerUrl.TrimEnd('/')}/{s.Topic}", s.Topic, s.Token));
+            string.IsNullOrWhiteSpace(s.Topic) ? null : $"{s.ServerUrl.TrimEnd('/')}/{s.Topic}",
+            // The bare topic only when it looks like a capability: a plain word ("production") would vanish from
+            // every audit row and notification.
+            s.Topic is { Length: >= 16 } topic && topic.Any(c => char.IsDigit(c) || c is '-' or '_') ? topic : null,
+            s.Token));
         services.PostConfigure<DiscordSettings>(s => KnownSecrets.Register(s.WebhookUrl));
         services.PostConfigure<SlackSettings>(s => KnownSecrets.Register(s.WebhookUrl));
         services.PostConfigure<EmailSettings>(s => KnownSecrets.Register(s.Password));
