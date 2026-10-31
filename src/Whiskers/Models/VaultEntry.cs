@@ -18,4 +18,9 @@ public class VaultData
     /// <summary>Base64 random salt for the PBKDF2 key derivation. Generated once on first use and
     /// persisted so the derived key is stable across restarts. Null on legacy vaults (pre-KDF).</summary>
     public string? KdfSalt { get; set; }
+
+    /// <summary>R1-28: a fixed text encrypted with the derived key ("g1:" format). A key that cannot decrypt it is not
+    /// this vault's key: the vault refuses to write or migrate with it. Null on vaults written before R1-28 (set at
+    /// the first start whose key is proven by an existing entry).</summary>
+    public string? KeyCheck { get; set; }
 }

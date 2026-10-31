@@ -136,7 +136,7 @@ public sealed class AuditChain : IAuditChain
     /// <summary>The app's chain from its configuration: VAULT_KEY and the data directory.</summary>
     public static AuditChain FromConfiguration(IConfiguration configuration, DataPathOptions paths, ILogger<AuditChain> logger,
         IServiceScopeFactory scopes) =>
-        new(configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY"), paths.AuditCheckpointJson, logger,
+        new(SecretSource.VaultKey(configuration), paths.AuditCheckpointJson, logger,
             scopes: scopes);
 
     /// <summary>The checkpoint key: the passphrase stretched like the vault's (PBKDF2-SHA-256, 600,000 rounds) and

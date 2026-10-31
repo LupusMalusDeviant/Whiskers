@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-28: **A wrong `VAULT_KEY` no longer touches the vault.** `vault.json` now carries a key check; at start the key
+  must open it (or, on a vault written before, one of its entries). A wrong key, a tampered check or entries without a
+  salt lock the vault: no secret is read, written, deleted or migrated and the file stays exactly as it was. Settings
+  and the production-readiness check show that the key does not match. Legacy AES-CBC entries are converted only when
+  every one of them decrypts to valid text — a padding that happens to fit is no proof of the key — and only after an
+  untouched copy `vault.json.legacy-cbc.bak` is written next to the vault (never overwritten); they are converted all or
+  none. **New:** `VAULT_KEY_FILE` (Docker/Kubernetes secret file) wins over `VAULT_KEY` for the vault, the backup
+  encryption and the audit chain. A configured `VAULT_KEY_FILE` or `WHISKERS_DB_CONNECTION_FILE` that is missing,
+  unreadable or empty now stops the start (it fell back silently before).
 - R1-25: **Logs and outbound notifications carry no secrets.** Every logger now writes through a redacting logger
   factory, in front of all providers (console, debug, event log): the message, each structured value, the message template, scopes and the full
   exception text are redacted before they reach it, and an entry that cannot be redacted is replaced by

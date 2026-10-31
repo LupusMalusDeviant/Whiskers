@@ -11,7 +11,10 @@ namespace Whiskers.Services.Vault;
 /// Authenticated encrypted secret vault (AES-256-GCM). The master key is derived from the VAULT_KEY
 /// passphrase with PBKDF2 (600k iterations) over a persisted per-vault salt. Secrets are stored encrypted
 /// at rest in /app/data/vault.json as "g1:" + base64(nonce ‖ tag ‖ ciphertext). Legacy AES-CBC entries
-/// (unauthenticated, key = SHA256(passphrase)) are transparently migrated on load.
+/// (unauthenticated, key = SHA256(passphrase)) are migrated on load, after an untouched copy of the file is kept.
+/// R1-28 (INV-54): the key is checked at start against a key check stored in the file (or, on an older vault, an
+/// existing authenticated entry). A key that does not match reads, writes and migrates nothing and leaves the file
+/// as it is. The passphrase comes from <c>VAULT_KEY_FILE</c> or <c>VAULT_KEY</c> (<see cref="SecretSource"/>).
 /// </summary>
 public class VaultService : IVaultService, IInitializable
 {
@@ -19,7 +22,14 @@ public class VaultService : IVaultService, IInitializable
     private const int NonceSize = 12;
     private const int TagSize = 16;
     private const int Pbkdf2Iterations = 600_000;
+    private const string KeyCheckText = "whiskers-vault-key-check-v1";
 
+    /// <summary>Suffix of the untouched copy of vault.json kept before legacy CBC entries are converted.</summary>
+    internal const string LegacyCopySuffix = ".legacy-cbc.bak";
+
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    private readonly string _path;
     private readonly JsonFileStore<VaultData> _store;
     private readonly ILogger<VaultService> _logger;
     private readonly string? _passphrase;
@@ -30,17 +40,21 @@ public class VaultService : IVaultService, IInitializable
 
     public VaultService(IConfiguration configuration, ILogger<VaultService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
-        _store = new JsonFileStore<VaultData>(storePath ?? (dataPaths ?? DataPathOptions.Default).VaultJson);
+        _path = storePath ?? (dataPaths ?? DataPathOptions.Default).VaultJson;
+        _store = new JsonFileStore<VaultData>(_path);
         _logger = logger;
 
-        _passphrase = configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY");
-        if (!string.IsNullOrEmpty(_passphrase))
+        // A VAULT_KEY_FILE that cannot be read stops the start here (SecretFileException): never a silent "no key".
+        _passphrase = SecretSource.VaultKey(configuration);
+        if (_passphrase is not null)
             _legacyKey = SHA256.HashData(Encoding.UTF8.GetBytes(_passphrase));
         else
-            _logger.LogWarning("VAULT_KEY not set — vault is disabled. Set VAULT_KEY env var to enable.");
+            _logger.LogWarning("VAULT_KEY not set — vault is disabled. Set VAULT_KEY or VAULT_KEY_FILE to enable.");
     }
 
-    public bool IsEnabled => _masterKey != null;
+    public bool IsEnabled => KeyState == VaultKeyState.Verified;
+
+    public VaultKeyState KeyState { get; private set; } = VaultKeyState.NotConfigured;
 
     public int Order => 40;
 
@@ -52,41 +66,124 @@ public class VaultService : IVaultService, IInitializable
             _logger.LogInformation("Vault loaded: {Count} secrets", _data.Entries.Count);
         }
 
-        if (string.IsNullOrEmpty(_passphrase)) return;
+        if (_passphrase is null) return;
 
-        // Establish the persisted PBKDF2 salt (generate on first use), then derive the master key.
-        var dirty = false;
-        if (string.IsNullOrEmpty(_data.KdfSalt))
+        var data = _data;
+        var gcm = data.Entries.Where(e => IsGcm(e.EncryptedValue)).ToList();
+        var legacy = data.Entries.Where(e => !string.IsNullOrEmpty(e.EncryptedValue) && !IsGcm(e.EncryptedValue)).ToList();
+
+        // The derived key: from the persisted salt, or from a new one for a vault that has never had one. A vault that
+        // carries a key check or authenticated entries but no salt can match no key.
+        byte[] salt;
+        var newSalt = string.IsNullOrEmpty(data.KdfSalt);
+        if (newSalt && (data.KeyCheck is not null || gcm.Count > 0))
         {
-            _data.KdfSalt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+            Reject("vault.json has encrypted entries but no key salt");
+            return;
+        }
+        try
+        {
+            salt = newSalt ? RandomNumberGenerator.GetBytes(16) : Convert.FromBase64String(data.KdfSalt!);
+        }
+        catch (FormatException)
+        {
+            Reject("the key salt in vault.json is not valid");
+            return;
+        }
+        var key = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(_passphrase), salt, Pbkdf2Iterations,
+            HashAlgorithmName.SHA256, 32);
+
+        // Proof of the key: the key check, else any authenticated entry (GCM fails on a wrong key). A vault of legacy
+        // CBC entries only has no proof — a padding that happens to fit is none — so every entry must decrypt to valid
+        // text, and the conversion below keeps the original file untouched beside it.
+        string? rejection = null;
+        if (data.KeyCheck is not null)
+        {
+            if (!Opens(key, data.KeyCheck, out var text) || text != KeyCheckText)
+                rejection = "VAULT_KEY does not open the vault's key check";
+        }
+        else if (gcm.Count > 0)
+        {
+            if (!gcm.Any(e => Opens(key, e.EncryptedValue, out _)))
+                rejection = "VAULT_KEY opens none of the vault's entries";
+        }
+        else if (legacy.Count > 0 && !legacy.All(e => TryLegacy(e.EncryptedValue, out _)))
+        {
+            rejection = "VAULT_KEY does not decrypt the vault's legacy entries";
+        }
+        if (rejection is not null)
+        {
+            Reject(rejection);
+            return;
+        }
+
+        _masterKey = key;
+        KeyState = VaultKeyState.Verified;
+
+        var next = Copy(data);
+        var dirty = false;
+        if (newSalt)
+        {
+            next.KdfSalt = Convert.ToBase64String(salt);
             dirty = true;
         }
-        var salt = Convert.FromBase64String(_data.KdfSalt);
-        _masterKey = Rfc2898DeriveBytes.Pbkdf2(
-            Encoding.UTF8.GetBytes(_passphrase), salt, Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
-
-        // Migrate any legacy (CBC) entries to authenticated GCM.
-        foreach (var e in _data.Entries)
+        if (legacy.Count > 0)
+            dirty |= MigrateLegacy(next, provenByKeyCheck: data.KeyCheck is not null || gcm.Count > 0);
+        // The key check is written once the key is the vault's: proven, new, or converted from legacy entries (whose
+        // original stays in the recovery copy). A failed conversion leaves the legacy entries and adds no check.
+        if (next.KeyCheck is null && next.Entries.All(e => string.IsNullOrEmpty(e.EncryptedValue) || IsGcm(e.EncryptedValue)))
         {
-            if (string.IsNullOrEmpty(e.EncryptedValue) || e.EncryptedValue.StartsWith(GcmPrefix, StringComparison.Ordinal))
-                continue;
-            try
-            {
-                var plain = DecryptLegacyCbc(e.EncryptedValue);
-                e.EncryptedValue = Encrypt(plain);
-                dirty = true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Vault migration failed for key {Key} — wrong VAULT_KEY or corrupted entry", e.Key);
-            }
+            next.KeyCheck = Encrypt(key, KeyCheckText);
+            dirty = true;
         }
 
         if (dirty)
         {
-            await _store.SaveAsync(_data);
-            _logger.LogInformation("Vault initialized (PBKDF2 + AES-GCM); migrated legacy entries where present");
+            await _store.SaveAsync(next);
+            _data = next;
+            _logger.LogInformation("Vault initialized (PBKDF2 + AES-GCM, key checked)");
         }
+    }
+
+    /// <summary>Converts the legacy entries of <paramref name="next"/> to AES-GCM — all of them or none — once an
+    /// untouched copy of vault.json is kept beside it.</summary>
+    private bool MigrateLegacy(VaultData next, bool provenByKeyCheck)
+    {
+        var copy = _path + LegacyCopySuffix;
+        try
+        {
+            // Never overwritten: a copy from an earlier attempt is the original as it was before any conversion.
+            if (!File.Exists(copy)) File.Copy(_path, copy, overwrite: false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(ex, "Vault: legacy entries not converted, the recovery copy {Copy} could not be written", copy);
+            return false;
+        }
+
+        var converted = new Dictionary<VaultEntry, string>();
+        foreach (var e in next.Entries.Where(e => !string.IsNullOrEmpty(e.EncryptedValue) && !IsGcm(e.EncryptedValue)))
+        {
+            if (!TryLegacy(e.EncryptedValue, out var plain))
+            {
+                _logger.LogError("Vault: legacy entry {Key} does not decrypt — no legacy entry converted", e.Key);
+                return false;
+            }
+            converted[e] = Encrypt(_masterKey!, plain);
+        }
+        foreach (var (entry, value) in converted) entry.EncryptedValue = value;
+        if (!provenByKeyCheck)
+            _logger.LogWarning("Vault: {Count} legacy entries converted with a key that only their padding and text could "
+                               + "confirm; the original file is kept as {Copy}", converted.Count, copy);
+        return converted.Count > 0;
+    }
+
+    private void Reject(string reason)
+    {
+        _masterKey = null;
+        KeyState = VaultKeyState.Wrong;
+        _logger.LogError("VAULT KEY REJECTED: {Reason}. Secrets are not read, written or migrated and vault.json is left "
+                         + "unchanged until the right VAULT_KEY is set.", reason);
     }
 
     public List<VaultEntry> ListSecrets()
@@ -112,12 +209,12 @@ public class VaultService : IVaultService, IInitializable
 
     public async Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null, int? rotateAfterDays = null)
     {
-        if (_masterKey == null) throw new InvalidOperationException("Vault ist nicht aktiviert. VAULT_KEY Umgebungsvariable setzen.");
+        EnsureWritable();
 
         await _lock.WaitAsync();
         try
         {
-            var encrypted = Encrypt(plainValue);
+            var encrypted = Encrypt(_masterKey!, plainValue);
             // Copy-on-write (R1-11): the new entry list is published only once it is written, so a failed write
             // leaves the live vault as it was.
             var next = Copy(_data);
@@ -153,7 +250,7 @@ public class VaultService : IVaultService, IInitializable
 
     public string? GetSecret(string key)
     {
-        if (_masterKey == null) return null;
+        if (!IsEnabled) return null;
 
         // Same lock as the writers: the entry lookup can't race a concurrent Add/Remove. Decrypt runs
         // under the lock (CPU-only, no re-entrant vault call, so no deadlock).
@@ -175,6 +272,7 @@ public class VaultService : IVaultService, IInitializable
 
     public async Task DeleteSecretAsync(string key)
     {
+        EnsureWritable();
         await _lock.WaitAsync();
         try
         {
@@ -184,6 +282,15 @@ public class VaultService : IVaultService, IInitializable
             _data = next;
         }
         finally { _lock.Release(); }
+    }
+
+    /// <summary>Writes need the vault's own key: without a key, or with a wrong one, the file stays as it is.</summary>
+    private void EnsureWritable()
+    {
+        if (KeyState == VaultKeyState.Wrong)
+            throw new InvalidOperationException("Vault ist gesperrt: VAULT_KEY passt nicht zu diesem Vault. Den richtigen Schlüssel setzen und neu starten.");
+        if (!IsEnabled)
+            throw new InvalidOperationException("Vault ist nicht aktiviert. VAULT_KEY Umgebungsvariable setzen.");
     }
 
     /// <summary>A copy of the vault data whose entries can be changed without touching the live ones.</summary>
@@ -207,14 +314,16 @@ public class VaultService : IVaultService, IInitializable
         finally { _lock.Release(); }
     }
 
-    private string Encrypt(string plainText)
+    private static bool IsGcm(string? stored) => stored?.StartsWith(GcmPrefix, StringComparison.Ordinal) == true;
+
+    private static string Encrypt(byte[] key, string plainText)
     {
         var plainBytes = Encoding.UTF8.GetBytes(plainText);
         var nonce = RandomNumberGenerator.GetBytes(NonceSize);
         var cipher = new byte[plainBytes.Length];
         var tag = new byte[TagSize];
 
-        using (var gcm = new AesGcm(_masterKey!, TagSize))
+        using (var gcm = new AesGcm(key, TagSize))
             gcm.Encrypt(nonce, plainBytes, cipher, tag);
 
         // Layout: nonce ‖ tag ‖ ciphertext, base64, with a version prefix.
@@ -225,28 +334,60 @@ public class VaultService : IVaultService, IInitializable
         return GcmPrefix + Convert.ToBase64String(blob);
     }
 
-    private string Decrypt(string stored)
+    /// <summary>Opens a "g1:" value with <paramref name="key"/>; false on a wrong key, a changed value or bad data.</summary>
+    private static bool Opens(byte[] key, string stored, out string plain)
     {
-        if (!stored.StartsWith(GcmPrefix, StringComparison.Ordinal))
-            return DecryptLegacyCbc(stored);   // not yet migrated (should not happen post-InitializeAsync)
+        plain = "";
+        try
+        {
+            plain = Decrypt(key, stored);
+            return true;
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException or ArgumentException)
+        {
+            return false;
+        }
+    }
 
+    // A legacy value is still read only while its conversion could not run (no recovery copy).
+    private string Decrypt(string stored) => IsGcm(stored) ? Decrypt(_masterKey!, stored) : StrictLegacy(stored);
+
+    private static string Decrypt(byte[] key, string stored)
+    {
+        if (!IsGcm(stored)) throw new FormatException("not an AES-GCM value");
         var blob = Convert.FromBase64String(stored[GcmPrefix.Length..]);
+        if (blob.Length < NonceSize + TagSize) throw new FormatException("AES-GCM value too short");
         var nonce = blob[..NonceSize];
         var tag = blob[NonceSize..(NonceSize + TagSize)];
         var cipher = blob[(NonceSize + TagSize)..];
         var plain = new byte[cipher.Length];
 
-        using (var gcm = new AesGcm(_masterKey!, TagSize))
+        using (var gcm = new AesGcm(key, TagSize))
             gcm.Decrypt(nonce, cipher, tag, plain);   // throws CryptographicException on tamper/wrong key
 
         return Encoding.UTF8.GetString(plain);
     }
 
-    /// <summary>Decrypts a legacy AES-256-CBC entry (IV prepended, key = SHA256(passphrase)). Only used to
-    /// read pre-GCM data during migration.</summary>
-    private string DecryptLegacyCbc(string cipherBase64)
+    private bool TryLegacy(string stored, out string plain)
+    {
+        plain = "";
+        try
+        {
+            plain = StrictLegacy(stored);
+            return true;
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException or ArgumentException or DecoderFallbackException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Decrypts a legacy AES-256-CBC entry (IV prepended, key = SHA256(passphrase)) to text that must be valid
+    /// UTF-8. A padding that fits is no proof of the key; text that is no UTF-8 is a sure sign of the wrong one.</summary>
+    private string StrictLegacy(string cipherBase64)
     {
         var cipherBytes = Convert.FromBase64String(cipherBase64);
+        if (cipherBytes.Length < 32 || cipherBytes.Length % 16 != 0) throw new FormatException("not a legacy AES-CBC value");
 
         using var aes = Aes.Create();
         aes.Key = _legacyKey!;
@@ -254,6 +395,6 @@ public class VaultService : IVaultService, IInitializable
 
         using var decryptor = aes.CreateDecryptor();
         var plainBytes = decryptor.TransformFinalBlock(cipherBytes, 16, cipherBytes.Length - 16);
-        return Encoding.UTF8.GetString(plainBytes);
+        return StrictUtf8.GetString(plainBytes);
     }
 }

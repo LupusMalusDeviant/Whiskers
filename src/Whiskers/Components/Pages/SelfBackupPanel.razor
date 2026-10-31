@@ -113,7 +113,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
-        _encrypted = !string.IsNullOrEmpty(Configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY"));
+        _encrypted = Whiskers.Configuration.SecretSource.VaultKey(Configuration) is not null;
         _provider = (Configuration["WHISKERS_DB_PROVIDER"] ?? Configuration["Database:Provider"] ?? "sqlite").ToLowerInvariant();
         await LoadBackups();
     }

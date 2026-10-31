@@ -45,7 +45,7 @@ public sealed class BackupService : IBackupService
         _lifetime = lifetime;
         _logger = logger;
         _dataPaths = dataPaths ?? DataPathOptions.Default;
-        _vaultKey = configuration["VAULT_KEY"] ?? Environment.GetEnvironmentVariable("VAULT_KEY");
+        _vaultKey = SecretSource.VaultKey(configuration);
     }
 
     // ---------------------------------------------------------------- create
