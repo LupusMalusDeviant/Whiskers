@@ -145,7 +145,7 @@ public sealed class McpCallLogMiddleware
                 ActorType = "mcp-direct",
                 ToolName = call.Tool,
                 Level = level,
-                ParamsJson = Cap(Redact(call.Args), 4000),
+                ParamsJson = Cap(SinkRedaction.Arguments(call.Args), 4000),
                 Verdict = outcome?.Verdict ?? verdict,
                 Success = outcome?.Success ?? false,
                 DurationMs = (int)durationMs,
@@ -154,7 +154,7 @@ public sealed class McpCallLogMiddleware
                 CorrelationId = outcome?.OperationId,
                 Error = outcome is null
                     ? $"No outcome was reported for this call (HTTP {context.Response.StatusCode})."
-                    : outcome.Success ? null : Cap(Redact(outcome.Error ?? outcome.Result.ToString()), 1000),
+                    : outcome.Success ? null : Cap(SinkRedaction.Json(outcome.Error ?? outcome.Result.ToString()), 1000),
             });
         }
         catch (Exception ex)
@@ -189,10 +189,7 @@ public sealed class McpCallLogMiddleware
         return (PrincipalIds.Anonymous, "deny");
     }
 
-    // URL user info first: a token alone in front of the host (https://<token>@host) is no pattern the redactor knows.
-    private static string? Redact(string? text) =>
-        text is null ? null : SecretRedactor.Redact(PolicyDecisions.WithoutUrlCredentials(text)!);
 
-    private static string? Cap(string? s, int max) =>
-        s is null ? null : (s.Length > max ? s[..max] + "…" : s);
+    // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.
+    private static string? Cap(string? s, int max) => Whiskers.Utils.SinkRedaction.Cap(s, max);
 }

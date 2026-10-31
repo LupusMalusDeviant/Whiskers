@@ -6,7 +6,8 @@ Small, dependency-free helpers used across the app.
 
 | File | Purpose |
 |---|---|
-| `SecretRedactor.cs` | Redacts secrets (tokens, keys, passwords, SQL password literals such as `PASSWORD '…'` / `IDENTIFIED BY …`) from command output and logs before they are displayed or stored; `RedactJson` redacts a JSON document value by value (decoded), as approval cards store it. |
+| `SecretRedactor.cs` | Redacts secrets (tokens, keys, passwords, SQL password literals such as `PASSWORD '…'` / `IDENTIFIED BY …`) from command output and logs before they are displayed or stored; `RedactJson` redacts a JSON document value by value (decoded), as approval cards store it. A pattern that times out withholds the whole text (fail closed). |
+| `SinkRedaction.cs` | What every persistent sink stores (R1-24, INV-51): `Text` (URL user info removed, then `SecretRedactor`), `Json` (value by value), `Arguments` (tool/mutation arguments: free-text payloads — `IsPayload`, matched on every spelling of the name — keep only their length, a secret-named key is `***` at any depth). Idempotent; never a prefix of a secret. |
 | `ShellUtils.cs` | Shell helpers, safe quoting/escaping of arguments for host command execution. |
 | `MarkdownSanitizer.cs` | Post-filters rendered (LLM) markdown HTML, rewriting any non-`http(s)`/`mailto`/`#` href to `#` so a model-supplied `javascript:` link can't become a live one-click XSS. |
 | `EnvMasking.cs` | Decides whether a container env-var value should be masked in the UI — a sensitive key OR a value with inline credentials (`://user:pass@`). |

@@ -139,9 +139,10 @@ public class ServerTools
 
         var result = await executor.ExecuteAsync(serverId, command, TimeSpan.FromSeconds(timeoutSeconds));
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
-        // Redact secrets before persisting the command to the audit log (the executed command is unchanged).
-        var redactedCommand = SecretRedactor.Redact(command);
-        await auditLog.LogAsync(actor, actorType, "command.execute", "command", redactedCommand, redactedCommand, details: $"Exit code: {result.ExitCode}", serverId: serverId, success: result.ExitCode == 0);
+        // The command is a payload: the audit log keeps only its length (R1-24) — no pattern knows every credential
+        // syntax a shell line can carry (curl -u user:pass, …). The executed command is unchanged.
+        var withheldCommand = SinkRedaction.Withheld(command);
+        await auditLog.LogAsync(actor, actorType, "command.execute", "command", withheldCommand, withheldCommand, details: $"Exit code: {result.ExitCode}", serverId: serverId, success: result.ExitCode == 0);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Exit code: {result.ExitCode}");
         if (!string.IsNullOrEmpty(result.Output))

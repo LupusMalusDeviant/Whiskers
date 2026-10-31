@@ -86,9 +86,9 @@ public class SchedulerTools
         });
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
-        // A CustomCommand may embed a secret — redact it before it reaches the audit log.
+        // A CustomCommand is a payload: the audit log keeps only its length (R1-24).
         var auditDetails = type == ScheduledTaskType.CustomCommand && !string.IsNullOrEmpty(command)
-            ? $"type={type}, cron={cronExpression}, command={SecretRedactor.Redact(command)}"
+            ? $"type={type}, cron={cronExpression}, command={SinkRedaction.Withheld(command)}"
             : $"type={type}, cron={cronExpression}";
         await auditLog.LogAsync(actor, actorType, "scheduler.create", "scheduled-task", task.TaskId, task.Name, auditDetails, serverId);
 

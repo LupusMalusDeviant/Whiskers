@@ -9,6 +9,7 @@ The storage primitives every other service builds on. Whiskers persists two ways
 | File | Purpose |
 |---|---|
 | `DatabaseRegistration.cs` | `AddWhiskersDatabase` — reads `Database:Provider` / `WHISKERS_DB_PROVIDER` (+ `_CONNECTION` / `_CONNECTION_FILE` secret) and registers `MetricsDbContext` for SQLite or PostgreSQL, pinning the matching `MigrationsAssembly`. An unknown provider fails fast at startup. |
+| `SinkRedactionInterceptor.cs` | R1-24 (INV-51): an EF `SaveChangesInterceptor` registered on `MetricsDbContext` for both providers. On save it redacts every free-text column of the audit log, MCP/agent call history, approvals, policy decisions and task results ([`SinkRedaction`](../../Utils/SinkRedaction.cs)), whoever wrote the row. Bulk `ExecuteUpdate` bypasses it (its values come from rows that went through it, or are fixed texts). |
 | `DatabaseInitializer.cs` | Brings the schema up to date on startup. The SQLite path baselines legacy `EnsureCreated` databases onto migrations + enables WAL; the PostgreSQL path is a straight `MigrateAsync` (see below). |
 | `MetricsDbContextFactory.cs` | Design-time `IDesignTimeDbContextFactory` used only by `dotnet ef`; branches on `WHISKERS_DB_PROVIDER` so scaffolding targets the right migration assembly without booting the app host. |
 | `SqliteToPostgresMigrator.cs` | The one-time `--migrate-to-postgres` data copy (SQLite → a fresh PostgreSQL). Read-only on the source, aborts on a non-empty target; the provider-agnostic core is unit-tested. See below. |

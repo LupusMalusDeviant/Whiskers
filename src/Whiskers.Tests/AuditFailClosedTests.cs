@@ -40,7 +40,8 @@ public sealed class AuditFailClosedTests : IDisposable
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o
             .UseSqlite($"Data Source={Path.Combine(_root, "metrics.db")};Pooling=False")
-            .AddInterceptors(_writes, _writes.Commits, _reads));
+            // The sink redaction as the app registers it (R1-24), then the fault injectors.
+            .AddInterceptors(SinkRedactionInterceptor.Instance, _writes, _writes.Commits, _reads));
         _sp = services.BuildServiceProvider();
         _scopes = _sp.GetRequiredService<IServiceScopeFactory>();
         using (var scope = _scopes.CreateScope())
@@ -332,6 +333,48 @@ public sealed class AuditFailClosedTests : IDisposable
     }
 
     [Fact]
+    public async Task A_refusal_kept_in_the_outbox_holds_no_secret_in_its_target_or_payload()
+    {
+        // R1-24: the outbox file is written as the row was built — the interceptor never sees it.
+        _writes.FailBefore = true;
+        var request = Restart("op-sec2") with
+        {
+            CapabilityId = "no.such",
+            Target = new MutationTarget("repo", "https://deploy:hunter4@git.example.org/r.git",
+                "git clone https://hunter5@git.example.org/r.git", "local"),
+            Arguments = Args(new { containerId = "web", command = "curl -u deploy:hunter6 https://api.example.org" }),
+        };
+
+        await Gateway().ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        var kept = Directory.EnumerateFiles(Path.Combine(_root, "audit-outbox"), "*.json").Single();
+        var text = await File.ReadAllTextAsync(kept);
+        Assert.DoesNotContain("hunter", text);
+        Assert.Contains("git.example.org", text);
+    }
+
+    [Fact]
+    public async Task An_event_keeps_every_argument_through_the_save_redaction()
+    {
+        // R1-24: the arguments are a JSON string inside the details; redacting them again on save must not run a
+        // pattern across their quotes and drop what follows a "token: …" or a bare "password=".
+        var request = Restart("op-args") with
+        {
+            CapabilityId = "no.such",
+            Arguments = Args(new { description = "rotate token: monthly", pattern = "password=", containerId = "web", serverId = "local" }),
+        };
+
+        await Gateway().ExecuteAsync(request, (_, _) => Task.FromResult(1));
+
+        var details = Assert.Single(await Events()).Details!;
+        Assert.Contains("rotate token=***", details);
+        Assert.Contains("password=", details);
+        Assert.Contains("containerId", details);
+        Assert.Contains("serverId", details);
+        await AssertTrailIntact();
+    }
+
+    [Fact]
     public async Task A_refusal_whose_commit_answer_was_lost_is_one_event()
     {
         _writes.FailAfter = true;
@@ -372,8 +415,9 @@ public sealed class AuditFailClosedTests : IDisposable
         });
         _writes.FailBefore = false;
         var running = new TaskCompletionSource<int>();
-        _ = gateway.ExecuteAsync(Restart("op-cut"), (_, _) => running.Task);
-        await Task.Delay(300);
+        var started = new TaskCompletionSource();
+        _ = gateway.ExecuteAsync(Restart("op-cut"), (_, _) => { started.TrySetResult(); return running.Task; });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(15));   // intent and journal claim are written by then
         using (var scope = _scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -473,8 +517,9 @@ public sealed class AuditFailClosedTests : IDisposable
         var journal = new DbOperationJournal(_scopes);
         var recovery = Recovery(journal);
         var running = new TaskCompletionSource<int>();
-        var run = Gateway(recovery, journal).ExecuteAsync(Restart("op-live"), (_, _) => running.Task);
-        await Task.Delay(300);
+        var started = new TaskCompletionSource();
+        var run = Gateway(recovery, journal).ExecuteAsync(Restart("op-live"), (_, _) => { started.TrySetResult(); return running.Task; });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(15));   // intent and journal claim are written by then
 
         _time.Advance(AuditRecovery.IntentGrace + TimeSpan.FromMinutes(1));
         await recovery.RecoverAsync();

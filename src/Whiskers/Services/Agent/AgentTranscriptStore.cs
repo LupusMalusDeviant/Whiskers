@@ -51,7 +51,8 @@ public sealed class AgentTranscriptStore : IAgentTranscriptStore
     }
 
     // Keep the last N messages, then make the window safe to persist AND re-seed: drop orphaned tool pairs
-    // (a dangling tool_use/tool_result 400s the next provider request), redact tool outputs, and strip
+    // (a dangling tool_use/tool_result 400s the next provider request), redact every message and every tool
+    // call's arguments (R1-24: a user or the model can quote a secret as well as a tool can), and strip
     // base64 screenshots (prompt bloat + possible secrets).
     private static List<AgentMessage> SanitizeForPersistence(IReadOnlyList<AgentMessage> messages)
     {
@@ -74,11 +75,13 @@ public sealed class AgentTranscriptStore : IAgentTranscriptStore
             var m = original;
             if (m.Role == AgentRole.Assistant && m.ToolCalls is { Count: > 0 })
             {
-                var kept = m.ToolCalls.Where(tc => answered.Contains(tc.Id)).ToList();
+                var kept = m.ToolCalls.Where(tc => answered.Contains(tc.Id))
+                    .Select(tc => tc with { ArgumentsJson = SinkRedaction.Arguments(tc.ArgumentsJson) ?? "" }).ToList();
                 m = m with { ToolCalls = kept.Count > 0 ? kept : null };
             }
-            if (m.Role == AgentRole.Tool && m.Text != null)
-                m = m with { Text = SecretRedactor.Redact(m.Text) };
+            if (m.Text != null)
+                // A tool result is often JSON: value by value, so no pattern runs across its quotes.
+                m = m with { Text = m.Role == AgentRole.Tool ? SinkRedaction.Json(m.Text) : SinkRedaction.Text(m.Text) };
             if (m.ImageBase64 != null)
                 m = m with { ImageBase64 = null, ImageMediaType = null };
             result.Add(m);
