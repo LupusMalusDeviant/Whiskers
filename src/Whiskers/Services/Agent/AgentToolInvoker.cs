@@ -254,8 +254,9 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 Verdict = decision.Verdict.ToString().ToLowerInvariant(),
                 Success = success,
                 DurationMs = (int)sw.ElapsedMilliseconds,
-                ResultSummary = output is null ? null : Cap(SinkRedaction.Text(output)!, 2000),
-                Error = error is null ? null : Cap(SinkRedaction.Text(error)!, 1000),
+                // Tool output is often JSON: redacted value by value (Json falls back to Text for other text).
+                ResultSummary = output is null ? null : Cap(SinkRedaction.Json(output)!, 2000),
+                Error = error is null ? null : Cap(SinkRedaction.Json(error)!, 1000),
             });
         }
         catch { /* observability must never break tool execution */ }

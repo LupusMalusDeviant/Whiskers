@@ -19,8 +19,9 @@ public static class SecretRedactor
 
     // A value this redactor already wrote ("***" followed by whitespace or the end — "\S+" below always ends there)
     // is left alone, so redacting twice changes nothing. Any other value starting with "***" ("***;x") is a secret
-    // like any other. Sinks never run these patterns over JSON text (they redact JSON value by value and shorten it
-    // structurally), so a written "***" is never followed by a quote.
+    // like any other. Sinks redact JSON value by value and shorten it structurally, so a written "***" is never
+    // followed by a quote there; text that is not valid JSON (a cut tool output) can lose what follows a redacted
+    // value, never keep a secret.
     private const string NotRedacted = @"(?!\*\*\*(?:\s|$))";
 
     // mysql -p<secret>, "-p<secret>", '-p<secret>'  →  -p***  — a flag, so not inside a word: "web-prod" is a name.

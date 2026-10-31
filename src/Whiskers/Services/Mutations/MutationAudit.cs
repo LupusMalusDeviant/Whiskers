@@ -229,7 +229,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
                 }).ToList()
                 : null,
             intent = intentValue,
-        });
+        }, SinkRedaction.JsonOptions);
         entity.Details = TryFit(budget => Outcome(budget, intent))
                          ?? Fit(budget => Outcome(budget, Field(entity.Details, budget)));
     }
@@ -330,7 +330,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         sessionId = request.SessionId,
         arguments = Field(RedactedArguments(request.Arguments),
             budget >= MaxReasonChars ? MaxArgumentChars : budget),
-    }));
+    }, SinkRedaction.JsonOptions));
 
     // URL user info first: a token alone in front of the host (https://<token>@github.com) is no pattern the
     // redactor knows, and a reason can quote a resolved repository URL.

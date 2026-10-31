@@ -11,6 +11,11 @@ namespace Whiskers.Utils;
 /// </summary>
 public static class SinkRedaction
 {
+    /// <summary>How sinks serialize JSON: readable text (a quote stays a quote, <c>&lt;</c> stays <c>&lt;</c>), as the
+    /// redaction writes it back — the stored JSON is shown HTML-encoded, never raw.</summary>
+    public static readonly JsonSerializerOptions JsonOptions =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     /// <summary>Name parts that make an argument a free-text payload, compared case- and separator-insensitively
     /// (<c>composeContent</c>, <c>compose_content</c>, <c>docker-compose</c>, <c>existingContent</c>,
     /// <c>envVars</c> …). An identifier that happens to contain one is withheld too — losing a name in the audit is

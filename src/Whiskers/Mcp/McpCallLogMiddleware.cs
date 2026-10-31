@@ -154,7 +154,7 @@ public sealed class McpCallLogMiddleware
                 CorrelationId = outcome?.OperationId,
                 Error = outcome is null
                     ? $"No outcome was reported for this call (HTTP {context.Response.StatusCode})."
-                    : outcome.Success ? null : Cap(Redact(outcome.Error ?? outcome.Result.ToString()), 1000),
+                    : outcome.Success ? null : Cap(SinkRedaction.Json(outcome.Error ?? outcome.Result.ToString()), 1000),
             });
         }
         catch (Exception ex)
@@ -189,8 +189,6 @@ public sealed class McpCallLogMiddleware
         return (PrincipalIds.Anonymous, "deny");
     }
 
-    // The sinks' one rule (R1-24): URL user info first, then the patterns; fail closed on a timeout.
-    private static string? Redact(string? text) => SinkRedaction.Text(text);
 
     // JSON stays valid JSON when shortened (R1-24): the save redaction then works value by value.
     private static string? Cap(string? s, int max) => Whiskers.Utils.SinkRedaction.Cap(s, max);

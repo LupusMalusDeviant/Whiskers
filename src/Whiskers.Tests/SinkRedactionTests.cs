@@ -430,6 +430,26 @@ public sealed class SinkRedactionTests
         Directory.Delete(dir, recursive: true);
     }
 
+    [Fact]
+    public async Task A_json_tool_result_keeps_what_follows_a_redacted_value()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sw-sink-agent-" + Guid.NewGuid().ToString("N"));
+        var store = new AgentTranscriptStore(dir);
+        var output = JsonSerializer.Serialize(new { note = $"token: {Canary}", containers = new[] { "web", "db" } });
+        await store.SaveAsync("u@example.com",
+        [
+            new(AgentRole.User, "list"),
+            new(AgentRole.Assistant, null, ToolCalls: [new AgentToolCall("c1", "list_containers", "{}")]),
+            new(AgentRole.Tool, output, ToolCallId: "c1", ToolName: "list_containers"),
+        ]);
+
+        var tool = (await store.LoadAsync("u@example.com")).Single(m => m.Role == AgentRole.Tool).Text!;
+        AssertClean(tool);
+        using var document = JsonDocument.Parse(tool);
+        Assert.Equal(2, document.RootElement.GetProperty("containers").GetArrayLength());
+        Directory.Delete(dir, recursive: true);
+    }
+
     [Theory]
     [MemberData(nameof(Secrets))]
     public async Task The_chat_history_redacts_every_message(string secret)

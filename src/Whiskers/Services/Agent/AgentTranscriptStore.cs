@@ -80,7 +80,8 @@ public sealed class AgentTranscriptStore : IAgentTranscriptStore
                 m = m with { ToolCalls = kept.Count > 0 ? kept : null };
             }
             if (m.Text != null)
-                m = m with { Text = SinkRedaction.Text(m.Text) };
+                // A tool result is often JSON: value by value, so no pattern runs across its quotes.
+                m = m with { Text = m.Role == AgentRole.Tool ? SinkRedaction.Json(m.Text) : SinkRedaction.Text(m.Text) };
             if (m.ImageBase64 != null)
                 m = m with { ImageBase64 = null, ImageMediaType = null };
             result.Add(m);
