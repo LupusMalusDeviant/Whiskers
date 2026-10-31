@@ -87,6 +87,14 @@ public class ServerConfig
     // The API key is per-server: Hetzner tokens are per-project and Hostinger keys per-account,
     // so each server carries the credential for whatever account/project it lives in.
     public CloudProvider CloudProvider { get; set; } = CloudProvider.None;
+
+    /// <summary>R1-29: the vault key that holds this server's cloud API key. A new key per change (as for the
+    /// kubeconfig), decided by the store when it writes the record. The key itself is never in servers.json.</summary>
+    public string? CloudKeyRef { get; set; }
+
+    /// <summary>Legacy plaintext cloud API key (before R1-29). Only read: it is moved into the vault at the first start
+    /// with a usable vault and removed from servers.json once the vault holds it; the store never writes a new one.
+    /// Until then (no vault) it is still used, and the readiness check reports it.</summary>
     public string? CloudApiKey { get; set; }
 
     public bool IsDefault { get; set; }

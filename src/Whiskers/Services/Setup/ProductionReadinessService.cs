@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Whiskers.Models;
 using Whiskers.Services.Persistence;
+using Whiskers.Services.Cloud;
+using Whiskers.Services.ServerConfig;
 using Whiskers.Services.Vault;
 
 namespace Whiskers.Services.Setup;
@@ -24,12 +26,17 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly IConfiguration _config;
     private readonly IVaultService _vault;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IServerConfigService? _servers;
+    private readonly IAppSettingsStore? _appSettings;
 
-    public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory)
+    public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
+        IServerConfigService? servers = null, IAppSettingsStore? appSettings = null)
     {
         _config = config;
         _vault = vault;
         _scopeFactory = scopeFactory;
+        _servers = servers;
+        _appSettings = appSettings;
     }
 
     public async Task<IReadOnlyList<ReadinessCheck>> GetChecksAsync(bool isHttps)
@@ -52,10 +59,29 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             _vault.IsEnabled,
             _vault.KeyState switch
             {
-                VaultKeyState.Verified => "Secrets werden verschlüsselt gespeichert; Backups sind verschlüsselbar.",
+                // INV-56: says which credentials the vault holds — and which it does not hold yet.
+                VaultKeyState.Verified => "Der Vault ist aktiv; Backups sind verschlüsselbar. Im Vault liegen Cloud-API-Keys, der DNS-Token, "
+                                          + "kubeconfigs sowie Registry- und Git-Zugangsdaten. Benachrichtigungs- und KI-Zugangsdaten und "
+                                          + "Webhook-Secrets liegen noch unverschlüsselt in den Einstellungsdateien.",
                 VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
             },
+            null, null));
+
+        // 2b) R1-29: the cloud API keys and the DNS token as they are actually stored, not as the vault switch suggests.
+        var plaintextCloud = _servers?.GetServers().Count(s => s.HasPlaintextCloudKey()) ?? 0;
+        var plaintextDns = await HasPlaintextDnsTokenAsync();
+        var credentialsInVault = plaintextCloud == 0 && !plaintextDns;
+        checks.Add(new ReadinessCheck(
+            "Cloud- und DNS-Zugangsdaten im Vault",
+            credentialsInVault,
+            credentialsInVault
+                ? "Keine Cloud-API-Keys und kein DNS-Token im Klartext: sie liegen verschlüsselt im Vault (oder sind nicht konfiguriert)."
+                : $"Im Klartext gespeichert: {plaintextCloud} Cloud-API-Key(s) in servers.json"
+                  + (plaintextDns ? " und der DNS-Token in app-settings.json" : "") + ". "
+                  + (_vault.IsEnabled
+                      ? "Die Übernahme in den Vault ist beim Start fehlgeschlagen — das Log nennt den Grund; nach dem Beheben neu starten."
+                      : "Sie werden beim ersten Start mit gültigem VAULT_KEY in den Vault übernommen."),
             null, null));
 
         // 3) Self-backup schedule (F3) + 4) update policy — one scope, two cheap queries.
@@ -104,5 +130,15 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             null, null));
 
         return checks;
+    }
+
+    /// <summary>Whether app-settings.json holds a DNS token in plaintext (the file, not the merged configuration: a
+    /// token set by the environment is not stored at rest by Whiskers).</summary>
+    private async Task<bool> HasPlaintextDnsTokenAsync()
+    {
+        if (_appSettings is null) return false;
+        var section = await _appSettings.ReadSectionAsync(Whiskers.Configuration.DnsSettings.SectionName);
+        var token = section?.FirstOrDefault(p => string.Equals(p.Key, nameof(Whiskers.Configuration.DnsSettings.ApiToken), StringComparison.OrdinalIgnoreCase)).Value;
+        return token is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
     }
 }

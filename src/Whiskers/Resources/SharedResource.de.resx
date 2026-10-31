@@ -1937,6 +1937,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Vault_Error_KeyWrong" xml:space="preserve">
     <value>Vault ist gesperrt: VAULT_KEY passt nicht zu diesem Vault. Den richtigen Schlüssel setzen und neu starten.</value>
   </data>
+  <data name="Settings_Dns_Error_NeedsVault" xml:space="preserve">
+    <value>Ein DNS-Token braucht den Vault: VAULT_KEY (oder VAULT_KEY_FILE) setzen und neu starten. Ohne Vault läge der Token im Klartext.</value>
+  </data>
+  <data name="Servers_Error_CloudKeyNeedsVault" xml:space="preserve">
+    <value>Ein Cloud-API-Key braucht den Vault: VAULT_KEY (oder VAULT_KEY_FILE) setzen und neu starten. Ohne Vault läge der Key im Klartext.</value>
+  </data>
   <data name="Settings_Alert_WhitelistEmpty" xml:space="preserve">
     <value>Whitelist ist aktiviert aber leer — niemand kann sich anmelden!</value>
   </data>

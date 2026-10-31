@@ -14,7 +14,7 @@ never in a tool answer, never in a log line.
 |---|---|
 | `IDnsProviderClient.cs` | Provider contract: list/create/update/delete records of a zone; names zone-relative (`@` = apex). Also `DnsProviderException` (HTTP status + the API's own message). |
 | `InfomaniakDnsClient.cs` | Infomaniak implementation (`/2/zones/{zone}/records`, Bearer token, `result`/`data`/`error` envelope — an error can arrive with HTTP 200). Maps the apex spelling (`"."` on the wire) to `@`. |
-| `IDnsRecordService.cs` / `DnsRecordService.cs` | Resolves provider + token from `DnsSettings`, enforces `AllowedZones`, normalises zone/name/type/value (IPv4/IPv6/hostname/TXT validation), refuses CNAME coexistence, and implements the idempotent `SetAsync` (create / update / unchanged, duplicates collapsed) and `DeleteAsync`. |
+| `IDnsRecordService.cs` / `DnsRecordService.cs` | Resolves provider + token from `DnsSettings` (the token from the vault under `ApiTokenRef` since R1-29; a plaintext token only when not migrated yet or set by the environment; a token in a disabled or locked vault is an error), enforces `AllowedZones`, normalises zone/name/type/value (IPv4/IPv6/hostname/TXT validation), refuses CNAME coexistence, and implements the idempotent `SetAsync` (create / update / unchanged, duplicates collapsed) and `DeleteAsync`. |
 
 ## Behaviour notes
 

@@ -244,7 +244,11 @@ public class VaultService : IVaultService, IInitializable
     public async Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null, int? rotateAfterDays = null)
     {
         EnsureWritable();
+        await StoreAsync(key, plainValue, containerId, containerName, rotateAfterDays);
+    }
 
+    private async Task StoreAsync(string key, string plainValue, string? containerId, string? containerName, int? rotateAfterDays)
+    {
         await _lock.WaitAsync();
         try
         {
@@ -332,6 +336,29 @@ public class VaultService : IVaultService, IInitializable
     {
         var json = System.Text.Json.JsonSerializer.Serialize(data);
         return System.Text.Json.JsonSerializer.Deserialize<VaultData>(json) ?? new VaultData();
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> AdoptLegacyCredentialAsync(string migrationKey, string plaintext)
+    {
+        if (!CredentialRefs.IsMigrationKey(migrationKey))
+            throw new ArgumentException("Only a credential migration key is adopted.", nameof(migrationKey));
+        ArgumentException.ThrowIfNullOrWhiteSpace(plaintext);
+        EnsureWritable();
+        // Already there from an interrupted run: nothing to write.
+        if (await IsPersistedAsync(migrationKey, plaintext)) return true;
+        await StoreAsync(migrationKey, plaintext, null, null, null);
+        return await IsPersistedAsync(migrationKey, plaintext);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsPersistedAsync(string key, string plainValue)
+    {
+        if (!IsEnabled || !_store.Exists()) return false;
+        var onDisk = await _store.LoadAsync();
+        var entry = onDisk.Entries.FirstOrDefault(e => e.Key == key);
+        if (entry is null || !IsGcm(entry.EncryptedValue)) return false;
+        return Opens(_masterKey!, entry.EncryptedValue, out var plain) && plain == plainValue;
     }
 
     public List<VaultEntry> GetExpiringSecrets()

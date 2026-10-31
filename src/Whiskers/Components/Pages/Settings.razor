@@ -910,60 +910,117 @@ else
         _dnsDefaultTtl = dns.DefaultTtl <= 0 ? 300 : dns.DefaultTtl;
         _dnsAllowedZones = string.Join(", ", dns.AllowedZones ?? new());
         _dnsHasToken = dns.IsConfigured;
-        _dnsTokenTail = _dnsHasToken && dns.ApiToken.Length >= 4 ? dns.ApiToken[^4..] : "";
+        var token = CurrentDnsToken(dns);
+        _dnsTokenTail = token is { Length: >= 4 } ? token[^4..] : "";
         _dnsApiToken = "";
     }
 
+    // The stored token for the status line: from the vault (R1-29), else a plaintext one not migrated yet.
+    private string? CurrentDnsToken(DnsSettings dns)
+    {
+        if (string.IsNullOrWhiteSpace(dns.ApiTokenRef)) return dns.ApiToken;
+        return VaultService.IsEnabled ? VaultService.GetSecret(dns.ApiTokenRef) : null;
+    }
+
+    // R1-29: the DNS token lives in the vault only. A save writes a new token under a NEW vault key and then names that
+    // key in app-settings.json (never the token); a plaintext token still in the file moves into the vault with the save.
+    // Without a usable vault a save that would have to store a token is refused.
     private async Task SaveDns()
     {
         var current = DnsOptions.CurrentValue;
-        // Empty input keeps the stored token; the field is write-only by design (see DnsTokenStatus).
-        var token = string.IsNullOrWhiteSpace(_dnsApiToken) ? current.ApiToken : _dnsApiToken.Trim();
+        var stored = await AppSettings.ReadSectionAsync(DnsSettings.SectionName);
+        var storedRef = stored?["ApiTokenRef"]?.GetValue<string>();
+        var filePlaintext = string.IsNullOrWhiteSpace(storedRef) ? stored?["ApiToken"]?.GetValue<string>() : null;
+        var token = !string.IsNullOrWhiteSpace(_dnsApiToken) ? _dnsApiToken.Trim()
+                  : !string.IsNullOrWhiteSpace(filePlaintext) ? filePlaintext
+                  : null;
         var zones = (_dnsAllowedZones ?? "")
             .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(z => z.TrimEnd('.').ToLowerInvariant())
             .Distinct()
             .ToList();
 
+        if (token is not null && !VaultService.IsEnabled)
+        {
+            Snackbar.Add(VaultService.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
+                ? L["Vault_Error_KeyWrong"].Value
+                : L["Settings_Dns_Error_NeedsVault"].Value, Severity.Error);
+            return;
+        }
+
+        string? newRef = null;
         try
         {
-            await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
+            if (token is not null)
             {
-                await AppSettings.SaveSectionAsync(DnsSettings.SectionName, new DnsSettings
-                {
-                    Provider = string.IsNullOrWhiteSpace(_dnsProvider) ? "infomaniak" : _dnsProvider,
-                    ApiToken = token,
-                    AllowedZones = zones,
-                    DefaultTtl = Math.Clamp(_dnsDefaultTtl, 60, 86400),
-                });
-            });
-            _dnsApiToken = "";
-            _dnsHasToken = !string.IsNullOrWhiteSpace(token);
-            _dnsTokenTail = _dnsHasToken && token.Length >= 4 ? token[^4..] : "";
-            Snackbar.Add(L["Settings_Dns_Snackbar_Saved"].Value, Severity.Success);
+                // A vault write of its own (R1-11): decided and audited by name, the token never in the arguments.
+                newRef = Whiskers.Services.Vault.CredentialRefs.NewDnsToken();
+                var key = newRef;
+                await Mutations.RunAsync("vault.secret_set", new { section = "vault", key }, _ => VaultService.SetSecretAsync(key, token));
+            }
+            var section = new System.Text.Json.Nodes.JsonObject
+            {
+                ["Provider"] = string.IsNullOrWhiteSpace(_dnsProvider) ? "infomaniak" : _dnsProvider,
+                ["ApiTokenRef"] = newRef ?? storedRef,
+                ["AllowedZones"] = new System.Text.Json.Nodes.JsonArray(zones.Select(z => (System.Text.Json.Nodes.JsonNode?)z).ToArray()),
+                ["DefaultTtl"] = Math.Clamp(_dnsDefaultTtl, 60, 86400),
+            };
+            await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
+                await AppSettings.SaveSectionAsync(DnsSettings.SectionName, section));
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException)
+        {
+            // The settings were not written: a new token never took effect.
+            if (newRef is not null) await RemoveUnusedDnsTokenAsync(newRef);
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
+        // The settings name the new token now; the old one is unused.
+        if (newRef is not null && !string.IsNullOrWhiteSpace(storedRef)) await RemoveUnusedDnsTokenAsync(storedRef);
+
+        _dnsApiToken = "";
+        _dnsHasToken = token is not null || !string.IsNullOrWhiteSpace(storedRef) || !string.IsNullOrWhiteSpace(current.ApiToken);
+        var shown = token ?? CurrentDnsToken(current);
+        _dnsTokenTail = shown is { Length: >= 4 } ? shown[^4..] : "";
+        Snackbar.Add(L["Settings_Dns_Snackbar_Saved"].Value, Severity.Success);
     }
 
     private async Task ClearDnsToken()
     {
         var current = DnsOptions.CurrentValue;
+        var stored = await AppSettings.ReadSectionAsync(DnsSettings.SectionName);
+        var storedRef = stored?["ApiTokenRef"]?.GetValue<string>();
         try
         {
+            // An empty ApiToken also hides a token set by the environment, as before.
             await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
             {
                 await AppSettings.SaveSectionAsync(DnsSettings.SectionName, new DnsSettings
                 {
                     Provider = current.Provider,
                     ApiToken = "",
+                    ApiTokenRef = null,
                     AllowedZones = current.AllowedZones,
                     DefaultTtl = current.DefaultTtl,
                 });
             });
-            _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
-            Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        if (!string.IsNullOrWhiteSpace(storedRef)) await RemoveUnusedDnsTokenAsync(storedRef);
+        _dnsApiToken = ""; _dnsHasToken = false; _dnsTokenTail = "";
+        Snackbar.Add(L["Settings_Dns_Snackbar_TokenCleared"].Value, Severity.Info);
+    }
+
+    /// <summary>Removes a DNS token from the vault — tidying up, so a failure only leaves an unused secret.</summary>
+    private async Task RemoveUnusedDnsTokenAsync(string vaultKey)
+    {
+        if (!VaultService.IsEnabled) return;
+        try
+        {
+            await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
+                _ => VaultService.DeleteSecretAsync(vaultKey));
+        }
+        catch { /* an unused secret at worst; the settings no longer name it */ }
     }
 
     private async Task SaveAiChat()

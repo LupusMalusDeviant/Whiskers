@@ -25,8 +25,12 @@ public sealed class DnsRecordService : IDnsRecordService
     private readonly IOptionsMonitor<DnsSettings> _settings;
     private readonly ILogger<DnsRecordService> _logger;
 
-    public DnsRecordService(IEnumerable<IDnsProviderClient> clients, IOptionsMonitor<DnsSettings> settings, ILogger<DnsRecordService> logger)
+    private readonly Whiskers.Services.Vault.IVaultService? _vault;
+
+    public DnsRecordService(IEnumerable<IDnsProviderClient> clients, IOptionsMonitor<DnsSettings> settings, ILogger<DnsRecordService> logger,
+        Whiskers.Services.Vault.IVaultService? vault = null)
     {
+        _vault = vault;
         _clients = clients ?? throw new ArgumentNullException(nameof(clients));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -141,7 +145,20 @@ public sealed class DnsRecordService : IDnsRecordService
         if (allowed.Count > 0 && !allowed.Contains(z, StringComparer.OrdinalIgnoreCase))
             throw new ArgumentException($"Zone '{z}' ist nicht freigegeben. Erlaubte Zonen: {string.Join(", ", allowed)}.");
 
-        return (client, settings.ApiToken, z);
+        return (client, TokenOf(settings), z);
+    }
+
+    /// <summary>The provider token: from the vault (R1-29), else a plaintext one not migrated yet or set by the
+    /// environment. A token in the vault needs a usable vault — a locked or disabled vault is an error.</summary>
+    private string TokenOf(DnsSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.ApiTokenRef)) return settings.ApiToken;
+        if (_vault is not { IsEnabled: true })
+            throw new InvalidOperationException(_vault?.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
+                ? "Der DNS-Token liegt im Vault, und der Vault ist gesperrt (VAULT_KEY passt nicht)."
+                : "Der DNS-Token liegt im Vault, und der Vault ist deaktiviert (VAULT_KEY fehlt).");
+        return _vault.GetSecret(settings.ApiTokenRef)
+               ?? throw new InvalidOperationException("Der DNS-Token fehlt im Vault. Token unter Einstellungen → DNS neu hinterlegen.");
     }
 
     public static string NormalizeZone(string? zone)

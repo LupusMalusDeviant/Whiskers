@@ -345,6 +345,9 @@ public static class WhiskersHostingExtensions
         builder.Services.AddInitializable<Whiskers.Services.Notifications.IContainerNotificationPrefsService>(); // 30
         builder.Services.AddInitializable<Whiskers.Services.Vault.IVaultService>();                 // 40
         builder.Services.AddInitializable<Whiskers.Services.ServerConfig.IServerConfigService>();   // 50
+        // R1-29: plaintext cloud API keys and the DNS token move into the vault (after the vault and the servers).
+        builder.Services.AddSingleton<Whiskers.Services.Vault.CredentialVaultMigration>();
+        builder.Services.AddInitializable<Whiskers.Services.Vault.CredentialVaultMigration>();      // 55
         builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>();           // 70
         // GuardrailStore (80) + AiTriggerStore (90) warm-ups moved to Modules/Agent (RoadToSAP §3.8): the module
         // registers its own AddInitializable when enabled, so they run in Order then and drop out when the agent is off.

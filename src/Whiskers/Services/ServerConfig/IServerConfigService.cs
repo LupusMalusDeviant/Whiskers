@@ -34,6 +34,30 @@ public interface IServerConfigService
         return current;
     }
 
+    /// <summary>
+    /// As <see cref="UpdateServerAsync(Models.ServerConfig, string?)"/>, and decides the cloud API key in the same step
+    /// (R1-29, <see cref="CloudKeyChange"/>). The default is for test doubles; the store does it under its write lock.
+    /// </summary>
+    async Task<Models.ServerConfig?> UpdateServerAsync(Models.ServerConfig server, string? newKubeconfigRef, CloudKeyChange cloudKey)
+    {
+        cloudKey.ApplyTo(server, GetServer(server.Id));
+        return await UpdateServerAsync(server, newKubeconfigRef);
+    }
+
+    /// <summary>
+    /// Start-up migration (R1-29): replaces the legacy plaintext cloud API key of <paramref name="serverId"/> by the vault
+    /// reference <paramref name="vaultRef"/> — only while the server still carries exactly <paramref name="plaintext"/>
+    /// and no reference. Returns whether it was replaced. The default is for test doubles.
+    /// </summary>
+    async Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef)
+    {
+        var current = GetServer(serverId);
+        if (current is null || current.CloudKeyRef is not null || current.CloudApiKey != plaintext) return false;
+        var copy = current.Clone();
+        await UpdateServerAsync(copy, newKubeconfigRef: null, CloudKeyChange.Set(vaultRef));
+        return true;
+    }
+
     /// <summary>Removes a server and returns the record that was removed, as stored at that moment (R1-11): its
     /// kubeconfig reference is the one to clean up, not that of an older copy. The default is for test doubles.</summary>
     async Task<Models.ServerConfig?> TakeServerAsync(string serverId)

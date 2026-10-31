@@ -134,6 +134,9 @@ public class ServerConfigService : IServerConfigService, IInitializable
     public async Task AddServerAsync(Models.ServerConfig server)
     {
         ArgumentNullException.ThrowIfNull(server);
+        // R1-29: a cloud API key goes to the vault; the record names it (CloudKeyRef). Never a new plaintext key.
+        if (!string.IsNullOrWhiteSpace(server.CloudApiKey))
+            throw new InvalidOperationException("A cloud API key is stored in the vault, never in servers.json.");
         await _lock.WaitAsync();
         try
         {
@@ -161,16 +164,23 @@ public class ServerConfigService : IServerConfigService, IInitializable
     public Task UpdateServerAsync(Models.ServerConfig server) => UpdateServerAsync(server, newKubeconfigRef: null);
 
     /// <inheritdoc />
-    public async Task<Models.ServerConfig?> UpdateServerAsync(Models.ServerConfig server, string? newKubeconfigRef)
+    public Task<Models.ServerConfig?> UpdateServerAsync(Models.ServerConfig server, string? newKubeconfigRef)
+        => UpdateServerAsync(server, newKubeconfigRef, CloudKeyChange.Keep);
+
+    /// <inheritdoc />
+    public async Task<Models.ServerConfig?> UpdateServerAsync(Models.ServerConfig server, string? newKubeconfigRef, CloudKeyChange cloudKey)
     {
+        ArgumentNullException.ThrowIfNull(cloudKey);
         await _lock.WaitAsync();
         try
         {
             var index = _cached.Servers.FindIndex(s => s.Id == server.Id);
             if (index < 0) return null;
             var current = _cached.Servers[index];
-            // Decided under the lock: a save that queued behind a kubeconfig rotation keeps the rotated reference.
+            // Decided under the lock: a save that queued behind a kubeconfig rotation keeps the rotated reference,
+            // and the cloud API key is the stored one unless this save brings or clears one (R1-29).
             server.KubeconfigRef = newKubeconfigRef ?? current.KubeconfigRef;
+            cloudKey.ApplyTo(server, current);
             var servers = new List<Models.ServerConfig>(_cached.Servers);
             servers[index] = server;
             var newData = new ServerConfigData { Servers = servers };
@@ -181,6 +191,34 @@ public class ServerConfigService : IServerConfigService, IInitializable
             _cached = newData;
             Whiskers.Services.Mutations.ConfigChange.Record($"server:{server.Id}", persisted ?? current, server);   // R1-22
             return current;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef)
+    {
+        // Checked again under the write lock inside the update: the server must still carry exactly this plaintext.
+        var current = GetServer(serverId);
+        if (current is null || current.CloudKeyRef is not null || current.CloudApiKey != plaintext) return false;
+        await _lock.WaitAsync();
+        try
+        {
+            var index = _cached.Servers.FindIndex(s => s.Id == current.Id);
+            if (index < 0) return false;
+            var stored = _cached.Servers[index];
+            if (stored.CloudKeyRef is not null || stored.CloudApiKey != plaintext) return false;
+            var server = stored.Clone();
+            CloudKeyChange.Set(vaultRef).ApplyTo(server, stored);
+            var servers = new List<Models.ServerConfig>(_cached.Servers);
+            servers[index] = server;
+            var newData = new ServerConfigData { Servers = servers };
+            await _store.SaveAsync(newData);
+            _cached = newData;
+            return true;
         }
         finally
         {

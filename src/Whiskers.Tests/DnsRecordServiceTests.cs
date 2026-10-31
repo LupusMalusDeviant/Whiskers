@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
@@ -18,8 +19,11 @@ public class DnsRecordServiceTests
 
         public string ProviderId => "infomaniak";
 
+        public string? LastToken { get; private set; }
+
         public Task<List<DnsRecord>> ListRecordsAsync(string token, string zone, CancellationToken ct = default)
         {
+            LastToken = token;
             Calls.Add($"list {zone}");
             return Task.FromResult(Records.ToList());
         }
@@ -192,6 +196,42 @@ public class DnsRecordServiceTests
         Assert.False(svc.IsConfigured);
         await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ListAsync("lupusmalus.dev"));
         Assert.Empty(provider.Calls);
+    }
+
+    [Fact]
+    public async Task A_token_kept_in_the_vault_is_read_from_it_and_a_locked_vault_is_an_error()
+    {
+        // R1-29: app-settings.json names the vault key; the token itself is only in the vault.
+        var dir = Path.Combine(Path.GetTempPath(), "sw-tests", "dns-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var path = Path.Combine(dir, "vault.json");
+            var token = "DNSTOKEN-" + Guid.NewGuid().ToString("N");
+            var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["VAULT_KEY"] = "dns-test-passphrase" }).Build();
+            var vault = new Whiskers.Services.Vault.VaultService(config, NullLogger<Whiskers.Services.Vault.VaultService>.Instance, path);
+            await vault.InitializeAsync();
+            await vault.SetSecretAsync("dns:apitoken:1", token);
+
+            var provider = new FakeProvider();
+            var settings = new DnsSettings { Provider = "infomaniak", ApiTokenRef = "dns:apitoken:1" };
+            var svc = new DnsRecordService(new[] { provider }, new Monitor(settings), NullLogger<DnsRecordService>.Instance, vault);
+            Assert.True(svc.IsConfigured);
+            await svc.ListAsync("lupusmalus.dev");
+            Assert.Equal(token, provider.LastToken);
+
+            var disabled = new Whiskers.Services.Vault.VaultService(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+                NullLogger<Whiskers.Services.Vault.VaultService>.Instance, path);
+            await disabled.InitializeAsync();
+            var locked = new DnsRecordService(new[] { new FakeProvider() }, new Monitor(settings), NullLogger<DnsRecordService>.Instance, disabled);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => locked.ListAsync("lupusmalus.dev"));
+            Assert.Contains("Vault", ex.Message);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
     }
 
     [Fact]

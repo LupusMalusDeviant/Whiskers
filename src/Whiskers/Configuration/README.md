@@ -27,6 +27,7 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | `WhiskersPublicUrl.cs` | The configured address people open Whiskers at (`Whiskers:PublicUrl`, env `WHISKERS_PUBLIC_URL` in compose; R1-15). The only source of absolute links in outbound notifications (approval links) — never a request's host; an invalid value (not absolute http(s), credentials, query or fragment) is ignored. |
 | `GuardrailPolicy.cs` | A single guardrail policy (restrictive-by-default), incl. the per-policy tool mode (deny/allow) and `RequireSecondApprover` (R1-15, PC-D4: nobody decides their own request, not even in the chat; optional in `guardrails.json`, off by default and left out of the stored policy while off). |
 | `GuardrailConfig.cs` | The multi-preset wrapper: several named `GuardrailPreset`s + the active one (persisted in admin-only `guardrails.json`). `ActivePolicy()` never falls back to another preset: an active preset that does not exist yields `GuardrailPolicy.FailClosed()` (R1-12). |
+| `DnsSettings.cs` | Section `Dns`: provider, allowed zones, default TTL and the provider token — since R1-29 kept in the vault and named by `ApiTokenRef`; a plaintext `ApiToken` is only a legacy value (moved at start) or one set by the environment, and the settings store refuses to write one. |
 | `MetricAlertSettings.cs` | Thresholds for `high_cpu` / `high_memory` / `metric_anomaly` events (drive AI triggers). |
 
 ## Related

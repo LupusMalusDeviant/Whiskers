@@ -98,7 +98,9 @@ built in).
   that capability; they do not reduce what it is.
 - **The Whiskers instance is the crown jewel.** Its data directory holds the mTLS client key, the vault,
   the MCP key hashes (`mcp-permissions.json`), provider tokens and the database. Vault-stored secrets are
-  encrypted at rest (AES-256-GCM, key derived from `VAULT_KEY` or `VAULT_KEY_FILE`); other files in the data directory rely on
+  encrypted at rest (AES-256-GCM, key derived from `VAULT_KEY` or `VAULT_KEY_FILE`): cloud API keys, the DNS token,
+  kubeconfigs, registry and Git credentials. Notification, chat and AI provider credentials and webhook secrets are
+  still stored in plaintext in the settings files; those and the other files in the data directory rely on
   file-system and volume protection. Whoever can read that directory, or run code in the Whiskers
   container, can act as Whiskers.
 - **The default `docker-compose.yml` profile is privileged** (host PID namespace) so it can manage its own
@@ -116,8 +118,8 @@ built in).
 - Keep the email whitelist tight; review roles under *Settings > Authentication*.
 - Issue MCP API keys with the **least** permission level needed.
 - Keep the agent's guardrail presets restrictive; only widen autonomy deliberately.
-- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (it holds plaintext provider keys by
-  design choice and the data-protection keys).
+- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (it still holds plaintext notification/AI
+  credentials and webhook secrets, and the data-protection keys).
 - Keep dependencies current, Dependabot config ships in `.github/dependabot.yml`.
 - **Run the least-privileged container profile that fits.** The default `docker-compose.yml` is
   privileged because it can manage its own host (nsenter host-shell). If Whiskers only monitors

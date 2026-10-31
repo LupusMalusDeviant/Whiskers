@@ -499,7 +499,7 @@
         _sshKeyFileName = server.SshKeyFileName;
         _sshKeyData = null;
         _cloudApiKey = "";                                  // never prefill the secret
-        _hasCloudKey = !string.IsNullOrWhiteSpace(server.CloudApiKey);
+        _hasCloudKey = Whiskers.Services.Cloud.CloudCredentials.HasCloudKey(server);
         _kubeconfigYaml = "";                               // never prefill the secret (vault-only)
         _kubeNamespacesCsv = string.Join(", ", server.KubeNamespaces);
         _tagsCsv = string.Join(", ", server.Tags);
@@ -521,26 +521,41 @@
     }
 
     // Set by PersistServerRecordAsync for the one save in flight (saves are serialized by _saving).
-    private string? _newKubeconfigKey, _oldKubeconfigKey;
+    private string? _newKubeconfigKey, _oldKubeconfigKey, _newCloudKey, _oldCloudKey;
 
     private async Task<Whiskers.Models.ServerConfig> PersistServerCoreAsync()
     {
-        _newKubeconfigKey = _oldKubeconfigKey = null;
+        _newKubeconfigKey = _oldKubeconfigKey = _newCloudKey = _oldCloudKey = null;
         Whiskers.Models.ServerConfig saved;
         try
         {
             saved = await PersistServerRecordAsync();
         }
-        catch when (_newKubeconfigKey is not null)
+        catch when (_newKubeconfigKey is not null || _newCloudKey is not null)
         {
-            // The server record was not written: the new kubeconfig never took effect.
-            await RemoveUnusedKubeconfigAsync(_newKubeconfigKey);
+            // The server record was not written: the new kubeconfig / cloud key never took effect.
+            if (_newKubeconfigKey is not null) await RemoveUnusedKubeconfigAsync(_newKubeconfigKey);
+            if (_newCloudKey is not null) await RemoveUnusedCloudKeyAsync(_newCloudKey);
             throw;
         }
-        // The record names the new kubeconfig now; the old one is unused, removing it is tidying up.
+        // The record names the new kubeconfig / cloud key now; the old ones are unused, removing them is tidying up.
         if (_oldKubeconfigKey is not null)
             await RemoveUnusedKubeconfigAsync(_oldKubeconfigKey);
+        if (_oldCloudKey is not null)
+            await RemoveUnusedCloudKeyAsync(_oldCloudKey);
         return saved;
+    }
+
+    /// <summary>Removes a cloud API key from the vault (R1-29) — only when no stored server names it any more.</summary>
+    private async Task RemoveUnusedCloudKeyAsync(string vaultKey)
+    {
+        if (!Vault.IsEnabled || ServerConfigService.GetServers().Any(s => s.CloudKeyRef == vaultKey)) return;
+        try
+        {
+            await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
+                _ => Vault.DeleteSecretAsync(vaultKey));
+        }
+        catch { /* an unused secret at worst; no server names it */ }
     }
 
     /// <summary>Removes a kubeconfig key from the vault — only when no stored server names it any more.</summary>
@@ -587,13 +602,27 @@
             }
         }
 
-        // Resolve the cloud API key: blank field = keep the existing one; clearing the provider clears the key.
+        // The cloud API key (R1-29): a new one goes to the VAULT under a new key that no server names yet, so it takes
+        // effect only with the record below. Blank field = keep the stored one; clearing the provider clears it. The
+        // store decides keep/clear under its lock; the record never carries a plaintext key.
+        var cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Keep;
         if (_form.CloudProvider == Whiskers.Models.CloudProvider.None)
-            _form.CloudApiKey = null;
+            cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Clear;
         else if (!string.IsNullOrWhiteSpace(_cloudApiKey))
-            _form.CloudApiKey = _cloudApiKey.Trim();
-        else
-            _form.CloudApiKey = _editingServer?.CloudApiKey;   // keep existing (null for new server)
+        {
+            if (!Vault.IsEnabled)
+                throw new InvalidOperationException(Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
+                    ? L["Vault_Error_KeyWrong"].Value
+                    : L["Servers_Error_CloudKeyNeedsVault"].Value);
+            var id = _editingServer?.Id ?? _form.Id;
+            var vaultKey = Whiskers.Services.Vault.CredentialRefs.NewCloudKey(id);
+            var apiKey = _cloudApiKey.Trim();
+            await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
+                _ => Vault.SetSecretAsync(vaultKey, apiKey));
+            _newCloudKey = vaultKey;
+            cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Set(vaultKey);
+        }
+        _form.CloudApiKey = null;
 
         // Key vs password are mutually exclusive — drop a stale password if the user picked key auth.
         if (!_useSshPassword) _form.SshPassword = null;
@@ -617,9 +646,11 @@
 
             // The store decides the kubeconfig reference when it writes (R1-11): the new one, or whatever the server
             // has at that moment — a save queued behind another admin's rotation keeps the rotated kubeconfig.
-            var previous = await ServerConfigService.UpdateServerAsync(Record(), _newKubeconfigKey);
+            var previous = await ServerConfigService.UpdateServerAsync(Record(), _newKubeconfigKey, cloudKey);
             if (_newKubeconfigKey is not null && previous is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
                 _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(previous);
+            if ((cloudKey.NewRef is not null || cloudKey.Clears) && previous?.CloudKeyRef is { } oldRef && oldRef != cloudKey.NewRef)
+                _oldCloudKey = oldRef;
             ConnectionManager.InvalidateClient(_form.Id);
             KubeClients.Invalidate(_form.Id); // rebuild on next use if kubeconfig/context changed
         }
@@ -645,6 +676,8 @@
         {
             var record = _form.Clone();
             record.KubeconfigRef = _newKubeconfigKey;
+            record.CloudKeyRef = cloudKey.NewRef;   // a new server; an update is decided by the store
+            record.CloudApiKey = null;
             return record;
         }
     }

@@ -8,7 +8,8 @@ It resolves a Whiskers server's configured provider + per-server API key, finds 
 
 | File | Purpose |
 |---|---|
-| `ICloudControlService.cs` / `CloudControlService.cs` | Provider-agnostic control plane: resolves provider + credentials, matches the server in the account, and dispatches power/snapshot/metrics calls to the provider-specific client. |
+| `ICloudControlService.cs` / `CloudControlService.cs` | Provider-agnostic control plane: resolves provider + credentials, matches the server in the account, and dispatches power/snapshot/metrics calls to the provider-specific client. The API key comes from the vault (R1-29). |
+| `CloudCredentials.cs` | R1-29: where a server's cloud API key lives — in the vault under `ServerConfig.CloudKeyRef`, or (not migrated yet, no usable vault) still as the legacy plaintext field. `KeyOf` reads it; a key kept in a disabled or locked vault is an error, never a silent "no key". |
 
 ## Behaviour notes
 
