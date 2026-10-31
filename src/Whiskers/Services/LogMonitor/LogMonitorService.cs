@@ -321,7 +321,8 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
                         if (hit)
                         {
-                            matchedLine = line.Length > 200 ? line[..200] : line;
+                            // At a complete word (R1-24): a raw cut can leave the beginning of a credential.
+                            matchedLine = Whiskers.Utils.ShellUtils.CutAtBoundary(line, 200);
                             break;
                         }
                     }

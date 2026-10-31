@@ -112,6 +112,16 @@ public class TrivyOutputTruncationTests
     }
 
     [Fact]
+    public async Task A_cap_just_before_a_line_break_keeps_the_complete_line()
+    {
+        var (text, truncated) = await HostCommandExecutor.ReadCappedAsync(
+            new StringReader("first line\nsecond line\nthird"), cap: 22, CancellationToken.None);
+
+        Assert.True(truncated);
+        Assert.StartsWith("first line\nsecond line\n", text);
+    }
+
+    [Fact]
     public void A_cut_just_before_whitespace_keeps_the_complete_token() =>
         Assert.Equal("one two", Whiskers.Utils.ShellUtils.CutAtBoundary("one two three", 7));
 

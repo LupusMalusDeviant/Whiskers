@@ -71,7 +71,8 @@ public class LogSearchService : ILogSearchService
                             ContainerName = container.Name,
                             ServerId = container.ServerId,
                             ServerName = container.ServerName,
-                            Line = line.Length > 500 ? line[..500] + "..." : line,
+                            // At a complete word (R1-24): the line reaches the call history and the transcript.
+                            Line = line.Length > 500 ? Whiskers.Utils.ShellUtils.CutAtBoundary(line, 500) + "..." : line,
                             LineNumber = i + 1
                         });
                     }
