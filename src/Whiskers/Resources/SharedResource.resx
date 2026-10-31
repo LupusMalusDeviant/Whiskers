@@ -1943,6 +1943,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Error_CloudKeyNeedsVault" xml:space="preserve">
     <value>Storing a cloud API key needs the vault: set VAULT_KEY (or VAULT_KEY_FILE) and restart. Without it the key would be kept in plaintext.</value>
   </data>
+  <data name="Settings_Dns_Error_PlaintextNeedsVault" xml:space="preserve">
+    <value>A DNS token is still stored in plaintext. Enable the vault (VAULT_KEY) to move it there, or clear the token, before saving other DNS settings.</value>
+  </data>
   <data name="Settings_Alert_WhitelistEmpty" xml:space="preserve">
     <value>The whitelist is enabled but empty — nobody can sign in!</value>
   </data>

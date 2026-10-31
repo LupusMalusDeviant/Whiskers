@@ -63,7 +63,8 @@ public sealed class AppSettingsStore : IAppSettingsStore
     public async Task<bool> AdoptDnsTokenRefAsync(string plaintext, string vaultRef)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(plaintext);
-        ArgumentException.ThrowIfNullOrWhiteSpace(vaultRef);
+        if (vaultRef != Whiskers.Services.Vault.CredentialRefs.MigratedDnsToken)
+            throw new ArgumentException("Only the DNS token's migration key is adopted.", nameof(vaultRef));
         await _lock.WaitAsync();
         try
         {
@@ -103,10 +104,15 @@ public sealed class AppSettingsStore : IAppSettingsStore
 
     private static void EnsureNoVaultOnlyValue(string section, JsonNode? value)
     {
-        if (value is not JsonObject obj) return;
+        // A flattened key ("Dns:ApiToken") is read by the configuration as the nested path: never write one.
+        if (section.Contains(':', StringComparison.Ordinal))
+            throw new InvalidOperationException($"Section '{section}' is not a section name.");
         foreach (var (s, field) in VaultOnlyFields)
         {
             if (!string.Equals(s, section, StringComparison.OrdinalIgnoreCase)) continue;
+            if (value is null) continue;
+            if (value is not JsonObject obj)
+                throw new InvalidOperationException($"Section '{section}' must be an object.");
             var hit = obj.FirstOrDefault(p => string.Equals(p.Key, field, StringComparison.OrdinalIgnoreCase)).Value;
             if (hit is JsonValue v && v.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
                 throw new InvalidOperationException($"{section}:{field} is a credential kept in the vault; it is never written to app-settings.json.");

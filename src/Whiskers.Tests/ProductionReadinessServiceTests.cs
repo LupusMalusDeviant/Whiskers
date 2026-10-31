@@ -89,13 +89,13 @@ public class ProductionReadinessServiceTests : IDisposable
         Assert.False(credentials.Ok);
         Assert.Contains("1 Cloud-API-Key(s) in servers.json", credentials.Detail);
         Assert.Contains("DNS-Token in app-settings.json", credentials.Detail);
-        Assert.Contains("fehlgeschlagen", credentials.Detail);   // the vault is on: the migration should have run
+        Assert.Contains("noch nicht in den Vault übernommen", credentials.Detail);
         Assert.DoesNotContain(_cloudKey, credentials.Detail);
 
         // The vault line names what is still unencrypted instead of "secrets are stored encrypted".
         var vaultCheck = checks.Single(c => c.Title == VaultTitle);
         Assert.True(vaultCheck.Ok);
-        Assert.Contains("noch unverschlüsselt", vaultCheck.Detail);
+        Assert.Contains("Noch unverschlüsselt gespeichert", vaultCheck.Detail);
         Assert.DoesNotContain("Secrets werden verschlüsselt gespeichert", vaultCheck.Detail);
     }
 

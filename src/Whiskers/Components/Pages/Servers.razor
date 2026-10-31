@@ -546,6 +546,15 @@
         return saved;
     }
 
+    /// <summary>The legacy plaintext key of the server being edited, as stored now — only while a vault can take it;
+    /// without one the save keeps it as it is (the store never writes a new plaintext key).</summary>
+    private string? StoredPlaintextCloudKey()
+        => Vault.IsEnabled && _editingServer is not null
+           && ServerConfigService.GetServer(_editingServer.Id) is { } stored
+           && Whiskers.Services.Cloud.CloudCredentials.HasPlaintextCloudKey(stored)
+            ? stored.CloudApiKey
+            : null;
+
     /// <summary>Removes a cloud API key from the vault (R1-29) — only when no stored server names it any more.</summary>
     private async Task RemoveUnusedCloudKeyAsync(string vaultKey)
     {
@@ -608,7 +617,7 @@
         var cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Keep;
         if (_form.CloudProvider == Whiskers.Models.CloudProvider.None)
             cloudKey = Whiskers.Services.ServerConfig.CloudKeyChange.Clear;
-        else if (!string.IsNullOrWhiteSpace(_cloudApiKey))
+        else if (!string.IsNullOrWhiteSpace(_cloudApiKey) || StoredPlaintextCloudKey() is not null)
         {
             if (!Vault.IsEnabled)
                 throw new InvalidOperationException(Vault.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
@@ -616,7 +625,8 @@
                     : L["Servers_Error_CloudKeyNeedsVault"].Value);
             var id = _editingServer?.Id ?? _form.Id;
             var vaultKey = Whiskers.Services.Vault.CredentialRefs.NewCloudKey(id);
-            var apiKey = _cloudApiKey.Trim();
+            // A key entered now, or a plaintext one from before R1-29 that the save moves into the vault.
+            var apiKey = !string.IsNullOrWhiteSpace(_cloudApiKey) ? _cloudApiKey.Trim() : StoredPlaintextCloudKey()!;
             await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
                 _ => Vault.SetSecretAsync(vaultKey, apiKey));
             _newCloudKey = vaultKey;

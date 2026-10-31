@@ -929,11 +929,10 @@ else
     {
         var current = DnsOptions.CurrentValue;
         var stored = await AppSettings.ReadSectionAsync(DnsSettings.SectionName);
-        var storedRef = stored?["ApiTokenRef"]?.GetValue<string>();
-        var filePlaintext = string.IsNullOrWhiteSpace(storedRef) ? stored?["ApiToken"]?.GetValue<string>() : null;
-        var token = !string.IsNullOrWhiteSpace(_dnsApiToken) ? _dnsApiToken.Trim()
-                  : !string.IsNullOrWhiteSpace(filePlaintext) ? filePlaintext
-                  : null;
+        var storedRef = Whiskers.Services.Dns.DnsSettingsSection.StoredRef(stored);
+        var filePlaintext = Whiskers.Services.Dns.DnsSettingsSection.PlaintextToken(stored);
+        var entered = !string.IsNullOrWhiteSpace(_dnsApiToken) ? _dnsApiToken.Trim() : null;
+        var token = entered ?? filePlaintext;
         var zones = (_dnsAllowedZones ?? "")
             .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(z => z.TrimEnd('.').ToLowerInvariant())
@@ -942,9 +941,10 @@ else
 
         if (token is not null && !VaultService.IsEnabled)
         {
+            // A token entered now, or a plaintext one still in the file: the save would have to store it without a vault.
             Snackbar.Add(VaultService.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
                 ? L["Vault_Error_KeyWrong"].Value
-                : L["Settings_Dns_Error_NeedsVault"].Value, Severity.Error);
+                : entered is null ? L["Settings_Dns_Error_PlaintextNeedsVault"].Value : L["Settings_Dns_Error_NeedsVault"].Value, Severity.Error);
             return;
         }
 
@@ -958,13 +958,7 @@ else
                 var key = newRef;
                 await Mutations.RunAsync("vault.secret_set", new { section = "vault", key }, _ => VaultService.SetSecretAsync(key, token));
             }
-            var section = new System.Text.Json.Nodes.JsonObject
-            {
-                ["Provider"] = string.IsNullOrWhiteSpace(_dnsProvider) ? "infomaniak" : _dnsProvider,
-                ["ApiTokenRef"] = newRef ?? storedRef,
-                ["AllowedZones"] = new System.Text.Json.Nodes.JsonArray(zones.Select(z => (System.Text.Json.Nodes.JsonNode?)z).ToArray()),
-                ["DefaultTtl"] = Math.Clamp(_dnsDefaultTtl, 60, 86400),
-            };
+            var section = Whiskers.Services.Dns.DnsSettingsSection.Next(stored, _dnsProvider, newRef, zones, _dnsDefaultTtl);
             await Mutations.RunAsync("config.save", new { section = "dns" }, async _ =>
                 await AppSettings.SaveSectionAsync(DnsSettings.SectionName, section));
         }
@@ -989,7 +983,7 @@ else
     {
         var current = DnsOptions.CurrentValue;
         var stored = await AppSettings.ReadSectionAsync(DnsSettings.SectionName);
-        var storedRef = stored?["ApiTokenRef"]?.GetValue<string>();
+        var storedRef = Whiskers.Services.Dns.DnsSettingsSection.StoredRef(stored);
         try
         {
             // An empty ApiToken also hides a token set by the environment, as before.

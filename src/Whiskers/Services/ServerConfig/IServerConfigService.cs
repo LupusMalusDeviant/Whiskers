@@ -51,6 +51,8 @@ public interface IServerConfigService
     /// </summary>
     async Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef)
     {
+        if (vaultRef != Whiskers.Services.Vault.CredentialRefs.MigratedCloudKey(serverId))
+            throw new ArgumentException("Only the server's migration key is adopted.", nameof(vaultRef));
         var current = GetServer(serverId);
         if (current is null || current.CloudKeyRef is not null || current.CloudApiKey != plaintext) return false;
         var copy = current.Clone();

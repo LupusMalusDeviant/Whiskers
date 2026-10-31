@@ -290,6 +290,109 @@ public class SecretsAtRestTests : IDisposable
         Assert.DoesNotContain(_cloudKey, ex.Message);
     }
 
+    [Fact]
+    public async Task Adoption_never_replaces_an_existing_vault_entry()
+    {
+        var vault = await Vault();
+        var key = CredentialRefs.MigratedCloudKey("hetz");
+        Assert.True(await vault.AdoptLegacyCredentialAsync(key, _cloudKey));
+        Assert.False(await vault.AdoptLegacyCredentialAsync(key, "another-value-entirely"));
+        Assert.Equal(_cloudKey, (await Vault()).GetSecret(key));
+    }
+
+    [Fact]
+    public async Task Store_adoption_takes_only_the_fixed_migration_key_and_exactly_the_stored_plaintext()
+    {
+        WriteLegacyServers(_cloudKey);
+        WriteLegacyDns(_dnsToken);
+        var servers = await Servers();
+        var settings = AppSettings();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => servers.AdoptCloudKeyRefAsync("hetz", _cloudKey, "kubeconfig:other"));
+        await Assert.ThrowsAsync<ArgumentException>(() => settings.AdoptDnsTokenRefAsync(_dnsToken, "registry:cred"));
+        Assert.False(await servers.AdoptCloudKeyRefAsync("hetz", "not-the-stored-key", CredentialRefs.MigratedCloudKey("hetz")));
+        Assert.False(await settings.AdoptDnsTokenRefAsync("not-the-stored-token", CredentialRefs.MigratedDnsToken));
+
+        Assert.True(await servers.AdoptCloudKeyRefAsync("hetz", _cloudKey, CredentialRefs.MigratedCloudKey("hetz")));
+        Assert.True(await settings.AdoptDnsTokenRefAsync(_dnsToken, CredentialRefs.MigratedDnsToken));
+        // Already adopted: a second call changes nothing.
+        Assert.False(await servers.AdoptCloudKeyRefAsync("hetz", _cloudKey, CredentialRefs.MigratedCloudKey("hetz")));
+        Assert.False(await settings.AdoptDnsTokenRefAsync(_dnsToken, CredentialRefs.MigratedDnsToken));
+        AssertNoPlaintext(_cloudKey, _dnsToken);
+    }
+
+    [Fact]
+    public async Task Settings_store_refuses_a_flattened_or_malformed_dns_section()
+    {
+        var settings = AppSettings();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => settings.SaveSectionsAsync(new Dictionary<string, object>
+        {
+            ["Dns:ApiToken"] = JsonValue.Create(_dnsToken)!,
+        }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => settings.SaveSectionsAsync(new Dictionary<string, object>
+        {
+            ["Dns"] = JsonValue.Create(_dnsToken)!,
+        }));
+        AssertNoPlaintext(_dnsToken);
+    }
+
+    [Fact]
+    public void A_dns_save_keeps_a_hidden_environment_token_hidden_and_never_writes_plaintext()
+    {
+        var hidden = new JsonObject { ["Provider"] = "infomaniak", ["ApiToken"] = "", ["DefaultTtl"] = 300 };
+        var next = Whiskers.Services.Dns.DnsSettingsSection.Next(hidden, "infomaniak", null, ["example.org"], 600);
+        Assert.Equal("", next["ApiToken"]!.GetValue<string>());
+        Assert.Null(next["ApiTokenRef"]);
+
+        var legacy = new JsonObject { ["ApiToken"] = _dnsToken };
+        Assert.Equal(_dnsToken, Whiskers.Services.Dns.DnsSettingsSection.PlaintextToken(legacy));
+        var moved = Whiskers.Services.Dns.DnsSettingsSection.Next(legacy, "infomaniak", "dns:apitoken:new", [], 300);
+        Assert.Null(moved["ApiToken"]);
+        Assert.Equal("dns:apitoken:new", moved["ApiTokenRef"]!.GetValue<string>());
+
+        var named = new JsonObject { ["ApiTokenRef"] = "dns:apitoken:old" };
+        Assert.Equal("dns:apitoken:old", Whiskers.Services.Dns.DnsSettingsSection.Next(named, "infomaniak", null, [], 300)["ApiTokenRef"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Removing_a_server_removes_its_cloud_key_unless_another_server_names_it()
+    {
+        var vault = await Vault();
+        var servers = await Servers();
+        var shared = CredentialRefs.NewCloudKey("a");
+        var own = CredentialRefs.NewCloudKey("c");
+        await vault.SetSecretAsync(shared, _cloudKey);
+        await vault.SetSecretAsync(own, _cloudKey + "-c");
+        await servers.AddServerAsync(new ServerConfig { Id = "a", Name = "a", CloudProvider = CloudProvider.Hetzner, CloudKeyRef = shared, IsDefault = true });
+        await servers.AddServerAsync(new ServerConfig { Id = "b", Name = "b", CloudProvider = CloudProvider.Hetzner, CloudKeyRef = shared });
+        await servers.AddServerAsync(new ServerConfig { Id = "c", Name = "c", CloudProvider = CloudProvider.Hetzner, CloudKeyRef = own });
+
+        Assert.True(await ServerRemoval.RemoveAsync(servers, vault, servers.GetServer("b")!));
+        Assert.Equal(_cloudKey, vault.GetSecret(shared));   // still named by server a
+        Assert.True(await ServerRemoval.RemoveAsync(servers, vault, servers.GetServer("c")!));
+        Assert.Null(vault.GetSecret(own));
+    }
+
+    [Fact]
+    public async Task Cloud_listing_marks_only_the_server_whose_key_the_locked_vault_holds()
+    {
+        var vault = await Vault();
+        var servers = await Servers();
+        var cloudRef = CredentialRefs.NewCloudKey("hetz");
+        await vault.SetSecretAsync(cloudRef, _cloudKey);
+        await servers.AddServerAsync(new ServerConfig { Id = "hetz", Name = "Hetzner box", CloudProvider = CloudProvider.Hetzner, CloudKeyRef = cloudRef });
+
+        var disabled = await Vault(key: null);
+        var cloud = new CloudControlService(servers, [], NullLogger<CloudControlService>.Instance, disabled);
+        var listed = Assert.Single(await cloud.ListAllAsync());
+        Assert.Equal("error", listed.Status);
+        Assert.Equal("hetz", listed.WhiskersId);
+        Assert.Contains("vault", listed.Note);
+        Assert.DoesNotContain(_cloudKey, listed.Note);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => cloud.RebootAsync("hetz"));
+        Assert.DoesNotContain(_cloudKey, ex.Message);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /// <summary>A vault that stores nothing it could read back (the write was lost).</summary>

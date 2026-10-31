@@ -201,6 +201,9 @@ public class ServerConfigService : IServerConfigService, IInitializable
     /// <inheritdoc />
     public async Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef)
     {
+        // Only the fixed migration key of this very server: no caller can point a server at another secret.
+        if (vaultRef != Whiskers.Services.Vault.CredentialRefs.MigratedCloudKey(serverId))
+            throw new ArgumentException("Only the server's migration key is adopted.", nameof(vaultRef));
         // Checked again under the write lock inside the update: the server must still carry exactly this plaintext.
         var current = GetServer(serverId);
         if (current is null || current.CloudKeyRef is not null || current.CloudApiKey != plaintext) return false;

@@ -1943,6 +1943,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Error_CloudKeyNeedsVault" xml:space="preserve">
     <value>Ein Cloud-API-Key braucht den Vault: VAULT_KEY (oder VAULT_KEY_FILE) setzen und neu starten. Ohne Vault läge der Key im Klartext.</value>
   </data>
+  <data name="Settings_Dns_Error_PlaintextNeedsVault" xml:space="preserve">
+    <value>Ein DNS-Token liegt noch im Klartext. Den Vault aktivieren (VAULT_KEY), damit er dorthin wandert, oder den Token löschen, bevor andere DNS-Einstellungen gespeichert werden.</value>
+  </data>
   <data name="Settings_Alert_WhitelistEmpty" xml:space="preserve">
     <value>Whitelist ist aktiviert aber leer — niemand kann sich anmelden!</value>
   </data>

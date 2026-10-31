@@ -60,9 +60,10 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             _vault.KeyState switch
             {
                 // INV-56: says which credentials the vault holds — and which it does not hold yet.
-                VaultKeyState.Verified => "Der Vault ist aktiv; Backups sind verschlüsselbar. Im Vault liegen Cloud-API-Keys, der DNS-Token, "
-                                          + "kubeconfigs sowie Registry- und Git-Zugangsdaten. Benachrichtigungs- und KI-Zugangsdaten und "
-                                          + "Webhook-Secrets liegen noch unverschlüsselt in den Einstellungsdateien.",
+                VaultKeyState.Verified => "Der Vault ist aktiv; Backups sind verschlüsselbar. In den Vault gehören Cloud-API-Keys, der "
+                                          + "DNS-Token (wo sie stehen, sagt der nächste Punkt), kubeconfigs sowie Registry- und Git-Zugangsdaten. "
+                                          + "Noch unverschlüsselt gespeichert: Benachrichtigungs-, Chat- und KI-Zugangsdaten und Webhook-Secrets "
+                                          + "(Einstellungsdateien) sowie SSH-Schlüssel und der mTLS-Client-Schlüssel im Datenverzeichnis.",
                 VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
             },
@@ -80,7 +81,7 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 : $"Im Klartext gespeichert: {plaintextCloud} Cloud-API-Key(s) in servers.json"
                   + (plaintextDns ? " und der DNS-Token in app-settings.json" : "") + ". "
                   + (_vault.IsEnabled
-                      ? "Die Übernahme in den Vault ist beim Start fehlgeschlagen — das Log nennt den Grund; nach dem Beheben neu starten."
+                      ? "Sie sind noch nicht in den Vault übernommen (die Übernahme läuft beim Start; scheitert sie, nennt das Log den Grund) — neu starten."
                       : "Sie werden beim ersten Start mit gültigem VAULT_KEY in den Vault übernommen."),
             null, null));
 

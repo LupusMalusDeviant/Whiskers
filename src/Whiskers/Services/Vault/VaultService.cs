@@ -345,8 +345,14 @@ public class VaultService : IVaultService, IInitializable
             throw new ArgumentException("Only a credential migration key is adopted.", nameof(migrationKey));
         ArgumentException.ThrowIfNullOrWhiteSpace(plaintext);
         EnsureWritable();
-        // Already there from an interrupted run: nothing to write.
-        if (await IsPersistedAsync(migrationKey, plaintext)) return true;
+        // An entry under this key is never replaced: it is either this very credential from an interrupted run (done)
+        // or a different value — then the plaintext stays where it is and is reported, never a live key overwritten.
+        if (_data.Entries.Any(e => e.Key == migrationKey) || (await _store.LoadAsync()).Entries.Any(e => e.Key == migrationKey))
+        {
+            if (await IsPersistedAsync(migrationKey, plaintext)) return true;
+            _logger.LogError("Vault migration: {Key} already holds a different value; it is not replaced", migrationKey);
+            return false;
+        }
         await StoreAsync(migrationKey, plaintext, null, null, null);
         return await IsPersistedAsync(migrationKey, plaintext);
     }
