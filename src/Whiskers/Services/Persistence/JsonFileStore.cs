@@ -158,9 +158,16 @@ public class JsonFileStore<T> where T : class, new()
     }
 
     // A copy under a name of its own, never overwriting an earlier one; the original stays where it is until a readable
-    // generation replaces it.
+    // generation replaces it. A start that stops on the same unreadable file again (a restart loop) adds no new copy.
     private string PreserveUnreadable()
     {
+        var current = File.ReadAllBytes(_filePath);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(_filePath))!;
+        var same = Directory.EnumerateFiles(dir, Path.GetFileName(_filePath) + ".corrupt-*")
+            .Order(StringComparer.Ordinal)
+            .LastOrDefault(f => new FileInfo(f).Length == current.Length && File.ReadAllBytes(f).AsSpan().SequenceEqual(current));
+        if (same is not null) return same;
+
         var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
         for (var n = 0; ; n++)
         {

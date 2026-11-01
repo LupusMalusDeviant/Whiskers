@@ -31,8 +31,11 @@ public static class JsonStoreRecovery
 /// <summary>A JSON store whose file and previous generation are both unreadable: the start stops instead of carrying
 /// on with an empty (for roles, whitelist or permissions: more permissive) store. The file is left as it is.</summary>
 public sealed class JsonStoreCorruptException(string path, string preservedAs, Exception inner)
-    : Exception($"{path} cannot be read and has no readable previous generation ({inner.Message}). The file is unchanged " +
-        $"(a copy is at {preservedAs}); repair or remove it, or restore a backup.", inner)
+    : Exception(preservedAs == JsonStoreRecovery.Missing
+        ? $"{path} is missing and its previous generation {path}.bak cannot be read ({inner.Message}); repair or remove " +
+          "the .bak, or restore a backup."
+        : $"{path} cannot be read and has no readable previous generation ({inner.Message}). The file is unchanged " +
+          $"(a copy is at {preservedAs}); repair it, remove it together with {path}.bak, or restore a backup.", inner)
 {
     public string Path { get; } = path;
 }

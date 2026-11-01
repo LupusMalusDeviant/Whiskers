@@ -34,9 +34,8 @@ public sealed class AuditOutbox
         {
             Directory.CreateDirectory(_dir);
             var path = Path.Combine(_dir, row.EventId + ".json");
-            var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(row));
-            File.Move(temp, path, overwrite: true);
+            // Flushed (R1-35): a row torn by a power loss would stay unreadable and keep the audit health degraded.
+            Whiskers.Services.Persistence.DurableFile.WriteAllText(path, JsonSerializer.Serialize(row));
             return true;
         }
         catch (Exception)

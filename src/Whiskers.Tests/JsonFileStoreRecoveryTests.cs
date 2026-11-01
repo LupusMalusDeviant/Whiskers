@@ -144,10 +144,14 @@ public class JsonFileStoreRecoveryTests : IDisposable
     }
 
     [Fact]
-    public async Task A_second_failure_keeps_every_earlier_copy()
+    public async Task A_second_failure_keeps_every_earlier_copy_but_a_restart_loop_adds_none()
     {
         await File.WriteAllTextAsync(StorePath, "{first");
         await Assert.ThrowsAsync<JsonStoreCorruptException>(() => new JsonFileStore<Doc>(StorePath).LoadAsync());
+        await Assert.ThrowsAsync<JsonStoreCorruptException>(() => new JsonFileStore<Doc>(StorePath).LoadAsync());
+        Assert.Single(Directory.EnumerateFiles(_dir, "roles.json.corrupt-*"));   // the same file again: no new copy
+
+        await File.WriteAllTextAsync(StorePath, "{second");
         await Assert.ThrowsAsync<JsonStoreCorruptException>(() => new JsonFileStore<Doc>(StorePath).LoadAsync());
 
         Assert.Equal(2, Directory.EnumerateFiles(_dir, "roles.json.corrupt-*").Count());

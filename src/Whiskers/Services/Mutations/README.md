@@ -42,7 +42,7 @@ key and system prompt), `mcp.key_create`, `mcp.key_delete`,
 `guardrails.save`, `guardrails.kill_switch_off`, `vault.secret_set`, `vault.secret_delete`, `registry.save`,
 `registry.delete`. `GuardrailMutationPolicy` makes one narrow exception, for a person in the UI only and after
 authorization: `guardrails.kill_switch_off` is evaluated with `ReadOnlyMode` off (every other rule applies). A
-fail-closed store (`LoadError`) has none: it is repaired on the host (fix or remove `guardrails.json`, restart). `UiMutationGatewayCoverageTests` lists every configuration write.
+fail-closed store (`LoadError`) has none: it is repaired on the host (fix `guardrails.json`, or remove it together with `guardrails.json.bak`, restart). `UiMutationGatewayCoverageTests` lists every configuration write.
 
 ### Unattended automation (PC-D6)
 
