@@ -51,6 +51,9 @@ public sealed class BackupService : IBackupService
         _vaultKey = SecretSource.VaultKey(configuration);
     }
 
+    private const string CommittedRestorePending =
+        "A restore is already committed and is applied at the next start. Restart Whiskers first, or remove .restore-pending from the data directory to give it up.";
+
     /// <summary>Bounds on what one archive may unpack to (R1-32).</summary>
     public BackupExtractionLimits ExtractionLimits { get; init; } = BackupExtractionLimits.Default;
 
@@ -287,6 +290,9 @@ public sealed class BackupService : IBackupService
     public async Task<BackupValidationResult> ValidateArchiveAsync(string uploadedPath, CancellationToken ct = default)
     {
         string? decryptTemp = null;
+        // Told before the confirm dialog, not after it (the restore itself refuses too).
+        if (File.Exists(_dataPaths.RestorePendingMarker))
+            return BackupValidationResult.Fail(CommittedRestorePending);
         try
         {
             var prepared = await PrepareValidatedAsync(uploadedPath, ct);
@@ -316,7 +322,7 @@ public sealed class BackupService : IBackupService
         {
             // A committed restore waits for the restart; a second one would delete its staging and strand its marker.
             if (File.Exists(_dataPaths.RestorePendingMarker))
-                throw new BackupValidationException("A restore is already committed and applied at the next start.");
+                throw new BackupValidationException(CommittedRestorePending);
             var prepared = await PrepareValidatedAsync(uploadedPath, ct);   // throws on any incompatibility
             var staging = _dataPaths.RestoreStagingDir;
 

@@ -375,6 +375,13 @@ public class BackupArchiverTests
                 for (var i = 0; i <= BackupExtractionLimits.MaxKeyFiles; i++) Entry(w, $"keys/key-{i}.xml");
             });
             await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+
+            // Few files, but more bytes than a ring holds.
+            var perFile = (int)BackupExtractionLimits.MaxKeyEntryBytes;
+            var files = (int)(BackupExtractionLimits.MaxKeyRingBytes / perFile) + 1;
+            using var big = await BuildTarGz(w => { for (var i = 0; i < files; i++) Entry(w, $"keys/key-{i}.xml", size: perFile); });
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(big, dest));
+            Assert.Contains("key ring", ex.Message);
         }
         finally { Cleanup(dest); }
     }

@@ -322,6 +322,7 @@ public class BackupServiceTests
             await File.WriteAllTextAsync(Path.Combine(paths.RestoreStagingDir, "roles.json"), "{}");
             var archive = await CraftManifestArchive(root, new SelfBackupManifest { Provider = "sqlite" });
 
+            Assert.False((await svc.ValidateArchiveAsync(archive)).Ok);   // said before the confirm dialog
             await Assert.ThrowsAsync<BackupValidationException>(() => svc.BeginRestoreAsync(archive, "tester"));
             Assert.True(File.Exists(Path.Combine(paths.RestoreStagingDir, "roles.json")));   // the committed one is intact
         }

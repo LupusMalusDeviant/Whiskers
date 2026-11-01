@@ -17,7 +17,8 @@ All notable changes to Whiskers are documented here. The format follows
   longer part of a self-backup. The restore
   makes each store equal to the archive — a store the archive does not hold is removed (the safety copy keeps it);
   the database and the VPN daemon state are only ever replaced, the audit outbox is merged. Key directories and the vault file are readable by
-  the app's user only afterwards, and encrypted archives appear under their name only when complete. **Breaking:**
+  the app's user only afterwards, and encrypted archives appear under their name only when complete. A second restore
+  is refused while one is committed and waiting for the restart. **Breaking:**
   with `VAULT_KEY` set an unencrypted archive is no longer restored (it cannot be checked for changes); restore it on
   an instance without `VAULT_KEY`, or keep using the encrypted backups made since the key was set.
 - R1-31: **Webhook secrets, rollback snapshots and the sign-in key ring are encrypted.** The inbound webhooks' signing
