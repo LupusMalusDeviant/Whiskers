@@ -182,8 +182,6 @@ public class BackupArchiverTests
                 await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
 
             var limits = BackupExtractionLimits.Default with { MaxJsonEntryBytes = 1024 };
-            using (var archive = await BuildTarGz(w => Entry(w, "manifest.json", size: 4096)))
-                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
             using (var archive = await BuildTarGz(w => Entry(w, "servers.json", size: 4096)))
                 await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
             using (var archive = await BuildTarGz(w => Entry(w, "chat/long.json", size: 4096)))   // read in parts, not whole
@@ -269,6 +267,97 @@ public class BackupArchiverTests
             Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dest, "ssh-keys", "id")));
         }
         finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task A_name_too_long_or_too_deep_and_a_file_named_like_a_directory_are_refused()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            // 64 KiB of "a/a/a/…": its prefixes alone would be gigabytes.
+            var deep = "chat/" + string.Concat(Enumerable.Repeat("a/", 32 << 10)) + "x.json";
+            using (var archive = await BuildTarGz(w => Entry(w, deep)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+            using (var archive = await BuildTarGz(w => Entry(w, "chat/" + new string('a', 5000))))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+            using (var archive = await RawTarGz(Header("roles.json/", '0', 1), new byte[512]))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+            using (var archive = await BuildTarGz(w => Entry(w, "manifest.json", size: (int)BackupExtractionLimits.MaxManifestBytes + 1)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task An_extended_header_claiming_a_huge_size_is_refused_before_it_is_allocated()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            // A PAX record that declares 1.5 GiB and then ends: the reader would allocate the declared size first.
+            using var archive = await RawTarGz(Header("PaxHeader/x", 'x', 0x6000_0000L));
+            var before = GC.GetTotalAllocatedBytes(precise: true);
+            await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+            Assert.True(GC.GetTotalAllocatedBytes(precise: true) - before < 512L << 20);
+
+            using (var link = await RawTarGz(Header("chat/link", '1', 0)))   // a hard link never reaches the reader
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(link, dest));
+            using (var dir = await RawTarGz(Header("chat/", '5', 1), new byte[512]))   // a directory with data
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(dir, dest));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task A_pax_size_record_is_followed_so_the_entries_after_it_are_read_as_written()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            var record = System.Text.Encoding.ASCII.GetBytes("10 size=5\n");
+            var data = new byte[512];
+            "hello"u8.CopyTo(data);
+            using var archive = await RawTarGz(
+                Header("PaxHeader/a", 'x', record.Length), Pad(record),
+                Header("chat/a.json", '0', 0), data,                       // the ustar size says 0, the PAX record 5
+                Header("chat/b.json", '0', 1), new byte[512]);
+            var inspection = await BackupArchiver.InspectAsync(archive, dest);
+            Assert.Equal(["chat/a.json", "chat/b.json"], inspection.EntryNames);
+        }
+        finally { Cleanup(dest); }
+    }
+
+    private static byte[] Pad(byte[] data) => data.Concat(new byte[(512 - data.Length % 512) % 512]).ToArray();
+
+    // A ustar header block: name, octal size, type flag, checksum.
+    private static byte[] Header(string name, char type, long size)
+    {
+        var h = new byte[512];
+        Encoding.ASCII.GetBytes(name).CopyTo(h, 0);
+        Encoding.ASCII.GetBytes("0000644\0").CopyTo(h, 100);
+        Encoding.ASCII.GetBytes("0000000\0").CopyTo(h, 108);
+        Encoding.ASCII.GetBytes("0000000\0").CopyTo(h, 116);
+        Encoding.ASCII.GetBytes(Convert.ToString(size, 8).PadLeft(11, '0') + "\0").CopyTo(h, 124);
+        Encoding.ASCII.GetBytes("00000000000\0").CopyTo(h, 136);
+        h[156] = (byte)type;
+        Encoding.ASCII.GetBytes("ustar\0" + "00").CopyTo(h, 257);
+        for (var i = 148; i < 156; i++) h[i] = (byte)' ';
+        var sum = h.Sum(b => (int)b);
+        Encoding.ASCII.GetBytes(Convert.ToString(sum, 8).PadLeft(6, '0') + "\0 ").CopyTo(h, 148);
+        return h;
+    }
+
+    private static async Task<MemoryStream> RawTarGz(params byte[][] blocks)
+    {
+        var ms = new MemoryStream();
+        await using (var gz = new GZipStream(ms, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            foreach (var block in blocks) await gz.WriteAsync(block);
+            await gz.WriteAsync(new byte[1024]);
+        }
+        ms.Position = 0;
+        return ms;
     }
 
     [Fact]

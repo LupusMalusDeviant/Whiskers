@@ -246,6 +246,12 @@ public class RestoreBootHandlerTests
             File.WriteAllText(p.NetbirdConfigPath, "OLD-NETBIRD");
             Directory.CreateDirectory(p.KeysDir + ".__restoring");
             File.WriteAllText(p.RolesJson + ".__restoring", "HALF");
+            Directory.CreateDirectory(p.AuditOutboxDir);
+            File.WriteAllText(Path.Combine(p.AuditOutboxDir, "e.json.__restoring"), "HALF");
+            Directory.CreateDirectory(p.SelfBackupsDir);
+            File.WriteAllText(Path.Combine(p.SelfBackupsDir, "kept.tar.gz.enc"), "A");
+            File.WriteAllText(Path.Combine(p.SelfBackupsDir, "kept.meta.json"), "{}");
+            File.WriteAllText(Path.Combine(p.SelfBackupsDir, "orphan.meta.json"), "{}");   // its archive never got its name
 
             Directory.CreateDirectory(Path.Combine(p.RestoreStagingDir, "netbird"));
             File.WriteAllText(Path.Combine(p.RestoreStagingDir, "netbird", "config.json"), "NEW-NETBIRD");
@@ -257,6 +263,9 @@ public class RestoreBootHandlerTests
             Assert.Equal("NEW-NETBIRD", File.ReadAllText(p.NetbirdConfigPath));
             Assert.False(Directory.Exists(p.KeysDir + ".__restoring"));
             Assert.False(File.Exists(p.RolesJson + ".__restoring"));
+            Assert.False(File.Exists(Path.Combine(p.AuditOutboxDir, "e.json.__restoring")));
+            Assert.True(File.Exists(Path.Combine(p.SelfBackupsDir, "kept.meta.json")));
+            Assert.False(File.Exists(Path.Combine(p.SelfBackupsDir, "orphan.meta.json")));
         }
         finally { Cleanup(root); }
     }

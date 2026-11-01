@@ -133,7 +133,8 @@ The vault's key also derives the keys for the webhook secrets, the rollback snap
 
 A restore (R1-32) writes only Whiskers' own stores and directories (`SelfBackupLayout`): an archive with anything a
 restore may never write — `backups/`, restore state, database journals, temp files, `vault.key` — or with duplicate,
-conflicting or non-canonical entry names (`a/../b`), oversized headers or JSON stores, or more than 100,000 entries or
+conflicting, non-canonical (`a/../b`) or overlong names, entry types other than file and directory, oversized headers
+(checked before the tar reader allocates them), JSON stores or key files, or more than 100,000 entries or
 32 GiB of content, is refused; other unknown entries are left out, and a restore that would not fit on the data volume
 is refused. Before it is committed the extracted database must pass SQLite's integrity check and hold exactly the
 migrations its manifest names, the stores a service reads at start must read as what it loads, and the

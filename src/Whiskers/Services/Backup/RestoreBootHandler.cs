@@ -234,11 +234,13 @@ public static class RestoreBootHandler
     {
         if (includeStaging) TryDeleteDir(dataPaths.RestoreStagingDir);
 
-        // Copies a swap left half made (only reached without a pending restore, or after one completed).
-        if (Directory.Exists(dataPaths.RootDir))
+        // Copies a swap left half made (only reached without a pending restore, or after one completed), at the
+        // root and in the merged outbox.
+        foreach (var dir in new[] { dataPaths.RootDir, dataPaths.AuditOutboxDir })
         {
-            foreach (var d in SafeEnumerateDirs(dataPaths.RootDir, "*" + SwapTempSuffix)) TryDeleteDir(d);
-            foreach (var f in SafeEnumerate(dataPaths.RootDir, "*" + SwapTempSuffix)) TryDelete(f);
+            if (!Directory.Exists(dir)) continue;
+            foreach (var d in SafeEnumerateDirs(dir, "*" + SwapTempSuffix)) TryDeleteDir(d);
+            foreach (var f in SafeEnumerate(dir, "*" + SwapTempSuffix)) TryDelete(f);
         }
 
         var selfDir = dataPaths.SelfBackupsDir;
@@ -246,6 +248,14 @@ public static class RestoreBootHandler
         TryDeleteDir(Path.Combine(selfDir, ".build"));
         foreach (var f in SafeEnumerate(selfDir, ".decrypt-*")) TryDelete(f);
         foreach (var f in SafeEnumerate(selfDir, ".upload-*")) TryDelete(f);
+
+        // A sidecar whose archive never got its name (a crash between the two): listed by nothing, pruned by nothing.
+        foreach (var sidecar in SafeEnumerate(selfDir, "*.meta.json"))
+        {
+            var id = Path.GetFileName(sidecar)[..^".meta.json".Length];
+            if (!File.Exists(Path.Combine(selfDir, id + ".tar.gz")) && !File.Exists(Path.Combine(selfDir, id + ".tar.gz.enc")))
+                TryDelete(sidecar);
+        }
     }
 
     private static IEnumerable<string> SafeEnumerate(string dir, string pattern)

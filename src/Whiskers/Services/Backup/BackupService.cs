@@ -585,18 +585,24 @@ public sealed class BackupService : IBackupService
     private readonly record struct PreparedRestore(string TarGzPath, SelfBackupManifest Manifest, bool Encrypted, string? DecryptTemp,
         long ExtractedBytes);
 
-    // Staging takes the extracted bytes, the pre-restore safety copy at most as much again (compressed, usually far
-    // less), the swap a second copy of each target beside the live one (R1-32).
+    // Staging takes the extracted bytes and the swap a second copy of each target beside the live one; the pre-restore
+    // safety copy takes the live data twice at most (the database copy in the build dir, then the archive) (R1-32).
     private void EnsureFreeSpace(long extractedBytes)
     {
-        long available;
-        try { available = new DriveInfo(Path.GetFullPath(_dataPaths.RootDir)).AvailableFreeSpace; }
+        long live = 0, available;
+        try
+        {
+            foreach (var file in EnumerateDataFiles(Path.GetFullPath(_dataPaths.RootDir)))
+                live += new FileInfo(file.SourcePath).Length;
+            if (File.Exists(_dataPaths.DbPath)) live += new FileInfo(_dataPaths.DbPath).Length;
+            available = new DriveInfo(Path.GetFullPath(_dataPaths.RootDir)).AvailableFreeSpace;
+        }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
         {
             _logger.LogWarning(ex, "Free space of the data volume unknown; the restore goes ahead without the check");
             return;
         }
-        var needed = extractedBytes * 3 + (64L << 20);
+        var needed = extractedBytes * 2 + live * 2 + (64L << 20);
         if (available < needed)
             throw new BackupValidationException(
                 $"Not enough free space for this restore: it needs about {needed / (1 << 20)} MiB, the data volume has {available / (1 << 20)} MiB.");

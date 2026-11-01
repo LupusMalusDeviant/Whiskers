@@ -9,7 +9,7 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-32: **A restore writes only what a backup may hold, and only after checking it.** A self-backup archive may
   contain only Whiskers' own stores and directories (one list, `SelfBackupLayout`, used for packing and restoring);
   an archive with backups, restore state, database journals, temp files, a vault key, duplicate, conflicting or
-  non-canonical entry names, oversized headers or JSON stores, or more than 100,000 entries or 32 GiB of content is
+  non-canonical entry names, overlong names, oversized headers, JSON stores or key files, or more than 100,000 entries or 32 GiB of content is
   refused, and unknown entries are left out; a restore that would not fit on the data volume is refused too. Before
   the restore is committed the extracted database must pass SQLite's integrity check and hold exactly the migrations
   its manifest names, the stores a service reads at start must read as what it loads, and the key files must parse;

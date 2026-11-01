@@ -39,6 +39,13 @@ public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes, 
 
     /// <summary>A data-protection key file: loaded whole at validation and at every start.</summary>
     public const long MaxKeyEntryBytes = 1L << 20;
+
+    /// <summary>The manifest: a few KiB in practice, read whole.</summary>
+    public const long MaxManifestBytes = 1L << 20;
+
+    /// <summary>An entry name (PATH_MAX) and its depth: far above any data file, and bounding the name bookkeeping.</summary>
+    public const int MaxNameLength = 4096;
+    public const int MaxNameDepth = 32;
 }
 
 /// <summary>
@@ -107,7 +114,10 @@ public static class BackupArchiver
                 && string.Equals(SelfBackupLayout.Normalize(entry.Name), SelfBackupFormat.DbEntryName, StringComparison.Ordinal))
                 hasDatabase = true;
             if (kind is BackupEntryKind.Manifest && entry.DataStream is { } ds)
-                manifest = await JsonSerializer.DeserializeAsync<SelfBackupManifest>(ds, cancellationToken: ct);
+            {
+                try { manifest = await JsonSerializer.DeserializeAsync<SelfBackupManifest>(ds, cancellationToken: ct); }
+                catch (JsonException) { throw new InvalidDataException("Refusing an archive whose manifest.json is not valid."); }
+            }
         }, ct);
 
         return new BackupInspection
@@ -121,7 +131,8 @@ public static class BackupArchiver
     {
         await using var gzip = new GZipStream(tarGzSource, CompressionMode.Decompress, leaveOpen: true);
         await using var bounded = new BoundedReadStream(gzip, limits.MaxDecompressedBytes);
-        await using var tar = new TarReader(bounded, leaveOpen: true);
+        await using var screen = new TarHeaderScreen(bounded, BackupExtractionLimits.MaxHeaderBytes);
+        await using var tar = new TarReader(screen, leaveOpen: true);
 
         // Every name seen (case-insensitive: the data dir may live on a case-insensitive file system, where two
         // spellings are one file) and the directories they imply: a second entry for one path, or a file where
@@ -145,13 +156,17 @@ public static class BackupArchiver
             // A backslash is a separator on Windows and a name character on Linux: one archive, two meanings.
             if (entry.Name.Contains('\\'))
                 throw new InvalidDataException($"Refusing tar entry '{entry.Name}': backslashes are not allowed in names.");
+            if (entry.Name.Length > BackupExtractionLimits.MaxNameLength || entry.Name.Count(c => c == '/') >= BackupExtractionLimits.MaxNameDepth)
+                throw new InvalidDataException("Refusing a tar entry whose name is too long or too deep.");
+            var isDirectory = entry.EntryType is TarEntryType.Directory;
+            if (!isDirectory && entry.Name.EndsWith('/'))
+                throw new InvalidDataException($"Refusing tar entry '{entry.Name}': a file named like a directory.");
             var target = ResolveWithinRoot(rootFull, entry.Name);
             // The name must already be the path it lands on: "chat/../roles.json", "./x", "a//b" or (on Windows) a
             // trailing dot would reach one file under two names and slip past the list and the duplicate check.
             var name = SelfBackupLayout.Normalize(entry.Name);
             if (!string.Equals(Path.GetRelativePath(rootFull, target).Replace('\\', '/').TrimEnd('/'), name, StringComparison.Ordinal))
                 throw new InvalidDataException($"Refusing tar entry '{entry.Name}': its name is not in canonical form.");
-            var isDirectory = entry.EntryType is TarEntryType.Directory;
             var kind = SelfBackupLayout.Classify(name, isDirectory);
             if (kind is BackupEntryKind.Forbidden)
                 throw new InvalidDataException($"Refusing tar entry '{entry.Name}': it is not something a restore may write.");
@@ -160,8 +175,9 @@ public static class BackupArchiver
             // The header's length is what the entry's data stream yields — no more is read for it.
             if (!isDirectory && (remaining -= entry.Length) < 0)
                 throw new InvalidDataException($"Refusing an archive that unpacks to more than {limits.MaxTotalBytes} bytes.");
-            if ((kind is BackupEntryKind.Manifest || (kind is BackupEntryKind.File && name.EndsWith(".json", StringComparison.Ordinal)))
-                && entry.Length > limits.MaxJsonEntryBytes)
+            if (kind is BackupEntryKind.Manifest && entry.Length > BackupExtractionLimits.MaxManifestBytes)
+                throw new InvalidDataException($"Refusing tar entry '{entry.Name}': larger than {BackupExtractionLimits.MaxManifestBytes} bytes.");
+            if (kind is BackupEntryKind.File && name.EndsWith(".json", StringComparison.Ordinal) && entry.Length > limits.MaxJsonEntryBytes)
                 throw new InvalidDataException($"Refusing tar entry '{entry.Name}': larger than {limits.MaxJsonEntryBytes} bytes.");
             if (kind is BackupEntryKind.Directory && !isDirectory && name.StartsWith(SelfBackupLayout.KeyRing + "/", StringComparison.Ordinal)
                 && entry.Length > BackupExtractionLimits.MaxKeyEntryBytes)
