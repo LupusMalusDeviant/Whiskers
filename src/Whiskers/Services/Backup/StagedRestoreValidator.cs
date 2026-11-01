@@ -105,6 +105,7 @@ public static class StagedRestoreValidator
 
             CheckHistory(connection, "__EFMigrationsHistory", manifest.MetricsMigrations, "metrics");
             CheckHistory(connection, "__IdentityMigrationsHistory", manifest.IdentityMigrations, "identity");
+            CheckStartCanMigrate(connection, manifest);
         }
         catch (SqliteException ex)
         {
@@ -115,6 +116,30 @@ public static class StagedRestoreValidator
             throw new BackupValidationException("Backup archive is invalid: its migration history cannot be read.");
         }
     }
+
+    // Without a history the start migrates from the beginning, and a table already there stops it — every start, after
+    // the marker is gone. The start baselines only a metrics schema it recognises (DatabaseInitializer: the
+    // ContainerMetrics table); identity has no baseline. Such a database is refused here instead.
+    private static void CheckStartCanMigrate(SqliteConnection connection, SelfBackupManifest manifest)
+    {
+        var tables = new List<string>();
+        using (var list = connection.CreateCommand())
+        {
+            list.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_\\_%MigrationsHistory' ESCAPE '\\'";
+            using var reader = list.ExecuteReader();
+            while (reader.Read()) tables.Add(reader.GetString(0));
+        }
+        var identityTables = tables.Where(t => t.StartsWith("AspNet", StringComparison.Ordinal)).ToList();
+        if (manifest.IdentityMigrations.Length == 0 && identityTables.Count > 0)
+            throw new BackupValidationException(
+                "Backup archive is invalid: its database holds sign-in tables without their migration history.");
+        if (manifest.MetricsMigrations.Length == 0 && tables.Except(identityTables).Any()
+            && !tables.Contains(DatabaseInitializerSentinel))
+            throw new BackupValidationException(
+                "Backup archive is invalid: its database holds tables without their migration history.");
+    }
+
+    private const string DatabaseInitializerSentinel = "ContainerMetrics";
 
     // The manifest's migration lists drive the schema check before the restore; the database must say the same, or
     // the check was made against something other than what would be restored.

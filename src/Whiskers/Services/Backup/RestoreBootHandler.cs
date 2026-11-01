@@ -137,6 +137,7 @@ public static class RestoreBootHandler
                     // not be paired with it or SQLite would replay the wrong journal → corruption.
                     TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-wal"));
                     TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-shm"));
+                    TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-journal"));   // a hot one would be rolled back into it
                 }
             }
             else if (name != SelfBackupFormat.DbEntryName && name != SelfBackupLayout.AuditCheckpoint && File.Exists(live))
@@ -171,17 +172,25 @@ public static class RestoreBootHandler
         {
             var dir = Path.Combine(root, name);
             if (!Directory.Exists(dir)) continue;
-            File.SetUnixFileMode(dir, dirMode);
+            Restrict(dir, dirMode);
             foreach (var sub in Directory.EnumerateDirectories(dir, "*", SearchOption.AllDirectories))
-                File.SetUnixFileMode(sub, dirMode);
+                Restrict(sub, dirMode);
             foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
-                File.SetUnixFileMode(file, fileMode);
+                Restrict(file, fileMode);
         }
         foreach (var name in SelfBackupLayout.SecretFiles)
         {
             var file = Path.Combine(root, name);
-            if (File.Exists(file)) File.SetUnixFileMode(file, fileMode);
+            if (File.Exists(file)) Restrict(file, fileMode);
         }
+    }
+
+    // A mode that grants nothing beyond the owner is left as it is: only a path that is too open needs chmod, so a
+    // mount that refuses chmod fails the swap only when it would really leave a key readable.
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    private static void Restrict(string path, UnixFileMode allowed)
+    {
+        if ((File.GetUnixFileMode(path) & ~allowed) != 0) File.SetUnixFileMode(path, allowed);
     }
 
     // Each outbox file is one audit event no database holds yet: the archive's are added, the live ones stay.

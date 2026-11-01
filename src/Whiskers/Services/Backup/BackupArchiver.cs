@@ -25,8 +25,11 @@ public sealed class BackupInspection
 }
 
 /// <summary>Bounds on what one archive may unpack to (R1-32): a small upload must fill neither the disk nor the memory.
-/// <paramref name="MaxJsonEntryBytes"/> bounds the manifest and each JSON store (both are read whole into memory).</summary>
-public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes, long MaxJsonEntryBytes = 256L << 20)
+/// <paramref name="MaxJsonEntryBytes"/> bounds each JSON store at the root (read whole into memory; the manifest has its
+/// own, smaller bound); <paramref name="MaxNameChars"/> bounds the characters of all names and the directories they
+/// imply together (they live in the headers, outside the content bound).</summary>
+public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes, long MaxJsonEntryBytes = 256L << 20,
+    long MaxNameChars = 64L << 20)
 {
     /// <summary>100k entries and 32 GiB of content — far above a real data directory.</summary>
     public static BackupExtractionLimits Default { get; } = new(100_000, 32L << 30);
@@ -137,7 +140,7 @@ public static class BackupArchiver
         // Every name seen (case-insensitive: the data dir may live on a case-insensitive file system, where two
         // spellings are one file) and the directories they imply: a second entry for one path, or a file where
         // another entry needs a directory, would make the result depend on the entry order.
-        var names = new NameLedger();
+        var names = new NameLedger(limits.MaxNameChars);
         var count = 0;
         var remaining = limits.MaxTotalBytes;
         long previousLength = 0;
@@ -190,14 +193,19 @@ public static class BackupArchiver
     /// <summary>Every name of one archive (case-insensitive: the data dir may live on a case-insensitive file system,
     /// where two spellings are one file) and the directories they imply. A second entry for one path, or a file where
     /// another entry needs a directory, would make the result depend on the entry order.</summary>
-    private sealed class NameLedger
+    private sealed class NameLedger(long maxChars)
     {
+        private long _chars;
         private readonly HashSet<string> _entries = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _files = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
 
         public void Track(string name, bool isDirectory)
         {
+            // The name and each directory it implies, counted before any of them is kept.
+            _chars += (long)name.Length * (name.Count(c => c == '/') + 1);
+            if (_chars > maxChars)
+                throw new InvalidDataException("Refusing an archive whose entry names are larger than allowed together.");
             if (!_entries.Add(name))
                 throw new InvalidDataException($"Refusing an archive with more than one entry for '{name}'.");
             if (!isDirectory && _directories.Contains(name))

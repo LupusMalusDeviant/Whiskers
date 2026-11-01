@@ -89,7 +89,7 @@ internal sealed class TarHeaderScreen(Stream inner, long maxHeaderBytes) : Strea
         switch (type)
         {
             case 'x' or 'g' or 'L' or 'K':
-                if (size > maxHeaderBytes)
+                if (size < 0 || size > maxHeaderBytes)
                     throw new InvalidDataException($"Refusing an archive with a {size}-byte extended header.");
                 if (type == 'x')
                 {

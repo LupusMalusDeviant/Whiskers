@@ -260,6 +260,8 @@ public class BackupServiceTests
         { "roles-shape", "roles.json" },        // valid JSON, but not what the role service reads at start
         { "settings-shape", "app-settings.json" },
         { "key", "keys/" },
+        { "identity-unmigrated", "migration history" },   // the start would create the sign-in tables again and stop
+        { "metrics-unmigrated", "migration history" },
     };
 
     [Theory]
@@ -277,7 +279,8 @@ public class BackupServiceTests
             if (damage == "database")
                 await File.WriteAllBytesAsync(db, System.Text.Encoding.ASCII.GetBytes("SQLite format 3\0").Concat(new byte[4096]).ToArray());
             else
-                CreateDatabase(db, damage == "migrations" ? ["20260101000000_NotInTheManifest"] : []);
+                CreateDatabase(db, damage == "migrations" ? ["20260101000000_NotInTheManifest"] : [],
+                    damage switch { "identity-unmigrated" => "AspNetUsers", "metrics-unmigrated" => "Servers", _ => null });
             var extra = new List<PackEntry>();
             if (damage is "json" or "roles-shape" or "settings-shape")
             {
@@ -324,13 +327,18 @@ public class BackupServiceTests
         finally { Cleanup(sp, root); }
     }
 
-    private static void CreateDatabase(string path, string[] migrations)
+    private static void CreateDatabase(string path, string[] migrations, string? table = null)
     {
         using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False");
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "CREATE TABLE \"__EFMigrationsHistory\" (\"MigrationId\" TEXT PRIMARY KEY, \"ProductVersion\" TEXT);";
         command.ExecuteNonQuery();
+        if (table is not null)
+        {
+            command.CommandText = $"CREATE TABLE \"{table}\" (\"Id\" INTEGER PRIMARY KEY);";
+            command.ExecuteNonQuery();
+        }
         foreach (var migration in migrations)
         {
             command.CommandText = "INSERT INTO \"__EFMigrationsHistory\" VALUES ($id, '10.0')";

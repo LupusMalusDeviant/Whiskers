@@ -290,6 +290,24 @@ public class BackupArchiverTests
     }
 
     [Fact]
+    public async Task Names_larger_than_allowed_together_are_refused_before_they_are_kept()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            // Each name is small; together (with the directories they imply) they pass the bound.
+            var limits = BackupExtractionLimits.Default with { MaxNameChars = 64 << 10 };
+            using var archive = await BuildTarGz(w =>
+            {
+                for (var i = 0; i < 200; i++) Entry(w, $"chat/{i}-{new string('a', 200)}/b/c/d.json");
+            });
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
+            Assert.Contains("names", ex.Message);
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
     public async Task An_extended_header_claiming_a_huge_size_is_refused_before_it_is_allocated()
     {
         var dest = NewTempDir();

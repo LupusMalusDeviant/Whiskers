@@ -143,7 +143,9 @@ and the restore committed. At the next start each store is made equal to the arc
 removed; the safety copy keeps it), the database and the VPN state (`tailscale/`, `netbird/`) are only replaced, the
 audit outbox merged, `backups/` never touched,
 and `keys/`, `ssh-keys/`, `mtls/` and `vault.json` are left readable by the app's user only. An interrupted swap is
-repeated at the next start. Without `VAULT_KEY` archives are neither encrypted nor authenticated: keep them where only
+repeated at the next start; so is one that cannot make a key directory or `vault.json` owner-only (a mount that
+refuses `chmod` on a path that is too open) — remove `.restore-pending` from the data directory to give the restore up
+(the start's log says so). Without `VAULT_KEY` archives are neither encrypted nor authenticated: keep them where only
 administrators can reach them.
 
 ## Hardening checklist for operators

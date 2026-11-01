@@ -216,11 +216,13 @@ public class RestoreBootHandlerTests
             File.WriteAllText(p.RolesJson, "OLD");
             File.WriteAllText(p.DbPath, "OLD-DB");
             File.WriteAllText(p.DbPath + "-wal", "OLD-WAL");
+            File.WriteAllText(p.DbPath + "-journal", "OLD-JOURNAL");
 
             RestoreBootHandler.ApplyPendingRestore(p);
 
             Assert.Equal("NEW-DB", File.ReadAllText(p.DbPath));
             Assert.False(File.Exists(p.DbPath + "-wal"));
+            Assert.False(File.Exists(p.DbPath + "-journal"));
             Assert.Equal("NEW", File.ReadAllText(p.RolesJson));
             Assert.Equal("NEW-KEY", File.ReadAllText(Path.Combine(p.SshKeysDir, "id")));
             Assert.False(File.Exists(Path.Combine(p.SshKeysDir, "partial")));
