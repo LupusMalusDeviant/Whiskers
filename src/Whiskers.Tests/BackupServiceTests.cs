@@ -113,7 +113,7 @@ public class BackupServiceTests
         {
             await File.WriteAllTextAsync(Path.Combine(root, "roles.json"), "[]");
             Directory.CreateDirectory(Path.Combine(root, "keys"));
-            await File.WriteAllTextAsync(Path.Combine(root, "keys", "ring.txt"), "K");
+            await File.WriteAllTextAsync(Path.Combine(root, "keys", "ring.xml"), "<k/>");
             Directory.CreateDirectory(paths.SelfBackupsDir);
             await File.WriteAllTextAsync(Path.Combine(paths.SelfBackupsDir, "old.tar.gz"), "OLD-BACKUP");
             await File.WriteAllTextAsync(Path.Combine(root, "scratch.tmp"), "TMP");
@@ -128,7 +128,7 @@ public class BackupServiceTests
             Assert.Contains("manifest.json", inspection.EntryNames);
             Assert.Contains("metrics.db", inspection.EntryNames);            // the VACUUM copy
             Assert.Contains("roles.json", inspection.EntryNames);
-            Assert.Contains("keys/ring.txt", inspection.EntryNames);
+            Assert.Contains("keys/ring.xml", inspection.EntryNames);
             Assert.DoesNotContain(inspection.EntryNames, n => n.StartsWith("backups/", StringComparison.Ordinal));
             Assert.DoesNotContain(inspection.EntryNames, n => n.EndsWith(".tmp", StringComparison.Ordinal));
         }

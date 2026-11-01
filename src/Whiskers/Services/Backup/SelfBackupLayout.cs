@@ -90,6 +90,13 @@ public static class SelfBackupLayout
     /// <summary>The audit checkpoint: kept aside instead of removed when the archive has none.</summary>
     public static string AuditCheckpoint { get; } = Rel(Probe.AuditCheckpointJson);
 
+    /// <summary>The data-protection key ring: only its <c>*.xml</c> key files are backed up and restored.</summary>
+    public static string KeyRing { get; } = Rel(Probe.KeysDir);
+
+    /// <summary>VPN daemon state, used by a daemon that may already run when the restore is applied: replaced when the
+    /// archive holds it, never removed when it does not (that would reset the node's identity under the daemon).</summary>
+    public static IReadOnlyList<string> KeptWhenAbsent { get; } = [Rel(Probe.TailscaleStateDir), Rel(Probe.NetbirdConfigPath).Split('/')[0]];
+
     /// <summary>Directories holding private keys: restored with owner-only permissions.</summary>
     public static IReadOnlyList<string> SecretDirectories { get; } = [Rel(Probe.KeysDir), Rel(Probe.SshKeysDir), Rel(Probe.MtlsDir)];
 
@@ -132,8 +139,14 @@ public static class SelfBackupLayout
             return segments.Length == 1 && !isDirectory ? BackupEntryKind.File : BackupEntryKind.Forbidden;
 
         if (DirectorySet.Contains(top))
+        {
             // A file where a known directory belongs would replace the directory with it.
-            return segments.Length == 1 && !isDirectory ? BackupEntryKind.Forbidden : BackupEntryKind.Directory;
+            if (segments.Length == 1) return isDirectory ? BackupEntryKind.Directory : BackupEntryKind.Forbidden;
+            // The key ring reads every *.xml file in its directory and nothing else.
+            if (top == KeyRing && (isDirectory || segments.Length > 2 || !last.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)))
+                return BackupEntryKind.NotRestored;
+            return BackupEntryKind.Directory;
+        }
 
         return BackupEntryKind.NotRestored;
     }

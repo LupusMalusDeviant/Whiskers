@@ -26,12 +26,12 @@ public class BackupArchiverTests
         {
             await File.WriteAllTextAsync(Path.Combine(src, "manifest.json"), "{}");
             Directory.CreateDirectory(Path.Combine(src, "keys"));
-            await File.WriteAllTextAsync(Path.Combine(src, "keys", "k1.txt"), "secret");
+            await File.WriteAllTextAsync(Path.Combine(src, "keys", "k1.xml"), "secret");
 
             var entries = new List<PackEntry>
             {
                 new("manifest.json", Path.Combine(src, "manifest.json")),
-                new("keys/k1.txt", Path.Combine(src, "keys", "k1.txt")),
+                new("keys/k1.xml", Path.Combine(src, "keys", "k1.xml")),
             };
 
             using var archive = new MemoryStream();
@@ -40,7 +40,7 @@ public class BackupArchiverTests
 
             await BackupArchiver.ExtractAsync(archive, dest);
             Assert.True(File.Exists(Path.Combine(dest, "manifest.json")));
-            Assert.Equal("secret", await File.ReadAllTextAsync(Path.Combine(dest, "keys", "k1.txt")));
+            Assert.Equal("secret", await File.ReadAllTextAsync(Path.Combine(dest, "keys", "k1.xml")));
         }
         finally { Cleanup(src, dest); }
     }
@@ -154,6 +154,8 @@ public class BackupArchiverTests
     [InlineData("chat/../metrics.db")]
     [InlineData("chat//a.json")]
     [InlineData("chat/./a.json")]
+    [InlineData("metrics.db\\")]            // a separator on Windows, part of the name on Linux
+    [InlineData("chat\\a.json")]
     public async Task An_entry_whose_name_is_not_the_path_it_lands_on_is_refused(string name)
     {
         var dest = NewTempDir();
@@ -186,6 +188,10 @@ public class BackupArchiverTests
                 await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
             using (var archive = await BuildTarGz(w => Entry(w, "chat/long.json", size: 4096)))   // read in parts, not whole
                 await BackupArchiver.InspectAsync(archive, dest, limits);
+
+            // A key file is loaded whole at every start.
+            using (var archive = await BuildTarGz(w => Entry(w, "keys/key-1.xml", size: (int)BackupExtractionLimits.MaxKeyEntryBytes + 1)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
         }
         finally { Cleanup(dest); }
     }
@@ -263,6 +269,28 @@ public class BackupArchiverTests
             Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dest, "ssh-keys", "id")));
         }
         finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task Only_the_key_files_of_the_key_ring_are_restored()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            using (var archive = await BuildTarGz(w => { Entry(w, "keys/key-1.xml"); Entry(w, "keys/notes.txt"); Entry(w, "keys/sub/k.xml"); }))
+                await BackupArchiver.ExtractAsync(archive, dest);
+            Assert.Equal(["key-1.xml"], Directory.GetFiles(Path.Combine(dest, "keys"), "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName).ToArray());
+            Assert.Equal(BackupEntryKind.NotRestored, SelfBackupLayout.Classify("keys/notes.txt", isDirectory: false));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public void Every_store_checked_by_type_is_a_restore_target()
+    {
+        // A misspelt name would check nothing.
+        Assert.All(StagedRestoreValidator.TypedStores, s => Assert.Contains(s, SelfBackupLayout.Files));
     }
 
     [Fact]

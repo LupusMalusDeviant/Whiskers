@@ -36,6 +36,9 @@ public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes, 
 
     // What reading one entry's headers may take (PAX records and long names are held in memory whole).
     internal const long MaxHeaderBytes = 1L << 20;
+
+    /// <summary>A data-protection key file: loaded whole at validation and at every start.</summary>
+    public const long MaxKeyEntryBytes = 1L << 20;
 }
 
 /// <summary>
@@ -139,6 +142,9 @@ public static class BackupArchiver
             if (++count > limits.MaxEntries)
                 throw new InvalidDataException($"Refusing an archive with more than {limits.MaxEntries} entries.");
             GuardEntryType(entry);
+            // A backslash is a separator on Windows and a name character on Linux: one archive, two meanings.
+            if (entry.Name.Contains('\\'))
+                throw new InvalidDataException($"Refusing tar entry '{entry.Name}': backslashes are not allowed in names.");
             var target = ResolveWithinRoot(rootFull, entry.Name);
             // The name must already be the path it lands on: "chat/../roles.json", "./x", "a//b" or (on Windows) a
             // trailing dot would reach one file under two names and slip past the list and the duplicate check.
@@ -157,6 +163,9 @@ public static class BackupArchiver
             if ((kind is BackupEntryKind.Manifest || (kind is BackupEntryKind.File && name.EndsWith(".json", StringComparison.Ordinal)))
                 && entry.Length > limits.MaxJsonEntryBytes)
                 throw new InvalidDataException($"Refusing tar entry '{entry.Name}': larger than {limits.MaxJsonEntryBytes} bytes.");
+            if (kind is BackupEntryKind.Directory && !isDirectory && name.StartsWith(SelfBackupLayout.KeyRing + "/", StringComparison.Ordinal)
+                && entry.Length > BackupExtractionLimits.MaxKeyEntryBytes)
+                throw new InvalidDataException($"Refusing tar entry '{entry.Name}': larger than a data-protection key can be.");
             previousLength = isDirectory ? 0 : entry.Length;
             await onEntry(entry, kind, target);
         }

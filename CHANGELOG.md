@@ -12,11 +12,11 @@ All notable changes to Whiskers are documented here. The format follows
   non-canonical entry names, oversized headers or JSON stores, or more than 100,000 entries or 32 GiB of content is
   refused, and unknown entries are left out; a restore that would not fit on the data volume is refused too. Before
   the restore is committed the extracted database must pass SQLite's integrity check and hold exactly the migrations
-  its manifest names, the JSON stores must read as what their services load at start, and the key files must parse;
+  its manifest names, the stores a service reads at start must read as what it loads, and the key files must parse;
   only then is the pre-restore safety copy taken. The vault's CBC recovery copy (`vault.json.legacy-cbc*.bak`) is no
   longer part of a self-backup. The restore
   makes each store equal to the archive — a store the archive does not hold is removed (the safety copy keeps it);
-  the database is only ever replaced, the audit outbox is merged. Key directories and the vault file are readable by
+  the database and the VPN daemon state are only ever replaced, the audit outbox is merged. Key directories and the vault file are readable by
   the app's user only afterwards, and encrypted archives appear under their name only when complete. **Breaking:**
   with `VAULT_KEY` set an unencrypted archive is no longer restored (it cannot be checked for changes); restore it on
   an instance without `VAULT_KEY`, or keep using the encrypted backups made since the key was set.

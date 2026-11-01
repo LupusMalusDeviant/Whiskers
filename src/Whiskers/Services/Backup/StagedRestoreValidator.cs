@@ -35,7 +35,7 @@ public static class StagedRestoreValidator
 
     private static readonly JsonSerializerOptions StoreOptions = new() { PropertyNameCaseInsensitive = true };
 
-    /// <summary>The stores checked by type (for the layout test).</summary>
+    /// <summary>The stores checked by type or root kind (a test holds them to the restore targets).</summary>
     public static IEnumerable<string> TypedStores => StoreTypes.Keys.Concat(ObjectRoots);
 
     public static void Validate(string stagingDir, SelfBackupManifest manifest)

@@ -234,6 +234,34 @@ public class RestoreBootHandlerTests
     }
 
     [Fact]
+    public void Vpn_state_is_replaced_but_never_removed_and_half_made_copies_are_cleaned_up()
+    {
+        var p = NewRoot(out var root);
+        try
+        {
+            // A running daemon's state the archive cannot know; a copy left by a swap whose marker was removed.
+            Directory.CreateDirectory(p.TailscaleStateDir);
+            File.WriteAllText(Path.Combine(p.TailscaleStateDir, "tailscaled.state"), "NODE");
+            Directory.CreateDirectory(Path.Combine(root, "netbird"));
+            File.WriteAllText(p.NetbirdConfigPath, "OLD-NETBIRD");
+            Directory.CreateDirectory(p.KeysDir + ".__restoring");
+            File.WriteAllText(p.RolesJson + ".__restoring", "HALF");
+
+            Directory.CreateDirectory(Path.Combine(p.RestoreStagingDir, "netbird"));
+            File.WriteAllText(Path.Combine(p.RestoreStagingDir, "netbird", "config.json"), "NEW-NETBIRD");
+            WriteMarker(p);
+
+            RestoreBootHandler.ApplyPendingRestore(p);
+
+            Assert.Equal("NODE", File.ReadAllText(Path.Combine(p.TailscaleStateDir, "tailscaled.state")));
+            Assert.Equal("NEW-NETBIRD", File.ReadAllText(p.NetbirdConfigPath));
+            Assert.False(Directory.Exists(p.KeysDir + ".__restoring"));
+            Assert.False(File.Exists(p.RolesJson + ".__restoring"));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void Key_directories_and_the_vault_are_readable_by_the_owner_only_after_a_restore()
     {
         if (OperatingSystem.IsWindows()) return;   // no file modes

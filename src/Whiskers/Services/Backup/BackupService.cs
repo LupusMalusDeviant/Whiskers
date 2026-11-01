@@ -585,7 +585,8 @@ public sealed class BackupService : IBackupService
     private readonly record struct PreparedRestore(string TarGzPath, SelfBackupManifest Manifest, bool Encrypted, string? DecryptTemp,
         long ExtractedBytes);
 
-    // Staging takes the extracted bytes, the swap a second copy of each target beside the live one (R1-32).
+    // Staging takes the extracted bytes, the pre-restore safety copy at most as much again (compressed, usually far
+    // less), the swap a second copy of each target beside the live one (R1-32).
     private void EnsureFreeSpace(long extractedBytes)
     {
         long available;
@@ -595,7 +596,7 @@ public sealed class BackupService : IBackupService
             _logger.LogWarning(ex, "Free space of the data volume unknown; the restore goes ahead without the check");
             return;
         }
-        var needed = extractedBytes * 2 + (64L << 20);
+        var needed = extractedBytes * 3 + (64L << 20);
         if (available < needed)
             throw new BackupValidationException(
                 $"Not enough free space for this restore: it needs about {needed / (1 << 20)} MiB, the data volume has {available / (1 << 20)} MiB.");

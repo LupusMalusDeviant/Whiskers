@@ -57,7 +57,14 @@ public static class RestoreBootHandler
 
         // Swap each staged top-level entry over the live data. Throws on an unrecoverable failure → process
         // exits → restart retries from the (immutable) staging.
-        SwapStagingOverLive(dataPaths, staging);
+        try { SwapStagingOverLive(dataPaths, staging); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[restore] The restore could not be applied ({Whiskers.Utils.SinkRedaction.Text(ex.Message)}). " +
+                $"The start stops and the restore is repeated at the next one; to give it up, remove {dataPaths.RestorePendingMarker} " +
+                "(the pre-restore safety backup holds the previous data).");
+            throw;
+        }
 
         // R1-23: the restored database no longer holds the restore's own event; the note keeps who restored what
         // until the start-up writes it as a chained audit row (RecordAppliedAsync). Written before the marker goes,
@@ -113,7 +120,8 @@ public static class RestoreBootHandler
                 if (Directory.Exists(staged)) MergeDirectory(staged, live);
             }
             else if (Directory.Exists(staged)) ReplaceDirectory(staged, live);
-            else if (Directory.Exists(live)) Retry(() => Directory.Delete(live, recursive: true));
+            else if (Directory.Exists(live) && !SelfBackupLayout.KeptWhenAbsent.Contains(name))
+                Retry(() => Directory.Delete(live, recursive: true));
         }
 
         foreach (var name in SelfBackupLayout.Files)
@@ -148,14 +156,8 @@ public static class RestoreBootHandler
             Console.Out.WriteLine($"[restore] The archive has no audit checkpoint; the current one was kept as {kept}.");
         }
 
-        try { RestrictSecrets(root); }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine("[restore] The key directories and the vault file could not be made readable by the owner only " +
-                $"({Whiskers.Utils.SinkRedaction.Text(ex.Message)}). The start stops and the restore is repeated; to give it up, " +
-                $"remove {dataPaths.RestorePendingMarker} (the pre-restore safety backup holds the previous data).");
-            throw;
-        }
+        // Throws like any other step; the caller names the way out.
+        RestrictSecrets(root);
     }
 
     // Owner-only for what holds private keys or the vault, whatever the archive or an earlier install left. A failure
@@ -232,6 +234,13 @@ public static class RestoreBootHandler
     {
         if (includeStaging) TryDeleteDir(dataPaths.RestoreStagingDir);
 
+        // Copies a swap left half made (only reached without a pending restore, or after one completed).
+        if (Directory.Exists(dataPaths.RootDir))
+        {
+            foreach (var d in SafeEnumerateDirs(dataPaths.RootDir, "*" + SwapTempSuffix)) TryDeleteDir(d);
+            foreach (var f in SafeEnumerate(dataPaths.RootDir, "*" + SwapTempSuffix)) TryDelete(f);
+        }
+
         var selfDir = dataPaths.SelfBackupsDir;
         if (!Directory.Exists(selfDir)) return;
         TryDeleteDir(Path.Combine(selfDir, ".build"));
@@ -242,6 +251,12 @@ public static class RestoreBootHandler
     private static IEnumerable<string> SafeEnumerate(string dir, string pattern)
     {
         try { return Directory.EnumerateFiles(dir, pattern).ToList(); }
+        catch { return Array.Empty<string>(); }
+    }
+
+    private static IEnumerable<string> SafeEnumerateDirs(string dir, string pattern)
+    {
+        try { return Directory.EnumerateDirectories(dir, pattern).ToList(); }
         catch { return Array.Empty<string>(); }
     }
 
