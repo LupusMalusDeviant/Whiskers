@@ -342,6 +342,7 @@ public sealed class BackupService : IBackupService
                     throw new BackupValidationException($"Backup archive is invalid: {ex.Message}");
                 }
                 StagedRestoreValidator.Validate(staging, prepared.Manifest);
+                await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
                 // nothing has been changed at this point.
@@ -585,6 +586,42 @@ public sealed class BackupService : IBackupService
     private readonly record struct PreparedRestore(string TarGzPath, SelfBackupManifest Manifest, bool Encrypted, string? DecryptTemp,
         long ExtractedBytes);
 
+    // R1-32: the start migrates the restored database; one it cannot bring up to date (a history behind its tables)
+    // would stop every start after the marker is consumed. So the start's own migration runs first on a copy, with
+    // the app's migrations, and a failure refuses the restore. SQLite only: a PostgreSQL archive holds no database.
+    private async Task ProbeMigrationAsync(string stagedDb, CancellationToken ct)
+    {
+        if (!File.Exists(stagedDb)) return;
+        var probeDir = Path.Combine(_dataPaths.SelfBackupsDir, ".build", "probe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(probeDir);
+        var probe = Path.Combine(probeDir, SelfBackupFormat.DbEntryName);
+        var connection = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = probe, Pooling = false }.ToString();
+        try
+        {
+            File.Copy(stagedDb, probe);
+            await using (var metrics = new MetricsDbContext(new DbContextOptionsBuilder<MetricsDbContext>()
+                .UseSqlite(connection, sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite")).Options))
+                await DatabaseInitializer.InitializeAsync(metrics, _logger, ct);
+            await using (var identity = new WhiskersIdentityDbContext(new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+                .UseSqlite(connection, sql =>
+                {
+                    sql.MigrationsAssembly("Whiskers.Migrations.Sqlite");
+                    sql.MigrationsHistoryTable("__IdentityMigrationsHistory");
+                }).Options))
+                await identity.Database.MigrateAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Restore refused: the archive's database cannot be brought up to this version's schema");
+            throw new BackupValidationException(
+                "Backup archive is invalid: its database cannot be brought up to this version's schema (its migration history does not match its tables).");
+        }
+        finally
+        {
+            TryDeleteDir(probeDir);
+        }
+    }
+
     // Staging takes the extracted bytes and the swap a second copy of each target beside the live one; the pre-restore
     // safety copy takes the live data twice at most (the database copy in the build dir, then the archive) (R1-32).
     private void EnsureFreeSpace(long extractedBytes)
@@ -602,7 +639,7 @@ public sealed class BackupService : IBackupService
             _logger.LogWarning(ex, "Free space of the data volume unknown; the restore goes ahead without the check");
             return;
         }
-        var needed = extractedBytes * 2 + live * 2 + (64L << 20);
+        var needed = extractedBytes * 3 + live * 2 + (64L << 20);   // the third copy: the migration probe
         if (available < needed)
             throw new BackupValidationException(
                 $"Not enough free space for this restore: it needs about {needed / (1 << 20)} MiB, the data volume has {available / (1 << 20)} MiB.");

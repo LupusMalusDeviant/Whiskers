@@ -216,7 +216,7 @@ public class RestoreBootHandlerTests
             File.WriteAllText(p.RolesJson, "OLD");
             File.WriteAllText(p.DbPath, "OLD-DB");
             File.WriteAllText(p.DbPath + "-wal", "OLD-WAL");
-            File.WriteAllText(p.DbPath + "-journal", "OLD-JOURNAL");
+            File.WriteAllText(p.DbPath + "-journal", "OLD-JOURNAL");   // removed like WAL/SHM, strictly
 
             RestoreBootHandler.ApplyPendingRestore(p);
 

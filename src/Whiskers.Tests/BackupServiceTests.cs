@@ -228,7 +228,7 @@ public class BackupServiceTests
     [Fact]
     public async Task A_restore_stages_checks_and_commits_and_the_next_start_applies_it()
     {
-        var (svc, paths, root, sp) = NewService("test-vault-key");
+        var (svc, paths, root, sp) = NewService("test-vault-key", new MaintenanceStateService(), migrate: true);
         try
         {
             await File.WriteAllTextAsync(paths.RolesJson, "{\"version\":\"archived\"}");
@@ -323,6 +323,49 @@ public class BackupServiceTests
 
             await svc.BeginRestoreAsync(svc.ResolveArchivePath(info.Id)!, "tester");
             Assert.True(File.Exists(paths.RestorePendingMarker));
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
+    public async Task A_database_whose_history_is_behind_its_tables_is_refused_before_anything_is_committed()
+    {
+        // The start would run the next migration against tables it already holds and stop — every start.
+        var maintenance = new MaintenanceStateService();
+        var (svc, paths, root, sp) = NewService(vaultKey: null, maintenance, migrate: true);
+        try
+        {
+            string[] metrics, identity;
+            using (var scope = sp.CreateScope())
+            {
+                metrics = (await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetAppliedMigrationsAsync()).ToArray();
+                identity = (await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.GetAppliedMigrationsAsync()).ToArray();
+            }
+            Assert.True(metrics.Length > 1);
+            TestSqlite.ClearPools(root);
+
+            var dir = Path.Combine(root, "crafted-behind");
+            Directory.CreateDirectory(dir);
+            var db = Path.Combine(dir, "metrics.db");
+            File.Copy(paths.DbPath, db);
+            using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={db};Pooling=False"))
+            {
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" <> $first";
+                command.Parameters.AddWithValue("$first", metrics[0]);
+                command.ExecuteNonQuery();
+            }
+            var archive = await CraftManifestArchive(root,
+                new SelfBackupManifest { Provider = "sqlite", MetricsMigrations = [metrics[0]], IdentityMigrations = identity }, db);
+
+            Assert.True((await svc.ValidateArchiveAsync(archive)).Ok);   // the manifest alone looks fine
+            var ex = await Assert.ThrowsAsync<BackupValidationException>(() => svc.BeginRestoreAsync(archive, "tester"));
+            Assert.Contains("schema", ex.Message);
+            Assert.False(File.Exists(paths.RestorePendingMarker));
+            Assert.False(Directory.Exists(paths.RestoreStagingDir));
+            Assert.False(maintenance.IsMaintenance);
+            Assert.Empty(Directory.GetDirectories(Path.Combine(paths.SelfBackupsDir, ".build")));   // the probe copy is gone
         }
         finally { Cleanup(sp, root); }
     }

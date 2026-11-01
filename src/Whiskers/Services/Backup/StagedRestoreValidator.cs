@@ -134,12 +134,10 @@ public static class StagedRestoreValidator
             throw new BackupValidationException(
                 "Backup archive is invalid: its database holds sign-in tables without their migration history.");
         if (manifest.MetricsMigrations.Length == 0 && tables.Except(identityTables).Any()
-            && !tables.Contains(DatabaseInitializerSentinel))
+            && !tables.Contains(Whiskers.Services.Persistence.DatabaseInitializer.SentinelTable))
             throw new BackupValidationException(
                 "Backup archive is invalid: its database holds tables without their migration history.");
     }
-
-    private const string DatabaseInitializerSentinel = "ContainerMetrics";
 
     // The manifest's migration lists drive the schema check before the restore; the database must say the same, or
     // the check was made against something other than what would be restored.

@@ -135,9 +135,12 @@ public static class RestoreBootHandler
                 {
                     // The restored DB is a clean DELETE-mode file; a stale live WAL/SHM from the OLD database must
                     // not be paired with it or SQLite would replay the wrong journal → corruption.
-                    TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-wal"));
-                    TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-shm"));
-                    TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-journal"));   // a hot one would be rolled back into it
+                    // A failure throws like any other step: a stale journal must never meet the restored file.
+                    foreach (var suffix in new[] { "-wal", "-shm", "-journal" })   // a hot journal would be rolled back into it
+                    {
+                        var journal = Path.Combine(root, SelfBackupFormat.DbEntryName + suffix);
+                        Retry(() => { if (File.Exists(journal)) File.Delete(journal); });
+                    }
                 }
             }
             else if (name != SelfBackupFormat.DbEntryName && name != SelfBackupLayout.AuditCheckpoint && File.Exists(live))
