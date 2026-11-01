@@ -22,6 +22,7 @@ public sealed class AutoRollbackTests : IDisposable
     private readonly ServiceProvider _sp;
     private readonly VerificationOutcomeTests.StatefulDocker _docker;
     private readonly IDockerService _service;
+    private readonly AutomationMutationRunnerTests.Fixture _owner = AutomationMutationRunnerTests.Build(requireOwner: true);
 
     public AutoRollbackTests()
     {
@@ -33,6 +34,10 @@ public sealed class AutoRollbackTests : IDisposable
 
         (_service, _docker) = VerificationOutcomeTests.StatefulDocker.Create();
         _docker.States[OldId] = "running";
+        // The real target resolver lists the server's containers: every container the test knows is named "web".
+        _docker.On[nameof(IDockerService.ListContainersAsync)] = _ => Task.FromResult<IList<ContainerInfo>>(
+            _docker.States.Select(s => new ContainerInfo { Id = s.Key, Name = "web", ServerId = "local", State = s.Value })
+                .ToList());
         _docker.On[nameof(IDockerService.ListAllContainersAsync)] = _ => Task.FromResult<IList<ContainerInfo>>(
             [new ContainerInfo { Id = OldId, Name = "web", ServerId = "local", Image = "nginx:latest", State = "running" }]);
         _docker.On[nameof(IDockerService.CaptureRollbackSnapshotAsync)] = _ => Task.FromResult(("sha256:old", "{\"Image\":\"nginx\"}"));
@@ -68,7 +73,7 @@ public sealed class AutoRollbackTests : IDisposable
 
     private AutomationMutationRunner Runner()
     {
-        var f = AutomationMutationRunnerTests.Build(requireOwner: true);
+        var f = _owner;
         f.Whitelist.Allowed.Add("admin@example.com");
         f.Roles.Map["admin@example.com"] = AppRole.Admin;
         var policy = GuardrailPolicy.SafeDefault();
@@ -77,6 +82,8 @@ public sealed class AutoRollbackTests : IDisposable
         var verifiers = VerificationOutcomeTests.Verifiers(new ServiceCollection().AddSingleton(_service).BuildServiceProvider());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
             new AgentToolTestHelpers.NullMutationAudit(), verifiers, NullLogger<MutationGateway>.Instance,
+            targets: new MutationTargetResolver(new TestServices(_service,
+                new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }))),
             approvals: new ApprovalGate(new ApprovalStore(), store));
         return new AutomationMutationRunner(gateway, new CapabilityCatalog(),
             new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts),
@@ -135,11 +142,51 @@ public sealed class AutoRollbackTests : IDisposable
 
         await service.CheckAndUpdateAsync(CancellationToken.None);
 
-        var (history, policy, _) = await ResultAsync();
+        var (history, policy, snapshots) = await ResultAsync();
         Assert.False(history.Success);
         Assert.False(history.RolledBack);
         Assert.Contains("automatic rollback failed", history.Error);
         Assert.StartsWith("FEHLER (Rollback fehlgeschlagen)", policy.LastUpdateResult);
+        Assert.Equal(1, snapshots);                   // kept: the way back is still there for a manual rollback
+    }
+
+    [Fact]
+    public async Task A_rollback_the_gateway_refuses_is_recorded_and_never_run()
+    {
+        FailingUpdate();
+        var recreate = _docker.On[nameof(IDockerService.RecreateContainerAsync)];
+        _docker.On[nameof(IDockerService.RecreateContainerAsync)] = args =>
+        {
+            _owner.Roles.Map["admin@example.com"] = AppRole.Viewer;   // the owner lost the right in between
+            return recreate(args);
+        };
+        var service = await ServiceAsync(autoRollback: true);
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        var (history, policy, snapshots) = await ResultAsync();
+        Assert.False(history.Success);
+        Assert.False(history.RolledBack);
+        Assert.Contains("automatic rollback failed", history.Error);
+        Assert.StartsWith("FEHLER (Rollback fehlgeschlagen)", policy.LastUpdateResult);
+        Assert.Equal(1, snapshots);
+    }
+
+    [Fact]
+    public async Task A_recreate_that_threw_is_not_rolled_back()
+    {
+        _docker.On[nameof(IDockerService.RecreateContainerAsync)] = _ => throw new IOException("pull failed");
+        var service = await ServiceAsync(autoRollback: true);
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        var (history, _, snapshots) = await ResultAsync();
+        Assert.False(history.Success);
+        Assert.False(history.RolledBack);
+        Assert.Equal(1, snapshots);
+        Assert.Equal("running", _docker.States[OldId]);   // the old container never left
     }
 
     [Fact]

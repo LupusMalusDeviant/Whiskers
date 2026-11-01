@@ -70,9 +70,12 @@ public abstract class ContainerVerifier(IServiceProvider services) : IMutationVe
         => result is string s && s.Length is >= 12 and <= 64 && s.All(Uri.IsHexDigit) ? s : null;
 
     protected static async Task RequireRunningAsync(IDockerService docker, string container, string? serverId,
-        CancellationToken ct)
+        CancellationToken ct, bool finishedCounts = false)
     {
         var (state, exitCode, oomKilled) = await InspectAsync(docker, container, serverId, ct);
+        // A one-shot container (a migration, a backup) that already ran to completion did start.
+        if (finishedCounts && !oomKilled && exitCode == 0 && string.Equals(state, "exited", StringComparison.OrdinalIgnoreCase))
+            return;
         if (oomKilled)
             throw new MutationVerificationFailedException($"the container was killed for lack of memory (state {state}).");
         if (!string.Equals(state, "running", StringComparison.OrdinalIgnoreCase))
@@ -80,22 +83,22 @@ public abstract class ContainerVerifier(IServiceProvider services) : IMutationVe
     }
 }
 
-/// <summary>container.start: the container runs.</summary>
+/// <summary>container.start: the container runs — or, a one-shot container, already ran to completion (exit code 0).</summary>
 public sealed class ContainerStartVerifier(IServiceProvider services) : ContainerVerifier(services)
 {
     public override string CapabilityId => "container.start";
 
     protected override Task CheckAsync(IDockerService docker, string container, string? serverId, CancellationToken ct)
-        => RequireRunningAsync(docker, container, serverId, ct);
+        => RequireRunningAsync(docker, container, serverId, ct, finishedCounts: true);
 }
 
-/// <summary>container.restart: the container runs again.</summary>
+/// <summary>container.restart: the container runs again — or, a one-shot container, already ran to completion.</summary>
 public sealed class ContainerRestartVerifier(IServiceProvider services) : ContainerVerifier(services)
 {
     public override string CapabilityId => "container.restart";
 
     protected override Task CheckAsync(IDockerService docker, string container, string? serverId, CancellationToken ct)
-        => RequireRunningAsync(docker, container, serverId, ct);
+        => RequireRunningAsync(docker, container, serverId, ct, finishedCounts: true);
 }
 
 /// <summary>container.stop: the container no longer runs (stopped, created or dead — not running, restarting or
@@ -150,10 +153,15 @@ public sealed class ContainerUpdateVerifier(IServiceProvider services) : Contain
         => RequireRunningAsync(docker, container, serverId, ct);
 }
 
-/// <summary>container.create (a deployment from the UI): the container the call returned runs.</summary>
-public sealed class ContainerCreateVerifier(IServiceProvider services) : ContainerVerifier(services)
+/// <summary>container.create / app.deploy (a single-container deployment): the container the call returned runs. A
+/// deployment whose answer names no container (the MCP tool answers with text) records NotVerifiable; compose
+/// deployments are R1-37.</summary>
+public sealed class ContainerCreateVerifier(IServiceProvider services, string capabilityId = "container.create")
+    : ContainerVerifier(services)
 {
-    public override string CapabilityId => "container.create";
+    public override string CapabilityId => capabilityId;
+
+    protected override bool UnnamedIsNotVerifiable => true;
 
     protected override (string? Container, string? ServerId) Subject(MutationContext context, object? result)
         => (ReturnedId(result), context.Request.Target.ServerId ?? Argument(context, "serverId"));

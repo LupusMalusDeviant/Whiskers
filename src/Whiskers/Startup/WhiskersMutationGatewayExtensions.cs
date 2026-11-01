@@ -82,7 +82,8 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerRestartVerifier>();
         services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerRemoveVerifier>();
         services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerUpdateVerifier>();
-        services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerCreateVerifier>();
+        services.AddSingleton<IMutationVerifier>(sp => new Whiskers.Services.Docker.ContainerCreateVerifier(sp));
+        services.AddSingleton<IMutationVerifier>(sp => new Whiskers.Services.Docker.ContainerCreateVerifier(sp, "app.deploy"));
         services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerRollbackVerifier>();
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.

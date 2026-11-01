@@ -21,6 +21,8 @@ public class VerificationOutcomeTests
     {
         public Dictionary<string, string> States { get; } = new(StringComparer.Ordinal);
         public HashSet<string> OomKilled { get; } = new(StringComparer.Ordinal);
+        /// <summary>Exit code of a container (default: 1 when exited, else 0).</summary>
+        public Dictionary<string, int> ExitCodes { get; } = new(StringComparer.Ordinal);
         public List<string> Calls { get; } = [];
         /// <summary>Run by a call the test scripts (name → what happens); returns the call's value.</summary>
         public Dictionary<string, Func<object?[], object?>> On { get; } = new(StringComparer.Ordinal);
@@ -40,7 +42,8 @@ public class VerificationOutcomeTests
                 var id = (string)args[0]!;
                 if (!States.TryGetValue(id, out var state))
                     return Task.FromException<(string, int, bool)>(new DockerContainerNotFoundException(HttpStatusCode.NotFound, ""));
-                return Task.FromResult((state, state == "exited" ? 1 : 0, OomKilled.Contains(id)));
+                var exitCode = ExitCodes.TryGetValue(id, out var code) ? code : state == "exited" ? 1 : 0;
+                return Task.FromResult((state, exitCode, OomKilled.Contains(id)));
             }
             if (On.TryGetValue(method.Name, out var handler))
             {
@@ -62,7 +65,7 @@ public class VerificationOutcomeTests
     [
         new ContainerStartVerifier(sp), new ContainerStopVerifier(sp), new ContainerRestartVerifier(sp),
         new ContainerRemoveVerifier(sp), new ContainerUpdateVerifier(sp), new ContainerCreateVerifier(sp),
-        new ContainerRollbackVerifier(sp),
+        new ContainerCreateVerifier(sp, "app.deploy"), new ContainerRollbackVerifier(sp),
     ];
 
     private static (MutationGateway Gateway, StatefulDocker Docker) Build()
@@ -98,6 +101,25 @@ public class VerificationOutcomeTests
 
         var outcome = await gateway.ExecuteAsync(Request(capability, new { containerId = "aaaaaaaaaaaa", serverId = "local" },
             targetId: "aaaaaaaaaaaa"), (_, _) => Task.FromResult("done"));
+
+        AssertOutcome(outcome, verified, "done");
+    }
+
+    [Theory]
+    [InlineData("container.start", 0, false, true)]
+    [InlineData("container.restart", 0, false, true)]
+    [InlineData("container.start", 2, false, false)]
+    [InlineData("container.start", 0, true, false)]
+    public async Task A_one_shot_container_that_ran_to_completion_counts_as_started(string capability, int exitCode,
+        bool oom, bool verified)
+    {
+        var (gateway, docker) = Build();
+        docker.States["aaaaaaaaaaaa"] = "exited";
+        docker.ExitCodes["aaaaaaaaaaaa"] = exitCode;
+        if (oom) docker.OomKilled.Add("aaaaaaaaaaaa");
+
+        var outcome = await gateway.ExecuteAsync(Request(capability, new { containerId = "aaaaaaaaaaaa" }, "aaaaaaaaaaaa"),
+            (_, _) => Task.FromResult("done"));
 
         AssertOutcome(outcome, verified, "done");
     }
@@ -169,6 +191,32 @@ public class VerificationOutcomeTests
             (_, _) => Task.FromResult(Ids["new"]));
 
         AssertOutcome(outcome, verified, Ids["new"]);
+    }
+
+    [Theory]
+    [InlineData("running", true)]
+    [InlineData("exited", false)]
+    public async Task An_app_deployment_that_returned_its_container_is_read_back(string state, bool verified)
+    {
+        var (gateway, docker) = Build();
+        docker.States[Ids["new"]] = state;
+
+        var outcome = await gateway.ExecuteAsync(Request("app.deploy", new { serverId = "local" }),
+            (_, _) => Task.FromResult(Ids["new"]));
+
+        AssertOutcome(outcome, verified, Ids["new"]);
+    }
+
+    [Fact]
+    public async Task An_app_deployment_that_names_no_container_is_not_verifiable_never_verified()
+    {
+        var (gateway, _) = Build();
+
+        var outcome = await gateway.ExecuteAsync(Request("app.deploy", new { serverId = "local" }),
+            (_, _) => Task.FromResult("Deployed nginx."));
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(VerificationStatus.NotVerifiable, outcome.Verification);
     }
 
     [Fact]
