@@ -307,10 +307,12 @@ internal static class HelpContentEn
                     servers, permissions …) as `<file>.bak`. If a file cannot be read — cut off by a power
                     loss or broken by hand — Whiskers starts with the previous version, keeps the broken
                     file as `<file>.corrupt-<time>` and shows it in **Settings > Production ready?**
-                    (the last change may be missing) until you delete the kept file. If the previous version
-                    cannot be read either, Whiskers does **not start** rather than run with empty roles or
-                    permissions: repair the file, or remove it **together with** `<file>.bak`, or restore a
-                    backup. A broken `guardrails.json` is not replaced by its previous version: the agent's
+                    until you delete the kept file. The last change may be missing — **check roles, whitelist,
+                    MCP keys and vault entries** for changes made shortly before the damage: a revoked access
+                    may be back in force. If the previous version cannot be read either, Whiskers does **not
+                    start** (for stores read on first use, such as git deploys and registries: that feature
+                    does not work) rather than run with empty roles or permissions: repair the file, or remove
+                    it **together with** `<file>.bak`, or restore a backup. A broken `guardrails.json` is not replaced by its previous version: the agent's
                     guarded actions stay refused until you repair it.
                     """),
             }),

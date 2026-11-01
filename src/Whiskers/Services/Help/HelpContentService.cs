@@ -311,9 +311,12 @@ public sealed class HelpContentService : IHelpContentService
                     Berechtigungen …) die vorige Fassung als `<datei>.bak`. Ist eine Datei unlesbar — durch
                     einen Stromausfall abgeschnitten oder von Hand beschädigt —, startet Whiskers mit der
                     vorigen Fassung, legt die kaputte Datei als `<datei>.corrupt-<zeit>` daneben und zeigt
-                    das unter **Einstellungen > Produktionsreif?** an (die letzte Änderung kann fehlen), bis
-                    du die aufbewahrte Datei löschst. Ist auch die vorige Fassung unlesbar, startet Whiskers
-                    **nicht**, statt mit leeren Rollen oder Berechtigungen zu laufen: Datei reparieren, sie
+                    das unter **Einstellungen > Produktionsreif?** an, bis du die aufbewahrte Datei löschst.
+                    Die letzte Änderung kann fehlen — **prüfe Rollen, Whitelist, MCP-Schlüssel und
+                    Vault-Einträge** auf Änderungen kurz vor dem Schaden: ein entzogener Zugang kann wieder
+                    gelten. Ist auch die vorige Fassung unlesbar, startet Whiskers **nicht** (bei Speichern,
+                    die erst bei Gebrauch gelesen werden, etwa Git-Deploys und Registries: diese Funktion
+                    nicht), statt mit leeren Rollen oder Berechtigungen zu laufen: Datei reparieren, sie
                     **zusammen mit** `<datei>.bak` entfernen oder ein Backup zurückspielen. Eine kaputte
                     `guardrails.json` wird nicht durch die vorige Fassung ersetzt: die abgesicherten Aktionen
                     des Agenten bleiben gesperrt, bis du sie reparierst.

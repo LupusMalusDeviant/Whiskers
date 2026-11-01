@@ -168,7 +168,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 : string.Join(" ", new[]
                   {
                       recovered.Count == 0 ? null
-                          : "Seit dem Start aus der vorigen Fassung wiederhergestellt (die letzte Änderung kann fehlen): "
+                          : "Seit dem Start aus der vorigen Fassung wiederhergestellt — die letzte Änderung kann fehlen; "
+                            + "Rollen, Whitelist, MCP-Schlüssel und Vault auf einen wieder geltenden, entzogenen Zugang prüfen: "
                             + string.Join(", ", recovered.Select(r => Path.GetFileName(r.Path))) + ".",
                       kept.Count == 0 ? null
                           : "Unlesbare Dateien aufbewahrt (prüfen, dann löschen): " + string.Join(", ", kept) + ".",
