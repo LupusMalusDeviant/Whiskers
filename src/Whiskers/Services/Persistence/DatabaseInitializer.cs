@@ -21,7 +21,7 @@ public static class DatabaseInitializer
 {
     // Sentinel table present in every schema version — its presence (with no migration history) is how we
     // recognise a legacy EnsureCreated database that must be baselined rather than migrated from scratch.
-    private const string SentinelTable = "ContainerMetrics";
+    internal const string SentinelTable = "ContainerMetrics";   // also read by the restore check (StagedRestoreValidator)
 
     public static async Task InitializeAsync(MetricsDbContext db, ILogger logger, CancellationToken ct = default)
     {

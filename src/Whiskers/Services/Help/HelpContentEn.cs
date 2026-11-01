@@ -295,9 +295,12 @@ internal static class HelpContentEn
                     data continue to exist.
                     """),
                 new("Restoring", """
-                    You restore a backup by uploading it: Whiskers **validates** it, automatically creates
-                    a **pre-restore backup**, switches into **maintenance mode** and swaps the data in
-                    **crash-safely on restart**. Encrypted backups need the same `VAULT_KEY` to decrypt.
+                    You restore a backup by uploading it: Whiskers **validates** it (only its own stores,
+                    an intact database, readable settings), automatically creates a **pre-restore backup**,
+                    switches into **maintenance mode** and swaps the data in **crash-safely on restart**.
+                    Each store then matches the backup — one the backup does not hold is removed (the
+                    pre-restore backup keeps it). Encrypted backups need the same `VAULT_KEY` to decrypt;
+                    with a `VAULT_KEY` set, unencrypted backups are not restored.
                     """),
             }),
 

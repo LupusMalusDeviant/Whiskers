@@ -298,10 +298,13 @@ public sealed class HelpContentService : IHelpContentService
                     deiner Container.
                     """),
                 new("Wiederherstellen", """
-                    Ein Backup spielst du per Upload zurück: Whiskers **validiert** es, legt automatisch ein
+                    Ein Backup spielst du per Upload zurück: Whiskers **validiert** es (nur eigene
+                    Speicher, intakte Datenbank, lesbare Einstellungen), legt automatisch ein
                     **Pre-Restore-Backup** an, wechselt in den **Wartungsmodus** und tauscht die Daten
-                    **crash-sicher beim Neustart**. Verschlüsselte Backups brauchen zum Entschlüsseln
-                    denselben `VAULT_KEY`.
+                    **crash-sicher beim Neustart**. Danach entspricht jeder Speicher dem Backup — was das
+                    Backup nicht enthält, wird entfernt (das Pre-Restore-Backup behält es). Verschlüsselte
+                    Backups brauchen zum Entschlüsseln denselben `VAULT_KEY`; mit gesetztem `VAULT_KEY`
+                    werden unverschlüsselte Backups nicht zurückgespielt.
                     """),
             }),
 

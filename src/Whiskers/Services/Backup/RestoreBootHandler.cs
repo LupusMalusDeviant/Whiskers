@@ -16,6 +16,10 @@ namespace Whiskers.Services.Backup;
 /// simply retried on the next boot. If the swap cannot complete it THROWS — Program.cs lets it propagate so the
 /// process exits and the restart policy retries, rather than booting on half-swapped state (fail-closed). The
 /// pre-restore safety backup remains available throughout. NEVER touches <c>backups/</c> (never in staging).
+///
+/// R1-32: only the targets of <see cref="SelfBackupLayout"/> are written, and each is made equal to the archive — a
+/// target the archive does not hold is removed (the database is only replaced, the audit outbox merged, the audit
+/// checkpoint kept aside). Afterwards the key directories and the vault file are readable by the app's user only.
 /// </summary>
 public static class RestoreBootHandler
 {
@@ -53,7 +57,14 @@ public static class RestoreBootHandler
 
         // Swap each staged top-level entry over the live data. Throws on an unrecoverable failure → process
         // exits → restart retries from the (immutable) staging.
-        SwapStagingOverLive(dataPaths, staging);
+        try { SwapStagingOverLive(dataPaths, staging); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[restore] The restore could not be applied ({Whiskers.Utils.SinkRedaction.Text(ex.Message)}). " +
+                $"The start stops and the restore is repeated at the next one; to give it up, remove {dataPaths.RestorePendingMarker} " +
+                "(the pre-restore safety backup holds the previous data).");
+            throw;
+        }
 
         // R1-23: the restored database no longer holds the restore's own event; the note keeps who restored what
         // until the start-up writes it as a chained audit row (RecordAppliedAsync). Written before the marker goes,
@@ -100,24 +111,40 @@ public static class RestoreBootHandler
         var root = dataPaths.RootDir;
         Directory.CreateDirectory(root);
 
-        foreach (var dir in Directory.EnumerateDirectories(staging))
-            ReplaceDirectory(dir, Path.Combine(root, Path.GetFileName(dir)));
-
-        foreach (var file in Directory.EnumerateFiles(staging))
+        foreach (var name in SelfBackupLayout.Directories)
         {
-            var name = Path.GetFileName(file);
-            if (string.Equals(name, SelfBackupFormat.ManifestEntryName, StringComparison.Ordinal))
-                continue;   // archive artifact, not a live data file
-
-            ReplaceFile(file, Path.Combine(root, name));
-
-            if (string.Equals(name, SelfBackupFormat.DbEntryName, StringComparison.Ordinal))
+            var staged = Path.Combine(staging, name);
+            var live = Path.Combine(root, name);
+            if (name == SelfBackupLayout.AuditOutbox)
             {
-                // The restored DB is a clean DELETE-mode file; a stale live WAL/SHM from the OLD database must
-                // not be paired with it or SQLite would replay the wrong journal → corruption.
-                TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-wal"));
-                TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-shm"));
+                if (Directory.Exists(staged)) MergeDirectory(staged, live);
             }
+            else if (Directory.Exists(staged)) ReplaceDirectory(staged, live);
+            else if (Directory.Exists(live) && !SelfBackupLayout.KeptWhenAbsent.Contains(name))
+                Retry(() => Directory.Delete(live, recursive: true));
+        }
+
+        foreach (var name in SelfBackupLayout.Files)
+        {
+            var staged = Path.Combine(staging, name);
+            var live = Path.Combine(root, name);
+            if (File.Exists(staged))
+            {
+                ReplaceFile(staged, live);
+                if (name == SelfBackupFormat.DbEntryName)
+                {
+                    // The restored DB is a clean DELETE-mode file; a stale live WAL/SHM from the OLD database must
+                    // not be paired with it or SQLite would replay the wrong journal → corruption.
+                    // A failure throws like any other step: a stale journal must never meet the restored file.
+                    foreach (var suffix in new[] { "-wal", "-shm", "-journal" })   // a hot journal would be rolled back into it
+                    {
+                        var journal = Path.Combine(root, SelfBackupFormat.DbEntryName + suffix);
+                        Retry(() => { if (File.Exists(journal)) File.Delete(journal); });
+                    }
+                }
+            }
+            else if (name != SelfBackupFormat.DbEntryName && name != SelfBackupLayout.AuditCheckpoint && File.Exists(live))
+                Retry(() => File.Delete(live));
         }
 
         // R1-23: a restored database comes with the audit checkpoint taken with it. An archive from before the audit
@@ -131,6 +158,51 @@ public static class RestoreBootHandler
             var kept = $"{dataPaths.AuditCheckpointJson}.pre-restore-{DateTime.UtcNow:yyyyMMddHHmmss}";
             Retry(() => File.Move(dataPaths.AuditCheckpointJson, kept));
             Console.Out.WriteLine($"[restore] The archive has no audit checkpoint; the current one was kept as {kept}.");
+        }
+
+        // Throws like any other step; the caller names the way out.
+        RestrictSecrets(root);
+    }
+
+    // Owner-only for what holds private keys or the vault, whatever the archive or an earlier install left. A failure
+    // throws like any other swap step: the next start repeats it rather than running with readable keys.
+    private static void RestrictSecrets(string root)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        const UnixFileMode dirMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        const UnixFileMode fileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        foreach (var name in SelfBackupLayout.SecretDirectories)
+        {
+            var dir = Path.Combine(root, name);
+            if (!Directory.Exists(dir)) continue;
+            Restrict(dir, dirMode);
+            foreach (var sub in Directory.EnumerateDirectories(dir, "*", SearchOption.AllDirectories))
+                Restrict(sub, dirMode);
+            foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                Restrict(file, fileMode);
+        }
+        foreach (var name in SelfBackupLayout.SecretFiles)
+        {
+            var file = Path.Combine(root, name);
+            if (File.Exists(file)) Restrict(file, fileMode);
+        }
+    }
+
+    // A mode that grants nothing beyond the owner is left as it is: only a path that is too open needs chmod, so a
+    // mount that refuses chmod fails the swap only when it would really leave a key readable.
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    private static void Restrict(string path, UnixFileMode allowed)
+    {
+        if ((File.GetUnixFileMode(path) & ~allowed) != 0) File.SetUnixFileMode(path, allowed);
+    }
+
+    // Each outbox file is one audit event no database holds yet: the archive's are added, the live ones stay.
+    private static void MergeDirectory(string source, string target)
+    {
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var dest = Path.Combine(target, Path.GetRelativePath(source, file));
+            if (!File.Exists(dest)) ReplaceFile(file, dest);
         }
     }
 
@@ -174,16 +246,39 @@ public static class RestoreBootHandler
     {
         if (includeStaging) TryDeleteDir(dataPaths.RestoreStagingDir);
 
+        // Copies a swap left half made (only reached without a pending restore, or after one completed), at the
+        // root and in the merged outbox.
+        foreach (var dir in new[] { dataPaths.RootDir, dataPaths.AuditOutboxDir })
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var d in SafeEnumerateDirs(dir, "*" + SwapTempSuffix)) TryDeleteDir(d);
+            foreach (var f in SafeEnumerate(dir, "*" + SwapTempSuffix)) TryDelete(f);
+        }
+
         var selfDir = dataPaths.SelfBackupsDir;
         if (!Directory.Exists(selfDir)) return;
         TryDeleteDir(Path.Combine(selfDir, ".build"));
         foreach (var f in SafeEnumerate(selfDir, ".decrypt-*")) TryDelete(f);
         foreach (var f in SafeEnumerate(selfDir, ".upload-*")) TryDelete(f);
+
+        // A sidecar whose archive never got its name (a crash between the two): listed by nothing, pruned by nothing.
+        foreach (var sidecar in SafeEnumerate(selfDir, "*.meta.json"))
+        {
+            var id = Path.GetFileName(sidecar)[..^".meta.json".Length];
+            if (!File.Exists(Path.Combine(selfDir, id + ".tar.gz")) && !File.Exists(Path.Combine(selfDir, id + ".tar.gz.enc")))
+                TryDelete(sidecar);
+        }
     }
 
     private static IEnumerable<string> SafeEnumerate(string dir, string pattern)
     {
         try { return Directory.EnumerateFiles(dir, pattern).ToList(); }
+        catch { return Array.Empty<string>(); }
+    }
+
+    private static IEnumerable<string> SafeEnumerateDirs(string dir, string pattern)
+    {
+        try { return Directory.EnumerateDirectories(dir, pattern).ToList(); }
         catch { return Array.Empty<string>(); }
     }
 

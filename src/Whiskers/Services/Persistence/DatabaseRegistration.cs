@@ -9,6 +9,12 @@ namespace Whiskers.Services.Persistence;
 /// </summary>
 public static class DatabaseRegistration
 {
+    /// <summary>The assembly holding the SQLite migrations of both contexts (ADR-0004).</summary>
+    public const string SqliteMigrationsAssembly = "Whiskers.Migrations.Sqlite";
+
+    /// <summary>The identity context's own migration history table (F1).</summary>
+    public const string IdentityMigrationsHistoryTable = "__IdentityMigrationsHistory";
+
     /// <summary>
     /// Wires up <see cref="MetricsDbContext"/> for <c>Database:Provider</c> (sqlite | postgres). With no
     /// configuration this is byte-identical to the previous inline SQLite registration (connection string
@@ -43,7 +49,7 @@ public static class DatabaseRegistration
                 // told which assembly to load them from (ADR-0004, separate migration assemblies).
                 // R1-24: every sink row is redacted on save, whoever wrote it.
                 builder.Services.AddDbContext<MetricsDbContext>(
-                    o => o.UseSqlite(sqliteCs, sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite"))
+                    o => o.UseSqlite(sqliteCs, sql => sql.MigrationsAssembly(SqliteMigrationsAssembly))
                         .AddInterceptors(SinkRedactionInterceptor.Instance),
                     ServiceLifetime.Transient);
                 // Local-auth Identity context (F1): SAME database, its OWN __IdentityMigrationsHistory so it
@@ -51,8 +57,8 @@ public static class DatabaseRegistration
                 builder.Services.AddDbContext<WhiskersIdentityDbContext>(
                     o => o.UseSqlite(sqliteCs, sql =>
                     {
-                        sql.MigrationsAssembly("Whiskers.Migrations.Sqlite");
-                        sql.MigrationsHistoryTable("__IdentityMigrationsHistory");
+                        sql.MigrationsAssembly(SqliteMigrationsAssembly);
+                        sql.MigrationsHistoryTable(IdentityMigrationsHistoryTable);
                     }));
                 break;
 

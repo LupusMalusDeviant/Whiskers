@@ -126,7 +126,27 @@ The vault's key also derives the keys for the webhook secrets, the rollback snap
   encrypted in place at the first start with a usable vault, and keep working.
 - **No `VAULT_KEY`:** the data-protection keys are written in plaintext as before; webhooks cannot be created or have
   their secret regenerated; updates keep no rollback snapshot. The readiness check names what is still in plaintext.
-- **Backups:** a self-backup holds the encrypted values; restoring it needs the same `VAULT_KEY`.
+- **Backups:** a self-backup holds the encrypted values; restoring it needs the same `VAULT_KEY`. With `VAULT_KEY`
+  set only an encrypted archive is restored (R1-32): an unencrypted one cannot be checked for changes.
+
+## Self-backup restore
+
+A restore (R1-32) writes only Whiskers' own stores and directories (`SelfBackupLayout`): an archive with anything a
+restore may never write — `backups/`, restore state, database journals, temp files, `vault.key` — or with duplicate,
+conflicting, non-canonical (`a/../b`) or overlong names, entry types other than file and directory, oversized headers
+(checked before the tar reader allocates them), JSON stores or key files, or more than 100,000 entries or
+32 GiB of content, is refused; other unknown entries are left out, and a restore that would not fit on the data volume
+is refused. Before it is committed the extracted database must pass SQLite's integrity check, hold exactly the
+migrations its manifest names and migrate cleanly on a copy (the start's own migration, run first), the stores a service reads at start must read as what it loads, and the
+data-protection keys must parse; only then is the pre-restore safety copy taken
+and the restore committed. At the next start each store is made equal to the archive (a store the archive lacks is
+removed; the safety copy keeps it), the database and the VPN state (`tailscale/`, `netbird/`) are only replaced, the
+audit outbox merged, `backups/` never touched,
+and `keys/`, `ssh-keys/`, `mtls/` and `vault.json` are left readable by the app's user only. An interrupted swap is
+repeated at the next start; so is one that cannot make a key directory or `vault.json` owner-only (a mount that
+refuses `chmod` on a path that is too open) — remove `.restore-pending` from the data directory to give the restore up
+(the start's log says so). Without `VAULT_KEY` archives are neither encrypted nor authenticated: keep them where only
+administrators can reach them.
 
 ## Hardening checklist for operators
 
