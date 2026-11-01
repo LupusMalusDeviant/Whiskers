@@ -154,6 +154,17 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 : "Keine Auto-Update-Policy aktiv — Updates bleiben vollständig manuell (bewusste Entscheidung ist auch okay).",
             "image-updates", "Image-Updates öffnen"));
 
+        // R1-35: a JSON store that could not be read and came back from its previous generation since the start.
+        var recovered = JsonStoreRecovery.Recovered;
+        checks.Add(new ReadinessCheck(
+            "Datenspeicher lesbar",
+            recovered.Count == 0,
+            recovered.Count == 0
+                ? "Seit dem Start war jede Speicherdatei (Rollen, Whitelist, Tresor, Server, Berechtigungen …) lesbar."
+                : "Aus der vorigen Fassung wiederhergestellt (die letzte Änderung kann fehlen; die unlesbare Datei liegt daneben): "
+                  + string.Join("; ", recovered.Select(r => $"{Path.GetFileName(r.Path)} → {Path.GetFileName(r.PreservedAs)}")),
+            null, null));
+
         // 5) Non-root / hardened profile. The hardened compose runs the container as uid 10001;
         // a privileged (root) process signals that the default profile is in use.
         var nonRoot = !Environment.IsPrivilegedProcess;

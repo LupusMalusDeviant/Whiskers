@@ -64,33 +64,22 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
         await _lock.WaitAsync();
         try
         {
-            var tmp = $"{_path}.{Guid.NewGuid():N}.tmp";
-            try
-            {
-                JsonNode? before = null;
-                if (File.Exists(_path))
-                    try { before = JsonNode.Parse(await File.ReadAllTextAsync(_path))?["Agent"]?.DeepClone(); }
-                    catch (System.Text.Json.JsonException) { /* an unreadable file is no previous version */ }
-                // The API key: decided against what is stored now (R1-30) — never a plaintext key from this save.
-                var agent = (JsonObject)doc["Agent"]!;
-                (apiKey ?? Whiskers.Services.Vault.SecretFieldChange.Keep).ApplyTo(agent, before as JsonObject, ApiKeyField);
-                if (Whiskers.Services.Vault.VaultBackedSettings.Field(agent, ApiKeyField) is { } kept && !string.IsNullOrWhiteSpace(kept))
-                    throw new InvalidOperationException(
-                        "Agent:ApiKey is still stored in plaintext; it moves into the vault with a save once the vault is usable.");
-                await File.WriteAllTextAsync(tmp, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                File.Move(tmp, _path, overwrite: true);
-                // Written: the change as part of the gateway's event, the API key and prompt redacted (R1-22).
-                Whiskers.Services.Mutations.ConfigChange.Record("agent",
-                    before is null ? null : System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(before.ToJsonString()),
-                    System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(doc["Agent"]!.ToJsonString()));
-                return before as JsonObject;
-            }
-            finally
-            {
-                // Best effort: a leftover temp file must neither mask the write failure nor keep the lock held.
-                try { if (File.Exists(tmp)) File.Delete(tmp); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            }
+            JsonNode? before = null;
+            if (File.Exists(_path))
+                try { before = JsonNode.Parse(await File.ReadAllTextAsync(_path))?["Agent"]?.DeepClone(); }
+                catch (System.Text.Json.JsonException) { /* an unreadable file is no previous version */ }
+            // The API key: decided against what is stored now (R1-30) — never a plaintext key from this save.
+            var agent = (JsonObject)doc["Agent"]!;
+            (apiKey ?? Whiskers.Services.Vault.SecretFieldChange.Keep).ApplyTo(agent, before as JsonObject, ApiKeyField);
+            if (Whiskers.Services.Vault.VaultBackedSettings.Field(agent, ApiKeyField) is { } kept && !string.IsNullOrWhiteSpace(kept))
+                throw new InvalidOperationException(
+                    "Agent:ApiKey is still stored in plaintext; it moves into the vault with a save once the vault is usable.");
+            await Whiskers.Services.Persistence.DurableFile.WriteAllTextAsync(_path, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            // Written: the change as part of the gateway's event, the API key and prompt redacted (R1-22).
+            Whiskers.Services.Mutations.ConfigChange.Record("agent",
+                before is null ? null : System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(before.ToJsonString()),
+                System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(doc["Agent"]!.ToJsonString()));
+            return before as JsonObject;
         }
         finally
         {
@@ -129,17 +118,7 @@ public sealed class AgentSettingsStore : IAgentSettingsStore
             Whiskers.Services.Vault.VaultBackedSettings.Remove(agent, ApiKeyField);
             Whiskers.Services.Vault.VaultBackedSettings.Remove(agent, Whiskers.Services.Vault.VaultBackedSettings.RefName(ApiKeyField));
             agent[Whiskers.Services.Vault.VaultBackedSettings.RefName(ApiKeyField)] = vaultRef;
-            var tmp = $"{_path}.{Guid.NewGuid():N}.tmp";
-            try
-            {
-                await File.WriteAllTextAsync(tmp, root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                File.Move(tmp, _path, overwrite: true);
-            }
-            finally
-            {
-                try { if (File.Exists(tmp)) File.Delete(tmp); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            }
+            await Whiskers.Services.Persistence.DurableFile.WriteAllTextAsync(_path, root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
             return true;
         }
         finally

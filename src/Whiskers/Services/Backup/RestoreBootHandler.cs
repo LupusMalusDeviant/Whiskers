@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Whiskers.Configuration;
+using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.Backup;
 
@@ -128,6 +129,10 @@ public static class RestoreBootHandler
         {
             var staged = Path.Combine(staging, name);
             var live = Path.Combine(root, name);
+            // R1-35: a JSON store's previous generation belongs to the replaced data; left in place it would come back
+            // the first time the restored file cannot be read, or bring back a store the archive does not hold.
+            var previous = live + DurableFile.BackupSuffix;
+            Retry(() => { if (File.Exists(previous)) File.Delete(previous); });
             if (File.Exists(staged))
             {
                 ReplaceFile(staged, live);
@@ -255,6 +260,11 @@ public static class RestoreBootHandler
             foreach (var f in SafeEnumerate(dir, "*" + SwapTempSuffix)) TryDelete(f);
         }
 
+        // R1-35: a durable write cut off before its rename leaves its own temporary file; nothing reads it. This runs
+        // before any store is opened.
+        if (Directory.Exists(dataPaths.RootDir))
+            foreach (var f in SafeEnumerate(dataPaths.RootDir, "*" + DurableFile.TempSuffix, SearchOption.AllDirectories)) TryDelete(f);
+
         var selfDir = dataPaths.SelfBackupsDir;
         if (!Directory.Exists(selfDir)) return;
         TryDeleteDir(Path.Combine(selfDir, ".build"));
@@ -270,9 +280,9 @@ public static class RestoreBootHandler
         }
     }
 
-    private static IEnumerable<string> SafeEnumerate(string dir, string pattern)
+    private static IEnumerable<string> SafeEnumerate(string dir, string pattern, SearchOption option = SearchOption.TopDirectoryOnly)
     {
-        try { return Directory.EnumerateFiles(dir, pattern).ToList(); }
+        try { return Directory.EnumerateFiles(dir, pattern, option).ToList(); }
         catch { return Array.Empty<string>(); }
     }
 

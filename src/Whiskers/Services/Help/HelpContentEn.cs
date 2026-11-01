@@ -302,6 +302,15 @@ internal static class HelpContentEn
                     pre-restore backup keeps it). Encrypted backups need the same `VAULT_KEY` to decrypt;
                     with a `VAULT_KEY` set, unencrypted backups are not restored.
                     """),
+                new("Damaged Settings Files", """
+                    Whiskers keeps the previous version of each settings file (roles, whitelist, vault,
+                    servers, permissions …) as `<file>.bak`. If a file cannot be read — cut off by a power
+                    loss or broken by hand — Whiskers starts with the previous version, keeps the broken
+                    file as `<file>.corrupt-<time>` and shows it in **Settings > Production ready?**
+                    (the last change may be missing). If the previous version cannot be read either,
+                    Whiskers does **not start** rather than run with empty roles or permissions: repair or
+                    remove the file, or restore a backup.
+                    """),
             }),
 
         new("agent", "The AI Agent", "SmartToy",

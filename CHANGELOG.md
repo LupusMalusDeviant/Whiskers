@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-35: **Settings files survive a power loss and say when they were damaged.** Every JSON store (roles, whitelist,
+  vault, servers, permissions, guardrails, triggers, …) is written to a flushed temporary file and renamed into place,
+  keeping the version before as `<file>.bak`; the CVE and image-update state, the agent and app settings and the chat
+  history are written the same way. A store that cannot be read is no longer the end of the start: Whiskers uses the
+  previous version, keeps the unreadable file as `<file>.corrupt-<time>` and lists it on the readiness card
+  ("Datenspeicher lesbar"). Without a readable previous version the start still stops — never with an empty, more
+  permissive store. A restore removes the previous versions of what it replaces.
 - R1-32: **A restore writes only what a backup may hold, and only after checking it.** A self-backup archive may
   contain only Whiskers' own stores and directories (one list, `SelfBackupLayout`, used for packing and restoring);
   an archive with backups, restore state, database journals, temp files, a vault key, duplicate, conflicting or

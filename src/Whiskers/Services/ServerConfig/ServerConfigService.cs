@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services;
+using Whiskers.Services.Cloud;
 using Whiskers.Services.Persistence;
 
 namespace Whiskers.Services.ServerConfig;
@@ -22,7 +23,9 @@ public class ServerConfigService : IServerConfigService, IInitializable
     public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
     {
         var paths = dataPaths ?? DataPathOptions.Default;
-        _store = new JsonFileStore<ServerConfigData>(storePath ?? paths.ServersJson);
+        // A legacy plaintext cloud key moves into the vault (R1-29); no previous generation keeps it (R1-35).
+        _store = new JsonFileStore<ServerConfigData>(storePath ?? paths.ServersJson,
+            holdsPlaintextSecret: d => d.Servers.Any(s => s.HasPlaintextCloudKey()));
         _sshKeysBasePath = paths.SshKeysDir;
         _dockerSettings = dockerSettings;
         _logger = logger;

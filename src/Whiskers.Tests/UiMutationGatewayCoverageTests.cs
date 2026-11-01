@@ -337,7 +337,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         config.Presets.First(p => p.Name == config.ActivePreset).Policy.ReadOnlyMode = true;
         await store.SaveConfigAsync(config, Admin);
 
-        Directory.CreateDirectory(path + ".tmp");   // the next write fails
+        DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;   // the next write fails
         await Assert.ThrowsAnyAsync<Exception>(() => store.DisableKillSwitchAsync(Admin));
 
         Assert.True(store.Current.ReadOnlyMode);
@@ -353,7 +353,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var edit = svc.GetPermissionData();
         edit.ApiKeys.Single(k => k.Id == key.Id).Enabled = false;
 
-        Directory.CreateDirectory(paths.McpPermissionsJson + ".tmp");
+        DurableFile.FailingWrites[Path.GetFullPath(paths.McpPermissionsJson)] = 0;
         await Assert.ThrowsAnyAsync<Exception>(() => svc.SavePermissionDataAsync(edit));
 
         Assert.True(svc.GetPermissionData().ApiKeys.Single(k => k.Id == key.Id).Enabled);
@@ -387,7 +387,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         await vault.InitializeAsync();
         await vault.SetSecretAsync("kept", "one");
 
-        Directory.CreateDirectory(path + ".tmp");
+        DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;
         await Assert.ThrowsAnyAsync<Exception>(() => vault.SetSecretAsync("kept", "two"));
         await Assert.ThrowsAnyAsync<Exception>(() => vault.SetSecretAsync("new", "three"));
         await Assert.ThrowsAnyAsync<Exception>(() => vault.DeleteSecretAsync("kept"));
@@ -403,7 +403,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var (vault, registries, path) = await RegistriesAsync();
         var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "old");
 
-        Directory.CreateDirectory(path + ".tmp");
+        DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;
         var edit = new RegistryConfig { Id = saved.Id, Name = "renamed", Host = "other.io", Username = "you" };
         await Assert.ThrowsAnyAsync<Exception>(() => registries.SaveRegistryAsync(edit, "new"));
         await Assert.ThrowsAnyAsync<Exception>(() =>
@@ -504,7 +504,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var path = Path.Combine(_dir, "servers.json");
         var (servers, server) = await KubernetesServerAsync(path, vault);
 
-        Directory.CreateDirectory(path + ".tmp");   // writing servers.json fails
+        DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;   // writing servers.json fails
         await Assert.ThrowsAnyAsync<Exception>(() => ServerRemoval.RemoveAsync(servers, vault, server));
 
         Assert.Contains(servers.GetServers(), s => s.Id == server.Id);
@@ -538,7 +538,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         await vault.SetSecretAsync(staged, "new-yaml");
         var edit = servers.GetServer(server.Id)!.Clone();
         edit.KubeconfigRef = staged;
-        Directory.CreateDirectory(path + ".tmp");
+        DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;
         await Assert.ThrowsAnyAsync<Exception>(() => servers.UpdateServerAsync(edit));
 
         // The live record still names the old key, so every client built now reads the old kubeconfig.
@@ -607,7 +607,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         await store.SaveSectionsAsync(new Dictionary<string, object> { ["A"] = new { V = 1 }, ["B"] = new { V = 1 } });
         var before = await File.ReadAllTextAsync(path);
 
-        Directory.CreateDirectory(path + ".tmp");
+        DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;
         await Assert.ThrowsAnyAsync<Exception>(() =>
             store.SaveSectionsAsync(new Dictionary<string, object> { ["A"] = new { V = 2 }, ["B"] = new { V = 2 } }));
 
@@ -620,7 +620,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var (_, registries, path) = await RegistriesAsync();
         var saved = await registries.SaveRegistryAsync(new RegistryConfig { Name = "ghcr", Host = "ghcr.io", Username = "me" }, "pw");
 
-        Directory.CreateDirectory(path + ".tmp");
+        DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;
         await Assert.ThrowsAnyAsync<Exception>(() => registries.DeleteRegistryAsync(saved.Id));
 
         Assert.Single(await registries.GetRegistriesAsync());

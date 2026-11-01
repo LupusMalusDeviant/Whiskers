@@ -233,7 +233,7 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
         var server = await AddCloudServer(original);
         var page = OpenServer(server.Id);
         Set(page, "_cloudApiKey", Secret("CLOUDKEY"));
-        Directory.CreateDirectory(Path.Combine(_dir, "servers.json.tmp"));   // the record cannot be written
+        DurableFile.FailingWrites[Path.GetFullPath(Path.Combine(_dir, "servers.json"))] = 0;   // the record cannot be written
 
         await Assert.ThrowsAnyAsync<Exception>(() => Persist(page));
 
@@ -350,7 +350,7 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
         var original = Secret("DNSTOKEN");
         await SaveDns(DnsPage(), original);
         var before = await StoredDnsRef();
-        Directory.CreateDirectory(Path.Combine(_dir, "app-settings.json.tmp"));   // the settings cannot be written
+        DurableFile.FailingWrites[Path.GetFullPath(Path.Combine(_dir, "app-settings.json"))] = 0;   // the settings cannot be written
 
         await SaveDns(DnsPage(), Secret("DNSTOKEN"));   // reported on the page, not thrown
 
@@ -364,7 +364,7 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     {
         await SaveDns(DnsPage(), Secret("DNSTOKEN"));
         var before = await StoredDnsRef();
-        Directory.CreateDirectory(Path.Combine(_dir, "app-settings.json.tmp"));
+        DurableFile.FailingWrites[Path.GetFullPath(Path.Combine(_dir, "app-settings.json"))] = 0;
 
         await SaveDns(DnsPage(), token: null, zones: "example.net");
 

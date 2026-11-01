@@ -597,10 +597,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `JsonFileStoreRecoveryTests` covers concurrent saves, torn writes, corrupt JSON, permission failures and previous-generation recovery.
-- [ ] Durable publication never exposes partial JSON.
-- [ ] Security-store corruption cannot silently create permissive defaults.
-- [ ] Recovery is visible and preserves the unreadable original.
+- [x] `JsonFileStoreRecoveryTests` covers concurrent saves, torn writes, corrupt JSON, permission failures and previous-generation recovery.
+- [x] Durable publication never exposes partial JSON.
+- [x] Security-store corruption cannot silently create permissive defaults.
+- [x] Recovery is visible and preserves the unreadable original.
 
 **Out of scope:** Cross-provider database transactions.
 

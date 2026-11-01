@@ -306,6 +306,16 @@ public sealed class HelpContentService : IHelpContentService
                     Backups brauchen zum Entschlüsseln denselben `VAULT_KEY`; mit gesetztem `VAULT_KEY`
                     werden unverschlüsselte Backups nicht zurückgespielt.
                     """),
+                new("Beschädigte Einstellungsdateien", """
+                    Whiskers behält von jeder Einstellungsdatei (Rollen, Whitelist, Vault, Server,
+                    Berechtigungen …) die vorige Fassung als `<datei>.bak`. Ist eine Datei unlesbar — durch
+                    einen Stromausfall abgeschnitten oder von Hand beschädigt —, startet Whiskers mit der
+                    vorigen Fassung, legt die kaputte Datei als `<datei>.corrupt-<zeit>` daneben und zeigt
+                    das unter **Einstellungen > Produktionsreif?** an (die letzte Änderung kann fehlen). Ist
+                    auch die vorige Fassung unlesbar, startet Whiskers **nicht**, statt mit leeren Rollen
+                    oder Berechtigungen zu laufen: Datei reparieren oder entfernen, oder ein Backup
+                    zurückspielen.
+                    """),
             }),
 
         new("agent", "Der KI-Agent", "SmartToy",

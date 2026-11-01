@@ -62,7 +62,7 @@ public class ImageUpdateStore : IImageUpdateStore
                 Updates = new Dictionary<string, ImageUpdateInfo>(_updates),
                 LastCheckAt = LastCheckAt
             };
-            await File.WriteAllTextAsync(_persistPath, JsonSerializer.Serialize(model));
+            await Whiskers.Services.Persistence.DurableFile.WriteAllTextAsync(_persistPath, JsonSerializer.Serialize(model));   // never half written (R1-35)
         }
         catch (Exception ex)
         {
