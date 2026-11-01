@@ -4839,7 +4839,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>A scheduled task needs an owner: sign in with an account that has an email address.</value>
   </data>
   <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
-    <value>guardrails.json could not be read or is invalid. Every change is refused (saving this page included) and agents and MCP clients get no tool. Repair or remove guardrails.json on the host and restart Whiskers; without the file the safe default is created. The previous file was kept next to it as guardrails.json.unreadable-&lt;timestamp&gt;.</value>
+    <value>guardrails.json could not be read or is invalid. Every change is refused (saving this page included) and agents and MCP clients get no tool. Repair guardrails.json on the host, or remove it together with guardrails.json.bak, and restart Whiskers; without either file the safe default is created. The previous file was kept next to it as guardrails.json.unreadable-&lt;timestamp&gt;.</value>
   </data>
   <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
     <value>Fail-closed (configuration unreadable)</value>

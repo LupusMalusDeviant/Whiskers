@@ -50,10 +50,8 @@ public class ChatHistoryStore : IChatHistoryStore
             .ToList();
         var json = System.Text.Json.JsonSerializer.Serialize(new UserChatHistory { Messages = toSave },
             new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
-        // Atomic write: a crash mid-write must not leave a truncated/corrupt history file.
-        var tmp = path + ".tmp";
-        await File.WriteAllTextAsync(tmp, json);
-        File.Move(tmp, path, overwrite: true);
+        // A crash or power loss mid-write must not leave a truncated/corrupt history file (R1-35).
+        await Whiskers.Services.Persistence.DurableFile.WriteAllTextAsync(path, json);
     }
 
     public async Task ClearAsync(string userEmail)

@@ -4839,7 +4839,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Eine geplante Aufgabe braucht einen Besitzer: Melde dich mit einem Konto an, das eine E-Mail-Adresse hat.</value>
   </data>
   <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
-    <value>guardrails.json konnte nicht gelesen werden oder ist ungültig. Jede Änderung wird abgelehnt (auch das Speichern dieser Seite), Agenten und MCP-Clients bekommen kein Werkzeug. Reparieren oder entfernen Sie guardrails.json auf dem Host und starten Sie Whiskers neu; ohne Datei wird die sichere Standardkonfiguration angelegt. Die bisherige Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;.</value>
+    <value>guardrails.json konnte nicht gelesen werden oder ist ungültig. Jede Änderung wird abgelehnt (auch das Speichern dieser Seite), Agenten und MCP-Clients bekommen kein Werkzeug. Reparieren Sie guardrails.json auf dem Host oder entfernen Sie sie zusammen mit guardrails.json.bak, und starten Sie Whiskers neu; ohne beide Dateien wird die sichere Standardkonfiguration angelegt. Die bisherige Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;.</value>
   </data>
   <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
     <value>Gesperrt (Konfiguration unlesbar)</value>

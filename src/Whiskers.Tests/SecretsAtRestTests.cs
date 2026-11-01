@@ -275,9 +275,9 @@ public partial class SecretsAtRestTests : IDisposable
         var settingsBefore = File.ReadAllBytes(_paths.AppSettingsJson);
         var vault = await Vault();
         var servers = await Servers();
-        // Neither file can be replaced: the temporary file each write goes through is a directory.
-        Directory.CreateDirectory(_paths.ServersJson + ".tmp");
-        Directory.CreateDirectory(_paths.AppSettingsJson + ".tmp");
+        // Neither file can be written (as on a full or read-only disk).
+        DurableFile.FailingWrites[Path.GetFullPath(_paths.ServersJson)] = 0;
+        DurableFile.FailingWrites[Path.GetFullPath(_paths.AppSettingsJson)] = 0;
 
         await Migrate(vault, servers);   // no exception: the start goes on
 
@@ -286,8 +286,8 @@ public partial class SecretsAtRestTests : IDisposable
         Assert.Equal(_cloudKey, CloudCredentials.KeyOf(servers.GetServer("hetz")!, vault));
 
         // Fixed by the next start: the vault already holds both credentials under the same keys.
-        Directory.Delete(_paths.ServersJson + ".tmp");
-        Directory.Delete(_paths.AppSettingsJson + ".tmp");
+        DurableFile.FailingWrites.TryRemove(Path.GetFullPath(_paths.ServersJson), out _);
+        DurableFile.FailingWrites.TryRemove(Path.GetFullPath(_paths.AppSettingsJson), out _);
         var restartedVault = await Vault();
         var restarted = await Servers();
         await Migrate(restartedVault, restarted);

@@ -247,12 +247,13 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         Changed?.Invoke();
     }
 
-    /// <summary>Enforces <see cref="GuardrailPolicy.FailClosed"/> until <c>guardrails.json</c> is repaired (or removed,
-    /// which recreates the SafeDefault) on the host and Whiskers restarted. The unreadable file is kept next to it.</summary>
+    /// <summary>Enforces <see cref="GuardrailPolicy.FailClosed"/> until <c>guardrails.json</c> is repaired (or removed
+    /// together with <c>guardrails.json.bak</c>, which recreates the SafeDefault) on the host and Whiskers restarted. The
+    /// unreadable file is kept next to it.</summary>
     private void FailClosed(string reason, Exception? ex)
     {
         _state = new State(new GuardrailConfig(), reason);
-        _logger?.LogError(ex, "Guardrails: {Reason} Every mutation is refused until guardrails.json is repaired or removed on the host and Whiskers is restarted",
+        _logger?.LogError(ex, "Guardrails: {Reason} Every mutation is refused until guardrails.json is repaired, or removed together with guardrails.json.bak, on the host and Whiskers is restarted",
             reason);
         try
         {

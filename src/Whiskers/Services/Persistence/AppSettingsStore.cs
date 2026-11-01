@@ -199,9 +199,8 @@ public sealed class AppSettingsStore : IAppSettingsStore
     {
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        var tmp = _path + ".tmp";
-        await File.WriteAllTextAsync(tmp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        File.Move(tmp, _path, overwrite: true);
+        // Flushed before the rename: a power loss never leaves the settings half written (R1-35).
+        await DurableFile.WriteAllTextAsync(_path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static void EnsureNoVaultOnlyValue(string section, JsonNode? value)

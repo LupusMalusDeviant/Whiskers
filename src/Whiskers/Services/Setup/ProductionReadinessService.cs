@@ -30,6 +30,7 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly IAppSettingsStore? _appSettings;
     private readonly Whiskers.Services.Agent.IAgentSettingsStore? _agentSettings;
     private readonly VaultKeyRingRepository? _keyRing;
+    private readonly Whiskers.Configuration.DataPathOptions? _dataPaths;
 
     public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
         IServerConfigService? servers = null, IAppSettingsStore? appSettings = null,
@@ -37,6 +38,7 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         VaultKeyRingRepository? keyRing = null)
     {
         _keyRing = keyRing;
+        _dataPaths = dataPaths;
         _config = config;
         _vault = vault;
         _scopeFactory = scopeFactory;
@@ -154,6 +156,26 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 : "Keine Auto-Update-Policy aktiv — Updates bleiben vollständig manuell (bewusste Entscheidung ist auch okay).",
             "image-updates", "Image-Updates öffnen"));
 
+        // R1-35: a JSON store that could not be read since the start (recovered from its previous generation), and the
+        // unreadable copies kept in the data directory — they outlast the restart that usually follows a power loss.
+        var recovered = JsonStoreRecovery.Recovered;
+        var kept = CorruptCopies();
+        checks.Add(new ReadinessCheck(
+            "Datenspeicher lesbar",
+            recovered.Count == 0 && kept.Count == 0,
+            recovered.Count == 0 && kept.Count == 0
+                ? "Jede Speicherdatei (Rollen, Whitelist, Vault, Server, Berechtigungen …) ist lesbar; keine beschädigte Datei liegt im Datenverzeichnis."
+                : string.Join(" ", new[]
+                  {
+                      recovered.Count == 0 ? null
+                          : "Seit dem Start aus der vorigen Fassung wiederhergestellt — die letzte Änderung kann fehlen; "
+                            + "Rollen, Whitelist, MCP-Schlüssel und Vault auf einen wieder geltenden, entzogenen Zugang prüfen: "
+                            + string.Join(", ", recovered.Select(r => Path.GetFileName(r.Path))) + ".",
+                      kept.Count == 0 ? null
+                          : "Unlesbare Dateien aufbewahrt (prüfen, dann löschen): " + string.Join(", ", kept) + ".",
+                  }.Where(s => s is not null)),
+            null, null));
+
         // 5) Non-root / hardened profile. The hardened compose runs the container as uid 10001;
         // a privileged (root) process signals that the default profile is in use.
         var nonRoot = !Environment.IsPrivilegedProcess;
@@ -176,6 +198,24 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             null, null));
 
         return checks;
+    }
+
+    /// <summary>The unreadable store copies (<c>*.corrupt-*</c>, R1-35; the guardrails' <c>*.unreadable-*</c>) in the
+    /// data directory, relative to it.</summary>
+    private List<string> CorruptCopies()
+    {
+        var root = _dataPaths?.RootDir;
+        if (root is null || !Directory.Exists(root)) return [];
+        try
+        {
+            return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Where(f => Path.GetFileName(f).Contains(".corrupt-", StringComparison.Ordinal)
+                            || Path.GetFileName(f).Contains(".unreadable-", StringComparison.Ordinal))
+                .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
+                .Where(f => !f.StartsWith("backups/", StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
     }
 
     /// <summary>The vault-backed settings (R1-30) still stored in plaintext in app-settings.json or agent-settings.json, by

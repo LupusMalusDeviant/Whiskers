@@ -3,6 +3,8 @@ using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Guardrails;
 
+using Whiskers.Services.Persistence;
+
 namespace Whiskers.Tests;
 
 /// <summary>
@@ -62,8 +64,8 @@ public sealed class PolicyChangeAuditTests : IDisposable
     {
         var store = new GuardrailStore(filePath: FilePath);
         await store.InitializeAsync();
-        // The temp file the store writes first cannot be created: a directory is in its place.
-        Directory.CreateDirectory(FilePath + ".tmp");
+        // The file cannot be written (as on a full or read-only disk).
+        DurableFile.FailingWrites[Path.GetFullPath(FilePath)] = 0;
         var config = store.Config;
         config.Presets[0].Policy.ReadOnlyMode = true;
         config.Presets[0].Policy.ProtectedResources.Clear();

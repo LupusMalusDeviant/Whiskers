@@ -52,7 +52,11 @@ public static class StagedRestoreValidator
             {
                 using var stream = File.OpenRead(path);
                 if (StoreTypes.TryGetValue(file, out var type))
-                    JsonSerializer.Deserialize(stream, type, StoreOptions);
+                {
+                    // A literal null is no store: the start refuses it (R1-35), so the restore does too.
+                    if (JsonSerializer.Deserialize(stream, type, StoreOptions) is null)
+                        throw new JsonException("The file holds null.");
+                }
                 else
                 {
                     using var document = JsonDocument.Parse(stream);

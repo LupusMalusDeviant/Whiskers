@@ -15,6 +15,8 @@ using Whiskers.Services.ServerConfig;
 using Whiskers.Services.Vault;
 using Whiskers.Services.Workloads.Kubernetes;
 
+using Whiskers.Services.Persistence;
+
 namespace Whiskers.Tests.ComponentTests;
 
 /// <summary>R1-11, on the Servers page's own save path: a kubeconfig change takes effect only with the saved server
@@ -75,7 +77,7 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
         Assert.Equal("yaml-A", _vault.GetSecret(KubernetesClientCache.KubeconfigKeyOf(live)));
 
         Set(page, "_kubeconfigYaml", "yaml-B");
-        Directory.CreateDirectory(_path + ".tmp");   // the retry cannot write servers.json
+        DurableFile.FailingWrites[Path.GetFullPath(_path)] = 0;   // the retry cannot write servers.json
         await Assert.ThrowsAnyAsync<Exception>(() => Persist(page));
 
         live = _servers.GetServer(server.Id)!;

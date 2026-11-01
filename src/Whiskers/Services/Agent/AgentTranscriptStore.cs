@@ -89,11 +89,11 @@ public sealed class AgentTranscriptStore : IAgentTranscriptStore
         return result;
     }
 
-    public Task ClearAsync(string userEmail)
+    public async Task ClearAsync(string userEmail)
     {
-        var path = GetPath(userEmail);
-        try { if (File.Exists(path)) File.Delete(path); } catch { /* egal */ }
-        return Task.CompletedTask;
+        // With the previous generation (R1-35): a cleared conversation must not come back from the .bak.
+        try { await StoreFor(userEmail).DeleteAsync(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort, as before */ }
     }
 
     private string GetPath(string email)
