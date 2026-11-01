@@ -118,7 +118,15 @@ public static class BackupArchiver
                 hasDatabase = true;
             if (kind is BackupEntryKind.Manifest && entry.DataStream is { } ds)
             {
-                try { manifest = await JsonSerializer.DeserializeAsync<SelfBackupManifest>(ds, cancellationToken: ct); }
+                try
+                {
+                    manifest = await JsonSerializer.DeserializeAsync<SelfBackupManifest>(ds, cancellationToken: ct);
+                    if (manifest is not null)   // an explicit null overrides the empty defaults
+                    {
+                        manifest.MetricsMigrations ??= [];
+                        manifest.IdentityMigrations ??= [];
+                    }
+                }
                 catch (JsonException) { throw new InvalidDataException("Refusing an archive whose manifest.json is not valid."); }
             }
         }, ct);

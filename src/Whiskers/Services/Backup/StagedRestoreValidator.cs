@@ -104,7 +104,8 @@ public static class StagedRestoreValidator
             }
 
             CheckHistory(connection, "__EFMigrationsHistory", manifest.MetricsMigrations, "metrics");
-            CheckHistory(connection, "__IdentityMigrationsHistory", manifest.IdentityMigrations, "identity");
+            CheckHistory(connection, Whiskers.Services.Persistence.DatabaseRegistration.IdentityMigrationsHistoryTable,
+                manifest.IdentityMigrations, "identity");
             CheckStartCanMigrate(connection, manifest);
         }
         catch (SqliteException ex)

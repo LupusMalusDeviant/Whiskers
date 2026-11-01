@@ -327,10 +327,12 @@ public class BackupServiceTests
         finally { Cleanup(sp, root); }
     }
 
-    [Fact]
-    public async Task A_database_whose_history_is_behind_its_tables_is_refused_before_anything_is_committed()
+    [Theory]
+    [InlineData("history-behind")]   // the start would run the next migration against tables it already holds
+    [InlineData("table-dropped")]    // the history is complete, but the start reads a table that is gone
+    [InlineData("column-dropped")]
+    public async Task A_database_the_start_cannot_use_is_refused_before_anything_is_committed(string damage)
     {
-        // The start would run the next migration against tables it already holds and stop — every start.
         var maintenance = new MaintenanceStateService();
         var (svc, paths, root, sp) = NewService(vaultKey: null, maintenance, migrate: true);
         try
@@ -352,12 +354,21 @@ public class BackupServiceTests
             {
                 connection.Open();
                 using var command = connection.CreateCommand();
-                command.CommandText = "DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" <> $first";
+                command.CommandText = damage switch
+                {
+                    "history-behind" => "DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" <> $first",
+                    "table-dropped" => "DROP TABLE \"AuditLog\"",
+                    _ => "ALTER TABLE \"AuditLog\" DROP COLUMN \"Details\"",
+                };
                 command.Parameters.AddWithValue("$first", metrics[0]);
                 command.ExecuteNonQuery();
             }
-            var archive = await CraftManifestArchive(root,
-                new SelfBackupManifest { Provider = "sqlite", MetricsMigrations = [metrics[0]], IdentityMigrations = identity }, db);
+            var archive = await CraftManifestArchive(root, new SelfBackupManifest
+            {
+                Provider = "sqlite",
+                MetricsMigrations = damage == "history-behind" ? [metrics[0]] : metrics,
+                IdentityMigrations = identity,
+            }, db);
 
             Assert.True((await svc.ValidateArchiveAsync(archive)).Ok);   // the manifest alone looks fine
             var ex = await Assert.ThrowsAsync<BackupValidationException>(() => svc.BeginRestoreAsync(archive, "tester"));

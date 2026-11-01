@@ -586,9 +586,11 @@ public sealed class BackupService : IBackupService
     private readonly record struct PreparedRestore(string TarGzPath, SelfBackupManifest Manifest, bool Encrypted, string? DecryptTemp,
         long ExtractedBytes);
 
-    // R1-32: the start migrates the restored database; one it cannot bring up to date (a history behind its tables)
-    // would stop every start after the marker is consumed. So the start's own migration runs first on a copy, with
-    // the app's migrations, and a failure refuses the restore. SQLite only: a PostgreSQL archive holds no database.
+    // R1-32: the start migrates the restored database and then reads it; one it cannot bring up to date (a history
+    // behind its tables) or whose tables lack what the model maps would stop every start after the marker is
+    // consumed. So the start's own migration runs first on a copy, with the app's migrations, then every mapped table
+    // and column is read once; a failure refuses the restore. SQLite only: a PostgreSQL archive holds no database.
+    // The probe logs nothing of its own: its messages would read as being about the live database.
     private async Task ProbeMigrationAsync(string stagedDb, CancellationToken ct)
     {
         if (!File.Exists(stagedDb)) return;
@@ -600,15 +602,21 @@ public sealed class BackupService : IBackupService
         {
             File.Copy(stagedDb, probe);
             await using (var metrics = new MetricsDbContext(new DbContextOptionsBuilder<MetricsDbContext>()
-                .UseSqlite(connection, sql => sql.MigrationsAssembly("Whiskers.Migrations.Sqlite")).Options))
-                await DatabaseInitializer.InitializeAsync(metrics, _logger, ct);
+                .UseSqlite(connection, sql => sql.MigrationsAssembly(DatabaseRegistration.SqliteMigrationsAssembly)).Options))
+            {
+                await DatabaseInitializer.InitializeAsync(metrics, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, ct);
+                await ReadEveryMappedColumnAsync(metrics, ct);
+            }
             await using (var identity = new WhiskersIdentityDbContext(new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
                 .UseSqlite(connection, sql =>
                 {
-                    sql.MigrationsAssembly("Whiskers.Migrations.Sqlite");
-                    sql.MigrationsHistoryTable("__IdentityMigrationsHistory");
+                    sql.MigrationsAssembly(DatabaseRegistration.SqliteMigrationsAssembly);
+                    sql.MigrationsHistoryTable(DatabaseRegistration.IdentityMigrationsHistoryTable);
                 }).Options))
+            {
                 await identity.Database.MigrateAsync(ct);
+                await ReadEveryMappedColumnAsync(identity, ct);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -620,6 +628,36 @@ public sealed class BackupService : IBackupService
         {
             TryDeleteDir(probeDir);
         }
+    }
+
+    // SELECT of every column the model maps, per table, with no rows: fails on a table or column that is missing.
+    private static async Task ReadEveryMappedColumnAsync(DbContext db, CancellationToken ct)
+    {
+        var tables = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var entity in db.Model.GetEntityTypes())
+        {
+            var table = entity.GetTableName();
+            if (table is null) continue;
+            var store = Microsoft.EntityFrameworkCore.Metadata.StoreObjectIdentifier.Table(table, entity.GetSchema());
+            if (!tables.TryGetValue(table, out var columns)) tables[table] = columns = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in entity.GetProperties())
+                if (property.GetColumnName(store) is { } column) columns.Add(column);
+        }
+        static string Quote(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+        var connection = db.Database.GetDbConnection();
+        await connection.OpenAsync(ct);
+        try
+        {
+            foreach (var (table, columns) in tables)
+            {
+                if (columns.Count == 0) continue;
+                await using var command = connection.CreateCommand();
+                // Names from the app's own model, quoted: no input from the archive reaches this text.
+                command.CommandText = $"SELECT {string.Join(", ", columns.Select(Quote))} FROM {Quote(table)} LIMIT 0";
+                await command.ExecuteNonQueryAsync(ct);
+            }
+        }
+        finally { await connection.CloseAsync(); }
     }
 
     // Staging takes the extracted bytes and the swap a second copy of each target beside the live one; the pre-restore
