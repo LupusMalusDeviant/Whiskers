@@ -397,6 +397,15 @@ public sealed class TargetResolutionTests : IDisposable
         Assert.Equal("aaa111local", decided.Id);
         Assert.Equal("local", decided.ServerId);
         Assert.Equal(("recreate", "aaa111local", (string?)"local"), Assert.Single(_docker.Actions));
+
+        // R1-31: no vault here, so no rollback snapshot — the update went ahead and its result says it has no way back.
+        using var check = sp.CreateScope();
+        var checkDb = check.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        var history = Assert.Single(checkDb.UpdateHistory);
+        Assert.True(history.Success);
+        Assert.Contains("No rollback snapshot", history.Error);
+        Assert.Equal("OK (ohne Rollback-Snapshot)", Assert.Single(checkDb.UpdatePolicies).LastUpdateResult);
+        Assert.Empty(checkDb.UpdateRollbacks);
     }
 
     [Fact]

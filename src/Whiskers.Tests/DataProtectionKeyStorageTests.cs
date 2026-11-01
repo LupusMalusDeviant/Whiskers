@@ -70,6 +70,8 @@ public sealed class DataProtectionKeyStorageTests : IDisposable
         var text = KeyFilesText();
         Assert.DoesNotContain("masterKey", text);
         Assert.Contains("vaultProtected", text);
+        // Named without the assembly version: a key written by a newer build is still read after a downgrade.
+        Assert.Contains("decryptorType=\"Whiskers.Services.Vault.VaultXmlDecryptor, Whiskers\"", text);
         Assert.Equal(0, new VaultKeyRingRepository(_paths.KeysDir, vault, NullLogger<VaultKeyRingRepository>.Instance).CountPlaintextKeys());
 
         // A restart: a new vault instance on the same files, a new key ring read from the directory.

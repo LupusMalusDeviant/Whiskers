@@ -130,6 +130,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             }
 
             // Perform update
+            var noRollback = false;
             var history = new UpdateHistoryEntity
             {
                 ContainerId = container.Id,
@@ -166,7 +167,11 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         // survives even a crash mid-update). Inside the gateway, so a refused update keeps the
                         // previous rollback point. Best-effort — a snapshot failure must never abort the update.
                         try { await CaptureSnapshotAsync(container); }
-                        catch (Exception cex) { _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name); }
+                        catch (Exception cex)
+                        {
+                            _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name);
+                            noRollback = true;
+                        }
                         return await _docker.RecreateContainerAsync(container.Id, sid, progress);
                     }, ct);
                 if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval
@@ -199,7 +204,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 history.Success = true;
                 history.CompletedAt = DateTime.UtcNow;
                 policy.LastUpdated = DateTime.UtcNow;
-                policy.LastUpdateResult = "OK";
+                // R1-31: an update without a way back says so where its result is read.
+                policy.LastUpdateResult = noRollback ? "OK (ohne Rollback-Snapshot)" : "OK";
+                if (noRollback) history.Error = "No rollback snapshot was kept for this update; it cannot be rolled back from Whiskers.";
 
                 _updateStore.Remove(container.Id, container.ServerId);
                 _logger.LogInformation("Auto-update succeeded for {Container}", container.Name);
@@ -311,9 +318,11 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         var purpose = Whiskers.Services.Vault.ProtectedFields.RollbackSnapshot(container.ServerId, container.Name);
         if (_vault?.IsEnabled != true)
         {
-            // No plaintext snapshot, and no older one offered as the way back from this update either.
-            await db.UpdateRollbacks.Where(r => r.ContainerName == container.Name && r.ServerId == container.ServerId)
-                .ExecuteDeleteAsync();
+            // No plaintext snapshot, and no older one offered as the way back from this update either — removed so that
+            // an older plaintext one does not linger in the database file.
+            await Whiskers.Services.Vault.ProtectedFieldMigration.WithoutRemnantsAsync(db,
+                () => db.UpdateRollbacks.Where(r => r.ContainerName == container.Name && r.ServerId == container.ServerId).ExecuteDeleteAsync(),
+                _logger);
             throw new RollbackSnapshotUnavailableException();
         }
         var (oldImageId, cfg) = await _docker.CaptureRollbackSnapshotAsync(

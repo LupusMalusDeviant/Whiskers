@@ -120,7 +120,8 @@ The vault's key also derives the keys for the webhook secrets, the rollback snap
   credentials cannot be read; webhooks refuse every delivery until their secret is regenerated with a usable vault;
   rollback snapshots cannot be rolled back to; **everybody is signed out** — the key ring cannot be opened, so a new
   data-protection key is created and, while the vault is locked, kept in memory only (sign-in works, sessions end at
-  the next restart, nothing is written in plaintext). Setting the right key again restores all of it.
+  the next restart, no new key is written in plaintext; key files that were plaintext already stay so until the right
+  key is back, and the readiness check counts them). Setting the right key again restores all of it.
 - **Upgrade to R1-31:** nobody is signed out. Key files, webhook secrets and snapshots written in plaintext before are
   encrypted in place at the first start with a usable vault, and keep working.
 - **No `VAULT_KEY`:** the data-protection keys are written in plaintext as before; webhooks cannot be created or have

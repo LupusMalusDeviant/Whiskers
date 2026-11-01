@@ -582,7 +582,7 @@ public static class WhiskersPipelineExtensions
                 await Whiskers.Services.Vault.ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(),
                     app.Services.GetRequiredService<Whiskers.Services.Vault.IVaultService>(), fieldLogger);
             }
-            catch (Exception ex) { fieldLogger.LogError(ex, "Webhook secrets and rollback snapshots stored in plaintext could not be encrypted; they stay as they are"); }
+            catch (Exception ex) { fieldLogger.LogError(ex, "Webhook secrets and rollback snapshots stored in plaintext could not be encrypted; none was changed"); }
         }
 
         // R1-14: the approvals live in the metrics database, so they load only once its schema is current. Pending

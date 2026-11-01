@@ -148,6 +148,19 @@ public sealed class WebhookSecretTests : IDisposable
     }
 
     [Fact]
+    public async Task A_legacy_plaintext_secret_keeps_working_without_a_vault()
+    {
+        var wh = Seed(secret: "legacy-" + Guid.NewGuid().ToString("N"));
+        var noVault = new WebhookService(_sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+            planner: null!, NullLogger<WebhookService>.Instance);
+        var body = "{}"u8.ToArray();
+
+        var reply = await noVault.AcceptAsync(wh.WebhookId, new WebhookRequest(body, GitHubSignature: WebhookSignatures.Sign(wh.Secret, body)));
+
+        Assert.NotEqual(WebhookReply.Rejected, reply.Reply);
+    }
+
+    [Fact]
     public async Task A_secret_that_cannot_be_opened_refuses_every_delivery()
     {
         var created = await Service().CreateWebhookAsync(new WebhookEntity { Name = "ci", TargetId = "/x", Provider = WebhookSignatures.GitHub });

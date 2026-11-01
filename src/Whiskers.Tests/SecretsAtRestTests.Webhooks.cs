@@ -125,6 +125,49 @@ public partial class SecretsAtRestTests
     }
 
     [Fact]
+    public async Task A_migration_whose_value_does_not_read_back_changes_no_row()
+    {
+        await using var sp = MetricsDb();
+        using (var scope = sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.Webhooks.Add(new WebhookEntity { WebhookId = "first", Name = "a", Secret = "SECRET-A", TargetId = "/x" });
+            db.Webhooks.Add(new WebhookEntity { WebhookId = "second", Name = "b", Secret = "SECRET-B", TargetId = "/x" });
+            await db.SaveChangesAsync();
+        }
+        var vault = new UnreadableFor(await Vault(), ProtectedFields.WebhookSecret("second"));
+
+        using (var scope = sp.CreateScope())
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), vault, NullLogger.Instance));
+
+        using (var scope = sp.CreateScope())
+            Assert.Equal(["SECRET-A", "SECRET-B"],
+                scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Webhooks.OrderBy(w => w.WebhookId).Select(w => w.Secret).ToList());
+        TestSqlite.ClearPools(_root);
+    }
+
+    /// <summary>A usable vault whose values for one purpose do not read back.</summary>
+    private sealed class UnreadableFor(IVaultService inner, string purpose) : IVaultService
+    {
+        public bool IsEnabled => inner.IsEnabled;
+        public VaultKeyState KeyState => inner.KeyState;
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public List<VaultEntry> ListSecrets() => inner.ListSecrets();
+        public Task SetSecretAsync(string key, string plainValue, string? containerId = null, string? containerName = null, int? rotateAfterDays = null)
+            => throw new NotSupportedException();
+        public string? GetSecret(string key) => inner.GetSecret(key);
+        public Task DeleteSecretAsync(string key) => throw new NotSupportedException();
+        public List<VaultEntry> GetExpiringSecrets() => [];
+        public string? ProtectField(string p, string plaintext) => inner.ProtectField(p, plaintext);
+        public bool TryUnprotectField(string p, string stored, out string plaintext)
+        {
+            plaintext = "";
+            return p != purpose && inner.TryUnprotectField(p, stored, out plaintext);
+        }
+    }
+
+    [Fact]
     public async Task Without_a_usable_vault_no_snapshot_is_kept_and_no_older_one_is_offered()
     {
         var vault = await Vault();

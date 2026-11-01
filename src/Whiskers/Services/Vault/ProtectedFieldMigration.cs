@@ -33,28 +33,48 @@ public static class ProtectedFieldMigration
             snapshot.ConfigJson = Protect(vault, ProtectedFields.RollbackSnapshot(snapshot.ServerId, snapshot.ContainerName), snapshot.ConfigJson);
 
         if (webhooks.Count + snapshotRows.Count == 0) return;
-        // The replaced plaintext must not linger in the database files: SQLite zeroes the freed space and folds the
-        // write-ahead log back; PostgreSQL rewrites the two (small) tables without their dead row versions.
+        await WithoutRemnantsAsync(db, () => db.SaveChangesAsync(ct), logger, ct);
+        logger.LogInformation("Encrypted {Secrets} webhook secret(s) and {Snapshots} rollback snapshot(s) stored in plaintext before",
+            webhooks.Count, snapshotRows.Count);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="write"/> — one that replaces or deletes plaintext webhook secrets or snapshots — so the
+    /// plaintext does not linger in the database files: SQLite zeroes the freed space and folds the write-ahead log
+    /// back; PostgreSQL rewrites the two (small) tables without their dead row versions. The write is committed either
+    /// way; a clean-up that could not finish is logged, not thrown. PostgreSQL's own WAL segments and replicas are
+    /// outside the app's reach.
+    /// </summary>
+    internal static async Task WithoutRemnantsAsync(MetricsDbContext db, Func<Task> write, ILogger logger, CancellationToken ct = default)
+    {
         var sqlite = db.Database.IsSqlite();
-        if (sqlite)
+        if (!sqlite)
         {
-            await db.Database.OpenConnectionAsync(ct);
-            await db.Database.ExecuteSqlRawAsync("PRAGMA secure_delete = ON;", ct);
+            await write();
+            try { await db.Database.ExecuteSqlRawAsync("VACUUM FULL \"Webhooks\", \"UpdateRollbacks\";", ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Webhook secrets and rollback snapshots are encrypted or removed, but the old row versions are not removed yet (VACUUM FULL failed)");
+            }
+            return;
         }
+
+        await db.Database.OpenConnectionAsync(ct);
         try
         {
-            await db.SaveChangesAsync(ct);
-            if (sqlite)
-                await db.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(TRUNCATE);", ct);
-            else
-                await db.Database.ExecuteSqlRawAsync("VACUUM FULL \"Webhooks\", \"UpdateRollbacks\";", ct);
+            await db.Database.ExecuteSqlRawAsync("PRAGMA secure_delete = ON;", ct);
+            await write();
+            await using var checkpoint = db.Database.GetDbConnection().CreateCommand();
+            checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            await using var result = await checkpoint.ExecuteReaderAsync(ct);
+            // (busy, log frames, checkpointed frames): busy means a reader held the log, and the old pages stay in it.
+            if (await result.ReadAsync(ct) && result.GetInt64(0) != 0)
+                logger.LogWarning("The database log could not be folded back yet (busy); plaintext replaced just now stays in it until the next checkpoint");
         }
         finally
         {
-            if (sqlite) await db.Database.CloseConnectionAsync();
+            await db.Database.CloseConnectionAsync();
         }
-        logger.LogInformation("Encrypted {Secrets} webhook secret(s) and {Snapshots} rollback snapshot(s) stored in plaintext before",
-            webhooks.Count, snapshotRows.Count);
     }
 
     /// <summary>How many webhook secrets and rollback snapshots are stored in plaintext (for the readiness check).</summary>

@@ -47,7 +47,17 @@ public static class VaultKeyRing
 
     /// <summary>The placeholder Data Protection reads back: our decryptor named, our encrypted element inside.</summary>
     internal static XElement Placeholder(Type decryptor, XElement encrypted)
-        => new(EncryptedSecret, new XAttribute(DecryptorType, decryptor.AssemblyQualifiedName!), encrypted);
+        => new(EncryptedSecret, new XAttribute(DecryptorType, TypeName(decryptor)), encrypted);
+
+    /// <summary>A decryptor's type name without the assembly version (<c>Namespace.Type, Whiskers</c>): Data Protection
+    /// writes the full assembly-qualified name, and a key written by a newer build would not be read by an older one
+    /// after a downgrade — everybody signed out.</summary>
+    internal static string TypeName(Type decryptor) => $"{decryptor.FullName}, {decryptor.Assembly.GetName().Name}";
+
+    /// <summary>Whether a placeholder's decryptor type names <paramref name="decryptor"/>, with or without a version.</summary>
+    internal static bool Names(XElement placeholder, Type decryptor)
+        => (string?)placeholder.Attribute(DecryptorType) is { } name
+           && (name == decryptor.AssemblyQualifiedName || name == TypeName(decryptor));
 }
 
 /// <summary>Encrypts a key's secret with the vault. When the vault is not usable it encrypts nothing: the element is
@@ -125,8 +135,10 @@ public sealed class VaultKeyRingRepository(string directory, IVaultService vault
         {
             var element2 = new XElement(element);
             var marked = element2.Descendants(VaultKeyRing.EncryptedSecret)
-                .Where(p => (string?)p.Attribute(VaultKeyRing.DecryptorType) == typeof(PassThroughXmlDecryptor).AssemblyQualifiedName)
+                .Where(p => VaultKeyRing.Names(p, typeof(PassThroughXmlDecryptor)))
                 .ToList();
+            foreach (var placeholder in element2.Descendants(VaultKeyRing.EncryptedSecret).Where(p => VaultKeyRing.Names(p, typeof(VaultXmlDecryptor))))
+                placeholder.SetAttributeValue(VaultKeyRing.DecryptorType, VaultKeyRing.TypeName(typeof(VaultXmlDecryptor)));
             if (marked.Any(p => p.Elements().Single().Name == VaultKeyRing.MemoryOnly))
             {
                 _memory.Add(element2);
@@ -155,22 +167,30 @@ public sealed class VaultKeyRingRepository(string directory, IVaultService vault
         var count = 0;
         lock (_gate)
         {
+            // File by file: one that cannot be encrypted stays as it was (and is said), the others are still done.
             foreach (var file in System.IO.Directory.EnumerateFiles(directory, "*.xml").ToList())
             {
-                var root = XElement.Load(file);
-                var plain = PlaintextSecrets(root);
-                if (plain.Count == 0) continue;
-                foreach (var secret in plain)
+                try
                 {
-                    var text = secret.ToString(SaveOptions.DisableFormatting);
-                    var stored = vault.ProtectField(ProtectedFields.DataProtectionKey, text)
-                        ?? throw new InvalidOperationException("The vault is not usable.");
-                    if (!vault.TryUnprotectField(ProtectedFields.DataProtectionKey, stored, out var back) || back != text)
-                        throw new InvalidOperationException("An encrypted data-protection key did not read back; nothing was changed.");
-                    secret.ReplaceWith(VaultKeyRing.Placeholder(typeof(VaultXmlDecryptor), new XElement(VaultKeyRing.VaultProtected, stored)));
+                    var root = XElement.Load(file);
+                    var plain = PlaintextSecrets(root);
+                    if (plain.Count == 0) continue;
+                    foreach (var secret in plain)
+                    {
+                        var text = secret.ToString(SaveOptions.DisableFormatting);
+                        var stored = vault.ProtectField(ProtectedFields.DataProtectionKey, text)
+                            ?? throw new InvalidOperationException("The vault is not usable.");
+                        if (!vault.TryUnprotectField(ProtectedFields.DataProtectionKey, stored, out var back) || back != text)
+                            throw new InvalidOperationException("An encrypted data-protection key did not read back.");
+                        secret.ReplaceWith(VaultKeyRing.Placeholder(typeof(VaultXmlDecryptor), new XElement(VaultKeyRing.VaultProtected, stored)));
+                    }
+                    Write(file, root);
+                    count++;
                 }
-                Write(file, root);
-                count++;
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException or InvalidOperationException)
+                {
+                    logger.LogError(ex, "The data-protection key file {File} could not be encrypted; it stays as it is", Path.GetFileName(file));
+                }
             }
         }
         if (count > 0) logger.LogInformation("Encrypted {Count} data-protection key file(s) stored in plaintext before", count);
@@ -202,7 +222,15 @@ public sealed class VaultKeyRingRepository(string directory, IVaultService vault
     // A temporary file beside it, then a replace: a crash leaves the old file or the new one, never half of one.
     private static void Write(string path, XElement element)
     {
-        System.IO.Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var dir = Path.GetDirectoryName(path)!;
+        System.IO.Directory.CreateDirectory(dir);
+        // Readable by the app's user only (D-04), where the platform has such modes; a directory the app does not own
+        // keeps its mode.
+        if (!OperatingSystem.IsWindows())
+        {
+            try { File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write))
         {
