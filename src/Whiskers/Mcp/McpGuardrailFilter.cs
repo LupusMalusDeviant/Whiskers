@@ -143,7 +143,7 @@ public static class McpGuardrailFilter
         };
         var result = outcome.Status switch
         {
-            MutationStatus.Executed when outcome.Verification == VerificationStatus.Failed => McpCallResult.VerificationFailed,
+            MutationStatus.Failed when outcome.Verification == VerificationStatus.Failed => McpCallResult.VerificationFailed,
             MutationStatus.Executed => McpCallResult.Executed,
             MutationStatus.Denied => McpCallResult.Denied,
             MutationStatus.PendingApproval => McpCallResult.PendingApproval,
@@ -154,6 +154,10 @@ public static class McpGuardrailFilter
         return outcome.Status switch
         {
             MutationStatus.Executed => outcome.Value!,
+            // R1-36: the call ran but its effect is not there — an error with what the read-back found, never the
+            // tool's success text.
+            MutationStatus.Failed when outcome.Verification == VerificationStatus.Failed =>
+                Refuse(outcome.Reason ?? "The call ran, but its effect could not be verified."),
             // The tool answered but reported a failure: the client gets the tool's own answer, marked as an error.
             MutationStatus.Failed when outcome.Error is null && outcome.Value is { } answer => AsError(answer),
             // The tool threw: rethrow so the MCP server reports it exactly as before the gateway existed.

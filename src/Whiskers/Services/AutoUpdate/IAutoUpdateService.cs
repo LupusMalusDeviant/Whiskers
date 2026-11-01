@@ -18,4 +18,7 @@ public interface IAutoUpdateService
     Task<List<UpdateRollbackEntity>> GetRollbacksAsync();
     [MutatingOperation("container.rollback")]
     Task<string> RollbackAsync(long rollbackId);
+    // R1-36: consumes the snapshot (and marks the update history) once the gateway verified the rollback — called
+    // after the gated rollback succeeded, so a rollback that did not come up keeps its way back.
+    Task CompleteRollbackAsync(long rollbackId);
 }

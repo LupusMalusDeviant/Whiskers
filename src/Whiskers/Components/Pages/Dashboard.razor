@@ -985,6 +985,8 @@
             var rollbackId = snap.Id;
             var msg = await Mutations.RunAsync("container.rollback", new { containerId = container.Id, name = container.Name, serverId = container.ServerId, rollbackId },
                 _ => AutoUpdate.RollbackAsync(rollbackId));
+            // Verified by the gateway: only now is the snapshot used up.
+            await AutoUpdate.CompleteRollbackAsync(rollbackId);
             Snackbar.Add(msg, Severity.Success);
             await RefreshAll();
         }

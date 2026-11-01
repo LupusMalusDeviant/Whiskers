@@ -172,9 +172,14 @@ public class MutationGatewayTests
 
         var outcome = await gateway.ExecuteAsync(Request(), (_, _) => Task.FromResult(1));
 
-        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        // R1-36: a call whose effect is not there is no success — Failed, the value withheld; the verification says
+        // the call itself ran.
+        Assert.Equal(cleanReason ? MutationStatus.Executed : MutationStatus.Failed, outcome.Status);
         Assert.Equal(result, outcome.Verification);
         Assert.Equal(cleanReason, outcome.Reason is null);
+        Assert.Equal(cleanReason ? 1 : 0, outcome.Value);
+        Assert.Equal(cleanReason, outcome.Error is null);
+        if (!cleanReason) Assert.IsType<MutationVerificationFailedException>(outcome.Error);
     }
 
     [Fact]

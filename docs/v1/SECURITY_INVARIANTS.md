@@ -99,8 +99,8 @@ of the third.
 
 | ID | Invariant | Status | Evidence / gap | Test | WP |
 |---|---|---|---|---|---|
-| INV-43 | Every mutating capability declares a verifier. The recorded outcome is `Verified`, `Failed` or `NotVerifiable` and is never inferred from transport status. | ❌ | Verification is absent on most paths. Since R1-20 the Agent History of a direct MCP call records the call's own outcome (a failed verification as `VerificationFailed`), not the HTTP status. TA-30, B-19. | `McpCallOutcomeTests`; `VerificationOutcomeTests` *(planned, WP2)* | WP2 |
-| INV-44 | Every recovery feature the UI or docs offer actually runs. A setting that is not implemented is not shown. | ❌ | `AutoRollback` is persisted (default on) and never executed. TA-29. | `AutoRollbackTests` *(planned, WP9)* | WP9 |
+| INV-43 | Every mutating capability declares a verifier. The recorded outcome is `Verified`, `Failed` or `NotVerifiable` and is never inferred from transport status. | ⚠️ | R1-36: the container capabilities (start, stop, restart, remove, update, create, rollback) and a single-container `app.deploy` that names its container read the container back (a one-shot container that exited 0 counts as started); an effect that is not there makes the outcome `Failed` with verification `Failed` — never a success for a page, the agent, MCP or the audit, the value withheld — and a read-back that cannot be made counts as failed. A rollback named only by its snapshot id, and a deployment that names no container (`deploy_app`, compose, Git deploy), record `NotVerifiable`; the other capabilities still record `NotVerifiable` (R1-37). Since R1-20 the Agent History of a direct MCP call records the call's own outcome (a failed verification as `VerificationFailed`), not the HTTP status. TA-30, B-19. | `McpCallOutcomeTests`, `VerificationOutcomeTests`, `MutationGatewayTests.The_capability_verifier_decides_the_verification` | WP2 |
+| INV-44 | Every recovery feature the UI or docs offer actually runs. A setting that is not implemented is not shown. | ✅ | R1-36: `AutoRollback` (default on) rolls a failed automatic update back — its new container is not verified or is unhealthy afterwards (a recreate that threw left or put the old one back) — through the gateway (`container.rollback`, verified) on the AutoUpdate owner's authority; the history records whether it worked; the snapshot is consumed only by a rollback that is verified. With rollback on, a snapshot that failed stops the update; without a usable vault the update runs without a way back and says so (R1-31). TA-29. | `AutoRollbackTests` | WP9 |
 
 ## 8. Audit
 
@@ -137,8 +137,8 @@ of the third.
 
 | Status | Count |
 |---|---|
-| ✅ | 38 |
-| ⚠️ | 13 (INV-01, 08, 13, 17, 19, 20, 21, 25, 41, 45, 52, 56, 57) |
-| ❌ | 9 (INV-05, 09, 18, 38, 40, 43, 44, 58, 60) |
+| ✅ | 39 |
+| ⚠️ | 14 (INV-01, 08, 13, 17, 19, 20, 21, 25, 41, 43, 45, 52, 56, 57) |
+| ❌ | 7 (INV-05, 09, 18, 38, 40, 58, 60) |
 | ❓ | 0 |
 | **Total** | **60** |

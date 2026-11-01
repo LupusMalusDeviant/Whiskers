@@ -151,11 +151,11 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 
 | ID | Tool | Level | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
-| M-01 | `start_container` | write | ❌ | GW ✅ + details | INV-43 |
-| M-02 | `stop_container` | write | ❌ | GW ✅ + details | INV-43 |
-| M-03 | `restart_container` | write | ❌ | GW ✅ + details | INV-43 |
-| M-04 | `update_container` | write | ❌ no health check; rollback snapshot only | GW ✅ + details | INV-43, 44, 53 |
-| M-05 | `deploy_app` | admin | ❌ | GW ✅ + details | INV-43 (volumes checked since R1-16) |
+| M-01 | `start_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
+| M-02 | `stop_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
+| M-03 | `restart_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
+| M-04 | `update_container` | write | ✅ the new container (same name) read back (R1-36); no health check; a failed snapshot is a warning, not a stop (that rule is AutoUpdate's) | GW ✅ + details | INV-43, 44, 53 |
+| M-05 | `deploy_app` | admin | ⚠️ `NotVerifiable` (the tool answers with text, R1-37) | GW ✅ + details | INV-43 (volumes checked since R1-16) |
 | M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | GW ✅ + details | INV-43, 51 |
 | M-07 | `deploy_compose` | admin | ❌ | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16) |
 | M-08 | `execute_command` | admin | ❌ | GW ✅ + details (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
@@ -206,10 +206,10 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 
 | ID | Path | Actor | AuthN | AuthZ at run | Policy | Approval | Execution | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|---|---|---|
-| S-01 | Scheduler cron (incl. custom root command, prune, retention `rm -f`) | Automation on behalf of `CreatedBy` (since WP2 step 2.3; typed owner id and `CreatedVia` provenance since R1-03); ownerless tasks refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies; agent-created tasks keep agent rules | n/a | ✅ owner re-checked per run; ⚠️ grace period | ✅ PC-D1 rules (kill switch, protected) | none (owner approved by scheduling); a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `TaskExecutor` (incl. self-backup and retention deletes); key-owned tasks keep the key's rules | ❌ | ✅ gateway AL + `TaskRunHistory` | INV-04 (grace), 43, 45 |
-| S-02 | AutoUpdate | Automation on behalf of the feature owner (Settings); ownerless refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies | n/a | ✅ re-checked per update; ⚠️ grace period (opt-in) | ✅ PC-D1 rules | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `RecreateContainerAsync` | ⚠️ 15 s state check, no rollback | ✅ gateway AL + `UpdateHistory` | INV-04 (grace), 44, 45, 59 |
+| S-01 | Scheduler cron (incl. custom root command, prune, retention `rm -f`) | Automation on behalf of `CreatedBy` (since WP2 step 2.3; typed owner id and `CreatedVia` provenance since R1-03); ownerless tasks refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies; agent-created tasks keep agent rules | n/a | ✅ owner re-checked per run; ⚠️ grace period | ✅ PC-D1 rules (kill switch, protected) | none (owner approved by scheduling); a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `TaskExecutor` (incl. self-backup and retention deletes); key-owned tasks keep the key's rules | ⚠️ container restart read back (R1-36); other task types ❌ (R1-37) | ✅ gateway AL + `TaskRunHistory` | INV-04 (grace), 43, 45 |
+| S-02 | AutoUpdate | Automation on behalf of the feature owner (Settings); ownerless refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies | n/a | ✅ re-checked per update; ⚠️ grace period (opt-in) | ✅ PC-D1 rules | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `RecreateContainerAsync` | ✅ recreate read back + 15 s state check; a failed one rolled back through the gateway, verified (R1-36) | ✅ gateway AL + `UpdateHistory` | INV-04 (grace), 44, 45, 59 |
 | S-03 | AutoPatch nightly | Automation on behalf of the Admin who took it over; **no owner → no run**; authority loss (also mid-cycle) suspends + notifies (R1-04) | n/a | ✅ config opt-in + owner re-checked per cycle | ✅ PC-D1 rules for the cycle; own exclude list per container | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway (`autopatch.run` per night + `container.update` per container) → `img-update.sh` as root | ✅ script verify + rollback | ✅ gateway AL + notification | INV-45 |
-| S-04 | Webhook `POST /api/webhooks/{id}` | Automation on behalf of the webhook owner (R1-09); ownerless or authority lost → refused, switched off + notified | ✅ HMAC + provider freshness rule + durable delivery dedup, serialized per target (R1-10) | ✅ owner re-checked per delivery | ✅ PC-D1 rules (kill switch, protected, resolved target) | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → restart / recreate / compose up (each planned container decided) / Git deploy (then on the app owner) as root; server = the webhook's, or `local` (R1-06, same as the Test gate) | ❌ | ✅ gateway AL (every delivery) + `WebhookLogs` | INV-42, 45, 57 |
+| S-04 | Webhook `POST /api/webhooks/{id}` | Automation on behalf of the webhook owner (R1-09); ownerless or authority lost → refused, switched off + notified | ✅ HMAC + provider freshness rule + durable delivery dedup, serialized per target (R1-10) | ✅ owner re-checked per delivery | ✅ PC-D1 rules (kill switch, protected, resolved target) | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → restart / recreate / compose up (each planned container decided) / Git deploy (then on the app owner) as root; server = the webhook's, or `local` (R1-06, same as the Test gate) | ⚠️ restart / recreate read back (R1-36); compose up and Git deploy ❌ (R1-37) | ✅ gateway AL (every delivery) + `WebhookLogs` | INV-42, 45, 57 |
 | S-05 | Git deploy (via S-04 or U-29) | U-29: the person; S-04: the app owner (R1-08) | owner re-checked each run | ✅ gateway (stored app, revision; S-04 via automation runner) | ❌ | ❌ | clone + compose up of the decided snapshot (planned, explicit `-p` / `-f`; every planned container decided — R1-07/08) | ❌ | ✅ gateway | INV-04, 20, 24, 41 (branch), 45 |
 | S-06 | Health / log / CVE / cert monitors | system | — | — | — | — | no direct mutation; emits events → A-03 | — | — | INV-27 (event text → prompt) |
 | S-07 | VPN bootstrap at startup | system | — | — | — | — | `EnsureUpAsync` local | ❌ | ❌ log only | INV-41 (E-08), 45 |
@@ -251,16 +251,16 @@ mTLS carries the server's diff.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
-| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-02 | Dashboard remove (force) | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-03 | Dashboard update | Operator | ❌ | GW ✅ (R1-21) | INV-43, 53 |
-| U-04 | Dashboard rollback | Operator | ❌ | GW ✅ (R1-21) | INV-43, 53 |
-| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ✅ Docker read back (R1-36); K8s ❌ (R1-37) | GW ✅ (R1-21) | INV-43 |
+| U-02 | Dashboard remove (force) | Admin | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43 |
+| U-03 | Dashboard update | Operator | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43, 53 |
+| U-04 | Dashboard rollback | Operator | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43, 53 |
+| U-05 | Container detail start/stop/restart/remove | Operator / Admin | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43 |
 | U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | GW ✅ (R1-21) | INV-51 |
 | U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | ❌ | GW ✅ (R1-21) | — |
 | U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | GW ✅ (R1-21) | — |
 | U-09 | Container detail DB backup | Admin | ❌ | GW ✅ (R1-21) | — |
-| U-10 | Deploy form / raw compose | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-10 | Deploy form / raw compose | **Admin** (WP1) | ⚠️ the form's container read back (R1-36); raw compose ❌ (R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-11 | App store template / registry image | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-12 | Compose editor | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-13 | Networks create/remove | Admin | ❌ | GW ✅ (R1-21) | — (MCP admin since R1-05) |

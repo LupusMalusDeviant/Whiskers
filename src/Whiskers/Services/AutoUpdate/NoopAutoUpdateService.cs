@@ -20,4 +20,5 @@ public sealed class NoopAutoUpdateService : IAutoUpdateService
     // Unreachable in normal flow: GetRollbacksAsync returns none, so the UI never offers a rollback to invoke.
     public Task<string> RollbackAsync(long rollbackId)
         => throw new InvalidOperationException("The Image Updates module is disabled — rollback is not available.");
+    public Task CompleteRollbackAsync(long rollbackId) => Task.CompletedTask;
 }
