@@ -908,7 +908,7 @@ public sealed class WebhookMutationTests : IDisposable
         // The Docker service of the webhook (lookup and planning) starts failing whenever a test says so.
         var docker = ThrowingDocker.Wrap(_docker, () => _dockerThrows, () => _dockerTimesOut);
         return new(_sp.GetRequiredService<IServiceScopeFactory>(), docker, _host, new ComposePlanner(docker, _host),
-            NullLogger<WebhookService>.Instance, locks: _locks);
+            NullLogger<WebhookService>.Instance, locks: _locks, vault: TestVault.Usable);
     }
 
     /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>

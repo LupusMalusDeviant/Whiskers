@@ -1,0 +1,165 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Models;
+using Whiskers.Services.AutoUpdate;
+using Whiskers.Services.Docker;
+using Whiskers.Services.Persistence;
+using Whiskers.Services.Vault;
+using Whiskers.Services.Webhooks;
+
+namespace Whiskers.Tests;
+
+// R1-31 (INV-52): the inbound webhooks' signing secrets and the rollback snapshots (a container's full configuration,
+// its environment included) are stored in the database encrypted with a vault-derived key. After a save or the
+// start-up migration neither the database nor a self-backup holds them in plaintext, and both still work.
+public partial class SecretsAtRestTests
+{
+    private ServiceProvider MetricsDb()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_paths.DbPath}"));
+        var sp = services.BuildServiceProvider();
+        using var scope = sp.CreateScope();
+        scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
+        return sp;
+    }
+
+    /// <summary>A container whose configuration carries a secret in its environment, as Docker reports it.</summary>
+    private static (string Json, string EnvSecret) SnapshotWithSecret()
+    {
+        var envSecret = "DBPASS-" + Guid.NewGuid().ToString("N");
+        return ($"{{\"Name\":\"web\",\"Config\":{{\"Env\":[\"DB_PASSWORD={envSecret}\"]}}}}", envSecret);
+    }
+
+    private static AutoUpdateService Updates(IServiceProvider sp, IDockerService docker, IVaultService? vault)
+        => new(sp.GetRequiredService<IServiceScopeFactory>(), docker, null!, null!, null!, null!, null!,
+            NullLogger<AutoUpdateService>.Instance, vault);
+
+    private static ComponentTests.UiCreatedResourceAuditTests.Stub<IDockerService> SnapshotDocker(string json, Action<string>? rolledBackWith = null)
+        => new ComponentTests.UiCreatedResourceAuditTests.Stub<IDockerService>()
+            .On(nameof(IDockerService.CaptureRollbackSnapshotAsync), _ => Task.FromResult(("sha256:old", json)))
+            .On(nameof(IDockerService.RollbackContainerAsync), args =>
+            {
+                rolledBackWith?.Invoke((string)args[2]!);
+                return Task.FromResult("web");
+            });
+
+    private static readonly ContainerInfo Web = new() { Id = "web-1", Name = "web", ServerId = "local", Image = "web:1" };
+
+    [Fact]
+    public async Task Webhook_secrets_and_rollback_snapshots_are_stored_encrypted_and_keep_working()
+    {
+        var vault = await Vault();
+        await using var sp = MetricsDb();
+        var hooks = new WebhookService(sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+            planner: null!, NullLogger<WebhookService>.Instance, vault: vault);
+        var created = await hooks.CreateWebhookAsync(new WebhookEntity { Name = "ci", TargetId = "/x" });
+        var rotated = await hooks.RegenerateSecretAsync(created.WebhookId);
+        var (json, envSecret) = SnapshotWithSecret();
+        string? rolledBackWith = null;
+        var updates = Updates(sp, SnapshotDocker(json, j => rolledBackWith = j).Object, vault);
+        await updates.CaptureSnapshotAsync(Web);
+
+        TestSqlite.ClearPools(_root);
+        await CreatePlaintextBackupAsync(vault);
+        AssertNoPlaintext(created.Secret, rotated, envSecret);
+
+        // Both still work: a delivery signed with the secret is verified, the rollback gets the configuration back.
+        var body = "{}"u8.ToArray();
+        var reply = await hooks.AcceptAsync(created.WebhookId, new WebhookRequest(body, GitHubSignature: WebhookSignatures.Sign(rotated, body)));
+        Assert.NotEqual(WebhookReply.Rejected, reply.Reply);
+        var snapshot = Assert.Single(await updates.GetRollbacksAsync());
+        await updates.RollbackAsync(snapshot.Id);
+        Assert.Equal(json, rolledBackWith);
+        TestSqlite.ClearPools(_root);
+    }
+
+    [Fact]
+    public async Task The_migration_encrypts_plaintext_webhook_secrets_and_snapshots_and_both_keep_working()
+    {
+        var secret = "WHSECRET-" + Guid.NewGuid().ToString("N");
+        var (json, envSecret) = SnapshotWithSecret();
+        await using var sp = MetricsDb();
+        WebhookEntity hook;
+        using (var scope = sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            hook = new WebhookEntity { Name = "legacy", Secret = secret, TargetId = "/x" };
+            db.Webhooks.Add(hook);
+            db.UpdateRollbacks.Add(new UpdateRollbackEntity
+            {
+                ContainerId = "web-1", ContainerName = "web", ServerId = "local", OldImageRef = "sha256:old", ConfigJson = json,
+                CapturedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Without a usable vault nothing changes, and the plaintext values keep working.
+        using (var scope = sp.CreateScope())
+            await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), await Vault(key: null),
+                NullLogger.Instance);
+        using (var scope = sp.CreateScope())
+            Assert.Equal((1, 1), await ProtectedFieldMigration.CountPlaintextAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>()));
+
+        var vault = await Vault();
+        using (var scope = sp.CreateScope())
+            await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), vault, NullLogger.Instance);
+        using (var scope = sp.CreateScope())
+            Assert.Equal((0, 0), await ProtectedFieldMigration.CountPlaintextAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>()));
+
+        TestSqlite.ClearPools(_root);
+        await CreatePlaintextBackupAsync(vault);
+        AssertNoPlaintext(secret, envSecret);
+
+        var hooks = new WebhookService(sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+            planner: null!, NullLogger<WebhookService>.Instance, vault: vault);
+        var body = "{}"u8.ToArray();
+        var reply = await hooks.AcceptAsync(hook.WebhookId, new WebhookRequest(body, GitHubSignature: WebhookSignatures.Sign(secret, body)));
+        Assert.NotEqual(WebhookReply.Rejected, reply.Reply);
+        string? rolledBackWith = null;
+        var updates = Updates(sp, SnapshotDocker(json, j => rolledBackWith = j).Object, vault);
+        await updates.RollbackAsync(Assert.Single(await updates.GetRollbacksAsync()).Id);
+        Assert.Equal(json, rolledBackWith);
+        TestSqlite.ClearPools(_root);
+    }
+
+    [Fact]
+    public async Task Without_a_usable_vault_no_snapshot_is_kept_and_no_older_one_is_offered()
+    {
+        var vault = await Vault();
+        await using var sp = MetricsDb();
+        var (json, envSecret) = SnapshotWithSecret();
+        await Updates(sp, SnapshotDocker(json).Object, vault).CaptureSnapshotAsync(Web);
+
+        var inspected = false;
+        var docker = SnapshotDocker(json).On(nameof(IDockerService.CaptureRollbackSnapshotAsync), _ =>
+        {
+            inspected = true;
+            return Task.FromResult(("sha256:new", json));
+        }).Object;
+        var off = Updates(sp, docker, await Vault(key: null));
+        await Assert.ThrowsAsync<RollbackSnapshotUnavailableException>(() => off.CaptureSnapshotAsync(Web));
+        Assert.False(inspected);
+        Assert.Empty(await off.GetRollbacksAsync());
+
+        TestSqlite.ClearPools(_root);
+        AssertNoPlaintext(envSecret);
+    }
+
+    [Fact]
+    public async Task A_snapshot_that_cannot_be_opened_is_not_rolled_back_to()
+    {
+        var vault = await Vault();
+        await using var sp = MetricsDb();
+        var (json, _) = SnapshotWithSecret();
+        var rolledBack = false;
+        await Updates(sp, SnapshotDocker(json).Object, vault).CaptureSnapshotAsync(Web);
+
+        var locked = Updates(sp, SnapshotDocker(json, _ => rolledBack = true).Object, await Vault("another-passphrase-entirely"));
+        var snapshot = Assert.Single(await locked.GetRollbacksAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => locked.RollbackAsync(snapshot.Id));
+        Assert.False(rolledBack);
+        TestSqlite.ClearPools(_root);
+    }
+}

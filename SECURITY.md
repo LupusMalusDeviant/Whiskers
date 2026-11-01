@@ -100,14 +100,32 @@ built in).
   the MCP key hashes (`mcp-permissions.json`), provider tokens and the database. Vault-stored secrets are
   encrypted at rest (AES-256-GCM, key derived from `VAULT_KEY` or `VAULT_KEY_FILE`): cloud API keys, the DNS token,
   the notification channels' credentials (SMTP password, chat and bot tokens, webhook URLs and secrets, the ntfy topic
-  and token), the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials. The secrets of inbound
-  webhooks are still stored in plaintext in their store, and so are the SSH private keys (`ssh-keys/`) and the mTLS
-  client key; those and the other files in the data directory rely on file-system and volume protection. Whoever can read that directory, or run code in the Whiskers
+  and token), the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials. Encrypted with a key
+  derived from the vault's: the inbound webhooks' signing secrets and the rollback snapshots (a container's full
+  configuration, its environment included) in the database, and the data-protection key ring (`keys/`, sign-in cookies
+  and antiforgery). The SSH private keys (`ssh-keys/`) and the mTLS client key are still stored in plaintext; those and
+  the other files in the data directory rely on file-system and volume protection. Whoever can read that directory, or run code in the Whiskers
   container, can act as Whiskers.
 - **The default `docker-compose.yml` profile is privileged** (host PID namespace) so it can manage its own
   host. Use `docker-compose.hardened.yml` when Whiskers only manages remote hosts.
 - **Secrets** (`.env`, API keys, tokens, certificates, the encrypted vault, the SQLite DB) live under
   `/app/data` / `.env`, both gitignored and volume-mounted, never baked into the image or committed.
+
+## VAULT_KEY loss, change and rotation
+
+The vault's key also derives the keys for the webhook secrets, the rollback snapshots and the data-protection key ring
+(R1-31). There is no in-place rotation of `VAULT_KEY` yet; what a change or loss does:
+
+- **Changed or lost key:** the vault is locked (it is left unchanged until the right key is set again). Stored
+  credentials cannot be read; webhooks refuse every delivery until their secret is regenerated with a usable vault;
+  rollback snapshots cannot be rolled back to; **everybody is signed out** — the key ring cannot be opened, so a new
+  data-protection key is created and, while the vault is locked, kept in memory only (sign-in works, sessions end at
+  the next restart, nothing is written in plaintext). Setting the right key again restores all of it.
+- **Upgrade to R1-31:** nobody is signed out. Key files, webhook secrets and snapshots written in plaintext before are
+  encrypted in place at the first start with a usable vault, and keep working.
+- **No `VAULT_KEY`:** the data-protection keys are written in plaintext as before; webhooks cannot be created or have
+  their secret regenerated; updates keep no rollback snapshot. The readiness check names what is still in plaintext.
+- **Backups:** a self-backup holds the encrypted values; restoring it needs the same `VAULT_KEY`.
 
 ## Hardening checklist for operators
 
@@ -119,8 +137,9 @@ built in).
 - Keep the email whitelist tight; review roles under *Settings > Authentication*.
 - Issue MCP API keys with the **least** permission level needed.
 - Keep the agent's guardrail presets restrictive; only widen autonomy deliberately.
-- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (it still holds plaintext inbound
-  webhook secrets, SSH and mTLS client keys, and the data-protection keys). Credentials entered in the UI need the vault;
+- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (it still holds plaintext SSH and
+  mTLS client keys). Without a usable vault Whiskers creates no webhook and keeps no rollback snapshot (an update then
+  goes ahead without a way back), and writes the data-protection keys as before. Credentials entered in the UI need the vault;
   credentials set by environment variables (`AICHAT_API_KEY`, `AGENT_API_KEY`, `MATTERMOST_WEBHOOK_URL`, …) are not
   stored by Whiskers — keep them in a secret store or a mode-0600 `.env`, never in the image.
 - Keep dependencies current, Dependabot config ships in `.github/dependabot.yml`.

@@ -6,6 +6,14 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-31: **Webhook secrets, rollback snapshots and the sign-in key ring are encrypted.** The inbound webhooks' signing
+  secrets and the rollback snapshots (a container's full configuration, its environment variables included) are
+  stored in the database encrypted with a key derived from the vault's, and so is each key of the data-protection key
+  ring (sign-in cookies, antiforgery). Without a usable vault a webhook cannot be created or have its secret
+  regenerated, and an update keeps no rollback snapshot (it goes ahead and says so). **Upgrade:** plaintext secrets,
+  snapshots and key files are encrypted in place at the first start with a usable vault; nobody is signed out.
+  **Changing or losing `VAULT_KEY`** now also signs everybody out and leaves webhooks and snapshots unreadable until
+  the right key is back (see SECURITY.md). A readiness line counts what is still in plaintext.
 - R1-30: **Notification and AI credentials are kept in the vault.** The SMTP password, the Matrix, Telegram and ntfy
   tokens, the ntfy topic, the Mattermost, Discord, Slack and custom-webhook URLs, the custom webhook's signing secret,
   and the API keys of the AI chat and the agent are now stored encrypted in the vault; app-settings.json and

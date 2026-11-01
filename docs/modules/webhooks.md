@@ -21,6 +21,11 @@ service) and resolves `IWebhookService` per request, so it can't be gated by the
 `NoopWebhookService` default keeps that resolution working when the module is off — its `AcceptAsync` rejects
 every delivery (400, not a 500 from an unresolved service).
 
+**Secrets (R1-31).** A webhook's signing secret is shown once, when it is created or regenerated, and stored in the
+database encrypted with a key derived from the vault's (bound to the webhook). Creating a webhook or regenerating its
+secret needs a usable vault (`VAULT_KEY`); a secret that cannot be opened (vault locked or another key) refuses every
+delivery until it is regenerated. Secrets stored in plaintext before are encrypted at the first start with the vault.
+
 **Calling a webhook (R1-10).** Each webhook has a signature scheme:
 
 - `github` — `X-Hub-Signature-256: sha256=<HMAC-SHA256(secret, body)>` (GitHub, Gitea). GitHub signs no time, so a

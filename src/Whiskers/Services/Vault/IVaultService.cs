@@ -28,6 +28,22 @@ public interface IVaultService
     /// stores nothing.
     /// </summary>
     Task<bool> AdoptLegacyCredentialAsync(string migrationKey, string plaintext) => Task.FromResult(false);
+
+    /// <summary>
+    /// R1-31 (INV-52): encrypts a value that is kept outside the vault — a webhook secret or a rollback snapshot in the
+    /// database, a data-protection key in its file — with a key derived from the vault's (AES-256-GCM, bound to
+    /// <paramref name="purpose"/>, so a value cannot be moved to another field or row). Null when the vault is not
+    /// usable: the caller then stores nothing (see <see cref="ProtectedFields"/>). The default (test doubles) is null.
+    /// </summary>
+    string? ProtectField(string purpose, string plaintext) => null;
+
+    /// <summary>Opens a value <see cref="ProtectField"/> returned for the same <paramref name="purpose"/>; false when the
+    /// vault is not usable, the key is another, or the value was changed or moved.</summary>
+    bool TryUnprotectField(string purpose, string stored, out string plaintext)
+    {
+        plaintext = "";
+        return false;
+    }
 }
 
 /// <summary>The vault key as the vault judged it at start (R1-28).</summary>

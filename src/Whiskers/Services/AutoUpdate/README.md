@@ -6,7 +6,7 @@ Scheduled **automatic container updates**. When an image update is detected ([`.
 
 | File | Purpose |
 |---|---|
-| `IAutoUpdateService.cs` / `AutoUpdateService.cs` | Background auto-update of container images; exposes the policy and update history for the UI. |
+| `IAutoUpdateService.cs` / `AutoUpdateService.cs` | Background auto-update of container images; exposes the policy and update history for the UI. R1-31 (INV-53): the rollback snapshot (full configuration, environment included) is stored encrypted with a vault-derived key bound to its container and server. Without a usable vault none is kept and an older one for that container is removed: `CaptureSnapshotAsync` throws `RollbackSnapshotUnavailableException`, the update goes ahead and the callers say it cannot be rolled back. A snapshot that cannot be opened is not rolled back to. |
 
 ## Behaviour notes
 

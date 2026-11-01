@@ -5138,4 +5138,13 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="AuditFinding_RetentionUnsigned" xml:space="preserve">
     <value>Der Retention-Checkpoint bei Kettenglied {0} ist nicht signiert: er wurde außerhalb von Whiskers angelegt.</value>
   </data>
+  <data name="Dashboard_Snackbar_NoRollbackSnapshot" xml:space="preserve">
+    <value>{0}: Es wurde kein Rollback-Snapshot angelegt – der Vault ist nicht nutzbar (VAULT_KEY fehlt oder ist falsch). Das Update läuft ohne Rückweg.</value>
+  </data>
+  <data name="Webhook_Error_SecretNeedsVault" xml:space="preserve">
+    <value>Das Signatur-Secret eines Webhooks wird im Vault abgelegt, und der Vault ist nicht nutzbar (VAULT_KEY fehlt oder ist falsch).</value>
+  </data>
+  <data name="Webhook_Test_SecretUnreadable" xml:space="preserve">
+    <value>Das Secret des Webhooks kann nicht gelesen werden: Der Vault ist nicht nutzbar (VAULT_KEY fehlt oder ist falsch).</value>
+  </data>
 </root>

@@ -38,7 +38,7 @@ public sealed class WebhookSecretTests : IDisposable
     /// touching them (validation failures) or is routed to the deploy-path guard (relative path).</summary>
     private WebhookService Service() => new(
         _sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!, planner: null!,
-        NullLogger<WebhookService>.Instance);
+        NullLogger<WebhookService>.Instance, vault: TestVault.Usable);
 
     private WebhookEntity Seed(string secret, bool enabled = true)
     {
@@ -126,7 +126,58 @@ public sealed class WebhookSecretTests : IDisposable
         using var scope = _sp.CreateScope();
         var stored = scope.ServiceProvider.GetRequiredService<MetricsDbContext>()
             .Webhooks.Single(w => w.WebhookId == wh.WebhookId);
-        Assert.Equal(fresh, stored.Secret);
+        // R1-31: stored encrypted, bound to this webhook — never the secret itself.
+        Assert.NotEqual(fresh, stored.Secret);
+        Assert.Equal(fresh, Whiskers.Services.Vault.ProtectedFields.Read(TestVault.Usable,
+            Whiskers.Services.Vault.ProtectedFields.WebhookSecret(wh.WebhookId), stored.Secret));
+    }
+
+    [Fact]
+    public async Task Without_a_usable_vault_creating_or_rotating_a_secret_is_refused_and_nothing_is_written()
+    {
+        var wh = Seed(secret: "old");
+        var noVault = new WebhookService(_sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+            planner: null!, NullLogger<WebhookService>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => noVault.CreateWebhookAsync(new WebhookEntity { Name = "ci", TargetId = "/x" }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => noVault.RegenerateSecretAsync(wh.WebhookId));
+
+        using var scope = _sp.CreateScope();
+        var rows = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Webhooks.ToList();
+        Assert.Equal("old", Assert.Single(rows).Secret);
+    }
+
+    [Fact]
+    public async Task A_secret_that_cannot_be_opened_refuses_every_delivery()
+    {
+        var created = await Service().CreateWebhookAsync(new WebhookEntity { Name = "ci", TargetId = "/x", Provider = WebhookSignatures.GitHub });
+        var body = "{}"u8.ToArray();
+        var signed = new WebhookRequest(body, GitHubSignature: WebhookSignatures.Sign(created.Secret, body));
+
+        // The vault is off: the encrypted secret is unreadable, so even a correctly signed delivery is refused.
+        var noVault = new WebhookService(_sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+            planner: null!, NullLogger<WebhookService>.Instance);
+        Assert.Equal(WebhookReply.Rejected, (await noVault.AcceptAsync(created.WebhookId, signed)).Reply);
+        var (success, _) = await noVault.TriggerSignedTestAsync(created.WebhookId);
+        Assert.False(success);
+    }
+
+    [Fact]
+    public async Task A_secret_copied_to_another_webhook_does_not_open_there()
+    {
+        var first = await Service().CreateWebhookAsync(new WebhookEntity { Name = "a", TargetId = "/x" });
+        var second = Seed(secret: "");
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var stored = db.Webhooks.Single(w => w.WebhookId == first.WebhookId).Secret;
+            db.Webhooks.Single(w => w.WebhookId == second.WebhookId).Secret = stored;
+            db.SaveChanges();
+        }
+        var body = "{}"u8.ToArray();
+        var reply = await Service().AcceptAsync(second.WebhookId,
+            new WebhookRequest(body, GitHubSignature: WebhookSignatures.Sign(first.Secret, body)));
+        Assert.Equal(WebhookReply.Rejected, reply.Reply);
     }
 
     [Fact]

@@ -548,6 +548,12 @@ public static class WhiskersPipelineExtensions
         foreach (var initializable in app.Services.GetServices<Whiskers.Services.IInitializable>().OrderBy(i => i.Order))
             await initializable.InitializeAsync(CancellationToken.None);
 
+        // R1-31: the vault has started — data-protection keys written in plaintext before are encrypted in place, before
+        // the key ring is first read (nobody is signed out by it).
+        var keyRingLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("VaultKeyRing");
+        try { app.Services.GetRequiredService<Whiskers.Services.Vault.VaultKeyRingRepository>().ProtectExistingKeys(); }
+        catch (Exception ex) { keyRingLogger.LogError(ex, "Data-protection keys stored in plaintext could not be encrypted; they stay as they are"); }
+
         // Bring the SQLite metrics database up to the current schema via EF Core migrations. On a legacy
         // EnsureCreated database (no migration history) this baselines onto migrations without recreating
         // existing tables — see Services/Persistence/DatabaseInitializer and docs/adr/0003.
@@ -566,6 +572,18 @@ public static class WhiskersPipelineExtensions
             app.Services.GetRequiredService<Whiskers.Configuration.DataPathOptions>(),
             app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>(),
             app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Restore"));
+
+        // R1-31: webhook secrets and rollback snapshots stored in plaintext before are encrypted, now the schema is current.
+        using (var scope = app.Services.CreateScope())
+        {
+            var fieldLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("ProtectedFieldMigration");
+            try
+            {
+                await Whiskers.Services.Vault.ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(),
+                    app.Services.GetRequiredService<Whiskers.Services.Vault.IVaultService>(), fieldLogger);
+            }
+            catch (Exception ex) { fieldLogger.LogError(ex, "Webhook secrets and rollback snapshots stored in plaintext could not be encrypted; they stay as they are"); }
+        }
 
         // R1-14: the approvals live in the metrics database, so they load only once its schema is current. Pending
         // agent approvals are cancelled here (their sessions are gone); approve-then-retry approvals and unused

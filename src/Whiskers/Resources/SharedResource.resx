@@ -5138,4 +5138,13 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AuditFinding_RetentionUnsigned" xml:space="preserve">
     <value>The retention checkpoint at link {0} is not signed: it was added outside Whiskers.</value>
   </data>
+  <data name="Dashboard_Snackbar_NoRollbackSnapshot" xml:space="preserve">
+    <value>{0}: no rollback snapshot was kept — the vault is not usable (VAULT_KEY missing or wrong). The update goes ahead without a way back.</value>
+  </data>
+  <data name="Webhook_Error_SecretNeedsVault" xml:space="preserve">
+    <value>A webhook's signing secret is stored in the vault, and the vault is not usable (VAULT_KEY missing or wrong).</value>
+  </data>
+  <data name="Webhook_Test_SecretUnreadable" xml:space="preserve">
+    <value>The webhook's secret cannot be read: the vault is not usable (VAULT_KEY missing or wrong).</value>
+  </data>
 </root>
