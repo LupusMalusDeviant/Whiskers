@@ -143,10 +143,8 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         ct.ThrowIfCancellationRequested();
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         if (_loadFailed) KeepUnreadableFile();
-        var temp = _path + ".tmp";
-        // The other features' blocks are written too, so they survive a restart until each is taken over.
-        File.WriteAllText(temp, JsonSerializer.Serialize(next, Json));
-        File.Move(temp, _path, overwrite: true);
+        // The other features' blocks are written too, so they survive a restart until each is taken over. Flushed (R1-35).
+        Whiskers.Services.Persistence.DurableFile.WriteAllText(_path, JsonSerializer.Serialize(next, Json));
     }
 
     /// <summary>Replaces the feature's entry and returns the one it replaced.</summary>
@@ -164,10 +162,8 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
             };
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             if (_loadFailed) KeepUnreadableFile();
-            var temp = _path + ".tmp";
-            // The other features' blocks are written too, so they survive a restart until each is taken over.
-            await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(next, Json), ct);
-            File.Move(temp, _path, overwrite: true);
+            // The other features' blocks are written too, so they survive a restart until each is taken over. Flushed (R1-35).
+            await Whiskers.Services.Persistence.DurableFile.WriteAllTextAsync(_path, JsonSerializer.Serialize(next, Json), ct: ct);
             Volatile.Write(ref _entries, next);
             _loadFailed = false;
             // The whole entry (owner, block and its reason) as a versioned diff in the gateway's event (R1-22): a

@@ -723,7 +723,7 @@ public class AutomationMutationRunnerTests
         {
             var store = new AutomationOwnerStore(paths, NullLogger<AutomationOwnerStore>.Instance);
             await store.SetAsync(IAutomationOwnerStore.AutoUpdate, OpsId);
-            Directory.CreateDirectory(paths.AutomationOwnersJson + ".tmp");   // the next write fails
+            Whiskers.Services.Persistence.DurableFile.FailingWrites[Path.GetFullPath(paths.AutomationOwnersJson)] = 0;   // the next write fails
 
             var saved = await store.SuspendAsync(IAutomationOwnerStore.AutoUpdate, OpsId, "its owner has no authority left");
 

@@ -280,6 +280,63 @@ public class JsonFileStoreRecoveryTests : IDisposable
     }
 
     [Fact]
+    public async Task A_directory_in_place_of_the_file_is_refused_not_seeded_as_a_first_run()
+    {
+        Directory.CreateDirectory(StorePath);   // a bind mount of a host file that does not exist
+        var store = new JsonFileStore<Doc>(StorePath);
+
+        Assert.True(store.Exists());
+        await Assert.ThrowsAsync<IOException>(() => store.LoadAsync());
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["WHISKERS_ADMIN_EMAIL"] = "admin@example.com",
+        }).Build();
+        await Assert.ThrowsAsync<IOException>(() => new RoleService(config, NullLogger<RoleService>.Instance, StorePath).InitializeAsync());
+        Assert.Empty(Directory.EnumerateFileSystemEntries(StorePath));
+    }
+
+    [Fact]
+    public async Task Guardrails_with_only_a_previous_generation_stay_fail_closed()
+    {
+        var path = Path.Combine(_dir, "guardrails.json");
+        var first = new Whiskers.Services.Guardrails.GuardrailStore(filePath: path);
+        await first.InitializeAsync();
+        await File.WriteAllTextAsync(path + ".bak", await File.ReadAllTextAsync(path));
+        File.Delete(path);
+
+        var restarted = new Whiskers.Services.Guardrails.GuardrailStore(filePath: path);
+        await restarted.InitializeAsync();
+
+        Assert.NotNull(restarted.LoadError);   // not a first run that recreates the SafeDefault
+    }
+
+    [Fact]
+    public async Task A_store_recovered_after_its_file_went_missing_keeps_the_owner_only_mode()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var store = new JsonFileStore<Doc>(StorePath);
+        await store.SaveAsync(Make(1));
+        File.SetUnixFileMode(StorePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        await store.SaveAsync(Make(2));
+        File.Delete(StorePath);
+
+        Assert.Equal(1, (await store.LoadAsync()).Version);
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(StorePath));
+    }
+
+    [Fact]
+    public void A_restore_refuses_a_store_holding_null()
+    {
+        var staging = Path.Combine(_dir, "staging");
+        Directory.CreateDirectory(staging);
+        File.WriteAllText(Path.Combine(staging, "roles.json"), "null");
+
+        Assert.Throws<BackupValidationException>(() => StagedRestoreValidator.Validate(staging, new SelfBackupManifest()));
+    }
+
+    [Fact]
     public async Task A_plaintext_secret_moved_out_stays_in_no_previous_generation()
     {
         var store = new JsonFileStore<Doc>(StorePath, holdsPlaintextSecret: d => d.Items.Contains("plaintext-secret"));

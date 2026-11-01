@@ -46,12 +46,13 @@ public class JsonFileStore<T> where T : class, new()
         try
         {
             var backup = _filePath + DurableFile.BackupSuffix;
+            ThrowIfNotAFile();
             if (!File.Exists(_filePath))
             {
                 // Only a store never written has neither; a file removed by hand while its previous generation is still
                 // there is recovered like an unreadable one.
                 if (!File.Exists(backup)) return new T();
-                return await RecoverAsync(backup, preservedAs: "(missing)", new FileNotFoundException("The file is missing.", _filePath));
+                return await RecoverAsync(backup, preservedAs: JsonStoreRecovery.Missing, new FileNotFoundException("The file is missing.", _filePath));
             }
 
             var json = await File.ReadAllTextAsync(_filePath);
@@ -92,7 +93,10 @@ public class JsonFileStore<T> where T : class, new()
 
     /// <summary>Whether the store was ever written: its file, or its previous generation alone (which
     /// <see cref="LoadAsync"/> recovers). A store with only a <c>.bak</c> is not a first run to seed.</summary>
-    public bool Exists() => File.Exists(_filePath) || File.Exists(_filePath + DurableFile.BackupSuffix);
+    /// A directory in the file's place (a bind mount of a missing host file) counts as existing, so that the load
+    /// refuses it instead of the caller seeding a first run.
+    public bool Exists() => File.Exists(_filePath) || File.Exists(_filePath + DurableFile.BackupSuffix)
+                            || Directory.Exists(_filePath) || Directory.Exists(_filePath + DurableFile.BackupSuffix);
 
     /// <summary>Removes the store with its previous generation (a reset, not a damage: nothing comes back).</summary>
     public async Task DeleteAsync()
@@ -121,6 +125,14 @@ public class JsonFileStore<T> where T : class, new()
             return _holdsPlaintextSecret?.Invoke(current) ?? false;
         }
         catch (JsonException) { return null; }
+    }
+
+    // A directory is no missing file: File.Exists says false for it, and the store would read as never written.
+    private void ThrowIfNotAFile()
+    {
+        foreach (var path in new[] { _filePath, _filePath + DurableFile.BackupSuffix })
+            if (Directory.Exists(path))
+                throw new IOException($"{path} is a directory, not a file; the store cannot be read.");
     }
 
     // "null" is no store: read as unreadable rather than as an empty one.

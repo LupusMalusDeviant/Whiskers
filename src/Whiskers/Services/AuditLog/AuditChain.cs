@@ -629,9 +629,8 @@ public sealed class AuditChain : IAuditChain
         {
             var dir = Path.GetDirectoryName(_checkpointFile);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            var tmp = _checkpointFile + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(checkpoint));
-            File.Move(tmp, _checkpointFile, overwrite: true);
+            // Flushed (R1-35): a checkpoint torn by a power loss would read as a tamper alarm.
+            Whiskers.Services.Persistence.DurableFile.WriteAllText(_checkpointFile, JsonSerializer.Serialize(checkpoint));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

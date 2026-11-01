@@ -15,11 +15,16 @@ public static class JsonStoreRecovery
 
     public static IReadOnlyList<JsonStoreRecoveryEvent> Recovered => Events.ToArray();
 
+    /// <summary><see cref="JsonStoreRecoveryEvent.PreservedAs"/> of a store whose file was missing (nothing to keep).</summary>
+    public const string Missing = "(missing)";
+
     internal static void Record(JsonStoreRecoveryEvent recovery)
     {
         Events.Enqueue(recovery);
-        Console.Error.WriteLine($"[store] {recovery.Path} could not be read and was restored from its previous generation; " +
-            $"the unreadable file was kept as {recovery.PreservedAs}.");
+        Console.Error.WriteLine(recovery.PreservedAs == Missing
+            ? $"[store] {recovery.Path} was missing and was restored from its previous generation."
+            : $"[store] {recovery.Path} could not be read and was restored from its previous generation; " +
+              $"the unreadable file was kept as {recovery.PreservedAs}.");
     }
 }
 

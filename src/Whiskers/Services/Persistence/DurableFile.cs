@@ -18,12 +18,11 @@ public static class DurableFile
 
     public static async Task WriteAllTextAsync(string path, string content, bool keepPrevious = false, CancellationToken ct = default)
     {
-        if (!FailingWrites.IsEmpty && FailingWrites.ContainsKey(Path.GetFullPath(path)))
-            throw new IOException($"{path} cannot be written.");
+        ThrowIfFailingForTests(path);
         var dir = Path.GetDirectoryName(Path.GetFullPath(path))!;
         Directory.CreateDirectory(dir);
         var temp = TempName(path);
-        UnixFileMode? mode = !OperatingSystem.IsWindows() && File.Exists(path) ? File.GetUnixFileMode(path) : null;
+        var mode = ModeOf(path);
         try
         {
             await WriteFlushedAsync(temp, Encoding.UTF8.GetBytes(content), mode, ct);
@@ -42,6 +41,50 @@ public static class DurableFile
         finally { TryDelete(temp); }
     }
 
+    /// <summary>The synchronous form, for writers that run under a synchronous lock (no previous generation).</summary>
+    public static void WriteAllText(string path, string content)
+    {
+        ThrowIfFailingForTests(path);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path))!;
+        Directory.CreateDirectory(dir);
+        var temp = TempName(path);
+        try
+        {
+            using (var stream = new FileStream(temp, Options(ModeOf(path), FileOptions.None)))
+            {
+                stream.Write(Encoding.UTF8.GetBytes(content));
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temp, path, overwrite: true);
+        }
+        finally { TryDelete(temp); }
+    }
+
+    // The mode of the file replaced, or of its previous generation when the file itself is gone (a recovery), so an
+    // owner-only store does not come back readable by others.
+    private static UnixFileMode? ModeOf(string path)
+    {
+        if (OperatingSystem.IsWindows()) return null;
+        if (File.Exists(path)) return File.GetUnixFileMode(path);
+        return File.Exists(path + BackupSuffix) ? File.GetUnixFileMode(path + BackupSuffix) : null;
+    }
+
+    private static void ThrowIfFailingForTests(string path)
+    {
+        if (!FailingWrites.IsEmpty && FailingWrites.ContainsKey(Path.GetFullPath(path)))
+            throw new IOException($"{path} cannot be written.");
+    }
+
+    private static FileStreamOptions Options(UnixFileMode? mode, FileOptions options)
+    {
+        var result = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, Options = options,
+        };
+        if (mode is { } m && !OperatingSystem.IsWindows()) result.UnixCreateMode = m;
+        return result;
+    }
+
     /// <summary>Tests only: full paths whose writes fail as on a full or read-only disk (empty in production).</summary>
     internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> FailingWrites = new(StringComparer.Ordinal);
 
@@ -53,12 +96,7 @@ public static class DurableFile
 
     private static async Task WriteFlushedAsync(string path, byte[] bytes, UnixFileMode? mode, CancellationToken ct)
     {
-        var options = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, Options = FileOptions.Asynchronous,
-        };
-        if (mode is { } m && !OperatingSystem.IsWindows()) options.UnixCreateMode = m;
-        await using var stream = new FileStream(path, options);
+        await using var stream = new FileStream(path, Options(mode, FileOptions.Asynchronous));
         await stream.WriteAsync(bytes, ct);
         stream.Flush(flushToDisk: true);
     }

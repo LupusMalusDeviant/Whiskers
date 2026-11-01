@@ -6,10 +6,11 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-- R1-35: **Settings files survive a power loss and say when they were damaged.** Every JSON store (roles, whitelist,
+- R1-35: **Settings files survive a power loss and say when they were damaged.** Every settings store (roles, whitelist,
   vault, servers, permissions, guardrails, triggers, …) is written to a flushed temporary file and renamed into place,
-  keeping the version before as `<file>.bak`; the CVE and image-update state, the agent and app settings and the chat
-  history are written the same way. A store that cannot be read is no longer the end of the start: Whiskers uses the
+  keeping the version before as `<file>.bak`; the CVE and image-update state, the agent and app settings, the chat
+  history, the automation owners, the known local accounts and the audit checkpoint are written the same way (without
+  a previous version). A store that cannot be read is no longer the end of the start: Whiskers uses the
   previous version, keeps the unreadable file as `<file>.corrupt-<time>` and shows both on the readiness card
   ("Datenspeicher lesbar") until the kept file is deleted. Without a readable previous version the start still stops —
   never with an empty, more permissive store. The guardrail policy is the exception: an unreadable `guardrails.json`

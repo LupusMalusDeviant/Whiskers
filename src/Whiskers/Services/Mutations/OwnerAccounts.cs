@@ -143,13 +143,11 @@ public sealed class OwnerAccounts : IOwnerAccounts
             change(known);
             if (existed && (known.Local.Count, known.Federated.Count) == before) return known;
             Directory.CreateDirectory(Path.GetDirectoryName(_knownPath)!);
-            var temp = _knownPath + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(new
+            Whiskers.Services.Persistence.DurableFile.WriteAllText(_knownPath, JsonSerializer.Serialize(new
             {
                 local = known.Local.Order(StringComparer.Ordinal),
                 federated = known.Federated.Order(StringComparer.Ordinal),
-            }, Json));
-            File.Move(temp, _knownPath, overwrite: true);
+            }, Json));   // flushed (R1-35)
             return known;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException

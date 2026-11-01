@@ -199,14 +199,17 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         return checks;
     }
 
-    /// <summary>The unreadable store copies (<c>*.corrupt-*</c>, R1-35) in the data directory, relative to it.</summary>
+    /// <summary>The unreadable store copies (<c>*.corrupt-*</c>, R1-35; the guardrails' <c>*.unreadable-*</c>) in the
+    /// data directory, relative to it.</summary>
     private List<string> CorruptCopies()
     {
         var root = _dataPaths?.RootDir;
         if (root is null || !Directory.Exists(root)) return [];
         try
         {
-            return Directory.EnumerateFiles(root, "*.corrupt-*", SearchOption.AllDirectories)
+            return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Where(f => Path.GetFileName(f).Contains(".corrupt-", StringComparison.Ordinal)
+                            || Path.GetFileName(f).Contains(".unreadable-", StringComparison.Ordinal))
                 .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
                 .Where(f => !f.StartsWith("backups/", StringComparison.Ordinal))
                 .Order(StringComparer.Ordinal).ToList();
