@@ -19,15 +19,15 @@ public class AgentSettingsStoreTests
     public async Task Saved_file_binds_back_through_the_config_system()
     {
         var path = TempPath();
+        var vaultKey = Whiskers.Services.Vault.VaultBackedSettings.NewKey("Agent", "ApiKey");
         await new AgentSettingsStore(path).SaveAsync(new AgentSettings
         {
             Enabled = true,
             Provider = "anthropic",
             Model = "claude-opus-4-8",
             Endpoint = "",
-            ApiKey = "sk-secret",
             MaxToolIterations = 5,
-        }, Admin);
+        }, Admin, Whiskers.Services.Vault.SecretFieldChange.Set(vaultKey));
 
         // Genau der Weg, den Program.cs nutzt: JSON-Datei → Config → Section "Agent" → AgentSettings.
         var config = new ConfigurationBuilder().AddJsonFile(path, optional: false).Build();
@@ -36,8 +36,27 @@ public class AgentSettingsStoreTests
         Assert.True(bound.Enabled);
         Assert.Equal("anthropic", bound.Provider);
         Assert.Equal("claude-opus-4-8", bound.Model);
-        Assert.Equal("sk-secret", bound.ApiKey);
+        // The key is only named (R1-30); the options read it from the vault.
+        Assert.Equal("", bound.ApiKey);
+        Assert.Equal(vaultKey, config["Agent:ApiKeyRef"]);
         Assert.Equal(5, bound.MaxToolIterations);
+    }
+
+    [Fact]
+    public async Task A_plaintext_api_key_is_refused_and_a_later_save_keeps_the_named_key()
+    {
+        var path = TempPath();
+        var store = new AgentSettingsStore(path);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.SaveAsync(new AgentSettings { ApiKey = "plain-" + Guid.NewGuid().ToString("N") }, Admin));
+        Assert.False(File.Exists(path));
+
+        var vaultKey = Whiskers.Services.Vault.VaultBackedSettings.NewKey("Agent", "ApiKey");
+        await store.SaveAsync(new AgentSettings { Provider = "openai" }, Admin, Whiskers.Services.Vault.SecretFieldChange.Set(vaultKey));
+        var previous = await store.SaveAsync(new AgentSettings { Provider = "anthropic" }, Admin);   // keep
+
+        Assert.Equal(vaultKey, previous!["ApiKeyRef"]!.GetValue<string>());
+        Assert.Equal(vaultKey, (await store.ReadSectionAsync())!["ApiKeyRef"]!.GetValue<string>());
     }
 
     [Fact]

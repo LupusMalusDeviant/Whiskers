@@ -10,6 +10,8 @@ direct MCP calls too and must not switch off with this module.
 ## What it registers (`ConfigureServices`, moved verbatim)
 
 - **AI chat:** `AiChatSettings`, the `AiChatService` HTTP client + `IAiChatService`, `IChatHistoryStore`.
+- **Credentials (R1-30):** the API keys of the AI chat and the agent are kept in the vault and bound from it
+  (`AddVaultBackedSecrets` for `AiChatSettings` and `AgentSettings`); the settings files only name the vault key.
 - **Agent:** `AgentSettings`, `IAgentProviderFactory`, `IAgentToolCatalog`, `IAgentToolInvoker`,
   `IApprovalCoordinator`, `IChatWidgetParser`, `IAgentService`, `IClaudeCodeRuntime`, `IAgentTranscriptStore`,
   `IAgentSettingsStore`.

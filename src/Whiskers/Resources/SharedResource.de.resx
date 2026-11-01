@@ -1943,6 +1943,30 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Settings_Dns_Error_NeedsVault" xml:space="preserve">
     <value>Ein DNS-Token braucht den Vault: VAULT_KEY (oder VAULT_KEY_FILE) setzen und neu starten. Ohne Vault läge der Token im Klartext.</value>
   </data>
+  <data name="SecretField_Stored" xml:space="preserve">
+    <value>Gespeichert (im Vault). Leer lassen, um ihn zu behalten.</value>
+  </data>
+  <data name="SecretField_NotSet" xml:space="preserve">
+    <value>Nicht gesetzt.</value>
+  </data>
+  <data name="SecretField_WillClear" xml:space="preserve">
+    <value>Wird beim Speichern entfernt.</value>
+  </data>
+  <data name="SecretField_Clear" xml:space="preserve">
+    <value>Gespeicherten Wert entfernen</value>
+  </data>
+  <data name="SecretField_UndoClear" xml:space="preserve">
+    <value>Gespeicherten Wert behalten</value>
+  </data>
+  <data name="Settings_Error_SecretNeedsVault" xml:space="preserve">
+    <value>Zugangsdaten zu speichern braucht den Vault: VAULT_KEY (oder VAULT_KEY_FILE) setzen und neu starten. Noch im Klartext gespeicherte Zugangsdaten wandern beim Speichern ebenfalls dorthin.</value>
+  </data>
+  <data name="Settings_Error_SecretChangedMeanwhile" xml:space="preserve">
+    <value>Zugangsdaten wurden inzwischen geändert. Seite neu laden und erneut speichern.</value>
+  </data>
+  <data name="Settings_Snackbar_SecretCleanupFailed" xml:space="preserve">
+    <value>Gespeichert. Ein bisheriger Zugangswert konnte nicht aus dem Vault gelöscht werden (der Vault ist nicht nutzbar, oder das Löschen wurde abgelehnt oder schlug fehl); er bleibt verschlüsselt und ungenutzt.</value>
+  </data>
   <data name="Servers_Error_CloudKeyChangedMeanwhile" xml:space="preserve">
     <value>Der Cloud-API-Key dieses Servers wurde inzwischen geändert. Seite neu laden und erneut speichern.</value>
   </data>

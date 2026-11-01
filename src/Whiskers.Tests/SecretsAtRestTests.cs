@@ -20,7 +20,7 @@ namespace Whiskers.Tests;
 
 // R1-29 (INV-52): cloud API keys and the DNS token are kept in the vault. After a save or the start-up migration no
 // file of the data directory — servers.json, app-settings.json, the database, a self-backup — holds them in plaintext.
-public class SecretsAtRestTests : IDisposable
+public partial class SecretsAtRestTests : IDisposable
 {
     private const string VaultKey = "secrets-at-rest-test-passphrase";
 
@@ -66,7 +66,7 @@ public class SecretsAtRestTests : IDisposable
     private AppSettingsStore AppSettings() => new(dataPaths: _paths);
 
     private async Task Migrate(IVaultService vault, IServerConfigService servers)
-        => await new CredentialVaultMigration(vault, servers, AppSettings(), NullLogger<CredentialVaultMigration>.Instance)
+        => await new CredentialVaultMigration(vault, servers, AppSettings(), NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths)
             .InitializeAsync();
 
     /// <summary>Every file below the data directory — gzip archives unpacked — must not contain <paramref name="secrets"/>.</summary>

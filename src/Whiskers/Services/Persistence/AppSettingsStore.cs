@@ -26,11 +26,22 @@ public interface IAppSettingsStore
     [Whiskers.Services.Mutations.MutatingOperation("config.save")]
     Task<JsonObject?> UpdateSectionAsync(string section, Func<JsonObject?, JsonObject> build);
 
+    /// <summary>Like <see cref="UpdateSectionAsync"/> for several sections in one file replacement (R1-30): either all
+    /// of them take effect or, when a build or the write fails, none. Returns each section as it was before.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("config.save")]
+    Task<IReadOnlyDictionary<string, JsonObject?>> UpdateSectionsAsync(IReadOnlyDictionary<string, Func<JsonObject?, JsonObject>> builds);
+
     /// <summary>R1-29 start-up migration: replaces the plaintext DNS token of app-settings.json by the vault key
     /// <paramref name="vaultRef"/> — only while the file still holds exactly <paramref name="plaintext"/> and names no
     /// vault key. It changes nothing else and can only remove a secret from the file, never write one, so it is not a
     /// <c>config.save</c>. Returns whether the file was rewritten.</summary>
     Task<bool> AdoptDnsTokenRefAsync(string plaintext, string vaultRef);
+
+    /// <summary>R1-30 start-up migration: replaces the plaintext <paramref name="property"/> of <paramref name="section"/>
+    /// by the vault key <paramref name="vaultRef"/> (only that setting's fixed migration key) — only while the file still
+    /// holds exactly <paramref name="plaintext"/> and names no vault key for it. Like <see cref="AdoptDnsTokenRefAsync"/>
+    /// it can only remove a secret from the file. Returns whether the file was rewritten.</summary>
+    Task<bool> AdoptSettingRefAsync(string section, string property, string plaintext, string vaultRef);
 }
 
 public sealed class AppSettingsStore : IAppSettingsStore
@@ -46,6 +57,9 @@ public sealed class AppSettingsStore : IAppSettingsStore
     private static readonly (string Section, string Field)[] VaultOnlyFields =
     [
         (DnsSettings.SectionName, nameof(DnsSettings.ApiToken)),
+        // R1-30: the notification channels' and the AI chat's credentials.
+        .. Whiskers.Services.Vault.VaultBackedSettings.AppSettingsSections
+            .SelectMany(s => Whiskers.Services.Vault.VaultBackedSettings.Fields[s].Select(p => (s, p))),
     ];
 
     public Task SaveSectionAsync<T>(string section, T value) =>
@@ -80,6 +94,62 @@ public sealed class AppSettingsStore : IAppSettingsStore
             await WriteRootAsync(root);
             Whiskers.Services.Mutations.ConfigChange.Record(section, ToElement(before), ToElement(after));
             return before as JsonObject;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, JsonObject?>> UpdateSectionsAsync(IReadOnlyDictionary<string, Func<JsonObject?, JsonObject>> builds)
+    {
+        ArgumentNullException.ThrowIfNull(builds);
+        await _lock.WaitAsync();
+        try
+        {
+            var root = await ReadRootAsync();
+            var changes = new List<(string Section, JsonNode? Before, JsonObject After)>();
+            foreach (var (section, build) in builds)
+            {
+                var before = root[section]?.DeepClone();
+                var after = build(before?.DeepClone() as JsonObject);
+                EnsureNoVaultOnlyValue(section, after);
+                changes.Add((section, before, after));
+            }
+            // Every section built and checked: only now is the file replaced, all of them at once.
+            foreach (var (section, _, after) in changes) root[section] = after.DeepClone();
+            await WriteRootAsync(root);
+            foreach (var (section, before, after) in changes)
+                Whiskers.Services.Mutations.ConfigChange.Record(section, ToElement(before), ToElement(after));
+            return changes.ToDictionary(c => c.Section, c => c.Before as JsonObject, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> AdoptSettingRefAsync(string section, string property, string plaintext, string vaultRef)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(plaintext);
+        if (Whiskers.Services.Vault.VaultBackedSettings.IsAgent(section)
+            || !Whiskers.Services.Vault.VaultBackedSettings.IsVaultBacked(section, property)
+            || vaultRef != Whiskers.Services.Vault.VaultBackedSettings.MigratedKey(section, property))
+            throw new ArgumentException("Only the setting's migration key is adopted.", nameof(vaultRef));
+        await _lock.WaitAsync();
+        try
+        {
+            var root = await ReadRootAsync();
+            var name = root.FirstOrDefault(p => string.Equals(p.Key, section, StringComparison.OrdinalIgnoreCase)).Key;
+            if (name is null || root[name] is not JsonObject obj) return false;
+            if (Whiskers.Services.Vault.VaultBackedSettings.PlaintextValue(obj, property) != plaintext) return false;
+            Whiskers.Services.Vault.VaultBackedSettings.Remove(obj, property);
+            Whiskers.Services.Vault.VaultBackedSettings.Remove(obj, Whiskers.Services.Vault.VaultBackedSettings.RefName(property));
+            obj[Whiskers.Services.Vault.VaultBackedSettings.RefName(property)] = vaultRef;
+            await WriteRootAsync(root);
+            return true;
         }
         finally
         {

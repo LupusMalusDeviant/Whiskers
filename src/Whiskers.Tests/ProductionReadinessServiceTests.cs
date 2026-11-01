@@ -60,7 +60,7 @@ public class ProductionReadinessServiceTests : IDisposable
 
     private async Task<IReadOnlyList<ReadinessCheck>> Checks(string? vaultKey, IVaultService vault, IServerConfigService servers)
         => await new ProductionReadinessService(Config(vaultKey), vault, _sp.GetRequiredService<IServiceScopeFactory>(),
-            servers, new AppSettingsStore(dataPaths: _paths)).GetChecksAsync(isHttps: true);
+            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
 
     private void WriteLegacyCredentials()
     {
@@ -116,10 +116,42 @@ public class ProductionReadinessServiceTests : IDisposable
         WriteLegacyCredentials();
         var (vault, servers) = await Stores("readiness-test-passphrase");
         await new CredentialVaultMigration(vault, servers, new AppSettingsStore(dataPaths: _paths),
-            NullLogger<CredentialVaultMigration>.Instance).InitializeAsync();
+            NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths).InitializeAsync();
 
         var credentials = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == CredentialsTitle);
         Assert.True(credentials.Ok);
+    }
+
+    private const string SettingsTitle = "Benachrichtigungs- und KI-Zugangsdaten im Vault";
+
+    [Fact]
+    public async Task Plaintext_notification_and_ai_credentials_are_reported_by_name_until_migrated()
+    {
+        File.WriteAllText(_paths.AppSettingsJson, new JsonObject
+        {
+            ["Email"] = new JsonObject { ["Password"] = "SMTP-" + Guid.NewGuid().ToString("N") },
+        }.ToJsonString());
+        var agentKey = "AGENT-" + Guid.NewGuid().ToString("N");
+        File.WriteAllText(_paths.AgentSettingsJson, new JsonObject { ["Agent"] = new JsonObject { ["ApiKey"] = agentKey } }.ToJsonString());
+        var (vault, servers) = await Stores("readiness-test-passphrase");
+
+        var before = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle);
+        Assert.False(before.Ok);
+        Assert.Contains("Email:Password", before.Detail);
+        Assert.Contains("Agent:ApiKey", before.Detail);
+        Assert.DoesNotContain(agentKey, before.Detail);
+
+        await new CredentialVaultMigration(vault, servers, new AppSettingsStore(dataPaths: _paths),
+            NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths).InitializeAsync();
+        Assert.True((await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle).Ok);
+
+        // A plaintext value written by hand next to the reference is at rest all the same.
+        var agent = JsonNode.Parse(File.ReadAllText(_paths.AgentSettingsJson))!.AsObject();
+        agent["Agent"]!["ApiKey"] = "AGENT-" + Guid.NewGuid().ToString("N");
+        File.WriteAllText(_paths.AgentSettingsJson, agent.ToJsonString());
+        var stray = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle);
+        Assert.False(stray.Ok);
+        Assert.Contains("Agent:ApiKey", stray.Detail);
     }
 
     [Fact]

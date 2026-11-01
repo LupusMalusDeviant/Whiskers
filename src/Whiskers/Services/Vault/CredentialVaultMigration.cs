@@ -7,8 +7,9 @@ using Whiskers.Services.ServerConfig;
 namespace Whiskers.Services.Vault;
 
 /// <summary>
-/// Start-up migration of R1-29 (INV-52): moves the plaintext cloud API keys of servers.json and the plaintext DNS token
-/// of app-settings.json into the vault. Each credential is written to the vault, read back from vault.json on disk and
+/// Start-up migration of R1-29/R1-30 (INV-52): moves the plaintext cloud API keys of servers.json, the plaintext DNS
+/// token and the notification channels' and AI chat's credentials of app-settings.json, and the agent's API key of
+/// agent-settings.json into the vault. Each credential is written to the vault, read back from vault.json on disk and
 /// compared, and only then is the plaintext replaced by the vault key in its file — so an interrupted run leaves
 /// either the plaintext (and runs again at the next start, under the same vault key) or the finished state, never a
 /// credential that exists nowhere. Without a usable vault nothing moves; the credentials stay usable and the readiness
@@ -26,14 +27,21 @@ public sealed class CredentialVaultMigration : IInitializable
     private readonly IServerConfigService _servers;
     private readonly IAppSettingsStore _appSettings;
     private readonly ILogger<CredentialVaultMigration> _logger;
+    private readonly Whiskers.Services.Agent.IAgentSettingsStore? _agentSettings;
+    private readonly IEnumerable<IVaultBackedOptionsCache> _optionCaches;
 
     public CredentialVaultMigration(IVaultService vault, IServerConfigService servers, IAppSettingsStore appSettings,
-        ILogger<CredentialVaultMigration> logger)
+        ILogger<CredentialVaultMigration> logger, IEnumerable<IVaultBackedOptionsCache>? optionCaches = null,
+        Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, DataPathOptions? dataPaths = null)
     {
         _vault = vault;
         _servers = servers;
         _appSettings = appSettings;
         _logger = logger;
+        _optionCaches = optionCaches ?? [];
+        // The agent's file is migrated also while the agent module is off (its store is then not registered) — but only
+        // in a data directory named here: without one the agent's file is left alone, never a guessed directory.
+        _agentSettings = agentSettings ?? (dataPaths is null ? null : new Whiskers.Services.Agent.AgentSettingsStore(dataPaths: dataPaths));
     }
 
     /// <summary>After the vault (40) and the server registry (50).</summary>
@@ -41,18 +49,45 @@ public sealed class CredentialVaultMigration : IInitializable
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {
+        try
+        {
+            await MigrateAsync(ct);
+        }
+        finally
+        {
+            // The vault has started: options bound before read nothing from it — bind them again (R1-30).
+            foreach (var cache in _optionCaches) cache.Invalidate();
+        }
+    }
+
+    private async Task MigrateAsync(CancellationToken ct)
+    {
         var plaintextServers = _servers.GetServers().Where(s => s.HasPlaintextCloudKey()).ToList();
         var dns = await _appSettings.ReadSectionAsync(DnsSettings.SectionName);
         var dnsPlaintext = PlaintextDnsToken(dns);
-        if (plaintextServers.Count == 0 && dnsPlaintext is null) return;
+        var settings = await PlaintextSettingsAsync();
+        if (plaintextServers.Count == 0 && dnsPlaintext is null && settings.Count == 0) return;
 
         if (!_vault.IsEnabled)
         {
-            _logger.LogWarning("{Count} credential(s) are stored in plaintext ({Servers} cloud API key(s), DNS token: {Dns}) and are "
-                               + "not moved into the vault: it is {State}. Set the right VAULT_KEY and restart.",
-                plaintextServers.Count + (dnsPlaintext is null ? 0 : 1), plaintextServers.Count, dnsPlaintext is not null,
-                _vault.KeyState == VaultKeyState.Wrong ? "locked" : "disabled");
+            _logger.LogWarning("{Count} credential(s) are stored in plaintext ({Servers} cloud API key(s), DNS token: {Dns}, "
+                               + "{Settings} notification/AI credential(s)) and are not moved into the vault: it is {State}. "
+                               + "Set the right VAULT_KEY and restart.",
+                plaintextServers.Count + (dnsPlaintext is null ? 0 : 1) + settings.Count, plaintextServers.Count,
+                dnsPlaintext is not null, settings.Count, _vault.KeyState == VaultKeyState.Wrong ? "locked" : "disabled");
             return;
+        }
+
+        foreach (var (section, property, plaintext) in settings)
+        {
+            ct.ThrowIfCancellationRequested();
+            var vaultKey = VaultBackedSettings.MigratedKey(section, property);
+            var what = $"{section}:{property}";
+            if (!await StoreAsync(vaultKey, plaintext, what)) continue;
+            var adopted = VaultBackedSettings.IsAgent(section)
+                ? await AdoptAsync(() => _agentSettings!.AdoptApiKeyRefAsync(plaintext, vaultKey), what)
+                : await AdoptAsync(() => _appSettings.AdoptSettingRefAsync(section, property, plaintext, vaultKey), what);
+            if (adopted) _logger.LogInformation("{Setting} moved into the vault", what);
         }
 
         foreach (var server in plaintextServers)
@@ -101,6 +136,23 @@ public sealed class CredentialVaultMigration : IInitializable
             _logger.LogError(ex, "Vault migration: the {What} could not be stored in the vault; it stays in plaintext", what);
         }
         return false;
+    }
+
+    /// <summary>The plaintext notification/AI credentials stored in app-settings.json and agent-settings.json (R1-30).</summary>
+    private async Task<List<(string Section, string Property, string Plaintext)>> PlaintextSettingsAsync()
+    {
+        var found = new List<(string, string, string)>();
+        foreach (var (section, properties) in VaultBackedSettings.Fields)
+        {
+            if (VaultBackedSettings.IsAgent(section) && _agentSettings is null) continue;
+            var stored = VaultBackedSettings.IsAgent(section)
+                ? await _agentSettings!.ReadSectionAsync()
+                : await _appSettings.ReadSectionAsync(section);
+            foreach (var property in properties)
+                if (VaultBackedSettings.PlaintextValue(stored, property) is { } plaintext)
+                    found.Add((section, property, plaintext));
+        }
+        return found;
     }
 
     /// <summary>The plaintext DNS token stored in app-settings.json, when the section names no vault key.</summary>

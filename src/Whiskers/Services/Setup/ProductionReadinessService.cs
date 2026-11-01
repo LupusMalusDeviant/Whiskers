@@ -28,15 +28,19 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IServerConfigService? _servers;
     private readonly IAppSettingsStore? _appSettings;
+    private readonly Whiskers.Services.Agent.IAgentSettingsStore? _agentSettings;
 
     public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
-        IServerConfigService? servers = null, IAppSettingsStore? appSettings = null)
+        IServerConfigService? servers = null, IAppSettingsStore? appSettings = null,
+        Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, Whiskers.Configuration.DataPathOptions? dataPaths = null)
     {
         _config = config;
         _vault = vault;
         _scopeFactory = scopeFactory;
         _servers = servers;
         _appSettings = appSettings;
+        // The agent's file is read also while the agent module is off (its store is then not registered).
+        _agentSettings = agentSettings ?? (dataPaths is null ? null : new Whiskers.Services.Agent.AgentSettingsStore(dataPaths: dataPaths));
     }
 
     public async Task<IReadOnlyList<ReadinessCheck>> GetChecksAsync(bool isHttps)
@@ -61,9 +65,10 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             {
                 // INV-56: says which credentials the vault holds — and which it does not hold yet.
                 VaultKeyState.Verified => "Der Vault ist aktiv; Backups sind verschlüsselbar. In den Vault gehören Cloud-API-Keys, der "
-                                          + "DNS-Token (wo sie stehen, sagt der nächste Punkt), kubeconfigs sowie Registry- und Git-Zugangsdaten. "
-                                          + "Noch unverschlüsselt gespeichert: Benachrichtigungs-, Chat- und KI-Zugangsdaten und Webhook-Secrets "
-                                          + "(Einstellungsdateien) sowie SSH-Schlüssel und der mTLS-Client-Schlüssel im Datenverzeichnis.",
+                                          + "DNS-Token, die Zugangsdaten der Benachrichtigungskanäle und der KI (wo sie stehen, sagen die "
+                                          + "nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten. Noch unverschlüsselt "
+                                          + "gespeichert: die Secrets eingehender Webhooks (Einstellungsdateien) sowie SSH-Schlüssel und der "
+                                          + "mTLS-Client-Schlüssel im Datenverzeichnis.",
                 VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
             },
@@ -83,6 +88,21 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                   + (_vault.IsEnabled
                       ? "Sie sind noch nicht in den Vault übernommen (die Übernahme läuft beim Start; scheitert sie, nennt das Log den Grund) — "
                         + "neu starten, oder den Server bzw. die DNS-Einstellungen einmal speichern: das legt den Wert unter einem neuen Vault-Schlüssel ab."
+                      : "Sie werden beim ersten Start mit gültigem VAULT_KEY in den Vault übernommen."),
+            null, null));
+
+        // 2c) R1-30: the notification channels' and the AI clients' credentials, as they are actually stored.
+        var plaintextSettings = await PlaintextSettingsAsync();
+        checks.Add(new ReadinessCheck(
+            "Benachrichtigungs- und KI-Zugangsdaten im Vault",
+            plaintextSettings.Count == 0,
+            plaintextSettings.Count == 0
+                ? "Keine Zugangsdaten der Benachrichtigungskanäle, des KI-Chats oder des Agenten im Klartext: sie liegen verschlüsselt im Vault (oder sind nicht konfiguriert)."
+                : $"Im Klartext gespeichert: {string.Join(", ", plaintextSettings)}. "
+                  + (_vault.IsEnabled
+                      ? "Sie sind noch nicht in den Vault übernommen (die Übernahme läuft beim Start; scheitert sie, nennt das Log den Grund) — "
+                        + "neu starten, oder die Einstellungen einmal speichern: das legt die Werte unter neuen Vault-Schlüsseln ab. "
+                        + "Ein von Hand neben einen Vault-Verweis geschriebener Wert wird beim Start nicht übernommen; nur ein Speichern entfernt ihn."
                       : "Sie werden beim ersten Start mit gültigem VAULT_KEY in den Vault übernommen."),
             null, null));
 
@@ -132,6 +152,22 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             null, null));
 
         return checks;
+    }
+
+    /// <summary>The vault-backed settings (R1-30) still stored in plaintext in app-settings.json or agent-settings.json, by
+    /// name (<c>Section:Property</c>) — the files, not the merged configuration.</summary>
+    private async Task<List<string>> PlaintextSettingsAsync()
+    {
+        var found = new List<string>();
+        foreach (var (section, properties) in VaultBackedSettings.Fields)
+        {
+            var stored = VaultBackedSettings.IsAgent(section)
+                ? _agentSettings is null ? null : await _agentSettings.ReadSectionAsync()
+                : _appSettings is null ? null : await _appSettings.ReadSectionAsync(section);
+            // Also a value next to a vault reference (hand-edited): it is at rest in plaintext all the same.
+            found.AddRange(properties.Where(p => VaultBackedSettings.HasPlaintext(stored, p)).Select(p => $"{section}:{p}"));
+        }
+        return found;
     }
 
     /// <summary>Whether app-settings.json holds a DNS token in plaintext (the file, not the merged configuration: a

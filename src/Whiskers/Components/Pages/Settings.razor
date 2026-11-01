@@ -87,7 +87,7 @@ else
         <MudText Typo="Typo.subtitle2" Class="mb-2">Mattermost</MudText>
         <MudGrid>
             <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mmEnabled" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_mmWebhook" Label="@L["Settings_Label_WebhookUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12"><SecretTextField @bind-Value="_mmWebhook" @bind-Clear='_secretClear["Mattermost:WebhookUrl"]' Stored="@SecretStored("Mattermost", "WebhookUrl")" Label="@L["Settings_Label_WebhookUrl"]" /></MudItem>
             <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmChannel" Label="@L["Settings_Label_Channel"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="4"><MudTextField @bind-Value="_mmBot" Label="@L["Settings_Label_BotUsername"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mmThrottle" Label="@L["Settings_Label_ThrottleMinutes"]" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
@@ -101,7 +101,7 @@ else
             <MudItem xs="12" md="4"><MudSwitch @bind-Value="_mxEnabled" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" /></MudItem>
             <MudItem xs="12"><MudTextField @bind-Value="_mxHomeserver" Label="@L["Settings_Label_HomeserverUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="_mxRoom" Label="@L["Settings_Label_RoomId"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="!abc123:matrix.org" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mxToken" Label="Access Token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><SecretTextField @bind-Value="_mxToken" @bind-Clear='_secretClear["Matrix:AccessToken"]' Stored="@SecretStored("Matrix", "AccessToken")" Label="Access Token" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_mxThrottle" Label="@L["Settings_Label_ThrottleMinutes"]" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="TestMatrix" StartIcon="@Icons.Material.Filled.Send"
@@ -116,7 +116,7 @@ else
         <MudText Typo="Typo.subtitle2" Class="mb-1">Telegram</MudText>
         <MudGrid>
             <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_tgEnabled" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgToken" Label="@L["Settings_Label_BotToken"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="6"><SecretTextField @bind-Value="_tgToken" @bind-Clear='_secretClear["Telegram:BotToken"]' Stored="@SecretStored("Telegram", "BotToken")" Label="@L["Settings_Label_BotToken"]" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="_tgChat" Label="@L["Settings_Label_ChatId"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
 
@@ -125,22 +125,22 @@ else
         <MudGrid>
             <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_ntfyEnabled" /></MudItem>
             <MudItem xs="12" md="5"><MudTextField @bind-Value="_ntfyServer" Label="@L["Settings_Label_ServerUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="https://ntfy.sh" /></MudItem>
-            <MudItem xs="12" md="4"><MudTextField @bind-Value="_ntfyTopic" Label="Topic" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="3"><MudTextField @bind-Value="_ntfyToken" Label="Token (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="4"><SecretTextField @bind-Value="_ntfyTopic" @bind-Clear='_secretClear["Ntfy:Topic"]' Stored="@SecretStored("Ntfy", "Topic")" Label="Topic" /></MudItem>
+            <MudItem xs="12" md="3"><SecretTextField @bind-Value="_ntfyToken" @bind-Clear='_secretClear["Ntfy:Token"]' Stored="@SecretStored("Ntfy", "Token")" Label="Token (optional)" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
         <MudText Typo="Typo.subtitle2" Class="mb-1">Discord</MudText>
         <MudGrid>
             <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_dcEnabled" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_dcWebhook" Label="@L["Settings_Label_WebhookUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12"><SecretTextField @bind-Value="_dcWebhook" @bind-Clear='_secretClear["Discord:WebhookUrl"]' Stored="@SecretStored("Discord", "WebhookUrl")" Label="@L["Settings_Label_WebhookUrl"]" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
         <MudText Typo="Typo.subtitle2" Class="mb-1">Slack</MudText>
         <MudGrid>
             <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_slEnabled" /></MudItem>
-            <MudItem xs="12"><MudTextField @bind-Value="_slWebhook" Label="@L["Settings_Label_WebhookUrl"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12"><SecretTextField @bind-Value="_slWebhook" @bind-Clear='_secretClear["Slack:WebhookUrl"]' Stored="@SecretStored("Slack", "WebhookUrl")" Label="@L["Settings_Label_WebhookUrl"]" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
@@ -151,7 +151,7 @@ else
             <MudItem xs="6" md="3"><MudNumericField @bind-Value="_mailPort" Label="Port" Min="1" Max="65535" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="6" md="3" Class="d-flex align-center"><MudSwitch T="bool" Color="Color.Primary" Label="SSL/TLS" @bind-Value="_mailSsl" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailUser" Label="@L["Settings_Label_Username"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailPass" Label="@L["Settings_Label_Password"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="6"><SecretTextField @bind-Value="_mailPass" @bind-Clear='_secretClear["Email:Password"]' Stored="@SecretStored("Email", "Password")" Label="@L["Settings_Label_Password"]" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailFrom" Label="@L["Settings_Label_MailFrom"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="_mailTo" Label="@L["Settings_Label_MailTo"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
@@ -160,8 +160,8 @@ else
         <MudText Typo="Typo.subtitle2" Class="mb-1">@L["Settings_Heading_GenericWebhook"]</MudText>
         <MudGrid>
             <MudItem xs="12"><MudSwitch T="bool" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" @bind-Value="_whEnabled" /></MudItem>
-            <MudItem xs="12" md="8"><MudTextField @bind-Value="_whUrl" Label="URL (POST JSON)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudTextField @bind-Value="_whSecret" Label="@L["Settings_Label_WebhookSecret"]" HelperText="@L["Settings_Help_WebhookSecret"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" /></MudItem>
+            <MudItem xs="12" md="8"><SecretTextField @bind-Value="_whUrl" @bind-Clear='_secretClear["WebhookNotification:Url"]' Stored="@SecretStored("WebhookNotification", "Url")" Label="URL (POST JSON)" /></MudItem>
+            <MudItem xs="12" md="4"><SecretTextField @bind-Value="_whSecret" @bind-Clear='_secretClear["WebhookNotification:Secret"]' Stored="@SecretStored("WebhookNotification", "Secret")" Label="@L["Settings_Label_WebhookSecret"]" /></MudItem>
         </MudGrid>
 
         <MudDivider Class="my-3" />
@@ -366,7 +366,7 @@ else
                 <MudTextField @bind-Value="_aiApiUrl" Label="@L["Settings_Label_ApiUrlOptional"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="@L["Settings_Placeholder_ApiUrlDefault"]" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_aiApiKey" Label="@L["Settings_Label_ApiKey"]" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" />
+                <SecretTextField @bind-Value="_aiApiKey" @bind-Clear='_secretClear["AiChat:ApiKey"]' Stored="@SecretStored("AiChat", "ApiKey")" Label="@L["Settings_Label_ApiKey"]" />
             </MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SaveAiChat"
@@ -759,9 +759,9 @@ else
 
         // Editable settings — load current effective values.
         var mm = MattermostOptions.CurrentValue;
-        _mmEnabled = mm.Enabled; _mmWebhook = mm.WebhookUrl; _mmChannel = mm.Channel; _mmBot = mm.BotUsername; _mmThrottle = mm.ThrottleMinutes;
+        _mmEnabled = mm.Enabled; _mmWebhook = ""; _mmChannel = mm.Channel; _mmBot = mm.BotUsername; _mmThrottle = mm.ThrottleMinutes;
         var mx = MatrixOptions.CurrentValue;
-        _mxEnabled = mx.Enabled; _mxHomeserver = mx.HomeserverUrl; _mxRoom = mx.RoomId; _mxToken = mx.AccessToken; _mxThrottle = mx.ThrottleMinutes;
+        _mxEnabled = mx.Enabled; _mxHomeserver = mx.HomeserverUrl; _mxRoom = mx.RoomId; _mxToken = ""; _mxThrottle = mx.ThrottleMinutes;
         var h = HealthOptions.CurrentValue;
         _hInterval = h.CheckIntervalSeconds; _hRetention = h.HistoryRetentionHours; _hLoopThreshold = h.RestartLoopThreshold; _hLoopWindow = h.RestartLoopWindowMinutes;
         var ma = MetricAlertOptions.CurrentValue;
@@ -776,42 +776,97 @@ else
         _termEnabled = t.Enabled; _termShell = t.DefaultShell; _termMaxSessions = t.MaxSessions; _termIdle = t.IdleTimeoutMinutes;
         LoadDns();
         var ai = AiChatOptions.CurrentValue;
-        _aiEnabled = ai.Enabled; _aiProvider = ai.Provider; _aiModel = ai.Model; _aiApiUrl = ai.ApiUrl ?? ""; _aiApiKey = ai.ApiKey;
-        var tg = TelegramOptions.CurrentValue; _tgEnabled = tg.Enabled; _tgToken = tg.BotToken; _tgChat = tg.ChatId;
-        var nt = NtfyOptions.CurrentValue; _ntfyEnabled = nt.Enabled; _ntfyServer = nt.ServerUrl; _ntfyTopic = nt.Topic; _ntfyToken = nt.Token;
-        var dc = DiscordOptions.CurrentValue; _dcEnabled = dc.Enabled; _dcWebhook = dc.WebhookUrl;
-        var sl = SlackOptions.CurrentValue; _slEnabled = sl.Enabled; _slWebhook = sl.WebhookUrl;
-        var ml = EmailOptions.CurrentValue; _mailEnabled = ml.Enabled; _mailHost = ml.Host; _mailPort = ml.Port; _mailSsl = ml.UseSsl; _mailUser = ml.Username; _mailPass = ml.Password; _mailFrom = ml.From; _mailTo = ml.To;
-        var wh = WebhookOptions.CurrentValue; _whEnabled = wh.Enabled; _whUrl = wh.Url; _whSecret = wh.Secret;
+        _aiEnabled = ai.Enabled; _aiProvider = ai.Provider; _aiModel = ai.Model; _aiApiUrl = ai.ApiUrl ?? ""; _aiApiKey = "";
+        var tg = TelegramOptions.CurrentValue; _tgEnabled = tg.Enabled; _tgToken = ""; _tgChat = tg.ChatId;
+        var nt = NtfyOptions.CurrentValue; _ntfyEnabled = nt.Enabled; _ntfyServer = nt.ServerUrl; _ntfyTopic = ""; _ntfyToken = "";
+        var dc = DiscordOptions.CurrentValue; _dcEnabled = dc.Enabled; _dcWebhook = "";
+        var sl = SlackOptions.CurrentValue; _slEnabled = sl.Enabled; _slWebhook = "";
+        var ml = EmailOptions.CurrentValue; _mailEnabled = ml.Enabled; _mailHost = ml.Host; _mailPort = ml.Port; _mailSsl = ml.UseSsl; _mailUser = ml.Username; _mailPass = ""; _mailFrom = ml.From; _mailTo = ml.To;
+        var wh = WebhookOptions.CurrentValue; _whEnabled = wh.Enabled; _whUrl = ""; _whSecret = "";
     }
 
     private async Task SaveNotifications()
     {
         var mmCur = MattermostOptions.CurrentValue;
-        try
-        {
-            await Mutations.RunAsync("config.save", new { section = "notifications" }, async _ =>
+        // One file replacement for both sections: a failed write changes neither. The credentials are kept in the vault
+        // (R1-30): empty fields keep the stored ones.
+        if (await SaveWithSecretsAsync("notifications", new Dictionary<string, object>
             {
-                // One file replacement for both sections: a failed write changes neither.
-                await AppSettings.SaveSectionsAsync(new Dictionary<string, object>
+                ["Mattermost"] = new MattermostSettings
                 {
-                    ["Mattermost"] = new MattermostSettings
-                {
-                    Enabled = _mmEnabled, WebhookUrl = _mmWebhook?.Trim() ?? "", Channel = _mmChannel?.Trim() ?? "",
+                    Enabled = _mmEnabled, Channel = _mmChannel?.Trim() ?? "",
                     BotUsername = string.IsNullOrWhiteSpace(_mmBot) ? "Whiskers" : _mmBot.Trim(),
                     BotIconUrl = mmCur.BotIconUrl, ThrottleMinutes = _mmThrottle,
                 },
-                    ["Matrix"] = new MatrixSettings
+                ["Matrix"] = new MatrixSettings
                 {
                     Enabled = _mxEnabled, HomeserverUrl = _mxHomeserver?.Trim() ?? "", RoomId = _mxRoom?.Trim() ?? "",
-                    AccessToken = _mxToken ?? "", ThrottleMinutes = _mxThrottle,
+                    ThrottleMinutes = _mxThrottle,
                 },
-                });
-            });
+            },
+            Secret("Mattermost", "WebhookUrl", _mmWebhook), Secret("Matrix", "AccessToken", _mxToken)))
+        {
+            _mmWebhook = _mxToken = "";
             Snackbar.Add(L["Settings_Snackbar_NotificationsSaved"].Value, Severity.Success);
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
+
+    // ---- R1-30: settings with credentials kept in the vault ----
+
+    // Section:Property → stored or not since this page's last save (the configuration reloads a moment later).
+    private readonly Dictionary<string, bool> _secretStoredNow = new(StringComparer.OrdinalIgnoreCase);
+
+    // Section:Property → the next save removes the stored value.
+    private readonly Dictionary<string, bool> _secretClear = Whiskers.Services.Vault.VaultBackedSettings.Fields
+        .Where(f => !Whiskers.Services.Vault.VaultBackedSettings.IsAgent(f.Key))
+        .SelectMany(f => f.Value.Select(p => $"{f.Key}:{p}"))
+        .ToDictionary(k => k, _ => false, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether a value is stored for the setting (in the vault, in plaintext from before, or by the environment)
+    /// — read from the configuration, never shown.</summary>
+    private bool SecretStored(string section, string property)
+        => _secretStoredNow.TryGetValue($"{section}:{property}", out var now) ? now
+         : !string.IsNullOrWhiteSpace(Configuration[$"{section}:{Whiskers.Services.Vault.VaultBackedSettings.RefName(property)}"])
+           || !string.IsNullOrWhiteSpace(Configuration[$"{section}:{property}"]);
+
+    private Whiskers.Services.Vault.SecretInput Secret(string section, string property, string? entered)
+        => new(section, property, entered, _secretClear[$"{section}:{property}"]);
+
+    /// <summary>Saves <paramref name="sections"/> with their vault-backed credentials; reports a refusal or failure on the
+    /// page. Returns whether the settings were written.</summary>
+    private async Task<bool> SaveWithSecretsAsync(string scope, Dictionary<string, object> sections,
+        params Whiskers.Services.Vault.SecretInput[] secrets)
+    {
+        try
+        {
+            var plain = sections.ToDictionary(s => s.Key,
+                s => (System.Text.Json.Nodes.JsonObject)System.Text.Json.JsonSerializer.SerializeToNode(s.Value, s.Value.GetType())!);
+            var result = await Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAppSettingsAsync(Mutations, VaultService,
+                AppSettings, scope, plain, secrets, SecretNeedsVault());
+            foreach (var input in secrets)
+            {
+                var name = $"{input.Section}:{input.Property}";
+                if (input.Clear) _secretStoredNow[name] = false;
+                else if (!string.IsNullOrWhiteSpace(input.Entered)) _secretStoredNow[name] = true;
+                _secretClear[name] = false;
+            }
+            if (result.UnremovedSecrets > 0) Snackbar.Add(L["Settings_Snackbar_SecretCleanupFailed"].Value, Severity.Info);
+            return true;
+        }
+        catch (Whiskers.Services.Vault.SecretFieldChange.SecretChangedException)
+        {
+            Snackbar.Add(L["Settings_Error_SecretChangedMeanwhile"].Value, Severity.Warning);
+        }
+        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        return false;
+    }
+
+    private string SecretNeedsVault() => VaultService.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
+        ? L["Vault_Error_KeyWrong"].Value
+        : L["Settings_Error_SecretNeedsVault"].Value;
 
     private async Task SaveHealth()
     {
@@ -1041,66 +1096,65 @@ else
 
     private async Task SaveAiChat()
     {
-        try
-        {
-            await Mutations.RunAsync("config.save", new { section = "aichat" }, async _ =>
+        if (await SaveWithSecretsAsync("aichat", new Dictionary<string, object>
             {
-                await AppSettings.SaveSectionAsync("AiChat", new AiChatSettings
+                ["AiChat"] = new AiChatSettings
                 {
                     Enabled = _aiEnabled,
                     Provider = string.IsNullOrWhiteSpace(_aiProvider) ? "openai" : _aiProvider,
                     Model = _aiModel?.Trim() ?? "",
                     ApiUrl = string.IsNullOrWhiteSpace(_aiApiUrl) ? null : _aiApiUrl.Trim(),
-                    ApiKey = _aiApiKey ?? "",
-                });
-            });
+                },
+            },
+            Secret("AiChat", "ApiKey", _aiApiKey)))
+        {
+            _aiApiKey = "";
             Snackbar.Add(L["Settings_Snackbar_AiChatSaved"].Value, Severity.Success);
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task SaveChannels()
     {
-        try
-        {
-            await Mutations.RunAsync("config.save", new { section = "notification-channels" }, async _ =>
+        // One file replacement for all six sections: a failed write changes none. Credentials: kept in the vault (R1-30).
+        if (await SaveWithSecretsAsync("notification-channels", new Dictionary<string, object>
             {
-                // One file replacement for all six sections: a failed write changes none.
-                await AppSettings.SaveSectionsAsync(new Dictionary<string, object>
+                ["Telegram"] = new TelegramSettings
                 {
-                    ["Telegram"] = new TelegramSettings
-                {
-                    Enabled = _tgEnabled, BotToken = _tgToken?.Trim() ?? "", ChatId = _tgChat?.Trim() ?? "",
+                    Enabled = _tgEnabled, ChatId = _tgChat?.Trim() ?? "",
                     ThrottleMinutes = TelegramOptions.CurrentValue.ThrottleMinutes,
                 },
-                    ["Ntfy"] = new NtfySettings
+                ["Ntfy"] = new NtfySettings
                 {
                     Enabled = _ntfyEnabled, ServerUrl = string.IsNullOrWhiteSpace(_ntfyServer) ? "https://ntfy.sh" : _ntfyServer.Trim(),
-                    Topic = _ntfyTopic?.Trim() ?? "", Token = _ntfyToken?.Trim() ?? "", ThrottleMinutes = NtfyOptions.CurrentValue.ThrottleMinutes,
+                    ThrottleMinutes = NtfyOptions.CurrentValue.ThrottleMinutes,
                 },
-                    ["Discord"] = new DiscordSettings
+                ["Discord"] = new DiscordSettings
                 {
-                    Enabled = _dcEnabled, WebhookUrl = _dcWebhook?.Trim() ?? "", ThrottleMinutes = DiscordOptions.CurrentValue.ThrottleMinutes,
+                    Enabled = _dcEnabled, ThrottleMinutes = DiscordOptions.CurrentValue.ThrottleMinutes,
                 },
-                    ["Slack"] = new SlackSettings
+                ["Slack"] = new SlackSettings
                 {
-                    Enabled = _slEnabled, WebhookUrl = _slWebhook?.Trim() ?? "", ThrottleMinutes = SlackOptions.CurrentValue.ThrottleMinutes,
+                    Enabled = _slEnabled, ThrottleMinutes = SlackOptions.CurrentValue.ThrottleMinutes,
                 },
-                    ["Email"] = new EmailSettings
+                ["Email"] = new EmailSettings
                 {
                     Enabled = _mailEnabled, Host = _mailHost?.Trim() ?? "", Port = _mailPort, UseSsl = _mailSsl,
-                    Username = _mailUser?.Trim() ?? "", Password = _mailPass ?? "", From = _mailFrom?.Trim() ?? "",
+                    Username = _mailUser?.Trim() ?? "", From = _mailFrom?.Trim() ?? "",
                     To = _mailTo?.Trim() ?? "", ThrottleMinutes = EmailOptions.CurrentValue.ThrottleMinutes,
                 },
-                    ["WebhookNotification"] = new WebhookNotificationSettings
+                ["WebhookNotification"] = new WebhookNotificationSettings
                 {
-                    Enabled = _whEnabled, Url = _whUrl?.Trim() ?? "", Secret = _whSecret ?? "", ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
+                    Enabled = _whEnabled, ThrottleMinutes = WebhookOptions.CurrentValue.ThrottleMinutes,
                 },
-                });
-            });
+            },
+            Secret("Telegram", "BotToken", _tgToken), Secret("Ntfy", "Topic", _ntfyTopic), Secret("Ntfy", "Token", _ntfyToken),
+            Secret("Discord", "WebhookUrl", _dcWebhook), Secret("Slack", "WebhookUrl", _slWebhook),
+            Secret("Email", "Password", _mailPass),
+            Secret("WebhookNotification", "Url", _whUrl), Secret("WebhookNotification", "Secret", _whSecret)))
+        {
+            _tgToken = _ntfyTopic = _ntfyToken = _dcWebhook = _slWebhook = _mailPass = _whUrl = _whSecret = "";
             Snackbar.Add(L["Settings_Snackbar_ChannelsSaved"].Value, Severity.Success);
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private async Task TestChannels()

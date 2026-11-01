@@ -33,15 +33,22 @@ public sealed class CredentialMigrationBootTests
                 ["CloudProvider"] = (int)CloudProvider.Hetzner, ["CloudApiKey"] = cloudKey,
             }),
         }.ToJsonString());
+        var botToken = "BOTTOKEN-" + Guid.NewGuid().ToString("N");
+        var agentKey = "AGENTKEY-" + Guid.NewGuid().ToString("N");
         File.WriteAllText(paths.AppSettingsJson, new JsonObject
         {
             ["Dns"] = new JsonObject { ["Provider"] = "infomaniak", ["ApiToken"] = dnsToken },
+            ["Telegram"] = new JsonObject { ["Enabled"] = true, ["BotToken"] = botToken, ["ChatId"] = "1" },
+        }.ToJsonString());
+        File.WriteAllText(paths.AgentSettingsJson, new JsonObject
+        {
+            ["Agent"] = new JsonObject { ["Provider"] = "openai", ["ApiKey"] = agentKey },
         }.ToJsonString());
 
         var prev = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
         Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
         var config = new List<KeyValuePair<string, string?>>();
-        config.AddRange(BootSettings.OnlyCore());
+        // All modules: the notification channels and the agent read their credentials from the vault after the boot.
         config.Add(new("Auth:Disabled", "true"));
         config.Add(new("VAULT_KEY", "r129-boot-test-passphrase-" + Guid.NewGuid().ToString("N")));
 
@@ -67,6 +74,12 @@ public sealed class CredentialMigrationBootTests
             Assert.Contains(CredentialRefs.MigratedDnsToken, settings);
             Assert.DoesNotContain(cloudKey, servers);
             Assert.DoesNotContain(dnsToken, settings);
+
+            // R1-30: moved too, and the options the app resolves read them from the vault (bound again after the start).
+            Assert.DoesNotContain(botToken, settings);
+            Assert.DoesNotContain(agentKey, File.ReadAllText(paths.AgentSettingsJson));
+            Assert.Equal(botToken, factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<TelegramSettings>>().CurrentValue.BotToken);
+            Assert.Equal(agentKey, factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<AgentSettings>>().CurrentValue.ApiKey);
         }
         finally
         {

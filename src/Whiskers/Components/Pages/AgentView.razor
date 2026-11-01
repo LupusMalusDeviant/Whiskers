@@ -21,6 +21,8 @@
 @inject IAgentTranscriptStore TranscriptStore
 @inject IAgentSettingsStore SettingsStore
 @inject IUiMutationRunner Mutations
+@inject Whiskers.Services.Vault.IVaultService VaultService
+@inject IConfiguration Configuration
 @inject IAgentProviderFactory ProviderFactory
 @inject IApprovalCoordinator ApprovalCoordinator
 @inject IApprovalStore ApprovalStore
@@ -162,8 +164,14 @@
                     </MudSelect>
                     <MudTextField @bind-Value="_llmEndpoint" Label="@L["AgentView_Provider_EndpointLabel"]" Margin="Margin.Dense"
                                   Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync" />
+                    @* R1-30: the stored key is kept in the vault and never shown; empty keeps it, the icon removes it. *@
                     <MudTextField @bind-Value="_llmKey" Label="@L["AgentView_Provider_ApiKeyLabel"]" InputType="InputType.Password" Margin="Margin.Dense"
-                                  Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync"
+                                  Variant="Variant.Outlined" Class="mt-2" OnBlur="MaybeTestAsync" Disabled="_llmKeyClear"
+                                  HelperText="@(_llmKeyClear ? L["SecretField_WillClear"].Value : AgentKeyStored ? L["SecretField_Stored"].Value : L["SecretField_NotSet"].Value)"
+                                  Adornment="@(AgentKeyStored ? Adornment.End : Adornment.None)"
+                                  AdornmentIcon="@(_llmKeyClear ? Icons.Material.Filled.Undo : Icons.Material.Filled.DeleteOutline)"
+                                  AdornmentAriaLabel="@(_llmKeyClear ? L["SecretField_UndoClear"].Value : L["SecretField_Clear"].Value)"
+                                  OnAdornmentClick="ToggleKeyClear"
                                   Immediate="true" DebounceInterval="700" OnDebounceIntervalElapsed="OnKeyDebounced" />
 
                     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;" class="mt-2">
@@ -279,7 +287,26 @@
     private string _llmProvider = "openai";
     private string _llmModel = "";
     private string _llmEndpoint = "";
+    // A key typed now (never the stored one, R1-30); _llmKeyClear: the next save removes the stored key.
     private string _llmKey = "";
+    private bool _llmKeyClear;
+
+    // Stored or not since this page's last save (the configuration reloads a moment later).
+    private bool? _llmKeyStoredNow;
+
+    private bool AgentKeyStored => _llmKeyStoredNow ?? !string.IsNullOrWhiteSpace(Configuration["Agent:ApiKeyRef"])
+                                   || !string.IsNullOrWhiteSpace(Configuration["Agent:ApiKey"]);
+
+    /// <summary>The key a connection test uses: the one typed now, else the stored one — read on the server, never shown.</summary>
+    // As typed, like the save stores it: a key tested here is the key the agent will use.
+    private string EffectiveKey => !string.IsNullOrWhiteSpace(_llmKey) ? _llmKey
+        : _llmKeyClear ? "" : Settings.CurrentValue.ApiKey;
+
+    private void ToggleKeyClear()
+    {
+        _llmKeyClear = !_llmKeyClear;
+        if (_llmKeyClear) _llmKey = "";
+    }
     private int _llmIterations = 8;
     private string _systemPrompt = "";
 
@@ -306,7 +333,7 @@
         _llmProvider = cfg.Provider;
         _llmModel = cfg.Model;
         _llmEndpoint = cfg.Endpoint ?? "";
-        _llmKey = cfg.ApiKey;
+        _llmKey = "";
         _llmIterations = cfg.MaxToolIterations;
         _systemPrompt = string.IsNullOrWhiteSpace(cfg.SystemPrompt) ? DefaultSystemPrompt : cfg.SystemPrompt;
 
@@ -541,22 +568,36 @@
             Provider = _llmProvider,
             Model = _llmModel,
             Endpoint = string.IsNullOrWhiteSpace(_llmEndpoint) ? null : _llmEndpoint,
-            ApiKey = _llmKey,
             MaxToolIterations = _llmIterations,
             // Store empty when unchanged from default, so it keeps tracking the built-in prompt.
             SystemPrompt = _systemPrompt.Trim() == DefaultSystemPrompt.Trim() ? "" : _systemPrompt,
         };
+        // The API key goes to the vault under a new key first (R1-30); the settings then name it.
+        Whiskers.Services.Vault.SecretSaveResult result;
         try
         {
-            await Mutations.RunAsync("config.agent",
+            result = await Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAgentAsync(Mutations, VaultService, SettingsStore,
                 new { section = "agent", provider = settings.Provider, model = settings.Model, enabled = settings.Enabled },
-                _ => SettingsStore.SaveAsync(settings, principal));
+                settings, principal, new Whiskers.Services.Vault.SecretInput("Agent", "ApiKey", _llmKey, _llmKeyClear),
+                VaultService.KeyState == Whiskers.Services.Vault.VaultKeyState.Wrong
+                    ? L["Vault_Error_KeyWrong"].Value
+                    : L["Settings_Error_SecretNeedsVault"].Value);
         }
-        catch (MutationRefusedException ex)
+        catch (Whiskers.Services.Vault.SecretFieldChange.SecretChangedException)
+        {
+            Snackbar.Add(L["Settings_Error_SecretChangedMeanwhile"].Value, Severity.Warning);
+            return;
+        }
+        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
+        if (_llmKeyClear) _llmKeyStoredNow = false;
+        else if (!string.IsNullOrWhiteSpace(_llmKey)) _llmKeyStoredNow = true;
+        _llmKey = "";
+        _llmKeyClear = false;
+        if (result.UnremovedSecrets > 0) Snackbar.Add(L["Settings_Snackbar_SecretCleanupFailed"].Value, Severity.Info);
         Snackbar.Add(L["AgentView_Snackbar_ProviderSaved"].Value, Severity.Success);
     }
 
@@ -569,7 +610,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _isAdmin && (_llmProvider == "claude-code" || !string.IsNullOrWhiteSpace(_llmKey)))
+        if (firstRender && _isAdmin && (_llmProvider == "claude-code" || !string.IsNullOrWhiteSpace(EffectiveKey)))
             await MaybeTestAsync();
 
         // Keep the chat pinned to the newest message whenever a line was added.
@@ -580,13 +621,13 @@
         }
     }
 
-    private string Signature() => $"{_llmProvider}|{_llmEndpoint}|{_llmKey}";
+    private string Signature() => $"{_llmProvider}|{_llmEndpoint}|{_llmKey}|{_llmKeyClear}";
 
     /// <summary>Auto-test when a relevant field changed and a key is present (avoids redundant probes).</summary>
     private async Task MaybeTestAsync()
     {
         if (_modelTesting) return;
-        if (_llmProvider != "claude-code" && string.IsNullOrWhiteSpace(_llmKey)) return;
+        if (_llmProvider != "claude-code" && string.IsNullOrWhiteSpace(EffectiveKey)) return;
         if (Signature() == _lastTestedSignature && _availableModels.Count > 0) return;
         await TestAndLoadModelsAsync();
     }
@@ -618,7 +659,7 @@
         _availableModels.Clear();
         _modelStatus = "";
         _lastTestedSignature = "";
-        if (provider == "claude-code" || !string.IsNullOrWhiteSpace(_llmKey))
+        if (provider == "claude-code" || !string.IsNullOrWhiteSpace(EffectiveKey))
             await TestAndLoadModelsAsync();
     }
 
@@ -634,7 +675,7 @@
             _lastTestedSignature = Signature();
             return;
         }
-        if (string.IsNullOrWhiteSpace(_llmKey))
+        if (string.IsNullOrWhiteSpace(EffectiveKey))
         {
             _modelStatus = "";
             _availableModels.Clear();
@@ -649,7 +690,7 @@
             var probe = new AgentSettings
             {
                 Provider = _llmProvider,
-                ApiKey = _llmKey,
+                ApiKey = EffectiveKey,
                 Endpoint = string.IsNullOrWhiteSpace(_llmEndpoint) ? null : _llmEndpoint,
                 Model = _llmModel,
             };

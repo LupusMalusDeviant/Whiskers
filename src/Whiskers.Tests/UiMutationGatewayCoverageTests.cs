@@ -114,7 +114,6 @@ public class UiMutationGatewayCoverageTests : IDisposable
     /// <summary>Every UI handler that writes security configuration, with the capability it runs as.</summary>
     public static readonly (Type Component, string Handler, string Capability)[] Handlers =
     [
-        (typeof(Whiskers.Components.Pages.Settings), "SaveNotifications", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveHealth", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveMetricAlert", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveCve", "config.save"),
@@ -124,8 +123,6 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.Settings), "SaveDns", "vault.secret_set"),
         (typeof(Whiskers.Components.Pages.Settings), "RemoveUnusedDnsTokenAsync", "vault.secret_delete"),
         (typeof(Whiskers.Components.Pages.Settings), "ClearDnsToken", "config.save"),
-        (typeof(Whiskers.Components.Pages.Settings), "SaveAiChat", "config.save"),
-        (typeof(Whiskers.Components.Pages.Settings), "SaveChannels", "config.save"),
         (typeof(Whiskers.Components.Pages.Settings), "AddApiKey", "mcp.key_create"),
         (typeof(Whiskers.Components.Pages.Settings), "RemoveApiKey", "mcp.key_delete"),
         (typeof(Whiskers.Components.Pages.Settings), "SaveMcpPermissions", "config.mcp_permissions"),
@@ -133,7 +130,11 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.Settings), "SaveRoles", "config.roles"),
         (typeof(Whiskers.Components.Pages.Settings), "AddVaultSecret", "vault.secret_set"),
         (typeof(Whiskers.Components.Pages.Settings), "DeleteVaultSecret", "vault.secret_delete"),
-        (typeof(Whiskers.Components.Pages.AgentView), "SaveLlm", "config.agent"),
+        // R1-30: the notification, AI chat and agent editors save through the shared vault-backed save.
+        (typeof(Whiskers.Services.Vault.VaultBackedSettingsSave), "SaveAppSettingsAsync", "config.save"),
+        (typeof(Whiskers.Services.Vault.VaultBackedSettingsSave), "SaveAgentAsync", "config.agent"),
+        (typeof(Whiskers.Services.Vault.VaultBackedSettingsSave), "StageAsync", "vault.secret_set"),
+        (typeof(Whiskers.Services.Vault.VaultBackedSettingsSave), "RemoveAsync", "vault.secret_delete"),
         (typeof(Whiskers.Components.Pages.GuardrailsView), "SaveAll", "guardrails.save"),
         (typeof(Whiskers.Components.Pages.GuardrailsView), "DisableKillSwitch", "guardrails.kill_switch_off"),
         (typeof(Whiskers.Components.Pages.AiOperationsView), "CreateKey", "mcp.key_create"),
