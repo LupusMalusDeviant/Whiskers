@@ -6,6 +6,17 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-32: **A restore writes only what a backup may hold, and only after checking it.** A self-backup archive may
+  contain only Whiskers' own stores and directories (one list, `SelfBackupLayout`, used for packing and restoring);
+  an archive with backups, restore state, database journals, temp files, a vault key, duplicate or conflicting entries,
+  or more than 100,000 entries or 32 GiB of content is refused, and unknown entries are left out. Before the restore
+  is committed the extracted database must pass SQLite's integrity check and hold exactly the migrations its manifest
+  names, and the JSON stores and key files must parse; only then is the pre-restore safety copy taken. The restore
+  makes each store equal to the archive — a store the archive does not hold is removed (the safety copy keeps it);
+  the database is only ever replaced, the audit outbox is merged. Key directories and the vault file are readable by
+  the app's user only afterwards, and encrypted archives appear under their name only when complete. **Breaking:**
+  with `VAULT_KEY` set an unencrypted archive is no longer restored (it cannot be checked for changes); restore it on
+  an instance without `VAULT_KEY`, or keep using the encrypted backups made since the key was set.
 - R1-31: **Webhook secrets, rollback snapshots and the sign-in key ring are encrypted.** The inbound webhooks' signing
   secrets and the rollback snapshots (a container's full configuration, its environment variables included) are
   stored in the database encrypted with a key derived from the vault's, and so is each key of the data-protection key

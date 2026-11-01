@@ -25,6 +25,10 @@ public class BackupServiceTests
     }
 
     private static (BackupService svc, DataPathOptions paths, string root, ServiceProvider sp) NewService(string? vaultKey)
+        => NewService(vaultKey, new MaintenanceStateService());
+
+    private static (BackupService svc, DataPathOptions paths, string root, ServiceProvider sp) NewService(string? vaultKey,
+        IMaintenanceStateService maintenance)
     {
         var root = Path.Combine(Path.GetTempPath(), $"sw-bak-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
@@ -45,7 +49,7 @@ public class BackupServiceTests
 
         var svc = new BackupService(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            new MaintenanceStateService(),
+            maintenance,
             new NoopLifetime(),
             config,
             NullLogger<BackupService>.Instance,
@@ -176,15 +180,149 @@ public class BackupServiceTests
         finally { Cleanup(sp, root); }
     }
 
-    private static async Task<string> CraftManifestArchive(string root, SelfBackupManifest manifest)
+    // ---------------------------------------------------------------- R1-32: authentic, checked restore
+
+    [Fact]
+    public async Task With_a_vault_key_an_unencrypted_archive_is_refused()
+    {
+        var (svc, _, root, sp) = NewService("test-vault-key");
+        try
+        {
+            var archive = await CraftManifestArchive(root, new SelfBackupManifest { Provider = "sqlite" });
+            var result = await svc.ValidateArchiveAsync(archive);
+            Assert.False(result.Ok);
+            Assert.Contains("not encrypted", result.Error!);
+            await Assert.ThrowsAsync<BackupValidationException>(() => svc.BeginRestoreAsync(archive, "tester"));
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
+    public async Task An_encrypted_archive_is_published_whole_under_its_final_name()
+    {
+        var (svc, paths, root, sp) = NewService("test-vault-key");
+        try
+        {
+            var info = await svc.CreateBackupAsync("manual");
+            Assert.Equal([$"{info.Id}.meta.json", $"{info.Id}.tar.gz.enc"],
+                Directory.GetFiles(paths.SelfBackupsDir).Select(Path.GetFileName).Order().ToArray());
+            Assert.False(Directory.Exists(Path.Combine(paths.SelfBackupsDir, ".build", info.Id)));
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
+    public async Task A_restore_stages_checks_and_commits_and_the_next_start_applies_it()
+    {
+        var (svc, paths, root, sp) = NewService("test-vault-key");
+        try
+        {
+            await File.WriteAllTextAsync(paths.RolesJson, "{\"version\":\"archived\"}");
+            var info = await svc.CreateBackupAsync("manual");
+            await File.WriteAllTextAsync(paths.RolesJson, "{\"version\":\"live\"}");
+            await File.WriteAllTextAsync(paths.GuardrailsJson, "{}");   // not in the archive
+
+            await svc.BeginRestoreAsync(svc.ResolveArchivePath(info.Id)!, "tester");
+
+            Assert.True(File.Exists(paths.RestorePendingMarker));
+            Assert.True(File.Exists(Path.Combine(paths.RestoreStagingDir, "metrics.db")));
+            Assert.Equal(2, (await svc.ListBackupsAsync()).Count);    // the archive and the pre-restore safety copy
+
+            TestSqlite.ClearPools(root);
+            RestoreBootHandler.ApplyPendingRestore(paths);
+
+            Assert.Equal("{\"version\":\"archived\"}", await File.ReadAllTextAsync(paths.RolesJson));
+            Assert.False(File.Exists(paths.GuardrailsJson));
+            Assert.Equal(2, (await svc.ListBackupsAsync()).Count);    // both survive the swap
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    public static TheoryData<string, string> DamagedArchives => new()
+    {
+        { "database", "database" },
+        { "migrations", "migrations" },
+        { "json", "roles.json" },
+        { "key", "keys/" },
+    };
+
+    [Theory]
+    [MemberData(nameof(DamagedArchives))]
+    public async Task A_damaged_archive_is_refused_before_anything_is_committed(string damage, string expected)
+    {
+        var maintenance = new MaintenanceStateService();
+        var (svc, paths, root, sp) = NewService(vaultKey: null, maintenance);
+        try
+        {
+
+            var dir = Path.Combine(root, "crafted-db");
+            Directory.CreateDirectory(dir);
+            var db = Path.Combine(dir, "metrics.db");
+            if (damage == "database")
+                await File.WriteAllBytesAsync(db, System.Text.Encoding.ASCII.GetBytes("SQLite format 3\0").Concat(new byte[4096]).ToArray());
+            else
+                CreateDatabase(db, damage == "migrations" ? ["20260101000000_NotInTheManifest"] : []);
+            var extra = new List<PackEntry>();
+            if (damage == "json")
+            {
+                await File.WriteAllTextAsync(Path.Combine(dir, "roles.json"), "{ not json");
+                extra.Add(new PackEntry("roles.json", Path.Combine(dir, "roles.json")));
+            }
+            if (damage == "key")
+            {
+                await File.WriteAllTextAsync(Path.Combine(dir, "key.xml"), "<key><unclosed>");
+                extra.Add(new PackEntry("keys/key-1.xml", Path.Combine(dir, "key.xml")));
+            }
+            // The manifest names no migrations; for "migrations" the database holds one.
+            var archive = await CraftManifestArchive(root, new SelfBackupManifest { Provider = "sqlite" }, db, extra);
+            await File.WriteAllTextAsync(paths.RolesJson, "LIVE");
+
+            var ex = await Assert.ThrowsAsync<BackupValidationException>(() => svc.BeginRestoreAsync(archive, "tester"));
+            Assert.Contains(expected, ex.Message);
+
+            Assert.False(File.Exists(paths.RestorePendingMarker));
+            Assert.False(Directory.Exists(paths.RestoreStagingDir));
+            Assert.False(maintenance.IsMaintenance);
+            Assert.Empty(await svc.ListBackupsAsync());                  // no safety copy for a refused archive
+            Assert.Equal("LIVE", await File.ReadAllTextAsync(paths.RolesJson));
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    private static void CreateDatabase(string path, string[] migrations)
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE TABLE \"__EFMigrationsHistory\" (\"MigrationId\" TEXT PRIMARY KEY, \"ProductVersion\" TEXT);";
+        command.ExecuteNonQuery();
+        foreach (var migration in migrations)
+        {
+            command.CommandText = "INSERT INTO \"__EFMigrationsHistory\" VALUES ($id, '10.0')";
+            command.Parameters.Clear();
+            command.Parameters.AddWithValue("$id", migration);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    private static async Task<string> CraftManifestArchive(string root, SelfBackupManifest manifest,
+        string? database = null, IReadOnlyList<PackEntry>? extra = null)
     {
         var dir = Path.Combine(root, $"crafted-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         var manifestPath = Path.Combine(dir, "manifest.json");
         await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest));
+        var entries = new List<PackEntry> { new("manifest.json", manifestPath) };
+        if (manifest.Provider == SelfBackupFormat.ProviderSqlite)
+        {
+            var db = database ?? Path.Combine(dir, "metrics.db");
+            if (database is null) await File.WriteAllTextAsync(db, "");   // a SQLite archive holds its database
+            entries.Add(new PackEntry("metrics.db", db));
+        }
+        if (extra is not null) entries.AddRange(extra);
         var archivePath = Path.Combine(dir, "crafted.tar.gz");
         await using (var fs = File.Create(archivePath))
-            await BackupArchiver.PackAsync(fs, new List<PackEntry> { new("manifest.json", manifestPath) });
+            await BackupArchiver.PackAsync(fs, entries);
         return archivePath;
     }
 }

@@ -8,18 +8,36 @@ namespace Whiskers.Services.Backup;
 public readonly record struct PackEntry(string Name, string SourcePath);
 
 /// <summary>Result of inspecting an archive without extracting it: the manifest (if present) and the entry
-/// names, having already passed the same zip-slip / entry-type guards that extraction enforces.</summary>
+/// names, having already passed the same guards that extraction enforces.</summary>
 public sealed class BackupInspection
 {
     public SelfBackupManifest? Manifest { get; init; }
     public IReadOnlyList<string> EntryNames { get; init; } = Array.Empty<string>();
+
+    /// <summary>Entries that are not restore targets (<see cref="BackupEntryKind.NotRestored"/>): never extracted.</summary>
+    public IReadOnlyList<string> SkippedEntries { get; init; } = Array.Empty<string>();
+
+    /// <summary>Whether the archive holds the SQLite database.</summary>
+    public bool HasDatabase { get; init; }
+}
+
+/// <summary>Bounds on what one archive may unpack to (R1-32): a small upload must not fill the disk.</summary>
+public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes)
+{
+    /// <summary>100k entries and 32 GiB of content — far above a real data directory.</summary>
+    public static BackupExtractionLimits Default { get; } = new(100_000, 32L << 30);
+
+    // Tar headers and padding on top of the content: 1.5 KiB per entry plus a flat 16 MiB.
+    internal long MaxDecompressedBytes => MaxTotalBytes + MaxEntries * 1536L + (16L << 20);
 }
 
 /// <summary>
-/// Low-level tar.gz pack/unpack for self-backups, with hardened extraction. Both the extract and the
-/// inspect passes reject any entry that is not a regular file or directory (no symlinks/hardlinks/devices —
-/// a symlink entry is a write-outside-root vector) and canonicalise every path to enforce containment
-/// under the destination root (zip-slip). Encryption is layered separately by <see cref="BackupArchiveCipher"/>.
+/// Low-level tar.gz pack/unpack for self-backups, with hardened extraction. Both the extract and the inspect passes
+/// reject any entry that is not a regular file or directory (no symlinks/hardlinks/devices — a symlink entry is a
+/// write-outside-root vector), canonicalise every path to enforce containment under the destination root
+/// (zip-slip), and (R1-32) refuse forbidden or conflicting entries (<see cref="SelfBackupLayout"/>) and archives
+/// that unpack to more entries or bytes than <see cref="BackupExtractionLimits"/> allow. Entries that are not restore
+/// targets are skipped. Encryption is layered separately by <see cref="BackupArchiveCipher"/>.
 /// </summary>
 public static class BackupArchiver
 {
@@ -36,55 +54,121 @@ public static class BackupArchiver
         }
     }
 
-    /// <summary>Extracts a gzip tar into <paramref name="destinationRoot"/> with entry-type and zip-slip
-    /// guards. Parent directories are created as needed; existing files are overwritten.</summary>
-    public static async Task ExtractAsync(Stream tarGzSource, string destinationRoot, CancellationToken ct = default)
+    /// <summary>Extracts the restore targets of a gzip tar into <paramref name="destinationRoot"/> with all guards.
+    /// Parent directories are created as needed; files are created readable by the owner only.</summary>
+    public static async Task ExtractAsync(Stream tarGzSource, string destinationRoot, BackupExtractionLimits? limits = null,
+        CancellationToken ct = default)
     {
         Directory.CreateDirectory(destinationRoot);
         var rootFull = Path.GetFullPath(destinationRoot);
 
-        await using var gzip = new GZipStream(tarGzSource, CompressionMode.Decompress, leaveOpen: true);
-        await using var tar = new TarReader(gzip, leaveOpen: true);
-        while (await tar.GetNextEntryAsync(cancellationToken: ct) is { } entry)
+        await ReadAsync(tarGzSource, rootFull, limits ?? BackupExtractionLimits.Default, async (entry, kind, target) =>
         {
-            GuardEntryType(entry);
-            var target = ResolveWithinRoot(rootFull, entry.Name);
+            if (kind is BackupEntryKind.NotRestored) return;
             if (entry.EntryType is TarEntryType.Directory)
             {
                 Directory.CreateDirectory(target);
-                continue;
+                return;
             }
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            await entry.ExtractToFileAsync(target, overwrite: true, ct);
-        }
+            await WriteOwnerOnlyAsync(entry, target, ct);
+        }, ct);
     }
 
     /// <summary>Single decompression pass that enforces the extraction guards on every entry (throwing on a
     /// violation) and captures the manifest — used to validate an uploaded archive before touching live state.
     /// <paramref name="virtualRoot"/> is only used for the containment math; nothing is written.</summary>
-    public static async Task<BackupInspection> InspectAsync(Stream tarGzSource, string virtualRoot, CancellationToken ct = default)
+    public static async Task<BackupInspection> InspectAsync(Stream tarGzSource, string virtualRoot, BackupExtractionLimits? limits = null,
+        CancellationToken ct = default)
     {
         var rootFull = Path.GetFullPath(virtualRoot);
         var names = new List<string>();
+        var skipped = new List<string>();
+        var hasDatabase = false;
         SelfBackupManifest? manifest = null;
 
+        await ReadAsync(tarGzSource, rootFull, limits ?? BackupExtractionLimits.Default, async (entry, kind, _) =>
+        {
+            names.Add(entry.Name);
+            if (kind is BackupEntryKind.NotRestored) skipped.Add(entry.Name);
+            if (kind is BackupEntryKind.File
+                && string.Equals(SelfBackupLayout.Normalize(entry.Name), SelfBackupFormat.DbEntryName, StringComparison.Ordinal))
+                hasDatabase = true;
+            if (kind is BackupEntryKind.Manifest && entry.DataStream is { } ds)
+                manifest = await JsonSerializer.DeserializeAsync<SelfBackupManifest>(ds, cancellationToken: ct);
+        }, ct);
+
+        return new BackupInspection { Manifest = manifest, EntryNames = names, SkippedEntries = skipped, HasDatabase = hasDatabase };
+    }
+
+    private static async Task ReadAsync(Stream tarGzSource, string rootFull, BackupExtractionLimits limits,
+        Func<TarEntry, BackupEntryKind, string, Task> onEntry, CancellationToken ct)
+    {
         await using var gzip = new GZipStream(tarGzSource, CompressionMode.Decompress, leaveOpen: true);
-        await using var tar = new TarReader(gzip, leaveOpen: true);
+        await using var bounded = new BoundedReadStream(gzip, limits.MaxDecompressedBytes);
+        await using var tar = new TarReader(bounded, leaveOpen: true);
+
+        // Every name seen (case-insensitive: the data dir may live on a case-insensitive file system, where two
+        // spellings are one file) and the directories they imply: a second entry for one path, or a file where
+        // another entry needs a directory, would make the result depend on the entry order.
+        var names = new NameLedger();
+        var count = 0;
+        var remaining = limits.MaxTotalBytes;
+
         while (await tar.GetNextEntryAsync(cancellationToken: ct) is { } entry)
         {
+            if (++count > limits.MaxEntries)
+                throw new InvalidDataException($"Refusing an archive with more than {limits.MaxEntries} entries.");
             GuardEntryType(entry);
-            ResolveWithinRoot(rootFull, entry.Name);   // throws on escape
-            names.Add(entry.Name);
+            var target = ResolveWithinRoot(rootFull, entry.Name);
+            var isDirectory = entry.EntryType is TarEntryType.Directory;
+            var kind = SelfBackupLayout.Classify(entry.Name, isDirectory);
+            if (kind is BackupEntryKind.Forbidden)
+                throw new InvalidDataException($"Refusing tar entry '{entry.Name}': it is not something a restore may write.");
+            names.Track(SelfBackupLayout.Normalize(entry.Name), isDirectory);
 
-            if (manifest is null
-                && string.Equals(entry.Name, SelfBackupFormat.ManifestEntryName, StringComparison.Ordinal)
-                && entry.DataStream is { } ds)
-            {
-                manifest = await JsonSerializer.DeserializeAsync<SelfBackupManifest>(ds, cancellationToken: ct);
-            }
+            // The header's length is what the entry's data stream yields — no more is read for it.
+            if (!isDirectory && (remaining -= entry.Length) < 0)
+                throw new InvalidDataException($"Refusing an archive that unpacks to more than {limits.MaxTotalBytes} bytes.");
+            await onEntry(entry, kind, target);
         }
+    }
 
-        return new BackupInspection { Manifest = manifest, EntryNames = names };
+    /// <summary>Every name of one archive (case-insensitive: the data dir may live on a case-insensitive file system,
+    /// where two spellings are one file) and the directories they imply. A second entry for one path, or a file where
+    /// another entry needs a directory, would make the result depend on the entry order.</summary>
+    private sealed class NameLedger
+    {
+        private readonly HashSet<string> _entries = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _files = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Track(string name, bool isDirectory)
+        {
+            if (!_entries.Add(name))
+                throw new InvalidDataException($"Refusing an archive with more than one entry for '{name}'.");
+            if (!isDirectory && _directories.Contains(name))
+                throw new InvalidDataException($"Refusing an archive where '{name}' is both a file and a directory.");
+            for (var i = name.IndexOf('/'); i > 0; i = name.IndexOf('/', i + 1))
+            {
+                var parent = name[..i];
+                if (_files.Contains(parent))
+                    throw new InvalidDataException($"Refusing an archive where '{parent}' is both a file and a directory.");
+                _directories.Add(parent);
+            }
+            if (isDirectory) _directories.Add(name);
+            else _files.Add(name);
+        }
+    }
+
+    private static async Task WriteOwnerOnlyAsync(TarEntry entry, string target, CancellationToken ct)
+    {
+        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows())
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;   // never the mode the archive claims
+        await using var output = new FileStream(target, options);
+        if (entry.DataStream is { } data)
+            await data.CopyToAsync(output, ct);
     }
 
     private static void GuardEntryType(TarEntry entry)
@@ -108,5 +192,38 @@ public static class BackupArchiver
             throw new InvalidDataException($"Refusing tar entry '{entryName}' that escapes the extraction root.");
 
         return combined;
+    }
+
+    /// <summary>Fails a read that goes past <c>limit</c> decompressed bytes (a gzip bomb never fully inflates).</summary>
+    private sealed class BoundedReadStream(Stream inner, long limit) : Stream
+    {
+        private long _read;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _read; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count) => Count(inner.Read(buffer, offset, count));
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+            => Count(await inner.ReadAsync(buffer, ct));
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+            => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+
+        private int Count(int read)
+        {
+            _read += read;
+            if (_read > limit)
+                throw new InvalidDataException("Refusing an archive that unpacks to more bytes than allowed.");
+            return read;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

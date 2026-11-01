@@ -552,10 +552,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `BackupArchiverTests` rejects forbidden roots, WAL/SHM, duplicate/conflicting entries and extraction-size/count bombs.
-- [ ] `RestoreBootHandlerTests` preserves backups, including the safety copy, and handles interrupted swaps.
-- [ ] With a vault key, unauthenticated plaintext archives are refused; staged DB and security JSON validate before commit.
-- [ ] Define replacement semantics for absent stores, restore secret-file permissions, and publish archives atomically.
+- [x] `BackupArchiverTests` rejects forbidden roots, WAL/SHM, duplicate/conflicting entries and extraction-size/count bombs.
+- [x] `RestoreBootHandlerTests` preserves backups, including the safety copy, and handles interrupted swaps.
+- [x] With a vault key, unauthenticated plaintext archives are refused; staged DB and security JSON validate before commit.
+- [x] Define replacement semantics for absent stores, restore secret-file permissions, and publish archives atomically.
 
 **Out of scope:** PostgreSQL relational backup implementation.
 

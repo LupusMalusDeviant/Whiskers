@@ -16,6 +16,10 @@ namespace Whiskers.Services.Backup;
 /// simply retried on the next boot. If the swap cannot complete it THROWS — Program.cs lets it propagate so the
 /// process exits and the restart policy retries, rather than booting on half-swapped state (fail-closed). The
 /// pre-restore safety backup remains available throughout. NEVER touches <c>backups/</c> (never in staging).
+///
+/// R1-32: only the targets of <see cref="SelfBackupLayout"/> are written, and each is made equal to the archive — a
+/// target the archive does not hold is removed (the database is only replaced, the audit outbox merged, the audit
+/// checkpoint kept aside). Afterwards the key directories and the vault file are readable by the app's user only.
 /// </summary>
 public static class RestoreBootHandler
 {
@@ -100,24 +104,35 @@ public static class RestoreBootHandler
         var root = dataPaths.RootDir;
         Directory.CreateDirectory(root);
 
-        foreach (var dir in Directory.EnumerateDirectories(staging))
-            ReplaceDirectory(dir, Path.Combine(root, Path.GetFileName(dir)));
-
-        foreach (var file in Directory.EnumerateFiles(staging))
+        foreach (var name in SelfBackupLayout.Directories)
         {
-            var name = Path.GetFileName(file);
-            if (string.Equals(name, SelfBackupFormat.ManifestEntryName, StringComparison.Ordinal))
-                continue;   // archive artifact, not a live data file
-
-            ReplaceFile(file, Path.Combine(root, name));
-
-            if (string.Equals(name, SelfBackupFormat.DbEntryName, StringComparison.Ordinal))
+            var staged = Path.Combine(staging, name);
+            var live = Path.Combine(root, name);
+            if (name == SelfBackupLayout.AuditOutbox)
             {
-                // The restored DB is a clean DELETE-mode file; a stale live WAL/SHM from the OLD database must
-                // not be paired with it or SQLite would replay the wrong journal → corruption.
-                TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-wal"));
-                TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-shm"));
+                if (Directory.Exists(staged)) MergeDirectory(staged, live);
             }
+            else if (Directory.Exists(staged)) ReplaceDirectory(staged, live);
+            else if (Directory.Exists(live)) Retry(() => Directory.Delete(live, recursive: true));
+        }
+
+        foreach (var name in SelfBackupLayout.Files)
+        {
+            var staged = Path.Combine(staging, name);
+            var live = Path.Combine(root, name);
+            if (File.Exists(staged))
+            {
+                ReplaceFile(staged, live);
+                if (name == SelfBackupFormat.DbEntryName)
+                {
+                    // The restored DB is a clean DELETE-mode file; a stale live WAL/SHM from the OLD database must
+                    // not be paired with it or SQLite would replay the wrong journal → corruption.
+                    TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-wal"));
+                    TryDelete(Path.Combine(root, SelfBackupFormat.DbEntryName + "-shm"));
+                }
+            }
+            else if (name != SelfBackupFormat.DbEntryName && name != SelfBackupLayout.AuditCheckpoint && File.Exists(live))
+                Retry(() => File.Delete(live));
         }
 
         // R1-23: a restored database comes with the audit checkpoint taken with it. An archive from before the audit
@@ -131,6 +146,42 @@ public static class RestoreBootHandler
             var kept = $"{dataPaths.AuditCheckpointJson}.pre-restore-{DateTime.UtcNow:yyyyMMddHHmmss}";
             Retry(() => File.Move(dataPaths.AuditCheckpointJson, kept));
             Console.Out.WriteLine($"[restore] The archive has no audit checkpoint; the current one was kept as {kept}.");
+        }
+
+        RestrictSecrets(root);
+    }
+
+    // Owner-only for what holds private keys or the vault, whatever the archive or an earlier install left. A failure
+    // throws like any other swap step: the next start repeats it rather than running with readable keys.
+    private static void RestrictSecrets(string root)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        const UnixFileMode dirMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        const UnixFileMode fileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        foreach (var name in SelfBackupLayout.SecretDirectories)
+        {
+            var dir = Path.Combine(root, name);
+            if (!Directory.Exists(dir)) continue;
+            File.SetUnixFileMode(dir, dirMode);
+            foreach (var sub in Directory.EnumerateDirectories(dir, "*", SearchOption.AllDirectories))
+                File.SetUnixFileMode(sub, dirMode);
+            foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                File.SetUnixFileMode(file, fileMode);
+        }
+        foreach (var name in SelfBackupLayout.SecretFiles)
+        {
+            var file = Path.Combine(root, name);
+            if (File.Exists(file)) File.SetUnixFileMode(file, fileMode);
+        }
+    }
+
+    // Each outbox file is one audit event no database holds yet: the archive's are added, the live ones stay.
+    private static void MergeDirectory(string source, string target)
+    {
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var dest = Path.Combine(target, Path.GetRelativePath(source, file));
+            if (!File.Exists(dest)) ReplaceFile(file, dest);
         }
     }
 

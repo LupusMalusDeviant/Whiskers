@@ -51,6 +51,9 @@ public sealed class BackupService : IBackupService
         _vaultKey = SecretSource.VaultKey(configuration);
     }
 
+    /// <summary>Bounds on what one archive may unpack to (R1-32).</summary>
+    public BackupExtractionLimits ExtractionLimits { get; init; } = BackupExtractionLimits.Default;
+
     // ---------------------------------------------------------------- create
 
     public async Task<SelfBackupInfo> CreateBackupAsync(string label, CancellationToken ct = default)
@@ -156,9 +159,13 @@ public sealed class BackupService : IBackupService
 
             if (encrypted)
             {
-                await using var src = File.OpenRead(tmpTarGz);
-                await using var dst = File.Create(finalPath);
-                await BackupArchiveCipher.EncryptAsync(src, dst, _vaultKey!, ct);
+                // R1-32: sealed in the build dir and published by one rename — an interrupted run leaves no
+                // half-written archive under the final name.
+                var tmpEnc = Path.Combine(buildDir, "archive.tar.gz.enc");
+                await using (var src = File.OpenRead(tmpTarGz))
+                await using (var dst = File.Create(tmpEnc))
+                    await BackupArchiveCipher.EncryptAsync(src, dst, _vaultKey!, ct);
+                File.Move(tmpEnc, finalPath, overwrite: true);
             }
             else
             {
@@ -309,6 +316,7 @@ public sealed class BackupService : IBackupService
         try
         {
             var prepared = await PrepareValidatedAsync(uploadedPath, ct);   // throws on any incompatibility
+            var staging = _dataPaths.RestoreStagingDir;
 
             // Enter maintenance so the pre-restore snapshot is quiescent and no doomed writes are accepted in
             // the seconds before the process stops. If we abort BEFORE the commit point, we exit maintenance so
@@ -319,6 +327,21 @@ public sealed class BackupService : IBackupService
             {
                 _logger.LogWarning("Restore initiated by {Actor} from a backup created {Created:o} (provider={Provider}).",
                     actor, prepared.Manifest.CreatedAtUtc, prepared.Manifest.Provider);
+
+                // Extract the already-decrypted archive into a FRESH staging dir and check what was extracted
+                // (R1-32): database integrity and migrations, the JSON stores, the key ring. Staging stays immutable
+                // from here until the boot handler consumes it; without the marker it is discarded at the next start.
+                if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+                try
+                {
+                    await using (var tarFs = File.OpenRead(prepared.TarGzPath))
+                        await BackupArchiver.ExtractAsync(tarFs, staging, ExtractionLimits, ct);
+                }
+                catch (InvalidDataException ex)
+                {
+                    throw new BackupValidationException($"Backup archive is invalid: {ex.Message}");
+                }
+                StagedRestoreValidator.Validate(staging, prepared.Manifest);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
                 // nothing has been changed at this point.
@@ -331,13 +354,6 @@ public sealed class BackupService : IBackupService
                     throw new InvalidOperationException(
                         $"Restore aborted: could not create a pre-restore safety backup ({ex.Message}). Nothing was changed.", ex);
                 }
-
-                // Extract the already-decrypted archive into a FRESH staging dir. Staging stays immutable from
-                // here until the boot handler consumes it.
-                var staging = _dataPaths.RestoreStagingDir;
-                if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
-                await using (var tarFs = File.OpenRead(prepared.TarGzPath))
-                    await BackupArchiver.ExtractAsync(tarFs, staging, ct);
 
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker
@@ -368,6 +384,7 @@ public sealed class BackupService : IBackupService
             }
             catch when (!committed)
             {
+                TryDeleteDir(staging);            // never committed: nothing may be left to swap
                 _maintenance.ExitMaintenance();   // failed before committing — resume normal service
                 throw;
             }
@@ -399,6 +416,12 @@ public sealed class BackupService : IBackupService
         var tarGzPath = uploadedPath;
         string? decryptTemp = null;
 
+        // R1-32: with a VAULT_KEY every archive this instance writes is sealed with it. An unsealed one is not
+        // authenticated — anybody who can hand over a file could choose the roles, keys and settings restored.
+        if (!encrypted && !string.IsNullOrEmpty(_vaultKey))
+            throw new BackupValidationException(
+                "This backup is not encrypted. With VAULT_KEY set only encrypted backups made with that key are restored, because an unencrypted file cannot be checked for changes.");
+
         if (encrypted)
         {
             if (string.IsNullOrEmpty(_vaultKey))
@@ -428,7 +451,7 @@ public sealed class BackupService : IBackupService
             try
             {
                 await using var tarFs = File.OpenRead(tarGzPath);
-                inspection = await BackupArchiver.InspectAsync(tarFs, _dataPaths.RestoreStagingDir, ct);
+                inspection = await BackupArchiver.InspectAsync(tarFs, _dataPaths.RestoreStagingDir, ExtractionLimits, ct);
             }
             catch (InvalidDataException ex)
             {
@@ -454,6 +477,14 @@ public sealed class BackupService : IBackupService
 
                 CheckSubset(metrics.Database.GetMigrations(), manifest.MetricsMigrations, "metrics");
                 CheckSubset(idDb.Database.GetMigrations(), manifest.IdentityMigrations, "identity");
+
+                // R1-32: the database is replaced, never removed — an archive of a SQLite instance must hold it, and
+                // one of a PostgreSQL instance (whose data lives outside) must not.
+                var sqlite = string.Equals(manifest.Provider, SelfBackupFormat.ProviderSqlite, StringComparison.OrdinalIgnoreCase);
+                if (sqlite != inspection.HasDatabase)
+                    throw new BackupValidationException(sqlite
+                        ? "Backup archive is invalid: it was made on SQLite but holds no database."
+                        : "Backup archive is invalid: it was made on PostgreSQL but holds a SQLite database.");
             }
 
             return new PreparedRestore(tarGzPath, manifest, encrypted, decryptTemp);
@@ -518,6 +549,8 @@ public sealed class BackupService : IBackupService
                 if (excludedFiles.Contains(fileFull)) continue;
                 if (fileFull.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) continue;
                 var rel = Path.GetRelativePath(rootFull, fileFull).Replace('\\', '/');
+                // R1-32: only what a restore may write back (SelfBackupLayout) — the same list on both sides.
+                if (SelfBackupLayout.Classify(rel, isDirectory: false) is not (BackupEntryKind.File or BackupEntryKind.Directory)) continue;
                 yield return new PackEntry(rel, fileFull);
             }
         }

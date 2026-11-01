@@ -101,6 +101,144 @@ public class BackupArchiverTests
         finally { Cleanup(dest); }
     }
 
+    // ---------------------------------------------------------------- R1-32: what a restore may write
+
+    private static void Entry(TarWriter w, string name, int size = 1)
+        => w.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name) { DataStream = new MemoryStream(new byte[size]) });
+
+    [Theory]
+    [InlineData("backups/self/pre-restore.tar.gz.enc")]
+    [InlineData("backups")]
+    [InlineData(".restore-pending")]
+    [InlineData(".restore-staging/roles.json")]
+    [InlineData("metrics.db-wal")]
+    [InlineData("metrics.db-shm")]
+    [InlineData("roles.json.tmp")]
+    [InlineData("chat/session.json.tmp")]
+    [InlineData("vault.key")]
+    [InlineData("keys")]                  // a file where the key ring directory belongs
+    [InlineData("roles.json/inner.json")] // something below a known file
+    public async Task Extract_and_inspect_refuse_an_entry_a_restore_may_never_write(string name)
+    {
+        var dest = NewTempDir();
+        try
+        {
+            using (var archive = await BuildTarGz(w => Entry(w, name)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+            using (var archive = await BuildTarGz(w => Entry(w, name)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.ExtractAsync(archive, dest));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(dest));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Theory]
+    [InlineData("roles.json", "roles.json")]
+    [InlineData("roles.json", "./roles.json")]
+    [InlineData("chat/a.json", "CHAT/A.json")]          // one file on a case-insensitive file system
+    [InlineData("chat/a", "chat/a/b.json")]             // a file and a directory under one name
+    [InlineData("chat/a/b.json", "chat/a")]
+    public async Task An_archive_with_duplicate_or_conflicting_entries_is_refused(string first, string second)
+    {
+        var dest = NewTempDir();
+        try
+        {
+            using var archive = await BuildTarGz(w => { Entry(w, first); Entry(w, second); });
+            await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task An_archive_with_more_entries_than_allowed_is_refused()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            using var archive = await BuildTarGz(w => { for (var i = 0; i < 5; i++) Entry(w, $"chat/{i}.json"); });
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(
+                () => BackupArchiver.ExtractAsync(archive, dest, new BackupExtractionLimits(MaxEntries: 4, MaxTotalBytes: 1 << 20)));
+            Assert.Contains("entries", ex.Message);
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task An_archive_that_unpacks_to_more_bytes_than_allowed_is_refused_before_it_is_written()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            // 64 KiB of zeros compress to almost nothing: a small upload, a large unpack.
+            using (var archive = await BuildTarGz(w => Entry(w, "roles.json", size: 64 << 10)))
+                Assert.True(archive.Length < 4096);
+            var limits = new BackupExtractionLimits(MaxEntries: 10, MaxTotalBytes: 16 << 10);
+            using (var archive = await BuildTarGz(w => Entry(w, "roles.json", size: 64 << 10)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
+            using (var archive = await BuildTarGz(w => Entry(w, "roles.json", size: 64 << 10)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.ExtractAsync(archive, dest, limits));
+            Assert.False(File.Exists(Path.Combine(dest, "roles.json")));
+
+            // The bound counts the whole archive, not each entry.
+            using (var archive = await BuildTarGz(w => { for (var i = 0; i < 3; i++) Entry(w, $"chat/{i}.json", size: 8 << 10); }))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task Entries_that_are_not_restore_targets_are_reported_and_never_written()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            using (var archive = await BuildTarGz(w => { Entry(w, "roles.json"); Entry(w, "notes.txt"); Entry(w, "setup-token.txt"); }))
+            {
+                var inspection = await BackupArchiver.InspectAsync(archive, dest);
+                Assert.Equal(["notes.txt", "setup-token.txt"], inspection.SkippedEntries);
+            }
+            using (var archive = await BuildTarGz(w => { Entry(w, "roles.json"); Entry(w, "notes.txt"); Entry(w, "setup-token.txt"); }))
+                await BackupArchiver.ExtractAsync(archive, dest);
+            Assert.True(File.Exists(Path.Combine(dest, "roles.json")));
+            Assert.False(File.Exists(Path.Combine(dest, "notes.txt")));
+            Assert.False(File.Exists(Path.Combine(dest, "setup-token.txt")));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task Extracted_files_are_readable_by_the_owner_only_whatever_mode_the_archive_claims()
+    {
+        if (OperatingSystem.IsWindows()) return;   // no file modes
+        var dest = NewTempDir();
+        try
+        {
+            using var archive = await BuildTarGz(w => w.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "ssh-keys/id")
+            {
+                DataStream = new MemoryStream(new byte[4]),
+                Mode = (UnixFileMode)0b111_111_111,
+            }));
+            await BackupArchiver.ExtractAsync(archive, dest);
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dest, "ssh-keys", "id")));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public void Every_data_path_is_either_a_restore_target_or_named_as_not_restored()
+    {
+        // A new store in DataPathOptions must be placed here on purpose: backed up and restored, or not.
+        var paths = new Whiskers.Configuration.DataPathOptions("/r");
+        var known = SelfBackupLayout.Files.Concat(SelfBackupLayout.Directories).Concat(SelfBackupLayout.NotRestored.Keys).ToHashSet();
+        foreach (var property in typeof(Whiskers.Configuration.DataPathOptions).GetProperties())
+        {
+            if (property.PropertyType != typeof(string) || property.GetMethod!.IsStatic) continue;
+            if (property.Name is nameof(paths.RootDir) or nameof(paths.DbConnectionString)) continue;
+            var relative = ((string)property.GetValue(paths)!)["/r/".Length..];
+            Assert.True(known.Contains(relative) || known.Contains(relative.Split('/')[0]), $"{property.Name} ({relative}) is not placed");
+        }
+    }
+
     private static async Task<MemoryStream> BuildTarGz(Action<TarWriter> write)
     {
         var ms = new MemoryStream();

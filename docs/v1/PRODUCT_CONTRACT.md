@@ -275,7 +275,7 @@ mTLS carries the server's diff.
 | U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | — | GW ✅ (no page row since R1-22) | INV-17 |
 | U-23 | Cloud power / snapshot | Admin | ❌ | GW ✅ (R1-21) | INV-43, 52 |
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-25 | Self-backup create / delete / restore / download | Admin | ⚠️ archive validation | GW ✅ (download: audited before the first byte, refused without its row — R1-22) | INV-55 |
+| U-25 | Self-backup create / delete / restore / download | Admin | ✅ archive validation (R1-32) | GW ✅ (download: audited before the first byte, refused without its row — R1-22) | INV-55 |
 | U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | GW ✅ (R1-21) | INV-04 |
 | U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | — | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09); since R1-22 the one gateway event per action, with a versioned diff, no page row | INV-04, 19 (test fires the real action at Operator) |
