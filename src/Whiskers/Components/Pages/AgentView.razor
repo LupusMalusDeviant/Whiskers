@@ -298,7 +298,8 @@
                                    || !string.IsNullOrWhiteSpace(Configuration["Agent:ApiKey"]);
 
     /// <summary>The key a connection test uses: the one typed now, else the stored one — read on the server, never shown.</summary>
-    private string EffectiveKey => !string.IsNullOrWhiteSpace(_llmKey) ? _llmKey.Trim()
+    // As typed, like the save stores it: a key tested here is the key the agent will use.
+    private string EffectiveKey => !string.IsNullOrWhiteSpace(_llmKey) ? _llmKey
         : _llmKeyClear ? "" : Settings.CurrentValue.ApiKey;
 
     private void ToggleKeyClear()

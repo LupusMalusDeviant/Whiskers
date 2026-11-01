@@ -164,6 +164,41 @@ public partial class SecretsAtRestTests
         Assert.True(File.Exists(_paths.AppSettingsJson));
     }
 
+    [Fact]
+    public async Task A_section_refused_under_the_lock_leaves_every_section_of_the_save_unwritten()
+    {
+        var store = AppSettings();
+        await store.UpdateSectionsAsync(new Dictionary<string, Func<JsonObject?, JsonObject>>
+        {
+            ["Slack"] = _ => new JsonObject { ["Enabled"] = false },
+        });
+        var before = File.ReadAllText(_paths.AppSettingsJson);
+
+        await Assert.ThrowsAsync<SecretFieldChange.SecretChangedException>(() => store.UpdateSectionsAsync(
+            new Dictionary<string, Func<JsonObject?, JsonObject>>
+            {
+                ["Slack"] = _ => new JsonObject { ["Enabled"] = true },
+                ["Discord"] = _ => throw new SecretFieldChange.SecretChangedException(),
+            }));
+
+        Assert.Equal(before, File.ReadAllText(_paths.AppSettingsJson));
+    }
+
+    [Fact]
+    public async Task Clearing_a_legacy_plaintext_value_needs_no_vault_and_leaves_no_plaintext()
+    {
+        var values = FreshSettingValues();
+        WriteLegacySettings(values);
+        var vault = await Vault(key: null);
+
+        await VaultBackedSettingsSave.SaveAppSettingsAsync(new SettingsRunner(), vault, AppSettings(), "notifications",
+            new Dictionary<string, JsonObject> { ["Email"] = new() { ["Enabled"] = true } },
+            [new SecretInput("Email", "Password", null, Clear: true)], "needs vault");
+
+        Assert.DoesNotContain(values[("Email", "Password")], File.ReadAllText(_paths.AppSettingsJson));
+        Assert.Equal("", Bound<EmailSettings>(SettingsConfiguration(), vault, "Email").Password);
+    }
+
     private void WriteLegacySettings(Dictionary<(string Section, string Property), string> values)
     {
         var app = new JsonObject();
