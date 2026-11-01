@@ -197,12 +197,17 @@ public sealed class VaultKeyRingRepository(string directory, IVaultService vault
         return count;
     }
 
-    /// <summary>How many key files hold a secret in plaintext (for the readiness check).</summary>
+    /// <summary>How many key files hold a secret in plaintext (for the readiness check). A file that cannot be read
+    /// is counted too: nothing proves it is encrypted.</summary>
     public int CountPlaintextKeys()
     {
         if (!System.IO.Directory.Exists(directory)) return 0;
         lock (_gate)
-            return System.IO.Directory.EnumerateFiles(directory, "*.xml").Count(f => PlaintextSecrets(XElement.Load(f)).Count > 0);
+            return System.IO.Directory.EnumerateFiles(directory, "*.xml").Count(f =>
+            {
+                try { return PlaintextSecrets(XElement.Load(f)).Count > 0; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) { return true; }
+            });
     }
 
     // Elements Data Protection marks as secret that are not inside an encrypted placeholder.

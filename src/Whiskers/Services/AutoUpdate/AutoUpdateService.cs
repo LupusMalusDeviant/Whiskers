@@ -205,7 +205,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 history.CompletedAt = DateTime.UtcNow;
                 policy.LastUpdated = DateTime.UtcNow;
                 // R1-31: an update without a way back says so where its result is read.
-                policy.LastUpdateResult = noRollback ? "OK (ohne Rollback-Snapshot)" : "OK";
+                policy.LastUpdateResult = noRollback ? "OK (no rollback snapshot)" : "OK";
                 if (noRollback) history.Error = "No rollback snapshot was kept for this update; it cannot be rolled back from Whiskers.";
 
                 _updateStore.Remove(container.Id, container.ServerId);
@@ -320,9 +320,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         {
             // No plaintext snapshot, and no older one offered as the way back from this update either — removed so that
             // an older plaintext one does not linger in the database file.
-            await Whiskers.Services.Vault.ProtectedFieldMigration.WithoutRemnantsAsync(db,
-                () => db.UpdateRollbacks.Where(r => r.ContainerName == container.Name && r.ServerId == container.ServerId).ExecuteDeleteAsync(),
-                _logger);
+            var stale = db.UpdateRollbacks.Where(r => r.ContainerName == container.Name && r.ServerId == container.ServerId);
+            if (await stale.AnyAsync())
+                await Whiskers.Services.Vault.ProtectedFieldMigration.WithoutRemnantsAsync(db, () => stale.ExecuteDeleteAsync(), _logger);
             throw new RollbackSnapshotUnavailableException();
         }
         var (oldImageId, cfg) = await _docker.CaptureRollbackSnapshotAsync(
@@ -378,8 +378,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         // Encrypted since R1-31; a snapshot from before is read as it is until the start-up migration encrypted it.
         var configJson = Whiskers.Services.Vault.ProtectedFields.Read(_vault,
                 Whiskers.Services.Vault.ProtectedFields.RollbackSnapshot(snap.ServerId, snap.ContainerName), snap.ConfigJson)
-            ?? throw new InvalidOperationException(
-                "The rollback snapshot cannot be read: the vault is not usable (VAULT_KEY missing or wrong).");
+            ?? throw new InvalidOperationException(_vault?.IsEnabled == true
+                ? "The rollback snapshot cannot be read: it does not belong to this container and server, or it was changed."
+                : "The rollback snapshot cannot be read: the vault is not usable (VAULT_KEY missing or wrong).");
 
         var progress = new Progress<string>(msg => _logger.LogDebug("Rollback {Container}: {Msg}", snap.ContainerName, msg));
         await _docker.RollbackContainerAsync(

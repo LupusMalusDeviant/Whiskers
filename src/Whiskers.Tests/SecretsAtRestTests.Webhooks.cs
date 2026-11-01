@@ -147,6 +147,74 @@ public partial class SecretsAtRestTests
         TestSqlite.ClearPools(_root);
     }
 
+    [Fact]
+    public async Task In_wal_mode_the_migration_leaves_no_plaintext_in_the_live_database_files()
+    {
+        var secret = "WALSECRET-" + Guid.NewGuid().ToString("N");
+        await using var sp = MetricsDb();
+        using (var scope = sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");   // as the app runs it
+            db.Webhooks.Add(new WebhookEntity { Name = "legacy", Secret = secret, TargetId = "/x" });
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = sp.CreateScope())
+            await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), await Vault(), NullLogger.Instance);
+
+        // Read while the connection pool is still alive: closing it would fold the log back on its own.
+        foreach (var file in Directory.EnumerateFiles(_root, "metrics.db*"))
+        {
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var copy = new MemoryStream();
+            stream.CopyTo(copy);
+            Assert.False(System.Text.Encoding.UTF8.GetString(copy.ToArray()).Contains(secret, StringComparison.Ordinal),
+                $"{Path.GetFileName(file)} still holds the replaced secret");
+        }
+        TestSqlite.ClearPools(_root);
+    }
+
+    [Fact]
+    public async Task A_log_held_by_a_reader_is_reported_not_ignored()
+    {
+        await using var sp = MetricsDb();
+        using (var scope = sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+            db.Webhooks.Add(new WebhookEntity { Name = "legacy", Secret = "SECRET-" + Guid.NewGuid().ToString("N"), TargetId = "/x" });
+            await db.SaveChangesAsync();
+        }
+        // A reader in the middle of a transaction holds the log: the checkpoint cannot fold it back.
+        await using var reader = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_paths.DbPath};Pooling=False");
+        await reader.OpenAsync();
+        await using var read = reader.BeginTransaction(deferred: true);
+        await using (var select = reader.CreateCommand())
+        {
+            select.Transaction = read;
+            select.CommandText = "SELECT COUNT(*) FROM \"Webhooks\";";
+            await select.ExecuteScalarAsync();
+        }
+
+        var logger = new ListLogger();
+        using (var scope = sp.CreateScope())
+            await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), await Vault(), logger);
+
+        Assert.Contains(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("busy"));
+        await read.RollbackAsync();
+        TestSqlite.ClearPools(_root);
+    }
+
+    private sealed class ListLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public readonly List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     /// <summary>A usable vault whose values for one purpose do not read back.</summary>
     private sealed class UnreadableFor(IVaultService inner, string purpose) : IVaultService
     {

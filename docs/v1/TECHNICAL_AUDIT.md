@@ -109,10 +109,10 @@ The area reports contain 111 findings: A 18, B 20, C 24, D 17, E 9, F 23. After 
 | TA-34 | Security | A key's `AllowedTools` list bypasses its level check | C-16 |
 | TA-35 | Commercial readiness | Audit data: no tamper evidence, fixed 90-day hard delete, no export, visible to all Viewers | C-17, B-20 |
 | TA-36 | Security | A wrong/changed `VAULT_KEY` is not detected; legacy CBC migration with a wrong key can overwrite entries | D-03 |
-| TA-37 | Security | DataProtection key ring unencrypted at rest and included in backups (cookie-forgery credential) | D-04, A-04 |
+| TA-37 | Security | DataProtection key ring unencrypted at rest and included in backups (cookie-forgery credential). **Fixed in R1-31:** each key's secret is encrypted with a vault-derived key (`VaultKeyRing`), plaintext key files are encrypted in place at start; without `VAULT_KEY` the keys stay as before (reported). | D-04, A-04 |
 | TA-38 | Reliability | No pre-migration backup or downgrade path; a failed migration crash-loops; Helm startup probe ≈60 s | D-07, F-12 |
 | TA-39 | Reliability | JSON stores: corruption blocks boot, no fsync before rename, some non-atomic writers | D-09 |
-| TA-40 | Security | Rollback snapshots store full container env (secrets) in plaintext and replay it | D-11 |
+| TA-40 | Security | Rollback snapshots store full container env (secrets) in plaintext and replay it. **Fixed in R1-31:** snapshots are stored encrypted with a vault-derived key bound to container and server; without a usable vault none is kept. | D-11 |
 | TA-41 | Security | git branch not validated → option/argument injection; deploying an untrusted repo = code execution on host (by design, Admin) | E-01 |
 | TA-42 | Security | SSH user/host not charset-validated → `ssh` option injection (`-oProxyCommand`) on the Whiskers host (Admin-set) | E-02 |
 | TA-43 | Security | `execute_query` is Write level but runs arbitrary SQL as superuser (DROP, Postgres `COPY … TO PROGRAM`) — level decision needed | E-04 |

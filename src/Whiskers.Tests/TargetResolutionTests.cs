@@ -404,7 +404,7 @@ public sealed class TargetResolutionTests : IDisposable
         var history = Assert.Single(checkDb.UpdateHistory);
         Assert.True(history.Success);
         Assert.Contains("No rollback snapshot", history.Error);
-        Assert.Equal("OK (ohne Rollback-Snapshot)", Assert.Single(checkDb.UpdatePolicies).LastUpdateResult);
+        Assert.Equal("OK (no rollback snapshot)", Assert.Single(checkDb.UpdatePolicies).LastUpdateResult);
         Assert.Empty(checkDb.UpdateRollbacks);
     }
 
