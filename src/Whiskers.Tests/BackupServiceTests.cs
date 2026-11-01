@@ -262,6 +262,7 @@ public class BackupServiceTests
         { "key", "keys/" },
         { "identity-unmigrated", "migration history" },   // the start would create the sign-in tables again and stop
         { "metrics-unmigrated", "migration history" },
+        { "trigger", "triggers" },                  // would run only on the live database
     };
 
     [Theory]
@@ -280,7 +281,8 @@ public class BackupServiceTests
                 await File.WriteAllBytesAsync(db, System.Text.Encoding.ASCII.GetBytes("SQLite format 3\0").Concat(new byte[4096]).ToArray());
             else
                 CreateDatabase(db, damage == "migrations" ? ["20260101000000_NotInTheManifest"] : [],
-                    damage switch { "identity-unmigrated" => "AspNetUsers", "metrics-unmigrated" => "Servers", _ => null });
+                    damage switch { "identity-unmigrated" => "AspNetUsers", "metrics-unmigrated" => "Servers", _ => null },
+                    trigger: damage == "trigger");
             var extra = new List<PackEntry>();
             if (damage is "json" or "roles-shape" or "settings-shape")
             {
@@ -305,6 +307,23 @@ public class BackupServiceTests
             Assert.False(maintenance.IsMaintenance);
             Assert.Empty(await svc.ListBackupsAsync());                  // no safety copy for a refused archive
             Assert.Equal("LIVE", await File.ReadAllTextAsync(paths.RolesJson));
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
+    public async Task A_second_restore_is_refused_while_one_is_committed()
+    {
+        var (svc, paths, root, sp) = NewService(vaultKey: null);
+        try
+        {
+            await File.WriteAllTextAsync(paths.RestorePendingMarker, "{}");
+            Directory.CreateDirectory(paths.RestoreStagingDir);
+            await File.WriteAllTextAsync(Path.Combine(paths.RestoreStagingDir, "roles.json"), "{}");
+            var archive = await CraftManifestArchive(root, new SelfBackupManifest { Provider = "sqlite" });
+
+            await Assert.ThrowsAsync<BackupValidationException>(() => svc.BeginRestoreAsync(archive, "tester"));
+            Assert.True(File.Exists(Path.Combine(paths.RestoreStagingDir, "roles.json")));   // the committed one is intact
         }
         finally { Cleanup(sp, root); }
     }
@@ -381,7 +400,7 @@ public class BackupServiceTests
         finally { Cleanup(sp, root); }
     }
 
-    private static void CreateDatabase(string path, string[] migrations, string? table = null)
+    private static void CreateDatabase(string path, string[] migrations, string? table = null, bool trigger = false)
     {
         using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False");
         connection.Open();
@@ -391,6 +410,11 @@ public class BackupServiceTests
         if (table is not null)
         {
             command.CommandText = $"CREATE TABLE \"{table}\" (\"Id\" INTEGER PRIMARY KEY);";
+            command.ExecuteNonQuery();
+        }
+        if (trigger)
+        {
+            command.CommandText = "CREATE TRIGGER t AFTER INSERT ON \"__EFMigrationsHistory\" BEGIN SELECT 1; END;";
             command.ExecuteNonQuery();
         }
         foreach (var migration in migrations)

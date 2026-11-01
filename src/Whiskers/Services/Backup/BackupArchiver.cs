@@ -43,6 +43,10 @@ public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes, 
     /// <summary>A data-protection key file: loaded whole at validation and at every start.</summary>
     public const long MaxKeyEntryBytes = 1L << 20;
 
+    /// <summary>The key ring as a whole: the start holds every key in memory at once. A ring has a handful.</summary>
+    public const int MaxKeyFiles = 500;
+    public const long MaxKeyRingBytes = 64L << 20;
+
     /// <summary>The manifest: a few KiB in practice, read whole.</summary>
     public const long MaxManifestBytes = 1L << 20;
 
@@ -152,6 +156,8 @@ public static class BackupArchiver
         var count = 0;
         var remaining = limits.MaxTotalBytes;
         long previousLength = 0;
+        int keyFiles = 0;
+        long keyBytes = 0;
 
         while (true)
         {
@@ -193,6 +199,9 @@ public static class BackupArchiver
             if (kind is BackupEntryKind.Directory && !isDirectory && name.StartsWith(SelfBackupLayout.KeyRing + "/", StringComparison.Ordinal)
                 && entry.Length > BackupExtractionLimits.MaxKeyEntryBytes)
                 throw new InvalidDataException($"Refusing tar entry '{entry.Name}': larger than a data-protection key can be.");
+            if (kind is BackupEntryKind.Directory && !isDirectory && name.StartsWith(SelfBackupLayout.KeyRing + "/", StringComparison.Ordinal)
+                && (++keyFiles > BackupExtractionLimits.MaxKeyFiles || (keyBytes += entry.Length) > BackupExtractionLimits.MaxKeyRingBytes))
+                throw new InvalidDataException("Refusing an archive whose key ring is larger than a key ring can be.");
             previousLength = isDirectory ? 0 : entry.Length;
             await onEntry(entry, kind, target);
         }

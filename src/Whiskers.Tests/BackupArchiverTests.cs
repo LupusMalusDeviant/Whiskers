@@ -346,6 +346,39 @@ public class BackupArchiverTests
         finally { Cleanup(dest); }
     }
 
+    [Theory]
+    [InlineData("20 path=a\n8 size=99\n")]    // one record by length, two by newline: the reader would see a size
+    [InlineData("9 size=1\n9 size=2\n")]      // one key twice
+    [InlineData("12 path=a\rb\n")]
+    public async Task A_pax_record_set_the_screen_and_the_reader_could_read_differently_is_refused(string records)
+    {
+        var dest = NewTempDir();
+        try
+        {
+            var bytes = Encoding.ASCII.GetBytes(records);
+            using var archive = await RawTarGz(Header("PaxHeader/a", 'x', bytes.Length), Pad(bytes),
+                Header("chat/a.json", '0', 0));
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+            Assert.Contains("extended header", ex.Message);
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task A_key_ring_with_more_files_than_a_ring_holds_is_refused()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            using var archive = await BuildTarGz(w =>
+            {
+                for (var i = 0; i <= BackupExtractionLimits.MaxKeyFiles; i++) Entry(w, $"keys/key-{i}.xml");
+            });
+            await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+        }
+        finally { Cleanup(dest); }
+    }
+
     private static byte[] Pad(byte[] data) => data.Concat(new byte[(512 - data.Length % 512) % 512]).ToArray();
 
     // A ustar header block: name, octal size, type flag, checksum.

@@ -123,6 +123,13 @@ public static class StagedRestoreValidator
     // ContainerMetrics table); identity has no baseline. Such a database is refused here instead.
     private static void CheckStartCanMigrate(SqliteConnection connection, SelfBackupManifest manifest)
     {
+        // No migration creates a trigger or a view; one in an archive would run only on the live database.
+        using (var extra = connection.CreateCommand())
+        {
+            extra.CommandText = "SELECT count(*) FROM sqlite_master WHERE type IN ('trigger', 'view')";
+            if (Convert.ToInt64(extra.ExecuteScalar()) > 0)
+                throw new BackupValidationException("Backup archive is invalid: its database holds triggers or views no version of Whiskers creates.");
+        }
         var tables = new List<string>();
         using (var list = connection.CreateCommand())
         {

@@ -141,10 +141,13 @@ internal sealed class TarHeaderScreen(Stream inner, long maxHeaderBytes) : Strea
         return octal;
     }
 
-    // PAX records: "<length> <key>=<value>\n". Only "size" matters here; a malformed record set is refused.
+    // PAX records: "<length> <key>=<value>\n". Only "size" matters here; a malformed record set is refused. The reader
+    // splits records on newlines, this screen by their lengths: a newline anywhere but at a record's end, or one key
+    // twice, would let the two see different records, so either is refused.
     private static long? PaxSize(byte[] records)
     {
         long? size = null;
+        var keys = new HashSet<string>(StringComparer.Ordinal);
         var pos = 0;
         while (pos < records.Length)
         {
@@ -152,9 +155,15 @@ internal sealed class TarHeaderScreen(Stream inner, long maxHeaderBytes) : Strea
             if (space < 0 || !int.TryParse(Encoding.ASCII.GetString(records, pos, space - pos), out var length)
                 || length <= space - pos || pos + length > records.Length)
                 throw new InvalidDataException("Refusing an archive with a malformed extended header.");
+            var end = pos + length - 1;
+            if (records[end] != (byte)'\n' || Array.IndexOf(records, (byte)'\n', pos, end - pos) >= 0
+                || Array.IndexOf(records, (byte)'\r', pos, length) >= 0)
+                throw new InvalidDataException("Refusing an archive with a malformed extended header.");
             var record = Encoding.UTF8.GetString(records, space + 1, pos + length - space - 2);
             var eq = record.IndexOf('=');
-            if (eq > 0 && record[..eq] == "size")
+            if (eq <= 0 || !keys.Add(record[..eq]))
+                throw new InvalidDataException("Refusing an archive with a malformed extended header.");
+            if (record[..eq] == "size")
             {
                 if (!long.TryParse(record[(eq + 1)..], out var parsed) || parsed < 0)
                     throw new InvalidDataException("Refusing an archive with a malformed size record.");

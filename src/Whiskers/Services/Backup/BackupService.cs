@@ -314,6 +314,9 @@ public sealed class BackupService : IBackupService
         await _restoreLock.WaitAsync(ct);
         try
         {
+            // A committed restore waits for the restart; a second one would delete its staging and strand its marker.
+            if (File.Exists(_dataPaths.RestorePendingMarker))
+                throw new BackupValidationException("A restore is already committed and applied at the next start.");
             var prepared = await PrepareValidatedAsync(uploadedPath, ct);   // throws on any incompatibility
             var staging = _dataPaths.RestoreStagingDir;
 
@@ -644,8 +647,8 @@ public sealed class BackupService : IBackupService
                 if (property.GetColumnName(store) is { } column) columns.Add(column);
         }
         static string Quote(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+        await db.Database.OpenConnectionAsync(ct);
         var connection = db.Database.GetDbConnection();
-        await connection.OpenAsync(ct);
         try
         {
             foreach (var (table, columns) in tables)
@@ -657,7 +660,7 @@ public sealed class BackupService : IBackupService
                 await command.ExecuteNonQueryAsync(ct);
             }
         }
-        finally { await connection.CloseAsync(); }
+        finally { await db.Database.CloseConnectionAsync(); }
     }
 
     // Staging takes the extracted bytes and the swap a second copy of each target beside the live one; the pre-restore
