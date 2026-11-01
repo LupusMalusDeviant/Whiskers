@@ -10,7 +10,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 
 | Page | Purpose |
 |---|---|
-| `Dashboard.razor` | The main live dashboard, all containers, health, metrics, update badges. The "stopped" / "unhealthy" stat tiles double as filters (same predicate as their count, combined with the group/tag filter). |
+| `Dashboard.razor` | The main live dashboard, all containers, health, metrics, update badges. The "stopped" / "unhealthy" stat tiles double as filters (same predicate as their count, combined with the group/tag filter). R1-31: an update without a usable vault keeps no rollback snapshot — the Dashboard says so in a warning and the update goes ahead. |
 | `ContainerDetail.razor` | Deep view of one container: overview, stats, logs, health, terminal, env, and (for DB containers) a database tab. |
 | `ContainerGraph.razor` | Visual graph of containers and their relationships. |
 | `ContainerDiff.razor` | Compare container configurations. |

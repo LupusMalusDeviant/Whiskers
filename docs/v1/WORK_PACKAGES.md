@@ -537,10 +537,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `SecretsAtRestTests` covers inbound webhook secrets and full snapshot environment data.
-- [ ] `DataProtectionKeyStorageTests` proves key-ring files are protected and restart remains usable.
-- [ ] Existing records migrate without losing rollback or webhook capability.
-- [ ] Key loss/rotation and any session invalidation are documented explicitly.
+- [x] `SecretsAtRestTests` covers inbound webhook secrets and full snapshot environment data.
+- [x] `DataProtectionKeyStorageTests` proves key-ring files are protected and restart remains usable.
+- [x] Existing records migrate without losing rollback or webhook capability.
+- [x] Key loss/rotation and any session invalidation are documented explicitly.
 
 **Out of scope:** Per-host mTLS identity.
 

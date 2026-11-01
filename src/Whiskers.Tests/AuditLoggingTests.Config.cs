@@ -228,7 +228,7 @@ public sealed partial class AuditLoggingTests : IDisposable
     {
         var hooks = new Whiskers.Services.Webhooks.WebhookService(_db.Scopes, Stub<Whiskers.Services.Docker.IDockerService>(),
             Stub<Whiskers.Services.Server.IHostCommandExecutor>(), Stub<IComposePlanner>(),
-            NullLogger<Whiskers.Services.Webhooks.WebhookService>.Instance);
+            NullLogger<Whiskers.Services.Webhooks.WebhookService>.Instance, vault: TestVault.Usable);
         WebhookEntity? hook = null;
         string? secret = null;
 
@@ -591,7 +591,7 @@ public sealed partial class AuditLoggingTests : IDisposable
     {
         var hooks = new Whiskers.Services.Webhooks.WebhookService(_db.Scopes, Stub<Whiskers.Services.Docker.IDockerService>(),
             Stub<Whiskers.Services.Server.IHostCommandExecutor>(), Stub<IComposePlanner>(),
-            NullLogger<Whiskers.Services.Webhooks.WebhookService>.Instance);
+            NullLogger<Whiskers.Services.Webhooks.WebhookService>.Instance, vault: TestVault.Usable);
         var hook = await hooks.CreateWebhookAsync(new WebhookEntity
             { Name = "redeploy", TargetId = "web", Action = "restart", Owner = "user:admin@example.com" });
         var stored = (await hooks.GetWebhookAsync(hook.WebhookId))!;

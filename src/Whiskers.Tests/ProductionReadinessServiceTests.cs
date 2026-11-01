@@ -154,6 +154,37 @@ public class ProductionReadinessServiceTests : IDisposable
         Assert.Contains("Agent:ApiKey", stray.Detail);
     }
 
+    private const string StoredTitle = "Webhook-Secrets, Rollback-Snapshots und Sitzungsschlüssel verschlüsselt";
+
+    [Fact]
+    public async Task Plaintext_webhook_secrets_snapshots_and_key_files_are_counted_until_encrypted()
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.Webhooks.Add(new WebhookEntity { Name = "legacy", Secret = "WH-" + Guid.NewGuid().ToString("N"), TargetId = "/x" });
+            db.UpdateRollbacks.Add(new UpdateRollbackEntity { ContainerName = "web", ServerId = "local", ConfigJson = "{}" });
+            await db.SaveChangesAsync();
+        }
+        Directory.CreateDirectory(_paths.KeysDir);
+        File.WriteAllText(Path.Combine(_paths.KeysDir, "key-1.xml"),
+            "<key><masterKey p4:requiresEncryption=\"true\" xmlns:p4=\"http://schemas.asp.net/2015/03/dataProtection\"><value>x</value></masterKey></key>");
+        var (vault, servers) = await Stores("readiness-test-passphrase");
+        var keyRing = new VaultKeyRingRepository(_paths.KeysDir, vault, NullLogger<VaultKeyRingRepository>.Instance);
+        async Task<ReadinessCheck> Stored() => (await new ProductionReadinessService(Config("readiness-test-passphrase"), vault,
+            _sp.GetRequiredService<IServiceScopeFactory>(), servers, keyRing: keyRing).GetChecksAsync(isHttps: true)).Single(c => c.Title == StoredTitle);
+
+        var before = await Stored();
+        Assert.False(before.Ok);
+        Assert.Contains("1 Webhook-Secret(s) und 1 Rollback-Snapshot(s)", before.Detail);
+        Assert.Contains("1 Sitzungsschlüssel-Datei(en)", before.Detail);
+
+        using (var scope = _sp.CreateScope())
+            await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), vault, NullLogger.Instance);
+        keyRing.ProtectExistingKeys();
+        Assert.True((await Stored()).Ok);
+    }
+
     [Fact]
     public async Task A_wrong_vault_key_is_reported_as_such()
     {

@@ -35,6 +35,7 @@ public class VaultService : IVaultService, IInitializable
     private readonly string? _passphrase;
     private readonly byte[]? _legacyKey;   // SHA256(passphrase) — only used to read/migrate old CBC entries
     private byte[]? _masterKey;             // PBKDF2-derived — set in InitializeAsync once the salt is known
+    private byte[]? _fieldKey;              // R1-31: HKDF from the master key, for values kept outside vault.json
     private VaultData _data = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -118,6 +119,8 @@ public class VaultService : IVaultService, IInitializable
         }
 
         _masterKey = key;
+        // A key of its own for values kept outside vault.json (R1-31): one never opens the other's values.
+        _fieldKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, key, 32, info: Encoding.UTF8.GetBytes(FieldKeyInfo));
         KeyState = VaultKeyState.Verified;
 
         var next = Copy(data);
@@ -386,6 +389,47 @@ public class VaultService : IVaultService, IInitializable
     }
 
     private static bool IsGcm(string? stored) => stored?.StartsWith(GcmPrefix, StringComparison.Ordinal) == true;
+
+    private const string FieldKeyInfo = "whiskers-protected-field-v1";
+
+    public string? ProtectField(string purpose, string plaintext)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(purpose);
+        ArgumentNullException.ThrowIfNull(plaintext);
+        if (!IsEnabled || _fieldKey is null) return null;
+        var plainBytes = Encoding.UTF8.GetBytes(plaintext);
+        var nonce = RandomNumberGenerator.GetBytes(NonceSize);
+        var cipher = new byte[plainBytes.Length];
+        var tag = new byte[TagSize];
+        using (var gcm = new AesGcm(_fieldKey, TagSize))
+            gcm.Encrypt(nonce, plainBytes, cipher, tag, Encoding.UTF8.GetBytes(purpose));
+        var blob = new byte[NonceSize + TagSize + cipher.Length];
+        nonce.CopyTo(blob, 0);
+        tag.CopyTo(blob, NonceSize);
+        cipher.CopyTo(blob, NonceSize + TagSize);
+        return ProtectedFields.Prefix + Convert.ToBase64String(blob);
+    }
+
+    public bool TryUnprotectField(string purpose, string stored, out string plaintext)
+    {
+        plaintext = "";
+        if (!IsEnabled || _fieldKey is null || string.IsNullOrEmpty(purpose) || !ProtectedFields.IsProtected(stored)) return false;
+        try
+        {
+            var blob = Convert.FromBase64String(stored[ProtectedFields.Prefix.Length..]);
+            if (blob.Length < NonceSize + TagSize) return false;
+            var cipher = blob[(NonceSize + TagSize)..];
+            var plain = new byte[cipher.Length];
+            using (var gcm = new AesGcm(_fieldKey, TagSize))
+                gcm.Decrypt(blob[..NonceSize], cipher, blob[NonceSize..(NonceSize + TagSize)], plain, Encoding.UTF8.GetBytes(purpose));
+            plaintext = StrictUtf8.GetString(plain);
+            return true;
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException or DecoderFallbackException)
+        {
+            return false;
+        }
+    }
 
     private static string Encrypt(byte[] key, string plainText)
     {

@@ -29,11 +29,14 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly IServerConfigService? _servers;
     private readonly IAppSettingsStore? _appSettings;
     private readonly Whiskers.Services.Agent.IAgentSettingsStore? _agentSettings;
+    private readonly VaultKeyRingRepository? _keyRing;
 
     public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
         IServerConfigService? servers = null, IAppSettingsStore? appSettings = null,
-        Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, Whiskers.Configuration.DataPathOptions? dataPaths = null)
+        Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, Whiskers.Configuration.DataPathOptions? dataPaths = null,
+        VaultKeyRingRepository? keyRing = null)
     {
+        _keyRing = keyRing;
         _config = config;
         _vault = vault;
         _scopeFactory = scopeFactory;
@@ -66,8 +69,9 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 // INV-56: says which credentials the vault holds — and which it does not hold yet.
                 VaultKeyState.Verified => "Der Vault ist aktiv; Backups sind verschlüsselbar. In den Vault gehören Cloud-API-Keys, der "
                                           + "DNS-Token, die Zugangsdaten der Benachrichtigungskanäle und der KI (wo sie stehen, sagen die "
-                                          + "nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten. Noch unverschlüsselt "
-                                          + "gespeichert: die Secrets eingehender Webhooks (Einstellungsdateien) sowie SSH-Schlüssel und der "
+                                          + "nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten; mit einem daraus "
+                                          + "abgeleiteten Schlüssel verschlüsselt sind die Secrets eingehender Webhooks, die Rollback-Snapshots "
+                                          + "und die Sitzungsschlüssel. Noch unverschlüsselt gespeichert: SSH-Schlüssel und der "
                                           + "mTLS-Client-Schlüssel im Datenverzeichnis.",
                 VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
@@ -104,6 +108,26 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                         + "neu starten, oder die Einstellungen einmal speichern: das legt die Werte unter neuen Vault-Schlüsseln ab. "
                         + "Ein von Hand neben einen Vault-Verweis geschriebener Wert wird beim Start nicht übernommen; nur ein Speichern entfernt ihn."
                       : "Sie werden beim ersten Start mit gültigem VAULT_KEY in den Vault übernommen."),
+            null, null));
+
+        // 2d) R1-31: the webhook secrets and rollback snapshots in the database and the sign-in keys in their files.
+        int plaintextSecrets, plaintextSnapshots;
+        using (var scope = _scopeFactory.CreateScope())
+            (plaintextSecrets, plaintextSnapshots) = await ProtectedFieldMigration.CountPlaintextAsync(
+                scope.ServiceProvider.GetRequiredService<MetricsDbContext>());
+        var plaintextKeys = _keyRing?.CountPlaintextKeys() ?? 0;
+        var storedEncrypted = plaintextSecrets + plaintextSnapshots + plaintextKeys == 0;
+        checks.Add(new ReadinessCheck(
+            "Webhook-Secrets, Rollback-Snapshots und Sitzungsschlüssel verschlüsselt",
+            storedEncrypted,
+            storedEncrypted
+                ? "Keine Webhook-Secrets, Rollback-Snapshots (mit den Umgebungsvariablen der Container) oder Sitzungsschlüssel im Klartext."
+                : $"Im Klartext gespeichert: {plaintextSecrets} Webhook-Secret(s) und {plaintextSnapshots} Rollback-Snapshot(s) in der "
+                  + $"Datenbank, {plaintextKeys} Sitzungsschlüssel-Datei(en) im Datenverzeichnis. "
+                  + (_vault.IsEnabled
+                      ? "Sie werden beim Start verschlüsselt (scheitert das, nennt das Log den Grund) — neu starten."
+                      : "Sie werden beim ersten Start mit gültigem VAULT_KEY verschlüsselt; bis dahin legt Whiskers keine neuen "
+                        + "Webhook-Secrets und keine Rollback-Snapshots an."),
             null, null));
 
         // 3) Self-backup schedule (F3) + 4) update policy — one scope, two cheap queries.

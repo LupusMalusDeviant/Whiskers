@@ -39,10 +39,12 @@ public static class WhiskersHostingExtensions
 
         // Persist data protection keys so antiforgery tokens survive container restarts
         builder.Services.AddDataProtection()
-            .PersistKeysToFileSystem(new DirectoryInfo(dataPaths.KeysDir))
             // Pre-rebrand application name, kept deliberately: it is the Data Protection discriminator, and
             // changing it would invalidate every existing auth cookie and DP-protected payload.
             .SetApplicationName("ServerWatch");
+        // R1-31 (INV-52): same directory and file format as before, each key's secret encrypted with a vault-derived key
+        // (user-approved 2026-11-01; the authentication setup itself is unchanged).
+        Whiskers.Services.Vault.VaultKeyRing.AddVaultProtectedKeyRing(builder.Services, dataPaths.KeysDir);
     }
 
     /// <summary>The module pipeline (RoadToSAP Phase 1): Core no-op defaults registered BEFORE the module loop,

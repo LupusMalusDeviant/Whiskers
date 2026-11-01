@@ -944,6 +944,9 @@
                     {
                         _logger?.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name);
                         MutationScope.Note("No rollback snapshot: capturing it failed.");
+                        // R1-31: without a usable vault no snapshot is kept — the update goes ahead, and the user is told.
+                        if (cex is Whiskers.Services.AutoUpdate.RollbackSnapshotUnavailableException)
+                            Snackbar.Add(L["Dashboard_Snackbar_NoRollbackSnapshot", container.Name].Value, Severity.Warning);
                     }
                     await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
                 });

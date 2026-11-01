@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -45,6 +46,13 @@ public sealed class CredentialMigrationBootTests
             ["Agent"] = new JsonObject { ["Provider"] = "openai", ["ApiKey"] = agentKey },
         }.ToJsonString());
 
+        // R1-31: a data-protection key written in plaintext before (as the app did), and what it protected.
+        string signedIn;
+        using (var before = new ServiceCollection().AddDataProtection().SetApplicationName("ServerWatch")
+                   .PersistKeysToFileSystem(new DirectoryInfo(paths.KeysDir)).Services.BuildServiceProvider())
+            signedIn = before.GetRequiredService<IDataProtectionProvider>().CreateProtector("boot-test").Protect("session");
+        Assert.Contains("masterKey", string.Concat(Directory.GetFiles(paths.KeysDir, "*.xml").Select(File.ReadAllText)));
+
         var prev = Environment.GetEnvironmentVariable("WHISKERS_DATA_DIR");
         Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", dataDir);
         var config = new List<KeyValuePair<string, string?>>();
@@ -80,6 +88,10 @@ public sealed class CredentialMigrationBootTests
             Assert.DoesNotContain(agentKey, File.ReadAllText(paths.AgentSettingsJson));
             Assert.Equal(botToken, factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<TelegramSettings>>().CurrentValue.BotToken);
             Assert.Equal(agentKey, factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<AgentSettings>>().CurrentValue.ApiKey);
+
+            // R1-31: the key is encrypted in place at the start, and what it protected still opens — nobody signed out.
+            Assert.DoesNotContain("masterKey", string.Concat(Directory.GetFiles(paths.KeysDir, "*.xml").Select(File.ReadAllText)));
+            Assert.Equal("session", factory.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("boot-test").Unprotect(signedIn));
         }
         finally
         {

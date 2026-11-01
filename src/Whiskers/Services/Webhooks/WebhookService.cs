@@ -28,6 +28,8 @@ public class WebhookService : IWebhookService
     private readonly WebhookDeliveryStore _deliveries;
     private readonly CancellationToken _stopping;
     private readonly IStringLocalizer<SharedResource>? _text;
+    // R1-31 (INV-52): the signing secrets are stored encrypted with a key derived from the vault's.
+    private readonly Whiskers.Services.Vault.IVaultService? _vault;
 
     // R1-10 (INV-42): accepted deliveries wait here for one of a bounded number of workers; runs on the same resource
     // never overlap. A queue slot is reserved before a delivery is recorded, so an accepted delivery always runs. The
@@ -60,8 +62,9 @@ public class WebhookService : IWebhookService
     public WebhookService(IServiceScopeFactory scopeFactory, IDockerService docker,
         IHostCommandExecutor executor, IComposePlanner planner, ILogger<WebhookService> logger,
         IOptions<WebhookOptions>? options = null, TimeProvider? time = null, IHostApplicationLifetime? lifetime = null,
-        IStringLocalizer<SharedResource>? text = null, ResourceLocks? locks = null)
+        IStringLocalizer<SharedResource>? text = null, ResourceLocks? locks = null, Whiskers.Services.Vault.IVaultService? vault = null)
     {
+        _vault = vault;
         _locks = locks ?? new ResourceLocks();
         _scopeFactory = scopeFactory;
         _docker = docker;
@@ -139,6 +142,8 @@ public class WebhookService : IWebhookService
         // R1-10: only a provider with a known signature rule — any other could never be delivered to.
         if (!WebhookSignatures.Providers.Contains(webhook.Provider))
             throw new ArgumentException($"Unknown signature scheme '{webhook.Provider}'.", nameof(webhook));
+        var secret = webhook.Secret;
+        webhook.Secret = ProtectSecret(webhook.WebhookId, secret);   // before anything is written
 
         await _config.WaitAsync();
         try
@@ -148,9 +153,30 @@ public class WebhookService : IWebhookService
             db.Webhooks.Add(webhook);
             await db.SaveChangesAsync();
             Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhook.WebhookId}", null, AuditView(webhook));   // R1-22
+            // The caller shows the secret once; the database keeps it encrypted.
+            webhook.Secret = secret;
             return webhook;
         }
         finally { _config.Release(); }
+    }
+
+    /// <summary>The secret as stored (R1-31): encrypted, bound to the webhook. Without a usable vault the save is
+    /// refused before anything is written — a signing secret is never stored in plaintext.</summary>
+    private string ProtectSecret(string webhookId, string secret)
+        => _vault?.ProtectField(Whiskers.Services.Vault.ProtectedFields.WebhookSecret(webhookId), secret)
+           ?? throw new InvalidOperationException(Text("Webhook_Error_SecretNeedsVault",
+               "A webhook's signing secret is stored in the vault, and the vault is not usable (VAULT_KEY missing or wrong)."));
+
+    /// <summary>A webhook as loaded, with its secret readable for signing: an encrypted one opened through the vault, a
+    /// plaintext one from before R1-31 as it is. Empty when it cannot be opened — the delivery is then refused like one
+    /// to a webhook without a secret.</summary>
+    private WebhookEntity WithReadableSecret(WebhookEntity webhook, out bool unreadable)
+    {
+        var plain = Whiskers.Services.Vault.ProtectedFields.Read(_vault,
+            Whiskers.Services.Vault.ProtectedFields.WebhookSecret(webhook.WebhookId), webhook.Secret);
+        unreadable = plain is null;
+        webhook.Secret = plain ?? "";
+        return webhook;
     }
 
     public async Task<string> RegenerateSecretAsync(string webhookId)
@@ -163,10 +189,11 @@ public class WebhookService : IWebhookService
             var webhook = await db.Webhooks.FirstOrDefaultAsync(w => w.WebhookId == webhookId)
                 ?? throw new InvalidOperationException("Webhook not found");
             var before = AuditView(webhook);
-            webhook.Secret = GenerateSecret();
+            var secret = GenerateSecret();
+            webhook.Secret = ProtectSecret(webhookId, secret);
             await db.SaveChangesAsync();
             Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, AuditView(webhook));   // R1-22
-            return webhook.Secret;
+            return secret;
         }
         finally { _config.Release(); }
     }
@@ -232,6 +259,9 @@ public class WebhookService : IWebhookService
                 .FirstOrDefaultAsync(w => w.WebhookId == webhookId, ct);
         if (webhook is null) return Reject(webhookId, "unknown webhook");
         if (!webhook.Enabled) return Reject(webhookId, "the webhook is disabled");
+        WithReadableSecret(webhook, out var unreadable);
+        if (unreadable)
+            return Reject(webhookId, "the webhook's secret cannot be read (the vault is not usable, or the key is another)");
 
         // Signature and freshness by the webhook's provider; the key identifies the delivery (signed, never metadata).
         var (key, problem) = WebhookSignatures.Verify(webhook, request, _time.GetUtcNow(), _options.TimestampTolerance);
@@ -1015,6 +1045,10 @@ public class WebhookService : IWebhookService
         if (webhook == null) return (false, "Webhook not found");
         if (string.IsNullOrEmpty(webhook.Secret))
             return (false, "Webhook has no secret configured — regenerate its secret first.");
+        WithReadableSecret(webhook, out var unreadable);
+        if (unreadable)
+            return (false, Text("Webhook_Test_SecretUnreadable",
+                "The webhook's secret cannot be read: the vault is not usable (VAULT_KEY missing or wrong)."));
         if (!webhook.Enabled) return (false, "Webhook is disabled");
 
         var request = WebhookSignatures.SignedTest(webhook, _time.GetUtcNow(), "ui-test");
