@@ -37,6 +37,9 @@ public class VerificationOutcomeTests
         {
             args ??= [];
             Calls.Add(method!.Name);
+            // A scripted inspect (a read that fails, a state that changes) wins over the state table.
+            if (method.Name == nameof(IDockerService.InspectContainerStateAsync) && On.TryGetValue(method.Name, out var inspect))
+                return inspect(args);
             if (method.Name == nameof(IDockerService.InspectContainerStateAsync))
             {
                 var id = (string)args[0]!;
@@ -255,6 +258,37 @@ public class VerificationOutcomeTests
 
         // "nonexistent" has no state: the inspect fails, and an unproven effect is not a success.
         AssertOutcome(outcome, false, "done");
+    }
+
+    [Fact]
+    public async Task A_read_the_budget_turned_away_is_tried_again()
+    {
+        var (gateway, docker) = Build();
+        docker.States["aaaaaaaaaaaa"] = "running";
+        var reads = 0;
+        docker.On[nameof(IDockerService.InspectContainerStateAsync)] = _ => ++reads == 1
+            ? Task.FromException<(string, int, bool)>(new Whiskers.Services.Docker.Budget.DuplicateRequestException("inspectstate:a"))
+            : Task.FromResult(("running", 0, false));
+
+        var outcome = await gateway.ExecuteAsync(Request("container.start", new { containerId = "aaaaaaaaaaaa" }, "aaaaaaaaaaaa"),
+            (_, _) => Task.FromResult("done"));
+
+        AssertOutcome(outcome, true, "done");
+        Assert.Equal(2, reads);
+    }
+
+    [Fact]
+    public async Task A_read_back_that_cannot_be_made_is_marked_as_unknown_not_as_a_bad_state()
+    {
+        var (gateway, docker) = Build();
+        docker.On[nameof(IDockerService.InspectContainerStateAsync)] = _ =>
+            Task.FromException<(string, int, bool)>(new IOException("tunnel down"));
+
+        var outcome = await gateway.ExecuteAsync(Request("container.start", new { containerId = "aaaaaaaaaaaa" }, "aaaaaaaaaaaa"),
+            (_, _) => Task.FromResult("done"));
+
+        AssertOutcome(outcome, false, "done");
+        Assert.True(Assert.IsType<MutationVerificationFailedException>(outcome.Error).StateUnknown);
     }
 
     [Fact]

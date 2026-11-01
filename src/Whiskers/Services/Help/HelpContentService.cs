@@ -266,7 +266,8 @@ public sealed class HelpContentService : IHelpContentService
                     Vor jedem Update wird die alte Container-Konfiguration samt Image-Stand als **Snapshot**
                     festgehalten; über den **Rollback-Knopf** auf dem Dashboard kehrst du mit einem Klick zum
                     letzten funktionierenden Stand zurück. Ein **automatisches** Update, dessen neuer Container
-                    nicht hochkommt, wird von selbst zurückgerollt (die Update-Historie sagt es). Jede
+                    nicht hochkommt, wird von selbst zurückgerollt (die Update-Historie sagt es), und dasselbe
+                    Image wird erst wieder versucht, wenn ein neueres erscheint. Jede
                     Container-Aktion wird danach geprüft: steht der Container nicht wie versprochen da (nach
                     einem Start nicht laufend, nach dem Entfernen noch vorhanden), gilt sie als fehlgeschlagen.
                     """),

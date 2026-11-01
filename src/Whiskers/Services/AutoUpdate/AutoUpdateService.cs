@@ -111,6 +111,17 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 continue;
             }
 
+            // R1-36: an image whose update was rolled back is not tried again — the same broken image would be pulled,
+            // fail and be rolled back at every check. A newer image (another digest) is tried.
+            if (!string.IsNullOrEmpty(updateInfo.RemoteDigest)
+                && await db.UpdateHistory.AnyAsync(h => h.ContainerName == container.Name && h.ServerId == container.ServerId
+                                                        && h.RolledBack && h.NewImageDigest == updateInfo.RemoteDigest, ct))
+            {
+                policy.LastUpdateResult = "SKIPPED: this image was rolled back before; waiting for a newer one.";
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+
             _logger.LogInformation("Auto-update triggered for {Container} (opt-in policy)", container.Name);
 
             // Notify before update — a notification failure must not abort the update.
@@ -203,15 +214,20 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 var newId = outcome.Value!;
 
                 // Wait for health check (if container has one)
-                await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                await Task.Delay(HealthDelay, ct);
 
-                // Check health
-                var (state, _, oomKilled) = await _docker.InspectContainerStateAsync(newId, container.ServerId);
-
-                if (state != "running" || oomKilled)
+                // Check health. A state that cannot be read is reported, never taken for a bad one: it does not justify
+                // replacing a container the gateway just verified (R1-36).
+                (string State, int ExitCode, bool OomKilled) health;
+                try { health = await ContainerVerifier.InspectAsync(_docker, newId, container.ServerId, ct); }
+                catch (Exception iex) when (iex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
-                    throw new Exception($"Container unhealthy after update: state={state}, oom={oomKilled}");
+                    throw new InvalidOperationException(
+                        $"The container's state could not be read after the update ({iex.GetType().Name}); it was not rolled back.", iex);
                 }
+
+                if (health.State != "running" || health.OomKilled)
+                    throw new UpdateUnhealthyException(health.State, health.OomKilled);
 
                 history.Success = true;
                 history.CompletedAt = DateTime.UtcNow;
@@ -232,10 +248,14 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
                 _logger.LogError(ex, "Auto-update failed for {Container}", container.Name);
 
-                // R1-36: an update whose new container is not verified or not healthy afterwards is rolled back when
-                // the policy says so — through the gateway on the same owner's authority, and verified like any
-                // rollback. Never after a refused update, a failed snapshot or a recreate that threw.
-                if (recreateReturned && policy.AutoRollback && !noRollback && updateActor is { } rollbackActor)
+                // R1-36: an update whose new container was read back in a bad state (not verified, or not healthy
+                // afterwards) is rolled back when the policy says so — through the gateway on the same owner's
+                // authority, and verified like any rollback. Never after a refused update, a failed snapshot, a
+                // recreate that threw, a state that could not be read, or on shutdown.
+                var badState = ex is UpdateUnhealthyException
+                               || ex is MutationVerificationFailedException { StateUnknown: false };
+                if (recreateReturned && badState && policy.AutoRollback && !noRollback && !ct.IsCancellationRequested
+                    && updateActor is { } rollbackActor)
                 {
                     var problem = await AutoRollbackAsync(rollbackActor, container, ct);
                     history.RolledBack = problem is null;
@@ -402,10 +422,21 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                    ?? throw new InvalidOperationException("No rollback snapshot found.");
         await _docker.RollbackContainerAsync(snap.ContainerName, snap.OldImageRef, SnapshotConfig(snap), snap.ServerId,
             RollbackProgress(snap));
-        await ConsumeSnapshotAsync(db, snap, markHistory: true);
+        // R1-36: the snapshot stays until the gateway verified the rollback (CompleteRollbackAsync).
         _logger.LogInformation("Manual rollback of {Container} to the previous image completed", snap.ContainerName);
         return $"{snap.ContainerName} was rolled back to the previous image.";
     }
+
+    public async Task CompleteRollbackAsync(long rollbackId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        if (await db.UpdateRollbacks.FirstOrDefaultAsync(r => r.Id == rollbackId) is { } snap)
+            await ConsumeSnapshotAsync(db, snap, markHistory: true);
+    }
+
+    /// <summary>Wait before the health check after an update (a seam for tests).</summary>
+    internal TimeSpan HealthDelay { get; set; } = TimeSpan.FromSeconds(15);
 
     /// <summary>R1-36: rolls a failed automatic update back through the gateway (<c>container.rollback</c>, verified:
     /// the container runs again). Null when it was rolled back; otherwise why not.</summary>
@@ -480,8 +511,14 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     }
 }
 
-/// <summary>R1-36: the policy rolls back failed updates automatically, but no snapshot could be kept (no usable
-/// vault, or the capture failed): the update is not run, since its promised way back does not exist.</summary>
+/// <summary>R1-36: the updated container was read back and is not running (or was killed for lack of memory) after the
+/// health wait — a definite bad state, which automatic rollback acts on.</summary>
+public sealed class UpdateUnhealthyException(string state, bool oomKilled)
+    : InvalidOperationException($"Container unhealthy after update: state={state}, oom={oomKilled}");
+
+/// <summary>R1-36: the policy rolls back failed updates automatically, but the snapshot capture failed (with a usable
+/// vault — without one the update runs without a way back, R1-31): the update is not run, since its promised way back
+/// does not exist.</summary>
 public sealed class RollbackSnapshotRequiredException(Exception inner)
     : InvalidOperationException("Automatic rollback is on for this container, but no rollback snapshot could be kept ("
         + inner.Message + "). The update was not run, since it would have no way back; it is tried again at the next "

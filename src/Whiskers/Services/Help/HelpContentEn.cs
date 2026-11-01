@@ -263,7 +263,8 @@ internal static class HelpContentEn
                     manually. Before every update, the old container configuration including its image
                     state is captured as a **snapshot**; the **rollback button** on the Dashboard takes
                     you back to the last working state with one click. An **automatic** update whose new
-                    container does not come up is rolled back by itself (the update history says so). Every
+                    container does not come up is rolled back by itself (the update history says so), and the
+                    same image is not tried again until a newer one appears. Every
                     container action is checked afterwards: one whose container is not in the promised state
                     (not running after a start, still there after a removal) counts as failed.
                     """),

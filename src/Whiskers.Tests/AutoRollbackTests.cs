@@ -51,7 +51,7 @@ public sealed class AutoRollbackTests : IDisposable
             try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }
     }
 
-    private async Task<AutoUpdateService> ServiceAsync(bool autoRollback)
+    private async Task<AutoUpdateService> ServiceAsync(bool autoRollback, bool vault = true)
     {
         using (var scope = _sp.CreateScope())
         {
@@ -64,11 +64,15 @@ public sealed class AutoRollbackTests : IDisposable
             await db.SaveChangesAsync();
         }
         var updates = new Updates();
-        updates.Items.Add(new ImageUpdateInfo { ContainerId = OldId, ContainerName = "web", ServerId = "local", UpdateAvailable = true });
+        updates.Items.Add(new ImageUpdateInfo
+        {
+            ContainerId = OldId, ContainerName = "web", ServerId = "local", UpdateAvailable = true, RemoteDigest = "sha256:new",
+        });
         var owners = new MemoryAutomationOwners();
         await owners.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com");
         return new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(), _service, updates,
-            new FakeNotifications(), null!, Runner(), owners, NullLogger<AutoUpdateService>.Instance, TestVault.Usable);
+            new FakeNotifications(), null!, Runner(), owners, NullLogger<AutoUpdateService>.Instance,
+            vault ? TestVault.Usable : null) { HealthDelay = TimeSpan.Zero };
     }
 
     private AutomationMutationRunner Runner()
@@ -114,6 +118,131 @@ public sealed class AutoRollbackTests : IDisposable
         using var scope = _sp.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         return (await db.UpdateHistory.SingleAsync(), await db.UpdatePolicies.SingleAsync(), await db.UpdateRollbacks.CountAsync());
+    }
+
+    /// <summary>The recreate brings up a running container; the inspects after it answer with <paramref name="later"/>
+    /// (the first one is the gateway's read-back, the second the health check after the wait).</summary>
+    private void UpdateThatLaterReads(Func<int, Task<(string, int, bool)>> later)
+    {
+        FailingUpdate();
+        _docker.On[nameof(IDockerService.RecreateContainerAsync)] = _ =>
+        {
+            _docker.States.Remove(OldId);
+            _docker.States[NewId] = "running";
+            var reads = 0;
+            _docker.On[nameof(IDockerService.InspectContainerStateAsync)] = args =>
+                (string)args[0]! == NewId ? later(++reads) : Task.FromResult((_docker.States[(string)args[0]!], 0, false));
+            return NewId;
+        };
+    }
+
+    [Fact]
+    public async Task A_container_that_is_down_after_the_health_wait_is_rolled_back()
+    {
+        UpdateThatLaterReads(n => Task.FromResult(n == 1 ? ("running", 0, false) : ("exited", 137, false)));
+        var service = await ServiceAsync(autoRollback: true);
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.Contains(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        var (history, _, snapshots) = await ResultAsync();
+        Assert.True(history.RolledBack);
+        Assert.Contains("unhealthy", history.Error);
+        Assert.Equal(0, snapshots);
+    }
+
+    [Fact]
+    public async Task A_health_check_that_cannot_read_the_state_does_not_roll_a_verified_container_back()
+    {
+        UpdateThatLaterReads(n => n == 1
+            ? Task.FromResult(("running", 0, false))
+            : Task.FromException<(string, int, bool)>(new IOException("tunnel down")));
+        var service = await ServiceAsync(autoRollback: true);
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        var (history, _, snapshots) = await ResultAsync();
+        Assert.False(history.Success);
+        Assert.False(history.RolledBack);
+        Assert.Contains("could not be read", history.Error);
+        Assert.Equal(1, snapshots);
+    }
+
+    [Fact]
+    public async Task A_verification_that_cannot_read_the_state_does_not_roll_back()
+    {
+        UpdateThatLaterReads(_ => Task.FromException<(string, int, bool)>(new IOException("tunnel down")));
+        var service = await ServiceAsync(autoRollback: true);
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        var (history, _, _) = await ResultAsync();
+        Assert.False(history.Success);
+        Assert.False(history.RolledBack);
+    }
+
+    [Fact]
+    public async Task Without_a_usable_vault_the_update_runs_without_a_way_back_and_is_not_rolled_back()
+    {
+        FailingUpdate();
+        var service = await ServiceAsync(autoRollback: true, vault: false);
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.Contains(nameof(IDockerService.RecreateContainerAsync), _docker.Calls);
+        Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        var (history, _, snapshots) = await ResultAsync();
+        Assert.False(history.Success);
+        Assert.False(history.RolledBack);
+        Assert.Equal(0, snapshots);
+    }
+
+    [Fact]
+    public async Task A_manual_rollback_uses_its_snapshot_up_only_once_it_is_completed()
+    {
+        _docker.On[nameof(IDockerService.RollbackContainerAsync)] = _ => RolledId;
+        var service = await ServiceAsync(autoRollback: false);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.UpdateHistory.Add(new UpdateHistoryEntity { ContainerName = "web", ServerId = "local", StartedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        await service.CaptureSnapshotAsync(new ContainerInfo { Id = OldId, Name = "web", ServerId = "local" });
+        var snapshot = Assert.Single(await service.GetRollbacksAsync());
+
+        await service.RollbackAsync(snapshot.Id);
+        Assert.Single(await service.GetRollbacksAsync());           // not verified yet: still the way back
+
+        await service.CompleteRollbackAsync(snapshot.Id);
+        var (history, _, snapshots) = await ResultAsync();
+        Assert.Equal(0, snapshots);
+        Assert.True(history.RolledBack);
+    }
+
+    [Fact]
+    public async Task An_image_that_was_rolled_back_is_not_tried_again()
+    {
+        FailingUpdate();
+        var service = await ServiceAsync(autoRollback: true);
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+        Assert.True((await ResultAsync()).History.RolledBack);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            (await db.UpdatePolicies.SingleAsync()).LastChecked = null;   // due again
+            await db.SaveChangesAsync();
+        }
+        _docker.Calls.Clear();
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.DoesNotContain(nameof(IDockerService.RecreateContainerAsync), _docker.Calls);
+        var (history, policy, _) = await ResultAsync();              // still the one history row
+        Assert.True(history.RolledBack);
+        Assert.StartsWith("SKIPPED", policy.LastUpdateResult);
     }
 
     [Fact]

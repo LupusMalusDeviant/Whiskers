@@ -15,7 +15,10 @@ All notable changes to Whiskers are documented here. The format follows
   not verifiable until R1-37. **Automatic rollback works:** an automatic update whose new container is not verified
   or not healthy afterwards is rolled back to the previous image when its policy has rollback on (the default), on
   the owner's authority and verified; the update history says whether the rollback worked, and a rollback that did
-  not work keeps its snapshot for a manual one. With rollback on, an update whose snapshot could not be taken is not run; without a usable vault no
+  not work keeps its snapshot for a manual one (so does a manual rollback from the Dashboard that does not come up). A
+  state that cannot be read after the update is reported, never rolled back on; an image whose update was rolled
+  back is not tried again until a newer one appears. The snapshot rule applies to automatic updates: an update from
+  the Dashboard or the `update_container` tool still runs after a failed snapshot and says so. With rollback on, an update whose snapshot could not be taken is not run; without a usable vault no
   snapshot can exist, and the update still runs without a way back (as since R1-31).
 - R1-35: **Settings files survive a power loss and say when they were damaged.** Every settings store (roles, whitelist,
   vault, servers, permissions, guardrails, triggers, …) is written to a flushed temporary file and renamed into place,

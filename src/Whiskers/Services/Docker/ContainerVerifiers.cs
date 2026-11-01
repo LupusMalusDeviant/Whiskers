@@ -43,7 +43,7 @@ public abstract class ContainerVerifier(IServiceProvider services) : IMutationVe
 
     /// <summary>The container's state. A read that the server's budget turned away (a duplicate of a read in flight, a
     /// full queue) is tried again: it says nothing about the container.</summary>
-    protected static async Task<(string State, int ExitCode, bool OomKilled)> InspectAsync(IDockerService docker,
+    internal static async Task<(string State, int ExitCode, bool OomKilled)> InspectAsync(IDockerService docker,
         string container, string? serverId, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
@@ -166,8 +166,9 @@ public sealed class ContainerCreateVerifier(IServiceProvider services, string ca
     protected override (string? Container, string? ServerId) Subject(MutationContext context, object? result)
         => (ReturnedId(result), context.Request.Target.ServerId ?? Argument(context, "serverId"));
 
+    // A deployed job image that already ran to completion (exit code 0) was deployed.
     protected override Task CheckAsync(IDockerService docker, string container, string? serverId, CancellationToken ct)
-        => RequireRunningAsync(docker, container, serverId, ct);
+        => RequireRunningAsync(docker, container, serverId, ct, finishedCounts: true);
 }
 
 /// <summary>container.rollback: the container of the snapshot's name runs again on the previous image.</summary>
