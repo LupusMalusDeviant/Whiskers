@@ -124,6 +124,8 @@ public class BackupServiceTests
             await File.WriteAllTextAsync(Path.Combine(root, "agent-chat", "u.json"), "{}");
             await File.WriteAllTextAsync(Path.Combine(root, "agent-chat", "u.json.bak"), "{}");
             await File.WriteAllTextAsync(Path.Combine(root, "agent-chat", "u.json.corrupt-20261101000000"), "{");
+            Directory.CreateDirectory(Path.Combine(root, "ssh-keys", "srv"));
+            await File.WriteAllTextAsync(Path.Combine(root, "ssh-keys", "srv", "deploy.bak"), "KEY");   // the operator's name
 
             var info = await svc.CreateBackupAsync("manual");
             Assert.False(info.Encrypted);
@@ -139,7 +141,8 @@ public class BackupServiceTests
             Assert.DoesNotContain(inspection.EntryNames, n => n.StartsWith("backups/", StringComparison.Ordinal));
             Assert.DoesNotContain(inspection.EntryNames, n => n.EndsWith(".tmp", StringComparison.Ordinal));
             Assert.Contains("agent-chat/u.json", inspection.EntryNames);
-            Assert.DoesNotContain(inspection.EntryNames, n => n.EndsWith(".bak", StringComparison.Ordinal) || n.Contains(".corrupt-", StringComparison.Ordinal));
+            Assert.Contains("ssh-keys/srv/deploy.bak", inspection.EntryNames);
+            Assert.DoesNotContain(inspection.EntryNames, n => n.EndsWith(".json.bak", StringComparison.Ordinal) || n.Contains(".corrupt-", StringComparison.Ordinal));
         }
         finally { Cleanup(sp, root); }
     }

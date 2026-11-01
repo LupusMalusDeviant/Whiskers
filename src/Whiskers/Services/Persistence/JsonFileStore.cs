@@ -57,7 +57,7 @@ public class JsonFileStore<T> where T : class, new()
 
             var json = await File.ReadAllTextAsync(_filePath);
             try { return Parse(json); }
-            catch (JsonException ex)
+            catch (Exception ex) when (ex is JsonException or NotSupportedException)   // as the restore validator
             {
                 var preserved = PreserveUnreadable();
                 return await RecoverAsync(backup, preserved, ex);
@@ -124,7 +124,7 @@ public class JsonFileStore<T> where T : class, new()
             var current = Parse(await File.ReadAllTextAsync(_filePath));
             return _holdsPlaintextSecret?.Invoke(current) ?? false;
         }
-        catch (JsonException) { return null; }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException) { return null; }
     }
 
     // A directory is no missing file: File.Exists says false for it, and the store would read as never written.
@@ -147,7 +147,7 @@ public class JsonFileStore<T> where T : class, new()
             if (!File.Exists(backup)) throw cause;
             recovered = Parse(await File.ReadAllTextAsync(backup));
         }
-        catch (Exception ex) when (ex is JsonException or FileNotFoundException)
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or FileNotFoundException)
         {
             throw new JsonStoreCorruptException(_filePath, preservedAs, cause);
         }

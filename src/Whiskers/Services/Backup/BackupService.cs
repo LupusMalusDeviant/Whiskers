@@ -561,13 +561,22 @@ public sealed class BackupService : IBackupService
                 var rel = Path.GetRelativePath(rootFull, fileFull).Replace('\\', '/');
                 // R1-32: only what a restore may write back (SelfBackupLayout) — the same list on both sides.
                 if (SelfBackupLayout.Classify(rel, isDirectory: false) is not (BackupEntryKind.File or BackupEntryKind.Directory)) continue;
-                // R1-35: a store's previous generation and the unreadable copies are no live data (in agent-chat/, chat/).
-                var fileName = Path.GetFileName(rel);
-                if (fileName.EndsWith(Whiskers.Services.Persistence.DurableFile.BackupSuffix, StringComparison.Ordinal)
-                    || fileName.Contains(".corrupt-", StringComparison.Ordinal)) continue;
+                // R1-35: a JSON store's previous generation and its unreadable copies are no live data. Only in the two
+                // store directories (the root-level ones are not in the layout): elsewhere, e.g. an uploaded SSH key
+                // named "*.bak", the name is the operator's own.
+                if (IsStoreLeftover(rel)) continue;
                 yield return new PackEntry(rel, fileFull);
             }
         }
+    }
+
+    private bool IsStoreLeftover(string rel)
+    {
+        var top = rel.Split('/')[0];
+        if (top != Path.GetFileName(_dataPaths.AgentChatDir) && top != Path.GetFileName(_dataPaths.ChatDir)) return false;
+        var name = Path.GetFileName(rel);
+        return name.EndsWith(".json" + Whiskers.Services.Persistence.DurableFile.BackupSuffix, StringComparison.Ordinal)
+               || name.Contains(".json.corrupt-", StringComparison.Ordinal);
     }
 
     private static bool PathEquals(string a, string b)

@@ -12,7 +12,7 @@ All notable changes to Whiskers are documented here. The format follows
   history, the automation owners, the known local accounts and the audit checkpoint are written the same way (without
   a previous version). A store that cannot be read is no longer the end of the start: Whiskers uses the
   previous version, keeps the unreadable file as `<file>.corrupt-<time>` and shows both on the readiness card
-  ("Datenspeicher lesbar") until the kept file is deleted. Without a readable previous version the start still stops —
+  ("Datenspeicher lesbar") until the kept file is deleted. Without a readable previous version the start (or, for stores read on first use, that feature) still stops —
   never with an empty, more permissive store. The guardrail policy is the exception: an unreadable `guardrails.json`
   keeps refusing every guarded action (as before) instead of using the previous version. `servers.json` and
   `mcp-permissions.json` keep no previous version while they still hold a legacy plaintext key. A restore removes the
