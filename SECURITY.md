@@ -132,10 +132,12 @@ The vault's key also derives the keys for the webhook secrets, the rollback snap
 ## Self-backup restore
 
 A restore (R1-32) writes only Whiskers' own stores and directories (`SelfBackupLayout`): an archive with anything a
-restore may never write — `backups/`, restore state, database journals, temp files, `vault.key` — or with duplicate or
-conflicting entries, or more than 100,000 entries or 32 GiB of content, is refused; other unknown entries are left out.
-Before it is committed the extracted database must pass SQLite's integrity check and hold exactly the migrations its
-manifest names, and the JSON stores and data-protection keys must parse; only then is the pre-restore safety copy taken
+restore may never write — `backups/`, restore state, database journals, temp files, `vault.key` — or with duplicate,
+conflicting or non-canonical entry names (`a/../b`), oversized headers or JSON stores, or more than 100,000 entries or
+32 GiB of content, is refused; other unknown entries are left out, and a restore that would not fit on the data volume
+is refused. Before it is committed the extracted database must pass SQLite's integrity check and hold exactly the
+migrations its manifest names, the JSON stores must read as what their services load at start, and the
+data-protection keys must parse; only then is the pre-restore safety copy taken
 and the restore committed. At the next start each store is made equal to the archive (a store the archive lacks is
 removed; the safety copy keeps it), the database is only replaced, the audit outbox merged, `backups/` never touched,
 and `keys/`, `ssh-keys/`, `mtls/` and `vault.json` are left readable by the app's user only. An interrupted swap is

@@ -28,18 +28,32 @@ public class BackupServiceTests
         => NewService(vaultKey, new MaintenanceStateService());
 
     private static (BackupService svc, DataPathOptions paths, string root, ServiceProvider sp) NewService(string? vaultKey,
-        IMaintenanceStateService maintenance)
+        IMaintenanceStateService maintenance, bool migrate = false)
     {
         var root = Path.Combine(Path.GetTempPath(), $"sw-bak-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         var paths = new DataPathOptions(root);
 
         var services = new ServiceCollection();
-        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={paths.DbPath}"));
-        services.AddDbContext<WhiskersIdentityDbContext>(o => o.UseSqlite($"Data Source={paths.DbPath}"));
+        // As DatabaseRegistration does when migrate is set (the migrations' assembly, the identity history table).
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={paths.DbPath}",
+            sql => { if (migrate) sql.MigrationsAssembly("Whiskers.Migrations.Sqlite"); }));
+        services.AddDbContext<WhiskersIdentityDbContext>(o => o.UseSqlite($"Data Source={paths.DbPath}", sql =>
+        {
+            if (!migrate) return;
+            sql.MigrationsAssembly("Whiskers.Migrations.Sqlite");
+            sql.MigrationsHistoryTable("__IdentityMigrationsHistory");
+        }));
         var sp = services.BuildServiceProvider();
         using (var scope = sp.CreateScope())
-            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
+        {
+            if (migrate)
+            {
+                scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.Migrate();
+                scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.Migrate();
+            }
+            else scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
+        }
 
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(vaultKey is null
@@ -243,6 +257,8 @@ public class BackupServiceTests
         { "database", "database" },
         { "migrations", "migrations" },
         { "json", "roles.json" },
+        { "roles-shape", "roles.json" },        // valid JSON, but not what the role service reads at start
+        { "settings-shape", "app-settings.json" },
         { "key", "keys/" },
     };
 
@@ -263,10 +279,11 @@ public class BackupServiceTests
             else
                 CreateDatabase(db, damage == "migrations" ? ["20260101000000_NotInTheManifest"] : []);
             var extra = new List<PackEntry>();
-            if (damage == "json")
+            if (damage is "json" or "roles-shape" or "settings-shape")
             {
-                await File.WriteAllTextAsync(Path.Combine(dir, "roles.json"), "{ not json");
-                extra.Add(new PackEntry("roles.json", Path.Combine(dir, "roles.json")));
+                var store = damage == "settings-shape" ? "app-settings.json" : "roles.json";
+                await File.WriteAllTextAsync(Path.Combine(dir, store), damage == "json" ? "{ not json" : "[]");
+                extra.Add(new PackEntry(store, Path.Combine(dir, store)));
             }
             if (damage == "key")
             {
@@ -285,6 +302,24 @@ public class BackupServiceTests
             Assert.False(maintenance.IsMaintenance);
             Assert.Empty(await svc.ListBackupsAsync());                  // no safety copy for a refused archive
             Assert.Equal("LIVE", await File.ReadAllTextAsync(paths.RolesJson));
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
+    public async Task A_backup_of_a_migrated_database_restores()
+    {
+        // The real schema: both history tables present and named in the manifest, as on every installed instance.
+        var (svc, paths, root, sp) = NewService("test-vault-key", new MaintenanceStateService(), migrate: true);
+        try
+        {
+            using (var scope = sp.CreateScope())
+                Assert.NotEmpty(await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.GetAppliedMigrationsAsync());
+            var info = await svc.CreateBackupAsync("manual");
+            Assert.True((await svc.ValidateArchiveAsync(svc.ResolveArchivePath(info.Id)!)).Ok);
+
+            await svc.BeginRestoreAsync(svc.ResolveArchivePath(info.Id)!, "tester");
+            Assert.True(File.Exists(paths.RestorePendingMarker));
         }
         finally { Cleanup(sp, root); }
     }

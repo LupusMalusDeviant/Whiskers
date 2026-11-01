@@ -165,25 +165,24 @@ public sealed class BackupService : IBackupService
                 await using (var src = File.OpenRead(tmpTarGz))
                 await using (var dst = File.Create(tmpEnc))
                     await BackupArchiveCipher.EncryptAsync(src, dst, _vaultKey!, ct);
-                File.Move(tmpEnc, finalPath, overwrite: true);
-            }
-            else
-            {
-                File.Move(tmpTarGz, finalPath, overwrite: true);
+                tmpTarGz = tmpEnc;
             }
 
             var info = new SelfBackupInfo
             {
                 Id = id,
                 FileName = fileName,
-                SizeBytes = new FileInfo(finalPath).Length,
+                SizeBytes = new FileInfo(tmpTarGz).Length,
                 CreatedAtUtc = createdAt,
                 Label = label,
                 Provider = provider,
                 Encrypted = encrypted,
                 FormatVersion = SelfBackupFormat.CurrentVersion
             };
+            // The sidecar first: an archive is listed (and pruned) only through it, so a crash in between leaves a
+            // sidecar whose archive is missing (skipped by the list), never an archive nobody sees.
             await WriteSidecarAsync(selfDir, id, info, ct);
+            File.Move(tmpTarGz, finalPath, overwrite: true);
 
             _logger.LogInformation("Self-backup created: {Id} ({Size} bytes, encrypted={Encrypted}, provider={Provider})",
                 id, info.SizeBytes, encrypted, provider);
@@ -332,6 +331,7 @@ public sealed class BackupService : IBackupService
                 // (R1-32): database integrity and migrations, the JSON stores, the key ring. Staging stays immutable
                 // from here until the boot handler consumes it; without the marker it is discarded at the next start.
                 if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+                EnsureFreeSpace(prepared.ExtractedBytes);
                 try
                 {
                     await using (var tarFs = File.OpenRead(prepared.TarGzPath))
@@ -487,7 +487,7 @@ public sealed class BackupService : IBackupService
                         : "Backup archive is invalid: it was made on PostgreSQL but holds a SQLite database.");
             }
 
-            return new PreparedRestore(tarGzPath, manifest, encrypted, decryptTemp);
+            return new PreparedRestore(tarGzPath, manifest, encrypted, decryptTemp, inspection.ExtractedBytes);
         }
         catch
         {
@@ -582,5 +582,22 @@ public sealed class BackupService : IBackupService
         try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* best-effort cleanup */ }
     }
 
-    private readonly record struct PreparedRestore(string TarGzPath, SelfBackupManifest Manifest, bool Encrypted, string? DecryptTemp);
+    private readonly record struct PreparedRestore(string TarGzPath, SelfBackupManifest Manifest, bool Encrypted, string? DecryptTemp,
+        long ExtractedBytes);
+
+    // Staging takes the extracted bytes, the swap a second copy of each target beside the live one (R1-32).
+    private void EnsureFreeSpace(long extractedBytes)
+    {
+        long available;
+        try { available = new DriveInfo(Path.GetFullPath(_dataPaths.RootDir)).AvailableFreeSpace; }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Free space of the data volume unknown; the restore goes ahead without the check");
+            return;
+        }
+        var needed = extractedBytes * 2 + (64L << 20);
+        if (available < needed)
+            throw new BackupValidationException(
+                $"Not enough free space for this restore: it needs about {needed / (1 << 20)} MiB, the data volume has {available / (1 << 20)} MiB.");
+    }
 }

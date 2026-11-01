@@ -148,7 +148,14 @@ public static class RestoreBootHandler
             Console.Out.WriteLine($"[restore] The archive has no audit checkpoint; the current one was kept as {kept}.");
         }
 
-        RestrictSecrets(root);
+        try { RestrictSecrets(root); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[restore] The key directories and the vault file could not be made readable by the owner only " +
+                $"({Whiskers.Utils.SinkRedaction.Text(ex.Message)}). The start stops and the restore is repeated; to give it up, " +
+                $"remove {dataPaths.RestorePendingMarker} (the pre-restore safety backup holds the previous data).");
+            throw;
+        }
     }
 
     // Owner-only for what holds private keys or the vault, whatever the archive or an earlier install left. A failure

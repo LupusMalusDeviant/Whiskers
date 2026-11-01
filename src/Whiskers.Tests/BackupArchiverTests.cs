@@ -149,6 +149,47 @@ public class BackupArchiverTests
         finally { Cleanup(dest); }
     }
 
+    [Theory]
+    [InlineData("chat/../roles.json")]       // would land on roles.json under the name of the chat directory
+    [InlineData("chat/../metrics.db")]
+    [InlineData("chat//a.json")]
+    [InlineData("chat/./a.json")]
+    public async Task An_entry_whose_name_is_not_the_path_it_lands_on_is_refused(string name)
+    {
+        var dest = NewTempDir();
+        try
+        {
+            using (var archive = await BuildTarGz(w => Entry(w, name)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+            using (var archive = await BuildTarGz(w => Entry(w, name)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.ExtractAsync(archive, dest));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(dest));
+        }
+        finally { Cleanup(dest); }
+    }
+
+    [Fact]
+    public async Task Entry_headers_and_json_stores_larger_than_allowed_are_refused_before_they_are_held_in_memory()
+    {
+        var dest = NewTempDir();
+        try
+        {
+            // A PAX record of 2 MiB (the reader holds it whole) on an otherwise tiny entry.
+            using (var archive = await BuildTarGz(w => w.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "roles.json",
+                       new Dictionary<string, string> { ["comment"] = new string('x', 2 << 20) }) { DataStream = new MemoryStream(new byte[2]) })))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest));
+
+            var limits = BackupExtractionLimits.Default with { MaxJsonEntryBytes = 1024 };
+            using (var archive = await BuildTarGz(w => Entry(w, "manifest.json", size: 4096)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
+            using (var archive = await BuildTarGz(w => Entry(w, "servers.json", size: 4096)))
+                await Assert.ThrowsAsync<InvalidDataException>(() => BackupArchiver.InspectAsync(archive, dest, limits));
+            using (var archive = await BuildTarGz(w => Entry(w, "chat/long.json", size: 4096)))   // read in parts, not whole
+                await BackupArchiver.InspectAsync(archive, dest, limits);
+        }
+        finally { Cleanup(dest); }
+    }
+
     [Fact]
     public async Task An_archive_with_more_entries_than_allowed_is_refused()
     {

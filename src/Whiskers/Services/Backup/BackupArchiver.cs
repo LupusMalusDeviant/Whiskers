@@ -19,16 +19,23 @@ public sealed class BackupInspection
 
     /// <summary>Whether the archive holds the SQLite database.</summary>
     public bool HasDatabase { get; init; }
+
+    /// <summary>The content bytes of the entries a restore extracts.</summary>
+    public long ExtractedBytes { get; init; }
 }
 
-/// <summary>Bounds on what one archive may unpack to (R1-32): a small upload must not fill the disk.</summary>
-public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes)
+/// <summary>Bounds on what one archive may unpack to (R1-32): a small upload must fill neither the disk nor the memory.
+/// <paramref name="MaxJsonEntryBytes"/> bounds the manifest and each JSON store (both are read whole into memory).</summary>
+public sealed record BackupExtractionLimits(int MaxEntries, long MaxTotalBytes, long MaxJsonEntryBytes = 256L << 20)
 {
     /// <summary>100k entries and 32 GiB of content — far above a real data directory.</summary>
     public static BackupExtractionLimits Default { get; } = new(100_000, 32L << 30);
 
     // Tar headers and padding on top of the content: 1.5 KiB per entry plus a flat 16 MiB.
     internal long MaxDecompressedBytes => MaxTotalBytes + MaxEntries * 1536L + (16L << 20);
+
+    // What reading one entry's headers may take (PAX records and long names are held in memory whole).
+    internal const long MaxHeaderBytes = 1L << 20;
 }
 
 /// <summary>
@@ -85,12 +92,14 @@ public static class BackupArchiver
         var names = new List<string>();
         var skipped = new List<string>();
         var hasDatabase = false;
+        long extracted = 0;
         SelfBackupManifest? manifest = null;
 
         await ReadAsync(tarGzSource, rootFull, limits ?? BackupExtractionLimits.Default, async (entry, kind, _) =>
         {
             names.Add(entry.Name);
             if (kind is BackupEntryKind.NotRestored) skipped.Add(entry.Name);
+            else if (entry.EntryType is not TarEntryType.Directory) extracted += entry.Length;
             if (kind is BackupEntryKind.File
                 && string.Equals(SelfBackupLayout.Normalize(entry.Name), SelfBackupFormat.DbEntryName, StringComparison.Ordinal))
                 hasDatabase = true;
@@ -98,7 +107,10 @@ public static class BackupArchiver
                 manifest = await JsonSerializer.DeserializeAsync<SelfBackupManifest>(ds, cancellationToken: ct);
         }, ct);
 
-        return new BackupInspection { Manifest = manifest, EntryNames = names, SkippedEntries = skipped, HasDatabase = hasDatabase };
+        return new BackupInspection
+        {
+            Manifest = manifest, EntryNames = names, SkippedEntries = skipped, HasDatabase = hasDatabase, ExtractedBytes = extracted,
+        };
     }
 
     private static async Task ReadAsync(Stream tarGzSource, string rootFull, BackupExtractionLimits limits,
@@ -114,22 +126,38 @@ public static class BackupArchiver
         var names = new NameLedger();
         var count = 0;
         var remaining = limits.MaxTotalBytes;
+        long previousLength = 0;
 
-        while (await tar.GetNextEntryAsync(cancellationToken: ct) is { } entry)
+        while (true)
         {
+            // Moving to the next entry skips what is left of the previous one's data and reads the next headers.
+            bounded.Window = previousLength + 512 + BackupExtractionLimits.MaxHeaderBytes;
+            var entry = await tar.GetNextEntryAsync(cancellationToken: ct);
+            bounded.Window = long.MaxValue;
+            if (entry is null) break;
+
             if (++count > limits.MaxEntries)
                 throw new InvalidDataException($"Refusing an archive with more than {limits.MaxEntries} entries.");
             GuardEntryType(entry);
             var target = ResolveWithinRoot(rootFull, entry.Name);
+            // The name must already be the path it lands on: "chat/../roles.json", "./x", "a//b" or (on Windows) a
+            // trailing dot would reach one file under two names and slip past the list and the duplicate check.
+            var name = SelfBackupLayout.Normalize(entry.Name);
+            if (!string.Equals(Path.GetRelativePath(rootFull, target).Replace('\\', '/').TrimEnd('/'), name, StringComparison.Ordinal))
+                throw new InvalidDataException($"Refusing tar entry '{entry.Name}': its name is not in canonical form.");
             var isDirectory = entry.EntryType is TarEntryType.Directory;
-            var kind = SelfBackupLayout.Classify(entry.Name, isDirectory);
+            var kind = SelfBackupLayout.Classify(name, isDirectory);
             if (kind is BackupEntryKind.Forbidden)
                 throw new InvalidDataException($"Refusing tar entry '{entry.Name}': it is not something a restore may write.");
-            names.Track(SelfBackupLayout.Normalize(entry.Name), isDirectory);
+            names.Track(name, isDirectory);
 
             // The header's length is what the entry's data stream yields — no more is read for it.
             if (!isDirectory && (remaining -= entry.Length) < 0)
                 throw new InvalidDataException($"Refusing an archive that unpacks to more than {limits.MaxTotalBytes} bytes.");
+            if ((kind is BackupEntryKind.Manifest || (kind is BackupEntryKind.File && name.EndsWith(".json", StringComparison.Ordinal)))
+                && entry.Length > limits.MaxJsonEntryBytes)
+                throw new InvalidDataException($"Refusing tar entry '{entry.Name}': larger than {limits.MaxJsonEntryBytes} bytes.");
+            previousLength = isDirectory ? 0 : entry.Length;
             await onEntry(entry, kind, target);
         }
     }
@@ -198,6 +226,10 @@ public static class BackupArchiver
     private sealed class BoundedReadStream(Stream inner, long limit) : Stream
     {
         private long _read;
+        private long _window = long.MaxValue;
+
+        /// <summary>Bytes the next reads may take before they fail; reset by each assignment.</summary>
+        public long Window { set => _window = value; }
 
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -218,6 +250,8 @@ public static class BackupArchiver
             _read += read;
             if (_read > limit)
                 throw new InvalidDataException("Refusing an archive that unpacks to more bytes than allowed.");
+            if (_window != long.MaxValue && (_window -= read) < 0)
+                throw new InvalidDataException("Refusing an archive whose entry headers are larger than allowed.");
             return read;
         }
 

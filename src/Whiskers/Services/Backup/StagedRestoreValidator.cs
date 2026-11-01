@@ -2,17 +2,42 @@ using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Data.Sqlite;
+using Whiskers.Models;
 
 namespace Whiskers.Services.Backup;
 
 /// <summary>
 /// Checks the extracted contents of a restore BEFORE the commit marker is written (R1-32, INV-55): a staged SQLite
 /// database must pass <c>PRAGMA integrity_check</c> and hold exactly the migrations its manifest names, every staged
-/// JSON store must parse, and every staged data-protection key must be well-formed XML. A failure throws
+/// JSON store must read as the type its service loads at start (a store that only parses would still stop the start),
+/// and every staged data-protection key must be well-formed XML. A failure throws
 /// <see cref="BackupValidationException"/> and nothing is committed — the live data stays as it is.
 /// </summary>
 public static class StagedRestoreValidator
 {
+    // The stores whose service reads them at start without catching a malformed file, with the type it reads; the
+    // options are those of JsonFileStore. The two configuration layers must hold an object (AddJsonFile).
+    private static readonly IReadOnlyDictionary<string, Type> StoreTypes = new Dictionary<string, Type>(StringComparer.Ordinal)
+    {
+        ["roles.json"] = typeof(UserRoleData),
+        ["whitelist.json"] = typeof(WhitelistData),
+        ["vault.json"] = typeof(VaultData),
+        ["servers.json"] = typeof(ServerConfigData),
+        ["mcp-permissions.json"] = typeof(McpPermissionData),
+        ["guardrails.json"] = typeof(Whiskers.Configuration.GuardrailConfig),
+        ["notification-prefs.json"] = typeof(ContainerNotificationPrefs),
+        ["ai-triggers.json"] = typeof(Whiskers.Services.Agent.Triggers.AiTriggerData),
+        ["git-deploys.json"] = typeof(GitDeployData),
+        ["registries.json"] = typeof(RegistryConfigData),
+    };
+
+    private static readonly HashSet<string> ObjectRoots = new(StringComparer.Ordinal) { "app-settings.json", "agent-settings.json" };
+
+    private static readonly JsonSerializerOptions StoreOptions = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>The stores checked by type (for the layout test).</summary>
+    public static IEnumerable<string> TypedStores => StoreTypes.Keys.Concat(ObjectRoots);
+
     public static void Validate(string stagingDir, SelfBackupManifest manifest)
     {
         var db = Path.Combine(stagingDir, SelfBackupFormat.DbEntryName);
@@ -26,11 +51,18 @@ public static class StagedRestoreValidator
             try
             {
                 using var stream = File.OpenRead(path);
-                using var _ = JsonDocument.Parse(stream);
+                if (StoreTypes.TryGetValue(file, out var type))
+                    JsonSerializer.Deserialize(stream, type, StoreOptions);
+                else
+                {
+                    using var document = JsonDocument.Parse(stream);
+                    if (ObjectRoots.Contains(file) && document.RootElement.ValueKind != JsonValueKind.Object)
+                        throw new JsonException("not an object");
+                }
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException or NotSupportedException)
             {
-                throw new BackupValidationException($"Backup archive is invalid: {file} is not valid JSON.");
+                throw new BackupValidationException($"Backup archive is invalid: {file} is not a valid store.");
             }
         }
 
@@ -78,6 +110,10 @@ public static class StagedRestoreValidator
         {
             throw new BackupValidationException($"Backup archive is invalid: its database cannot be read ({ex.SqliteErrorCode}).");
         }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException)
+        {
+            throw new BackupValidationException("Backup archive is invalid: its migration history cannot be read.");
+        }
     }
 
     // The manifest's migration lists drive the schema check before the restore; the database must say the same, or
@@ -94,7 +130,7 @@ public static class StagedRestoreValidator
                 using var read = connection.CreateCommand();
                 read.CommandText = $"SELECT \"MigrationId\" FROM \"{table}\"";   // table name is one of two constants
                 using var reader = read.ExecuteReader();
-                while (reader.Read()) applied.Add(reader.GetString(0));
+                while (reader.Read()) applied.Add(Convert.ToString(reader.GetValue(0), System.Globalization.CultureInfo.InvariantCulture) ?? "");
             }
         }
         if (!applied.SetEquals(expected))
