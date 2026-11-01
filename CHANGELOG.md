@@ -6,6 +6,14 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-36: **A container action counts only when the container shows it.** After a start, stop, restart, remove,
+  update, deployment (create) or rollback the container is read back; one that is not running (or still running,
+  still there, killed for lack of memory) makes the action **failed** — on the page, for the agent, for MCP clients
+  and in the audit (verification `Failed`), even though Docker accepted the call. **Automatic rollback works:** an
+  automatic update whose new container does not come up is rolled back to the previous image when its policy has
+  rollback on (the default), on the owner's authority and verified; the update history says whether the rollback
+  worked. With rollback on, an update whose snapshot could not be taken is not run; without a usable vault no
+  snapshot can exist, and the update still runs without a way back (as since R1-31).
 - R1-35: **Settings files survive a power loss and say when they were damaged.** Every settings store (roles, whitelist,
   vault, servers, permissions, guardrails, triggers, …) is written to a flushed temporary file and renamed into place,
   keeping the version before as `<file>.bak`; the CVE and image-update state, the agent and app settings, the chat

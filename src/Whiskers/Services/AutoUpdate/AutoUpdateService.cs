@@ -131,6 +131,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
             // Perform update
             var noRollback = false;
+            // R1-36: set once the recreate was started — from then on a failed update is rolled back (if enabled).
+            var recreateStarted = false;
+            AutomationActor? updateActor = null;
             var history = new UpdateHistoryEntity
             {
                 ContainerId = container.Id,
@@ -158,20 +161,27 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
                 var updateOwner = _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId;
                 var actor = new AutomationActor("autoupdate", "AutoUpdate", updateOwner, updateOwner);
+                updateActor = actor;
                 var outcome = await _automation.RunAsync(actor,
                     "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
                     async _ =>
                     {
                         // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
-                        // drops the old container, so a failed update can be rolled back from the UI (and the snapshot
-                        // survives even a crash mid-update). Inside the gateway, so a refused update keeps the
-                        // previous rollback point. Best-effort — a snapshot failure must never abort the update.
+                        // drops the old container, so a failed update can be rolled back (and the snapshot survives
+                        // even a crash mid-update). Inside the gateway, so a refused update keeps the previous
+                        // rollback point.
                         try { await CaptureSnapshotAsync(container); }
                         catch (Exception cex)
                         {
+                            // R1-36: with automatic rollback on, the snapshot is the way back the policy promises; an
+                            // update whose snapshot failed is not run. Without a usable vault no snapshot can exist at
+                            // all: the update goes ahead without a way back and says so (R1-31).
+                            if (policy.AutoRollback && cex is not RollbackSnapshotUnavailableException)
+                                throw new RollbackSnapshotRequiredException(cex);
                             _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name);
                             noRollback = true;
                         }
+                        recreateStarted = true;
                         return await _docker.RecreateContainerAsync(container.Id, sid, progress);
                     }, ct);
                 if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval
@@ -220,7 +230,21 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
                 _logger.LogError(ex, "Auto-update failed for {Container}", container.Name);
 
-                // TODO: Rollback would go here — requires storing old image reference
+                // R1-36: an update that started and failed (the recreate threw, its effect could not be verified, or
+                // the container is not healthy afterwards) is rolled back when the policy says so — through the
+                // gateway on the same owner's authority, and verified like any rollback.
+                if (recreateStarted && policy.AutoRollback && !noRollback && updateActor is { } rollbackActor)
+                {
+                    var problem = await AutoRollbackAsync(rollbackActor, container, ct);
+                    history.RolledBack = problem is null;
+                    history.Error = problem is null
+                        ? $"{ex.Message} — rolled back to the previous image."
+                        : $"{ex.Message} — the automatic rollback failed: {problem}";
+                    policy.LastUpdateResult = problem is null
+                        ? $"FEHLER (zurückgerollt): {ex.Message}"
+                        : $"FEHLER (Rollback fehlgeschlagen): {ex.Message}";
+                }
+
                 // Notify about failure — wrapped so a notify error can't skip the history save below.
                 try
                 {
@@ -374,34 +398,85 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
         var snap = await db.UpdateRollbacks.FirstOrDefaultAsync(r => r.Id == rollbackId)
                    ?? throw new InvalidOperationException("No rollback snapshot found.");
+        await _docker.RollbackContainerAsync(snap.ContainerName, snap.OldImageRef, SnapshotConfig(snap), snap.ServerId,
+            RollbackProgress(snap));
+        await ConsumeSnapshotAsync(db, snap, markHistory: true);
+        _logger.LogInformation("Manual rollback of {Container} to the previous image completed", snap.ContainerName);
+        return $"{snap.ContainerName} was rolled back to the previous image.";
+    }
 
-        // Encrypted since R1-31; a snapshot from before is read as it is until the start-up migration encrypted it.
-        var configJson = Whiskers.Services.Vault.ProtectedFields.Read(_vault,
-                Whiskers.Services.Vault.ProtectedFields.RollbackSnapshot(snap.ServerId, snap.ContainerName), snap.ConfigJson)
-            ?? throw new InvalidOperationException(_vault?.IsEnabled == true
-                ? "The rollback snapshot cannot be read: it does not belong to this container and server, or it was changed."
-                : "The rollback snapshot cannot be read: the vault is not usable (VAULT_KEY missing or wrong).");
+    /// <summary>R1-36: rolls a failed automatic update back through the gateway (<c>container.rollback</c>, verified:
+    /// the container runs again). Null when it was rolled back; otherwise why not.</summary>
+    private async Task<string?> AutoRollbackAsync(AutomationActor actor, ContainerInfo container, CancellationToken ct)
+    {
+        try
+        {
+            var outcome = await _automation.RunAsync(actor, "container.rollback",
+                new { containerName = container.Name, serverId = container.ServerId },
+                async _ =>
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+                    var snap = await db.UpdateRollbacks.FirstOrDefaultAsync(
+                                   r => r.ContainerName == container.Name && r.ServerId == container.ServerId)
+                               ?? throw new InvalidOperationException("No rollback snapshot found.");
+                    var newId = await _docker.RollbackContainerAsync(snap.ContainerName, snap.OldImageRef,
+                        SnapshotConfig(snap), snap.ServerId, RollbackProgress(snap));
+                    // The run's own history row is written by the caller (not saved yet): not marked here.
+                    await ConsumeSnapshotAsync(db, snap, markHistory: false);
+                    return newId;
+                }, ct);
+            if (outcome.Status == MutationStatus.Executed)
+            {
+                _logger.LogWarning("Auto-update of {Container} failed and was rolled back to the previous image", container.Name);
+                return null;
+            }
+            return outcome.Error?.Message ?? outcome.Reason ?? $"the rollback was {outcome.Status}.";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Automatic rollback of {Container} failed", container.Name);
+            return ex.Message;
+        }
+    }
 
-        var progress = new Progress<string>(msg => _logger.LogDebug("Rollback {Container}: {Msg}", snap.ContainerName, msg));
-        await _docker.RollbackContainerAsync(
-            snap.ContainerName, snap.OldImageRef, configJson,
-            snap.ServerId, progress);
+    /// <summary>The snapshot's container configuration. Encrypted since R1-31; a snapshot from before is read as it
+    /// is until the start-up migration encrypted it.</summary>
+    private string SnapshotConfig(UpdateRollbackEntity snap)
+        => Whiskers.Services.Vault.ProtectedFields.Read(_vault,
+               Whiskers.Services.Vault.ProtectedFields.RollbackSnapshot(snap.ServerId, snap.ContainerName), snap.ConfigJson)
+           ?? throw new InvalidOperationException(_vault?.IsEnabled == true
+               ? "The rollback snapshot cannot be read: it does not belong to this container and server, or it was changed."
+               : "The rollback snapshot cannot be read: the vault is not usable (VAULT_KEY missing or wrong).");
 
+    private Progress<string> RollbackProgress(UpdateRollbackEntity snap)
+        => new(msg => _logger.LogDebug("Rollback {Container}: {Msg}", snap.ContainerName, msg));
+
+    /// <summary>Consumes the snapshot after the container was recreated from it.</summary>
+    private static async Task ConsumeSnapshotAsync(MetricsDbContext db, UpdateRollbackEntity snap, bool markHistory)
+    {
         // Mark the latest update-history row for this container as rolled back.
-        var hist = await db.UpdateHistory
-            .Where(h => h.ContainerName == snap.ContainerName && h.ServerId == snap.ServerId)
-            .OrderByDescending(h => h.StartedAt).FirstOrDefaultAsync();
-        if (hist != null) hist.RolledBack = true;
+        if (markHistory)
+        {
+            var hist = await db.UpdateHistory
+                .Where(h => h.ContainerName == snap.ContainerName && h.ServerId == snap.ServerId)
+                .OrderByDescending(h => h.StartedAt).FirstOrDefaultAsync();
+            if (hist != null) hist.RolledBack = true;
+        }
 
         // The snapshot is consumed — the container now runs the OLD image again, so there is nothing newer to
         // roll back to until the next update captures a fresh snapshot.
         db.UpdateRollbacks.Remove(snap);
         await db.SaveChangesAsync();
-
-        _logger.LogInformation("Manual rollback of {Container} to the previous image completed", snap.ContainerName);
-        return $"{snap.ContainerName} was rolled back to the previous image.";
     }
 }
+
+/// <summary>R1-36: the policy rolls back failed updates automatically, but no snapshot could be kept (no usable
+/// vault, or the capture failed): the update is not run, since its promised way back does not exist.</summary>
+public sealed class RollbackSnapshotRequiredException(Exception inner)
+    : InvalidOperationException("Automatic rollback is on for this container, but no rollback snapshot could be kept ("
+        + inner.Message + "). The update was not run; turn automatic rollback off in its update policy to update "
+        + "without a way back.", inner);
 
 /// <summary>R1-31: no rollback snapshot was kept for an update — it holds the container's environment, and without a
 /// usable vault it is not stored at all. The update itself goes ahead; it just cannot be rolled back from Whiskers.</summary>

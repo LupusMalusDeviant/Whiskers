@@ -612,10 +612,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `VerificationOutcomeTests` checks start/stop/restart/remove/update/deploy outcomes and separates transport completion from verified effect.
-- [ ] `AutoRollbackTests` proves enabled rollback executes and is verified after failed update.
-- [ ] A required recovery snapshot failure prevents destructive update; it is not merely logged and ignored.
-- [ ] Verifier failure cannot be returned to agent/UI as successful execution.
+- [x] `VerificationOutcomeTests` checks start/stop/restart/remove/update/deploy outcomes and separates transport completion from verified effect.
+- [x] `AutoRollbackTests` proves enabled rollback executes and is verified after failed update.
+- [x] A required recovery snapshot failure prevents destructive update; it is not merely logged and ignored.
+- [x] Verifier failure cannot be returned to agent/UI as successful execution.
 
 **Out of scope:** Non-container verifiers.
 

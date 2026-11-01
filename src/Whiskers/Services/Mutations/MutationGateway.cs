@@ -58,13 +58,19 @@ public sealed record MutationDecisionResult(
     public MutationTarget? Target { get; init; }
 }
 
-/// <summary>Step 7 of the pipeline: checks that a capability actually took effect (INV-43).</summary>
+/// <summary>Step 7 of the pipeline: checks that a capability actually took effect (INV-43). A verifier reads the
+/// effect back; it throws <see cref="MutationVerificationFailedException"/> with what it found when the effect is not
+/// there. Any other exception also counts as failed: a read-back that cannot be made proves nothing.</summary>
 public interface IMutationVerifier
 {
     string CapabilityId { get; }
 
     Task<VerificationStatus> VerifyAsync(MutationContext context, object? result, CancellationToken ct);
 }
+
+/// <summary>A call completed, but its effect is not there (R1-36). The outcome is <see cref="MutationStatus.Failed"/>
+/// with <see cref="VerificationStatus.Failed"/>; this exception is its <see cref="MutationOutcome{T}.Error"/>.</summary>
+public sealed class MutationVerificationFailedException(string message) : InvalidOperationException(message);
 
 /// <summary>
 /// Since WP2 step 2.1 every MCP tool call and every agent tool call that maps to a capability runs through here
@@ -584,10 +590,18 @@ public sealed class MutationGateway : IMutationGateway
                 }
                 else
                 {
-                    var verification = await VerifyAsync(context, value, deadline.Token);
-                    outcome = new MutationOutcome<T>(operationId, MutationStatus.Executed, value,
-                        verification == VerificationStatus.Failed ? "Executed, but verification failed." : null, verification,
-                        ApprovalId: approval?.ApprovalId);
+                    var (verification, problem) = await VerifyAsync(context, value, deadline.Token);
+                    // R1-36 (INV-43/44): the call completed, but its effect is not there — never a success. The status
+                    // says Failed, the verification says the call itself ran; the value is withheld so no caller can
+                    // read it as the effect's result.
+                    outcome = verification == VerificationStatus.Failed
+                        ? new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
+                            $"'{capability.Id}' ran, but its effect could not be verified: {problem}", verification,
+                            new MutationVerificationFailedException(
+                                $"'{capability.Id}' ran, but its effect could not be verified: {problem}"),
+                            approval?.ApprovalId)
+                        : new MutationOutcome<T>(operationId, MutationStatus.Executed, value, null, verification,
+                            ApprovalId: approval?.ApprovalId);
                 }
             }
             catch (OperationCanceledException ex) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
@@ -643,19 +657,26 @@ public sealed class MutationGateway : IMutationGateway
         }
     }
 
-    private async Task<VerificationStatus> VerifyAsync(MutationContext context, object? result, CancellationToken ct)
+    private async Task<(VerificationStatus Status, string? Problem)> VerifyAsync(MutationContext context, object? result,
+        CancellationToken ct)
     {
         if (!_verifiers.TryGetValue(context.Capability.Id, out var verifier))
-            return VerificationStatus.NotVerifiable;
+            return (VerificationStatus.NotVerifiable, null);
         try
         {
-            return await verifier.VerifyAsync(context, result, ct);
+            var status = await verifier.VerifyAsync(context, result, ct);
+            return (status, status == VerificationStatus.Failed ? "the read-back did not show it." : null);
+        }
+        catch (MutationVerificationFailedException failed)
+        {
+            return (VerificationStatus.Failed, failed.Message);
         }
         catch (Exception ex)
         {
+            // A read-back that cannot be made proves nothing: failed, not verified (INV-43).
             _logger.LogWarning(ex, "Verifier for {Capability} failed (operation {OperationId})",
                 context.Capability.Id, context.OperationId);
-            return VerificationStatus.Failed;
+            return (VerificationStatus.Failed, $"the read-back failed ({ex.GetType().Name}).");
         }
     }
 
