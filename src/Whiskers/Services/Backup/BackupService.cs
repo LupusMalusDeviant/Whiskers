@@ -561,6 +561,10 @@ public sealed class BackupService : IBackupService
                 var rel = Path.GetRelativePath(rootFull, fileFull).Replace('\\', '/');
                 // R1-32: only what a restore may write back (SelfBackupLayout) — the same list on both sides.
                 if (SelfBackupLayout.Classify(rel, isDirectory: false) is not (BackupEntryKind.File or BackupEntryKind.Directory)) continue;
+                // R1-35: a store's previous generation and the unreadable copies are no live data (in agent-chat/, chat/).
+                var fileName = Path.GetFileName(rel);
+                if (fileName.EndsWith(Whiskers.Services.Persistence.DurableFile.BackupSuffix, StringComparison.Ordinal)
+                    || fileName.Contains(".corrupt-", StringComparison.Ordinal)) continue;
                 yield return new PackEntry(rel, fileFull);
             }
         }
