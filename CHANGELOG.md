@@ -10,9 +10,13 @@ All notable changes to Whiskers are documented here. The format follows
   vault, servers, permissions, guardrails, triggers, …) is written to a flushed temporary file and renamed into place,
   keeping the version before as `<file>.bak`; the CVE and image-update state, the agent and app settings and the chat
   history are written the same way. A store that cannot be read is no longer the end of the start: Whiskers uses the
-  previous version, keeps the unreadable file as `<file>.corrupt-<time>` and lists it on the readiness card
-  ("Datenspeicher lesbar"). Without a readable previous version the start still stops — never with an empty, more
-  permissive store. A restore removes the previous versions of what it replaces.
+  previous version, keeps the unreadable file as `<file>.corrupt-<time>` and shows both on the readiness card
+  ("Datenspeicher lesbar") until the kept file is deleted. Without a readable previous version the start still stops —
+  never with an empty, more permissive store. The guardrail policy is the exception: an unreadable `guardrails.json`
+  keeps refusing every guarded action (as before) instead of using the previous version. `servers.json` and
+  `mcp-permissions.json` keep no previous version while they still hold a legacy plaintext key. A restore removes the
+  previous versions of what it replaces. **Operators:** to reset a store (e.g. delete `roles.json` to seed the admin
+  again) delete `<file>.bak` too — a store with only its previous version is recovered from it.
 - R1-32: **A restore writes only what a backup may hold, and only after checking it.** A self-backup archive may
   contain only Whiskers' own stores and directories (one list, `SelfBackupLayout`, used for packing and restoring);
   an archive with backups, restore state, database journals, temp files, a vault key, duplicate, conflicting or

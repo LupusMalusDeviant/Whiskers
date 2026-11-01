@@ -252,6 +252,34 @@ public class JsonFileStoreRecoveryTests : IDisposable
     }
 
     [Fact]
+    public async Task A_cleared_agent_conversation_does_not_come_back_from_the_previous_generation()
+    {
+        var transcripts = new Whiskers.Services.Agent.AgentTranscriptStore(basePath: _dir);
+        var message = new Whiskers.Models.Agent.AgentMessage(Whiskers.Models.Agent.AgentRole.User, "hello");
+        await transcripts.SaveAsync("a@example.com", [message]);
+        await transcripts.SaveAsync("a@example.com", [message, message]);
+
+        await transcripts.ClearAsync("a@example.com");
+
+        Assert.Empty(await transcripts.LoadAsync("a@example.com"));
+        Assert.Empty(Directory.EnumerateFiles(_dir));
+        Assert.DoesNotContain(JsonStoreRecovery.Recovered, r => r.Path.StartsWith(_dir, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_unreadable_file_is_not_kept_as_the_previous_generation()
+    {
+        var store = new JsonFileStore<Doc>(StorePath);
+        await store.SaveAsync(Make(1));
+        await store.SaveAsync(Make(2));            // .bak = 1
+        await File.WriteAllTextAsync(StorePath, "{torn");
+
+        await store.SaveAsync(Make(3));            // without a load in between
+
+        Assert.Equal(1, JsonSerializer.Deserialize<Doc>(await File.ReadAllTextAsync(StorePath + ".bak"))!.Version);
+    }
+
+    [Fact]
     public async Task A_plaintext_secret_moved_out_stays_in_no_previous_generation()
     {
         var store = new JsonFileStore<Doc>(StorePath, holdsPlaintextSecret: d => d.Items.Contains("plaintext-secret"));

@@ -74,14 +74,15 @@ public class JsonFileStore<T> where T : class, new()
         try
         {
             var json = JsonSerializer.Serialize(data, JsonOptions);
-            var keepPrevious = !await CurrentHoldsPlaintextSecretAsync();
-            if (!keepPrevious)
+            var current = await CurrentHoldsPlaintextSecretAsync();
+            if (current == true)
             {
                 // First, so that no crash leaves an older generation with the secret behind once it moved.
                 var previous = _filePath + DurableFile.BackupSuffix;
                 if (File.Exists(previous)) File.Delete(previous);
             }
-            await DurableFile.WriteAllTextAsync(_filePath, json, keepPrevious);
+            // An unreadable current file is no previous generation; the one kept before stays (it was checked when kept).
+            await DurableFile.WriteAllTextAsync(_filePath, json, keepPrevious: current == false);
         }
         finally
         {
@@ -93,12 +94,33 @@ public class JsonFileStore<T> where T : class, new()
     /// <see cref="LoadAsync"/> recovers). A store with only a <c>.bak</c> is not a first run to seed.</summary>
     public bool Exists() => File.Exists(_filePath) || File.Exists(_filePath + DurableFile.BackupSuffix);
 
-    // A file that cannot be told apart (unreadable) counts as holding one.
-    private async Task<bool> CurrentHoldsPlaintextSecretAsync()
+    /// <summary>Removes the store with its previous generation (a reset, not a damage: nothing comes back).</summary>
+    public async Task DeleteAsync()
     {
-        if (_holdsPlaintextSecret is null || !File.Exists(_filePath)) return false;
-        try { return _holdsPlaintextSecret(Parse(await File.ReadAllTextAsync(_filePath))); }
-        catch (JsonException) { return true; }
+        await _semaphore.WaitAsync();
+        try
+        {
+            if (File.Exists(_filePath)) File.Delete(_filePath);
+            var previous = _filePath + DurableFile.BackupSuffix;
+            if (File.Exists(previous)) File.Delete(previous);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    // false: the current file may be kept as the previous generation; true: it holds a plaintext secret; null: it is
+    // unreadable (never kept, being no readable generation and possibly holding a secret).
+    private async Task<bool?> CurrentHoldsPlaintextSecretAsync()
+    {
+        if (!File.Exists(_filePath)) return false;
+        try
+        {
+            var current = Parse(await File.ReadAllTextAsync(_filePath));
+            return _holdsPlaintextSecret?.Invoke(current) ?? false;
+        }
+        catch (JsonException) { return null; }
     }
 
     // "null" is no store: read as unreadable rather than as an empty one.

@@ -70,6 +70,12 @@ public sealed class McpPermissionServiceTests : IDisposable
         var file = await File.ReadAllTextAsync(paths.McpPermissionsJson);
         Assert.DoesNotContain(legacyKey, file);
         Assert.Contains(McpPermissionService.HashKey(legacyKey), file);
+
+        // R1-35: no previous generation keeps the plaintext key, also after further saves.
+        await svc.AddApiKeyAsync("next", "read");
+        foreach (var each in Directory.EnumerateFiles(_dir, "*", SearchOption.AllDirectories))
+            Assert.DoesNotContain(legacyKey, await File.ReadAllTextAsync(each));
+        Assert.True(File.Exists(paths.McpPermissionsJson + ".bak"));   // kept again once the file holds none
     }
 
     [Fact]

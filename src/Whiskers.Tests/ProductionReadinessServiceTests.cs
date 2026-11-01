@@ -62,6 +62,19 @@ public class ProductionReadinessServiceTests : IDisposable
         => await new ProductionReadinessService(Config(vaultKey), vault, _sp.GetRequiredService<IServiceScopeFactory>(),
             servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
 
+    [Fact]
+    public async Task Unreadable_store_copies_kept_in_the_data_directory_are_named_after_a_restart()
+    {
+        // R1-35: the copy outlasts the restart that follows a power loss; the in-memory recovery record does not.
+        await File.WriteAllTextAsync(_paths.RolesJson + ".corrupt-20261101000000", "{torn");
+        var (vault, servers) = await Stores(null);
+
+        var line = (await Checks(null, vault, servers)).Single(c => c.Title == "Datenspeicher lesbar");
+
+        Assert.False(line.Ok);
+        Assert.Contains("roles.json.corrupt-20261101000000", line.Detail);
+    }
+
     private void WriteLegacyCredentials()
     {
         File.WriteAllText(_paths.ServersJson, new JsonObject
