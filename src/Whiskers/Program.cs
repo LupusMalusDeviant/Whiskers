@@ -26,7 +26,7 @@ if (args is ["--migrate-to-postgres", ..])
 // startup below then migrates the restored DB and rebuilds every cache from the restored files. It throws on
 // an unrecoverable swap (→ process exit → restart retries) rather than booting on half-swapped state.
 // The restore CLI (R1-34) applies nothing: a restore already staged waits for a real start (the CLI refuses a second).
-var restoreCli = args is [RestoreCli.Flag, ..];
+var restoreCli = RestoreCli.Requested(args);
 if (!restoreCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
@@ -44,7 +44,7 @@ var app = builder.Build();
 if (restoreCli)
 {
     return await RestoreCli.RunAsync(app.Services.GetRequiredService<IBackupService>(),
-        app.Services.GetService<Whiskers.Services.Vault.IVaultService>(), dataPaths, args[1..], Console.Out);
+        app.Services.GetService<Whiskers.Services.Vault.IVaultService>(), dataPaths, RestoreCli.Arguments(args), Console.Out);
 }
 
 app.ConfigureWhiskersHttpPipeline();           // forwarded headers → fixed auth middleware chain → endpoints

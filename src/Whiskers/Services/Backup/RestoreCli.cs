@@ -22,7 +22,26 @@ public static class RestoreCli
 
     internal const string Actor = "cli (--restore-backup)";
 
-    /// <summary><paramref name="args"/> are the ones after <see cref="Flag"/>. Returns a process exit code: 0 staged,
+    /// <summary>True when the command line asks for this CLI: <c>--restore-backup</c> anywhere, also in the
+    /// <c>--restore-backup=&lt;id&gt;</c> form — a recovery typed that way must never start Whiskers normally.</summary>
+    public static bool Requested(IReadOnlyList<string> args) =>
+        args.Any(a => a == Flag || a.StartsWith(Flag + "=", StringComparison.Ordinal));
+
+    /// <summary>The arguments for <see cref="RunAsync"/>: everything but the flag, with the value of the <c>=</c> form
+    /// as its own argument.</summary>
+    public static IReadOnlyList<string> Arguments(IReadOnlyList<string> args)
+    {
+        var rest = new List<string>();
+        foreach (var a in args)
+        {
+            if (a == Flag) continue;
+            if (a.StartsWith(Flag + "=", StringComparison.Ordinal)) rest.Add(a[(Flag.Length + 1)..]);
+            else rest.Add(a);
+        }
+        return rest;
+    }
+
+    /// <summary><paramref name="args"/> are the command line without <see cref="Flag"/> (<see cref="Arguments"/>). Returns a process exit code: 0 staged,
     /// 2 usage, 3 no such backup, 4 refused by validation, 1 failed.</summary>
     public static async Task<int> RunAsync(IBackupService backups, Whiskers.Services.Vault.IVaultService? vault,
         DataPathOptions paths, IReadOnlyList<string> args, TextWriter log, CancellationToken ct = default)
@@ -57,12 +76,9 @@ public static class RestoreCli
 
             await log.WriteLineAsync($"Staging backup {id} for restore{(forPrevious ? " by the previous release" : "")} " +
                 "(a safety backup of the current state is taken first)…");
+            // Staging also resets the upgrade state (BackupService), as for a restore from the Settings panel.
             await backups.BeginRestoreAsync(archive, Actor,
                 forPrevious ? RestoreTarget.PreviousRelease : RestoreTarget.ThisRelease, ct);
-            // The restore ends the unfinished upgrade, and the restored data is no longer what the last release left: the
-            // next start of a newer release is a new upgrade with its own backup, also when no schema migration is pending.
-            File.Delete(paths.UpgradePendingMarker);
-            File.Delete(paths.LastStartedVersionFile);
             await log.WriteLineAsync($"Backup {id} is staged. " + (forPrevious
                 ? "Start the previous release now — it applies the restore before it opens the database."
                 : "Start Whiskers now — it applies the restore before it opens the database."));

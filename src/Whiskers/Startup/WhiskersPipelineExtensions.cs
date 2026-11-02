@@ -542,9 +542,10 @@ public static class WhiskersPipelineExtensions
     /// database migration/baseline. Moved verbatim from Program.cs.</summary>
     public static async Task RunWhiskersStartupAsync(this WebApplication app)
     {
-        // Run each IInitializable's async warm-up in ascending Order (whitelist → roles → notif-prefs →
-        // vault → server-config → MCP key store → MCP permissions → guardrails → AI triggers). Replaces the
-        // previously hand-wired InitializeAsync calls; the order lives on each service (see IInitializable).
+        // Run each IInitializable's async warm-up in ascending Order (whitelist 10 → roles 20 → setup 25 →
+        // notif-prefs 30 → vault 40 → pre-upgrade backup 45 (R1-34) → server-config 50 → credential move into the vault
+        // 55 → MCP permissions 70 → guardrails 80 → AI triggers 90). Replaces the previously hand-wired InitializeAsync
+        // calls; the order lives on each service (see IInitializable).
         foreach (var initializable in app.Services.GetServices<Whiskers.Services.IInitializable>().OrderBy(i => i.Order))
             await initializable.InitializeAsync(CancellationToken.None);
 
@@ -566,7 +567,7 @@ public static class WhiskersPipelineExtensions
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             var dbLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInitializer");
-            await Whiskers.Services.Persistence.UpgradeGuard.MigrateAsync("metrics", upgrade, upgradeLogger,
+            await Whiskers.Services.Persistence.UpgradeGuard.MigrateAsync("metrics", upgrade.PendingMetrics, upgrade, upgradeLogger,
                 () => Whiskers.Services.Persistence.DatabaseInitializer.InitializeAsync(db, dbLogger));
         }
         // Local-auth (F1): the Identity schema in its OWN __IdentityMigrationsHistory table (kept off the metrics
@@ -574,7 +575,7 @@ public static class WhiskersPipelineExtensions
         using (var scope = app.Services.CreateScope())
         {
             var idDb = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
-            await Whiskers.Services.Persistence.UpgradeGuard.MigrateAsync("identity", upgrade, upgradeLogger,
+            await Whiskers.Services.Persistence.UpgradeGuard.MigrateAsync("identity", upgrade.PendingIdentity, upgrade, upgradeLogger,
                 () => idDb.Database.MigrateAsync());
         }
         await upgradeGuard.CompleteAsync();

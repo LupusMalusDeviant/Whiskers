@@ -418,6 +418,11 @@ public sealed class BackupService : IBackupService
                 File.Move(tmpMarker, _dataPaths.RestorePendingMarker, overwrite: true);
                 committed = true;
 
+                // R1-34: the restore ends an unfinished upgrade, and the restored data is no longer what the last release
+                // left — the next start of a newer release is a new upgrade with its own backup, also without a pending
+                // schema migration. The same for the Settings panel and the CLI. Best effort: the restore is staged.
+                ResetUpgradeState();
+
                 // The upload temp (if this restore came from an uploaded file rather than an on-box archive) has
                 // served its purpose now that staging is committed — remove it. On-box archives (<id>.tar.gz)
                 // do not match this prefix and are preserved.
@@ -444,6 +449,22 @@ public sealed class BackupService : IBackupService
         finally
         {
             _restoreLock.Release();
+        }
+    }
+
+    private void ResetUpgradeState()
+    {
+        foreach (var file in new[] { _dataPaths.UpgradePendingMarker, _dataPaths.LastStartedVersionFile })
+        {
+            try
+            {
+                File.Delete(file);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "{File} could not be deleted after the restore was staged; the next start may not " +
+                    "take a pre-upgrade backup of the restored data.", Path.GetFileName(file));
+            }
         }
     }
 

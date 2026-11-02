@@ -100,15 +100,16 @@ An encrypted archive is safe to keep on another machine, because it is useless w
 5. To give up a pending restore, remove `/app/data/.restore-pending`. The pre-restore safety backup holds the state
    from before the restore. On PostgreSQL, if the start's log already says "The PostgreSQL database was restored from
    the archive", the database is the archive's while the files are not yet: after giving up, restore the pre-restore
-   safety backup so both match again.
+   safety backup so both match again. Staging already reset the upgrade state (see Upgrades), so the next start takes
+   one pre-upgrade backup of the unchanged data.
 
 ## Upgrades
 
 Each start checks whether it is an upgrade: another release than the one that last finished its start (a rebuild of
 the same release, which differs only after the `+` of its version, is not), or schema migrations pending in the
-database. A restore staged from the command line resets this, so the next start of a newer release is an upgrade
-again. Before an upgrade changes anything, Whiskers takes a self-backup labelled
-`pre-upgrade-<date>`:
+database. A staged restore (from the Settings panel or the command line) resets this: the restored data is not what
+the last release left, so the next start is an upgrade again, also of the same release. Before an upgrade changes
+anything, Whiskers takes a self-backup labelled `pre-upgrade-<yyyyMMdd_HHmmss>` (UTC):
 
 1. It is taken right after the vault has checked `VAULT_KEY`, before anything rewrites data in a newer format: the
    server list, the move of credentials into the vault, the data-protection key ring and the database schema. So the
@@ -119,14 +120,14 @@ again. Before an upgrade changes anything, Whiskers takes a self-backup labelled
    tools, the start **stops before anything is changed**. Fix the cause and start again. Only if you have a recovery
    point of your own, set `WHISKERS_UPGRADE_SKIP_BACKUP=true` to upgrade without the backup (the log warns about it
    at every such start). An invalid value of either upgrade setting also stops the start, before a backup is taken.
-3. Then the migrations run. The log shows how long the backup and each schema took. When both schemas are current,
+3. Then the migrations run. The log shows how long the backup took, and each schema that had migrations pending. When both schemas are current,
    the upgrade is finished and the release is recorded as the one that last started.
 
 Until then the upgrade counts as unfinished. A start after a failed migration (or after the orchestrator killed the
 container mid-upgrade) takes **no new backup**: it keeps the one from before the upgrade, which stays the way back,
 and the log says so. The scheduled self-backup retention does not delete pre-upgrade backups; Whiskers keeps the
 newest three (`WHISKERS_UPGRADE_KEEP_BACKUPS`), deletes older ones when it takes a new one, and never the one an
-unfinished upgrade depends on, nor any while an unfinished upgrade's own backup is unknown. A new database gets no
+unfinished upgrade depends on, nor any while an unfinished upgrade's own backup is unknown or gone (the log then lists the older ones by id). A new database gets no
 pre-upgrade backup: there is nothing in it yet (also when only the database file was removed from an existing data
 directory; back the directory up yourself before you do that).
 
@@ -146,8 +147,8 @@ docker compose run --rm serverwatch --restore-backup latest-pre-upgrade --for-pr
 ```
 
 `serverwatch` is the service name in the shipped compose file. `latest-pre-upgrade` is the backup of the unfinished
-upgrade (else the newest pre-upgrade backup); `--restore-backup <id>` picks a specific archive, and without an id the
-command lists them. Outside a container it is `dotnet Whiskers.dll --restore-backup …`; on Kubernetes, scale the
+upgrade (else the newest pre-upgrade backup); `--restore-backup <id>` (or `--restore-backup=<id>`) picks a specific
+archive, and without an id the command lists them. Outside a container it is `dotnet Whiskers.dll --restore-backup …`; on Kubernetes, scale the
 deployment to 0 and run the image once with the same volume, environment and arguments.
 
 The command checks the archive like **Settings > Backup** does (its entries, the key, the provider, the database's

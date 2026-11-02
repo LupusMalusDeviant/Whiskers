@@ -6,6 +6,12 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-34 follow-up: **the recovery command is recognised in every spelling.** `--restore-backup=<id>` and the option
+  after `--for-previous-release` now stage the restore; before, they started Whiskers normally on the data the restore
+  was meant to replace. A restore staged from the Settings panel now resets the upgrade state like the command line,
+  so the first start on the restored data takes a pre-upgrade backup of it; a failure to reset it no longer reports a
+  staged restore as failed. When an unfinished upgrade's own backup is gone, the log lists the older pre-upgrade
+  backups by id, and only a schema that had migrations pending logs its migration time.
 - Dependencies: **three known high-severity flaws removed.** The unused SignalR client package is gone; it pulled
   `SignalR.Common` 10.0.10 (CVE-2026-70159 / GHSA-334f-vvp4-7g6p, a denial of service up to 10.0.12). The server-side
   SignalR of the Blazor circuit and the container hub is part of the ASP.NET Core runtime in the base image, and the
