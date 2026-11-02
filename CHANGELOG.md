@@ -14,7 +14,8 @@ All notable changes to Whiskers are documented here. The format follows
   is also detected and the archive refused (the backup guide describes the recovery from the safety backup). A restore
   that leaves functions, triggers, rules, views, row policies or operators in `public` is refused, as on SQLite, and
   so is one that created or changed anything outside `public` (role or database settings, other schemas and their
-  objects). The restart then replaces the schema in one transaction, so the database is either the backup's or
+  objects), or brings grants, unlogged or foreign tables. A restore counts as done only when psql ran the end of the
+  script. The restart then replaces the schema in one transaction, so the database is either the backup's or
   unchanged, never half of each. Backups of PostgreSQL instances from before this version hold the files only: the
   backup list marks them **files only** and Whiskers does not restore them, because the files would no longer match
   the database. The image ships the PostgreSQL 18 client tools; outside the image, set `WHISKERS_PG_BIN_DIR`;
@@ -28,7 +29,7 @@ All notable changes to Whiskers are documented here. The format follows
   overlay's role is one, and the guide shows how to change that. The dump is written in UTF-8. A backup whose dump
   does not hold Whiskers' tables (for example because a search path put them in another schema) fails instead of
   claiming the database. A restore commits only when the dump was read to its end without an error. On PostgreSQL the
-  readiness check shows whether the client tools are usable.
+  readiness check shows whether the client tools are usable and new enough to restore.
 - R1-36: **A container action counts only when the container shows it.** After a start, stop, restart, remove,
   update or rollback — and after a single-container deployment from the Deploy page — the container is read back; one
   that is not running (or still running, still there, killed for lack of memory) makes the action **failed** — on the

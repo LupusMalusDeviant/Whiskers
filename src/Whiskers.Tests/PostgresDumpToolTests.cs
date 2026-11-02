@@ -199,6 +199,49 @@ public class PostgresDumpToolTests
     }
 
     [Fact]
+    public async Task The_end_of_the_script_prints_the_marker_that_proves_psql_ran_it()
+    {
+        var output = new MemoryStream();
+        using (var input = new StreamReader(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("\\restrict k\nSELECT 1;\n\\unrestrict k\n"))))
+        await using (var writer = new StreamWriter(output, new System.Text.UTF8Encoding(false), leaveOpen: true))
+            await PostgresDumpTool.FeedAsync(input, writer, null, commit: true, CancellationToken.None, doneMarker: "whiskers-restore-done-x");
+        Assert.Contains("COMMIT;\n\\echo whiskers-restore-done-x\n\\else", System.Text.Encoding.UTF8.GetString(output.ToArray()), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_script_that_ends_inside_a_copy_block_is_not_run_to_its_commit()
+    {
+        var output = new MemoryStream();
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() => FeedAsync(
+            "\\restrict k\nCOMMIT;\nCOPY public.sink FROM stdin;\n\\unrestrict k\n", null, commit: true, output: output));
+        Assert.Contains("COPY", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\echo", System.Text.Encoding.UTF8.GetString(output.ToArray()), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("pg_dump (PostgreSQL) 18.1 (Ubuntu 18.1-1.pgdg24.04+1)", true)]
+    [InlineData("pg_dump (PostgreSQL) 17.6", true)]
+    [InlineData("pg_dump (PostgreSQL) 17.5", false)]
+    [InlineData("pg_dump (PostgreSQL) 16.10", true)]
+    [InlineData("pg_dump (PostgreSQL) 16.4 (Debian 16.4-1)", false)]
+    [InlineData("pg_dump (PostgreSQL) 14.19", true)]
+    [InlineData("pg_dump (PostgreSQL) 13.22", false)]
+    [InlineData("something else", false)]
+    public void Only_tools_with_the_meta_command_protection_count_as_able_to_restore(string versionLine, bool canRestore)
+        => Assert.Equal(canRestore, PostgresDumpTool.CanRestore(versionLine));
+
+    [Theory]
+    [InlineData("ScramSHA256", "scram-sha-256")]
+    [InlineData("ScramSHA256,MD5", "scram-sha-256,md5")]
+    [InlineData("!None", "!none")]
+    public void Required_authentication_reaches_the_tools(string requireAuth, string expected)
+    {
+        var start = new ProcessStartInfo("pg_dump");
+        PostgresDumpTool.Connect(start, $"Host=db;Database=w;Username=u;Password=p;Require Auth={requireAuth}");
+        Assert.Equal(expected, start.Environment["PGREQUIREAUTH"]);
+    }
+
+    [Fact]
     public void Without_a_host_the_tools_connect_to_localhost_like_the_app_not_to_a_unix_socket()
     {
         var start = new ProcessStartInfo("pg_dump");

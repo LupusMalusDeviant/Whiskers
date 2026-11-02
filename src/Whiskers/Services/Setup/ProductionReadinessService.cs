@@ -161,12 +161,16 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 try { version = _pgDumpVersion = await Whiskers.Services.Backup.PostgresDumpTool.FromEnvironment().VersionAsync(); }
                 catch (Whiskers.Services.Backup.PostgresToolException ex) { problem = ex.Message; }
             }
+            // Tools without the \restrict protection write backups that no restore accepts.
+            var canRestore = version is not null && Whiskers.Services.Backup.PostgresDumpTool.CanRestore(version);
             checks.Add(new ReadinessCheck(
                 "PostgreSQL-Client-Tools für das Self-Backup",
-                version is not null,
-                version is not null
+                canRestore,
+                canRestore
                     ? $"{version} — Backups enthalten die Datenbank (pg_dump)."
-                    : $"pg_dump nicht nutzbar — Self-Backups schlagen fehl: {problem} (WHISKERS_PG_BIN_DIR auf das bin-Verzeichnis der Client-Tools setzen).",
+                    : version is not null
+                        ? $"{version} — zu alt für die Wiederherstellung: Client-Tools 17.6 oder neuer (bzw. 16.10, 15.14, 14.19) und mindestens so neu wie der Server nötig."
+                        : $"pg_dump nicht nutzbar — Self-Backups schlagen fehl: {problem} (WHISKERS_PG_BIN_DIR auf das bin-Verzeichnis der Client-Tools setzen).",
                 null, null));
         }
 

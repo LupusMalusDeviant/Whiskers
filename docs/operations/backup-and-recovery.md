@@ -174,7 +174,8 @@ webhooks and audit rows come back.
   files).
 - The dump leaves out ownership and grants (`--no-owner --no-acl`). Restored objects belong to the role Whiskers
   connects as. If other roles had grants, for example a read-only reporting user, grant them again after the
-  restore.
+  restore. A dump that brings grants of its own, or unlogged or foreign tables, into `public` is refused, and so is
+  one that adds default privileges or publications.
 - The dump covers the `public` schema only. Objects in other schemas of the same database are not touched unless
   they depend on objects in `public` (a view or foreign key on Whiskers' tables is dropped with them). A restore
   that creates or changes anything outside `public` — a schema, a table, a function, a trigger, a rule, a policy or
@@ -184,5 +185,13 @@ webhooks and audit rows come back.
 - Whiskers' migrations create tables, sequences, indexes and constraints only. A dump that brings functions,
   triggers, rules, views, row policies or operators into `public` is refused, because they would run with Whiskers'
   rights on its reads and writes.
+- A restore runs the archive's SQL with the rights of the role Whiskers connects as. Beyond what the checks above
+  refuse, a crafted archive could still change what a role may always change about itself, such as its own
+  password; Whiskers would then fail to connect after the restart. Restore only archives you trust, keep
+  `VAULT_KEY` set so that only archives sealed with it are accepted, and if connecting fails after a restore, reset
+  the role's password as a database administrator.
+- Whiskers takes a restore as done only when psql ran the end of the script (its checks and its `COMMIT`) and printed
+  a marker unknown to the archive; a script that leaves psql reading data, for example inside a `COPY` block, is
+  refused even when psql ends without an error.
 - The dump is written in UTF-8 (`pg_dump --encoding=UTF8`), whatever the database's encoding; a restore stops at a
   byte that is not valid UTF-8 instead of replacing it.

@@ -83,6 +83,25 @@ public sealed class PostgresDumpTool
     public async Task<string> VersionAsync(CancellationToken ct = default)
         => (await RunAsync("pg_dump", null, ["--version"], ct)).Trim();
 
+    /// <summary>Whether tools of this version line ("pg_dump (PostgreSQL) 18.1 …") protect a restore script with
+    /// <c>\restrict</c> (17.6, 16.10, 15.14, 14.19 and later): older tools write backups that they cannot restore.</summary>
+    internal static bool CanRestore(string versionLine)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(versionLine, @"\(PostgreSQL\) (\d+)(?:\.(\d+))?");
+        if (!match.Success) return false;
+        var major = int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var minor = match.Groups[2].Success ? int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) : 0;
+        return major switch
+        {
+            >= 18 => true,
+            17 => minor >= 6,
+            16 => minor >= 10,
+            15 => minor >= 14,
+            14 => minor >= 19,
+            _ => false,
+        };
+    }
+
     /// <summary>Restores the dump into the database in one transaction.</summary>
     public Task RestoreAsync(string connectionString, string dumpPath, CancellationToken ct = default)
         => ApplyAsync(connectionString, dumpPath, probeSql: null, commit: true, ct);
@@ -115,6 +134,8 @@ public sealed class PostgresDumpTool
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(_timeout);
+        // Unknown to the script: it cannot print this line itself.
+        var doneMarker = $"whiskers-restore-done-{Guid.NewGuid():N}";
         Process psql;
         try
         {
@@ -152,7 +173,7 @@ public sealed class PostgresDumpTool
                             return restore.ExitCode == 0
                                 ? null
                                 : $"pg_restore failed (exit code {restore.ExitCode}): {Tail(await restoreErrors)}";
-                        }, _timeout);
+                        }, _timeout, doneMarker);
                 }
                 catch (IOException)
                 {
@@ -177,11 +198,15 @@ public sealed class PostgresDumpTool
                     throw new PostgresToolException($"The restore did not finish within {_timeout.TotalMinutes:0.#} minutes.");
                 throw;
             }
-            await psqlOutput;
+            var printed = await psqlOutput;
             if (psql.ExitCode != 0)
                 throw new PostgresToolException($"psql failed (exit code {psql.ExitCode}): {Tail(await psqlErrors)}");
             if (restore is not null && restore.ExitCode != 0)
                 throw new PostgresToolException($"pg_restore failed (exit code {restore.ExitCode}): {Tail(await restoreErrors)}");
+            // Exit code 0 alone does not prove that the checks and the COMMIT ran (FeedAsync, doneMarker).
+            if (!printed.Split('\n').Any(l => l.TrimEnd('\r') == doneMarker))
+                throw new PostgresToolException(
+                    "psql did not run the end of the restore script (its checks and its COMMIT): the script left psql reading data. Nothing is taken as restored.");
         }
 
         void KillSource()
@@ -206,7 +231,14 @@ public sealed class PostgresDumpTool
         "OR EXISTS (SELECT 1 FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid OPERATOR(pg_catalog.=) y.polrelid " +
         "WHERE c.relnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace) " +
         "OR EXISTS (SELECT 1 FROM pg_catalog.pg_operator o WHERE o.oprnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace) " +
-        "THEN RAISE EXCEPTION 'the database dump brings functions, triggers, rules, views, policies or operators into public, which Whiskers does not create'; " +
+        // Nor what a dump without owners and grants (--no-owner --no-acl) never brings: grants on public's tables or on
+        // public itself (another role could read and write the accounts), unlogged tables (emptied after a server crash)
+        // and foreign tables (reads and writes sent to another server).
+        "OR EXISTS (SELECT 1 FROM pg_catalog.pg_class c WHERE c.relnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace " +
+        "AND (c.relacl IS NOT NULL OR c.relpersistence OPERATOR(pg_catalog.<>) 'p'::pg_catalog.\"char\" " +
+        "OR c.relkind OPERATOR(pg_catalog.=) 'f'::pg_catalog.\"char\")) " +
+        "OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspname OPERATOR(pg_catalog.=) 'public'::pg_catalog.name AND n.nspacl IS NOT NULL) " +
+        "THEN RAISE EXCEPTION 'the database dump brings functions, triggers, rules, views, policies, operators, grants, unlogged or foreign tables into public, which Whiskers does not create'; " +
         "END IF; END $code$;";
 
     // A digest of what the restore may not touch outside public: every role and database setting (an ALTER ROLE/DATABASE
@@ -239,13 +271,17 @@ public sealed class PostgresDumpTool
             $"SELECT {Key('r', "r.oid", "r.ev_enabled", "pg_catalog.md5(r.ev_action::pg_catalog.text)")} FROM pg_catalog.pg_rewrite r" + OnRelation("r", "ev_class"),
             $"SELECT {Key('y', "y.oid")} FROM pg_catalog.pg_policy y" + OnRelation("y", "polrelid"),
             $"SELECT {Key('o', "o.oid", "o.oprcode")} FROM pg_catalog.pg_operator o WHERE {Outside("o.oprnamespace")}",
+            // Default privileges (ALTER DEFAULT PRIVILEGES … GRANT … would reach the tables later migrations create) and
+            // publications, in any schema.
+            $"SELECT {Key('a', "a.oid", "a.defaclrole", "a.defaclnamespace", "a.defaclobjtype", "a.defaclacl")} FROM pg_catalog.pg_default_acl a",
+            $"SELECT {Key('b', "b.oid", "b.pubname", "b.puballtables")} FROM pg_catalog.pg_publication b",
         };
         return "pg_catalog.md5(coalesce((SELECT pg_catalog.string_agg(d.k, ';' ORDER BY d.k COLLATE pg_catalog.\"C\") FROM (" +
                string.Join(" UNION ALL ", parts) + ") d), ''))";
     }
 
     internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct,
-        Func<Task<string?>>? sourceFailure = null, TimeSpan? statementTimeout = null)
+        Func<Task<string?>>? sourceFailure = null, TimeSpan? statementTimeout = null, string? doneMarker = null)
     {
         psql.NewLine = "\n";
         psql.AutoFlush = false;   // one write per buffer, not per line; flushed at the end
@@ -318,6 +354,8 @@ public sealed class PostgresDumpTool
         }
         if (!restricted)
             throw new PostgresToolException("The database dump produced an empty restore script.");
+        if (inCopy)
+            throw new PostgresToolException(@"The restore script ends inside a COPY block (no ""\."" line): the dump is incomplete or crafted.");
         // Nothing is committed unless the script reached its own end and pg_restore finished without an error.
         if (sourceFailure is not null && await sourceFailure() is { } failure)
             throw new PostgresToolException(failure);
@@ -341,6 +379,9 @@ public sealed class PostgresDumpTool
             await psql.WriteLineAsync(probeSql);
         }
         await psql.WriteLineAsync(commit ? "COMMIT;" : "ROLLBACK;");
+        // Proof that psql ran this tail as commands: a script that leaves psql inside a COPY or a quote would take all of
+        // it as data and still let psql end with exit code 0 at the end of the input. The caller requires this line.
+        if (doneMarker is not null) await psql.WriteLineAsync($@"\echo {doneMarker}");
         await psql.WriteLineAsync(@"\else");
         await psql.WriteLineAsync("DO $guard$ BEGIN RAISE EXCEPTION 'the restore script changed role or database settings or objects outside the public schema'; END $guard$;");
         await psql.WriteLineAsync(@"\endif");
@@ -550,6 +591,26 @@ public sealed class PostgresDumpTool
         Set("PGSSLCERT", clientCertificate);
         Set("PGSSLKEY", clientKey);
         Set("PGTARGETSESSIONATTRS", targetSession);
+        // The authentication methods the app requires (Require Auth): the tools must not accept a weaker one (libpq 16+).
+        if (!string.IsNullOrWhiteSpace(builder.RequireAuth))
+            Set("PGREQUIREAUTH", string.Join(",", builder.RequireAuth.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Select(method =>
+                {
+                    var negated = method.StartsWith('!');
+                    var name = negated ? method[1..] : method;
+                    var mapped = name.ToLowerInvariant() switch
+                    {
+                        "password" => "password",
+                        "md5" => "md5",
+                        "gss" => "gss",
+                        "sspi" => "sspi",
+                        "scramsha256" or "scram-sha-256" => "scram-sha-256",
+                        "none" => "none",
+                        _ => throw new PostgresToolException(
+                            $"The connection string requires the authentication method \"{name}\", which the backup cannot pass on to the PostgreSQL client tools."),
+                    };
+                    return (negated ? "!" : "") + mapped;
+                })));
         Set("PGCHANNELBINDING", builder.ChannelBinding switch
         {
             ChannelBinding.Disable => "disable",

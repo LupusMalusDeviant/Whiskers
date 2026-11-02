@@ -546,12 +546,34 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
     }
 
     [SkippableTheory]
+    [InlineData("")]           // the tail taken as COPY data, psql ends with 0 at the end of the input
+    [InlineData("COMMIT;\n")]  // and what the script did before is committed by its own COMMIT, past every check
+    public async Task A_script_that_leaves_psql_reading_copy_data_is_not_taken_as_restored(string before)
+    {
+        await SkipUnlessReadyAsync();
+        var target = await CreateDatabaseAsync("sink");
+        // What a crafted entry could end with; the whole tail (checks, COMMIT) would follow as rows of public.sink.
+        var script = "\\restrict k7\n" + before + "CREATE TABLE public.sink (t text);\nCOPY public.sink FROM stdin;\n\\unrestrict k7\n";
+
+        await Assert.ThrowsAsync<PostgresToolException>(() => new PostgresDumpTool(BinDir).ApplyScriptAsync(target, script, commit: true));
+
+        await using var check = new NpgsqlConnection(target);
+        await check.OpenAsync();
+        await using var tables = new NpgsqlCommand("SELECT count(*) FROM pg_tables WHERE tablename = 'sink'", check);
+        Assert.Equal(0L, await tables.ExecuteScalarAsync());
+    }
+
+    [SkippableTheory]
     [InlineData("CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'SELECT 1';\n")]
     [InlineData("CREATE FUNCTION evil() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';\n" +
         "CREATE TRIGGER t_ins BEFORE INSERT ON public.t FOR EACH ROW EXECUTE FUNCTION evil();\n")]
     [InlineData("CREATE VIEW public.v AS SELECT id FROM public.t;\n")]
     [InlineData("CREATE RULE r AS ON INSERT TO public.t DO INSTEAD NOTHING;\n")]
     [InlineData("ALTER TABLE public.t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON public.t USING (true);\n")]
+    // What a dump without owners and grants never holds.
+    [InlineData("GRANT SELECT, INSERT ON public.t TO PUBLIC;\n")]
+    [InlineData("GRANT USAGE ON SCHEMA public TO PUBLIC;\n")]
+    [InlineData("CREATE UNLOGGED TABLE public.u (id int);\n")]
     public async Task A_dump_that_brings_code_into_public_is_refused(string code)
     {
         await SkipUnlessReadyAsync();
