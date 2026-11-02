@@ -102,13 +102,13 @@ public class GitDeployTools
                 Branch = string.IsNullOrWhiteSpace(branch) ? "main" : branch.Trim(),
                 ComposePath = string.IsNullOrWhiteSpace(composePath) ? "docker-compose.yml" : composePath.Trim(),
                 ServerId = serverId,
-            }, string.IsNullOrEmpty(token) ? null : token, owner);
+            }, string.IsNullOrWhiteSpace(token) ? null : token, owner);
             MutationScope.Note($"Git deployment app {saved.Id}");
 
             // Read back from the store: what a later deployment will use.
             var stored = await gitDeploy.GetAppAsync(saved.Id);
             if (stored is null || stored.RepoUrl != saved.RepoUrl || stored.ServerId != saved.ServerId
-                || stored.HasToken != !string.IsNullOrEmpty(token))
+                || stored.HasToken != !string.IsNullOrWhiteSpace(token))
                 return Failed("failed", $"'{saved.Name}' was saved, but reading it back did not show what was saved.");
             return Json(await ViewAsync(stored, webhooks));
         }
@@ -140,7 +140,7 @@ public class GitDeployTools
         {
             var saved = await gitDeploy.SetTokenAsync(appId, revision, token ?? "", owner);
             var stored = await gitDeploy.GetAppAsync(saved.Id);
-            if (stored is null || stored.HasToken != !string.IsNullOrEmpty(token))
+            if (stored is null || stored.HasToken != !string.IsNullOrWhiteSpace(token))
                 return Failed("failed", $"The token of '{saved.Name}' was set, but reading the app back did not show it.");
             return Json(await ViewAsync(stored, webhooks));
         }

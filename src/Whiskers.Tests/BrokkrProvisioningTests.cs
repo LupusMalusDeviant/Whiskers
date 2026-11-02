@@ -9,6 +9,7 @@ using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
 using Whiskers.Services.Approvals;
 using Whiskers.Services.GitDeploy;
+using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Server;
@@ -19,7 +20,7 @@ using Microsoft.AspNetCore.Http;
 namespace Whiskers.Tests;
 
 /// <summary>Contract 0001 (Brokkr provisioning): the app, its repository token and its GitHub webhook are set up over
-/// MCP through the real filter and Mutation Gateway — owned by the calling key, refused on conflicts and stale
+/// MCP through the real filter and Mutation Gateway — owned by the person who approved them, refused on conflicts and stale
 /// revisions, waiting for a person's approval when policy asks for one — and neither the token nor the webhook secret
 /// reaches an answer it should not, the audit or the approval card. The tools are never offered to the in-app agent.</summary>
 public sealed class BrokkrProvisioningTests : IDisposable
@@ -105,7 +106,7 @@ public sealed class BrokkrProvisioningTests : IDisposable
     // ---- App ---------------------------------------------------------------
 
     [Fact]
-    public async Task An_app_is_created_through_the_gateway_owned_by_the_key_without_returning_its_token()
+    public async Task An_app_is_created_through_the_gateway_owned_by_the_approving_person_without_returning_its_token()
     {
         var (answer, outcome) = await CreateAppAsync("shop", RepoToken);
 
@@ -545,6 +546,50 @@ public sealed class BrokkrProvisioningTests : IDisposable
         Assert.Equal(ApproverId, (await _git.GetAppAsync(id))!.Owner);
         Assert.Equal(ApproverId, _webhooks.All.Single().Owner);
         Assert.Equal(ApproverId, GitDeployOwners.ActorOf((await _git.GetAppAsync(id))!).OwnerId);
+    }
+
+    // ---- Review round 3 ----------------------------------------------------
+
+    [Fact]
+    public async Task A_token_for_an_app_deleted_meanwhile_does_not_bring_it_back()
+    {
+        var saved = await _git.SaveAppAsync(new GitDeployApp
+        {
+            Name = "shop", RepoUrl = "https://example.org/shop.git", ServerId = "local",
+        }, null, ApproverId);
+        var copy = (await _git.GetAppAsync(saved.Id))!;
+        await _git.DeleteAppAsync(saved.Id);
+
+        // The copy read before the delete is saved again, as SetTokenAsync does with what it read.
+        await Assert.ThrowsAsync<GitDeployConflictException>(() => _git.SaveAppAsync(copy, RepoToken, ApproverId));
+        Assert.Empty(await _git.GetAppsAsync());
+    }
+
+    [Fact]
+    public async Task A_token_of_blanks_stores_no_token()
+    {
+        var (created, _) = await CreateAppAsync("shop", null);
+        var (id, revision) = IdAndRevision(created);
+        NewRequest();
+
+        var (answer, outcome) = await SetTokenAsync(id, revision, "   ");
+
+        Assert.Equal(McpCallResult.Executed, outcome.Result);
+        using var json = JsonDocument.Parse(answer);
+        Assert.Equal("none", json.RootElement.GetProperty("credentials").GetString());
+        Assert.False((await _git.GetAppAsync(id))!.HasToken);
+    }
+
+    [Fact]
+    public async Task A_read_held_for_approval_is_pending_not_denied()
+    {
+        _mcp.ReadVerdict = new DirectCallVerdict(false, GuardrailVerdict.Confirm, "Human approval required (approval a1).");
+
+        var result = await _mcp.CallAsync("get_git_deploy_app", _ => throw new InvalidOperationException("must not run"),
+            new { appId = "0123456789ab" });
+
+        Assert.True(result.IsError);
+        Assert.Equal("pending_approval", Code(Text(result)));
     }
 
     // ---- Helpers -----------------------------------------------------------

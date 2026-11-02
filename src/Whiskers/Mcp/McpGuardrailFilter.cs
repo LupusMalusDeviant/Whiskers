@@ -43,7 +43,9 @@ public static class McpGuardrailFilter
         var resolver = services.GetService<IAgentPrincipalResolver>();
         var guard = services.GetService<IDirectMcpCallGuard>();
         if (http is null)
-            return Refuse("Guardrails could not identify the caller; the call was not executed.");
+            return McpErrorEnvelope.Tools.Contains(call.Name)
+                ? McpErrorEnvelope.Result(McpErrorEnvelope.Denied, "Guardrails could not identify the caller; the call was not executed.")
+                : Refuse("Guardrails could not identify the caller; the call was not executed.");
         var tool = new Call(http, requestId, call.Name);
         if (resolver is null)
             return tool.Deny("Guardrails could not identify the caller; the call was not executed.");
@@ -197,8 +199,10 @@ public static class McpGuardrailFilter
         public CallToolResult Deny(string message, string verdict = "deny")
         {
             Report(McpCallResult.Denied, verdict, null, message);
+            // A read held for approval waits for a person like a write: it is pending, not refused (its approval is
+            // named in the message; reads have no operation id).
             return McpErrorEnvelope.Tools.Contains(Tool)
-                ? McpErrorEnvelope.Result(McpErrorEnvelope.Denied, message)
+                ? McpErrorEnvelope.Result(verdict == "confirm" ? McpErrorEnvelope.PendingApproval : McpErrorEnvelope.Denied, message)
                 : Refuse(message);
         }
     }
