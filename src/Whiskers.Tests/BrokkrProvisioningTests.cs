@@ -22,7 +22,7 @@ namespace Whiskers.Tests;
 /// <summary>Contract 0001 (Brokkr provisioning): the app, its repository token and its GitHub webhook are set up over
 /// MCP through the real filter and Mutation Gateway — owned by the person who approved them, refused on conflicts and stale
 /// revisions, waiting for a person's approval when policy asks for one — and neither the token nor the webhook secret
-/// reaches an answer it should not, the audit or the approval card. The tools are never offered to the in-app agent.</summary>
+/// reaches an answer it should not, the audit or the approval card. The four writes are never offered to the in-app agent.</summary>
 public sealed class BrokkrProvisioningTests : IDisposable
 {
     /// <summary>A placeholder generated per run, so a leak is recognisable without any real credential in the file.</summary>

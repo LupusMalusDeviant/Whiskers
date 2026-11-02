@@ -14,10 +14,10 @@ All notable changes to Whiskers are documented here. The format follows
   mutation gateway (approvals included) and is read back afterwards. The person who approves the call in Whiskers
   becomes the owner of the app and the webhook — never the key — so a later push deploys on that person's authority;
   a call nobody approved (a policy that lets the key through) is refused. A repository URL that carries credentials
-  is refused (also on the page), and so is saving a copy of an app deleted meanwhile; a token of blanks removes the
+  is refused (also on the page), and so is saving a copy of an app deleted meanwhile (except a copy of an app saved before R1-08 and never since); a token of blanks removes the
   stored token. Tokens are
-  never echoed, logged or shown on an approval card; a webhook secret appears once, in the tool's answer. None of the
-  five is offered to the AI agent. Their errors are JSON with a code (`invalid_argument`, `not_found`, `conflict`,
+  never echoed, logged or shown on an approval card; a webhook secret appears once, in the tool's answer. The four
+  writes are not offered to the AI agent. Their errors are JSON with a code (`invalid_argument`, `not_found`, `conflict`,
   `denied`, `pending_approval`, `failed`) — also when the gateway refuses a call or holds it for approval, which answers
   with the operation id and the approval id; repeating the identical call after the approval runs it once. A Git
   deployment app name is now unique (case-insensitive), also when saved on the page. Switching off one of these tools

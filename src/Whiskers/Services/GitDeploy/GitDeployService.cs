@@ -114,7 +114,8 @@ public class GitDeployService : IGitDeployService
             // Edited from a stale copy: someone saved (or a deploy was decided on) a newer revision meanwhile.
             if (previous is not null && previous.Revision != app.Revision)
                 throw new GitDeployConflictException($"'{previous.Name}' was changed meanwhile; reload and save again.");
-            // A copy of a stored app (revision above 0) whose app was deleted meanwhile is not saved as a new one.
+            // A copy of a stored app (revision above 0) whose app was deleted meanwhile is not saved as a new one. A copy
+            // at revision 0 (an app saved before R1-08 and never since) cannot be told from a new app and passes.
             if (previous is null && app.Revision != 0)
                 throw new GitDeployConflictException($"'{app.Name}' was deleted meanwhile; nothing was saved.");
             // A new app, or one renamed, never takes the name of another (contract 0001). Checked here, under the lock

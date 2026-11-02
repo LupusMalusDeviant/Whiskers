@@ -198,9 +198,9 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-45 | `create_git_deploy_webhook` (`webhook.save`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the webhook back | GW ✅ + details | github only; the approving person becomes the owner; the target resolves through the app (its server); a webhook for an app moved or renamed after the decision is refused (`conflict`); the secret appears once, in the answer only; a second webhook for the same app is not refused (`get_git_deploy_app` lists them) |
 | M-46 | `rotate_git_deploy_webhook_secret` (`webhook.rotate_secret`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the webhook back | GW ✅ + details | git-deploy webhooks only; the new secret appears once, in the answer only |
 
-The five tools of M-42–M-46 are not offered to the AI agent (`AgentToolRegistry.NonAgentTools`): credentials never
+The four writes M-42, M-43, M-45 and M-46 are not offered to the AI agent (`AgentToolRegistry.NonAgentTools`): credentials never
 reach a model. Every error of the five, the gateway's refusals and a pending approval included, is the coded envelope of
-`McpErrorEnvelope` (contract 0001; a pending approval carries the operation and approval ids).
+`McpErrorEnvelope` (contract 0001; a pending write carries the operation and approval ids, a pending read neither — see M-44).
 
 ### 7.2 Agent paths
 
