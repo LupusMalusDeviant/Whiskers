@@ -27,6 +27,12 @@ public sealed class PostgresDumpTool
     private readonly string? _binDir;
     private readonly TimeSpan _timeout;
 
+    /// <summary>Minutes a single tool run may take (default 30).</summary>
+    public const string TimeoutKey = "WHISKERS_PG_TIMEOUT_MINUTES";
+
+    /// <summary>The tables a dump of Whiskers' database must hold: the migration histories of both contexts.</summary>
+    public static readonly IReadOnlyList<string> RequiredTables = ["__EFMigrationsHistory", "__IdentityMigrationsHistory"];
+
     public PostgresDumpTool(string? binDir = null, TimeSpan? timeout = null)
     {
         _binDir = string.IsNullOrWhiteSpace(binDir) ? null : binDir;
@@ -34,9 +40,15 @@ public sealed class PostgresDumpTool
     }
 
     public static PostgresDumpTool FromConfiguration(IConfiguration? configuration)
-        => new(configuration?[BinDirKey] ?? configuration?["Backup:PostgresBinDir"]);
+    {
+        var minutes = configuration?[TimeoutKey] ?? configuration?["Backup:PostgresTimeoutMinutes"];
+        return new(configuration?[BinDirKey] ?? configuration?["Backup:PostgresBinDir"],
+            int.TryParse(minutes, out var m) && m > 0 ? TimeSpan.FromMinutes(m) : null);
+    }
 
-    /// <summary>Writes a custom-format dump of the <c>public</c> schema to <paramref name="outputPath"/> (owner-only).</summary>
+    /// <summary>Writes a custom-format dump of the <c>public</c> schema to <paramref name="outputPath"/> (owner-only)
+    /// and proves it holds Whiskers' tables: a database whose tables live in another schema (a search path in the
+    /// connection string) would otherwise give an empty dump and an archive that claims a database it does not hold.</summary>
     public async Task DumpAsync(string connectionString, string outputPath, CancellationToken ct = default)
     {
         // pg_dump truncates an existing file and keeps its mode: created owner-only first, the data never readable by others.
@@ -44,14 +56,21 @@ public sealed class PostgresDumpTool
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(outputPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         await RunAsync("pg_dump", connectionString,
             ["--format=custom", "--no-owner", "--no-acl", "--schema=public", "--file", outputPath], ct);
+        await CheckReadableAsync(outputPath, ct);
     }
 
-    /// <summary>Reads the dump's table of contents: a file pg_restore cannot read is no dump.</summary>
+    /// <summary>Reads the dump's table of contents: a file pg_restore cannot read is no dump, and one without the
+    /// migration histories in <c>public</c> is no dump of Whiskers' database.</summary>
     public async Task CheckReadableAsync(string dumpPath, CancellationToken ct = default)
     {
         var listing = await RunAsync("pg_restore", null, ["--list", dumpPath], ct);
-        if (!listing.Contains("TABLE DATA", StringComparison.Ordinal) && !listing.Contains("TABLE ", StringComparison.Ordinal))
-            throw new InvalidDataException("The database dump holds no tables.");
+        // A table entry reads "<id>; <oid> <oid> TABLE public <name> <owner>".
+        var missing = RequiredTables.Where(t => !System.Text.RegularExpressions.Regex.IsMatch(listing,
+            $@"^\d+; \d+ \d+ TABLE public {System.Text.RegularExpressions.Regex.Escape(t)}(\s|$)", System.Text.RegularExpressions.RegexOptions.Multiline)).ToList();
+        if (missing.Count > 0)
+            throw new InvalidDataException(
+                $"The database dump holds no {string.Join(" or ", missing)} in the public schema: Whiskers' tables are not in it " +
+                "(their schema must be public; a search path in the connection string moves them elsewhere).");
     }
 
     /// <summary>Restores the dump into the database in one transaction.</summary>
@@ -95,11 +114,14 @@ public sealed class PostgresDumpTool
                 }
                 catch (IOException)
                 {
-                    // psql stopped reading (ON_ERROR_STOP): its own error says why, below.
+                    // psql stopped reading (ON_ERROR_STOP): its own error says why, below. Nobody reads pg_restore's
+                    // output any more — it would block on the full pipe until the timeout.
+                    Kill(restore);
                 }
                 try { psql.StandardInput.Close(); } catch (IOException) { /* already gone */ }
-                await restore.WaitForExitAsync(timeout.Token);
                 await psql.WaitForExitAsync(timeout.Token);
+                if (psql.ExitCode != 0) Kill(restore);
+                await restore.WaitForExitAsync(timeout.Token);
             }
             catch (Exception ex)
             {
@@ -225,6 +247,10 @@ public sealed class PostgresDumpTool
         if (!string.IsNullOrEmpty(builder.SslPassword))
             throw new PostgresToolException(
                 "The connection string sets an SSL key password, which the PostgreSQL client tools cannot take from Whiskers. Use an unencrypted client key for the backup role.");
+        // libpq takes one host; Npgsql's lists and host:port forms would reach the tools as a name they cannot resolve.
+        if (builder.Host is { } host && (host.Contains(',') || host.Contains(':')))
+            throw new PostgresToolException(
+                "The connection string names several hosts or a host with a port; the backup needs one host in Host and the port in Port.");
         var env = start.Environment;
         // Without a password in the connection string, Npgsql reads PGPASSWORD / PGPASSFILE: the tools may too.
         var inheritedPassword = string.IsNullOrEmpty(builder.Password) ? (env.TryGetValue("PGPASSWORD", out var pw) ? pw : null) : null;
@@ -268,7 +294,9 @@ public sealed class PostgresDumpTool
             .Where(l => l.Trim().Length > 0 && !char.IsWhiteSpace(l[0]))
             .Where(l => !ErrorDetail(l))
             .ToList();
-        var text = string.Join(" | ", kept.TakeLast(5));
+        // A quoted value that is not a name (an input value, a row's text) is left out.
+        var text = string.Join(" | ", kept.TakeLast(5).Select(l => System.Text.RegularExpressions.Regex.Replace(l,
+            "\"([^\"]*)\"", q => System.Text.RegularExpressions.Regex.IsMatch(q.Groups[1].Value, @"^[A-Za-z_][A-Za-z0-9_$.]{0,62}$") ? q.Value : "\"…\"")));
         if (text.Length > 500) text = text[..500] + "…";
         return Whiskers.Utils.SinkRedaction.Text(text) ?? "";
 

@@ -155,7 +155,8 @@ readable, or the archive is refused. The database is locked for that dry run. At
 and recreated from the dump in one transaction, before the files are swapped; any error rolls it back and stops the
 start. The restore script is piped from `pg_restore` to `psql` and never written to disk; it runs only when it opens
 with `\restrict` (client tools 17.6 or newer), so a crafted dump cannot run psql meta-commands such as `\!`. The
-connecting role must own the `public` schema. The password reaches the tools through their environment, and only the
+connecting role must own the `public` schema; use a dedicated role that is not a superuser, since a restore runs the
+archive's SQL with its rights (a superuser could be made to run `COPY … FROM PROGRAM` on the database host). The password reaches the tools through their environment, and only the
 error lines of their output are logged (lines that quote rows are left out).
 
 ## Hardening checklist for operators

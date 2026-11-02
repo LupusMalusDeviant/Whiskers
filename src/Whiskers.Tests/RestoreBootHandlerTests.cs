@@ -392,6 +392,26 @@ public class RestoreBootHandlerTests
     }
 
     [Fact]
+    public void A_postgres_restore_reads_the_database_settings_from_the_data_directory_like_the_app()
+    {
+        // Configured only in app-settings.json (a layer AddWhiskersConfiguration adds): the restore must see it too, so
+        // it reaches the database step (here: tools that are missing) instead of "not configured for PostgreSQL".
+        var p = NewRoot(out var root);
+        try
+        {
+            StagePostgresRestore(p);
+            File.WriteAllText(p.AppSettingsJson,
+                "{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=w;Username=u;Password=unused\"}}");
+            var config = new ConfigurationBuilder().Build();
+
+            Assert.Throws<PostgresToolException>(() =>
+                RestoreBootHandler.ApplyPendingRestore(p, config, new PostgresDumpTool(Path.Combine(root, "no-such-bin"))));
+            Assert.True(File.Exists(p.RestorePendingMarker));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void A_postgres_restore_whose_database_step_fails_swaps_no_file_and_stays_pending()
     {
         var p = NewRoot(out var root);

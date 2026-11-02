@@ -32,6 +32,14 @@ recreate it: it must own the schema, or on PostgreSQL 15 and later own the datab
 takes backups, but the restore is refused at its dry run, before anything changes. Check it once after setting up
 the database, by restoring a backup.
 
+Give Whiskers a database of its own and a dedicated role that owns it, not a superuser. A restore runs the archive's
+SQL with that role's rights; a superuser (or a member of `pg_execute_server_program`) could be made to run commands on
+the database host by a crafted archive, and without `VAULT_KEY` archives are not authenticated. The `public` schema
+must hold Whiskers' tables only: a restore drops everything in it, and the dump brings back only what Whiskers put
+there. Extensions a DBA installed into `public` must be installed again after a restore. Whiskers' tables must be in
+`public`: a backup whose dump does not hold them (for example because a `Search Path` in the connection string put
+them elsewhere) fails instead of writing an archive without the database.
+
 ## Recovery point and time
 
 - **Recovery point (RPO):** the newest archive you still have. With a daily *Self-backup* task you can lose up to a
@@ -64,7 +72,9 @@ An encrypted archive is safe to keep on another machine, because it is useless w
      transaction and rolls the transaction back. Inside that transaction it also checks that the migration
      histories match the archive's manifest, runs the migrations the next start would run, and reads every table and
      column this version uses. The database is locked while the dry run runs, so metric collection pauses for that
-     time; on a large database that can take minutes.
+     time; on a large database that can take minutes. The dry run writes the whole dataset once and rolls it back:
+     the database server needs about the database's size in free disk space (plus WAL) for it, which it reclaims
+     afterwards.
 3. Whiskers takes a **pre-restore safety backup**, commits the restore and stops.
 4. The container restart (through the Docker restart policy, systemd or Kubernetes) applies the restore:
    - On PostgreSQL, the `public` schema is dropped and recreated from the dump in **one transaction**. If any step
@@ -101,8 +111,9 @@ webhooks and audit rows come back.
 - The image ships the PostgreSQL client tools `pg_dump`, `pg_restore` and `psql` in version 18 from the PostgreSQL
   project. The tests restore with them into PostgreSQL 14 and 17 servers. If you run Whiskers outside the image,
   install the tools (17.6 or newer, at least as new as the server) and either put them on `PATH` or set
-  `WHISKERS_PG_BIN_DIR` (or `Backup:PostgresBinDir`) to their directory. Without them, a backup of a PostgreSQL
-  instance fails; Whiskers never writes an archive without the database.
+  `WHISKERS_PG_BIN_DIR` (or `Backup:PostgresBinDir`) to their directory; the image sets it. Without them, a backup
+  of a PostgreSQL instance fails; Whiskers never writes an archive without the database. Each tool run may take
+  30 minutes; set `WHISKERS_PG_TIMEOUT_MINUTES` (or `Backup:PostgresTimeoutMinutes`) for a larger database.
 - The restore script goes straight from `pg_restore` to `psql` and is never written to disk. Whiskers runs it only
   when it opens with `\restrict`, the protection of client tools 17.6 and newer, so a crafted dump cannot run psql
   meta-commands such as `\!` (which would run a shell command). Older tools are refused for a restore.
@@ -110,11 +121,13 @@ webhooks and audit rows come back.
   variables inherited from Whiskers' own environment are not passed on, except `PGPASSWORD` (when the connection
   string has no password) and `PGPASSFILE`, which Whiskers itself would use as well. Host, port, database, user,
   password, password file, SSL mode, root certificate, client certificate and key, target session attributes and the
-  connect timeout are taken over from the connection string; an encrypted client key (`SSL Password`) is not
-  supported for backups. Of the tools' error output, only the error lines are logged; lines that quote a row or a
-  statement are left out.
+  connect timeout are taken over from the connection string; an encrypted client key (`SSL Password`) and several
+  hosts in `Host` are not supported for backups. Of the tools' error output, only the error lines are logged; lines
+  that quote a row or a statement, and quoted values, are left out. The restore at the start reads the database
+  settings from the same places as the app (environment, `appsettings.json` and the data directory's settings
+  files).
 - The dump leaves out ownership and grants (`--no-owner --no-acl`). Restored objects belong to the role Whiskers
   connects as. If other roles had grants, for example a read-only reporting user, grant them again after the
   restore.
-- The dump covers the `public` schema only. Objects in other schemas of the same database are not touched, and
+- The dump covers the `public` schema only. Objects in other schemas of the same database are not touched;
   extensions are not part of the dump (Whiskers' migrations create none; a test keeps it that way).

@@ -66,7 +66,7 @@ public static class RestoreBootHandler
         try
         {
             if (string.Equals(parsed.Provider, SelfBackupFormat.ProviderPostgres, StringComparison.OrdinalIgnoreCase))
-                RestoreDatabase(staging, configuration, pgTools);
+                RestoreDatabase(dataPaths, staging, configuration, pgTools);
             SwapStagingOverLive(dataPaths, staging);
         }
         catch (Exception ex)
@@ -117,9 +117,17 @@ public static class RestoreBootHandler
             logger?.LogError("AUDIT ROW OF THE APPLIED RESTORE NOT WRITTEN — kept {Path} for the next start", note);
     }
 
-    private static void RestoreDatabase(string staging, IConfiguration? configuration,
+    private static void RestoreDatabase(DataPathOptions dataPaths, string staging, IConfiguration? configuration,
         PostgresDumpTool? pgTools)
     {
+        // The app reads the database settings with the data directory's JSON layers on top (AddWhiskersConfiguration);
+        // the restore reads the same, before the swap replaces those files.
+        if (configuration is not null)
+            configuration = new ConfigurationBuilder()
+                .AddConfiguration(configuration)
+                .AddJsonFile(Path.GetFullPath(dataPaths.AgentSettingsJson), optional: true, reloadOnChange: false)
+                .AddJsonFile(Path.GetFullPath(dataPaths.AppSettingsJson), optional: true, reloadOnChange: false)
+                .Build();
         var dump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
         if (!File.Exists(dump))
             throw new InvalidOperationException("the restore was made on PostgreSQL but holds no database dump");

@@ -242,8 +242,13 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         await using (var sealedFs = File.OpenRead(live.Service.ResolveArchivePath(info.Id)!))
         await using (var plainFs = File.Create(plain))
             await BackupArchiveCipher.DecryptAsync(sealedFs, plainFs, VaultKey);
-        var crafted = Path.Combine(live.Paths.RootDir, "files-only.tar.gz");
-        await WithoutEntryAsync(plain, crafted, SelfBackupFormat.PgDumpEntryName);
+        var filesOnly = Path.Combine(live.Paths.RootDir, "files-only.tar.gz");
+        await WithoutEntryAsync(plain, filesOnly, SelfBackupFormat.PgDumpEntryName);
+        // Sealed with the instance key like every archive it accepts: what is refused is the missing database.
+        var crafted = Path.Combine(live.Paths.RootDir, "files-only.tar.gz.enc");
+        await using (var source = File.OpenRead(filesOnly))
+        await using (var sealedOut = File.Create(crafted))
+            await BackupArchiveCipher.EncryptAsync(source, sealedOut, VaultKey);
 
         var validation = await live.Service.ValidateArchiveAsync(crafted);
         Assert.False(validation.Ok);
@@ -259,7 +264,8 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         // The dump holds a table of a type the target lacks (an extension is not part of a schema dump): the restore
         // fails after the schema was dropped and some tables were created — and all of it is rolled back.
         var source = await CreateDatabaseAsync("withext");
-        await ExecuteAsync(source, "CREATE EXTENSION citext; CREATE TABLE a_first (id int); CREATE TABLE names (n citext);");
+        await ExecuteAsync(source, WhiskersHistories +
+            "CREATE EXTENSION citext; CREATE TABLE a_first (id int); CREATE TABLE names (n citext);");
         var target = await CreateDatabaseAsync("target");
         await ExecuteAsync(target, "CREATE TABLE keep (v text); INSERT INTO keep VALUES ('still here');");
 
@@ -300,6 +306,53 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         Assert.False(File.Exists(live.Paths.RestorePendingMarker));
         await using var db = new MetricsDbContext(new DbContextOptionsBuilder<MetricsDbContext>().UseNpgsql(live.Connection).Options);
         Assert.Equal(["deploy"], await db.Webhooks.Select(w => w.Name).ToListAsync());   // the dry run changed nothing
+    }
+
+    // The two tables a dump of Whiskers' database must hold (PostgresDumpTool.RequiredTables).
+    private const string WhiskersHistories =
+        "CREATE TABLE \"__EFMigrationsHistory\" (id int); CREATE TABLE \"__IdentityMigrationsHistory\" (id int); ";
+
+    [SkippableFact]
+    public async Task A_restore_that_fails_at_its_first_statement_returns_at_once_with_the_reason()
+    {
+        await SkipUnlessReadyAsync();
+        // A dump far larger than a pipe's buffer, restored by a role that does not own the schema: psql stops at
+        // DROP SCHEMA, and pg_restore, still writing, must not keep the restore waiting for the time limit.
+        var source = await CreateDatabaseAsync("large");
+        await ExecuteAsync(source, WhiskersHistories +
+            "CREATE TABLE bulk AS SELECT g AS id, repeat(md5(g::text), 8) AS filler FROM generate_series(1, 200000) g;");
+        var target = await CreateDatabaseAsync("notmine");
+        await ExecuteAsync(_pg.GetConnectionString(), "CREATE ROLE stranger LOGIN PASSWORD 'stranger-pw'");
+        var asStranger = new NpgsqlConnectionStringBuilder(target) { Username = "stranger", Password = "stranger-pw" }.ConnectionString;
+
+        var work = Path.Combine(Path.GetTempPath(), $"sw-pgbak-{Guid.NewGuid():N}");
+        _roots.Add(work);
+        Directory.CreateDirectory(work);
+        var dump = Path.Combine(work, "db.pgdump");
+        await new PostgresDumpTool(BinDir).DumpAsync(source, dump);
+
+        var tools = new PostgresDumpTool(BinDir, TimeSpan.FromMinutes(5));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() => tools.DryRunAsync(asStranger, dump));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(60), $"took {clock.Elapsed}");
+        Assert.Contains("psql failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("owner", ex.Message, StringComparison.Ordinal);
+    }
+
+    [SkippableFact]
+    public async Task A_dump_without_whiskers_tables_in_public_fails_the_backup()
+    {
+        await SkipUnlessReadyAsync();
+        // Tables in another schema (a search path in the connection string): the dump of public would be empty.
+        var elsewhere = await CreateDatabaseAsync("elsewhere");
+        await ExecuteAsync(elsewhere, "CREATE SCHEMA app; CREATE TABLE app.\"__EFMigrationsHistory\" (id int);");
+        var work = Path.Combine(Path.GetTempPath(), $"sw-pgbak-{Guid.NewGuid():N}");
+        _roots.Add(work);
+        Directory.CreateDirectory(work);
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            new PostgresDumpTool(BinDir).DumpAsync(elsewhere, Path.Combine(work, "db.pgdump")));
+        Assert.Contains("__EFMigrationsHistory", ex.Message, StringComparison.Ordinal);
     }
 
     private static async Task ExecuteAsync(string connection, string sql)

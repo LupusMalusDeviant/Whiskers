@@ -70,6 +70,9 @@ RUN groupadd -g 10001 whiskers 2>/dev/null || true \
     && chown -R 10001:10001 /app
 
 ENV ASPNETCORE_URLS=http://+:8080
+# R1-33: the client tools by path, not through Debian's pg_wrapper (which picks a version from the environment):
+# the same binaries CI tests with.
+ENV WHISKERS_PG_BIN_DIR=/usr/lib/postgresql/18/bin
 EXPOSE 8080
 
 # Container liveness probe: curl the anonymous /healthz endpoint (status word only). start-period

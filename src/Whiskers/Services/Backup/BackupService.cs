@@ -722,6 +722,8 @@ public sealed class BackupService : IBackupService
             .Append(") IS DISTINCT FROM ARRAY[").Append(string.Join(", ", expected)).Append("]::text[] THEN RAISE EXCEPTION ")
             .Append(Literal($"the migration history in {historyTable} does not match the archive's manifest"))
             .AppendLine("; END IF; END $probe$;");
+        // NoTransactions: the dry run's own transaction holds it all. A future migration with DDL that cannot run in a
+        // transaction (CREATE INDEX CONCURRENTLY, ALTER TYPE … ADD VALUE) would fail this probe for every older archive.
         var migrator = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db);
         probe.AppendLine(migrator.GenerateScript(options:
             Microsoft.EntityFrameworkCore.Migrations.MigrationsSqlGenerationOptions.Idempotent

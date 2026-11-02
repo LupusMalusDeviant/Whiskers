@@ -29,6 +29,22 @@ public class PostgresDumpToolTests
         Assert.DoesNotContain(start.ArgumentList, a => a.Contains("pw-value", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("Host=db1,db2;Database=w;Username=u;Password=p")]
+    [InlineData("Host=db1:5433;Database=w;Username=u;Password=p")]
+    public void A_host_list_is_refused_instead_of_reaching_the_tools_as_one_name(string connection)
+        => Assert.Throws<PostgresToolException>(() => PostgresDumpTool.Connect(new ProcessStartInfo("pg_dump"), connection));
+
+    [Fact]
+    public void Quoted_values_in_an_error_are_left_out_and_names_kept()
+    {
+        var tail = PostgresDumpTool.Tail(
+            "psql:<stdin>:7: ERROR:  invalid input syntax for type uuid: \"not a uuid, but row text\"\n" +
+            "psql:<stdin>:9: ERROR:  relation \"Webhooks\" does not exist\n");
+        Assert.DoesNotContain("row text", tail, StringComparison.Ordinal);
+        Assert.Contains("\"Webhooks\"", tail, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void An_ssl_key_password_is_refused_instead_of_being_dropped()
         => Assert.Throws<PostgresToolException>(() => PostgresDumpTool.Connect(new ProcessStartInfo("pg_dump"),
