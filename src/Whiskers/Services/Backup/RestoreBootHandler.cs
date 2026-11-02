@@ -73,8 +73,9 @@ public static class RestoreBootHandler
         {
             Console.Error.WriteLine($"[restore] The restore could not be applied ({Whiskers.Utils.SinkRedaction.Text(ex.Message)}). " +
                 $"The start stops and the restore is repeated at the next one; to give it up, remove {dataPaths.RestorePendingMarker} " +
-                "(the pre-restore safety backup holds the previous data). If this log already says the PostgreSQL database was " +
-                "restored, giving up leaves the archive's database with the current files: restore the pre-restore safety backup then.");
+                "(the pre-restore safety backup holds the previous data). On PostgreSQL the database may already be the archive's " +
+                "(this log says so once its step finished; a refused script may also have changed it): after giving up, recover " +
+                "from the pre-restore safety backup (docs/operations/backup-and-recovery.md).");
             throw;
         }
 

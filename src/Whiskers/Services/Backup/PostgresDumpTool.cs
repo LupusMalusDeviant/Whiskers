@@ -23,6 +23,9 @@ public sealed class PostgresDumpTool
     public const string BinDirKey = "WHISKERS_PG_BIN_DIR";
 
     private static readonly UTF8Encoding Utf8 = new(false);
+    // The dump is written in UTF-8 (pg_dump --encoding=UTF8); a byte that is not valid UTF-8 stops the restore instead
+    // of reaching the database as a replacement character.
+    private static readonly UTF8Encoding StrictUtf8 = new(false, throwOnInvalidBytes: true);
 
     private readonly string? _binDir;
     private readonly TimeSpan _timeout;
@@ -39,10 +42,13 @@ public sealed class PostgresDumpTool
         _timeout = timeout ?? TimeSpan.FromMinutes(30);
     }
 
+    /// <summary>The time limit from the configuration; the tools' directory from the process environment only, since
+    /// the configuration also holds the data directory's settings files (written by the UI and by a restore), which
+    /// must not choose the programs Whiskers runs.</summary>
     public static PostgresDumpTool FromConfiguration(IConfiguration? configuration)
     {
         var minutes = configuration?[TimeoutKey] ?? configuration?["Backup:PostgresTimeoutMinutes"];
-        return new(configuration?[BinDirKey] ?? configuration?["Backup:PostgresBinDir"],
+        return new(Environment.GetEnvironmentVariable(BinDirKey),
             int.TryParse(minutes, out var m) && m > 0 ? TimeSpan.FromMinutes(m) : null);
     }
 
@@ -55,7 +61,7 @@ public sealed class PostgresDumpTool
         await using (File.Create(outputPath)) { }
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(outputPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         await RunAsync("pg_dump", connectionString,
-            ["--format=custom", "--no-owner", "--no-acl", "--schema=public", "--file", outputPath], ct);
+            ["--format=custom", "--encoding=UTF8", "--no-owner", "--no-acl", "--schema=public", "--file", outputPath], ct);
         await CheckReadableAsync(outputPath, ct);
     }
 
@@ -173,6 +179,25 @@ public sealed class PostgresDumpTool
         }
     }
 
+    // Whiskers' migrations create tables, sequences, indexes and constraints only. Code that a dump brings into public —
+    // a function, a trigger, a rule, a view, a row policy, an operator — would run with the app's rights on its reads
+    // and writes, so a restore that leaves any of it is refused (the SQLite restore refuses triggers and views alike).
+    // Runs with search_path = pg_catalog and every name qualified, after the transaction-id guard.
+    internal const string CodeObjectCheck =
+        "DO $code$ BEGIN IF " +
+        "EXISTS (SELECT 1 FROM pg_catalog.pg_proc p WHERE p.pronamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace) " +
+        "OR EXISTS (SELECT 1 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid OPERATOR(pg_catalog.=) t.tgrelid " +
+        "WHERE NOT t.tgisinternal AND c.relnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace) " +
+        "OR EXISTS (SELECT 1 FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid OPERATOR(pg_catalog.=) r.ev_class " +
+        "WHERE c.relnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace) " +
+        "OR EXISTS (SELECT 1 FROM pg_catalog.pg_class c WHERE c.relnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace " +
+        "AND c.relkind OPERATOR(pg_catalog.=) ANY (ARRAY['v', 'm']::pg_catalog.\"char\"[])) " +
+        "OR EXISTS (SELECT 1 FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid OPERATOR(pg_catalog.=) y.polrelid " +
+        "WHERE c.relnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace) " +
+        "OR EXISTS (SELECT 1 FROM pg_catalog.pg_operator o WHERE o.oprnamespace OPERATOR(pg_catalog.=) 'public'::pg_catalog.regnamespace) " +
+        "THEN RAISE EXCEPTION 'the database dump brings functions, triggers, rules, views, policies or operators into public, which Whiskers does not create'; " +
+        "END IF; END $code$;";
+
     internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct,
         Func<Task<string?>>? sourceFailure = null, TimeSpan? statementTimeout = null)
     {
@@ -202,7 +227,8 @@ public sealed class PostgresDumpTool
         var restricted = false;
         string? last = null;
         var statementLimit = $"SET statement_timeout = '{(long)(statementTimeout ?? TimeSpan.FromMinutes(30)).TotalMilliseconds}';";
-        while (await script.ReadLineAsync(ct) is { } line)
+        var lines = new BoundedLineReader(script);
+        while (await lines.ReadLineAsync(ct) is { } line)
         {
             if (line.Trim().Length > 0) last = line;
             if (!restricted)
@@ -244,6 +270,7 @@ public sealed class PostgresDumpTool
         await psql.WriteLineAsync(
             @"SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \gset");
         await psql.WriteLineAsync(@"\if :whiskers_same");
+        await psql.WriteLineAsync(CodeObjectCheck);
         if (probeSql is not null)
         {
             // The dump empties search_path; the probe names the tables unqualified, as the app does.
@@ -288,7 +315,7 @@ public sealed class PostgresDumpTool
         var output = new StringBuilder();
         var buffer = new char[81920];
         int read;
-        while ((read = await process.StandardOutput.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        while ((read = await ReadAsync()) > 0)
         {
             if (output.Length + read > MaxOutputChars)
             {
@@ -298,6 +325,66 @@ public sealed class PostgresDumpTool
             output.Append(buffer, 0, read);
         }
         return output.ToString();
+
+        async Task<int> ReadAsync()
+        {
+            try { return await process.StandardOutput.ReadAsync(buffer.AsMemory(), ct); }
+            catch (DecoderFallbackException)
+            {
+                Kill(process);
+                throw new PostgresToolException("The tool's output is not valid UTF-8.");
+            }
+        }
+    }
+
+    // The longest line of a restore script: a crafted archive with one entry without a line break must not make the app
+    // hold it whole. Lines of an honest dump are statements and COPY rows, far below it.
+    internal const int MaxLineChars = 64 << 20;
+
+    // StreamReader.ReadLineAsync holds a line whole, however long; this reader stops at MaxLineChars. A line ends at
+    // "\n" (a "\r" before it is dropped), as in the script pg_restore writes; COPY rows escape their own line breaks.
+    private sealed class BoundedLineReader(StreamReader reader)
+    {
+        private readonly char[] _buffer = new char[81920];
+        private readonly StringBuilder _line = new();
+        private int _position, _length;
+
+        public async Task<string?> ReadLineAsync(CancellationToken ct)
+        {
+            _line.Clear();
+            var any = false;
+            while (true)
+            {
+                if (_position == _length)
+                {
+                    try { _length = await reader.ReadAsync(_buffer.AsMemory(), ct); }
+                    catch (DecoderFallbackException)
+                    {
+                        throw new PostgresToolException("The restore script is not valid UTF-8: the dump was not written by this version's backup.");
+                    }
+                    _position = 0;
+                    if (_length == 0) return any ? Done() : null;
+                }
+                any = true;
+                var end = Array.IndexOf(_buffer, '\n', _position, _length - _position);
+                var take = (end < 0 ? _length : end) - _position;
+                if (_line.Length + take > MaxLineChars)
+                    throw new PostgresToolException($"The restore script holds a line longer than {MaxLineChars / (1 << 20)} Mi characters.");
+                _line.Append(_buffer, _position, take);
+                _position += take;
+                if (end >= 0)
+                {
+                    _position++;
+                    return Done();
+                }
+            }
+        }
+
+        private string Done()
+        {
+            if (_line.Length > 0 && _line[^1] == '\r') _line.Length--;
+            return _line.ToString();
+        }
     }
 
     private Process Start(string tool, string? connectionString, IReadOnlyList<string> arguments, bool stdin)
@@ -308,7 +395,7 @@ public sealed class PostgresDumpTool
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            StandardOutputEncoding = Utf8,
+            StandardOutputEncoding = StrictUtf8,
             StandardErrorEncoding = Utf8,
         };
         if (stdin) start.StandardInputEncoding = Utf8;
@@ -344,6 +431,10 @@ public sealed class PostgresDumpTool
             throw new PostgresToolException(
                 "The connection string names several hosts or a host with a port; the backup needs one host in Host and the port in Port.");
         var env = start.Environment;
+        // The same server options from the environment, which Npgsql reads too: refused like Options, not dropped.
+        if (env.TryGetValue("PGOPTIONS", out var inheritedOptions) && !string.IsNullOrWhiteSpace(inheritedOptions))
+            throw new PostgresToolException(
+                "PGOPTIONS is set in the environment, which the backup does not pass on. Set those server settings on the role or the database instead.");
         // Without a user or password in the connection string, Npgsql reads PGUSER / PGPASSWORD / PGPASSFILE: the tools may too.
         var inheritedPassword = string.IsNullOrEmpty(builder.Password) ? (env.TryGetValue("PGPASSWORD", out var pw) ? pw : null) : null;
         var inheritedPassfile = env.TryGetValue("PGPASSFILE", out var pf) ? pf : null;

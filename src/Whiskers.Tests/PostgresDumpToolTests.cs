@@ -82,7 +82,8 @@ public class PostgresDumpToolTests
         // The comparison names nothing the script could shadow.
         Assert.Equal(["SET search_path = pg_catalog;",
             "SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \\gset",
-            "\\if :whiskers_same", "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^9..^2]);
+            "\\if :whiskers_same", PostgresDumpTool.CodeObjectCheck, "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"],
+            lines[^10..^2]);
         Assert.StartsWith("DO $guard$ BEGIN RAISE EXCEPTION", lines[^2], StringComparison.Ordinal);
         Assert.Equal("\\endif", lines[^1]);
         Assert.DoesNotContain("\r", wrapped);
@@ -97,6 +98,53 @@ public class PostgresDumpToolTests
         var output = new MemoryStream();
         await Assert.ThrowsAsync<PostgresToolException>(() => FeedAsync(script, null, commit: true, sourceFailure, output));
         Assert.DoesNotContain("COMMIT", System.Text.Encoding.UTF8.GetString(output.ToArray()), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_line_longer_than_the_limit_stops_the_restore_before_anything_is_committed()
+    {
+        var output = new MemoryStream();
+        var script = "\\restrict k\nINSERT INTO t VALUES ('" + new string('x', PostgresDumpTool.MaxLineChars) + "');\n\\unrestrict k\n";
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() => FeedAsync(script, null, commit: true, output: output));
+        Assert.Contains("longer than", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("COMMIT", System.Text.Encoding.UTF8.GetString(output.ToArray()), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_script_that_is_not_utf8_stops_the_restore_instead_of_being_rewritten()
+    {
+        // A byte of a LATIN1 dump: decoded leniently it would become U+FFFD and be committed as such.
+        var bytes = System.Text.Encoding.ASCII.GetBytes("\\restrict k\nINSERT INTO t VALUES ('caf").Concat(new byte[] { 0xE9 })
+            .Concat(System.Text.Encoding.ASCII.GetBytes("');\n\\unrestrict k\n")).ToArray();
+        using var input = new StreamReader(new MemoryStream(bytes), new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true));
+        var output = new MemoryStream();
+        await using var writer = new StreamWriter(output, new System.Text.UTF8Encoding(false), leaveOpen: true);
+
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() =>
+            PostgresDumpTool.FeedAsync(input, writer, null, commit: true, CancellationToken.None));
+        Assert.Contains("UTF-8", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Server_options_inherited_from_the_environment_are_refused_like_options_in_the_connection_string()
+    {
+        var start = new ProcessStartInfo("pg_dump");
+        start.Environment["PGOPTIONS"] = "-c search_path=elsewhere";
+        Assert.Throws<PostgresToolException>(() => PostgresDumpTool.Connect(start, "Host=db;Database=w;Username=u;Password=p"));
+    }
+
+    [Fact]
+    public void A_user_is_taken_from_the_environment_only_when_the_connection_string_names_none()
+    {
+        var start = new ProcessStartInfo("pg_dump");
+        start.Environment["PGUSER"] = "env-user";
+        PostgresDumpTool.Connect(start, "Host=db;Database=w;Password=p");
+        Assert.Equal("env-user", start.Environment["PGUSER"]);
+
+        start = new ProcessStartInfo("pg_dump");
+        start.Environment["PGUSER"] = "env-user";
+        PostgresDumpTool.Connect(start, "Host=db;Database=w;Username=app;Password=p");
+        Assert.Equal("app", start.Environment["PGUSER"]);
     }
 
     [Theory]

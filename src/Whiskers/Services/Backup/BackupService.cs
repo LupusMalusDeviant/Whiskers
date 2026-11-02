@@ -714,7 +714,8 @@ public sealed class BackupService : IBackupService
             if (ex.Message.Contains("ended its transaction early", StringComparison.Ordinal))
                 throw new BackupValidationException(
                     "Backup archive's database script ended the dry run's transaction on its own and may have changed the " +
-                    "database: restore the pre-restore safety backup now.");
+                    "database: recover from the pre-restore safety backup as the backup guide describes " +
+                    "(docs/operations/backup-and-recovery.md, \"After a restore refused for an early commit\").");
             throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
         }
     }

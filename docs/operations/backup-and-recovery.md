@@ -32,7 +32,12 @@ recreate it: it must own the schema, or on PostgreSQL 15 and later own the datab
 takes backups, but the restore is refused at its dry run, before anything changes. Check it once after setting up
 the database, by restoring a backup.
 
-Give Whiskers a database of its own and a dedicated role that owns it, not a superuser. A restore runs the archive's
+Give Whiskers a database of its own and a dedicated role that owns it, not a superuser. The PostgreSQL overlay
+`deploy/docker-compose.postgres.yml` connects as the role `POSTGRES_USER` creates, which is a superuser; for
+production, create an owner role without superuser rights and connect as it:
+`CREATE ROLE whiskers_app LOGIN PASSWORD '…'; ALTER DATABASE whiskers OWNER TO whiskers_app;
+ALTER SCHEMA public OWNER TO whiskers_app;` (and `REASSIGN OWNED BY whiskers TO whiskers_app;` in that database for
+the existing tables). A restore runs the archive's
 SQL with that role's rights; a superuser (or a member of `pg_execute_server_program`) could be made to run commands on
 the database host by a crafted archive, and without `VAULT_KEY` archives are not authenticated. The `public` schema
 must hold Whiskers' tables only: a restore drops everything in it, and the dump brings back only what Whiskers put
@@ -74,8 +79,8 @@ An encrypted archive is safe to keep on another machine, because it is useless w
      a dry run: it applies the dump to the database in a transaction and rolls the transaction back. The dry run
      executes the archive's SQL with the role's rights, so a crafted archive can change the database before it is
      refused; the safety backup taken first is what holds the state from before. A script that ends the
-     transaction on its own is detected: the restore is refused with "ended its transaction early", and then you
-     restore the pre-restore safety backup at once. Inside that transaction it also checks that the migration
+     transaction on its own is detected: the restore is refused with "ended its transaction early"; then follow
+     [After a restore refused for an early commit](#after-a-restore-refused-for-an-early-commit). Inside that transaction it also checks that the migration
      histories match the archive's manifest, runs the migrations the next start would run, and reads every table and
      column this version uses. The database is locked while the dry run runs, so metric collection pauses for that
      time; on a large database that can take minutes. The dry run writes the whole dataset once and rolls it back:
@@ -92,6 +97,21 @@ An encrypted archive is safe to keep on another machine, because it is useless w
    from before the restore. On PostgreSQL, if the start's log already says "The PostgreSQL database was restored from
    the archive", the database is the archive's while the files are not yet: after giving up, restore the pre-restore
    safety backup so both match again.
+
+## After a restore refused for an early commit
+
+A dump whose script ends the dry run's transaction on its own (its own `COMMIT`) may already have committed part of
+its work, for example the dropped and recreated `public` schema. Whiskers then may not start or let anyone sign in,
+and a restore from **Settings > Backup** fails, because it first takes a new safety backup of the damaged database.
+Recover from the pre-restore safety backup taken just before the dry run, the same way as after a lost volume:
+
+1. Stop Whiskers. Copy the newest `pre-restore-*` archive out of `backups/self/` in the data directory.
+2. Give Whiskers an empty database: point `WHISKERS_DB_CONNECTION` at a new database, or drop and recreate the
+   `public` schema of the current one as its owner.
+3. Move the data directory aside and follow
+   [Restore after the volume is lost](#restore-after-the-volume-is-lost-off-volume-recovery) with the copied archive.
+4. Delete the archive that caused the refusal, and do not restore archives from a source you do not trust
+   (set `VAULT_KEY`, so that only archives sealed with it are accepted).
 
 ## Restore after the volume is lost (off-volume recovery)
 
@@ -120,7 +140,8 @@ webhooks and audit rows come back.
 - The image ships the PostgreSQL client tools `pg_dump`, `pg_restore` and `psql` in version 18 from the PostgreSQL
   project. The tests restore with them into PostgreSQL 14 and 17 servers. If you run Whiskers outside the image,
   install the tools (17.6 or newer, at least as new as the server) and either put them on `PATH` or set
-  `WHISKERS_PG_BIN_DIR` (or `Backup:PostgresBinDir`) to their directory; the image sets it. Without them, a backup
+  the environment variable `WHISKERS_PG_BIN_DIR` to their directory; the image sets it. It is read from the
+  environment only, never from the settings files in the data directory. Without them, a backup
   of a PostgreSQL instance fails; Whiskers never writes an archive without the database. Each tool run may take
   30 minutes; set `WHISKERS_PG_TIMEOUT_MINUTES` (or `Backup:PostgresTimeoutMinutes`) for a larger database.
 - The restore script goes straight from `pg_restore` to `psql` and is never written to disk. Whiskers runs it only
@@ -128,7 +149,8 @@ webhooks and audit rows come back.
   meta-commands such as `\!` (which would run a shell command). Older tools are refused for a restore.
 - Whiskers passes the password to the tools through their environment, never on their command line. `PG*`
   variables inherited from Whiskers' own environment are not passed on, except `PGPASSWORD` (when the connection
-  string has no password) and `PGPASSFILE`, which Whiskers itself would use as well. Host, port, database, user,
+  string has no password), `PGUSER` (when it has no user) and `PGPASSFILE`, which Whiskers itself would use as well.
+  An inherited `PGOPTIONS` is refused like `Options`. Host, port, database, user,
   password, password file, SSL mode, root certificate, client certificate and key, target session attributes and the
   connect timeout and channel binding are taken over from the connection string; a connection string with `Options`
   is refused for backups (set those server settings on the role or the database). With `SSL Mode=VerifyCA` or `VerifyFull` and no root
@@ -144,3 +166,8 @@ webhooks and audit rows come back.
 - The dump covers the `public` schema only. Objects in other schemas of the same database are not touched unless
   they depend on objects in `public` (a view or foreign key on Whiskers' tables is dropped with them);
   extensions are not part of the dump (Whiskers' migrations create none; a test keeps it that way).
+- Whiskers' migrations create tables, sequences, indexes and constraints only. A dump that brings functions,
+  triggers, rules, views, row policies or operators into `public` is refused, because they would run with Whiskers'
+  rights on its reads and writes.
+- The dump is written in UTF-8 (`pg_dump --encoding=UTF8`), whatever the database's encoding; a restore stops at a
+  byte that is not valid UTF-8 instead of replacing it.

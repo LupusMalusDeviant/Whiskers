@@ -155,8 +155,11 @@ them and every mapped table and column must be readable, or the archive is refus
 dry run. The dry run executes the archive's SQL with the role's rights, so a crafted archive can change the database
 before it is refused: the guarantee is the safety backup taken first, which holds the state from before. On top of
 that, a script that ends the transaction on its own (its own `COMMIT`) is detected by comparing the transaction id
-after the script, with a pinned `search_path` and schema-qualified operators, and the archive is refused with the
-advice to restore the safety backup. At the next start the schema is dropped
+after the script, with a pinned `search_path` and schema-qualified operators, and the archive is refused; the
+recovery from the safety backup is described in `docs/operations/backup-and-recovery.md` ("After a restore refused
+for an early commit"). A restore that leaves functions, triggers, rules, views, row policies or operators in
+`public` is refused, as on SQLite. The PostgreSQL overlay's `POSTGRES_USER` role is a superuser; the guide shows how
+to switch to an owner role without superuser rights. At the next start the schema is dropped
 and recreated from the dump in one transaction, before the files are swapped; any error rolls it back and stops the
 start. The restore script is piped from `pg_restore` to `psql` and never written to disk; it runs only when it opens
 with `\restrict` (client tools 17.6 or newer), so a crafted dump cannot run psql meta-commands such as `\!`. The

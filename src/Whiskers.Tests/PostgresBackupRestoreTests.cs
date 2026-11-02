@@ -437,6 +437,52 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         Assert.False(await tools.ApplyScriptAsync(target, hostile, commit: true).ContinueWith(t => t.IsCompletedSuccessfully));
     }
 
+    [SkippableTheory]
+    [InlineData("\\! touch {0}\n")]                         // a shell command
+    [InlineData("\\set whiskers_xid 0\n")]                   // the guard's variable
+    [InlineData("SELECT 1 AS whiskers_same \\gset\n")]       // the guard's verdict
+    public async Task A_meta_command_inside_the_protected_script_is_refused_by_psql(string metaCommand)
+    {
+        await SkipUnlessReadyAsync();
+        // The defence against \! and the guard both rest on psql's restricted mode (\restrict, CVE-2025-8714): proven here
+        // against the client tools in use, not assumed.
+        var target = await CreateDatabaseAsync("restricted");
+        var marker = Path.Combine(Path.GetTempPath(), $"sw-pgbak-owned-{Guid.NewGuid():N}");
+        _roots.Add(marker);
+        var script = "\\restrict k3\nCREATE TABLE t (id int);\n" + string.Format(metaCommand, marker) + "\\unrestrict k3\n";
+
+        await Assert.ThrowsAsync<PostgresToolException>(() => new PostgresDumpTool(BinDir).ApplyScriptAsync(target, script, commit: true));
+
+        Assert.False(File.Exists(marker));
+        await using var check = new NpgsqlConnection(target);
+        await check.OpenAsync();
+        await using var tables = new NpgsqlCommand("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'", check);
+        Assert.Equal(0L, await tables.ExecuteScalarAsync());   // nothing committed
+    }
+
+    [SkippableTheory]
+    [InlineData("CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'SELECT 1';\n")]
+    [InlineData("CREATE FUNCTION evil() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';\n" +
+        "CREATE TRIGGER t_ins BEFORE INSERT ON public.t FOR EACH ROW EXECUTE FUNCTION evil();\n")]
+    [InlineData("CREATE VIEW public.v AS SELECT id FROM public.t;\n")]
+    [InlineData("CREATE RULE r AS ON INSERT TO public.t DO INSTEAD NOTHING;\n")]
+    [InlineData("ALTER TABLE public.t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON public.t USING (true);\n")]
+    public async Task A_dump_that_brings_code_into_public_is_refused(string code)
+    {
+        await SkipUnlessReadyAsync();
+        var target = await CreateDatabaseAsync("code");
+        var script = "\\restrict k4\nSET search_path = public;\nCREATE TABLE public.t (id int);\n" + code + "\\unrestrict k4\n";
+
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() =>
+            new PostgresDumpTool(BinDir).ApplyScriptAsync(target, script, commit: true));
+
+        Assert.Contains("Whiskers does not create", ex.Message, StringComparison.Ordinal);
+        await using var check = new NpgsqlConnection(target);
+        await check.OpenAsync();
+        await using var tables = new NpgsqlCommand("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'", check);
+        Assert.Equal(0L, await tables.ExecuteScalarAsync());
+    }
+
     [SkippableFact]
     public async Task A_dump_without_whiskers_tables_in_public_fails_the_backup()
     {
