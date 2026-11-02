@@ -33,6 +33,7 @@ public sealed class MutationScope : IDisposable
     private readonly List<MutationDomainResult> _results = [];
     private int _dropped;
     private int _settingsShown;
+    private readonly Dictionary<string, string> _readBack = new(StringComparer.Ordinal);
 
     private MutationScope(string capabilityId, string operationId, MutationPrincipal? principal, MutationScope? parent,
         MutationRequest? request)
@@ -166,6 +167,29 @@ public sealed class MutationScope : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(details);
         if (Current is { } scope)
             Record(new MutationDomainResult(scope.CapabilityId, "", "", "", details, scope._serverId, success));
+    }
+
+    /// <summary>
+    /// R1-37: tells the capability's verifier what the call really acted on when its arguments do not say it — e.g. the
+    /// compose project a deployment ran under after the plan resolved it. In memory only (never audited); the first
+    /// value per key wins. Outside a scope it does nothing.
+    /// </summary>
+    public static void ReadBack(string key, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
+        if (Current is { } scope)
+            lock (scope._readBack)
+                scope._readBack.TryAdd(key, value);
+    }
+
+    /// <summary>What the call reported with <see cref="ReadBack"/>.</summary>
+    public IReadOnlyDictionary<string, string> ReadBackFacts
+    {
+        get
+        {
+            lock (_readBack) return new Dictionary<string, string>(_readBack, StringComparer.Ordinal);
+        }
     }
 
     /// <summary>Opened by the gateway only. Dispose restores the previous scope.</summary>

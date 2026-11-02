@@ -7,6 +7,7 @@ using Whiskers.Models.Dns;
 using Whiskers.Services.AuditLog;
 using Whiskers.Services.Dns;
 using Whiskers.Services.Mcp;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -71,9 +72,11 @@ public class DnsTools
         [Description("Record value: IPv4 for A, IPv6 for AAAA, hostname for CNAME, text for TXT")] string value,
         [Description("TTL in seconds (60–86400). Default 300.")] int? ttl = null)
     {
+        // R1-37: a refusal, a missing configuration and a provider error each fail the operation (the text still goes
+        // back to the caller); only a set or an unchanged record is an executed call.
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "set_dns_record");
-        if (denied != null) return denied;
-        if (!dns.IsConfigured) return NotConfigured;
+        if (denied != null) return MutationScope.Fail(denied);
+        if (!dns.IsConfigured) return MutationScope.Fail(NotConfigured);
 
         try
         {
@@ -96,7 +99,7 @@ public class DnsTools
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DnsProviderException)
         {
-            return "Fehler: " + ex.Message;
+            return MutationScope.Fail("Fehler: " + ex.Message);
         }
     }
 
@@ -110,8 +113,8 @@ public class DnsTools
         [Description("Record type: A, AAAA, CNAME or TXT")] string type)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "delete_dns_record");
-        if (denied != null) return denied;
-        if (!dns.IsConfigured) return NotConfigured;
+        if (denied != null) return MutationScope.Fail(denied);
+        if (!dns.IsConfigured) return MutationScope.Fail(NotConfigured);
 
         try
         {
@@ -128,7 +131,7 @@ public class DnsTools
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DnsProviderException)
         {
-            return "Fehler: " + ex.Message;
+            return MutationScope.Fail("Fehler: " + ex.Message);
         }
     }
 

@@ -41,6 +41,11 @@ public class MutationGatewayBootTests
             Assert.IsAssignableFrom<DispatchProxy>(services.GetRequiredService<IDockerService>());
             var gateway = services.GetRequiredService<IMutationGateway>();
 
+            // R1-37: the app itself registers a verifier for every capability whose contract declares a read-back.
+            var registered = services.GetServices<IMutationVerifier>().Select(v => v.CapabilityId).ToHashSet();
+            Assert.All(VerificationContracts.All.Where(c => c.Value.Kind == VerificationKind.ReadBack),
+                c => Assert.Contains(c.Key, registered));
+
             // A principal below the capability level is refused, and the refusal reaches the AuditLog table.
             var request = new MutationRequest("compose.deploy",
                 new MutationPrincipal(MutationPrincipalKind.Human, "viewer@example.com", "viewer@example.com", McpPermissionLevels.Read),

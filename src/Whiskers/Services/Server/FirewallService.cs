@@ -45,27 +45,32 @@ public class FirewallService : IFirewallService
     {
         var result = await _executor.ExecuteAsync(serverId, "ufw status numbered");
 
-        var status = new FirewallStatus
-        {
-            RawOutput = result.Output
-        };
-
         if (!result.Success)
         {
             _logger.LogWarning("ufw status numbered failed on {ServerId}: {Error}", serverId, result.Error);
-            return status;
+            return new FirewallStatus { RawOutput = result.Output };
         }
+        return Parse(result.Output);
+    }
 
-        var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    /// <summary>The status and rules in the output of <c>ufw status numbered</c> (also read by the R1-37 verifiers).</summary>
+    internal static FirewallStatus Parse(string output)
+    {
+        var status = new FirewallStatus
+        {
+            RawOutput = output
+        };
+
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
         foreach (var line in lines)
         {
             var trimmed = line.Trim();
 
-            // Parse active status
+            // Parse active status: "Status: active" — "inactive" contains "active", so the word itself is compared.
             if (trimmed.StartsWith("Status:", StringComparison.OrdinalIgnoreCase))
             {
-                status.Active = trimmed.Contains("active", StringComparison.OrdinalIgnoreCase);
+                status.Active = string.Equals(trimmed["Status:".Length..].Trim(), "active", StringComparison.OrdinalIgnoreCase);
                 continue;
             }
 

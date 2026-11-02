@@ -65,11 +65,7 @@ public class VerificationOutcomeTests
     };
 
     internal static IReadOnlyList<IMutationVerifier> Verifiers(IServiceProvider sp) =>
-    [
-        new ContainerStartVerifier(sp), new ContainerStopVerifier(sp), new ContainerRestartVerifier(sp),
-        new ContainerRemoveVerifier(sp), new ContainerUpdateVerifier(sp), new ContainerCreateVerifier(sp),
-        new ContainerCreateVerifier(sp, "app.deploy"), new ContainerRollbackVerifier(sp),
-    ];
+        MutationVerifiers.Factories.Select(f => f(sp)).ToList();
 
     private static (MutationGateway Gateway, StatefulDocker Docker) Build()
     {

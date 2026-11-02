@@ -155,6 +155,10 @@ public sealed record MutationOutcome<T>(
 
     /// <summary>The recorded policy decision (INV-22), when the call got as far as the policy step.</summary>
     public string? DecisionId { get; init; }
+
+    /// <summary>Why an executed call is <see cref="VerificationStatus.NotVerifiable"/> (R1-37): the capability's declared
+    /// reason, or what its verifier could not read back. Recorded in the audit outcome; never a success claim.</summary>
+    public string? VerificationNote { get; init; }
 }
 
 /// <summary>Refusal codes with a localized text (<c>Mutation_Refused_&lt;code&gt;</c> in the shared resources).</summary>
@@ -214,4 +218,8 @@ public static class MutationReasonCodes
 }
 
 /// <summary>Handed to the execution delegate: the decided request (with its resolved target) and its capability.</summary>
-public sealed record MutationContext(string OperationId, MutationRequest Request, Capability Capability);
+public sealed record MutationContext(string OperationId, MutationRequest Request, Capability Capability)
+{
+    /// <summary>R1-37: what the call reported for its read-back (<see cref="MutationScope.ReadBack"/>).</summary>
+    public IReadOnlyDictionary<string, string> ReadBackFacts { get; init; } = new Dictionary<string, string>();
+}

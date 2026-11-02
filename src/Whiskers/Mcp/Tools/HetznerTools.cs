@@ -4,6 +4,7 @@ using System.ComponentModel;
 using Whiskers.Services.Cloud;
 using Whiskers.Services.Cloud.Providers;
 using Whiskers.Services.Mcp;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.AuditLog;
 using Whiskers.Models.Hetzner;
 using Microsoft.AspNetCore.Http;
@@ -27,12 +28,13 @@ public class HetznerTools
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_rescue");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (ctx, error) = await ContextAsync(cloud, server);
         if (error != null) return error;
-        if (ctx == null) return NotHetzner(server);
+        if (ctx == null) return MutationScope.Fail(NotHetzner(server));
         var resp = await hetzner.EnableRescueAsync(ctx.Value.token, ctx.Value.server.Id);
+        if (ActionFailed(resp?.Action, "rescue enable") is { } rescueFailed) return rescueFailed;
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         // A root credential was issued to the caller — record THAT, never the password itself.
@@ -51,12 +53,13 @@ public class HetznerTools
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_disable_rescue");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (ctx, error) = await ContextAsync(cloud, server);
         if (error != null) return error;
-        if (ctx == null) return NotHetzner(server);
-        await hetzner.DisableRescueAsync(ctx.Value.token, ctx.Value.server.Id);
+        if (ctx == null) return MutationScope.Fail(NotHetzner(server));
+        if (ActionFailed(await hetzner.DisableRescueAsync(ctx.Value.token, ctx.Value.server.Id), "rescue disable") is { } failed)
+            return failed;
         return $"Rescue-Mode für {ctx.Value.server.Name} deaktiviert.";
     }
 
@@ -68,12 +71,13 @@ public class HetznerTools
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_enable_backups");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (ctx, error) = await ContextAsync(cloud, server);
         if (error != null) return error;
-        if (ctx == null) return NotHetzner(server);
-        await hetzner.EnableBackupsAsync(ctx.Value.token, ctx.Value.server.Id);
+        if (ctx == null) return MutationScope.Fail(NotHetzner(server));
+        if (ActionFailed(await hetzner.EnableBackupsAsync(ctx.Value.token, ctx.Value.server.Id), "backups enable") is { } failed)
+            return failed;
         return $"Backups für {ctx.Value.server.Name} aktiviert.";
     }
 
@@ -85,12 +89,13 @@ public class HetznerTools
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_disable_backups");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (ctx, error) = await ContextAsync(cloud, server);
         if (error != null) return error;
-        if (ctx == null) return NotHetzner(server);
-        await hetzner.DisableBackupsAsync(ctx.Value.token, ctx.Value.server.Id);
+        if (ctx == null) return MutationScope.Fail(NotHetzner(server));
+        if (ActionFailed(await hetzner.DisableBackupsAsync(ctx.Value.token, ctx.Value.server.Id), "backups disable") is { } failed)
+            return failed;
         return $"Backups für {ctx.Value.server.Name} deaktiviert.";
     }
 
@@ -104,15 +109,16 @@ public class HetznerTools
         [Description("Also upgrade the disk (irreversible). Default false.")] bool upgradeDisk = false)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_change_server_type");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (ctx, error) = await ContextAsync(cloud, server);
         if (error != null) return error;
-        if (ctx == null) return NotHetzner(server);
+        if (ctx == null) return MutationScope.Fail(NotHetzner(server));
         if (ctx.Value.server.Status != "off")
-            return $"{ctx.Value.server.Name} ist '{ctx.Value.server.Status}'. Für einen Typ-Wechsel muss der Server aus sein (erst cloud_shutdown).";
+            return MutationScope.Fail($"{ctx.Value.server.Name} ist '{ctx.Value.server.Status}'. Für einen Typ-Wechsel muss der Server aus sein (erst cloud_shutdown).");
 
         var action = await hetzner.ChangeServerTypeAsync(ctx.Value.token, ctx.Value.server.Id, serverType, upgradeDisk);
+        if (ActionFailed(action, "server type change") is { } typeFailed) return typeFailed;
         return $"{ctx.Value.server.Name} wird auf Typ '{serverType}' geändert (Aktion {action?.Status}).";
     }
 
@@ -124,11 +130,11 @@ public class HetznerTools
         [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_list_snapshots");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (ctx, error) = await ContextAsync(cloud, server);
         if (error != null) return error;
-        if (ctx == null) return NotHetzner(server);
+        if (ctx == null) return MutationScope.Fail(NotHetzner(server));
         var images = await hetzner.ListSnapshotsAsync(ctx.Value.token);
         if (images.Count == 0) return "Keine Snapshots gefunden.";
         var lines = images.Select(i =>
@@ -145,19 +151,19 @@ public class HetznerTools
         [Description("Snapshot/image numeric ID")] long imageId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_delete_snapshot");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var (ctx, error) = await ContextAsync(cloud, server);
         if (error != null) return error;
-        if (ctx == null) return NotHetzner(server);
+        if (ctx == null) return MutationScope.Fail(NotHetzner(server));
 
         // Load the image first and refuse anything that isn't a snapshot — a mistyped id must never delete
         // a backup or a custom/system image (irreversible).
         var image = await hetzner.GetImageAsync(ctx.Value.token, imageId);
         if (!IsDeletableSnapshot(image))
-            return image is null
+            return MutationScope.Fail(image is null
                 ? $"Kein Image #{imageId} in diesem Account gefunden — nichts gelöscht."
-                : $"Verweigert: Image #{imageId} hat Typ '{image.Type}', kein Snapshot. Backups und System-Images sind geschützt.";
+                : $"Verweigert: Image #{imageId} hat Typ '{image.Type}', kein Snapshot. Backups und System-Images sind geschützt.");
 
         await hetzner.DeleteImageAsync(ctx.Value.token, imageId);
         return $"Snapshot #{imageId} ({image!.Description ?? "ohne Beschreibung"}, erstellt {image.Created}) gelöscht.";
@@ -173,6 +179,13 @@ public class HetznerTools
         try { return (await cloud.HetznerContextAsync(server), null); }
         catch (InvalidOperationException ex) { return (null, Whiskers.Services.Mutations.MutationScope.Fail($"Fehler: {ex.Message}")); }
     }
+
+    /// <summary>R1-37: Hetzner answers an accepted call with an action; one already in status "error" is a failed call,
+    /// not a success to report.</summary>
+    private static string? ActionFailed(HetznerAction? action, string what) =>
+        string.Equals(action?.Status, "error", StringComparison.OrdinalIgnoreCase)
+            ? MutationScope.Fail($"Hetzner {what} failed: {action!.Error?.Message ?? action.Error?.Code ?? "action error"}")
+            : null;
 
     private static string NotHetzner(string server)
         => $"'{server}' ist kein konfigurierter Hetzner-Server (Provider/Key prüfen, oder IP-Abgleich fehlgeschlagen).";

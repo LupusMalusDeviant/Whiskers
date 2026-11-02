@@ -126,7 +126,8 @@ public class CloudTools
         IHttpContextAccessor http, IMcpPermissionService perm, string toolName, Func<Task<string>> action)
     {
         var denied = McpPermissionCheck.CheckAccess(http, perm, toolName);
-        if (denied != null) return denied;
+        // R1-37: a refusal fails a mutating call (outside a gateway scope, the cloud_metrics read, it is just the text).
+        if (denied != null) return MutationScope.Fail(denied);
         try { return await action(); }
         // Inside a cloud_shutdown / cloud_reboot call this marks the gateway's operation as failed.
         catch (Exception ex) { return MutationScope.Fail($"Fehler: {ex.Message}"); }
