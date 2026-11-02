@@ -10,6 +10,10 @@
     <!-- The SQLite provider these migrations were scaffolded against; brings EF Core Relational
          (MigrationBuilder, ModelSnapshot base types) needed to compile the migration code. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
+    <!-- The provider pulls SQLitePCLRaw 2.1.11, whose bundled SQLite has a known high-severity flaw
+         (GHSA-2m69-gcr7-jv3q); the same 3.x bundle as the app replaces it.
+         Keep it at the app's version (Whiskers.csproj). -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
   </ItemGroup>
 
   <ItemGroup>
