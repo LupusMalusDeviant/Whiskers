@@ -65,22 +65,24 @@ public class PostgresDumpToolTests
     public async Task A_restore_script_is_wrapped_in_one_transaction_that_replaces_the_schema()
     {
         var wrapped = await FeedAsync(
-            "--\n-- PostgreSQL database dump\n--\n\n\\restrict k3y\n\nSET transaction_timeout = 0;\nCREATE SCHEMA public;\nCREATE TABLE t (id int);\n\\unrestrict k3y\n",
+            "--\n-- PostgreSQL database dump\n--\n\n\\restrict k3y\n\nSET statement_timeout = 0;\nSET transaction_timeout = 0;\nCREATE SCHEMA public;\nCREATE TABLE t (id int);\n\\unrestrict k3y\n",
             probe: "SELECT 1", commit: false);
         var lines = wrapped.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        Assert.Equal("BEGIN;", lines[0]);
-        Assert.StartsWith("SET LOCAL whiskers.restore_tx = '", lines[1], StringComparison.Ordinal);
-        Assert.Equal(["SET LOCAL lock_timeout = '60s';", "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[2..5]);
-        // Checked after the script: it may not have ended the transaction on its own.
-        var marker = lines[1].Split('\'')[1];
-        Assert.Contains(lines, l => l.StartsWith("DO $guard$", StringComparison.Ordinal) && l.Contains(marker, StringComparison.Ordinal));
+        Assert.Equal(["BEGIN;", "SET LOCAL lock_timeout = '60s';", "SELECT pg_catalog.txid_current() AS whiskers_xid \\gset",
+            "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[..5]);
         Assert.Single(lines, l => l.StartsWith("CREATE SCHEMA", StringComparison.Ordinal));   // the dump's own left out
         Assert.DoesNotContain("SET transaction_timeout = 0;", lines);                             // older servers lack it
         Assert.Contains(lines, l => l.Contains("set_config('transaction_timeout'", StringComparison.Ordinal));
-        Assert.Equal(["SET search_path = public;", "SELECT 1", "ROLLBACK;"], lines[^3..]);
+        Assert.DoesNotContain("SET statement_timeout = 0;", lines);                               // bounded by the time limit
+        Assert.Contains("SET statement_timeout = '1800000';", lines);
+        // After the script: the same transaction or nothing more is committed.
+        Assert.Equal(["SELECT pg_catalog.txid_current() = :'whiskers_xid'::bigint AS whiskers_same \\gset", "\\if :whiskers_same",
+            "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^8..^2]);
+        Assert.StartsWith("DO $guard$ BEGIN RAISE EXCEPTION", lines[^2], StringComparison.Ordinal);
+        Assert.Equal("\\endif", lines[^1]);
         Assert.DoesNotContain("\r", wrapped);
-        Assert.EndsWith("COMMIT;\n", await FeedAsync("\\restrict k\nSELECT 1;\n\\unrestrict k\n", null, commit: true));
+        Assert.Contains("COMMIT;\n\\else", await FeedAsync("\\restrict k\nSELECT 1;\n\\unrestrict k\n", null, commit: true));
     }
 
     [Theory]

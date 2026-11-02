@@ -63,19 +63,22 @@ An encrypted archive is safe to keep on another machine, because it is useless w
 ## Restore on the same instance
 
 1. Open **Settings > Backup**, pick an archive (or upload one) and restore it.
-2. Whiskers checks the archive before it changes anything:
+2. Whiskers checks the archive before it commits anything:
    - the archive's entries;
    - its schema against this build;
    - the stores and the key files;
    - on SQLite, it opens the database and runs the migrations on a copy;
-   - on PostgreSQL, it reads the dump with `pg_restore` and does a dry run: it applies the dump to the database in a
-     transaction and rolls the transaction back. Inside that transaction it also checks that the migration
+   - on PostgreSQL, it first takes the **pre-restore safety backup**, then reads the dump with `pg_restore` and does
+     a dry run: it applies the dump to the database in a transaction and rolls the transaction back. The dry run
+     executes the archive's SQL with the role's rights; a script that ends the transaction on its own is detected
+     and the archive refused, and the safety backup holds the state from before in any case. Inside that transaction it also checks that the migration
      histories match the archive's manifest, runs the migrations the next start would run, and reads every table and
      column this version uses. The database is locked while the dry run runs, so metric collection pauses for that
      time; on a large database that can take minutes. The dry run writes the whole dataset once and rolls it back:
      the database server needs about the database's size in free disk space (plus WAL) for it, which it reclaims
-     afterwards.
-3. Whiskers takes a **pre-restore safety backup**, commits the restore and stops.
+     afterwards. A dry run that meets a running scheduled self-backup (its `pg_dump` holds a lock on every table)
+     fails after a minute with a lock timeout; restore again once the backup has finished.
+3. On SQLite Whiskers now takes the **pre-restore safety backup**. Then it commits the restore and stops.
 4. The container restart (through the Docker restart policy, systemd or Kubernetes) applies the restore:
    - On PostgreSQL, the `public` schema is dropped and recreated from the dump in **one transaction**. If any step
      fails, the whole transaction is rolled back and the start stops. The restore stays pending and runs again at
@@ -123,7 +126,8 @@ webhooks and audit rows come back.
   variables inherited from Whiskers' own environment are not passed on, except `PGPASSWORD` (when the connection
   string has no password) and `PGPASSFILE`, which Whiskers itself would use as well. Host, port, database, user,
   password, password file, SSL mode, root certificate, client certificate and key, target session attributes and the
-  connect timeout are taken over from the connection string. With `SSL Mode=VerifyCA` or `VerifyFull` and no root
+  connect timeout and channel binding are taken over from the connection string; a connection string with `Options`
+  is refused for backups (set those server settings on the role or the database). With `SSL Mode=VerifyCA` or `VerifyFull` and no root
   certificate, the tools verify against the system's trusted roots, as Whiskers does; `Require` encrypts without
   verifying in both. An encrypted client key (`SSL Password`) and several
   hosts in `Host` are not supported for backups. Of the tools' error output, only the error lines are logged; lines

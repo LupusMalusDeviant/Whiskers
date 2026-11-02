@@ -308,8 +308,8 @@ internal static class HelpContentEn
                     """),
                 new("PostgreSQL", """
                     On PostgreSQL the backup holds the **database** too: a `pg_dump` of its schema, taken
-                    together with the files. Before the restore is committed, Whiskers applies the dump in a
-                    transaction and rolls it back (a dry run). At the restart the schema is replaced in **one
+                    together with the files. Before the restore is committed, Whiskers takes the pre-restore
+                    backup, then applies the dump in a transaction and rolls it back (a dry run). At the restart the schema is replaced in **one
                     transaction**, so afterwards the database is either the backup's or unchanged. Backups from
                     before this version hold the files only (**files only**) and are not restored. Keep a copy of
                     your backups off the data volume: the backup guide (`docs/operations/backup-and-recovery.md`)

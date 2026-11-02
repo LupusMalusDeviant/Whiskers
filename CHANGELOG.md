@@ -8,8 +8,9 @@ All notable changes to Whiskers are documented here. The format follows
 
 - R1-33: **A backup of a PostgreSQL instance now holds the database.** The self-backup takes a `pg_dump` of the
   database together with the files, so one archive is one recovery point for sign-in accounts, scheduled tasks,
-  webhooks, audit and settings alike. Before a restore is committed, Whiskers applies the dump in a transaction and
-  rolls it back (a dry run). The restart then replaces the schema in one transaction, so the database is either the
+  webhooks, audit and settings alike. Before a restore is committed, Whiskers takes the pre-restore safety backup and
+  then applies the dump in a transaction and rolls it back (a dry run); a script that ends that transaction on its
+  own is detected and the archive refused. The restart then replaces the schema in one transaction, so the database is either the
   backup's or unchanged, never half of each. Backups of PostgreSQL instances from before this version hold the files
   only: the backup list marks them **files only** and Whiskers does not restore them, because the files would no
   longer match the database. The image ships the PostgreSQL 18 client tools; outside the image, set

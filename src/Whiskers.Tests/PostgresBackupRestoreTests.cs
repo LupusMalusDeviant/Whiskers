@@ -369,6 +369,24 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
     }
 
     [SkippableFact]
+    public async Task A_script_that_ends_its_transaction_on_its_own_is_refused()
+    {
+        await SkipUnlessReadyAsync();
+        // What a crafted dump could print as an object's definition: its own COMMIT, then a new transaction. The marker
+        // a script can reach (a setting) would survive that; the transaction id kept in a psql variable does not.
+        var target = await CreateDatabaseAsync("hostile");
+        var tools = new PostgresDumpTool(BinDir);
+        const string honest = "\\restrict k1\nCREATE TABLE t (id int);\n\\unrestrict k1\n";
+        const string hostile = "\\restrict k2\nCREATE TABLE t (id int);\n" +
+            "SELECT pg_catalog.set_config('whiskers.restore_tx', 'x', false);\nCOMMIT;\nBEGIN;\n\\unrestrict k2\n";
+
+        await tools.ApplyScriptAsync(target, honest, commit: false);   // the same transaction: accepted, rolled back
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() => tools.ApplyScriptAsync(target, hostile, commit: false));
+        Assert.Contains("ended its transaction early", ex.Message, StringComparison.Ordinal);
+        Assert.False(await tools.ApplyScriptAsync(target, hostile, commit: true).ContinueWith(t => t.IsCompletedSuccessfully));
+    }
+
+    [SkippableFact]
     public async Task A_dump_without_whiskers_tables_in_public_fails_the_backup()
     {
         await SkipUnlessReadyAsync();

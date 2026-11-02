@@ -312,8 +312,9 @@ public sealed class HelpContentService : IHelpContentService
                     """),
                 new("PostgreSQL", """
                     Mit PostgreSQL enthält das Backup auch die **Datenbank**: einen `pg_dump` ihres Schemas,
-                    zusammen mit den Dateien aufgenommen. Bevor die Wiederherstellung festgeschrieben wird, spielt
-                    Whiskers den Dump in einer Transaktion ein und rollt sie zurück (Probelauf). Beim Neustart wird
+                    zusammen mit den Dateien aufgenommen. Bevor die Wiederherstellung festgeschrieben wird, legt
+                    Whiskers das Pre-Restore-Backup an, spielt dann den Dump in einer Transaktion ein und rollt sie
+                    zurück (Probelauf). Beim Neustart wird
                     das Schema in **einer Transaktion** ersetzt, die Datenbank ist danach also die des Backups oder
                     unverändert. Backups aus älteren Versionen enthalten nur die Dateien (**nur Dateien**) und
                     werden nicht wiederhergestellt. Bewahre eine Kopie deiner Backups außerhalb des Datenvolumes

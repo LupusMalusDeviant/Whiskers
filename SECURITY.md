@@ -149,9 +149,12 @@ refuses `chmod` on a path that is too open) — remove `.restore-pending` from t
 administrators can reach them.
 
 On PostgreSQL (R1-33) the archive carries a `pg_dump` of the `public` schema instead of a database file. Before the
-restore is committed the dump is applied to the live database in a transaction that is rolled back: the migration
-histories must be the manifest's, the start's migrations must run on them and every mapped table and column must be
-readable, or the archive is refused. The database is locked for that dry run. At the next start the schema is dropped
+restore is committed the pre-restore safety backup is taken, then the dump is applied to the live database in a
+transaction that is rolled back: the migration histories must be the manifest's, the start's migrations must run on
+them and every mapped table and column must be readable, or the archive is refused. The database is locked for that
+dry run. The dry run executes the archive's SQL with the role's rights; a script that ends the transaction on its own
+(its own `COMMIT`) is detected through the transaction id kept in a psql variable it cannot change, and the archive is
+refused — whatever such a script changed before, the safety backup taken first holds the state from before. At the next start the schema is dropped
 and recreated from the dump in one transaction, before the files are swapped; any error rolls it back and stops the
 start. The restore script is piped from `pg_restore` to `psql` and never written to disk; it runs only when it opens
 with `\restrict` (client tools 17.6 or newer), so a crafted dump cannot run psql meta-commands such as `\!`. The

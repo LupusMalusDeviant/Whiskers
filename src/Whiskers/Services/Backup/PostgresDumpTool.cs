@@ -87,6 +87,25 @@ public sealed class PostgresDumpTool
     public Task DryRunAsync(string connectionString, string dumpPath, string? probeSql = null, CancellationToken ct = default)
         => ApplyAsync(connectionString, dumpPath, probeSql, commit: false, ct);
 
+    /// <summary>Tests only: a given restore script, wrapped and fed to psql as a dump's would be (no pg_restore), so
+    /// that a script a crafted dump could produce can be run against a real server.</summary>
+    internal async Task ApplyScriptAsync(string connectionString, string script, bool commit)
+    {
+        using var psql = Start("psql", connectionString, ["--no-psqlrc", "--quiet", "--set", "ON_ERROR_STOP=1", "--file", "-"], stdin: true);
+        var output = psql.StandardOutput.ReadToEndAsync();
+        var errors = psql.StandardError.ReadToEndAsync();
+        using (var reader = new StreamReader(new MemoryStream(Utf8.GetBytes(script))))
+        {
+            try { await FeedAsync(reader, psql.StandardInput, null, commit, CancellationToken.None, null, _timeout); }
+            catch (IOException) { /* psql stopped: its error says why */ }
+        }
+        try { psql.StandardInput.Close(); } catch (IOException) { /* already gone */ }
+        await psql.WaitForExitAsync();
+        await output;
+        if (psql.ExitCode != 0)
+            throw new PostgresToolException($"psql failed (exit code {psql.ExitCode}): {Tail(await errors)}");
+    }
+
     // pg_restore writes the script to stdout; it is checked and wrapped line by line on its way into psql's stdin:
     // BEGIN; replace the schema with the dump's; [probe;] COMMIT (or ROLLBACK for the dry run).
     private async Task ApplyAsync(string connectionString, string dumpPath, string? probeSql, bool commit, CancellationToken ct)
@@ -123,7 +142,7 @@ public sealed class PostgresDumpTool
                             return restore.ExitCode == 0
                                 ? null
                                 : $"pg_restore failed (exit code {restore.ExitCode}): {Tail(await restoreErrors)}";
-                        });
+                        }, _timeout);
                 }
                 catch (IOException)
                 {
@@ -155,25 +174,28 @@ public sealed class PostgresDumpTool
     }
 
     internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct,
-        Func<Task<string?>>? sourceFailure = null)
+        Func<Task<string?>>? sourceFailure = null, TimeSpan? statementTimeout = null)
     {
         psql.NewLine = "\n";
-        // A marker that only this transaction holds (SET LOCAL ends with it): a script that ends the transaction early —
-        // a crafted dump with its own COMMIT — fails the check below instead of running the rest outside it.
-        var marker = Guid.NewGuid().ToString("N");
+        psql.AutoFlush = false;   // one write per buffer, not per line; flushed at the end
         await psql.WriteLineAsync("BEGIN;");
-        await psql.WriteLineAsync($"SET LOCAL whiskers.restore_tx = '{marker}';");
         // The drop takes every table's lock: a session that still holds one makes it fail after a minute instead of
         // waiting for the whole timeout.
         await psql.WriteLineAsync("SET LOCAL lock_timeout = '60s';");
+        // The transaction's id, kept in a psql variable before the script runs. A script restricted by \restrict cannot
+        // set psql variables, so a crafted dump that ends the transaction early (its own COMMIT) cannot hide it: the id
+        // after the script differs, and nothing more is committed.
+        await psql.WriteLineAsync(@"SELECT pg_catalog.txid_current() AS whiskers_xid \gset");
         await psql.WriteLineAsync("DROP SCHEMA IF EXISTS public CASCADE;");
         await psql.WriteLineAsync("CREATE SCHEMA public;");
 
         // The script comes from an archive: a crafted dump could carry psql meta-commands (\! runs a shell command).
-        // pg_restore since 17.6 opens its script with \restrict, which makes psql refuse every meta-command until the
-        // matching \unrestrict (CVE-2025-8714); a script that does not open with it is not run.
+        // pg_restore since 17.6 (and 16.10, 15.14, 14.19) opens its script with \restrict, which makes psql refuse every
+        // meta-command until the matching \unrestrict with a key of that run (CVE-2025-8714); a script that does not
+        // open with it is not run.
         var restricted = false;
         string? last = null;
+        var statementLimit = $"SET statement_timeout = '{(long)(statementTimeout ?? TimeSpan.FromMinutes(30)).TotalMilliseconds}';";
         while (await script.ReadLineAsync(ct) is { } line)
         {
             if (line.Trim().Length > 0) last = line;
@@ -194,6 +216,11 @@ public sealed class PostgresDumpTool
                     await psql.WriteLineAsync(
                         "SELECT pg_catalog.set_config('transaction_timeout', '0', false) WHERE pg_catalog.current_setting('server_version_num')::int >= 170000;");
                     continue;
+                // No statement may outlive the tool's time limit: a killed psql leaves the server running it under the
+                // schema's locks until it notices the closed connection.
+                case "SET statement_timeout = 0;":
+                    await psql.WriteLineAsync(statementLimit);
+                    continue;
             }
             await psql.WriteLineAsync(line);
         }
@@ -203,11 +230,10 @@ public sealed class PostgresDumpTool
         if (sourceFailure is not null && await sourceFailure() is { } failure)
             throw new PostgresToolException(failure);
         if (last is null || !last.StartsWith(@"\unrestrict ", StringComparison.Ordinal))
-            throw new PostgresToolException("The restore script ended before its end (\\unrestrict): the dump is incomplete.");
+            throw new PostgresToolException(@"The restore script ended before its end (\unrestrict): the dump is incomplete.");
 
-        await psql.WriteLineAsync(
-            $"DO $guard$ BEGIN IF pg_catalog.current_setting('whiskers.restore_tx', true) IS DISTINCT FROM '{marker}' THEN " +
-            "RAISE EXCEPTION 'the restore script ended its transaction early'; END IF; END $guard$;");
+        await psql.WriteLineAsync(@"SELECT pg_catalog.txid_current() = :'whiskers_xid'::bigint AS whiskers_same \gset");
+        await psql.WriteLineAsync(@"\if :whiskers_same");
         if (probeSql is not null)
         {
             // The dump empties search_path; the probe names the tables unqualified, as the app does.
@@ -215,6 +241,9 @@ public sealed class PostgresDumpTool
             await psql.WriteLineAsync(probeSql);
         }
         await psql.WriteLineAsync(commit ? "COMMIT;" : "ROLLBACK;");
+        await psql.WriteLineAsync(@"\else");
+        await psql.WriteLineAsync("DO $guard$ BEGIN RAISE EXCEPTION 'the restore script ended its transaction early'; END $guard$;");
+        await psql.WriteLineAsync(@"\endif");
         await psql.FlushAsync(ct);
     }
 
@@ -275,6 +304,10 @@ public sealed class PostgresDumpTool
         if (!string.IsNullOrEmpty(builder.SslPassword))
             throw new PostgresToolException(
                 "The connection string sets an SSL key password, which the PostgreSQL client tools cannot take from Whiskers. Use an unencrypted client key for the backup role.");
+        // Server options (-c settings, a search path) would change what the tools see and cannot be checked here.
+        if (!string.IsNullOrEmpty(builder.Options))
+            throw new PostgresToolException(
+                "The connection string sets Options, which the backup does not pass on. Set those server settings on the role or the database instead.");
         // libpq takes one host; Npgsql's lists and host:port forms would reach the tools as a name they cannot resolve.
         if (builder.Host is { } host && (host.Contains(',') || host.Contains(':')))
             throw new PostgresToolException(
@@ -308,6 +341,12 @@ public sealed class PostgresDumpTool
         Set("PGSSLCERT", builder.SslCertificate);
         Set("PGSSLKEY", builder.SslKey);
         Set("PGTARGETSESSIONATTRS", builder.TargetSessionAttributes);
+        Set("PGCHANNELBINDING", builder.ChannelBinding switch
+        {
+            ChannelBinding.Disable => "disable",
+            ChannelBinding.Require => "require",
+            _ => "prefer",
+        });
         Set("PGCONNECT_TIMEOUT", builder.Timeout > 0 ? builder.Timeout.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
         Set("PGAPPNAME", "whiskers-backup");
 

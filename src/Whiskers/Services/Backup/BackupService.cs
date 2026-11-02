@@ -369,11 +369,14 @@ public sealed class BackupService : IBackupService
                 }
                 StagedRestoreValidator.Validate(staging, prepared.Manifest);
                 var stagedDump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
-                if (File.Exists(stagedDump)) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, ct);
-                else await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
+                var postgres = File.Exists(stagedDump);
+                if (!postgres) await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
-                // nothing has been changed at this point.
+                // nothing has been changed at this point. On PostgreSQL it is taken BEFORE the dry run (R1-33): the dry
+                // run executes the archive's SQL against the live database, and whatever a crafted script might get
+                // past its rollback, the safety backup holds the state from before (a refused restore leaves one extra
+                // archive).
                 try
                 {
                     await CreateBackupAsync($"pre-restore-{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
@@ -383,6 +386,7 @@ public sealed class BackupService : IBackupService
                     throw new InvalidOperationException(
                         $"Restore aborted: could not create a pre-restore safety backup ({ex.Message}). Nothing was changed.", ex);
                 }
+                if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, ct);
 
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker
