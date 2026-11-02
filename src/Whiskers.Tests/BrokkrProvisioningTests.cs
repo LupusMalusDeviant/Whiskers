@@ -5,6 +5,7 @@ using ModelContextProtocol.Protocol;
 using Whiskers.Mcp;
 using Whiskers.Mcp.Tools;
 using Whiskers.Models;
+using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
 using Whiskers.Services.Approvals;
 using Whiskers.Services.GitDeploy;
@@ -43,6 +44,8 @@ public sealed class BrokkrProvisioningTests : IDisposable
         (_permissions, _permissionScript) = ReadBackVerificationTests.Scripted<IMcpPermissionService>.Create();
         _permissionScript.On[nameof(IMcpPermissionService.IsToolAllowed)] = _ => true;
         _http = new HttpContextAccessor();
+        // Writes wait for a person, as under the normal policy; CallAsync approves as Approver unless a test says not.
+        _mcp.Policy.RequireConfirmationForWrites = true;
         // The gateway resolves targets as in production (R1-06): the app, its server, a stale revision.
         _mcp.Targets = new MutationTargetResolver(new ServiceCollection()
             .AddSingleton<IGitDeployService>(_git)
@@ -113,7 +116,7 @@ public sealed class BrokkrProvisioningTests : IDisposable
         Assert.Equal("local", json.RootElement.GetProperty("serverId").GetString());
         var app = Assert.Single(await _git.GetAppsAsync());
         Assert.Equal(app.Id, json.RootElement.GetProperty("id").GetString());
-        Assert.StartsWith("key:", app.Owner);
+        Assert.Equal(ApproverId, app.Owner);   // the approving person, never the key
         Assert.True(app.HasToken);
         await AssertNotInAuditAsync(RepoToken);
     }
@@ -221,7 +224,7 @@ public sealed class BrokkrProvisioningTests : IDisposable
         Assert.Equal("git-deploy", stored.Action);
         Assert.Equal(id, stored.TargetId);
         Assert.Equal("local", stored.ServerId);
-        Assert.StartsWith("key:", stored.Owner);
+        Assert.Equal(ApproverId, stored.Owner);
         Assert.Equal(WebhookSignatures.GitHub, stored.Provider);
 
         // Reading the app names its webhook, never the secret.
@@ -310,7 +313,7 @@ public sealed class BrokkrProvisioningTests : IDisposable
     [Fact]
     public async Task With_approval_required_the_setup_waits_for_a_person_and_then_runs_once()
     {
-        _mcp.Policy.RequireConfirmationForWrites = true;
+        _approveAsPerson = false;   // this test makes the round trip by hand
 
         var (waiting, pending) = await CreateAppAsync("shop", RepoToken);
 
@@ -339,6 +342,7 @@ public sealed class BrokkrProvisioningTests : IDisposable
 
         Assert.Equal(McpCallResult.Executed, done.Result);
         Assert.Equal(operationId, done.OperationId);   // one operation from the wait to the run (R1-18)
+        Assert.Equal(PrincipalIds.User("admin@example.com"), (await _git.GetAppsAsync()).Single().Owner);
         Assert.DoesNotContain(RepoToken, answer);
         Assert.Single(await _git.GetAppsAsync());
         await AssertNotInAuditAsync(RepoToken);
@@ -441,6 +445,108 @@ public sealed class BrokkrProvisioningTests : IDisposable
         Assert.Empty(await _git.GetAppsAsync());
     }
 
+    // ---- Review round 2 ----------------------------------------------------
+
+    [Fact]
+    public async Task A_repository_url_with_credentials_is_refused_and_nothing_is_stored()
+    {
+        var url = $"https://user:{RepoToken}@example.org/shop.git";
+        var (answer, outcome) = await CallAsync("create_git_deploy_app",
+            new { name = "shop", repoUrl = url, serverId = "local" },
+            () => GitDeployTools.CreateGitDeployApp(_http, _permissions, _git, _webhooks.Service, "shop", url, "local"));
+
+        Assert.Equal(McpCallResult.Failed, outcome.Result);
+        Assert.Equal("invalid_argument", Code(answer));
+        Assert.DoesNotContain(RepoToken, answer);
+        Assert.Empty(await _git.GetAppsAsync());
+        await AssertNotInAuditAsync(RepoToken);
+    }
+
+    [Theory]
+    [InlineData("create_git_deploy_app")]
+    [InlineData("set_git_deploy_token")]
+    [InlineData("create_git_deploy_webhook")]
+    [InlineData("rotate_git_deploy_webhook_secret")]
+    public async Task A_read_key_is_refused_every_setup_tool_with_the_denied_code(string tool)
+    {
+        _mcp.Principal = new AgentPrincipal(AgentPrincipalKind.McpKey, "reader", McpPermissionLevels.Read, null,
+            McpKeyId: "k2");
+
+        var result = await _mcp.CallAsync(tool, _ => throw new InvalidOperationException("the tool must not run"),
+            new { appId = "0123456789ab", webhookId = "0123456789ab", name = "shop", revision = 1, token = "",
+                repoUrl = "https://example.org/shop.git", serverId = "local" });
+
+        Assert.True(result.IsError);
+        Assert.Equal("denied", Code(Text(result)));
+        Assert.Equal(McpCallResult.Denied, McpCallOutcomes.Get(_mcp.Http).Last().Result);
+    }
+
+    [Fact]
+    public async Task A_stale_revision_out_of_range_is_a_conflict()
+    {
+        var (created, _) = await CreateAppAsync("shop", null);
+        var (id, _) = IdAndRevision(created);
+        NewRequest();
+
+        var result = await _mcp.CallAsync("set_git_deploy_token", _ => throw new InvalidOperationException("must not run"),
+            JsonSerializer.Deserialize<JsonElement>($$"""{"appId":"{{id}}","revision":1e30,"token":""}"""));
+
+        Assert.Equal("conflict", Code(Text(result)));
+    }
+
+    [Fact]
+    public async Task A_tool_that_throws_answers_with_the_failed_code()
+    {
+        _mcp.Policy.RequireConfirmationForWrites = false;
+        var result = await _mcp.CallAsync("create_git_deploy_app",
+            _ => throw new IOException("disk gone"),
+            new { name = "shop", repoUrl = "https://example.org/shop.git", serverId = "local" });
+
+        Assert.True(result.IsError);
+        Assert.Equal("failed", Code(Text(result)));
+    }
+
+    [Fact]
+    public async Task Without_a_person_behind_the_call_a_key_sets_nothing_up()
+    {
+        // A policy that lets the key through unapproved: nobody would answer for later pushes, so nothing is created.
+        _mcp.Policy.RequireConfirmationForWrites = false;
+        await _git.SaveAppAsync(new GitDeployApp { Name = "shop", RepoUrl = "https://example.org/shop.git", ServerId = "local" },
+            null, ApproverId);
+        var id = (await _git.GetAppsAsync()).Single().Id;
+
+        var (app, appOutcome) = await CreateAppAsync("other", null);
+        NewRequest();
+        var (token, tokenOutcome) = await SetTokenAsync(id, 1, RepoToken);
+        NewRequest();
+        var (hook, hookOutcome) = await CreateWebhookAsync(id);
+
+        foreach (var (answer, outcome) in new[] { (app, appOutcome), (token, tokenOutcome), (hook, hookOutcome) })
+        {
+            Assert.Equal(McpCallResult.Failed, outcome.Result);
+            Assert.Equal("denied", Code(answer));
+        }
+        var stored = Assert.Single(await _git.GetAppsAsync());
+        Assert.False(stored.HasToken);
+        Assert.Equal(ApproverId, stored.Owner);
+        Assert.Empty(_webhooks.All);
+    }
+
+    [Fact]
+    public async Task The_approving_person_owns_app_and_webhook_so_a_push_runs_on_a_person()
+    {
+        var (created, _) = await CreateAppAsync("shop", null);
+        var (id, _) = IdAndRevision(created);
+        NewRequest();
+        await CreateWebhookAsync(id);
+
+        // Deliveries run as these owners (GitDeployOwners / WebhookService.ActorOf): people, under the PC-D1 rules,
+        // which GitDeployMutationTests and WebhookMutationTests cover for a person owner.
+        Assert.Equal(ApproverId, (await _git.GetAppAsync(id))!.Owner);
+        Assert.Equal(ApproverId, _webhooks.All.Single().Owner);
+        Assert.Equal(ApproverId, GitDeployOwners.ActorOf((await _git.GetAppAsync(id))!).OwnerId);
+    }
+
     // ---- Helpers -----------------------------------------------------------
 
     private static string Text(CallToolResult result) =>
@@ -479,6 +585,21 @@ public sealed class BrokkrProvisioningTests : IDisposable
     private async Task<(string Answer, McpCallOutcome Outcome)> CallAsync(string tool, object arguments,
         Func<Task<string>> run)
     {
+        var (text, outcome) = await CallOnceAsync(tool, arguments, run);
+        if (outcome.Result != McpCallResult.PendingApproval || !_approveAsPerson)
+            return (text, outcome);
+
+        // A person approves in Whiskers; the key repeats the identical call (contract 0001).
+        var approval = Assert.Single(_mcp.Approvals.GetPending());
+        Assert.Equal(ApprovalDecisionResult.Decided,
+            await _mcp.Approvals.DecideAsync(approval.Id, true, ApprovalResolver.User(Approver, AppRole.Admin)));
+        NewRequest();
+        return await CallOnceAsync(tool, arguments, run);
+    }
+
+    private async Task<(string Answer, McpCallOutcome Outcome)> CallOnceAsync(string tool, object arguments,
+        Func<Task<string>> run)
+    {
         string? answer = null;
         var result = await _mcp.CallAsync(tool, async _ =>
         {
@@ -488,6 +609,10 @@ public sealed class BrokkrProvisioningTests : IDisposable
         var text = answer ?? string.Join('\n', result.Content.OfType<TextContentBlock>().Select(c => c.Text));
         return (text, McpCallOutcomes.Get(_mcp.Http).Last());
     }
+
+    private const string Approver = "admin@example.com";
+    private static readonly string ApproverId = PrincipalIds.User(Approver);
+    private bool _approveAsPerson = true;
 
     private IServiceProvider Services() =>
         new ServiceCollection().AddSingleton<IServerConfigService>(_servers).BuildServiceProvider();

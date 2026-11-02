@@ -93,6 +93,11 @@ public sealed class MutationScope : IDisposable
     /// <summary>The failure the delegate reported with <see cref="Fail"/>, or <c>null</c>. The first report wins.</summary>
     public string? FailureReason { get; private set; }
 
+    /// <summary>The person whose approval this operation used (<c>user:&lt;email&gt;</c>), set by the gateway for this
+    /// scope only; <c>null</c> when it ran without one. Contract 0001: that person answers for what a provisioned Git
+    /// deployment later runs, so the provisioning tools make them its owner.</summary>
+    public string? ApprovedBy { get; internal set; }
+
     /// <summary>
     /// Reports on the current scope that the mutation failed although the code returns normally — for tools that
     /// answer with an error text instead of throwing. The gateway then records the operation as <c>Failed</c> and

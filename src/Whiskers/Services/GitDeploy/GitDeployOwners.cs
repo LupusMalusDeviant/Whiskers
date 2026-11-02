@@ -6,9 +6,9 @@ namespace Whiskers.Services.GitDeploy;
 /// <summary>Who a Git deployment without a person at the keyboard (a webhook) runs as, and how (R1-08).</summary>
 public static class GitDeployOwners
 {
-    /// <summary>The app as an automation actor: decided on its owner's current authority. The owner is only ever
-    /// set by a person on the Git deploy page (save or take over), so that person is also its provenance: the PC-D1
-    /// rules apply, not an agent's (R1-09).</summary>
+    /// <summary>The app as an automation actor: decided on its owner's current authority. The owner is a person:
+    /// whoever saved or took it over on the Git deploy page, or the person who approved a provisioning call (contract
+    /// 0001), never the calling key. That person is also its provenance: the PC-D1 rules apply, not an agent's (R1-09).</summary>
     public static AutomationActor ActorOf(GitDeployApp app)
     {
         ArgumentNullException.ThrowIfNull(app);

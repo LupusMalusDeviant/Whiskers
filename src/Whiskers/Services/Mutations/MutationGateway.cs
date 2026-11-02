@@ -581,6 +581,9 @@ public sealed class MutationGateway : IMutationGateway
                 IReadOnlyDictionary<string, string> facts;
                 using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal, context.Request))
                 {
+                    // The person whose approval was used for this run (approvers are always people, by email).
+                    if (approval is { Approved: true, ApprovedBy: { } approver } && approver.Contains('@'))
+                        scope.ApprovedBy = PrincipalIds.User(approver);
                     try
                     {
                         value = await execute(context, deadline.Token);

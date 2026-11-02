@@ -90,6 +90,9 @@ public class GitDeployService : IGitDeployService
         if (string.IsNullOrWhiteSpace(app.Name)) throw new ArgumentException("Name is required.");
         if (!app.RepoUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Only https:// repository URLs are supported.");
+        // Credentials belong in the vault (INV-52), never in the stored, displayed and returned URL.
+        if (!Uri.TryCreate(app.RepoUrl.Trim(), UriKind.Absolute, out var repoUri) || repoUri.UserInfo.Length > 0)
+            throw new ArgumentException("The repository URL must be a plain https:// URL without credentials; give the token separately.");
         if (string.IsNullOrWhiteSpace(app.Branch)) app.Branch = "main";
         if (string.IsNullOrWhiteSpace(app.ComposePath)) app.ComposePath = "docker-compose.yml";
         if (app.ComposePath.StartsWith('/') || app.ComposePath.Contains(".."))

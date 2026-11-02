@@ -751,9 +751,9 @@ public class WebhookService : IWebhookService
         }
     }
 
-    /// <summary>The webhook as an automation actor on its owner. The owner is only ever set by a person on the
-    /// Webhooks page (create or take over), so that person is also its provenance: the PC-D1 rules apply, not an
-    /// agent's.</summary>
+    /// <summary>The webhook as an automation actor on its owner. The owner is a person: whoever creates or takes it
+    /// over on the Webhooks page, or the person who approved `create_git_deploy_webhook` (contract 0001), never the
+    /// calling key. That person is also its provenance: the PC-D1 rules apply, not an agent's.</summary>
     internal static AutomationActor ActorOf(WebhookEntity webhook)
     {
         var owner = string.IsNullOrWhiteSpace(webhook.Owner) ? null : webhook.Owner;

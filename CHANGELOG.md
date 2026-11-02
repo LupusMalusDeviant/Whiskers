@@ -11,7 +11,10 @@ All notable changes to Whiskers are documented here. The format follows
   (`set_git_deploy_token`, its own capability `gitdeploy.set_token`), read an app back without its token
   (`get_git_deploy_app`), create the GitHub push webhook for it (`create_git_deploy_webhook`) and rotate that
   webhook's secret (`rotate_git_deploy_webhook_secret`). Every write is Admin, goes through the guardrails and the
-  mutation gateway (approvals included), records the calling key as owner, and is read back afterwards. Tokens are
+  mutation gateway (approvals included) and is read back afterwards. The person who approves the call in Whiskers
+  becomes the owner of the app and the webhook — never the key — so a later push deploys on that person's authority;
+  a call nobody approved (a policy that lets the key through) is refused. A repository URL that carries credentials
+  is refused (also on the page). Tokens are
   never echoed, logged or shown on an approval card; a webhook secret appears once, in the tool's answer. None of the
   five is offered to the AI agent. Their errors are JSON with a code (`invalid_argument`, `not_found`, `conflict`,
   `denied`, `pending_approval`, `failed`) — also when the gateway refuses a call or holds it for approval, which answers

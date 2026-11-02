@@ -82,6 +82,21 @@ public static class AutomationOwners
         return $"{ownerId} ({resolver.Describe(ownerId).State}, {resolver.Resolve(ownerId).PermissionLevel})";
     }
 
+    /// <summary>
+    /// The owner of something an API key provisions to run later without anyone at the keyboard (contract 0001, a Git
+    /// deployment and its webhook): a person, never the key — the person whose approval the operation used, or the
+    /// caller when the caller is a person. A key's unattended runs are decided under the key's agent rules
+    /// (confirmation, tool list), which a deployment fired by a push can never satisfy. <c>null</c> when no person
+    /// stands behind the call: the caller then refuses.
+    /// </summary>
+    public static string? PersonFor(MutationScope? scope)
+    {
+        if (scope is null) return null;
+        if (!string.IsNullOrWhiteSpace(scope.ApprovedBy)) return scope.ApprovedBy;
+        var caller = OfCaller(scope.Principal);
+        return PrincipalIds.EmailOf(caller) is not null ? caller : null;
+    }
+
     /// <summary>What to record as <see cref="AutomationActor.CreatedVia"/> for an item created by
     /// <paramref name="caller"/>: the caller's own id (for an agent, its session).</summary>
     public static string? ViaOf(MutationPrincipal? caller) =>

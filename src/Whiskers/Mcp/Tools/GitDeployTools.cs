@@ -83,10 +83,11 @@ public class GitDeployTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "create_git_deploy_app");
         if (denied != null) return Failed("denied", denied);
-        // The caller owns the app (R1-08): a webhook later deploys it on that authority, re-checked then.
-        var owner = AutomationOwners.OfCaller(MutationScope.Current?.Principal);
+        // A person owns the app (R1-08, contract 0001): the one who approved this call, or the calling person. A push
+        // later deploys it on that authority, re-checked then; a key could never pass that check unattended.
+        var owner = AutomationOwners.PersonFor(MutationScope.Current);
         if (owner is null)
-            return Failed("denied", "A Git deployment app needs an owner, and this call has no user or API key to own it.");
+            return Failed("denied", NoPerson);
         if (string.IsNullOrWhiteSpace(name))
             return Failed("invalid_argument", "Name is required.");
         if ((await gitDeploy.GetAppsAsync()).Any(a => string.Equals(a.Name, name.Trim(), StringComparison.OrdinalIgnoreCase)))
@@ -131,9 +132,9 @@ public class GitDeployTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "set_git_deploy_token");
         if (denied != null) return Failed("denied", denied);
-        var owner = AutomationOwners.OfCaller(MutationScope.Current?.Principal);
+        var owner = AutomationOwners.PersonFor(MutationScope.Current);
         if (owner is null)
-            return Failed("denied", "Setting a token makes the caller the app's owner, and this call has no user or API key.");
+            return Failed("denied", NoPerson);
 
         try
         {
@@ -167,9 +168,9 @@ public class GitDeployTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "create_git_deploy_webhook");
         if (denied != null) return Failed("denied", denied);
-        var owner = AutomationOwners.OfCaller(MutationScope.Current?.Principal);
+        var owner = AutomationOwners.PersonFor(MutationScope.Current);
         if (owner is null)
-            return Failed("denied", "A webhook needs an owner, and this call has no user or API key to own it.");
+            return Failed("denied", NoPerson);
         if (!string.Equals(provider, WebhookSignatures.GitHub, StringComparison.Ordinal))
             return Failed("invalid_argument", $"Provider '{provider}' is not supported here; use '{WebhookSignatures.GitHub}'.");
         var app = await gitDeploy.GetAppAsync(appId);
@@ -293,6 +294,10 @@ public class GitDeployTools
     private static string Json(object value) => JsonSerializer.Serialize(value, JsonOut);
 
     private static string Error(string code, string message) => McpErrorEnvelope.Json(code, message);
+
+    private const string NoPerson =
+        "A person must own what this sets up, and none stands behind this call: let a person approve it in Whiskers "
+        + "(Approvals) — the policy must ask for an approval for this tool — or call it as a signed-in person.";
 
     /// <summary>A refused or failed setup call: the operation fails (R1-20/37) and the caller reads the reason code.</summary>
     private static string Failed(string code, string message) => MutationScope.Fail(Error(code, message));

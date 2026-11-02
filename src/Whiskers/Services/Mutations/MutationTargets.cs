@@ -523,7 +523,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (app is null)
             return Refuse($"Git deployment app not found: {target.Id}", target.Id);
         if (request.Arguments.TryGetValue("revision", out var revision)
-            && (revision.ValueKind != System.Text.Json.JsonValueKind.Number || revision.GetInt32() != app.Revision))
+            && (revision.ValueKind != System.Text.Json.JsonValueKind.Number || !revision.TryGetInt32(out var rev) || rev != app.Revision))
             return new(null, $"'{app.Name}' was changed after it was loaded; reload and try again.",
                 MutationReasonCodes.TargetChanged, [app.Name]);
 
