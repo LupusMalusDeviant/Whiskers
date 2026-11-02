@@ -6,6 +6,19 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-40: **A notification that fails is retried, and an important one is not lost.** Notification channels used to
+  swallow their own errors, so the retry never saw a failure. Now a failed Slack, Discord, Mattermost, Matrix,
+  Telegram, ntfy, e-mail or webhook delivery is tried a second time; every attempt ends after 20 s at the latest, and an
+  e-mail (SMTP) conversation after 30 s — so a hanging provider no longer holds up the health, log or update checks
+  that send the alert. An alert an admin must not miss (an error such as a stopped or unhealthy container, an approval
+  waiting for a person, a suspended or interrupted automation) that a channel still could not take is kept in
+  `notification-outbox.json` and sent to that channel again — also after a restart — after 1, 2, 4 … minutes (at most
+  an hour apart), for up to 8 more tries within 24 hours. At most 200 are kept; the oldest is dropped when it is full.
+  Giving up is logged with the channel and the reason (never a webhook URL or token) and shown in `/metrics`
+  (`whiskers_self_notification_outbox_pending`, `whiskers_self_notification_outbox_total`,
+  `whiskers_self_notification_failed_total`). The outbox is not restored from a self-backup. AI triggers are started
+  once per event, no longer a second time when the first dispatch was slow.
+
 - Brokkr provisioning (contract 0001): **Git deployments can be set up over MCP.** Five tools let an MCP client
   such as the Brokkr CLI create a Git deployment app (`create_git_deploy_app`), set or remove its access token
   (`set_git_deploy_token`, its own capability `gitdeploy.set_token`), read an app back without its token

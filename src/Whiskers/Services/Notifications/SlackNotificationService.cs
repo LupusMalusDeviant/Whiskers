@@ -20,19 +20,16 @@ public class SlackNotificationService : ISlackNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;
-        if (!c.Enabled || string.IsNullOrWhiteSpace(c.WebhookUrl)) return;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
-        try
-        {
-            var (title, severity) = NotificationFormatter.Describe(evt);
-            await PostAsync(c, title, NotificationFormatter.Detail(evt), severity);
-            _throttler.Record(evt);
-            _logger.LogInformation("Slack notification sent: {EventType}", evt.EventType);
-        }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to send Slack notification"); }
+        if (!c.Enabled || string.IsNullOrWhiteSpace(c.WebhookUrl)) return false;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        var (title, severity) = NotificationFormatter.Describe(evt);
+        await PostAsync(c, title, NotificationFormatter.Detail(evt), severity, ct);
+        _throttler.Record(evt);
+        _logger.LogInformation("Slack notification sent: {EventType}", evt.EventType);
+        return true;
     }
 
     public async Task SendTestAsync()
@@ -42,7 +39,8 @@ public class SlackNotificationService : ISlackNotificationService
         await PostAsync(c, "Whiskers Test", "Benachrichtigungen funktionieren.", "Success");
     }
 
-    private async Task PostAsync(SlackSettings c, string title, string description, string severity)
+    private async Task PostAsync(SlackSettings c, string title, string description, string severity,
+        CancellationToken ct = default)
     {
         var payload = new
         {
@@ -51,7 +49,7 @@ public class SlackNotificationService : ISlackNotificationService
                 new { color = ColorFor(severity), title, text = string.IsNullOrWhiteSpace(description) ? "—" : description }
             }
         };
-        var resp = await _http.PostAsJsonAsync(c.WebhookUrl, payload);
+        using var resp = await _http.PostAsJsonAsync(c.WebhookUrl, payload, ct);
         resp.EnsureSuccessStatusCode();
     }
 

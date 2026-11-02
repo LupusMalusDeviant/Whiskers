@@ -110,6 +110,9 @@ public sealed class NotificationsModule : IWhiskersModule
         // The composite fans out over the channels + the Core in-app feed store. Registered here (after the
         // Core NoopNotificationService, which the module loop runs before) so it wins by last-registration
         // when the module is enabled; when it's disabled the Noop remains. (RoadToSAP §2.1 soft dependency.)
+        // R1-40: critical notifications a channel still failed are kept and redelivered, also after a restart.
+        services.AddSingleton<INotificationOutbox, NotificationOutbox>();
+        services.AddHostedService<NotificationOutboxWorker>();
         services.AddSingleton<INotificationService, CompositeNotificationService>();
     }
 }

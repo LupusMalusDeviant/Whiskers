@@ -20,19 +20,16 @@ public class NtfyNotificationService : INtfyNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;
-        if (!c.Enabled || string.IsNullOrWhiteSpace(c.ServerUrl) || string.IsNullOrWhiteSpace(c.Topic)) return;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
-        try
-        {
-            var (_, severity) = NotificationFormatter.Describe(evt);
-            await PostAsync(c, NotificationFormatter.PlainText(evt), severity);
-            _throttler.Record(evt);
-            _logger.LogInformation("ntfy notification sent: {EventType}", evt.EventType);
-        }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to send ntfy notification"); }
+        if (!c.Enabled || string.IsNullOrWhiteSpace(c.ServerUrl) || string.IsNullOrWhiteSpace(c.Topic)) return false;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        var (_, severity) = NotificationFormatter.Describe(evt);
+        await PostAsync(c, NotificationFormatter.PlainText(evt), severity, ct);
+        _throttler.Record(evt);
+        _logger.LogInformation("ntfy notification sent: {EventType}", evt.EventType);
+        return true;
     }
 
     public async Task SendTestAsync()
@@ -42,7 +39,7 @@ public class NtfyNotificationService : INtfyNotificationService
         await PostAsync(c, "Whiskers Test — Benachrichtigungen funktionieren.", "Success");
     }
 
-    private async Task PostAsync(NtfySettings c, string body, string severity)
+    private async Task PostAsync(NtfySettings c, string body, string severity, CancellationToken ct = default)
     {
         var url = $"{c.ServerUrl.TrimEnd('/')}/{c.Topic}";
         using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(body) };
@@ -51,7 +48,7 @@ public class NtfyNotificationService : INtfyNotificationService
         req.Headers.TryAddWithoutValidation("Tags", TagFor(severity));
         if (!string.IsNullOrWhiteSpace(c.Token))
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", c.Token);
-        var resp = await _http.SendAsync(req);
+        using var resp = await _http.SendAsync(req, ct);
         resp.EnsureSuccessStatusCode();
     }
 

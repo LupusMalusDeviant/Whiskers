@@ -19,30 +19,36 @@ public class EmailNotificationService : IEmailNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send) may take: both <c>SmtpClient.Timeout</c>
+    /// (an <c>SmtpException</c>) and a cancellation (a <c>TimeoutException</c>) enforce it, whichever fires first.</summary>
+    internal static readonly TimeSpan DefaultSmtpDeadline = TimeSpan.FromSeconds(30);
+
+    /// <summary>The deadline in force (tests shorten it).</summary>
+    internal TimeSpan SmtpDeadline { get; init; } = DefaultSmtpDeadline;
+
+    public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;
-        if (!c.Enabled || string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
-        try
-        {
-            var (title, _) = NotificationFormatter.Describe(evt);
-            await SendMailAsync(c, $"[Whiskers] {title}", NotificationFormatter.PlainText(evt));
-            _throttler.Record(evt);
-            _logger.LogInformation("Email notification sent: {EventType}", evt.EventType);
-        }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to send email notification"); }
+        if (!c.Enabled || string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return false;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        var (title, _) = NotificationFormatter.Describe(evt);
+        await SendMailAsync(c, $"[Whiskers] {title}", NotificationFormatter.PlainText(evt), ct);
+        _throttler.Record(evt);
+        _logger.LogInformation("Email notification sent: {EventType}", evt.EventType);
+        return true;
     }
 
     public async Task SendTestAsync()
     {
         var c = _settings.CurrentValue;
         if (string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return;
-        await SendMailAsync(c, "[Whiskers] Test", "Benachrichtigungen funktionieren.");
+        await SendMailAsync(c, "[Whiskers] Test", "Benachrichtigungen funktionieren.", CancellationToken.None);
     }
 
-    private static async Task SendMailAsync(EmailSettings c, string subject, string body)
+    private async Task SendMailAsync(EmailSettings c, string subject, string body, CancellationToken ct)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(SmtpDeadline);
         using var msg = new MailMessage
         {
             From = new MailAddress(string.IsNullOrWhiteSpace(c.From) ? c.Username : c.From),
@@ -56,7 +62,15 @@ public class EmailNotificationService : IEmailNotificationService
         {
             EnableSsl = c.UseSsl,
             Credentials = string.IsNullOrWhiteSpace(c.Username) ? null : new NetworkCredential(c.Username, c.Password),
+            Timeout = (int)SmtpDeadline.TotalMilliseconds,
         };
-        await client.SendMailAsync(msg);
+        try
+        {
+            await client.SendMailAsync(msg, deadline.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"The SMTP server did not complete the send within {SmtpDeadline.TotalSeconds:0} s.");
+        }
     }
 }

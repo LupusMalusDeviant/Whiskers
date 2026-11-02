@@ -24,29 +24,23 @@ public class MatrixNotificationService : IMatrixNotificationService
         _logger = logger;
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var config = _settings.CurrentValue;
         if (!config.Enabled || string.IsNullOrWhiteSpace(config.HomeserverUrl) ||
             string.IsNullOrWhiteSpace(config.AccessToken) || string.IsNullOrWhiteSpace(config.RoomId))
-            return;
+            return false;
 
         if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
-            return;
+            return false;
 
-        try
-        {
-            var (plain, html) = FormatMessage(evt);
-            await SendMatrixMessage(config, plain, html);
+        var (plain, html) = FormatMessage(evt);
+        await SendMatrixMessage(config, plain, html, ct);
 
-            _throttler.Record(evt);
-            _logger.LogInformation("Matrix notification sent: {EventType} for {Container}",
-                evt.EventType, evt.ContainerName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send Matrix notification for {Container}", evt.ContainerName);
-        }
+        _throttler.Record(evt);
+        _logger.LogInformation("Matrix notification sent: {EventType} for {Container}",
+            evt.EventType, evt.ContainerName);
+        return true;
     }
 
     public async Task SendTestAsync()
@@ -61,13 +55,14 @@ public class MatrixNotificationService : IMatrixNotificationService
             "<strong>Whiskers Test</strong> | Notification system is working correctly. ✅");
     }
 
-    private async Task SendMatrixMessage(MatrixSettings config, string plainText, string htmlText)
+    private async Task SendMatrixMessage(MatrixSettings config, string plainText, string htmlText,
+        CancellationToken ct = default)
     {
         var txnId = Guid.NewGuid().ToString("N");
         var roomId = Uri.EscapeDataString(config.RoomId);
         var url = $"{config.HomeserverUrl.TrimEnd('/')}/_matrix/client/v3/rooms/{roomId}/send/m.room.message/{txnId}";
 
-        var request = new HttpRequestMessage(HttpMethod.Put, url);
+        using var request = new HttpRequestMessage(HttpMethod.Put, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.AccessToken);
         request.Content = JsonContent.Create(new
         {
@@ -77,7 +72,7 @@ public class MatrixNotificationService : IMatrixNotificationService
             formatted_body = htmlText
         });
 
-        var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
     }
 

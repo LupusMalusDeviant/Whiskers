@@ -789,6 +789,22 @@ public static class WhiskersPipelineExtensions
             }
         }
 
+        var outbox = services.GetService<Whiskers.Services.Notifications.INotificationOutbox>();
+        if (outbox is not null)
+        {
+            // R1-40: critical notifications a channel could not deliver. A pending count that stays up, or exhausted
+            // and dropped counts that grow, mean a channel is broken — said here, not only in the log.
+            var o = outbox.Status;
+            sb.AppendLine("# HELP whiskers_self_notification_outbox_pending Critical notifications waiting for redelivery to a channel that failed them");
+            sb.AppendLine("# TYPE whiskers_self_notification_outbox_pending gauge");
+            sb.AppendLine($"whiskers_self_notification_outbox_pending {o.Pending}");
+            sb.AppendLine("# HELP whiskers_self_notification_outbox_total Outbox entries since the start, by how they ended");
+            sb.AppendLine("# TYPE whiskers_self_notification_outbox_total counter");
+            sb.AppendLine($"whiskers_self_notification_outbox_total{{result=\"redelivered\"}} {o.Redelivered}");
+            sb.AppendLine($"whiskers_self_notification_outbox_total{{result=\"exhausted\"}} {o.Exhausted}");
+            sb.AppendLine($"whiskers_self_notification_outbox_total{{result=\"dropped\"}} {o.Dropped}");
+        }
+
         if (circuit is not null)
         {
             sb.AppendLine("# HELP whiskers_self_circuit_open 1 while Whiskers has stopped calling this server. Whiskers is NOT checking that host meanwhile — this is not the same as the host being fine.");

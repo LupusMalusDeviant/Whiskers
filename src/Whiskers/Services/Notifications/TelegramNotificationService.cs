@@ -20,18 +20,15 @@ public class TelegramNotificationService : ITelegramNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;
-        if (!c.Enabled || string.IsNullOrWhiteSpace(c.BotToken) || string.IsNullOrWhiteSpace(c.ChatId)) return;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
-        try
-        {
-            await PostAsync(c, NotificationFormatter.PlainText(evt));
-            _throttler.Record(evt);
-            _logger.LogInformation("Telegram notification sent: {EventType}", evt.EventType);
-        }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to send Telegram notification"); }
+        if (!c.Enabled || string.IsNullOrWhiteSpace(c.BotToken) || string.IsNullOrWhiteSpace(c.ChatId)) return false;
+        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        await PostAsync(c, NotificationFormatter.PlainText(evt), ct);
+        _throttler.Record(evt);
+        _logger.LogInformation("Telegram notification sent: {EventType}", evt.EventType);
+        return true;
     }
 
     public async Task SendTestAsync()
@@ -41,10 +38,10 @@ public class TelegramNotificationService : ITelegramNotificationService
         await PostAsync(c, "✅ Whiskers Test — Benachrichtigungen funktionieren.");
     }
 
-    private async Task PostAsync(TelegramSettings c, string text)
+    private async Task PostAsync(TelegramSettings c, string text, CancellationToken ct = default)
     {
         var url = $"https://api.telegram.org/bot{c.BotToken}/sendMessage";
-        var resp = await _http.PostAsJsonAsync(url, new { chat_id = c.ChatId, text, disable_web_page_preview = true });
+        using var resp = await _http.PostAsJsonAsync(url, new { chat_id = c.ChatId, text, disable_web_page_preview = true }, ct);
         resp.EnsureSuccessStatusCode();
     }
 }
