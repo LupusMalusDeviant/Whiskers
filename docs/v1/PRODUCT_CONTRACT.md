@@ -192,14 +192,15 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-39 | `resume_server_checks` | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ | — |
 | M-40 | `preview_auto_patch` (pulls images) | write | `NotVerifiable` + reason (a preview changes no container, R1-37) | GW ✅ | — |
 | M-41 | `instruct_agent` → agent run | read | per tool | per tool | INV-08 (in-flight run survives key revocation) |
-| M-42 | `create_git_deploy_app` (`gitdeploy.save`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the stored app back and fails on a mismatch | GW ✅ + details | the caller's key becomes the owner; the token is never echoed or logged; a name conflict is check-then-act (two creates in parallel can both pass) |
+| M-42 | `create_git_deploy_app` (`gitdeploy.save`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the stored app back and fails on a mismatch | GW ✅ + details | the caller's key becomes the owner; the token is never echoed or logged; a name is unique (case-insensitive, checked under the store lock) |
 | M-43 | `set_git_deploy_token` (`gitdeploy.set_token`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads `credentials` back | GW ✅ + details | stale `revision` refused; the caller becomes the owner (R1-08) |
 | M-44 | `get_git_deploy_app` (contract 0001) | read | — | — | answers `credentials: stored/none`, never the token |
-| M-45 | `create_git_deploy_webhook` (`webhook.save`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the webhook back | GW ✅ + details | github only; the target resolves through the app (its server); the secret appears once, in the answer only |
-| M-46 | `rotate_git_deploy_webhook_secret` (`webhook.rotate_secret`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record) | GW ✅ + details | git-deploy webhooks only; the new secret appears once, in the answer only |
+| M-45 | `create_git_deploy_webhook` (`webhook.save`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the webhook back | GW ✅ + details | github only; the target resolves through the app (its server); a webhook for an app moved or renamed after the decision is refused (`conflict`); the secret appears once, in the answer only; a second webhook for the same app is not refused (`get_git_deploy_app` lists them) |
+| M-46 | `rotate_git_deploy_webhook_secret` (`webhook.rotate_secret`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the webhook back | GW ✅ + details | git-deploy webhooks only; the new secret appears once, in the answer only |
 
 The five tools of M-42–M-46 are not offered to the AI agent (`AgentToolRegistry.NonAgentTools`): credentials never
-reach a model.
+reach a model. Every error of the five, the gateway's refusals and a pending approval included, is the coded envelope of
+`McpErrorEnvelope` (contract 0001; a pending approval carries the operation and approval ids).
 
 ### 7.2 Agent paths
 

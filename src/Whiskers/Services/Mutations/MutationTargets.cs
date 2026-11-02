@@ -524,7 +524,8 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Refuse($"Git deployment app not found: {target.Id}", target.Id);
         if (request.Arguments.TryGetValue("revision", out var revision)
             && (revision.ValueKind != System.Text.Json.JsonValueKind.Number || revision.GetInt32() != app.Revision))
-            return Refuse($"'{app.Name}' was changed after it was loaded; reload and try again.");
+            return new(null, $"'{app.Name}' was changed after it was loaded; reload and try again.",
+                MutationReasonCodes.TargetChanged, [app.Name]);
 
         // Saving may move the app to another server: decide on the server it will deploy to. Everything else acts
         // on the stored app, and a caller naming another server than the app's is refused.

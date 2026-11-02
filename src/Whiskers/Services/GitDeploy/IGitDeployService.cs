@@ -48,5 +48,8 @@ public interface IGitDeployService
 }
 
 /// <summary>The app was changed since it was loaded (R1-08): the save or deployment is refused rather than run with
-/// other inputs.</summary>
-public sealed class GitDeployConflictException(string message) : Exception(message);
+/// other inputs. <see cref="NameTaken"/>: refused because another app has the name already (contract 0001).</summary>
+public sealed class GitDeployConflictException(string message, bool nameTaken = false) : Exception(message)
+{
+    public bool NameTaken { get; } = nameTaken;
+}

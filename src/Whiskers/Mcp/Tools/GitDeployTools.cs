@@ -1,3 +1,4 @@
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Text.Json;
@@ -51,7 +52,7 @@ public class GitDeployTools
 
     [McpToolLevel(McpPermissionLevels.Read)]
     [McpServerTool, Description("Read one Git-deploy application as JSON: id, revision, name, repository, branch, compose path, server, whether a repository token is stored (never the token), the last deploy (time, result, commit) and the ids of its webhooks.")]
-    public static async Task<string> GetGitDeployApp(
+    public static async Task<CallToolResult> GetGitDeployApp(
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IGitDeployService gitDeploy,
@@ -59,11 +60,11 @@ public class GitDeployTools
         [Description("The application id (from list_git_deploy_apps or create_git_deploy_app)")] string appId)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_git_deploy_app");
-        if (denied != null) return denied;
+        if (denied != null) return McpErrorEnvelope.Result(McpErrorEnvelope.Denied, denied);
 
         var app = await gitDeploy.GetAppAsync(appId);
-        if (app is null) return Error("not_found", $"Git deployment app not found: {appId}");
-        return Json(await ViewAsync(app, webhooks));
+        if (app is null) return McpErrorEnvelope.Result(McpErrorEnvelope.NotFound, $"Git deployment app not found: {appId}");
+        return new CallToolResult { Content = [new TextContentBlock { Text = Json(await ViewAsync(app, webhooks)) }] };
     }
 
     [McpToolLevel(McpPermissionLevels.Admin)]
@@ -173,6 +174,12 @@ public class GitDeployTools
             return Failed("invalid_argument", $"Provider '{provider}' is not supported here; use '{WebhookSignatures.GitHub}'.");
         var app = await gitDeploy.GetAppAsync(appId);
         if (app is null) return Failed("not_found", $"Git deployment app not found: {appId}");
+        // The webhook binds to the app the gateway decided on (R1-06): one moved to another server or renamed since
+        // the decision (or the approval) is refused instead of bound under a name or server nobody approved.
+        var appServer = (services.GetService(typeof(Whiskers.Services.ServerConfig.IServerConfigService))
+            as Whiskers.Services.ServerConfig.IServerConfigService)?.GetServer(app.ServerId)?.Id ?? app.ServerId;
+        if (MutationScope.Current?.Covers(appServer, app.Name) != true)
+            return Failed("conflict", $"'{app.Name}' was changed after the call was decided; reload and try again.");
 
         try
         {
@@ -225,17 +232,26 @@ public class GitDeployTools
         if (webhook.Action != "git-deploy")
             return Failed("invalid_argument", "Only a Git-deploy webhook's secret can be rotated here.");
 
+        string secret;
         try
         {
-            var secret = await webhooks.RegenerateSecretAsync(webhook.WebhookId);
-            Whiskers.Utils.KnownSecrets.Register(secret);
-            MutationScope.Note($"Webhook {webhook.WebhookId}: secret rotated");
-            return Json(new { webhookId = webhook.WebhookId, secret });
+            secret = await webhooks.RegenerateSecretAsync(webhook.WebhookId);
         }
         catch (InvalidOperationException ex)
         {
-            return Failed("failed", ex.Message);
+            // Deleted between the check and the write: that is a missing webhook, not a failure of the rotation.
+            return await webhooks.GetWebhookAsync(webhook.WebhookId) is null
+                ? Failed("not_found", $"Webhook not found: {webhookId}")
+                : Failed("failed", ex.Message);
         }
+        Whiskers.Utils.KnownSecrets.Register(secret);
+        MutationScope.Note($"Webhook {webhook.WebhookId}: secret rotated");
+
+        // Read back: the webhook is still there and still a Git deployment's (the secret itself is not compared).
+        var stored = await webhooks.GetWebhookAsync(webhook.WebhookId);
+        if (stored is null || stored.Action != "git-deploy" || stored.TargetId != webhook.TargetId)
+            return Failed("failed", "The secret was rotated, but reading the webhook back did not show it.");
+        return Json(new { webhookId = webhook.WebhookId, secret });
     }
 
     /// <summary>What the read and setup tools answer about an app: never the token, only whether one is stored.</summary>
@@ -276,7 +292,7 @@ public class GitDeployTools
 
     private static string Json(object value) => JsonSerializer.Serialize(value, JsonOut);
 
-    private static string Error(string code, string message) => Json(new { error = code, message });
+    private static string Error(string code, string message) => McpErrorEnvelope.Json(code, message);
 
     /// <summary>A refused or failed setup call: the operation fails (R1-20/37) and the caller reads the reason code.</summary>
     private static string Failed(string code, string message) => MutationScope.Fail(Error(code, message));

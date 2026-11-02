@@ -261,9 +261,10 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             _apps = await GitDeploy.GetAppsAsync();
         }
-        catch (Whiskers.Services.GitDeploy.GitDeployConflictException)
+        catch (Whiskers.Services.GitDeploy.GitDeployConflictException conflict)
         {
-            Snackbar.Add(L["GitDeployView_Snackbar_Conflict", _form.Name].Value, Severity.Warning);
+            Snackbar.Add(L[conflict.NameTaken ? "GitDeployView_Snackbar_NameTaken" : "GitDeployView_Snackbar_Conflict", _form.Name].Value,
+                Severity.Warning);
             _apps = await GitDeploy.GetAppsAsync();
         }
         catch (Exception ex) { Snackbar.Add(L["GitDeployView_Snackbar_Error", ex.Message].Value, Severity.Error); }

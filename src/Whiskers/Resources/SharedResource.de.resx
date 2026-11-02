@@ -4916,6 +4916,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Mutation_Refused_TargetNotResolved" xml:space="preserve">
     <value>Das Ziel konnte nicht aufgelöst werden: {0}</value>
   </data>
+  <data name="Mutation_Refused_TargetChanged" xml:space="preserve">
+    <value>„{0}“ wurde geändert, nachdem es geladen wurde; neu laden und erneut versuchen.</value>
+  </data>
   <data name="GitDeployView_Table_Owner" xml:space="preserve">
     <value>Owner</value>
   </data>
@@ -4927,6 +4930,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="GitDeployView_Snackbar_Conflict" xml:space="preserve">
     <value>„{0}“ wurde zwischendurch geändert. Die Liste ist neu geladen; bitte erneut versuchen.</value>
+  </data>
+  <data name="GitDeployView_Snackbar_NameTaken" xml:space="preserve">
+    <value>Eine andere App heißt bereits „{0}“. Bitte einen anderen Namen wählen.</value>
   </data>
   <data name="GitDeployView_Snackbar_Adopted" xml:space="preserve">
     <value>„{0}“ gehört jetzt dir.</value>

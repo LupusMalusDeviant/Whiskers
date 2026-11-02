@@ -106,6 +106,150 @@
       }
     },
     {
+      "name": "create_git_deploy_app",
+      "description": "Create a Git-deploy application (Brokkr provisioning). Whiskers clones the repository over HTTPS on the target server and runs its compose file. A private repository needs a read-only token (optional here, or later with set_git_deploy_token). An existing name is refused. Answers JSON with the new id and revision; never the token.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Unique name of the application",
+            "type": "string"
+          },
+          "repoUrl": {
+            "description": "Repository URL, https:// only",
+            "type": "string"
+          },
+          "serverId": {
+            "description": "Server id the application deploys to",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Branch to deploy (default main)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "composePath": {
+            "description": "Compose file path relative to the repository root (default docker-compose.yml)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "token": {
+            "description": "Read-only repository token for a private repository (optional; never returned)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name",
+          "repoUrl",
+          "serverId"
+        ]
+      },
+      "execution": {
+        "taskSupport": "optional"
+      }
+    },
+    {
+      "name": "create_git_deploy_webhook",
+      "description": "Create a webhook that deploys a Git-deploy application when its repository is pushed. Whiskers generates the HMAC secret; it is in this answer ONLY — put it into the repository's webhook right away (content type JSON, header X-Hub-Signature-256). Provider: github. Answers JSON with webhookId, url and secret.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "description": "The application id",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Who sends the deliveries: github",
+            "type": "string",
+            "default": "github"
+          }
+        },
+        "required": [
+          "appId"
+        ]
+      },
+      "execution": {
+        "taskSupport": "optional"
+      }
+    },
+    {
+      "name": "get_git_deploy_app",
+      "description": "Read one Git-deploy application as JSON: id, revision, name, repository, branch, compose path, server, whether a repository token is stored (never the token), the last deploy (time, result, commit) and the ids of its webhooks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "description": "The application id (from list_git_deploy_apps or create_git_deploy_app)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "appId"
+        ]
+      },
+      "execution": {
+        "taskSupport": "optional"
+      }
+    },
+    {
+      "name": "rotate_git_deploy_webhook_secret",
+      "description": "Replace the HMAC secret of a Git-deploy webhook with a new one Whiskers generates. The new secret is in this answer ONLY; the old one stops working at once — update the repository's webhook right away. Answers JSON with webhookId and secret.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webhookId": {
+            "description": "The webhook id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "webhookId"
+        ]
+      },
+      "execution": {
+        "taskSupport": "optional"
+      }
+    },
+    {
+      "name": "set_git_deploy_token",
+      "description": "Set (or with an empty string remove) the read-only repository token of a Git-deploy application. Needs the app's current revision (from get_git_deploy_app); a stale one is refused. The token is stored in the vault and never returned. Answers JSON with the new revision.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "description": "The application id",
+            "type": "string"
+          },
+          "revision": {
+            "description": "The app's current revision",
+            "type": "integer"
+          },
+          "token": {
+            "description": "The repository token; an empty string removes it",
+            "type": "string"
+          }
+        },
+        "required": [
+          "appId",
+          "revision",
+          "token"
+        ]
+      },
+      "execution": {
+        "taskSupport": "optional"
+      }
+    },
+    {
       "name": "update_container",
       "description": "Pull latest image and recreate a Docker container (update).",
       "inputSchema": {

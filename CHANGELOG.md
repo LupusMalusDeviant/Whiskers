@@ -13,7 +13,11 @@ All notable changes to Whiskers are documented here. The format follows
   webhook's secret (`rotate_git_deploy_webhook_secret`). Every write is Admin, goes through the guardrails and the
   mutation gateway (approvals included), records the calling key as owner, and is read back afterwards. Tokens are
   never echoed, logged or shown on an approval card; a webhook secret appears once, in the tool's answer. None of the
-  five is offered to the AI agent.
+  five is offered to the AI agent. Their errors are JSON with a code (`invalid_argument`, `not_found`, `conflict`,
+  `denied`, `pending_approval`, `failed`) — also when the gateway refuses a call or holds it for approval, which answers
+  with the operation id and the approval id; repeating the identical call after the approval runs it once. A Git
+  deployment app name is now unique (case-insensitive), also when saved on the page. Switching off one of these tools
+  in Settings → MCP also stops the matching action on the Git deploy and Webhooks pages.
 
 - R1-38: **Nothing waits without end.** An AI provider that sends no response, stops sending in the middle of an
   answer or trickles on for too long is cut off (60 s for the response to start, 90 s between two lines, 10 min for

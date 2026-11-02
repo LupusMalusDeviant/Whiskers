@@ -21,6 +21,10 @@ since R1-17; step 2.6 makes bypassing the gateway fail. Brokkr provisioning (con
 `gitdeploy.save`, `webhook.save` and `webhook.rotate_secret` an MCP tool each and adds `gitdeploy.set_token`
 (`set_git_deploy_token`); one MCP tool per capability, so the UI keeps running these by capability id. A new
 `webhook.save` called with an `appId` resolves its target through that Git app (its server, its name and repository).
+Because the tool switch applies to its capability on every surface (INV-15), switching off `create_git_deploy_app`,
+`create_git_deploy_webhook` or `rotate_git_deploy_webhook_secret` in Settings → MCP also stops saving Git apps,
+creating or taking over webhooks and regenerating webhook secrets on the pages; a stale `revision` on a Git app is
+refused as `TargetChanged`.
 
 ### UI handlers
 

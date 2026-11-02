@@ -151,6 +151,19 @@ public static class McpGuardrailFilter
         };
         tool.Report(result, verdict, outcome.OperationId, result == McpCallResult.Executed ? null : outcome.Reason);
 
+        // Contract 0001: these tools answer every error as a coded envelope — also what the gateway refused or held for
+        // approval before they ran, with the operation (and approval) a client repeats the identical call for.
+        // The tool's own answer (already an envelope) and a tool exception the server reports keep their way below.
+        var toolAnswered = outcome.Status == MutationStatus.Failed && outcome.Verification != VerificationStatus.Failed
+            && outcome.Error is null && outcome.Value is not null;
+        var toolThrew = outcome.Status == MutationStatus.Failed && outcome.Verification != VerificationStatus.Failed
+            && outcome.Error is { } thrown && (thrown is not OperationCanceledException || ct.IsCancellationRequested);
+        if (McpErrorEnvelope.Tools.Contains(call.Name) && outcome.Status != MutationStatus.Executed
+            && !toolAnswered && !toolThrew)
+            return McpErrorEnvelope.Result(McpErrorEnvelope.CodeOf(outcome.Status, outcome.ReasonCode),
+                outcome.Reason ?? "The call was not executed.", outcome.OperationId,
+                outcome.Status == MutationStatus.PendingApproval ? outcome.ApprovalId : null);
+
         return outcome.Status switch
         {
             MutationStatus.Executed => outcome.Value!,
@@ -180,7 +193,9 @@ public static class McpGuardrailFilter
         public CallToolResult Deny(string message, string verdict = "deny")
         {
             Report(McpCallResult.Denied, verdict, null, message);
-            return Refuse(message);
+            return McpErrorEnvelope.Tools.Contains(Tool)
+                ? McpErrorEnvelope.Result(McpErrorEnvelope.Denied, message)
+                : Refuse(message);
         }
     }
 

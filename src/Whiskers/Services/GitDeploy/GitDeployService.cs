@@ -109,6 +109,11 @@ public class GitDeployService : IGitDeployService
             // Edited from a stale copy: someone saved (or a deploy was decided on) a newer revision meanwhile.
             if (previous is not null && previous.Revision != app.Revision)
                 throw new GitDeployConflictException($"'{previous.Name}' was changed meanwhile; reload and save again.");
+            // A new app, or one renamed, never takes the name of another (contract 0001). Checked here, under the lock
+            // and before the vault, so two creates at once cannot both pass; apps that already share a name keep it.
+            if ((previous is null || !string.Equals(previous.Name, app.Name, StringComparison.OrdinalIgnoreCase))
+                && data.Apps.Any(a => a.Id != app.Id && string.Equals(a.Name, app.Name, StringComparison.OrdinalIgnoreCase)))
+                throw new GitDeployConflictException($"A Git deployment app named '{app.Name}' exists already.", nameTaken: true);
 
             // Under the lock and after the revision check: the token this save replaces and the one it stores are
             // exactly what the audit describes (R1-22), and a save that loses the check never touches the vault.

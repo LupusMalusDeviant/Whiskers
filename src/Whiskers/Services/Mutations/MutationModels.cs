@@ -179,6 +179,9 @@ public static class MutationReasonCodes
     /// <summary>The target could not be resolved; {0} is the detail (R1-06).</summary>
     public const string TargetNotResolved = "TargetNotResolved";
 
+    /// <summary>{0} was changed after the caller loaded it (a stale revision); reload and try again.</summary>
+    public const string TargetChanged = "TargetChanged";
+
     /// <summary>The policy decision could not be recorded (INV-22, R1-12).</summary>
     public const string DecisionNotRecorded = "DecisionNotRecorded";
 
@@ -209,7 +212,7 @@ public static class MutationReasonCodes
     public const string OperationNotRegistered = "OperationNotRegistered";
 
     public static readonly IReadOnlyList<string> All =
-        [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved,
+        [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved, TargetChanged,
             DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval,
             OperationAlreadyRun, OperationRunning, OperationOutcomeUnknown, OperationIdReused, OperationNotRegistered];
 

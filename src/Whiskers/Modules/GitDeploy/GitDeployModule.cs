@@ -10,7 +10,8 @@ namespace Whiskers.Modules.GitDeploy;
 /// <see cref="IGitDeployService"/> that clones/builds/ups a repo on the target server. The Webhooks
 /// module triggers redeploys through the Core contract ("git-deploy" action); Core registers a
 /// <see cref="NoopGitDeployService"/> default so that path answers gracefully when this module is
-/// off (soft-dependency pattern, RoadToSAP §2.1). No MCP tools in v1.</summary>
+/// off (soft-dependency pattern, RoadToSAP §2.1). MCP: <see cref="Whiskers.Mcp.Tools.GitDeployTools"/> — reading the
+/// apps, and setting one up with its token and webhook (contract 0001, Brokkr); no deploy or rollback tool.</summary>
 public sealed class GitDeployModule : IWhiskersModule
 {
     public string Id => "gitdeploy";

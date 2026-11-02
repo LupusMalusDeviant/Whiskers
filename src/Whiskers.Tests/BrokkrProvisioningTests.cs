@@ -43,8 +43,18 @@ public sealed class BrokkrProvisioningTests : IDisposable
         (_permissions, _permissionScript) = ReadBackVerificationTests.Scripted<IMcpPermissionService>.Create();
         _permissionScript.On[nameof(IMcpPermissionService.IsToolAllowed)] = _ => true;
         _http = new HttpContextAccessor();
+        // The gateway resolves targets as in production (R1-06): the app, its server, a stale revision.
+        _mcp.Targets = new MutationTargetResolver(new ServiceCollection()
+            .AddSingleton<IGitDeployService>(_git)
+            .AddSingleton<IServerConfigService>(_servers)
+            .AddSingleton(_webhooks.Service)
+            .BuildServiceProvider());
         NewRequest();
     }
+
+    private readonly FakeServerConfig _servers = new(
+        new ServerConfig { Id = "edge", Name = "Edge", IsDefault = true },
+        new ServerConfig { Id = "local", Name = "Local" });
 
     public void Dispose()
     {
@@ -156,7 +166,8 @@ public sealed class BrokkrProvisioningTests : IDisposable
 
         NewRequest();
         var (stale, staleOutcome) = await SetTokenAsync(id, revision - 1, RepoToken);
-        Assert.NotEqual(McpCallResult.Executed, staleOutcome.Result);
+        Assert.Equal(McpCallResult.Denied, staleOutcome.Result);
+        Assert.Equal("conflict", Code(stale));
         Assert.DoesNotContain(RepoToken, stale);
         Assert.False((await _git.GetAppAsync(id))!.HasToken);
 
@@ -182,7 +193,8 @@ public sealed class BrokkrProvisioningTests : IDisposable
     {
         var (answer, outcome) = await SetTokenAsync("0123456789ab", 1, RepoToken);
 
-        Assert.NotEqual(McpCallResult.Executed, outcome.Result);
+        Assert.Equal(McpCallResult.Denied, outcome.Result);
+        Assert.Equal("not_found", Code(answer));
         Assert.DoesNotContain(RepoToken, answer);
     }
 
@@ -214,7 +226,7 @@ public sealed class BrokkrProvisioningTests : IDisposable
 
         // Reading the app names its webhook, never the secret.
         NewRequest();
-        var read = await GitDeployTools.GetGitDeployApp(_http, _permissions, _git, _webhooks.Service, id);
+        var read = Text(await GitDeployTools.GetGitDeployApp(_http, _permissions, _git, _webhooks.Service, id));
         Assert.Contains(webhookId, read);
         Assert.DoesNotContain(secret, read);
         await AssertNotInAuditAsync(secret);
@@ -300,13 +312,23 @@ public sealed class BrokkrProvisioningTests : IDisposable
     {
         _mcp.Policy.RequireConfirmationForWrites = true;
 
-        var (_, pending) = await CreateAppAsync("shop", RepoToken);
+        var (waiting, pending) = await CreateAppAsync("shop", RepoToken);
 
         Assert.Equal(McpCallResult.PendingApproval, pending.Result);
         Assert.Empty(await _git.GetAppsAsync());
         var approval = Assert.Single(_mcp.Approvals.GetPending());
         Assert.DoesNotContain(RepoToken, approval.ParamsJson ?? "");
         Assert.DoesNotContain(RepoToken, approval.Reason ?? "");
+        // A program reads the wait from a code, with the operation the identical repeat continues and the approval.
+        string operationId;
+        using (var json = JsonDocument.Parse(waiting))
+        {
+            Assert.Equal("pending_approval", json.RootElement.GetProperty("error").GetString());
+            operationId = json.RootElement.GetProperty("operationId").GetString()!;
+            Assert.Equal(approval.Id, json.RootElement.GetProperty("approvalId").GetString());
+        }
+        Assert.Equal(pending.OperationId, operationId);
+        Assert.DoesNotContain(RepoToken, waiting);
 
         var decision = await _mcp.Approvals.DecideAsync(approval.Id, true,
             ApprovalResolver.User("admin@example.com", AppRole.Admin));
@@ -316,12 +338,113 @@ public sealed class BrokkrProvisioningTests : IDisposable
         var (answer, done) = await CreateAppAsync("shop", RepoToken);
 
         Assert.Equal(McpCallResult.Executed, done.Result);
+        Assert.Equal(operationId, done.OperationId);   // one operation from the wait to the run (R1-18)
         Assert.DoesNotContain(RepoToken, answer);
         Assert.Single(await _git.GetAppsAsync());
         await AssertNotInAuditAsync(RepoToken);
     }
 
+    // ---- Review round 1 ----------------------------------------------------
+
+    [Fact]
+    public async Task Two_creates_with_one_name_at_once_store_one_app()
+    {
+        // Past the tool's early check: the service decides under its lock, so the second save is a conflict.
+        var saves = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+        {
+            try
+            {
+                await _git.SaveAppAsync(new GitDeployApp
+                {
+                    Name = "shop", RepoUrl = "https://example.org/shop.git", ServerId = "local",
+                }, null, "key:k1");
+                return true;
+            }
+            catch (GitDeployConflictException) { return false; }
+        })).ToList();
+
+        var results = await Task.WhenAll(saves);
+
+        Assert.Equal(1, results.Count(r => r));
+        Assert.Single(await _git.GetAppsAsync());
+    }
+
+    [Fact]
+    public async Task A_webhook_is_not_bound_to_an_app_that_moved_after_the_decision()
+    {
+        var (created, _) = await CreateAppAsync("shop", null);
+        var (id, _) = IdAndRevision(created);
+
+        NewRequest();
+        var (answer, outcome) = await CallAsync("create_git_deploy_webhook", new { appId = id }, async () =>
+        {
+            // Between the decision (on "local") and the run, the app is moved to another server.
+            var app = (await _git.GetAppAsync(id))!;
+            app.ServerId = "edge";
+            await _git.SaveAppAsync(app, null, "key:other");
+            return await GitDeployTools.CreateGitDeployWebhook(_http, _permissions, _git, _webhooks.Service, Services(), id);
+        });
+
+        Assert.Equal(McpCallResult.Failed, outcome.Result);
+        Assert.Equal("conflict", Code(answer));
+        Assert.Empty(_webhooks.All);
+    }
+
+    [Fact]
+    public async Task A_missing_app_for_a_webhook_is_not_found_before_anything_runs()
+    {
+        var (answer, outcome) = await CreateWebhookAsync("000000000000");
+
+        Assert.Equal(McpCallResult.Denied, outcome.Result);
+        Assert.Equal("not_found", Code(answer));
+        Assert.Empty(_webhooks.All);
+    }
+
+    [Fact]
+    public async Task Reading_a_missing_app_is_a_tool_error_with_its_code()
+    {
+        var result = await GitDeployTools.GetGitDeployApp(_http, _permissions, _git, _webhooks.Service, "000000000000");
+
+        Assert.True(result.IsError);
+        Assert.Equal("not_found", Code(Text(result)));
+    }
+
+    [Fact]
+    public async Task A_webhook_deleted_while_its_secret_is_rotated_is_not_found()
+    {
+        var (created, _) = await CreateAppAsync("shop", null);
+        var (id, _) = IdAndRevision(created);
+        NewRequest();
+        var (hook, _) = await CreateWebhookAsync(id);
+        string webhookId;
+        using (var json = JsonDocument.Parse(hook))
+            webhookId = json.RootElement.GetProperty("webhookId").GetString()!;
+        _webhooks.VanishOnRotate = true;
+
+        NewRequest();
+        var (answer, outcome) = await RotateAsync(webhookId);
+
+        Assert.Equal(McpCallResult.Failed, outcome.Result);
+        Assert.Equal("not_found", Code(answer));
+    }
+
+    [Fact]
+    public async Task Every_refusal_of_the_setup_tools_carries_a_contract_code()
+    {
+        // A refusal the filter makes before the gateway (here: a policy denial) is an envelope as well.
+        _mcp.Policy.ToolDenyList = ["create_git_deploy_app"];
+
+        var (answer, outcome) = await CreateAppAsync("shop", null);
+
+        Assert.NotEqual(McpCallResult.Executed, outcome.Result);
+        Assert.Contains(Code(answer), McpErrorEnvelope.Codes);
+        Assert.Empty(await _git.GetAppsAsync());
+    }
+
     // ---- Helpers -----------------------------------------------------------
+
+    private static string Text(CallToolResult result) =>
+        string.Join('\n', result.Content.OfType<TextContentBlock>().Select(c => c.Text));
 
     /// <summary>A fresh request of the key, as each MCP call is one.</summary>
     private void NewRequest()
@@ -366,7 +489,8 @@ public sealed class BrokkrProvisioningTests : IDisposable
         return (text, McpCallOutcomes.Get(_mcp.Http).Last());
     }
 
-    private static IServiceProvider Services() => new ServiceCollection().BuildServiceProvider();
+    private IServiceProvider Services() =>
+        new ServiceCollection().AddSingleton<IServerConfigService>(_servers).BuildServiceProvider();
 
     private static string? Code(string answer)
     {
@@ -417,13 +541,26 @@ public sealed class BrokkrProvisioningTests : IDisposable
             script.On[nameof(IWebhookService.GetWebhookAsync)] = a =>
                 Task.FromResult(All.FirstOrDefault(w => w.WebhookId == (string)a[0]!));
             script.On[nameof(IWebhookService.GetWebhooksAsync)] = _ => Task.FromResult(All.ToList());
-            script.On[nameof(IWebhookService.RegenerateSecretAsync)] = a =>
-            {
-                var hook = All.Single(w => w.WebhookId == (string)a[0]!);
-                hook.Secret = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
-                return Task.FromResult(hook.Secret);
-            };
+            script.On[nameof(IWebhookService.RegenerateSecretAsync)] = a => VanishOnRotate
+                ? Vanish((string)a[0]!)
+                : Rotate((string)a[0]!);
             Service = service;
+        }
+
+        /// <summary>The webhook is deleted by someone else just before its secret is replaced.</summary>
+        public bool VanishOnRotate { get; set; }
+
+        private Task<string> Rotate(string id)
+        {
+            var hook = All.Single(w => w.WebhookId == id);
+            hook.Secret = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            return Task.FromResult(hook.Secret);
+        }
+
+        private Task<string> Vanish(string id)
+        {
+            All.RemoveAll(w => w.WebhookId == id);
+            throw new InvalidOperationException("Webhook not found");
         }
     }
 }
