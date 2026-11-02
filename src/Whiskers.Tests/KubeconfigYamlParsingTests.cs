@@ -4,7 +4,7 @@ using k8s.KubeConfigModels;
 namespace Whiskers.Tests;
 
 /// <summary>Regression guard for the vault-kubeconfig path (Track B.2): KubernetesClientCache
-/// parses the kubeconfig IN-MEMORY via <see cref="KubernetesYaml.LoadFromString{T}"/>, which rides
+/// parses the kubeconfig IN-MEMORY via <see cref="KubernetesYaml.Deserialize{T}"/>, which rides
 /// on YamlDotNet — a YamlDotNet major bump that breaks KubernetesClient's deserialization would
 /// otherwise only surface at runtime against a live cluster.</summary>
 public class KubeconfigYamlParsingTests
@@ -32,7 +32,7 @@ public class KubeconfigYamlParsingTests
     [Fact]
     public void Kubeconfig_yaml_parses_via_KubernetesYaml()
     {
-        var cfg = KubernetesYaml.LoadFromString<K8SConfiguration>(SampleKubeconfig);
+        var cfg = KubernetesYaml.Deserialize<K8SConfiguration>(SampleKubeconfig);
         Assert.Equal("test", cfg.CurrentContext);
         Assert.Single(cfg.Clusters);
         Assert.Equal("https://10.0.0.1:6443", cfg.Clusters.First().ClusterEndpoint.Server);
@@ -42,7 +42,7 @@ public class KubeconfigYamlParsingTests
     [Fact]
     public void Client_configuration_builds_from_the_parsed_object_in_memory()
     {
-        var cfg = KubernetesYaml.LoadFromString<K8SConfiguration>(SampleKubeconfig);
+        var cfg = KubernetesYaml.Deserialize<K8SConfiguration>(SampleKubeconfig);
         var clientConfig = KubernetesClientConfiguration.BuildConfigFromConfigObject(cfg);
         Assert.Equal("https://10.0.0.1:6443", clientConfig.Host);
         Assert.Equal("abc123", clientConfig.AccessToken);

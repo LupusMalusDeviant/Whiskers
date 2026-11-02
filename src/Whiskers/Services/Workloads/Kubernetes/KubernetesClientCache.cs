@@ -9,7 +9,7 @@ namespace Whiskers.Services.Workloads.Kubernetes;
 
 /// <summary>Builds and caches one <see cref="IKubernetes"/> client per Kubernetes server. The
 /// kubeconfig is loaded from the vault (<c>kubeconfig:{serverId}</c>) and parsed IN-MEMORY via
-/// <see cref="KubernetesYaml.LoadFromString{T}"/> + BuildConfigFromConfigObject — it is never
+/// <see cref="KubernetesYaml.Deserialize{T}"/> + BuildConfigFromConfigObject — it is never
 /// written to a file. Vault key name: see <see cref="KubeconfigVaultKey"/>.</summary>
 public sealed class KubernetesClientCache : IKubernetesClientCache, IDisposable
 {
@@ -55,7 +55,7 @@ public sealed class KubernetesClientCache : IKubernetesClientCache, IDisposable
     {
         var (server, kubeconfigYaml) = ReadKubeconfig(serverId);
 
-        var kubeConfig = KubernetesYaml.LoadFromString<K8SConfiguration>(kubeconfigYaml);
+        var kubeConfig = KubernetesYaml.Deserialize<K8SConfiguration>(kubeconfigYaml);
         var clientConfig = KubernetesClientConfiguration.BuildConfigFromConfigObject(
             kubeConfig, currentContext: string.IsNullOrWhiteSpace(server.KubeContext) ? null : server.KubeContext);
         return new k8s.Kubernetes(clientConfig);
