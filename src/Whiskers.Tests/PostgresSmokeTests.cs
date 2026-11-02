@@ -21,7 +21,17 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         try { await _pg.StartAsync(); _up = true; }
-        catch { _up = false; } // no Docker daemon → the tests below Skip instead of failing
+        catch (Exception ex) { _up = false; _startFailure = ex; } // no Docker daemon → skipped locally, failed on CI
+    }
+
+    private Exception? _startFailure;
+
+    // CI has Docker (R1-33): there a server that does not start is a failure, not a silent skip.
+    private void SkipUnlessUp()
+    {
+        if (!_up && Environment.GetEnvironmentVariable("CI") is not null)
+            throw new InvalidOperationException("The PostgreSQL test server did not start on CI.", _startFailure);
+        Skip.IfNot(_up, "Docker daemon not available");
     }
 
     public async Task DisposeAsync()
@@ -37,7 +47,7 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     [SkippableFact]
     public async Task Approval_decisions_and_uses_commit_on_real_postgres_with_retries_on()
     {
-        Skip.IfNot(_up, "Docker daemon not available");
+        SkipUnlessUp();
         // R1-15: the production registration enables retries; a decision runs in a transaction inside the strategy.
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
         Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions.AddDbContext<MetricsDbContext>(
@@ -75,7 +85,7 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     [SkippableFact]
     public async Task Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on()
     {
-        Skip.IfNot(_up, "Docker daemon not available");
+        SkipUnlessUp();
         // R1-23 with the production shape: retries on, so every chain transaction runs inside the execution strategy;
         // verification and export read a RepeatableRead snapshot.
         var dir = Path.Combine(Path.GetTempPath(), $"pg-chain-{Guid.NewGuid():N}");
@@ -157,7 +167,7 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     [SkippableFact]
     public async Task Migrate_crud_retention_and_markread_on_real_postgres()
     {
-        Skip.IfNot(_up, "Docker daemon not available");
+        SkipUnlessUp();
 
         // DatabaseInitializer's PostgreSQL branch brings the schema up (exercises the non-SQLite path).
         await using (var db = Pg())
@@ -215,7 +225,7 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     [SkippableFact]
     public async Task Migrator_copies_sqlite_data_into_real_postgres()
     {
-        Skip.IfNot(_up, "Docker daemon not available");
+        SkipUnlessUp();
 
         var srcPath = Path.Combine(Path.GetTempPath(), $"sw-smoke-{Guid.NewGuid():N}.db");
         try
@@ -257,7 +267,7 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
     [SkippableFact]
     public async Task The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside()
     {
-        Skip.IfNot(_up, "Docker daemon not available");
+        SkipUnlessUp();
         // R1-23: PostgreSQL starts its own chain; a leftover checkpoint file would block it as a tampered trail.
         var root = Path.Combine(Path.GetTempPath(), $"sw-smoke-cli-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);

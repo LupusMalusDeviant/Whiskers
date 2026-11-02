@@ -1552,7 +1552,7 @@ Project: {4}</value>
     <value>No self-backups yet.</value>
   </data>
   <data name="SelfBackupPanel_Alert_Postgres" xml:space="preserve">
-    <value>This instance uses PostgreSQL. The backup contains configuration and secrets under &lt;code&gt;/app/data&lt;/code&gt;, but &lt;b&gt;not&lt;/b&gt; the PostgreSQL database itself — back it up separately (e.g. with &lt;code&gt;pg_dump&lt;/code&gt;).</value>
+    <value>This instance uses PostgreSQL. The backup holds the database (a &lt;code&gt;pg_dump&lt;/code&gt; of its schema) together with the configuration and secrets under &lt;code&gt;/app/data&lt;/code&gt;; a restore replaces both. Backups from before this version hold the files only and are not restored.</value>
   </data>
   <data name="SelfBackupPanel_Alert_Unencrypted" xml:space="preserve">
     <value>&lt;code&gt;VAULT_KEY&lt;/code&gt; is not set — backups are stored &lt;b&gt;unencrypted&lt;/b&gt; and contain plaintext secrets (ssh keys, mtls, API keys, DataProtection ring). Set &lt;code&gt;VAULT_KEY&lt;/code&gt; for encrypted backups, or store downloaded files securely.</value>
@@ -5146,5 +5146,11 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Webhook_Test_SecretUnreadable" xml:space="preserve">
     <value>The webhook's secret cannot be read: the vault is not usable (VAULT_KEY missing or wrong).</value>
+  </data>
+  <data name="SelfBackupPanel_Chip_FilesOnly" xml:space="preserve">
+    <value>files only</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_FilesOnly" xml:space="preserve">
+    <value>This backup holds the files only, not the PostgreSQL database (it was made before database dumps were included). It cannot be restored.</value>
   </data>
 </root>

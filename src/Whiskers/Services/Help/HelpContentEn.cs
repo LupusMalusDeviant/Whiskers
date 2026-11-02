@@ -306,6 +306,15 @@ internal static class HelpContentEn
                     pre-restore backup keeps it). Encrypted backups need the same `VAULT_KEY` to decrypt;
                     with a `VAULT_KEY` set, unencrypted backups are not restored.
                     """),
+                new("PostgreSQL", """
+                    On PostgreSQL the backup holds the **database** too: a `pg_dump` of its schema, taken
+                    together with the files. Before the restore is committed, Whiskers takes the pre-restore
+                    backup, then applies the dump in a transaction and rolls it back (a dry run). At the restart the schema is replaced in **one
+                    transaction**, so afterwards the database is either the backup's or unchanged. Backups from
+                    before this version hold the files only (**files only**) and are not restored. Keep a copy of
+                    your backups off the data volume: the backup guide (`docs/operations/backup-and-recovery.md`)
+                    describes the recovery onto a new host.
+                    """),
                 new("Damaged Settings Files", """
                     Whiskers keeps the previous version of each settings file (roles, whitelist, vault,
                     servers, permissions …) as `<file>.bak`. If a file cannot be read — cut off by a power

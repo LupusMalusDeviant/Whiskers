@@ -25,7 +25,7 @@ if (args is ["--migrate-to-postgres", ..])
 // A normal boot has no marker → this is a cheap no-op. After a restore it swaps the staged files into place;
 // startup below then migrates the restored DB and rebuilds every cache from the restored files. It throws on
 // an unrecoverable swap (→ process exit → restart retries) rather than booting on half-swapped state.
-RestoreBootHandler.ApplyPendingRestore(dataPaths);
+RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
 builder.AddWhiskersModules();                  // Core no-op defaults + module pipeline + MCP tools + nav registry

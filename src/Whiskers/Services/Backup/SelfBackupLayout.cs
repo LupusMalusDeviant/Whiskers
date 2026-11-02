@@ -11,6 +11,9 @@ public enum BackupEntryKind
     File,
     /// <summary>A known data directory or anything below it.</summary>
     Directory,
+    /// <summary>The PostgreSQL database dump at the archive root (R1-33): restored into the database, never placed
+    /// into the data directory.</summary>
+    DatabaseDump,
     /// <summary>Not a restore target (unknown, or local to the install): left out of staging, never written.</summary>
     NotRestored,
     /// <summary>Never allowed in an archive (backups, restore state, live journals, temp files, a vault key):
@@ -133,6 +136,8 @@ public static class SelfBackupLayout
 
         if (segments.Length == 1 && string.Equals(name, SelfBackupFormat.ManifestEntryName, StringComparison.Ordinal))
             return isDirectory ? BackupEntryKind.Forbidden : BackupEntryKind.Manifest;
+        if (segments.Length == 1 && string.Equals(name, SelfBackupFormat.PgDumpEntryName, StringComparison.Ordinal))
+            return isDirectory ? BackupEntryKind.Forbidden : BackupEntryKind.DatabaseDump;
 
         if (FileSet.Contains(top))
             // A known file must be a file at the root; a directory in its place, or anything below it, is not ours.

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Whiskers.Configuration;
 using Whiskers.Services.Backup;
 
@@ -351,6 +352,115 @@ public class RestoreBootHandlerTests
             File.WriteAllText(p.DbPath, "MUTATED-AFTER");   // normal running writes after the restore
             RestoreBootHandler.ApplyPendingRestore(p);      // no marker now → must not re-swap
             Assert.Equal("MUTATED-AFTER", File.ReadAllText(p.DbPath));
+        }
+        finally { Cleanup(root); }
+    }
+
+    private static void StagePostgresRestore(DataPathOptions p)
+    {
+        File.WriteAllText(p.RolesJson, "OLD");
+        Directory.CreateDirectory(p.RestoreStagingDir);
+        File.WriteAllText(Path.Combine(p.RestoreStagingDir, "database.pgdump"), "PGDMP");
+        File.WriteAllText(Path.Combine(p.RestoreStagingDir, "roles.json"), "NEW");
+        File.WriteAllText(p.RestorePendingMarker,
+            JsonSerializer.Serialize(new RestoreMarker { StagingDir = p.RestoreStagingDir, Provider = "postgres" }));
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("sqlite")]
+    public void A_postgres_restore_stops_the_start_when_this_start_is_not_on_postgres(string configured)
+    {
+        // R1-33: the database is restored first; without it the files are not swapped and the restore stays pending.
+        var p = NewRoot(out var root);
+        try
+        {
+            StagePostgresRestore(p);
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(configured == "none"
+                    ? new Dictionary<string, string?>()
+                    : new Dictionary<string, string?> { ["WHISKERS_DB_PROVIDER"] = configured })
+                .Build();
+
+            Assert.Throws<InvalidOperationException>(() => RestoreBootHandler.ApplyPendingRestore(p, config));
+
+            Assert.Equal("OLD", File.ReadAllText(p.RolesJson));
+            Assert.True(File.Exists(p.RestorePendingMarker));
+            Assert.True(File.Exists(Path.Combine(p.RestoreStagingDir, "database.pgdump")));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void A_postgres_restore_reads_the_database_settings_from_the_data_directory_like_the_app()
+    {
+        // Configured only in app-settings.json (a layer AddWhiskersConfiguration adds): the restore must see it too, so
+        // it reaches the database step (here: tools that are missing) instead of "not configured for PostgreSQL".
+        var p = NewRoot(out var root);
+        try
+        {
+            StagePostgresRestore(p);
+            const string settings =
+                "{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=w;Username=u;Password=unused\"}}";
+            File.WriteAllText(p.AppSettingsJson, settings);
+            File.WriteAllText(Path.Combine(p.RestoreStagingDir, "app-settings.json"), settings);   // the archive's copy
+            var config = new ConfigurationBuilder().Build();
+
+            Assert.Throws<PostgresToolException>(() =>
+                RestoreBootHandler.ApplyPendingRestore(p, config, new PostgresDumpTool(Path.Combine(root, "no-such-bin"))));
+            Assert.True(File.Exists(p.RestorePendingMarker));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Theory]
+    [InlineData("{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=other;Username=u;Password=unused\"}}")]
+    [InlineData(null)]   // no settings file in the archive: after the swap the app would not be on this database
+    public void A_postgres_restore_whose_archive_settings_name_another_database_is_not_applied(string? archived)
+    {
+        // The restore writes into the database this start names; after the swap the archive's settings files decide
+        // which database the app opens. Both must be the same, or database and files part.
+        var p = NewRoot(out var root);
+        try
+        {
+            StagePostgresRestore(p);
+            File.WriteAllText(p.AppSettingsJson,
+                "{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=w;Username=u;Password=unused\"}}");
+            if (archived is not null) File.WriteAllText(Path.Combine(p.RestoreStagingDir, "app-settings.json"), archived);
+            var config = new ConfigurationBuilder().Build();
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                RestoreBootHandler.ApplyPendingRestore(p, config, new PostgresDumpTool(Path.Combine(root, "no-such-bin"))));
+
+            Assert.Contains("another database", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("unused", ex.Message, StringComparison.Ordinal);
+            Assert.Equal("OLD", File.ReadAllText(p.RolesJson));
+            Assert.True(File.Exists(p.RestorePendingMarker));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void A_postgres_restore_whose_database_step_fails_swaps_no_file_and_stays_pending()
+    {
+        var p = NewRoot(out var root);
+        try
+        {
+            StagePostgresRestore(p);
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["WHISKERS_DB_PROVIDER"] = "postgres",
+                    ["WHISKERS_DB_CONNECTION"] = "Host=127.0.0.1;Database=whiskers;Username=whiskers;Password=unused",
+                })
+                .Build();
+            var missingTools = new PostgresDumpTool(Path.Combine(root, "no-such-bin"));
+
+            Assert.Throws<PostgresToolException>(() => RestoreBootHandler.ApplyPendingRestore(p, config, missingTools));
+
+            Assert.Equal("OLD", File.ReadAllText(p.RolesJson));
+            Assert.True(File.Exists(p.RestorePendingMarker));
+            Assert.False(File.Exists(Path.Combine(root, "database.pgdump")));
         }
         finally { Cleanup(root); }
     }

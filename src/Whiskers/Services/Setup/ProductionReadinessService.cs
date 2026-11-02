@@ -23,6 +23,8 @@ public interface IProductionReadinessService
 
 public sealed class ProductionReadinessService : IProductionReadinessService
 {
+    private static string? _pgDumpVersion;
+
     private readonly IConfiguration _config;
     private readonly IVaultService _vault;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -148,6 +150,30 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 ? "Ein geplanter Whiskers-Self-Backup-Task ist aktiv."
                 : "Kein geplanter Self-Backup-Task — unter Aufgaben einen SelfBackup-Zeitplan anlegen (manuelle Backups: Settings → Backup & Restore).",
             "tasks", "Aufgaben öffnen"));
+        // R1-33: on PostgreSQL a self-backup needs the client tools; without them every backup fails.
+        if (Whiskers.Services.Persistence.DatabaseRegistration.Resolve(_config).Provider == Whiskers.Services.Backup.SelfBackupFormat.ProviderPostgres)
+        {
+            // The tools do not change while the process runs: a found version is kept instead of starting pg_dump at
+            // every evaluation (a missing tool is looked for again, so installing it shows without a restart).
+            string? version = _pgDumpVersion, problem = null;
+            if (version is null)
+            {
+                try { version = _pgDumpVersion = await Whiskers.Services.Backup.PostgresDumpTool.FromEnvironment().VersionAsync(); }
+                catch (Whiskers.Services.Backup.PostgresToolException ex) { problem = ex.Message; }
+            }
+            // Tools without the \restrict protection write backups that no restore accepts.
+            var canRestore = version is not null && Whiskers.Services.Backup.PostgresDumpTool.CanRestore(version);
+            checks.Add(new ReadinessCheck(
+                "PostgreSQL-Client-Tools für das Self-Backup",
+                canRestore,
+                canRestore
+                    ? $"{version} — Backups enthalten die Datenbank (pg_dump)."
+                    : version is not null
+                        ? $"{version} — zu alt für die Wiederherstellung: Client-Tools 17.6 oder neuer (bzw. 16.10, 15.14, 14.19) und mindestens so neu wie der Server nötig."
+                        : $"pg_dump nicht nutzbar — Self-Backups schlagen fehl: {problem} (WHISKERS_PG_BIN_DIR auf das bin-Verzeichnis der Client-Tools setzen).",
+                null, null));
+        }
+
         checks.Add(new ReadinessCheck(
             "Update-Policy gesetzt",
             hasUpdatePolicy,

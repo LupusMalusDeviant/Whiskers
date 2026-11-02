@@ -148,6 +148,31 @@ refuses `chmod` on a path that is too open) — remove `.restore-pending` from t
 (the start's log says so). Without `VAULT_KEY` archives are neither encrypted nor authenticated: keep them where only
 administrators can reach them.
 
+On PostgreSQL (R1-33) the archive carries a `pg_dump` of the `public` schema instead of a database file. Before the
+restore is committed the pre-restore safety backup is taken, then the dump is applied to the live database in a
+transaction that is rolled back: the migration histories must be the manifest's, the start's migrations must run on
+them and every mapped table and column must be readable, or the archive is refused. The database is locked for that
+dry run. The dry run executes the archive's SQL with the role's rights, so a crafted archive can change the database
+before it is refused: the guarantee is the safety backup taken first, which holds the state from before. On top of
+that, a script that ends the transaction on its own (its own `COMMIT`) is detected by comparing the transaction id
+after the script, with a pinned `search_path` and schema-qualified operators, and the archive is refused; the recovery
+from the safety backup is described in `docs/operations/backup-and-recovery.md` ("After a restore refused for an early
+commit"). A restore that leaves functions, triggers, rules, views, row policies or operators in `public`, or that
+created, dropped or changed role or database settings (which could point the app's search path at another schema) or
+schemas, relations, functions, triggers, rules, policies or operators in other schemas (a schema named like the role
+would put its tables in front of Whiskers'), is refused, as are grants, unlogged or foreign tables in `public`,
+default privileges and publications. A restore counts as done only when psql printed a marker, unknown to the archive,
+after the checks and the `COMMIT`, so a script that leaves psql reading data cannot end the run as a success. At the
+next start the schema is dropped and recreated from the dump in one transaction, before the files are swapped; any
+error rolls it back and stops the start. The restore script is piped from `pg_restore` to `psql` and never written to
+disk; it runs only when it opens with `\restrict` (client tools 17.6 or newer), so a crafted dump cannot run psql
+meta-commands such as `\!`. The connecting role must own the `public` schema (on PostgreSQL 15 and later the database
+owner does) and hold `CREATE` on the database. Use a dedicated role that is not a superuser, since a restore runs the
+archive's SQL with its rights (a superuser could be made to run `COPY … FROM PROGRAM` on the database host); the
+PostgreSQL overlay's `POSTGRES_USER` role is a superuser, and the guide shows how to switch to an owner role without
+superuser rights. The password reaches the tools through their environment, and only the error lines of their output
+are logged (lines that quote rows are left out).
+
 ## Hardening checklist for operators
 
 - Set `AUTH_DISABLED=false` and put a real IdP (Google OAuth or OIDC) in front, or keep the app on a

@@ -13,7 +13,8 @@ namespace Whiskers.Services.Backup;
 /// Creates and restores consistent snapshots of Whiskers' own <c>/app/data</c> (F3). Runs IN-PROCESS
 /// (System.Formats.Tar + GZip) — unlike <see cref="VolumeBackupService"/> which shells a helper container for
 /// foreign Docker volumes — because the app can read its own data directory directly. The SQLite database is
-/// captured with <c>VACUUM INTO</c> (a consistent online snapshot with the WAL folded in), the archive is
+/// captured with <c>VACUUM INTO</c> (a consistent online snapshot with the WAL folded in), a PostgreSQL database with
+/// <c>pg_dump</c> (R1-33, <see cref="PostgresDumpTool"/>; restored at the start in one transaction), the archive is
 /// optionally AES-256-GCM encrypted with a VAULT_KEY-derived key, and restore is a crash-safe deferred swap.
 /// </summary>
 public sealed class BackupService : IBackupService
@@ -25,6 +26,7 @@ public sealed class BackupService : IBackupService
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<BackupService> _logger;
     private readonly string? _vaultKey;
+    private readonly PostgresDumpTool _pgTools;
     private readonly SemaphoreSlim _restoreLock = new(1, 1);
 
     // Backup ids and file names: must start alphanumeric, then alphanumerics plus _ . - only. Rejects any
@@ -40,9 +42,11 @@ public sealed class BackupService : IBackupService
         IConfiguration configuration,
         ILogger<BackupService> logger,
         DataPathOptions? dataPaths = null,
-        Whiskers.Services.Vault.IVaultService? vault = null)
+        Whiskers.Services.Vault.IVaultService? vault = null,
+        PostgresDumpTool? pgTools = null)
     {
         _vault = vault;
+        _pgTools = pgTools ?? PostgresDumpTool.FromEnvironment();
         _scopeFactory = scopeFactory;
         _maintenance = maintenance;
         _lifetime = lifetime;
@@ -84,6 +88,7 @@ public sealed class BackupService : IBackupService
             string[] metricsMigrations;
             string[] identityMigrations;
             string? stagedDb = null;
+            string? stagedDump = null;
 
             // R1-23: the audit checkpoint file is taken BEFORE the database. A checkpoint reaches the file only after
             // the database has it, so the restored database always reaches the restored checkpoint; taken after,
@@ -124,12 +129,21 @@ public sealed class BackupService : IBackupService
                     await metrics.Database.ExecuteSqlRawAsync($"VACUUM INTO '{escaped}'", ct);
 #pragma warning restore EF1002
                 }
+                else
+                {
+                    // R1-33: the database itself, consistent in one snapshot (pg_dump reads in one transaction); both
+                    // contexts share its public schema. A dump that fails fails the backup: an archive without the
+                    // database would claim a recovery point it does not hold.
+                    stagedDump = Path.Combine(buildDir, SelfBackupFormat.PgDumpEntryName);
+                    await _pgTools.DumpAsync(metrics.Database.GetConnectionString()
+                        ?? throw new InvalidOperationException("The PostgreSQL connection string is not known."), stagedDump, ct);
+                }
             }
 
             var createdAt = DateTime.UtcNow;
             var manifest = new SelfBackupManifest
             {
-                FormatVersion = SelfBackupFormat.CurrentVersion,
+                FormatVersion = stagedDump is null ? SelfBackupFormat.SqliteVersion : SelfBackupFormat.PostgresDumpVersion,
                 AppVersion = AppVersion(),
                 CreatedAtUtc = createdAt,
                 Label = label,
@@ -145,6 +159,8 @@ public sealed class BackupService : IBackupService
             var entries = new List<PackEntry> { new(SelfBackupFormat.ManifestEntryName, manifestPath) };
             if (stagedDb is not null)
                 entries.Add(new PackEntry(SelfBackupFormat.DbEntryName, stagedDb));
+            if (stagedDump is not null)
+                entries.Add(new PackEntry(SelfBackupFormat.PgDumpEntryName, stagedDump));
             if (stagedCheckpoint is not null)
                 entries.Add(new PackEntry(
                     Path.GetRelativePath(Path.GetFullPath(_dataPaths.RootDir), Path.GetFullPath(_dataPaths.AuditCheckpointJson))
@@ -180,7 +196,8 @@ public sealed class BackupService : IBackupService
                 Label = label,
                 Provider = provider,
                 Encrypted = encrypted,
-                FormatVersion = SelfBackupFormat.CurrentVersion
+                FormatVersion = manifest.FormatVersion,
+                IncludesDatabase = stagedDb is not null || stagedDump is not null
             };
             // The sidecar first: an archive is listed (and pruned) only through it, so a crash in between leaves a
             // sidecar whose archive is missing (skipped by the list), never an archive nobody sees.
@@ -351,19 +368,28 @@ public sealed class BackupService : IBackupService
                     throw new BackupValidationException($"Backup archive is invalid: {ex.Message}");
                 }
                 StagedRestoreValidator.Validate(staging, prepared.Manifest);
-                await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
+                var stagedDump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
+                var postgres = File.Exists(stagedDump);
+                if (!postgres) await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
+                // A file that is no dump is refused before the safety backup costs a full backup.
+                else await CheckPostgresDumpReadableAsync(stagedDump, ct);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
-                // nothing has been changed at this point.
+                // nothing has been changed at this point. On PostgreSQL it is taken BEFORE the dry run (R1-33): the dry
+                // run executes the archive's SQL against the live database, and whatever a crafted script might get
+                // past its rollback, the safety backup holds the state from before (a refused restore leaves one extra
+                // archive).
+                SelfBackupInfo safety;
                 try
                 {
-                    await CreateBackupAsync($"pre-restore-{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
+                    safety = await CreateBackupAsync($"pre-restore-{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
                 }
                 catch (Exception ex)
                 {
                     throw new InvalidOperationException(
                         $"Restore aborted: could not create a pre-restore safety backup ({ex.Message}). Nothing was changed.", ex);
                 }
+                if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, safety.Id, ct);
 
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker
@@ -488,13 +514,20 @@ public sealed class BackupService : IBackupService
                 CheckSubset(metrics.Database.GetMigrations(), manifest.MetricsMigrations, "metrics");
                 CheckSubset(idDb.Database.GetMigrations(), manifest.IdentityMigrations, "identity");
 
-                // R1-32: the database is replaced, never removed — an archive of a SQLite instance must hold it, and
-                // one of a PostgreSQL instance (whose data lives outside) must not.
+                // R1-32: the database is replaced, never removed — an archive must hold the database of its provider
+                // and no other. R1-33: a PostgreSQL archive from before the database dump holds the files only; paired
+                // with the database as it is now, they would restore a state that never existed — not restored.
                 var sqlite = string.Equals(manifest.Provider, SelfBackupFormat.ProviderSqlite, StringComparison.OrdinalIgnoreCase);
-                if (sqlite != inspection.HasDatabase)
-                    throw new BackupValidationException(sqlite
-                        ? "Backup archive is invalid: it was made on SQLite but holds no database."
-                        : "Backup archive is invalid: it was made on PostgreSQL but holds a SQLite database.");
+                if (sqlite && (!inspection.HasDatabase || inspection.HasDatabaseDump))
+                    throw new BackupValidationException(inspection.HasDatabaseDump
+                        ? "Backup archive is invalid: it was made on SQLite but holds a PostgreSQL dump."
+                        : "Backup archive is invalid: it was made on SQLite but holds no database.");
+                if (!sqlite && inspection.HasDatabase)
+                    throw new BackupValidationException("Backup archive is invalid: it was made on PostgreSQL but holds a SQLite database.");
+                if (!sqlite && !inspection.HasDatabaseDump)
+                    throw new BackupValidationException(
+                        "This backup holds the files only, not the PostgreSQL database (it was made before database dumps were included). " +
+                        "It is not restored: its files would meet a database from another time. Restore the database and the files together from a newer backup.");
             }
 
             return new PreparedRestore(tarGzPath, manifest, encrypted, decryptTemp, inspection.ExtractedBytes);
@@ -652,8 +685,102 @@ public sealed class BackupService : IBackupService
         }
     }
 
+    // R1-33: a file pg_restore cannot list, or a dump without Whiskers' tables in public, is no dump of this database.
+    private async Task CheckPostgresDumpReadableAsync(string stagedDump, CancellationToken ct)
+    {
+        try
+        {
+            await _pgTools.CheckReadableAsync(stagedDump, ct);
+        }
+        catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
+        {
+            _logger.LogWarning("Restore refused: the database dump cannot be read ({Reason})", ex.Message);
+            throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
+        }
+    }
+
+    // R1-33: the dump is applied to this server in a transaction that is rolled back — a dump this server
+    // does not accept (a newer format, a broken file, missing rights to replace the schema) is refused here, before
+    // the restore is committed, not at the start. Inside that transaction, as for SQLite (R1-32): the migration
+    // histories must be the manifest's, the start's migrations must run on them, and every mapped table and column
+    // must then be readable. The database is locked while the dry run holds the schema.
+    private async Task ProbePostgresRestoreAsync(string stagedDump, SelfBackupManifest manifest, string safetyBackupId, CancellationToken ct)
+    {
+        string connection;
+        var probe = new System.Text.StringBuilder();
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var metrics = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var identity = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+            connection = metrics.Database.GetConnectionString()
+                         ?? throw new BackupValidationException("The PostgreSQL connection string is not known.");
+            AppendPostgresProbe(probe, metrics, manifest.MetricsMigrations,
+                Microsoft.EntityFrameworkCore.Migrations.HistoryRepository.DefaultTableName);
+            AppendPostgresProbe(probe, identity, manifest.IdentityMigrations, DatabaseRegistration.IdentityMigrationsHistoryTable);
+        }
+        try
+        {
+            await _pgTools.DryRunAsync(connection, stagedDump, probe.ToString(), ct);
+        }
+        catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
+        {
+            _logger.LogWarning("Restore refused: the database dump cannot be restored into this server ({Reason})", ex.Message);
+            // The dry run ran the archive's SQL: a script that committed part of it on its own may have changed the
+            // database, whatever the error that ended it. The safety backup taken just before holds the state from before.
+            var early = ex.Message.Contains("ended its transaction early", StringComparison.Ordinal);
+            throw new BackupValidationException(
+                (early
+                    ? "Backup archive's database script ended the dry run's transaction on its own and may have changed the database. "
+                    : $"Backup archive's database cannot be restored into this server: {ex.Message}. ") +
+                $"The pre-restore safety backup {safetyBackupId} holds the database from before the dry run; if the database " +
+                "was changed, recover from it as the backup guide describes (docs/operations/backup-and-recovery.md, " +
+                "\"After a restore refused for an early commit\").");
+        }
+    }
+
+    // The history check, the start's migrations (idempotent: each runs only when its history row is missing, as
+    // MigrateAsync decides) and the mapped-column reads for one context. Migration ids are this build's own (the manifest
+    // is a subset of them, CheckSubset); names come from the app's model; all of it quoted.
+    private static void AppendPostgresProbe(System.Text.StringBuilder probe, DbContext db, IEnumerable<string> applied,
+        string historyTable)
+    {
+        static string Literal(string s) => "'" + s.Replace("'", "''") + "'";
+        var expected = applied.Order(StringComparer.Ordinal).Select(Literal);
+        probe.Append("DO $probe$ BEGIN IF (SELECT coalesce(array_agg(\"MigrationId\"::text ORDER BY \"MigrationId\"::text COLLATE \"C\"), ARRAY[]::text[]) FROM ")
+            .Append(QuoteIdentifier(historyTable))
+            .Append(") IS DISTINCT FROM ARRAY[").Append(string.Join(", ", expected)).Append("]::text[] THEN RAISE EXCEPTION ")
+            .Append(Literal($"the migration history in {historyTable} does not match the archive's manifest"))
+            .AppendLine("; END IF; END $probe$;");
+        // NoTransactions: the dry run's own transaction holds it all. A future migration with DDL that cannot run in a
+        // transaction (CREATE INDEX CONCURRENTLY, ALTER TYPE … ADD VALUE) would fail this probe for every older archive.
+        var migrator = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db);
+        probe.AppendLine(migrator.GenerateScript(options:
+            Microsoft.EntityFrameworkCore.Migrations.MigrationsSqlGenerationOptions.Idempotent
+            | Microsoft.EntityFrameworkCore.Migrations.MigrationsSqlGenerationOptions.NoTransactions));
+        foreach (var query in MappedColumnQueries(db)) probe.Append(query).AppendLine(";");
+    }
+
     // SELECT of every column the model maps, per table, with no rows: fails on a table or column that is missing.
     private static async Task ReadEveryMappedColumnAsync(DbContext db, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct);
+        var connection = db.Database.GetDbConnection();
+        try
+        {
+            foreach (var query in MappedColumnQueries(db))
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = query;
+                await command.ExecuteNonQueryAsync(ct);
+            }
+        }
+        finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    private static string QuoteIdentifier(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+
+    // Names from the app's own model, quoted: no input from the archive reaches this text.
+    private static IEnumerable<string> MappedColumnQueries(DbContext db)
     {
         var tables = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var entity in db.Model.GetEntityTypes())
@@ -665,21 +792,9 @@ public sealed class BackupService : IBackupService
             foreach (var property in entity.GetProperties())
                 if (property.GetColumnName(store) is { } column) columns.Add(column);
         }
-        static string Quote(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
-        await db.Database.OpenConnectionAsync(ct);
-        var connection = db.Database.GetDbConnection();
-        try
-        {
-            foreach (var (table, columns) in tables)
-            {
-                if (columns.Count == 0) continue;
-                await using var command = connection.CreateCommand();
-                // Names from the app's own model, quoted: no input from the archive reaches this text.
-                command.CommandText = $"SELECT {string.Join(", ", columns.Select(Quote))} FROM {Quote(table)} LIMIT 0";
-                await command.ExecuteNonQueryAsync(ct);
-            }
-        }
-        finally { await db.Database.CloseConnectionAsync(); }
+        foreach (var (table, columns) in tables)
+            if (columns.Count > 0)
+                yield return $"SELECT {string.Join(", ", columns.Select(QuoteIdentifier))} FROM {QuoteIdentifier(table)} LIMIT 0";
     }
 
     // Staging takes the extracted bytes and the swap a second copy of each target beside the live one; the pre-restore
@@ -699,7 +814,7 @@ public sealed class BackupService : IBackupService
             _logger.LogWarning(ex, "Free space of the data volume unknown; the restore goes ahead without the check");
             return;
         }
-        var needed = extractedBytes * 3 + live * 2 + (64L << 20);   // the third copy: the migration probe
+        var needed = extractedBytes * 3 + live * 2 + (64L << 20);   // the third copy: the SQLite migration probe (on PostgreSQL the probe runs in the server; the safety backup's pg_dump is not estimated here — on a full volume it fails, and nothing is changed)
         if (available < needed)
             throw new BackupValidationException(
                 $"Not enough free space for this restore: it needs about {needed / (1 << 20)} MiB, the data volume has {available / (1 << 20)} MiB.");

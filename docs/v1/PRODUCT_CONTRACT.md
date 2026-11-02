@@ -98,7 +98,7 @@ contract than it says.
 3. **Commands typed inside an interactive terminal are not policy-checked one by one.** The contract covers
    opening the session (authorization, kill switch, audit) and, depending on PC-D2, a transcript.
 4. **Single replica.** Whiskers 1.0 is a single-instance appliance. Availability and RPO/RTO follow from that
-   and are documented in the backup guide (WP11b).
+   and are documented in the backup guide (`docs/operations/backup-and-recovery.md`, R1-33).
 5. **No per-server or tenant scoping in 1.0.** A principal's level applies to every managed server (A-17).
 6. **Out-of-band changes are invisible.** Changes made directly on a host, in a cloud console or via another
    tool are not governed. Whiskers may observe their effects; it does not attribute them.
