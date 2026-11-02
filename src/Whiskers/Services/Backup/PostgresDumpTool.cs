@@ -258,7 +258,9 @@ public sealed class PostgresDumpTool
         static string Outside(string ns) =>
             $"{ns} OPERATOR(pg_catalog.<>) ALL (ARRAY(SELECT x.oid FROM pg_catalog.pg_namespace x WHERE " +
             "x.nspname" + eq + "ANY (ARRAY['public', 'pg_catalog', 'information_schema', 'pg_toast']::pg_catalog.name[]) " +
-            @"OR x.nspname OPERATOR(pg_catalog.~~) 'pg\_temp\_%' OR x.nspname OPERATOR(pg_catalog.~~) 'pg\_toast\_temp\_%'))";
+            // starts_with, not LIKE with escapes: the script may have turned standard_conforming_strings off.
+            "OR pg_catalog.starts_with(x.nspname::pg_catalog.text, 'pg_temp_') " +
+            "OR pg_catalog.starts_with(x.nspname::pg_catalog.text, 'pg_toast_temp_')))";
         static string OnRelation(string alias, string relation) =>
             $" JOIN pg_catalog.pg_class rc ON rc.oid{eq}{alias}.{relation} WHERE {Outside("rc.relnamespace")}";
         var parts = new[]
@@ -375,7 +377,8 @@ public sealed class PostgresDumpTool
         if (probeSql is not null)
         {
             // The dump empties search_path; the probe names the tables unqualified, as the app does.
-            await psql.WriteLineAsync("SET search_path = public;");
+            // pg_temp named last: otherwise it is searched first, and temporary tables named like Whiskers' could pass the probe.
+            await psql.WriteLineAsync("SET search_path = public, pg_temp;");
             await psql.WriteLineAsync(probeSql);
         }
         await psql.WriteLineAsync(commit ? "COMMIT;" : "ROLLBACK;");

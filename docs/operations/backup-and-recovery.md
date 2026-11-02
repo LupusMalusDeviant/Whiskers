@@ -174,13 +174,17 @@ webhooks and audit rows come back.
   files).
 - The dump leaves out ownership and grants (`--no-owner --no-acl`). Restored objects belong to the role Whiskers
   connects as. If other roles had grants, for example a read-only reporting user, grant them again after the
-  restore. A dump that brings grants of its own, or unlogged or foreign tables, into `public` is refused, and so is
+  restore. Default privileges for the role Whiskers connects as (`ALTER DEFAULT PRIVILEGES FOR ROLE … GRANT`) would
+  give every restored table grants, which the restore refuses: remove them before a restore and grant again after
+  it. A dump that brings grants of its own, or unlogged or foreign tables, into `public` is refused, and so is
   one that adds default privileges or publications.
 - The dump covers the `public` schema only. Objects in other schemas of the same database are not touched unless
   they depend on objects in `public` (a view or foreign key on Whiskers' tables is dropped with them). A restore
-  that creates or changes anything outside `public` — a schema, a table, a function, a trigger, a rule, a policy or
-  an operator, or a role or database setting — is refused: a schema named like the role comes first in the default
-  search path and its tables would shadow Whiskers' own;
+  that creates, drops or changes a schema, relation, function (its code or settings), trigger, rule, policy or
+  operator in another schema, default privileges, a publication, or a role or database setting is refused: a schema
+  named like the role comes first in the default search path and its tables would shadow Whiskers' own. Data in
+  other schemas is not compared. `pg_db_role_setting` is shared by the whole server: on a shared server, an
+  `ALTER ROLE … SET` by someone else during the dry run or the restore makes it fail; restore again;
   extensions are not part of the dump (Whiskers' migrations create none; a test keeps it that way).
 - Whiskers' migrations create tables, sequences, indexes and constraints only. A dump that brings functions,
   triggers, rules, views, row policies or operators into `public` is refused, because they would run with Whiskers'

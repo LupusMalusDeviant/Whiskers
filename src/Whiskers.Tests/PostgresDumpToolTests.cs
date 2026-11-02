@@ -85,7 +85,7 @@ public class PostgresDumpToolTests
             "SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \\gset",
             $"SELECT {PostgresDumpTool.OutsideDigest} OPERATOR(pg_catalog.=) :'whiskers_outside'::pg_catalog.text AS whiskers_outside_same \\gset",
             "\\if :whiskers_same", "\\if :whiskers_outside_same", PostgresDumpTool.CodeObjectCheck,
-            "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^15..^5]);
+            "SET search_path = public, pg_temp;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^15..^5]);
         Assert.Contains("changed role or database settings", lines[^5], StringComparison.Ordinal);
         Assert.Equal(["\\endif", "\\else"], lines[^4..^2]);
         Assert.Contains("ended its transaction early", lines[^2], StringComparison.Ordinal);
