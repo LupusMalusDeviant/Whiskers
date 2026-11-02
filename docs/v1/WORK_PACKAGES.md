@@ -691,6 +691,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [ ] Invalid intervals fail configuration validation rather than spinning or terminating the host.
 - [ ] `MetricsLabelEscapingTests` covers quotes, backslashes and newlines.
 - [ ] Loop death/stall remains observable; do not simply hide failures globally.
+- [ ] Carried over from R1-38: the Docker reads in the AutoPatch planning (`ListAllContainersAsync`, `GetImageContractAsync` in `AutoPatchService`) and in the advisor chat's context (`AiChatService.BuildContextAsync`) take the caller's token (new `IDockerService` overloads), so the preview deadline, host stop and closing the chat reach them too.
 
 **Out of scope:** Full tracing infrastructure.
 
