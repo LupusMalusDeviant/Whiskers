@@ -12,6 +12,7 @@ never in a tool answer, never in a log line.
 
 | File | Purpose |
 |---|---|
+| `DnsVerifiers.cs` | R1-37 (INV-43): the zone is listed again at the provider — a set record must hold the written value (normalised like the service writes it), a deleted one must be gone; a provider error on that read fails the outcome with the state unknown. |
 | `IDnsProviderClient.cs` | Provider contract: list/create/update/delete records of a zone; names zone-relative (`@` = apex). Also `DnsProviderException` (HTTP status + the API's own message). |
 | `InfomaniakDnsClient.cs` | Infomaniak implementation (`/2/zones/{zone}/records`, Bearer token, `result`/`data`/`error` envelope — an error can arrive with HTTP 200). Maps the apex spelling (`"."` on the wire) to `@`. |
 | `DnsSettingsSection.cs` | R1-29: the `Dns` section as a Settings save writes it — provider, zones, TTL and the token's vault key (`ApiTokenRef`), never the token; reads the stored section as it is in the file, so an empty `ApiToken` that hides a token set by the environment stays. |

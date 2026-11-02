@@ -27,10 +27,11 @@ public class ServerTools
         [Description("Server ID")] string serverId,
         CancellationToken cancellationToken = default)
     {
+        // R1-37: every refusal fails the operation; a failed renewal fails it through the audit report below.
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "renew_mtls_certificate");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(serverId))
-            return "Server ID is required.";
+            return MutationScope.Fail("Server ID is required.");
 
         var result = await certificates.RenewAsync(serverId, cancellationToken);
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
@@ -186,24 +187,28 @@ public class ServerTools
         IToolAuditLog auditLog,
         [Description("Server ID")] string serverId,
         [Description("Port number or range (e.g. '80', '8000:9000')")] string port,
-        [Description("Protocol: tcp, udp, or both")] string protocol = "tcp",
+        [Description("Protocol: tcp, udp, or any (both)")] string protocol = "tcp",
         [Description("Action: allow or deny")] string action = "allow",
         [Description("Source IP/CIDR (optional, e.g. '192.168.1.0/24')")] string? from = null)
     {
+        // R1-37: every refusal fails the operation; a failed ufw call fails it through the audit report below.
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "add_firewall_rule");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(serverId))
-            return "Server ID is required.";
+            return MutationScope.Fail("Server ID is required.");
         if (string.IsNullOrWhiteSpace(port))
-            return "Port is required.";
+            return MutationScope.Fail("Port is required.");
 
-        var validProtocols = new[] { "tcp", "udp", "both" };
-        if (!validProtocols.Contains(protocol.ToLower()))
-            return $"Invalid protocol '{protocol}'. Must be one of: tcp, udp, both.";
+        // The firewall service accepts tcp, udp and any; "both" was offered here but always refused there.
+        protocol = protocol.ToLowerInvariant() is "both" ? "any" : protocol.ToLowerInvariant();
+        var validProtocols = new[] { "tcp", "udp", "any" };
+        if (!validProtocols.Contains(protocol))
+            return MutationScope.Fail($"Invalid protocol '{protocol}'. Must be one of: tcp, udp, any.");
 
+        action = action.ToLowerInvariant();
         var validActions = new[] { "allow", "deny" };
-        if (!validActions.Contains(action.ToLower()))
-            return $"Invalid action '{action}'. Must be one of: allow, deny.";
+        if (!validActions.Contains(action))
+            return MutationScope.Fail($"Invalid action '{action}'. Must be one of: allow, deny.");
 
         var result = await firewall.AddRuleAsync(serverId, port, protocol, action, from);
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
@@ -225,11 +230,11 @@ public class ServerTools
         [Description("Rule number to remove")] int ruleNumber)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "remove_firewall_rule");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(serverId))
-            return "Server ID is required.";
+            return MutationScope.Fail("Server ID is required.");
         if (ruleNumber <= 0)
-            return "Rule number must be a positive integer.";
+            return MutationScope.Fail("Rule number must be a positive integer.");
 
         var result = await firewall.RemoveRuleAsync(serverId, ruleNumber);
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);

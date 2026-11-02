@@ -8,6 +8,7 @@ It resolves a Whiskers server's configured provider + per-server API key, finds 
 
 | File | Purpose |
 |---|---|
+| `CloudVerifiers.cs` | R1-37 (INV-43): power on / shutdown polled until the provider reports running / off (Hostinger: stopped), Hetzner rescue mode and backups polled until reported as asked, a deleted Hetzner image no longer found; the poll stops at its budget within the capability's deadline. Reboot, hard reset, snapshot creation and a server-type change are not verifiable (same end state or asynchronous); `HetznerTools` fails a call whose Hetzner action is in status `error`. |
 | `ICloudControlService.cs` / `CloudControlService.cs` | Provider-agnostic control plane: resolves provider + credentials, matches the server in the account, and dispatches power/snapshot/metrics calls to the provider-specific client. The API key comes from the vault (R1-29). |
 | `CloudCredentials.cs` | R1-29: where a server's cloud API key lives — in the vault under `ServerConfig.CloudKeyRef`, or (not migrated yet, no usable vault) still as the legacy plaintext field. `KeyOf` reads it; a key kept in a disabled or locked vault is an error, never a silent "no key". |
 

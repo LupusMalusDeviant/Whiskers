@@ -155,38 +155,38 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-02 | `stop_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
 | M-03 | `restart_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
 | M-04 | `update_container` | write | ✅ the new container (same name) read back (R1-36); no health check; a failed snapshot is a warning, not a stop (that rule is AutoUpdate's) | GW ✅ + details | INV-43, 44, 53 |
-| M-05 | `deploy_app` | admin | ⚠️ `NotVerifiable` (the tool answers with text, R1-37) | GW ✅ + details | INV-43 (volumes checked since R1-16) |
-| M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | ❌ | GW ✅ + details | INV-43, 51 |
-| M-07 | `deploy_compose` | admin | ❌ | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16) |
-| M-08 | `execute_command` | admin | ❌ | GW ✅ + details (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
-| M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | 43 |
-| M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | 43 |
-| M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ⚠️ `nginx -t` pre-check | GW ✅ + details | 41 (E-03) |
-| M-12 | `manage_systemd_service` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | 43 |
-| M-13 | `renew_ssl_certificate` | admin (R1-05) | ❌ | GW ✅ + details | INV-43 |
-| M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service | GW ✅ + details | INV-58 |
-| M-15 | `execute_query` | **admin** (PC-D3) | ❌ | GW ✅ | INV-19 (PC-D3), 24, 43 |
-| M-16 | `backup_database` | admin (R1-05) | ❌ | GW ✅ + details | INV-43 |
-| M-17 | `set_dns_record` | write | ❌ | GW ✅ + details | INV-43, 52 (DNS token) |
-| M-18 | `delete_dns_record` | write | ❌ | GW ✅ + details | INV-43, 52 |
-| M-19 | `create_network` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | — |
-| M-20 | `remove_network` | **admin** (R1-05; was write) | ❌ | GW ✅ + details | — |
-| M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ❌ | GW ✅ | — |
-| M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ❌ | GW ✅ | — |
+| M-05 | `deploy_app` | admin | ✅ the returned container read back (R1-37); a deployment that names none: `NotVerifiable` with its reason | GW ✅ + details | INV-43 (volumes checked since R1-16) |
+| M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | `NotVerifiable` + reason (the process reads the .env, R1-37) | GW ✅ + details | INV-43, 51 |
+| M-07 | `deploy_compose` | admin | ✅ every container of the project read back (R1-37); without a project name: `NotVerifiable` | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16) |
+| M-08 | `execute_command` | admin | `NotVerifiable` + reason (arbitrary command; its exit code decides, R1-37) | GW ✅ + details (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
+| M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ✅ `ufw show added` read back (R1-37) | GW ✅ + details | 43 |
+| M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | `NotVerifiable` + reason (ufw renumbers after a delete, R1-37) | GW ✅ + details | 43 |
+| M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ✅ `nginx -t` pre-check; the site file read back (R1-37) | GW ✅ + details | 41 (E-03) |
+| M-12 | `manage_systemd_service` | **admin** (R1-05; was write) | ✅ `systemctl is-active` / `is-enabled` read back (R1-37) | GW ✅ + details | 43 |
+| M-13 | `renew_ssl_certificate` | admin (R1-05) | ✅ certificate valid beyond the 30-day window read back (R1-37) | GW ✅ + details | INV-43 |
+| M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service; `NotVerifiable` + reason (R1-37) | GW ✅ + details | INV-58 |
+| M-15 | `execute_query` | **admin** (PC-D3) | `NotVerifiable` + reason (arbitrary SQL, R1-37) | GW ✅ | INV-19 (PC-D3), 24, 43 |
+| M-16 | `backup_database` | admin (R1-05) | ✅ dump file on the host, not empty (R1-37) | GW ✅ + details | INV-43 |
+| M-17 | `set_dns_record` | write | ✅ provider lists the record with the value (R1-37) | GW ✅ + details | INV-43, 52 (DNS token) |
+| M-18 | `delete_dns_record` | write | ✅ provider no longer lists the record (R1-37) | GW ✅ + details | INV-43, 52 |
+| M-19 | `create_network` | **admin** (R1-05; was write) | ✅ listed with its driver (R1-37) | GW ✅ + details | — |
+| M-20 | `remove_network` | **admin** (R1-05; was write) | ✅ no longer listed (R1-37) | GW ✅ + details | — |
+| M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ✅ container attached (R1-37) | GW ✅ | — |
+| M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ✅ container no longer attached (R1-37) | GW ✅ | — |
 | M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | n/a | GW ✅ + details | INV-04 |
 | M-24 | `delete_scheduled_task` | write | n/a | GW ✅ + details | — |
-| M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup, DB backup or retention, resolved before the caller check and the approval (R1-05) | ❌ | GW ✅ + details | INV-24 (policy sees only `taskId`), 30, 43 |
-| M-26 | `cloud_power_on` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-43, 52 |
-| M-27 | `cloud_shutdown` | **admin** (R1-05; was write) | ❌ | GW ✅ | 43, 52 |
-| M-28 | `cloud_reboot` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-43, 52 |
-| M-29 | `cloud_hard_reset` | **admin** (R1-05; was write) | ❌ | GW ✅ | 43, 52 |
-| M-30 | `cloud_create_snapshot` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-43, 52 |
-| M-31 | `hetzner_enable_rescue` | admin | ❌ | GW ✅ + details | INV-51 (returns root password), 52 |
-| M-32 | `hetzner_disable_rescue` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-52 |
-| M-33 | `hetzner_enable_backups` | **admin** (R1-05; was write) | ❌ | GW ✅ | INV-52 |
-| M-34 | `hetzner_disable_backups` (deletes backups) | **admin** (R1-05; was write) | ❌ | GW ✅ | 52 |
-| M-35 | `hetzner_change_server_type` | **admin** (R1-05; was write) | ❌ | GW ✅ | 43, 52 |
-| M-36 | `hetzner_delete_snapshot` (irreversible) | **admin** (R1-05; was write) | ❌ | GW ✅ | 52 |
+| M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup, DB backup or retention, resolved before the caller check and the approval (R1-05) | `NotVerifiable` + reason (the task's own capability is verified, R1-37) | GW ✅ + details | INV-24 (policy sees only `taskId`), 30, 43 |
+| M-26 | `cloud_power_on` | **admin** (R1-05; was write) | ✅ provider reports running, polled (R1-37) | GW ✅ | INV-43, 52 |
+| M-27 | `cloud_shutdown` | **admin** (R1-05; was write) | ✅ provider reports off, polled (R1-37) | GW ✅ | 43, 52 |
+| M-28 | `cloud_reboot` | **admin** (R1-05; was write) | `NotVerifiable` + reason (same end state, R1-37) | GW ✅ | INV-43, 52 |
+| M-29 | `cloud_hard_reset` | **admin** (R1-05; was write) | `NotVerifiable` + reason (same end state, R1-37) | GW ✅ | 43, 52 |
+| M-30 | `cloud_create_snapshot` | **admin** (R1-05; was write) | `NotVerifiable` + reason (created asynchronously, R1-37) | GW ✅ | INV-43, 52 |
+| M-31 | `hetzner_enable_rescue` | admin | ✅ Hetzner reports rescue on, polled (R1-37) | GW ✅ + details | INV-51 (returns root password), 52 |
+| M-32 | `hetzner_disable_rescue` | **admin** (R1-05; was write) | ✅ Hetzner reports rescue off, polled (R1-37) | GW ✅ | INV-52 |
+| M-33 | `hetzner_enable_backups` | **admin** (R1-05; was write) | ✅ Hetzner reports a backup window, polled (R1-37) | GW ✅ | INV-52 |
+| M-34 | `hetzner_disable_backups` (deletes backups) | **admin** (R1-05; was write) | ✅ Hetzner reports no backup window, polled (R1-37) | GW ✅ | 52 |
+| M-35 | `hetzner_change_server_type` | **admin** (R1-05; was write) | ⚠️ the action's error status fails the call; the resize itself `NotVerifiable` + reason (R1-37) | GW ✅ | 43, 52 |
+| M-36 | `hetzner_delete_snapshot` (irreversible) | **admin** (R1-05; was write) | ✅ Hetzner no longer finds the image (R1-37) | GW ✅ | 52 |
 | M-37 | `create_log_alert` (feeds AI triggers) | write | n/a | GW ✅ | INV-27, 46 |
 | M-38 | `pause_server_checks` | write | n/a | GW ✅ | — |
 | M-39 | `resume_server_checks` | write | n/a | GW ✅ | — |
@@ -206,11 +206,11 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 
 | ID | Path | Actor | AuthN | AuthZ at run | Policy | Approval | Execution | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|---|---|---|
-| S-01 | Scheduler cron (incl. custom root command, prune, retention `rm -f`) | Automation on behalf of `CreatedBy` (since WP2 step 2.3; typed owner id and `CreatedVia` provenance since R1-03); ownerless tasks refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies; agent-created tasks keep agent rules | n/a | ✅ owner re-checked per run; ⚠️ grace period | ✅ PC-D1 rules (kill switch, protected) | none (owner approved by scheduling); a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `TaskExecutor` (incl. self-backup and retention deletes); key-owned tasks keep the key's rules | ⚠️ container restart read back (R1-36); other task types ❌ (R1-37) | ✅ gateway AL + `TaskRunHistory` | INV-04 (grace), 43, 45 |
+| S-01 | Scheduler cron (incl. custom root command, prune, retention `rm -f`) | Automation on behalf of `CreatedBy` (since WP2 step 2.3; typed owner id and `CreatedVia` provenance since R1-03); ownerless tasks refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies; agent-created tasks keep agent rules | n/a | ✅ owner re-checked per run; ⚠️ grace period | ✅ PC-D1 rules (kill switch, protected) | none (owner approved by scheduling); a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `TaskExecutor` (incl. self-backup and retention deletes); key-owned tasks keep the key's rules | ✅ container restart (R1-36), DB / volume / self-backups and their retention read back (R1-37); custom command and prune `NotVerifiable` + reason | ✅ gateway AL + `TaskRunHistory` | INV-04 (grace), 43, 45 |
 | S-02 | AutoUpdate | Automation on behalf of the feature owner (Settings); ownerless refused by default (`RequireOwner`, R1-04), grace period only on explicit opt-out; authority loss suspends + notifies | n/a | ✅ re-checked per update; ⚠️ grace period (opt-in) | ✅ PC-D1 rules | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → `RecreateContainerAsync` | ✅ recreate read back + 15 s state check; a failed one rolled back through the gateway, verified (R1-36) | ✅ gateway AL + `UpdateHistory` | INV-04 (grace), 44, 45, 59 |
 | S-03 | AutoPatch nightly | Automation on behalf of the Admin who took it over; **no owner → no run**; authority loss (also mid-cycle) suspends + notifies (R1-04) | n/a | ✅ config opt-in + owner re-checked per cycle | ✅ PC-D1 rules for the cycle; own exclude list per container | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway (`autopatch.run` per night + `container.update` per container) → `img-update.sh` as root | ✅ script verify + rollback | ✅ gateway AL + notification | INV-45 |
-| S-04 | Webhook `POST /api/webhooks/{id}` | Automation on behalf of the webhook owner (R1-09); ownerless or authority lost → refused, switched off + notified | ✅ HMAC + provider freshness rule + durable delivery dedup, serialized per target (R1-10) | ✅ owner re-checked per delivery | ✅ PC-D1 rules (kill switch, protected, resolved target) | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → restart / recreate / compose up (each planned container decided) / Git deploy (then on the app owner) as root; server = the webhook's, or `local` (R1-06, same as the Test gate) | ⚠️ restart / recreate read back (R1-36); compose up and Git deploy ❌ (R1-37) | ✅ gateway AL (every delivery) + `WebhookLogs` | INV-42, 45, 57 |
-| S-05 | Git deploy (via S-04 or U-29) | U-29: the person; S-04: the app owner (R1-08) | owner re-checked each run | ✅ gateway (stored app, revision; S-04 via automation runner) | ❌ | ❌ | clone + compose up of the decided snapshot (planned, explicit `-p` / `-f`; every planned container decided — R1-07/08) | ❌ | ✅ gateway | INV-04, 20, 24, 41 (branch), 45 |
+| S-04 | Webhook `POST /api/webhooks/{id}` | Automation on behalf of the webhook owner (R1-09); ownerless or authority lost → refused, switched off + notified | ✅ HMAC + provider freshness rule + durable delivery dedup, serialized per target (R1-10) | ✅ owner re-checked per delivery | ✅ PC-D1 rules (kill switch, protected, resolved target) | none; a key-owned `Confirm` → Deny, no approval raised | automation runner → gateway → restart / recreate / compose up (each planned container decided) / Git deploy (then on the app owner) as root; server = the webhook's, or `local` (R1-06, same as the Test gate) | ✅ restart / recreate (R1-36) and compose up (R1-37) read back; Git deploy `NotVerifiable` + reason (R1-37) | ✅ gateway AL (every delivery) + `WebhookLogs` | INV-42, 45, 57 |
+| S-05 | Git deploy (via S-04 or U-29) | U-29: the person; S-04: the app owner (R1-08) | owner re-checked each run | ✅ gateway (stored app, revision; S-04 via automation runner) | ❌ | ❌ | clone + compose up of the decided snapshot (planned, explicit `-p` / `-f`; every planned container decided — R1-07/08) | `NotVerifiable` + reason (R1-37) | ✅ gateway | INV-04, 20, 24, 41 (branch), 45 |
 | S-06 | Health / log / CVE / cert monitors | system | — | — | — | — | no direct mutation; emits events → A-03 | — | — | INV-27 (event text → prompt) |
 | S-07 | VPN bootstrap at startup | system | — | — | — | — | `EnsureUpAsync` local | ❌ | ❌ log only | INV-41 (E-08), 45 |
 | S-08 | Retention purge of AuditLog + Agent History | system | — | — | — | — | after `Audit:RetentionDays` (default 365, at least 30), daily; both through the chain: the trail is verified first (nothing removed otherwise), an `audit.retention` event naming both counts, then the signed new start (R1-23) | — | ✅ (`audit.retention`) | — |
@@ -253,35 +253,35 @@ mTLS carries the server's diff.
 
 | ID | Handler | Role | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|
-| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ✅ Docker read back (R1-36); K8s ❌ (R1-37) | GW ✅ (R1-21) | INV-43 |
+| U-01 | Dashboard start/stop/restart (Docker and K8s) | Operator | ✅ Docker read back (R1-36); K8s `NotVerifiable` + reason (pods are replaced, R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-02 | Dashboard remove (force) | Admin | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43 |
 | U-03 | Dashboard update | Operator | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43, 53 |
 | U-04 | Dashboard rollback | Operator | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43, 53 |
 | U-05 | Container detail start/stop/restart/remove | Operator / Admin | ✅ read back (R1-36) | GW ✅ (R1-21) | INV-43 |
-| U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code | GW ✅ (R1-21) | INV-51 |
-| U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | ❌ | GW ✅ (R1-21) | — |
-| U-08 | Artisan migrate / rollback / SQL file / seed | Admin | ❌ | GW ✅ (R1-21) | — |
-| U-09 | Container detail DB backup | Admin | ❌ | GW ✅ (R1-21) | — |
-| U-10 | Deploy form / raw compose | **Admin** (WP1) | ⚠️ the form's container read back (R1-36); raw compose ❌ (R1-37) | GW ✅ (R1-21) | INV-43 |
+| U-06 | Container detail save `.env` + restart | Admin | ⚠️ exit code; `NotVerifiable` + reason (the process reads the .env, R1-37) | GW ✅ (R1-21) | INV-51 |
+| U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | `NotVerifiable` + reason (arbitrary SQL, R1-37) | GW ✅ (R1-21) | — |
+| U-08 | Artisan migrate / rollback / SQL file / seed | Admin | `NotVerifiable` + reason (arbitrary command, R1-37) | GW ✅ (R1-21) | — |
+| U-09 | Container detail DB backup | Admin | ✅ dump file on the host, not empty (R1-37) | GW ✅ (R1-21) | — |
+| U-10 | Deploy form / raw compose | **Admin** (WP1) | ✅ the form's container (R1-36); raw compose `NotVerifiable` + reason (no project name to read back, R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-11 | App store template / registry image | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
 | U-12 | Compose editor | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-13 | Networks create/remove | Admin | ❌ | GW ✅ (R1-21) | — (MCP admin since R1-05) |
-| U-14 | Firewall enable/disable UFW | Admin | ❌ | GW ✅ (R1-21) | — |
-| U-15 | Firewall rule add/remove (dialog submit has no page check; the gateway requires Admin for `firewall.rule_add` since R1-05) | Admin | ❌ | GW ✅ (R1-21) | INV-17 |
-| U-16 | Nginx save/enable/disable site | Admin | ⚠️ `nginx -t` | GW ✅ (R1-21) | INV-41 (E-03) |
-| U-17 | Nginx reload | Admin | ❌ | GW ✅ (R1-21) | — |
-| U-18 | Systemd start/stop/restart | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-19 | SSL certificate renew | Admin | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-13 | Networks create/remove | Admin | ✅ listed with its driver / no longer listed (R1-37) | GW ✅ (R1-21) | — (MCP admin since R1-05) |
+| U-14 | Firewall enable/disable UFW | Admin | ✅ `ufw status` read back (R1-37) | GW ✅ (R1-21) | — |
+| U-15 | Firewall rule add/remove (dialog submit has no page check; the gateway requires Admin for `firewall.rule_add` since R1-05) | Admin | ✅ add: `ufw show added` read back; remove: `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-17 |
+| U-16 | Nginx save/enable/disable site | Admin | ✅ `nginx -t`; the site file and the sites-enabled link read back (R1-37) | GW ✅ (R1-21) | INV-41 (E-03) |
+| U-17 | Nginx reload | Admin | ✅ nginx active after the reload (R1-37) | GW ✅ (R1-21) | — |
+| U-18 | Systemd start/stop/restart | Admin | ✅ `systemctl is-active` read back (R1-37) | GW ✅ (R1-21) | INV-43 |
+| U-19 | SSL certificate renew | Admin | ✅ certificate valid beyond the 30-day window (R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-20 | Servers add/update/delete (+ vault secrets: kubeconfig, cloud API key; SSH keys) | Admin | — | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
 | U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | GW ✅ (`server.onboard`; the switchover carries the server diff, R1-22) | INV-45 |
 | U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | — | GW ✅ (no page row since R1-22) | INV-17 |
-| U-23 | Cloud power / snapshot | Admin | ❌ | GW ✅ (R1-21) | INV-43, 52 |
-| U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-25 | Self-backup create / delete / restore / download | Admin | ✅ archive validation (R1-32) | GW ✅ (download: audited before the first byte, refused without its row — R1-22) | INV-55 |
+| U-23 | Cloud power / snapshot | Admin | ✅ power on / shut down read back, polled; reboot, reset, snapshot `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-43, 52 |
+| U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ✅ backup and delete read back; restore `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-43 |
+| U-25 | Self-backup create / delete / restore / download | Admin | ✅ archive validation (R1-32); create and delete read back, restore staged `NotVerifiable` + reason (R1-37) | GW ✅ (download: audited before the first byte, refused without its row — R1-22) | INV-55 |
 | U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | GW ✅ (R1-21) | INV-04 |
-| U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | `NotVerifiable` + reason for the outer call: "run now" answers with the run summary (R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | — | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09); since R1-22 the one gateway event per action, with a versioned diff, no page row | INV-04, 19 (test fires the real action at Operator) |
-| U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | ❌ | GW ✅ (R1-21) | INV-41 (branch), 46 |
+| U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | `NotVerifiable` + reason (the repository decides what is built, R1-37) | GW ✅ (R1-21) | INV-41 (branch), 46 |
 | U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | GW ✅ (`logalert.*`; create/toggle/delete carry a versioned diff, the pattern as text only — R1-22) | INV-27 |
 | U-31 | AI triggers save (prompt, preset, write grant) | Admin | — | GW ✅ (`aitrigger.save`; versioned diff, the prompt as text only — R1-22) | INV-23, 27, 28, 46 |
 | U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | — | GW ✅ | INV-28 |

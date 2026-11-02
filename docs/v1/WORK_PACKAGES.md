@@ -627,10 +627,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `VerificationOutcomeTests.Every_capability_declares_its_verification_contract` enumerates the full catalog.
-- [ ] Read-back tests cover representative host, cloud, DNS, network and backup failures.
-- [ ] Non-verifiable effects explicitly record `NotVerifiable` with a reason; absence of implementation is not success.
-- [ ] API-returned error strings, including cloud providers, become failed outcomes.
+- [x] `ReadBackVerificationTests.Every_capability_declares_its_verification_contract` enumerates the full catalog (the test lives with the R1-37 read-back tests).
+- [x] Read-back tests cover representative host, cloud, DNS, network and backup failures.
+- [x] Non-verifiable effects explicitly record `NotVerifiable` with a reason; absence of implementation is not success.
+- [x] API-returned error strings, including cloud providers, become failed outcomes.
 
 **Out of scope:** Promising semantic proof of arbitrary SQL/shell behavior.
 

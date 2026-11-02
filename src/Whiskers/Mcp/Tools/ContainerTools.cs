@@ -404,16 +404,17 @@ public class ContainerTools
         [Description("Environment variables to set as 'KEY=VALUE' pairs, comma-separated (e.g. 'OPENAI_API_KEY=sk-...,MODEL=gpt-4')")] string envVars,
         [Description("Server ID")] string? serverId = null)
     {
+        // R1-37: every refusal fails the operation; the text still goes back to the caller.
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "set_container_env");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
         if (string.IsNullOrWhiteSpace(containerId))
-            return "Container ID or name is required.";
+            return MutationScope.Fail("Container ID or name is required.");
         if (string.IsNullOrWhiteSpace(envVars))
-            return "Environment variables are required.";
+            return MutationScope.Fail("Environment variables are required.");
 
         var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
-        if (container is null) return resolveError ?? $"Container not found: {containerId}";
+        if (container is null) return MutationScope.Fail(resolveError ?? $"Container not found: {containerId}");
 
         var sid = serverId ?? "local";
         // The plan (R1-07): the merged .env for the container's project and every container `compose up` then

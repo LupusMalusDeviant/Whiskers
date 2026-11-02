@@ -76,15 +76,9 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<AuditRecovery>();
         services.AddSingleton<IAuditRecovery>(sp => sp.GetRequiredService<AuditRecovery>());
         services.AddHostedService(sp => sp.GetRequiredService<AuditRecovery>());
-        // R1-36 (INV-43/44): the read-backs of the container capabilities.
-        services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerStartVerifier>();
-        services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerStopVerifier>();
-        services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerRestartVerifier>();
-        services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerRemoveVerifier>();
-        services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerUpdateVerifier>();
-        services.AddSingleton<IMutationVerifier>(sp => new Whiskers.Services.Docker.ContainerCreateVerifier(sp));
-        services.AddSingleton<IMutationVerifier>(sp => new Whiskers.Services.Docker.ContainerCreateVerifier(sp, "app.deploy"));
-        services.AddSingleton<IMutationVerifier, Whiskers.Services.Docker.ContainerRollbackVerifier>();
+        // R1-36 / R1-37 (INV-43/44): the read-back of every capability whose contract declares one.
+        foreach (var verifier in MutationVerifiers.Factories)
+            services.AddSingleton(verifier);
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.
         services.AddScoped<IUiMutationRunner, UiMutationRunner>();

@@ -78,6 +78,11 @@ public sealed class MutationVerificationFailedException(string message, bool sta
     public bool StateUnknown { get; } = stateUnknown;
 }
 
+/// <summary>A verifier cannot read this particular call back (R1-37) — it named no subject, or its effect is not
+/// observable for this input. The outcome is <see cref="VerificationStatus.NotVerifiable"/> with this reason: recorded,
+/// never a success claim.</summary>
+public sealed class MutationNotVerifiableException(string reason) : InvalidOperationException(reason);
+
 /// <summary>
 /// Since WP2 step 2.1 every MCP tool call and every agent tool call that maps to a capability runs through here
 /// (<c>McpGuardrailFilter</c>, <c>AgentToolInvoker</c>). UI handlers, jobs, webhooks and terminals follow in steps
@@ -597,6 +602,7 @@ public sealed class MutationGateway : IMutationGateway
                 else
                 {
                     var (verification, problem, unknown) = await VerifyAsync(context, value, deadline.Token);
+                    var verificationNote = verification == VerificationStatus.NotVerifiable ? problem : null;
                     // R1-36 (INV-43/44): the call completed, but its effect is not there — never a success. The status
                     // says Failed, the verification says the call itself ran; the value is withheld so no caller can
                     // read it as the effect's result.
@@ -607,7 +613,7 @@ public sealed class MutationGateway : IMutationGateway
                                 $"'{capability.Id}' ran, but its effect could not be verified: {problem}", unknown),
                             approval?.ApprovalId)
                         : new MutationOutcome<T>(operationId, MutationStatus.Executed, value, null, verification,
-                            ApprovalId: approval?.ApprovalId);
+                            ApprovalId: approval?.ApprovalId) { VerificationNote = verificationNote };
                 }
             }
             catch (OperationCanceledException ex) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
@@ -641,8 +647,10 @@ public sealed class MutationGateway : IMutationGateway
         // 8: the outcome is recorded even when the caller has gone away (CancellationToken.None). The mutation has
         // already happened at this point, so a failed write must not hide its result from the caller; the intent
         // row stays as evidence that it ran, and the outcome is kept and written again (R1-19).
+        // An executed call that could not be verified carries why (R1-37) in the reason of its outcome row.
         await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, outcome.Status, outcome.Verification,
-            outcome.Reason, _time.GetElapsedTime(started), results), capability);
+            outcome.Reason ?? (outcome.VerificationNote is { } note ? $"Not verifiable: {note}" : null),
+            _time.GetElapsedTime(started), results), capability);
         return outcome with { DecisionId = request.DecisionId };
     }
 
@@ -667,11 +675,31 @@ public sealed class MutationGateway : IMutationGateway
         object? result, CancellationToken ct)
     {
         if (!_verifiers.TryGetValue(context.Capability.Id, out var verifier))
-            return (VerificationStatus.NotVerifiable, null, false);
+        {
+            // R1-37: the missing read-back is recorded with its reason, never as a success.
+            var contract = VerificationContracts.Find(context.Capability.Id);
+            return (VerificationStatus.NotVerifiable, contract switch
+            {
+                { Kind: VerificationKind.NotVerifiable } => contract.Reason,
+                { Kind: VerificationKind.ReadBack } => "its read-back is declared but no verifier is registered.",
+                _ => "no verification is declared for this capability.",
+            }, false);
+        }
         try
         {
             var status = await verifier.VerifyAsync(context, result, ct);
-            return (status, status == VerificationStatus.Failed ? "the read-back did not show it." : null, false);
+            return status switch
+            {
+                VerificationStatus.Failed => (status, "the read-back did not show it.", false),
+                VerificationStatus.NotVerifiable => (status, "the verifier could not read this call back.", false),
+                // A verifier has no other honest answer: NotRun from it would hide that nothing was checked.
+                VerificationStatus.NotRun => (VerificationStatus.NotVerifiable, "the verifier did not check this call.", false),
+                _ => (status, null, false),
+            };
+        }
+        catch (MutationNotVerifiableException notVerifiable)
+        {
+            return (VerificationStatus.NotVerifiable, notVerifiable.Message, false);
         }
         catch (MutationVerificationFailedException failed)
         {

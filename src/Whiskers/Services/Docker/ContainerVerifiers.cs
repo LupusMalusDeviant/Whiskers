@@ -20,7 +20,8 @@ public abstract class ContainerVerifier(IServiceProvider services) : IMutationVe
         var (container, serverId) = Subject(context, result);
         if (string.IsNullOrWhiteSpace(container))
         {
-            if (UnnamedIsNotVerifiable) return VerificationStatus.NotVerifiable;
+            if (UnnamedIsNotVerifiable)
+                throw new MutationNotVerifiableException("the call named no container to read back.");
             throw new MutationVerificationFailedException("the call named no container to read back.");
         }
         await CheckAsync(docker, container, serverId, ct);
