@@ -709,6 +709,12 @@ public sealed class BackupService : IBackupService
         catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
         {
             _logger.LogWarning("Restore refused: the database dump cannot be restored into this server ({Reason})", ex.Message);
+            // A script that committed on its own may have changed the database before it was caught: the safety
+            // backup taken just before holds the state from before.
+            if (ex.Message.Contains("ended its transaction early", StringComparison.Ordinal))
+                throw new BackupValidationException(
+                    "Backup archive's database script ended the dry run's transaction on its own and may have changed the " +
+                    "database: restore the pre-restore safety backup now.");
             throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
         }
     }

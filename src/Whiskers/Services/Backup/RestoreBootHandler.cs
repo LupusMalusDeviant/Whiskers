@@ -121,26 +121,33 @@ public static class RestoreBootHandler
     private static void RestoreDatabase(DataPathOptions dataPaths, string staging, IConfiguration? configuration,
         PostgresDumpTool? pgTools)
     {
-        // The app reads the database settings with the data directory's JSON layers on top (AddWhiskersConfiguration);
-        // the restore reads the same, before the swap replaces those files.
-        if (configuration is not null)
-            configuration = new ConfigurationBuilder()
-                .AddConfiguration(configuration)
-                .AddJsonFile(Path.GetFullPath(dataPaths.AgentSettingsJson), optional: true, reloadOnChange: false)
-                .AddJsonFile(Path.GetFullPath(dataPaths.AppSettingsJson), optional: true, reloadOnChange: false)
-                .Build();
         var dump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
         if (!File.Exists(dump))
             throw new InvalidOperationException("the restore was made on PostgreSQL but holds no database dump");
-        var (provider, connection) = configuration is null
-            ? ("", null)
-            : Whiskers.Services.Persistence.DatabaseRegistration.Resolve(configuration);
+        // The app reads the database settings with the data directory's JSON layers on top (AddWhiskersConfiguration).
+        // The restore writes into the database those settings name now, and the app opens the one they name after the
+        // swap (the archive's files): both must be the same database, or database and files would part again.
+        var live = configuration is null ? null : WithDataLayers(configuration, dataPaths.RootDir);
+        var (provider, connection) = live is null ? ("", null) : Whiskers.Services.Persistence.DatabaseRegistration.Resolve(live);
         if (provider != SelfBackupFormat.ProviderPostgres || string.IsNullOrWhiteSpace(connection))
             throw new InvalidOperationException("the restore holds a PostgreSQL database, but this start is not configured for PostgreSQL");
+        var afterSwap = Whiskers.Services.Persistence.DatabaseRegistration.Resolve(WithDataLayers(configuration!, staging));
+        if (afterSwap.Provider != provider || afterSwap.ConnectionString != connection)
+            throw new InvalidOperationException(
+                "the archive's settings files name another database than this start uses (Database:* in app-settings.json); " +
+                "configure the database through the environment (WHISKERS_DB_PROVIDER, WHISKERS_DB_CONNECTION)");
+        configuration = live;
         (pgTools ?? PostgresDumpTool.FromConfiguration(configuration)).RestoreAsync(connection, dump)
             .GetAwaiter().GetResult();
         Console.Out.WriteLine("[restore] The PostgreSQL database was restored from the archive.");
     }
+
+    private static IConfiguration WithDataLayers(IConfiguration configuration, string directory)
+        => new ConfigurationBuilder()
+            .AddConfiguration(configuration)
+            .AddJsonFile(Path.GetFullPath(Path.Combine(directory, "agent-settings.json")), optional: true, reloadOnChange: false)
+            .AddJsonFile(Path.GetFullPath(Path.Combine(directory, "app-settings.json")), optional: true, reloadOnChange: false)
+            .Build();
 
     private static void SwapStagingOverLive(DataPathOptions dataPaths, string staging)
     {

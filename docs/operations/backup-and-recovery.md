@@ -36,7 +36,9 @@ Give Whiskers a database of its own and a dedicated role that owns it, not a sup
 SQL with that role's rights; a superuser (or a member of `pg_execute_server_program`) could be made to run commands on
 the database host by a crafted archive, and without `VAULT_KEY` archives are not authenticated. The `public` schema
 must hold Whiskers' tables only: a restore drops everything in it, and the dump brings back only what Whiskers put
-there. Extensions a DBA installed into `public` must be installed again after a restore. Whiskers' tables must be in
+there. Extensions in `public`: one the role does not own (installed by a DBA or superuser) cannot be dropped with the
+schema, so the dry run refuses the restore; move it to another schema first (`ALTER EXTENSION … SET SCHEMA`). One
+the role owns is dropped with the schema and not recreated: install it again after the restore. Whiskers' tables must be in
 `public`: a backup whose dump does not hold them (for example because a `Search Path` in the connection string put
 them elsewhere) fails instead of writing an archive without the database.
 
@@ -70,8 +72,10 @@ An encrypted archive is safe to keep on another machine, because it is useless w
    - on SQLite, it opens the database and runs the migrations on a copy;
    - on PostgreSQL, it first takes the **pre-restore safety backup**, then reads the dump with `pg_restore` and does
      a dry run: it applies the dump to the database in a transaction and rolls the transaction back. The dry run
-     executes the archive's SQL with the role's rights; a script that ends the transaction on its own is detected
-     and the archive refused, and the safety backup holds the state from before in any case. Inside that transaction it also checks that the migration
+     executes the archive's SQL with the role's rights, so a crafted archive can change the database before it is
+     refused; the safety backup taken first is what holds the state from before. A script that ends the
+     transaction on its own is detected: the restore is refused with "ended its transaction early", and then you
+     restore the pre-restore safety backup at once. Inside that transaction it also checks that the migration
      histories match the archive's manifest, runs the migrations the next start would run, and reads every table and
      column this version uses. The database is locked while the dry run runs, so metric collection pauses for that
      time; on a large database that can take minutes. The dry run writes the whole dataset once and rolls it back:

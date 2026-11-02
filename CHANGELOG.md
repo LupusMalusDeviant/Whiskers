@@ -9,8 +9,9 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-33: **A backup of a PostgreSQL instance now holds the database.** The self-backup takes a `pg_dump` of the
   database together with the files, so one archive is one recovery point for sign-in accounts, scheduled tasks,
   webhooks, audit and settings alike. Before a restore is committed, Whiskers takes the pre-restore safety backup and
-  then applies the dump in a transaction and rolls it back (a dry run); a script that ends that transaction on its
-  own is detected and the archive refused. The restart then replaces the schema in one transaction, so the database is either the
+  then applies the dump in a transaction and rolls it back (a dry run). The dry run runs the archive's SQL, so the
+  safety backup is what protects the database from a crafted archive; a script that ends that transaction on its
+  own is also detected and the archive refused, with the advice to restore the safety backup. The restart then replaces the schema in one transaction, so the database is either the
   backup's or unchanged, never half of each. Backups of PostgreSQL instances from before this version hold the files
   only: the backup list marks them **files only** and Whiskers does not restore them, because the files would no
   longer match the database. The image ships the PostgreSQL 18 client tools; outside the image, set
@@ -19,7 +20,7 @@ All notable changes to Whiskers are documented here. The format follows
   that the migration histories match the manifest and that the next start's migrations run on the dump. The restore
   script goes from `pg_restore` straight to `psql` and never lands on disk, and it runs only with the meta-command
   protection of client tools 17.6 or newer, so a crafted dump cannot run shell commands. The role Whiskers connects
-  as must own the `public` schema and should not be a superuser. A backup whose dump does not hold Whiskers' tables
+  as must own the `public` schema (or, on PostgreSQL 15 and later, the database) and should not be a superuser. A backup whose dump does not hold Whiskers' tables
   (for example because a search path put them in another schema) fails instead of claiming the database. A restore
   commits only when the dump was read to its end without an error. On PostgreSQL the readiness check shows whether
   the client tools are usable.

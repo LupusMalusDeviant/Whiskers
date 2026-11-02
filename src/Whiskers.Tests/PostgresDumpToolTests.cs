@@ -69,16 +69,20 @@ public class PostgresDumpToolTests
             probe: "SELECT 1", commit: false);
         var lines = wrapped.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        Assert.Equal(["BEGIN;", "SET LOCAL lock_timeout = '60s';", "SELECT pg_catalog.txid_current() AS whiskers_xid \\gset",
-            "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[..5]);
+        Assert.Equal(["BEGIN;", "SET LOCAL lock_timeout = '60s';"], lines[..2]);
+        Assert.StartsWith("DO $check$", lines[2], StringComparison.Ordinal);
+        Assert.Equal(["SELECT pg_catalog.txid_current() AS whiskers_xid \\gset",
+            "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[3..6]);
         Assert.Single(lines, l => l.StartsWith("CREATE SCHEMA", StringComparison.Ordinal));   // the dump's own left out
         Assert.DoesNotContain("SET transaction_timeout = 0;", lines);                             // older servers lack it
         Assert.Contains(lines, l => l.Contains("set_config('transaction_timeout'", StringComparison.Ordinal));
         Assert.DoesNotContain("SET statement_timeout = 0;", lines);                               // bounded by the time limit
         Assert.Contains("SET statement_timeout = '1800000';", lines);
         // After the script: the same transaction or nothing more is committed.
-        Assert.Equal(["SELECT pg_catalog.txid_current() = :'whiskers_xid'::bigint AS whiskers_same \\gset", "\\if :whiskers_same",
-            "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^8..^2]);
+        // The comparison names nothing the script could shadow.
+        Assert.Equal(["SET search_path = pg_catalog;",
+            "SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \\gset",
+            "\\if :whiskers_same", "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^9..^2]);
         Assert.StartsWith("DO $guard$ BEGIN RAISE EXCEPTION", lines[^2], StringComparison.Ordinal);
         Assert.Equal("\\endif", lines[^1]);
         Assert.DoesNotContain("\r", wrapped);

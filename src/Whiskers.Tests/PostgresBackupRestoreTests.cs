@@ -312,6 +312,51 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         Assert.Equal(["deploy"], await db.Webhooks.Select(w => w.Name).ToListAsync());   // the dry run changed nothing
     }
 
+    [SkippableFact]
+    public async Task An_archive_from_an_older_schema_is_restored_and_brought_up_to_date_by_the_start()
+    {
+        await SkipUnlessReadyAsync();
+        using var live = await NewInstanceAsync(await CreateDatabaseAsync("older"));
+        // The database as the build before the newest migration left it.
+        using (var scope = live.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var applied = (await db.Database.GetAppliedMigrationsAsync()).ToList();
+            Assert.True(applied.Count >= 2);
+            await Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db).MigrateAsync(applied[^2]);
+        }
+        var info = await live.Service.CreateBackupAsync("manual");
+
+        await live.Service.BeginRestoreAsync(live.Service.ResolveArchivePath(info.Id)!, "tester");
+        NpgsqlConnection.ClearAllPools();
+        RestoreBootHandler.ApplyPendingRestore(live.Paths, live.Configuration);
+
+        using (var scope = live.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            Assert.Single(await db.Database.GetPendingMigrationsAsync());   // the archive's schema, one behind
+            await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
+            Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+            Assert.Empty(await db.Webhooks.ToListAsync());
+        }
+    }
+
+    [SkippableFact]
+    public async Task A_dump_missing_a_column_this_version_uses_is_refused_before_the_commit()
+    {
+        await SkipUnlessReadyAsync();
+        using var live = await NewInstanceAsync(await CreateDatabaseAsync("nocolumn"));
+        await SeedAsync(live);
+        // The histories are complete, but a mapped column is gone: the app would fail on its first read of webhooks.
+        await ExecuteAsync(live.Connection, "ALTER TABLE \"Webhooks\" DROP COLUMN \"Owner\"");
+        var info = await live.Service.CreateBackupAsync("manual");
+
+        var ex = await Assert.ThrowsAsync<BackupValidationException>(() =>
+            live.Service.BeginRestoreAsync(live.Service.ResolveArchivePath(info.Id)!, "tester"));
+        Assert.Contains("cannot be restored", ex.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(live.Paths.RestorePendingMarker));
+    }
+
     // The two tables a dump of Whiskers' database must hold (PostgresDumpTool.RequiredTables).
     private const string WhiskersHistories =
         "CREATE TABLE \"__EFMigrationsHistory\" (id int); CREATE TABLE \"__IdentityMigrationsHistory\" (id int); ";
@@ -368,17 +413,23 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         Assert.Equal("still here", await read.ExecuteScalarAsync());
     }
 
-    [SkippableFact]
-    public async Task A_script_that_ends_its_transaction_on_its_own_is_refused()
+    [SkippableTheory]
+    // A marker the script can reach (a setting) would survive its own COMMIT; the transaction id kept in a psql
+    // variable does not.
+    [InlineData("SELECT pg_catalog.set_config('whiskers.restore_tx', 'x', false);\nCOMMIT;\nBEGIN;\n")]
+    // An operator of its own that makes every bigint comparison true, found first through the search path it sets.
+    [InlineData("COMMIT;\nBEGIN;\n" +
+        "CREATE FUNCTION public.t(bigint, bigint) RETURNS boolean LANGUAGE sql AS 'SELECT true';\n" +
+        "CREATE OPERATOR public.= (LEFTARG = bigint, RIGHTARG = bigint, FUNCTION = public.t);\n" +
+        "SET search_path = public, pg_catalog;\n")]
+    public async Task A_script_that_ends_its_transaction_on_its_own_is_refused(string trick)
     {
         await SkipUnlessReadyAsync();
-        // What a crafted dump could print as an object's definition: its own COMMIT, then a new transaction. The marker
-        // a script can reach (a setting) would survive that; the transaction id kept in a psql variable does not.
+        // What a crafted dump could print as an object's definition: its own COMMIT, then a new transaction.
         var target = await CreateDatabaseAsync("hostile");
         var tools = new PostgresDumpTool(BinDir);
         const string honest = "\\restrict k1\nCREATE TABLE t (id int);\n\\unrestrict k1\n";
-        const string hostile = "\\restrict k2\nCREATE TABLE t (id int);\n" +
-            "SELECT pg_catalog.set_config('whiskers.restore_tx', 'x', false);\nCOMMIT;\nBEGIN;\n\\unrestrict k2\n";
+        var hostile = "\\restrict k2\nCREATE TABLE t (id int);\n" + trick + "\\unrestrict k2\n";
 
         await tools.ApplyScriptAsync(target, honest, commit: false);   // the same transaction: accepted, rolled back
         var ex = await Assert.ThrowsAsync<PostgresToolException>(() => tools.ApplyScriptAsync(target, hostile, commit: false));

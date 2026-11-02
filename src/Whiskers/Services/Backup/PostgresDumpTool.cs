@@ -182,9 +182,15 @@ public sealed class PostgresDumpTool
         // The drop takes every table's lock: a session that still holds one makes it fail after a minute instead of
         // waiting for the whole timeout.
         await psql.WriteLineAsync("SET LOCAL lock_timeout = '60s';");
+        // A killed psql (time limit, cancellation) must not leave its statement running under the schema's locks: the
+        // server checks the connection every 10 s (PostgreSQL 14+ on Linux; elsewhere the setting is refused and skipped).
+        await psql.WriteLineAsync(
+            "DO $check$ BEGIN PERFORM pg_catalog.set_config('client_connection_check_interval', '10000', false); " +
+            "EXCEPTION WHEN OTHERS THEN NULL; END $check$;");
         // The transaction's id, kept in a psql variable before the script runs. A script restricted by \restrict cannot
         // set psql variables, so a crafted dump that ends the transaction early (its own COMMIT) cannot hide it: the id
-        // after the script differs, and nothing more is committed.
+        // after the script differs, and nothing more is committed. This detects such a script; what it changed before is
+        // undone only by the pre-restore safety backup, which the caller takes first.
         await psql.WriteLineAsync(@"SELECT pg_catalog.txid_current() AS whiskers_xid \gset");
         await psql.WriteLineAsync("DROP SCHEMA IF EXISTS public CASCADE;");
         await psql.WriteLineAsync("CREATE SCHEMA public;");
@@ -232,7 +238,11 @@ public sealed class PostgresDumpTool
         if (last is null || !last.StartsWith(@"\unrestrict ", StringComparison.Ordinal))
             throw new PostgresToolException(@"The restore script ended before its end (\unrestrict): the dump is incomplete.");
 
-        await psql.WriteLineAsync(@"SELECT pg_catalog.txid_current() = :'whiskers_xid'::bigint AS whiskers_same \gset");
+        // The comparison names nothing the script could have created: the script may own functions, operators and types
+        // in public and set the search path, so the search path is pg_catalog alone and operator and type are qualified.
+        await psql.WriteLineAsync("SET search_path = pg_catalog;");
+        await psql.WriteLineAsync(
+            @"SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \gset");
         await psql.WriteLineAsync(@"\if :whiskers_same");
         if (probeSql is not null)
         {
@@ -253,7 +263,7 @@ public sealed class PostgresDumpTool
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(_timeout);
         using var process = Start(tool, connectionString, arguments, stdin: false);
-        var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var stdout = ReadBoundedAsync(process, timeout.Token);
         var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
         try { await process.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
@@ -267,6 +277,27 @@ public sealed class PostgresDumpTool
         if (process.ExitCode != 0)
             throw new PostgresToolException($"{tool} failed (exit code {process.ExitCode}): {Tail(errors)}");
         return output;
+    }
+
+    // The output of the tools run this way (a version line, a dump's table of contents) is small; a crafted archive with
+    // millions of entries must not fill the app's memory: more than 16 Mi characters stops the tool.
+    private const int MaxOutputChars = 16 << 20;
+
+    private static async Task<string> ReadBoundedAsync(Process process, CancellationToken ct)
+    {
+        var output = new StringBuilder();
+        var buffer = new char[81920];
+        int read;
+        while ((read = await process.StandardOutput.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            if (output.Length + read > MaxOutputChars)
+            {
+                Kill(process);
+                throw new PostgresToolException($"The tool's output exceeds {MaxOutputChars / (1 << 20)} Mi characters.");
+            }
+            output.Append(buffer, 0, read);
+        }
+        return output.ToString();
     }
 
     private Process Start(string tool, string? connectionString, IReadOnlyList<string> arguments, bool stdin)
@@ -313,15 +344,16 @@ public sealed class PostgresDumpTool
             throw new PostgresToolException(
                 "The connection string names several hosts or a host with a port; the backup needs one host in Host and the port in Port.");
         var env = start.Environment;
-        // Without a password in the connection string, Npgsql reads PGPASSWORD / PGPASSFILE: the tools may too.
+        // Without a user or password in the connection string, Npgsql reads PGUSER / PGPASSWORD / PGPASSFILE: the tools may too.
         var inheritedPassword = string.IsNullOrEmpty(builder.Password) ? (env.TryGetValue("PGPASSWORD", out var pw) ? pw : null) : null;
         var inheritedPassfile = env.TryGetValue("PGPASSFILE", out var pf) ? pf : null;
+        var inheritedUser = string.IsNullOrEmpty(builder.Username) && env.TryGetValue("PGUSER", out var pu) ? pu : null;
         // Nothing else from the parent's libpq environment may point the tools elsewhere.
         foreach (var key in env.Keys.Where(k => k.StartsWith("PG", StringComparison.Ordinal)).ToList()) env.Remove(key);
         Set("PGHOST", builder.Host);
         Set("PGPORT", builder.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Set("PGDATABASE", builder.Database);
-        Set("PGUSER", builder.Username);
+        Set("PGUSER", string.IsNullOrEmpty(builder.Username) ? inheritedUser : builder.Username);
         Set("PGPASSWORD", string.IsNullOrEmpty(builder.Password) ? inheritedPassword : builder.Password);
         Set("PGPASSFILE", builder.Passfile ?? inheritedPassfile);
         Set("PGSSLMODE", builder.SslMode switch

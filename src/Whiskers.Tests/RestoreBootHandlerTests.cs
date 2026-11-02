@@ -400,12 +400,41 @@ public class RestoreBootHandlerTests
         try
         {
             StagePostgresRestore(p);
-            File.WriteAllText(p.AppSettingsJson,
-                "{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=w;Username=u;Password=unused\"}}");
+            const string settings =
+                "{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=w;Username=u;Password=unused\"}}";
+            File.WriteAllText(p.AppSettingsJson, settings);
+            File.WriteAllText(Path.Combine(p.RestoreStagingDir, "app-settings.json"), settings);   // the archive's copy
             var config = new ConfigurationBuilder().Build();
 
             Assert.Throws<PostgresToolException>(() =>
                 RestoreBootHandler.ApplyPendingRestore(p, config, new PostgresDumpTool(Path.Combine(root, "no-such-bin"))));
+            Assert.True(File.Exists(p.RestorePendingMarker));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Theory]
+    [InlineData("{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=other;Username=u;Password=unused\"}}")]
+    [InlineData(null)]   // no settings file in the archive: after the swap the app would not be on this database
+    public void A_postgres_restore_whose_archive_settings_name_another_database_is_not_applied(string? archived)
+    {
+        // The restore writes into the database this start names; after the swap the archive's settings files decide
+        // which database the app opens. Both must be the same, or database and files part.
+        var p = NewRoot(out var root);
+        try
+        {
+            StagePostgresRestore(p);
+            File.WriteAllText(p.AppSettingsJson,
+                "{\"Database\":{\"Provider\":\"postgres\",\"ConnectionString\":\"Host=127.0.0.1;Database=w;Username=u;Password=unused\"}}");
+            if (archived is not null) File.WriteAllText(Path.Combine(p.RestoreStagingDir, "app-settings.json"), archived);
+            var config = new ConfigurationBuilder().Build();
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                RestoreBootHandler.ApplyPendingRestore(p, config, new PostgresDumpTool(Path.Combine(root, "no-such-bin"))));
+
+            Assert.Contains("another database", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("unused", ex.Message, StringComparison.Ordinal);
+            Assert.Equal("OLD", File.ReadAllText(p.RolesJson));
             Assert.True(File.Exists(p.RestorePendingMarker));
         }
         finally { Cleanup(root); }
