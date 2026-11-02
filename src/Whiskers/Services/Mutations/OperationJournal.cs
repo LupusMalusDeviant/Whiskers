@@ -66,6 +66,10 @@ public sealed class DbOperationJournal : IOperationJournal
 {
     internal const string Running = "Running", Executed = "Executed", Failed = "Failed", Released = "Released";
 
+    /// <summary>R1-39: a <c>Running</c> claim of an earlier process, marked at the next start. Like a running one of
+    /// another process, its outcome is unknown and it never runs again.</summary>
+    internal const string Interrupted = "Interrupted";
+
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
 
@@ -159,6 +163,8 @@ public sealed class DbOperationJournal : IOperationJournal
                 return existing.Instance.StartsWith(ProcessInstance + "/", StringComparison.Ordinal)
                     ? OperationClaimResult.AlreadyRunning
                     : OperationClaimResult.OutcomeUnknown;
+            case Interrupted:
+                return OperationClaimResult.OutcomeUnknown;
             default:
                 return OperationClaimResult.AlreadyRun;
         }

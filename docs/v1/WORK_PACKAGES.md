@@ -657,10 +657,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `MutationShutdownTests` covers shutdown during recreate, backup and scheduled command.
-- [ ] Startup reconciles incomplete operations without blindly repeating destructive work.
-- [ ] Nightly occurrence state survives restart; task history distinguishes interruption from success.
-- [ ] Graceful shutdown drains bounded work and documents forced-stop behavior.
+- [x] `MutationShutdownTests` covers shutdown during recreate, backup and scheduled command.
+- [x] Startup reconciles incomplete operations without blindly repeating destructive work.
+- [x] Nightly occurrence state survives restart; task history distinguishes interruption from success.
+- [x] Graceful shutdown drains bounded work and documents forced-stop behavior.
 
 **Out of scope:** Guaranteeing completion after host power loss.
 

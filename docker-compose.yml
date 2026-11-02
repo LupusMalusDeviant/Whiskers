@@ -112,6 +112,9 @@ services:
       # the inline connection string (the *_FILE value wins over the plain one):
       #   - WHISKERS_DB_CONNECTION_FILE=/run/secrets/whiskers_db_conn
     restart: unless-stopped
+    # R1-39: on stop Whiskers waits up to 30 s for running unattended work (an update, a backup, a scheduled
+    # command) and then stops its services (45 s in all). Docker's default of 10 s would kill it mid-way.
+    stop_grace_period: 60s
     # Health: the image ships a HEALTHCHECK (curl http://localhost:8080/healthz) so `docker ps` shows
     # health status and compose can gate `depends_on` on it. Its start period (5 min) covers an upgrade's
     # pre-upgrade backup + DB migrations; for a large database, override it here, e.g.:

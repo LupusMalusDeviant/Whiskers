@@ -58,6 +58,8 @@ public sealed class ImageUpdateModule : IWhiskersModule
         services.Configure<AutoPatchSettings>(config.GetSection("AutoPatch"));
         services.AddSingleton<Whiskers.Services.AutoPatch.IAutoPatchRunner,
                               Whiskers.Services.AutoPatch.ScriptAutoPatchRunner>();
+        // R1-39: the nightly cycle's day survives a restart (no second run, an interrupted one is reported).
+        services.AddSingleton<Whiskers.Services.AutoPatch.IAutoPatchNightlyStore, Whiskers.Services.AutoPatch.AutoPatchNightlyStore>();
         services.AddSingletonWithInterfaceAndHostedService<Whiskers.Services.AutoPatch.AutoPatchService,
                                                            Whiskers.Services.AutoPatch.IAutoPatchService>();
     }

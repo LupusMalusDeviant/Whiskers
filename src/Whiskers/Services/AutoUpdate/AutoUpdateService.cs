@@ -24,6 +24,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     private readonly IAutomationOwnerStore _owners;
     // R1-31 (INV-52): a snapshot holds the container's environment, so it is stored encrypted with a vault-derived key.
     private readonly Whiskers.Services.Vault.IVaultService? _vault;
+    private readonly Whiskers.Services.Mutations.IShutdownDrain _drain;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
@@ -36,9 +37,11 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         IAutomationMutationRunner automation,
         IAutomationOwnerStore owners,
         ILogger<AutoUpdateService> logger,
-        Whiskers.Services.Vault.IVaultService? vault = null)
+        Whiskers.Services.Vault.IVaultService? vault = null,
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
     {
         _vault = vault;
+        _drain = drain ?? Whiskers.Services.Mutations.NoShutdownDrain.Instance;
         _automation = automation;
         _owners = owners;
         _scopeFactory = scopeFactory;
@@ -60,8 +63,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             var success = true;
             try
             {
-                // WaitAsync bounds the cycle to shutdown: RecreateContainerAsync pulls an image and can
-                // run for minutes with no cancellation token, so abandon it on stop rather than block.
+                // R1-39: on stop the shutdown drain first waits (bounded) for the update in progress — no new one starts —
+                // and only then is stoppingToken cancelled. What still runs then (a recreate has no cancellation token)
+                // is cut off here: a forced stop, reported as interrupted at the next start, never repeated blindly.
                 await CheckAndUpdateAsync(stoppingToken).WaitAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -121,6 +125,12 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 await db.SaveChangesAsync(ct);
                 continue;
             }
+
+            // R1-39: once Whiskers is stopping no update starts; one that runs is waited for by the shutdown drain.
+            // A policy left here keeps its LastChecked unsaved, so it is checked again after the restart.
+            using var draining = _drain.TryEnter($"auto-update of '{container.Name}'");
+            if (draining is null)
+                break;
 
             _logger.LogInformation("Auto-update triggered for {Container} (opt-in policy)", container.Name);
 

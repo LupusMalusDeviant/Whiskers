@@ -23,6 +23,19 @@ All notable changes to Whiskers are documented here. The format follows
   deployment app name is now unique (case-insensitive), also when saved on the page. Switching off one of these tools
   in Settings → MCP also stops the matching action on the Git deploy and Webhooks pages.
 
+- R1-39: **A stop lets running work finish; what a hard stop cuts off is reported, not repeated.** When Whiskers
+  stops, no scheduled task, AutoUpdate or AutoPatch container is started any more, and what is already running gets
+  up to 30 s to finish (the host's shutdown budget is now 45 s; Compose `stop_grace_period` and Helm
+  `terminationGracePeriodSeconds` are 60 s so the container is not killed first). A task that falls due during the
+  stop stays due and runs once after the restart. Every scheduled run is on record before it starts; a run that a
+  forced stop, a kill or a crash cut off is marked at the next start as failed with "INTERRUPTED: … whether it took
+  effect is unknown. It was not run again." — in the task history and as the task's last result. Operations that were
+  still running in the operation journal become `Interrupted`: a retry under their id stays refused as "outcome
+  unknown" and their audit intent is settled as unknown. Admins get one notification (`operations_interrupted`)
+  naming what was cut off, so they can check the targets. The AutoPatch night is kept in `autopatch-nightly.json`: a
+  restart in the window hour does not run the night twice, and a night that was cut off shows as interrupted on the
+  AutoPatch page (not restored from a self-backup).
+
 - R1-38: **Nothing waits without end.** An AI provider that sends no response, stops sending in the middle of an
   answer or trickles on for too long is cut off (60 s for the response to start, 90 s between two lines, 10 min for
   the whole answer) and the run ends with a timeout message instead of hanging. An unattended AI-trigger run ends after

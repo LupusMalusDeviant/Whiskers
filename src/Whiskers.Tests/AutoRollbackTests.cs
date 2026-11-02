@@ -51,8 +51,16 @@ public sealed class AutoRollbackTests : IDisposable
             try { if (File.Exists(f)) File.Delete(f); } catch { /* temp file */ }
     }
 
-    private async Task<AutoUpdateService> ServiceAsync(bool autoRollback, bool vault = true)
+    internal VerificationOutcomeTests.StatefulDocker Docker => _docker;
+
+    internal IServiceScopeFactory Scopes => _sp.GetRequiredService<IServiceScopeFactory>();
+
+    /// <summary>The service with an opt-in policy for "web"; with <paramref name="second"/> also one for a second
+    /// container of that name (checked after "web"), which has an update too.</summary>
+    internal async Task<AutoUpdateService> ServiceAsync(bool autoRollback, bool vault = true, IShutdownDrain? drain = null,
+        string? second = null)
     {
+        const string SecondId = "dddddddddddd4444";
         using (var scope = _sp.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -62,17 +70,38 @@ public sealed class AutoRollbackTests : IDisposable
                 AutoRollback = autoRollback, NotifyBeforeUpdate = false,
             });
             await db.SaveChangesAsync();
+            if (second is not null)
+            {
+                db.UpdatePolicies.Add(new UpdatePolicyEntity
+                {
+                    ContainerId = SecondId, ContainerName = second, ServerId = "local", AutoUpdate = true,
+                    AutoRollback = autoRollback, NotifyBeforeUpdate = false,
+                });
+                await db.SaveChangesAsync();
+            }
         }
         var updates = new Updates();
         updates.Items.Add(new ImageUpdateInfo
         {
             ContainerId = OldId, ContainerName = "web", ServerId = "local", UpdateAvailable = true, RemoteDigest = "sha256:new",
         });
+        if (second is not null)
+        {
+            updates.Items.Add(new ImageUpdateInfo
+            {
+                ContainerId = SecondId, ContainerName = second, ServerId = "local", UpdateAvailable = true, RemoteDigest = "sha256:new2",
+            });
+            _docker.On[nameof(IDockerService.ListAllContainersAsync)] = _ => Task.FromResult<IList<ContainerInfo>>(
+            [
+                new ContainerInfo { Id = OldId, Name = "web", ServerId = "local", Image = "nginx:latest", State = "running" },
+                new ContainerInfo { Id = SecondId, Name = second, ServerId = "local", Image = "api:latest", State = "running" },
+            ]);
+        }
         var owners = new MemoryAutomationOwners();
         await owners.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com");
         return new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(), _service, updates,
             new FakeNotifications(), null!, Runner(), owners, NullLogger<AutoUpdateService>.Instance,
-            vault ? TestVault.Usable : null) { HealthDelay = TimeSpan.Zero };
+            vault ? TestVault.Usable : null, drain) { HealthDelay = TimeSpan.Zero };
     }
 
     private AutomationMutationRunner Runner()
@@ -122,7 +151,7 @@ public sealed class AutoRollbackTests : IDisposable
 
     /// <summary>The recreate brings up a running container; the inspects after it answer with <paramref name="later"/>
     /// (the first one is the gateway's read-back, the second the health check after the wait).</summary>
-    private void UpdateThatLaterReads(Func<int, Task<(string, int, bool)>> later)
+    internal void UpdateThatLaterReads(Func<int, Task<(string, int, bool)>> later)
     {
         FailingUpdate();
         _docker.On[nameof(IDockerService.RecreateContainerAsync)] = _ =>

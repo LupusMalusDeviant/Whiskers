@@ -46,6 +46,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// <summary>How long a preview started from a tool may run: a dry run pulls one image per candidate.</summary>
     public static readonly TimeSpan PreviewDeadline = TimeSpan.FromHours(2);
     private DateOnly? _lastNightlyRun;
+    private bool _nightlyLoaded;
+    private readonly IAutoPatchNightlyStore _nightly;
+    private readonly Whiskers.Services.Mutations.IShutdownDrain _drain;
 
     public AutoPatchService(
         IOptionsMonitor<AutoPatchSettings> settings,
@@ -57,9 +60,11 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         IServiceScopeFactory scopeFactory,
         IAutomationMutationRunner automation,
         IAutomationOwnerStore owners,
-        ILogger<AutoPatchService> logger)
+        ILogger<AutoPatchService> logger,
+        IAutoPatchNightlyStore? nightly = null,
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
         : this(settings, docker, cves, updates, runner, notifications, scopeFactory, automation, owners, logger,
-            () => DateTime.UtcNow) { }
+            () => DateTime.UtcNow, nightly, drain) { }
 
     internal AutoPatchService(
         IOptionsMonitor<AutoPatchSettings> settings,
@@ -72,7 +77,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         IAutomationMutationRunner automation,
         IAutomationOwnerStore owners,
         ILogger<AutoPatchService> logger,
-        Func<DateTime> utcNow)
+        Func<DateTime> utcNow,
+        IAutoPatchNightlyStore? nightly = null,
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
     {
         _automation = automation;
         _owners = owners;
@@ -85,9 +92,14 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         _scopeFactory = scopeFactory;
         _logger = logger;
         _utcNow = utcNow;
+        _nightly = nightly ?? new InMemoryAutoPatchNightlyStore();
+        _drain = drain ?? Whiskers.Services.Mutations.NoShutdownDrain.Instance;
     }
 
     public AutoPatchCycleReport? LastCycle { get; private set; }
+
+    /// <summary>The day of the last nightly cycle, as <see cref="IsDue"/> sees it. Internal for tests.</summary>
+    internal DateOnly? LastNightlyRun => _lastNightlyRun;
 
     public bool IsRunning => Volatile.Read(ref _running) == 1;
 
@@ -97,17 +109,57 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             try
             {
+                if (!_nightlyLoaded) await LoadNightlyAsync();
                 if (IsDue(_settings.CurrentValue, _utcNow(), _lastNightlyRun))
-                {
-                    _lastNightlyRun = DateOnly.FromDateTime(_utcNow());
-                    await RunNightlyAsync(ct);
-                }
+                    await RunNightlyRecordedAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex) { _logger.LogError(ex, "Auto-patch cycle failed"); }
 
             try { await Task.Delay(Tick, ct); }
             catch (OperationCanceledException) { break; }
+        }
+    }
+
+    /// <summary>R1-39: the night's day comes from disk, so a restart in the window hour does not run it again; a cycle
+    /// that started and never ended was cut off, which the status shows. Internal for tests.</summary>
+    internal async Task LoadNightlyAsync()
+    {
+        var state = await _nightly.LoadAsync();
+        _lastNightlyRun = state.Day;
+        _nightlyLoaded = true;
+        if (state is { StartedAt: { } started, CompletedAt: null })
+        {
+            LastCycle ??= new(started, null, state.DryRun, [], [],
+                "Interrupted: Whiskers stopped while this nightly cycle ran. Containers it had not reached were not " +
+                "patched; it was not run again that night.");
+            _logger.LogWarning("The nightly auto-patch cycle started {Started:u} was interrupted by a stop", started);
+        }
+    }
+
+    /// <summary>The nightly cycle with its day, start and end on disk. The day is written first: a cycle that is cut
+    /// off is not repeated the same night. Internal for tests.</summary>
+    internal async Task RunNightlyRecordedAsync(CancellationToken ct)
+    {
+        var now = _utcNow();
+        _lastNightlyRun = DateOnly.FromDateTime(now);
+        var state = new AutoPatchNightlyState { Day = _lastNightlyRun, StartedAt = now, DryRun = _settings.CurrentValue.DryRun };
+        await SaveNightlyAsync(state);
+        await RunNightlyAsync(ct);
+        state.CompletedAt = _utcNow();
+        await SaveNightlyAsync(state);
+    }
+
+    private async Task SaveNightlyAsync(AutoPatchNightlyState state)
+    {
+        try
+        {
+            await _nightly.SaveAsync(state);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The night still runs once in this process (the day is in memory); only a restart would not know.
+            _logger.LogError(ex, "The nightly auto-patch state could not be saved");
         }
     }
 
@@ -315,6 +367,13 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             if (ct.IsCancellationRequested) break;
             var c = candidate.Container;
+            // R1-39: once Whiskers is stopping, no further container is started; the one in progress is drained.
+            using var draining = _drain.TryEnter($"auto-patch of '{c.Name}'");
+            if (draining is null)
+            {
+                LastCycle = LastCycle! with { Error = $"Stopped before {c.Name}: Whiskers is shutting down." };
+                break;
+            }
             var startedAt = _utcNow();
 
             AutoPatchOutcome outcome;

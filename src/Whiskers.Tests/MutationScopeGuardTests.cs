@@ -116,6 +116,7 @@ public class MutationScopeGuardTests
         services.AddSingleton(new Whiskers.Configuration.DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-di-" + Guid.NewGuid().ToString("N"))));
         services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
         services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, Whiskers.Services.Auth.WhitelistService>();
+        services.AddSingleton<Whiskers.Services.Notifications.INotificationService, Whiskers.Services.Notifications.NoopNotificationService>();   // the interrupted-work report (R1-39)
     }
 
     [Fact]
