@@ -189,6 +189,68 @@ public class ReadBackVerificationTests
         else AssertFailed(outcome);
     }
 
+    [Theory]
+    [InlineData("10.0.0.0/24", "10.0.0.5/24", true)]     // ufw clears the host bits
+    [InlineData("2001:db8::1", "2001:DB8::1", true)]     // and lower-cases IPv6
+    [InlineData("10.0.0.0/24", "10.0.0.5/16", false)]
+    [InlineData("10.0.0.1", "10.0.0.2", false)]
+    [InlineData("10.0.0.1", "10.0.0.1/32", true)]        // a host is its /32
+    public void A_source_is_compared_as_ufw_lists_it(string listed, string asked, bool same) =>
+        Assert.Equal(same, FirewallRuleAddVerifier.SameSource(listed, asked));
+
+    [Theory]
+    [InlineData(0, "server { listen 80; }\n", true, false)]
+    [InlineData(0, "server { listen 81; }", false, false)]
+    [InlineData(1, "", false, false)]   // no file: the effect is not there
+    [InlineData(2, "", false, true)]    // no answer
+    public async Task An_nginx_site_file_must_hold_the_written_configuration(int exit, string onDisk, bool verified,
+        bool stateUnknown)
+    {
+        var gateway = Gateway(HostReads(("cat '/etc/nginx/sites-available/blog'", exit, onDisk)));
+
+        var outcome = await gateway.ExecuteAsync(Request("nginx.update",
+            new { serverId = "srv1", siteName = "blog", content = "server { listen 80; }" }, Host()), (_, _) => Task.FromResult("saved"));
+
+        if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+        else AssertFailed(outcome, stateUnknown);
+    }
+
+    private static IServiceProvider Certificates(params (string Name, int Days)[] certs)
+    {
+        var (ssl, script) = Scripted<ISslCertService>.Create();
+        script.On[nameof(ISslCertService.ListCertificatesAsync)] = _ => Task.FromResult(certs
+            .Select(c => new SslCertificate { CertName = c.Name, ExpiresAt = DateTime.UtcNow.AddDays(c.Days).AddHours(1) }).ToList());
+        return new ServiceCollection().AddSingleton(ssl).BuildServiceProvider();
+    }
+
+    [Theory]
+    [InlineData("blog", 89, true)]
+    [InlineData("blog", 12, false)]   // certbot did not renew it
+    [InlineData("ALL", 89, true)]     // the tool takes "all" in any case
+    [InlineData("all", 12, false)]
+    public async Task A_renewed_certificate_must_be_valid_beyond_the_renewal_window(string certName, int days, bool verified)
+    {
+        var gateway = Gateway(Certificates(("blog", days)));
+
+        var outcome = await gateway.ExecuteAsync(Request("ssl.renew", new { serverId = "srv1", certName }, Host()),
+            (_, _) => Task.FromResult("SSL renewal succeeded."));
+
+        if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+        else AssertFailed(outcome);
+    }
+
+    [Fact]
+    public async Task Renewing_all_on_a_host_without_certificates_is_not_verifiable_not_failed()
+    {
+        var gateway = Gateway(Certificates());
+
+        var outcome = await gateway.ExecuteAsync(Request("ssl.renew", new { serverId = "srv1", certName = "all" }, Host()),
+            (_, _) => Task.FromResult("SSL renewal succeeded."));
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(VerificationStatus.NotVerifiable, outcome.Verification);
+    }
+
     [Fact]
     public void Inactive_is_not_read_as_active() => Assert.False(FirewallService.Parse("Status: inactive\n").Active);
 
@@ -261,6 +323,21 @@ public class ReadBackVerificationTests
 
         if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
         else AssertFailed(outcome);
+    }
+
+    [Theory]
+    [InlineData("TXT", "\"v=spf1 -all\"", "v=spf1 -all")]   // a provider that lists TXT quoted
+    [InlineData("AAAA", "2001:DB8::1", "2001:db8::1")]      // another spelling of the same address
+    [InlineData("CNAME", "Target.Example.org.", "target.example.org")]
+    public async Task A_record_the_provider_lists_in_its_own_spelling_is_verified(string type, string listed, string written)
+    {
+        var gateway = Gateway(Dns(() => [new DnsRecord("1", "blog", type, listed, 300)]));
+
+        var outcome = await gateway.ExecuteAsync(Request("dns.record_set",
+            new { zone = "example.org", name = "blog", type, value = written }, new MutationTarget("dns-zone", "example.org")),
+            (_, _) => Task.FromResult("Angelegt"));
+
+        Assert.Equal(VerificationStatus.Verified, outcome.Verification);
     }
 
     [Fact]
@@ -437,6 +514,89 @@ public class ReadBackVerificationTests
 
         Assert.Equal(MutationStatus.Executed, outcome.Status);
         Assert.Equal(VerificationStatus.NotVerifiable, outcome.Verification);
+    }
+
+    // ---- compose ----
+
+    private static ContainerInfo Member(string name, string state, string status) => new()
+    {
+        Name = name, State = state, Status = status, Labels = new() { ["com.docker.compose.project"] = "shop" },
+    };
+
+    private static IServiceProvider Containers(params ContainerInfo[] containers)
+    {
+        var (docker, script) = Scripted<IDockerService>.Create();
+        script.On[nameof(IDockerService.ListContainersAsync)] = _ => Task.FromResult<IList<ContainerInfo>>(containers.ToList());
+        return new ServiceCollection().AddSingleton(docker).BuildServiceProvider();
+    }
+
+    [Theory]
+    [InlineData("exited", "Exited (0) 3 seconds ago", true)]   // a one-shot migration that ran to completion
+    [InlineData("exited", "Exited (1) 3 seconds ago", false)]
+    [InlineData("restarting", "Restarting (1)", false)]
+    public async Task Every_container_of_a_deployed_project_must_run(string state, string status, bool verified)
+    {
+        var gateway = Gateway(Containers(Member("shop-web-1", "running", "Up 3 seconds"), Member("shop-migrate-1", state, status)));
+
+        var outcome = await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName = "Shop" }, Host("host")),
+            (_, _) => Task.FromResult("deployed"));
+
+        if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+        else AssertFailed(outcome);
+    }
+
+    [Theory]
+    [InlineData("${APP_NAME}")]   // an interpolated name is recorded as its expression
+    [InlineData("my shop")]       // compose would rewrite it
+    public async Task A_project_name_that_is_no_compose_label_is_not_verifiable_never_failed(string projectName)
+    {
+        var gateway = Gateway(Containers(Member("shop-web-1", "running", "Up")));
+
+        var outcome = await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName }, Host("host")),
+            (_, _) => Task.FromResult("deployed"));
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(VerificationStatus.NotVerifiable, outcome.Verification);
+    }
+
+    // ---- Hetzner ----
+
+    [Fact]
+    public async Task A_server_Hetzner_no_longer_finds_fails_at_once_with_the_state_unknown()
+    {
+        var (cloud, script) = Scripted<ICloudControlService>.Create();
+        var reads = 0;
+        script.On[nameof(ICloudControlService.HetznerContextAsync)] = _ =>
+        {
+            reads++;
+            return Task.FromResult<(string, Whiskers.Models.Hetzner.HetznerServer)?>(null);
+        };
+        var sp = new ServiceCollection().AddSingleton(cloud).BuildServiceProvider();
+        var gateway = Gateway(sp, new HetznerFlagVerifier(sp, "hetzner.rescue_enable", TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1)));
+
+        var outcome = await gateway.ExecuteAsync(Request("hetzner.rescue_enable", new { server = "web" }, new MutationTarget("server", "web")),
+            (_, _) => Task.FromResult("Rescue enabled"));
+
+        AssertFailed(outcome, stateUnknown: true);
+        Assert.Equal(1, reads);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Rescue_mode_must_be_reported_on(bool reported, bool verified)
+    {
+        var (cloud, script) = Scripted<ICloudControlService>.Create();
+        script.On[nameof(ICloudControlService.HetznerContextAsync)] = _ =>
+            Task.FromResult<(string, Whiskers.Models.Hetzner.HetznerServer)?>(("token", new() { RescueEnabled = reported }));
+        var sp = new ServiceCollection().AddSingleton(cloud).BuildServiceProvider();
+        var gateway = Gateway(sp, new HetznerFlagVerifier(sp, "hetzner.rescue_enable", TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(1)));
+
+        var outcome = await gateway.ExecuteAsync(Request("hetzner.rescue_enable", new { server = "web" }, new MutationTarget("server", "web")),
+            (_, _) => Task.FromResult("Rescue enabled"));
+
+        if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+        else AssertFailed(outcome);
     }
 
     // ---- tools that answer with an error text ----

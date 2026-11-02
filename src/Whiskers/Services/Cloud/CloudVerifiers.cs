@@ -86,7 +86,8 @@ public sealed class HetznerFlagVerifier(IServiceProvider services, string capabi
                 var ctx = await ReadAsync(() => cloud.HetznerContextAsync(name), "Hetzner");
                 return ctx is { } c ? read(c.server) : (bool?)null;
             },
-            s => s == want, Budget, Interval, ct);
+            // A server Hetzner no longer finds will not come back by waiting.
+            s => s == want || s is null, Budget, Interval, ct);
         if (state is null)
             throw new MutationVerificationFailedException($"'{name}' is no longer found at Hetzner.", stateUnknown: true);
         if (state != want)

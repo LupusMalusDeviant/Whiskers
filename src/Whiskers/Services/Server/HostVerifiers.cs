@@ -34,6 +34,26 @@ public sealed partial class FirewallRuleAddVerifier(IServiceProvider services) :
                 $"ufw lists no '{action}' rule for {port}/{protocol}{(from is null ? "" : $" from {from}")}.");
     }
 
+    /// <summary>ufw lists a source as it normalised it: an IPv6 address lower-cased, a network with its host bits cleared
+    /// (<c>10.0.0.5/24</c> → <c>10.0.0.0/24</c>). Compared as addresses; anything that is no address, as text.</summary>
+    internal static bool SameSource(string listed, string asked)
+    {
+        if (Network(listed) is { } a && Network(asked) is { } b)
+            return a.Prefix == b.Prefix && a.Address.Equals(b.Address);
+        return string.Equals(listed, asked, StringComparison.OrdinalIgnoreCase);
+
+        static (System.Net.IPAddress Address, int Prefix)? Network(string text)
+        {
+            var slash = text.IndexOf('/');
+            if (!System.Net.IPAddress.TryParse(slash < 0 ? text : text[..slash], out var ip)) return null;
+            var bits = ip.GetAddressBytes();
+            var prefix = bits.Length * 8;
+            if (slash >= 0 && (!int.TryParse(text[(slash + 1)..], out prefix) || prefix < 0 || prefix > bits.Length * 8)) return null;
+            for (var bit = prefix; bit < bits.Length * 8; bit++) bits[bit / 8] &= (byte)~(0x80 >> (bit % 8));
+            return (new System.Net.IPAddress(bits), prefix);
+        }
+    }
+
     /// <summary>A line of <c>ufw show added</c> (<c>ufw allow 80/tcp</c>, <c>ufw allow from 10.0.0.1 to any port 22
     /// proto tcp</c>) that holds the rule.</summary>
     internal static bool Matches(string line, string action, string port, string protocol, string? from)
@@ -45,7 +65,7 @@ public sealed partial class FirewallRuleAddVerifier(IServiceProvider services) :
         if (from is not null)
         {
             var i = Array.IndexOf(tokens, "from");
-            if (i < 0 || i + 1 >= tokens.Length || tokens[i + 1] != from) return false;
+            if (i < 0 || i + 1 >= tokens.Length || !SameSource(tokens[i + 1], from)) return false;
             var p = Array.IndexOf(tokens, "port");
             if (p < 0 || p + 1 >= tokens.Length || tokens[p + 1] != port) return false;
             var proto = Array.IndexOf(tokens, "proto");
@@ -87,9 +107,15 @@ public sealed partial class NginxUpdateVerifier(IServiceProvider services) : Ser
         var site = NginxSite(context);
         var content = VerifierSupport.Arg(context, "content")
                       ?? throw new MutationNotVerifiableException("the call carried no configuration to compare.");
-        var written = await VerifierSupport.HostOutputAsync(Services, server,
+        var read = await VerifierSupport.HostReadAsync(Services, server,
             $"cat {ShellUtils.Quote($"/etc/nginx/sites-available/{site}")}", ct);
-        if (Normalize(written) != Normalize(content))
+        // cat answers 1 for a missing file: the effect is not there. Anything else is no answer.
+        if (read.ExitCode == 1)
+            throw new MutationVerificationFailedException($"site '{site}' has no file in sites-available.");
+        if (!read.Success)
+            throw new MutationVerificationFailedException(
+                $"the site file could not be read (exit code {read.ExitCode}: {VerifierSupport.FirstLine(read.Error)}).", stateUnknown: true);
+        if (Normalize(read.Output) != Normalize(content))
             throw new MutationVerificationFailedException($"the file of site '{site}' does not hold the written configuration.");
     }
 
@@ -205,8 +231,11 @@ public sealed class SslRenewVerifier(IServiceProvider services) : ServiceVerifie
     {
         var server = RequireServer(context);
         var name = VerifierSupport.Arg(context, "certName");
-        var all = string.IsNullOrWhiteSpace(name) || name == "all";
+        // The tool takes "all" in any case, as renew_ssl_certificate does.
+        var all = string.IsNullOrWhiteSpace(name) || string.Equals(name, "all", StringComparison.OrdinalIgnoreCase);
         var certs = await Services.GetRequiredService<ISslCertService>().ListCertificatesAsync(server);
+        if (certs.Count == 0 && all)
+            throw new MutationNotVerifiableException("certbot manages no certificate on this host: there was nothing to renew.");
         if (certs.Count == 0)
             throw new MutationVerificationFailedException("certbot listed no certificate.", stateUnknown: true);
         var renewed = all ? certs : certs.Where(c => c.CertName == name).ToList();

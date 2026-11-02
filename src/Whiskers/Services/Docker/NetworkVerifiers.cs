@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Whiskers.Models;
 using Whiskers.Services.Mutations;
 
@@ -91,7 +92,7 @@ public sealed class NetworkAttachVerifier(IServiceProvider services, bool connec
 /// <summary>compose.deploy: every container of the compose project exists and runs (a one-shot container may have exited
 /// with 0). Calls that name no project — a page's nested calls per colliding container or for its mounts — are not
 /// verifiable on their own: the deployment they belong to is.</summary>
-public sealed class ComposeDeployVerifier(IServiceProvider services) : ServiceVerifier(services)
+public sealed partial class ComposeDeployVerifier(IServiceProvider services) : ServiceVerifier(services)
 {
     public override string CapabilityId => "compose.deploy";
 
@@ -100,6 +101,10 @@ public sealed class ComposeDeployVerifier(IServiceProvider services) : ServiceVe
         var project = VerifierSupport.Arg(context, "projectName");
         if (string.IsNullOrWhiteSpace(project))
             throw new MutationNotVerifiableException("the call named no compose project to read back.");
+        // An interpolated name is recorded as its expression (never its value), and compose rewrites names outside its
+        // charset: neither is the label to look for.
+        if (!ComposeProjectName().IsMatch(project))
+            throw new MutationNotVerifiableException("the project name is not the one compose labels its containers with.");
         var server = RequireServer(context);
         // Compose lower-cases the project name it labels its containers with.
         var containers = (await Services.GetRequiredService<IDockerService>().ListContainersAsync(true, server, ct))
@@ -111,6 +116,10 @@ public sealed class ComposeDeployVerifier(IServiceProvider services) : ServiceVe
         if (down is not null)
             throw new MutationVerificationFailedException($"container '{down.Name}' of '{project}' is '{down.Status}'.");
     }
+
+    // Compose project names: letters (compose lower-cases them), digits, dash and underscore, starting with a letter or digit.
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_-]*$")]
+    private static partial Regex ComposeProjectName();
 
     private static bool Up(ContainerInfo c) =>
         string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase)

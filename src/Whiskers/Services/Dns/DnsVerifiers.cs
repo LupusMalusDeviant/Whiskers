@@ -53,7 +53,8 @@ public sealed class DnsRecordVerifier(IServiceProvider services, bool set) : Ser
         {
             throw new MutationNotVerifiableException($"the call named no valid value to compare ({ex.Message}).");
         }
-        if (!matching.Any(r => string.Equals(r.Value.TrimEnd('.'), value.TrimEnd('.'), StringComparison.OrdinalIgnoreCase)))
+        // The same provider-tolerant equality the service uses to answer "unchanged" (quoted TXT, IP spellings).
+        if (!matching.Any(r => DnsRecordService.ValuesEqual(type, r.Value, value)))
             throw new MutationVerificationFailedException(matching.Count == 0
                 ? $"{name} {type} is not listed in '{zone}'."
                 : $"{name} {type} in '{zone}' holds '{matching[0].Value}', not '{value}'.");

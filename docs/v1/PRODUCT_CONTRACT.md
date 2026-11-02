@@ -163,7 +163,7 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | `NotVerifiable` + reason (ufw renumbers after a delete, R1-37) | GW ✅ + details | 43 |
 | M-11 | `update_nginx_config` | **admin** (R1-05; was write) | ✅ `nginx -t` pre-check; the site file read back (R1-37) | GW ✅ + details | 41 (E-03) |
 | M-12 | `manage_systemd_service` | **admin** (R1-05; was write) | ✅ `systemctl is-active` / `is-enabled` read back (R1-37) | GW ✅ + details | 43 |
-| M-13 | `renew_ssl_certificate` | admin (R1-05) | ✅ certificate valid beyond the 30-day window read back (R1-37) | GW ✅ + details | INV-43 |
+| M-13 | `renew_ssl_certificate` | admin (R1-05) | ✅ certificate valid for at least 29 more days (certbot's 30-day renewal window, one day of slack) read back (R1-37) | GW ✅ + details | INV-43 |
 | M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service; `NotVerifiable` + reason (R1-37) | GW ✅ + details | INV-58 |
 | M-15 | `execute_query` | **admin** (PC-D3) | `NotVerifiable` + reason (arbitrary SQL, R1-37) | GW ✅ | INV-19 (PC-D3), 24, 43 |
 | M-16 | `backup_database` | admin (R1-05) | ✅ dump file on the host, not empty (R1-37) | GW ✅ + details | INV-43 |
@@ -173,8 +173,8 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-20 | `remove_network` | **admin** (R1-05; was write) | ✅ no longer listed (R1-37) | GW ✅ + details | — |
 | M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ✅ container attached (R1-37) | GW ✅ | — |
 | M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ✅ container no longer attached (R1-37) | GW ✅ | — |
-| M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | n/a | GW ✅ + details | INV-04 |
-| M-24 | `delete_scheduled_task` | write | n/a | GW ✅ + details | — |
+| M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ + details | INV-04 |
+| M-24 | `delete_scheduled_task` | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ + details | — |
 | M-25 | `run_scheduled_task` | write; **effective admin** for the stored task's CustomCommand, SelfBackup, DB backup or retention, resolved before the caller check and the approval (R1-05) | `NotVerifiable` + reason (the task's own capability is verified, R1-37) | GW ✅ + details | INV-24 (policy sees only `taskId`), 30, 43 |
 | M-26 | `cloud_power_on` | **admin** (R1-05; was write) | ✅ provider reports running, polled (R1-37) | GW ✅ | INV-43, 52 |
 | M-27 | `cloud_shutdown` | **admin** (R1-05; was write) | ✅ provider reports off, polled (R1-37) | GW ✅ | 43, 52 |
@@ -187,10 +187,10 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-34 | `hetzner_disable_backups` (deletes backups) | **admin** (R1-05; was write) | ✅ Hetzner reports no backup window, polled (R1-37) | GW ✅ | 52 |
 | M-35 | `hetzner_change_server_type` | **admin** (R1-05; was write) | ⚠️ the action's error status fails the call; the resize itself `NotVerifiable` + reason (R1-37) | GW ✅ | 43, 52 |
 | M-36 | `hetzner_delete_snapshot` (irreversible) | **admin** (R1-05; was write) | ✅ Hetzner no longer finds the image (R1-37) | GW ✅ | 52 |
-| M-37 | `create_log_alert` (feeds AI triggers) | write | n/a | GW ✅ | INV-27, 46 |
-| M-38 | `pause_server_checks` | write | n/a | GW ✅ | — |
-| M-39 | `resume_server_checks` | write | n/a | GW ✅ | — |
-| M-40 | `preview_auto_patch` (pulls images) | write | n/a | GW ✅ | — |
+| M-37 | `create_log_alert` (feeds AI triggers) | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ | INV-27, 46 |
+| M-38 | `pause_server_checks` | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ | — |
+| M-39 | `resume_server_checks` | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ | — |
+| M-40 | `preview_auto_patch` (pulls images) | write | `NotVerifiable` + reason (a preview changes no container, R1-37) | GW ✅ | — |
 | M-41 | `instruct_agent` → agent run | read | per tool | per tool | INV-08 (in-flight run survives key revocation) |
 
 ### 7.2 Agent paths
@@ -271,22 +271,22 @@ mTLS carries the server's diff.
 | U-16 | Nginx save/enable/disable site | Admin | ✅ `nginx -t`; the site file and the sites-enabled link read back (R1-37) | GW ✅ (R1-21) | INV-41 (E-03) |
 | U-17 | Nginx reload | Admin | ✅ nginx active after the reload (R1-37) | GW ✅ (R1-21) | — |
 | U-18 | Systemd start/stop/restart | Admin | ✅ `systemctl is-active` read back (R1-37) | GW ✅ (R1-21) | INV-43 |
-| U-19 | SSL certificate renew | Admin | ✅ certificate valid beyond the 30-day window (R1-37) | GW ✅ (R1-21) | INV-43 |
-| U-20 | Servers add/update/delete (+ vault secrets: kubeconfig, cloud API key; SSH keys) | Admin | — | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
+| U-19 | SSL certificate renew | Admin | ✅ certificate valid for at least 29 more days (certbot's 30-day renewal window, one day of slack) (R1-37) | GW ✅ (R1-21) | INV-43 |
+| U-20 | Servers add/update/delete (+ vault secrets: kubeconfig, cloud API key; SSH keys) | Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
 | U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | GW ✅ (`server.onboard`; the switchover carries the server diff, R1-22) | INV-45 |
-| U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | — | GW ✅ (no page row since R1-22) | INV-17 |
+| U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (no page row since R1-22) | INV-17 |
 | U-23 | Cloud power / snapshot | Admin | ✅ power on / shut down read back, polled; reboot, reset, snapshot `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-43, 52 |
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ✅ backup and delete read back; restore `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-25 | Self-backup create / delete / restore / download | Admin | ✅ archive validation (R1-32); create and delete read back, restore staged `NotVerifiable` + reason (R1-37) | GW ✅ (download: audited before the first byte, refused without its row — R1-22) | INV-55 |
-| U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | — | GW ✅ (R1-21) | INV-04 |
+| U-26 | Scheduled tasks create / toggle / delete | create + delete: catalog level (Operator), then the gateway's effective level per task type (R1-05); toggle / take over: Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (R1-21) | INV-04 |
 | U-27 | Scheduled task "Run now" | Operator; custom command, self-backup, DB backup and retention **Admin** (WP2; gateway resolves the same per task since R1-05) | `NotVerifiable` + reason for the outer call: "run now" answers with the run summary (R1-37) | GW ✅ (R1-21) | INV-43 |
-| U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | — | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09); since R1-22 the one gateway event per action, with a versioned diff, no page row | INV-04, 19 (test fires the real action at Operator) |
+| U-28 | Webhooks create / take over / regenerate / toggle / delete / test | Admin; test = Operator | `NotVerifiable` + reason (Whiskers' own record, R1-37) | ✅ gateway (`webhook.*` on the stored webhook; create records the owner; test decided as the person, then runs as the owner — R1-09); since R1-22 the one gateway event per action, with a versioned diff, no page row | INV-04, 19 (test fires the real action at Operator) |
 | U-29 | Git-deploy app save / delete; deploy | Admin; deploy **Admin** (R1-05, root-equivalent; was Operator) | `NotVerifiable` + reason (the repository decides what is built, R1-37) | GW ✅ (R1-21) | INV-41 (branch), 46 |
-| U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | — | GW ✅ (`logalert.*`; create/toggle/delete carry a versioned diff, the pattern as text only — R1-22) | INV-27 |
-| U-31 | AI triggers save (prompt, preset, write grant) | Admin | — | GW ✅ (`aitrigger.save`; versioned diff, the prompt as text only — R1-22) | INV-23, 27, 28, 46 |
-| U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | — | GW ✅ | INV-28 |
+| U-30 | Log-alert rules (Log search, AI triggers page) | Operator / Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (`logalert.*`; create/toggle/delete carry a versioned diff, the pattern as text only — R1-22) | INV-27 |
+| U-31 | AI triggers save (prompt, preset, write grant) | Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (`aitrigger.save`; versioned diff, the prompt as text only — R1-22) | INV-23, 27, 28, 46 |
+| U-32 | Guardrail policy edit / preset switch / kill switch (`guardrails.save`, `guardrails.kill_switch_off` since R1-11; the kill switch refuses every save but switching it off) | Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ | INV-28 |
 | U-33 | Approvals approve / reject | approve **and** reject (same rules since R1-15, INV-37): level ≥ the operation's **effective** level (the tool level, raised per call by R1-05 — e.g. Admin for a scheduled custom command or DB backup); a requester never decides their own non-interactive request, and decides an interactive one only while `RequireSecondApprover` is off (PC-D4); not after expiry | — | ✅ (R1-15: `ApprovalSeparationOfDutyTests`, `ApprovalStoreTests`) | — (INV-31 closed by R1-14; INV-32, 33, 34, 37 by R1-15) |
-| U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | — | GW ✅ (versioned, redacted diff; no page row since R1-22) | INV-15, 16 |
+| U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11) | Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (versioned, redacted diff; no page row since R1-22) | INV-15, 16 |
 
 Reading the trail is not a mutation and not counted above, but it is governed (R1-23, INV-50): the Audit log and Agent
 History pages and the audit rows of the Self status timeline are Admin only; `GET /audit/export` is Admin only, records

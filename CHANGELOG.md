@@ -9,7 +9,7 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-37: **Every change says what was checked afterwards.** Each capability now declares how its effect is verified:
   a read-back, or "not verifiable" with a reason that the outcome and the audit row carry. Read back after the call
   are compose deployments (every container of the project runs), networks, firewall rules and the ufw status, nginx
-  site files and links, nginx and systemd unit states, renewed certificates (valid beyond certbot's 30-day window),
+  site files and links, nginx and systemd unit states, renewed certificates (valid for at least 29 more days: certbot's 30-day renewal window with a day of slack),
   DNS records at the provider, cloud power on / shutdown and Hetzner rescue and backup settings (polled until the
   provider shows them, within the deadline), deleted Hetzner images, and database, volume and self-backups with their
   deletes and retention. An effect that is not there fails the operation; a read-back that cannot be made fails it
