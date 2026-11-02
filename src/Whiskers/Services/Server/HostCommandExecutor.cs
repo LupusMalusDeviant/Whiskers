@@ -14,6 +14,9 @@ public class HostCommandExecutor : IHostCommandExecutor
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>R1-38 (INV-40): a command stopped by its caller may already have changed something.</summary>
+    internal const string CancelledMessage = "Command cancelled — its effect is unknown";
+
     // Cap how much we buffer per stream so a runaway command (e.g. `cat` on a huge file) can't OOM
     // the process. Output beyond this is drained but discarded, with a marker appended.
     // Callers that read a DOCUMENT rather than a log (a scanner report, an inventory) can raise this per
@@ -91,6 +94,11 @@ public class HostCommandExecutor : IHostCommandExecutor
             // R1-38: the caller's token reaches the helper container, which is killed when it fires.
             var (output, error, exitCode) = await _docker.RunHostShellAsync(command, serverId, timeout, ct);
             return new CommandResult { ExitCode = exitCode, Output = output, Error = error };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Host command via Docker cancelled on {ServerId}", serverId);
+            return new CommandResult { ExitCode = -1, Error = CancelledMessage };
         }
         catch (Exception ex)
         {
@@ -223,7 +231,7 @@ public class HostCommandExecutor : IHostCommandExecutor
                 }
 
                 _logger.LogWarning("Command cancelled: {FileName}", fileName);
-                return new CommandResult { ExitCode = -1, Error = "Command cancelled" };
+                return new CommandResult { ExitCode = -1, Error = CancelledMessage };
             }
         }
         catch (Exception ex)

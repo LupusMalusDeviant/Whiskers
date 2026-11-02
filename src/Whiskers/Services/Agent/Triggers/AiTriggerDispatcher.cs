@@ -150,12 +150,16 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             var session = await agentService.StartSessionAsync(ctx);
             var sb = new StringBuilder();
             using var deadline = new CancellationTokenSource(RunDeadline);
+            var completed = false;
             try
             {
                 await foreach (var ev in session.SendAsync(BuildTaskMessage(t, evt), ct: deadline.Token))
                 {
                     switch (ev)
                     {
+                        case AgentEvent.TurnCompleted:
+                            completed = true;
+                            break;
                         case AgentEvent.AssistantDelta d:
                             sb.Append(d.Text);
                             break;
@@ -179,7 +183,8 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             {
                 sb.Append($"\n[Error] {ex.Message}");
             }
-            if (deadline.IsCancellationRequested)
+            // A run that finished its turn just as the deadline fired was not cut off.
+            if (deadline.IsCancellationRequested && !completed)
             {
                 // A tool that was running got the cancellation; whether it had already changed something is in
                 // its own audit entry, so the summary says that instead of guessing.

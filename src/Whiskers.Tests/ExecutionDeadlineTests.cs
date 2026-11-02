@@ -99,6 +99,22 @@ public class ExecutionDeadlineTests
         Assert.True(body.Disposed);
     }
 
+    [Fact]
+    public async Task An_error_body_that_never_arrives_still_fails_the_call_with_its_status()
+    {
+        var body = new DripStream([], gap: TimeSpan.Zero, hangAfterwards: true);
+        var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)
+        {
+            Content = new StreamContent(body),
+        }));
+        var provider = Provider(handler, new ProviderTimeouts(Wait, Short, Wait));
+
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(() => Drain(provider)).WaitAsync(Wait);
+
+        Assert.Contains("502", ex.Message);
+        Assert.True(body.Disposed);
+    }
+
     // ---- Unattended trigger runs -------------------------------------------
 
     [Fact]
@@ -121,6 +137,20 @@ public class ExecutionDeadlineTests
         await dispatcher.OnEventAsync(Event("c4"));
         await notify.Next(Wait);
         Assert.Equal(4, agents.Started);
+    }
+
+    [Fact]
+    public async Task A_run_that_ends_quietly_on_its_deadline_is_still_reported_as_timed_out()
+    {
+        var agents = new HangingAgents(quiet: true);
+        var notify = new CapturingNotify();
+        var dispatcher = TriggerDispatcher(agents, notify, Short);
+
+        await dispatcher.OnEventAsync(Event("c1"));
+        var summary = await notify.Next(Wait);
+
+        Assert.Equal(1, agents.Cancelled);
+        Assert.Contains("timed out", summary);
     }
 
     // ---- Advisor chat ------------------------------------------------------
@@ -380,9 +410,11 @@ public class ExecutionDeadlineTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
-    /// <summary>Every run's session waits for its token and counts the cancellations.</summary>
-    private sealed class HangingAgents : IAgentService
+    /// <summary>Every run's session waits for its token and counts the cancellations. A <paramref name="quiet"/> session
+    /// ends without throwing on the cancellation, as <see cref="AgentSession"/> does between two tool calls.</summary>
+    private sealed class HangingAgents(bool quiet = false) : IAgentService
     {
+        private readonly bool _quiet = quiet;
         private int _started, _cancelled;
         public int Started => Volatile.Read(ref _started);
         public int Cancelled => Volatile.Read(ref _cancelled);
@@ -408,7 +440,11 @@ public class ExecutionDeadlineTests
             {
                 yield return new AgentEvent.AssistantDelta("checking …");
                 try { await Task.Delay(Timeout.Infinite, ct); }
-                catch (OperationCanceledException) { Interlocked.Increment(ref owner._cancelled); throw; }
+                catch (OperationCanceledException)
+                {
+                    Interlocked.Increment(ref owner._cancelled);
+                    if (!owner._quiet) throw;
+                }
             }
 
             public Task ResolveConfirmationAsync(string operationId, bool approved, CancellationToken ct = default) =>

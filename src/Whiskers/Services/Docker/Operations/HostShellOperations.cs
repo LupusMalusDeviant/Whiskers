@@ -98,7 +98,7 @@ internal sealed class HostShellOperations
             {
                 try { await client.Containers.KillContainerAsync(id, new ContainerKillParameters(), CancellationToken.None); } catch { /* best effort */ }
                 return ("", ct.IsCancellationRequested
-                    ? "Command cancelled"
+                    ? "Command cancelled — its effect is unknown"
                     : $"Command timed out after {effectiveTimeout.TotalSeconds}s", -1);
             }
 
