@@ -322,12 +322,13 @@ public sealed class HelpContentService : IHelpContentService
                     Wiederherstellung auf einem neuen Host.
                     """),
                 new("Updates", """
-                    Bringt eine neue Version Schema-Migrationen mit, legt Whiskers vor der ersten Migration ein
-                    Backup **pre-upgrade-…** der Datenbank im alten Stand an. Scheitert dieses Backup, bricht der
-                    Start ab, bevor etwas migriert ist. Die geplante Backup-Aufbewahrung löscht diese Backups nicht;
-                    die neuesten drei bleiben. Scheitert eine Migration, nennt das Log das Backup; zurück geht es ohne
-                    Oberfläche mit `--restore-backup latest-pre-upgrade`. Ein **Downgrade** ist immer die vorige
-                    Version auf diesem Backup — siehe `docs/operations/backup-and-recovery.md`.
+                    Startet eine neue Version auf deinen Daten, legt Whiskers zuerst ein Backup **pre-upgrade-…**
+                    der Datenbank und der Dateien an, so wie die vorige Version sie hinterlassen hat. Scheitert dieses
+                    Backup, bricht der Start ab, bevor etwas geändert ist. Die geplante Backup-Aufbewahrung löscht
+                    diese Backups nicht; die neuesten drei bleiben. Scheitert eine Migration, nennt das Log das
+                    Backup, und weitere Starts behalten es; zurück geht es ohne Oberfläche mit
+                    `--restore-backup latest-pre-upgrade --for-previous-release`. Ein **Downgrade** ist immer die
+                    vorige Version auf diesem Backup — siehe `docs/operations/backup-and-recovery.md`.
                     """),
                 new("Beschädigte Einstellungsdateien", """
                     Whiskers behält von jeder Einstellungsdatei (Rollen, Whitelist, Vault, Server,

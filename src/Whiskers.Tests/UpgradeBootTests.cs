@@ -78,6 +78,15 @@ public sealed class UpgradeBootTests
             });
             Assert.Equal(latest, Applied(paths.DbPath)[^1]);
             Assert.NotEqual(before, Applied(paths.DbPath));
+            Assert.False(File.Exists(paths.UpgradePendingMarker));        // the upgrade finished
+
+            // The next start of the same release is no upgrade: no second backup.
+            await BootAsync(dataDir, async factory =>
+            {
+                using var client = factory.CreateClient();
+                Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/healthz")).StatusCode);
+                Assert.Single(await factory.Services.GetRequiredService<IBackupService>().ListBackupsAsync());
+            });
         }
         finally
         {

@@ -6,22 +6,27 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-- R1-34: **An upgrade starts from a recovery point.** When a new release finds schema migrations to run on an existing
-  database, it first takes a self-backup labelled `pre-upgrade-…` of the database as it was, then migrates. When that
-  backup cannot be taken (no space, a wrong `VAULT_KEY`, missing PostgreSQL client tools), the start stops before any
-  migration with the database unchanged; `WHISKERS_UPGRADE_SKIP_BACKUP=true` migrates without one and says so in the
-  log. The scheduled backup retention no longer deletes pre-upgrade backups; the newest three are kept
-  (`WHISKERS_UPGRADE_KEEP_BACKUPS`). A failed migration logs which backup to restore. The restore needs no running UI:
-  `--restore-backup <id>` (or `--restore-backup latest-pre-upgrade`) stages a backup through the same checks as the
-  Settings panel and exits; the next start applies it. A **downgrade** is the previous release started on the restored
-  pre-upgrade backup — an older release does not run on a database a newer one migrated. The Helm startup probe now
-  allows five minutes (`probes.startup.*`, with readiness and liveness configurable too), and the image's health check
-  waits five minutes on a starting container. The one-time SQLite → PostgreSQL transfer (`--migrate-to-postgres`) now
-  copies all tables and the sign-in accounts in one transaction: a failure leaves the target empty, so the transfer
-  can simply run again. The container now hands command-line options to Whiskers (it dropped them before), so
-  `docker compose run --rm serverwatch --restore-backup …` and `--migrate-to-postgres` work in the image; these runs
-  skip the VPN bring-up. Tests now catch a model change without a migration, and a migration shipped for only one of
-  the two databases.
+- R1-34: **An upgrade starts from a recovery point.** When another release starts on an existing database (a new
+  version, or schema migrations to run), it first takes a self-backup labelled `pre-upgrade-…` — right after the vault
+  checked `VAULT_KEY` and before anything rewrites data in a newer format (server list, credential move into the
+  vault, key ring, database schema), so it holds the state the previous release left (only `vault.json` may already
+  carry the vault's key check). When that backup cannot be taken (no space, a wrong `VAULT_KEY`, missing PostgreSQL
+  client tools), the start stops with nothing changed; `WHISKERS_UPGRADE_SKIP_BACKUP=true` upgrades without one and
+  says so in the log, and an invalid value of an upgrade setting stops the start before any backup. An upgrade whose
+  migration failed stays unfinished: the next starts keep its backup instead of taking new ones of the half-migrated
+  state, and it is never pruned. The scheduled backup retention no longer deletes pre-upgrade backups; the newest three
+  are kept (`WHISKERS_UPGRADE_KEEP_BACKUPS`). A failed migration logs which backup to restore. The restore needs no
+  running UI: `--restore-backup <id>` (or `latest-pre-upgrade`, the backup of the unfinished upgrade) stages a backup
+  through the same checks as the Settings panel and exits; the next start applies it. A **downgrade** is the previous
+  release started on the pre-upgrade backup, staged with `--for-previous-release` (this release's migrations are then
+  not run on the archive, since they may be what fails) — an older release does not run on a database a newer one
+  migrated. The Helm startup probe now allows five minutes (`probes.startup.*`, with readiness and liveness
+  configurable too), and the image's health check waits five minutes on a starting container. The one-time SQLite →
+  PostgreSQL transfer (`--migrate-to-postgres`) now copies all tables and the sign-in accounts in one transaction: a
+  failure leaves the target empty, so the transfer can simply run again. The container now hands command-line options
+  to Whiskers (it dropped them before), so `docker compose run --rm serverwatch --restore-backup …` and
+  `--migrate-to-postgres` work in the image, after the same VPN bring-up as a normal start. Tests now catch a model
+  change without a migration, and a migration shipped for only one of the two databases.
 - R1-33: **A backup of a PostgreSQL instance now holds the database.** The self-backup takes a `pg_dump` of the
   database together with the files, so one archive is one recovery point for sign-in accounts, scheduled tasks,
   webhooks, audit and settings alike. Before a restore is committed, Whiskers takes the pre-restore safety backup and

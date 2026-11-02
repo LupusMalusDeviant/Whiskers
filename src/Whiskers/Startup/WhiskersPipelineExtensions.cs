@@ -557,14 +557,11 @@ public static class WhiskersPipelineExtensions
         // Bring the SQLite metrics database up to the current schema via EF Core migrations. On a legacy
         // EnsureCreated database (no migration history) this baselines onto migrations without recreating
         // existing tables — see Services/Persistence/DatabaseInitializer and docs/adr/0003.
-        // R1-34: an upgrade starts from a recovery point — a pre-upgrade backup before the first pending migration of
-        // either context (the start stops, unmigrated, when it fails); a failed migration logs the way back. The vault
-        // has started above, so the backup is sealed with the verified key.
+        // R1-34: the pre-upgrade backup was taken by the UpgradeGuard warm-up (Order 45, before anything rewrote data);
+        // a failed migration logs the way back, and the upgrade counts as finished only when both schemas are current.
         var upgradeLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Upgrade");
-        var upgrade = await Whiskers.Services.Persistence.UpgradeGuard.PrepareAsync(
-            app.Services.GetRequiredService<IServiceScopeFactory>(),
-            app.Services.GetRequiredService<Whiskers.Services.Backup.IBackupService>(),
-            app.Configuration, upgradeLogger);
+        var upgradeGuard = app.Services.GetRequiredService<Whiskers.Services.Persistence.UpgradeGuard>();
+        var upgrade = upgradeGuard.Plan;
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -580,6 +577,7 @@ public static class WhiskersPipelineExtensions
             await Whiskers.Services.Persistence.UpgradeGuard.MigrateAsync("identity", upgrade, upgradeLogger,
                 () => idDb.Database.MigrateAsync());
         }
+        await upgradeGuard.CompleteAsync();
 
         // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis) — before
         // anything else can write an audit row.
@@ -611,7 +609,6 @@ public static class WhiskersPipelineExtensions
         // seed when auth is bypassed (Auth:Disabled has no login).
         using (var scope = app.Services.CreateScope())
         {
-
             if (!app.Configuration.GetValue<bool>("Auth:Disabled"))
             {
                 var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();

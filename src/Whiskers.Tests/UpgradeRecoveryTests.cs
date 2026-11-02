@@ -12,10 +12,14 @@ using Whiskers.Services.Persistence;
 
 namespace Whiskers.Tests;
 
-/// <summary>R1-34: a schema upgrade starts from a recovery point (a pre-upgrade backup of the database as it was), a
-/// failed backup stops the start before any migration, and the way back needs no running UI (the CLI restore).</summary>
+/// <summary>R1-34: an upgrade starts from a recovery point (a pre-upgrade backup of the state as it was), a failed backup
+/// stops the start before any migration, a start after a failed migration keeps that backup, and the way back needs no
+/// running UI (the CLI restore), also when this release's migration is what fails.</summary>
 public sealed class UpgradeRecoveryTests : IDisposable
 {
+    private const string ThisRelease = "2.0.0+test";
+    private const string PreviousRelease = "1.9.0+test";
+
     private readonly List<(ServiceProvider Sp, string Root)> _envs = [];
 
     private sealed class NoopLifetime : IHostApplicationLifetime
@@ -35,13 +39,20 @@ public sealed class UpgradeRecoveryTests : IDisposable
             Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
     }
 
-    private sealed record Env(BackupService Backups, DataPathOptions Paths, ServiceProvider Sp, IConfiguration Config);
+    private sealed record Env(BackupService Backups, DataPathOptions Paths, ServiceProvider Sp, IConfiguration Config)
+    {
+        public UpgradeGuard Guard(IBackupService? backups = null, ILogger? logger = null, string version = ThisRelease) =>
+            new(Sp.GetRequiredService<IServiceScopeFactory>(), backups ?? Backups, Config, Paths,
+                logger ?? NullLogger.Instance, version);
+    }
 
-    private enum Start { Fresh, Legacy, OneBehind, Current }
+    /// <summary>Fresh; a legacy EnsureCreated file; one metrics migration behind; one behind with a table in the way of
+    /// that migration (it fails on this data); identity never migrated; current.</summary>
+    private enum Start { Fresh, Legacy, OneBehind, OneBehindBroken, IdentityPending, Current }
 
-    /// <summary>An app data directory whose database is fresh, a legacy EnsureCreated file, one metrics migration behind
-    /// this release, or current — with a row written before the upgrade.</summary>
-    private Env NewEnv(Start start, Dictionary<string, string?>? settings = null)
+    /// <summary>An app data directory in the given state, last started by <paramref name="lastRelease"/> (none: a release
+    /// from before the version file), with a row written before the upgrade.</summary>
+    private Env NewEnv(Start start, string? lastRelease = PreviousRelease, Dictionary<string, string?>? settings = null)
     {
         var root = Path.Combine(Path.GetTempPath(), $"sw-upg-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
@@ -60,18 +71,26 @@ public sealed class UpgradeRecoveryTests : IDisposable
         using (var scope = sp.CreateScope())
         {
             var metrics = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var identity = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
             switch (start)
             {
                 case Start.Legacy:
                     metrics.Database.EnsureCreated();
                     break;
                 case Start.OneBehind:
+                case Start.OneBehindBroken:
                     metrics.Database.Migrate(metrics.Database.GetMigrations().ToList()[^2]);
-                    scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.Migrate();
+                    identity.Database.Migrate();
+                    // The last migration creates AuditChain: a table already there makes it fail, every time.
+                    if (start == Start.OneBehindBroken)
+                        metrics.Database.ExecuteSqlRaw("CREATE TABLE \"AuditChain\" (\"x\" INTEGER)");
+                    break;
+                case Start.IdentityPending:
+                    metrics.Database.Migrate();
                     break;
                 case Start.Current:
                     metrics.Database.Migrate();
-                    scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.Migrate();
+                    identity.Database.Migrate();
                     break;
             }
             if (start != Start.Fresh)
@@ -80,6 +99,7 @@ public sealed class UpgradeRecoveryTests : IDisposable
                 metrics.SaveChanges();
             }
         }
+        if (lastRelease is not null) File.WriteAllText(paths.LastStartedVersionFile, lastRelease);
 
         var config = new ConfigurationBuilder().AddInMemoryCollection(settings ?? []).Build();
         var backups = new BackupService(sp.GetRequiredService<IServiceScopeFactory>(), new MaintenanceStateService(),
@@ -87,15 +107,23 @@ public sealed class UpgradeRecoveryTests : IDisposable
         return new Env(backups, paths, sp, config);
     }
 
-    private static Task<UpgradePlan> PrepareAsync(Env env, ILogger? logger = null) =>
-        UpgradeGuard.PrepareAsync(env.Sp.GetRequiredService<IServiceScopeFactory>(), env.Backups, env.Config,
-            logger ?? NullLogger.Instance);
-
-    private static async Task MigrateAsync(Env env)
+    /// <summary>The start's migrations, as the pipeline runs them after the guard; <see cref="UpgradeGuard.CompleteAsync"/>
+    /// only when both finished.</summary>
+    private static async Task StartAsync(Env env, UpgradeGuard guard)
     {
-        using var scope = env.Sp.CreateScope();
-        await DatabaseInitializer.InitializeAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), NullLogger.Instance);
-        await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.MigrateAsync();
+        var plan = await guard.PrepareAsync();
+        using (var scope = env.Sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            await UpgradeGuard.MigrateAsync("metrics", plan, NullLogger.Instance,
+                () => DatabaseInitializer.InitializeAsync(db, NullLogger.Instance));
+        }
+        using (var scope = env.Sp.CreateScope())
+        {
+            var id = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+            await UpgradeGuard.MigrateAsync("identity", plan, NullLogger.Instance, () => id.Database.MigrateAsync());
+        }
+        await guard.CompleteAsync();
     }
 
     private static async Task<List<string>> AppliedAsync(Env env)
@@ -104,15 +132,17 @@ public sealed class UpgradeRecoveryTests : IDisposable
         return (await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetAppliedMigrationsAsync()).ToList();
     }
 
+    private static async Task<List<SelfBackupInfo>> PreUpgradeAsync(Env env) =>
+        (await env.Backups.ListBackupsAsync())
+        .Where(b => b.Label.StartsWith(BackupService.PreUpgradeLabelPrefix, StringComparison.Ordinal)).ToList();
+
     [Fact]
     public async Task An_upgrade_first_backs_up_the_database_as_it_was_before_any_migration()
     {
         var env = NewEnv(Start.OneBehind);
         var before = await AppliedAsync(env);
-        using (var scope = env.Sp.CreateScope())
-            Assert.Single(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetPendingMigrationsAsync());
 
-        var plan = await PrepareAsync(env);
+        var plan = await env.Guard().PrepareAsync();
 
         Assert.NotNull(plan.BackupId);
         Assert.Single(plan.PendingMetrics);
@@ -123,30 +153,88 @@ public sealed class UpgradeRecoveryTests : IDisposable
         // The archive holds the schema from before the upgrade, not after it.
         var manifest = (await env.Backups.ValidateArchiveAsync(env.Backups.ResolveArchivePath(backup.Id)!)).Manifest!;
         Assert.Equal(before, manifest.MetricsMigrations);
+        Assert.Equal(backup.Id, UpgradeGuard.ReadMarker(env.Paths)!.BackupId);
+    }
+
+    [Fact]
+    public async Task A_pending_identity_migration_alone_is_an_upgrade_too()
+    {
+        var env = NewEnv(Start.IdentityPending);
+        var plan = await env.Guard().PrepareAsync();
+        Assert.Empty(plan.PendingMetrics);
+        Assert.NotEmpty(plan.PendingIdentity);
+        Assert.NotNull(plan.BackupId);
+    }
+
+    [Fact]
+    public async Task A_new_release_without_migrations_is_an_upgrade_too_its_files_may_change()
+    {
+        var env = NewEnv(Start.Current, lastRelease: PreviousRelease);
+        var plan = await env.Guard().PrepareAsync();
+        Assert.False(plan.HasPending);
+        Assert.NotNull(plan.BackupId);
+
+        // A database from before the version file is treated the same way.
+        Assert.NotNull((await NewEnv(Start.Current, lastRelease: null).Guard().PrepareAsync()).BackupId);
     }
 
     [Fact]
     public async Task A_legacy_database_without_a_migration_history_is_backed_up_too()
     {
-        var env = NewEnv(Start.Legacy);
-        var plan = await PrepareAsync(env);
+        var plan = await NewEnv(Start.Legacy).Guard().PrepareAsync();
         Assert.False(plan.FreshDatabase);
         Assert.NotNull(plan.BackupId);
     }
 
     [Fact]
-    public async Task A_new_database_and_a_current_one_take_no_backup()
+    public async Task A_new_database_and_a_restart_of_the_same_release_take_no_backup()
     {
-        var fresh = await PrepareAsync(NewEnv(Start.Fresh));
+        var freshEnv = NewEnv(Start.Fresh, lastRelease: null);
+        var fresh = await freshEnv.Guard().PrepareAsync();
         Assert.True(fresh.FreshDatabase);
-        Assert.True(fresh.HasPending);
         Assert.Null(fresh.BackupId);
+        Assert.Empty(await freshEnv.Backups.ListBackupsAsync());
 
-        var currentEnv = NewEnv(Start.Current);
-        var current = await PrepareAsync(currentEnv);
-        Assert.False(current.HasPending);
+        var env = NewEnv(Start.Current, lastRelease: ThisRelease);
+        var current = await env.Guard().PrepareAsync();
         Assert.Null(current.BackupId);
-        Assert.Empty(await currentEnv.Backups.ListBackupsAsync());
+        Assert.Empty(await env.Backups.ListBackupsAsync());
+    }
+
+    [Fact]
+    public async Task A_finished_upgrade_records_the_release_and_the_next_start_takes_no_backup()
+    {
+        var env = NewEnv(Start.OneBehind);
+        await StartAsync(env, env.Guard());
+
+        Assert.Null(UpgradeGuard.ReadMarker(env.Paths));
+        Assert.Equal(ThisRelease, File.ReadAllText(env.Paths.LastStartedVersionFile));
+        Assert.Null((await env.Guard().PrepareAsync()).BackupId);
+        Assert.Single(await PreUpgradeAsync(env));
+    }
+
+    [Fact]
+    public async Task Restarts_after_a_failed_migration_keep_the_backup_of_the_state_before_it()
+    {
+        var env = NewEnv(Start.OneBehindBroken, settings: new() { [UpgradeGuard.KeepEnv] = "1" });
+        var before = await AppliedAsync(env);
+        string? first = null;
+
+        // A crash loop: every start fails in the same migration.
+        for (var start = 0; start < 4; start++)
+        {
+            var logger = new ListLogger();
+            await Assert.ThrowsAnyAsync<Exception>(() => StartAsync(env, env.Guard(logger: logger)));
+            var marker = UpgradeGuard.ReadMarker(env.Paths)!;
+            first ??= marker.BackupId;
+            Assert.Equal(first, marker.BackupId);
+            if (start > 0) Assert.Contains(logger.Entries, e => e.Message.Contains("Resuming the upgrade"));
+        }
+
+        var backup = Assert.Single(await PreUpgradeAsync(env));        // no new backup, nothing pruned
+        Assert.Equal(first, backup.Id);
+        var manifest = (await env.Backups.ValidateArchiveAsync(env.Backups.ResolveArchivePath(first!)!)).Manifest!;
+        Assert.Equal(before, manifest.MetricsMigrations);
     }
 
     private sealed class FailingBackups(IBackupService inner) : IBackupService
@@ -163,6 +251,8 @@ public sealed class UpgradeRecoveryTests : IDisposable
             inner.ValidateArchiveAsync(uploadedPath, ct);
         public Task BeginRestoreAsync(string uploadedPath, string actor, CancellationToken ct = default) =>
             inner.BeginRestoreAsync(uploadedPath, actor, ct);
+        public Task BeginRestoreAsync(string uploadedPath, string actor, RestoreTarget target, CancellationToken ct = default) =>
+            inner.BeginRestoreAsync(uploadedPath, actor, target, ct);
     }
 
     [Fact]
@@ -171,26 +261,40 @@ public sealed class UpgradeRecoveryTests : IDisposable
         var env = NewEnv(Start.OneBehind);
         var before = await AppliedAsync(env);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => UpgradeGuard.PrepareAsync(
-            env.Sp.GetRequiredService<IServiceScopeFactory>(), new FailingBackups(env.Backups), env.Config, NullLogger.Instance));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            env.Guard(new FailingBackups(env.Backups)).PrepareAsync());
 
         Assert.Contains("before any migration", ex.Message);
         Assert.Contains("No space left on device", ex.Message);
         Assert.Contains(UpgradeGuard.SkipBackupEnv, ex.Message);
         Assert.Equal(before, await AppliedAsync(env));
+        Assert.Null(UpgradeGuard.ReadMarker(env.Paths));
     }
 
     [Fact]
     public async Task The_backup_is_skipped_only_when_the_operator_says_so_and_that_is_logged()
     {
-        var env = NewEnv(Start.OneBehind, new() { [UpgradeGuard.SkipBackupEnv] = "true" });
+        var env = NewEnv(Start.OneBehind, settings: new() { [UpgradeGuard.SkipBackupEnv] = "true" });
         var logger = new ListLogger();
 
-        var plan = await UpgradeGuard.PrepareAsync(env.Sp.GetRequiredService<IServiceScopeFactory>(),
-            new FailingBackups(env.Backups), env.Config, logger);
+        var plan = await env.Guard(new FailingBackups(env.Backups), logger).PrepareAsync();
 
         Assert.Null(plan.BackupId);
         Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("WITHOUT a pre-upgrade backup"));
+    }
+
+    [Theory]
+    [InlineData(UpgradeGuard.SkipBackupEnv, "yes")]
+    [InlineData(UpgradeGuard.KeepEnv, "three")]
+    [InlineData(UpgradeGuard.KeepEnv, "0")]
+    public async Task An_invalid_setting_stops_the_start_before_a_backup_is_taken(string key, string value)
+    {
+        var env = NewEnv(Start.OneBehind, settings: new() { [key] = value });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => env.Guard().PrepareAsync());
+
+        Assert.Contains(key, ex.Message);
+        Assert.Empty(await env.Backups.ListBackupsAsync());
     }
 
     [Fact]
@@ -203,14 +307,14 @@ public sealed class UpgradeRecoveryTests : IDisposable
             () => throw new InvalidOperationException("column exists")));
 
         var critical = Assert.Single(logger.Entries, e => e.Level == LogLevel.Critical);
-        Assert.Contains("--restore-backup abc123def456", critical.Message);
+        Assert.Contains($"--restore-backup abc123def456 {RestoreCli.ForPreviousReleaseFlag}", critical.Message);
         Assert.Contains("partly migrated", critical.Message);
     }
 
     [Fact]
     public async Task The_scheduled_retention_keeps_the_pre_upgrade_backups_which_are_pruned_on_their_own()
     {
-        var env = NewEnv(Start.Current, new() { [UpgradeGuard.KeepEnv] = "2" });
+        var env = NewEnv(Start.Current);
         var upgrades = new List<string>();
         for (var i = 0; i < 3; i++)
         {
@@ -226,10 +330,12 @@ public sealed class UpgradeRecoveryTests : IDisposable
         Assert.Equal(4, left.Count);                                     // one scheduled, all three pre-upgrade
         Assert.Single(left, b => b.Label == "scheduled");
 
-        await UpgradeGuard.PruneAsync(env.Backups, env.Config, NullLogger.Instance, default);
-        var kept = (await env.Backups.ListBackupsAsync())
-            .Where(b => b.Label.StartsWith(BackupService.PreUpgradeLabelPrefix, StringComparison.Ordinal)).Select(b => b.Id).ToList();
-        Assert.Equal(upgrades.Skip(1).Reverse(), kept);                  // the newest two
+        await UpgradeGuard.PruneAsync(env.Backups, keep: 2, current: upgrades[2], NullLogger.Instance, default);
+        Assert.Equal(upgrades.Skip(1).Reverse(), (await PreUpgradeAsync(env)).Select(b => b.Id));   // the newest two
+
+        // The backup the running upgrade depends on is never pruned, however many are kept.
+        await UpgradeGuard.PruneAsync(env.Backups, keep: 1, current: upgrades[1], NullLogger.Instance, default);
+        Assert.Contains(upgrades[1], (await PreUpgradeAsync(env)).Select(b => b.Id));
     }
 
     [Fact]
@@ -237,8 +343,8 @@ public sealed class UpgradeRecoveryTests : IDisposable
     {
         var env = NewEnv(Start.OneBehind);
         var before = await AppliedAsync(env);
-        var plan = await PrepareAsync(env);
-        await MigrateAsync(env);
+        await StartAsync(env, env.Guard());
+        var backupId = Assert.Single(await PreUpgradeAsync(env)).Id;
         using (var scope = env.Sp.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -248,11 +354,13 @@ public sealed class UpgradeRecoveryTests : IDisposable
         Assert.NotEqual(before, await AppliedAsync(env));
 
         var log = new StringWriter();
-        Assert.Equal(0, await RestoreCli.RunAsync(env.Backups, vault: null, RestoreCli.LatestPreUpgrade, log));
-        Assert.Contains($"Backup {plan.BackupId} is staged", log.ToString());
+        var rc = await RestoreCli.RunAsync(env.Backups, vault: null, env.Paths,
+            [RestoreCli.LatestPreUpgrade, RestoreCli.ForPreviousReleaseFlag], log);
+        Assert.True(rc == 0, log.ToString());
+        Assert.Contains($"Backup {backupId} is staged", log.ToString());
         Assert.True(File.Exists(env.Paths.RestorePendingMarker));
 
-        // The next start — of either release — applies it before it opens the database.
+        // The next start applies it before it opens the database.
         TestSqlite.ClearPools(env.Paths.RootDir);
         RestoreBootHandler.ApplyPendingRestore(env.Paths);
 
@@ -265,15 +373,31 @@ public sealed class UpgradeRecoveryTests : IDisposable
         }
     }
 
-    [Theory]
-    [InlineData(null)]                    // no id: the usage text, not a configuration error
-    [InlineData(RestoreCli.LatestPreUpgrade)]
-    public void The_restore_options_pass_the_host_command_line_configuration(string? id)
+    [Fact]
+    public async Task When_the_migration_fails_on_the_data_the_way_back_is_the_restore_for_the_previous_release()
     {
-        // Program hands the same args to WebApplication.CreateBuilder before it reaches the restore branch.
-        string[] args = id is null ? [RestoreCli.Flag] : [RestoreCli.Flag, id];
-        var config = new ConfigurationBuilder().AddCommandLine(args).Build();
-        Assert.NotNull(config);
+        var env = NewEnv(Start.OneBehindBroken);
+        var before = await AppliedAsync(env);
+        await Assert.ThrowsAnyAsync<Exception>(() => StartAsync(env, env.Guard()));
+        var backupId = UpgradeGuard.ReadMarker(env.Paths)!.BackupId;
+
+        // For this release the archive is refused: its migration fails on the same data.
+        var refused = new StringWriter();
+        Assert.Equal(4, await RestoreCli.RunAsync(env.Backups, null, env.Paths, [RestoreCli.LatestPreUpgrade], refused));
+        Assert.Contains(RestoreCli.ForPreviousReleaseFlag, refused.ToString());
+        Assert.False(File.Exists(env.Paths.RestorePendingMarker));
+
+        // For the previous release it is staged (still validated, the safety backup taken), and the upgrade is over.
+        var log = new StringWriter();
+        Assert.Equal(0, await RestoreCli.RunAsync(env.Backups, null, env.Paths,
+            [RestoreCli.LatestPreUpgrade, RestoreCli.ForPreviousReleaseFlag], log));
+        Assert.Contains($"Backup {backupId} is staged", log.ToString());
+        Assert.Null(UpgradeGuard.ReadMarker(env.Paths));
+        Assert.Contains(await env.Backups.ListBackupsAsync(), b => b.Label.StartsWith("pre-restore-", StringComparison.Ordinal));
+
+        TestSqlite.ClearPools(env.Paths.RootDir);
+        RestoreBootHandler.ApplyPendingRestore(env.Paths);
+        Assert.Equal(before, await AppliedAsync(env));
     }
 
     [Fact]
@@ -283,20 +407,35 @@ public sealed class UpgradeRecoveryTests : IDisposable
         var manual = await env.Backups.CreateBackupAsync("manual");
 
         var usage = new StringWriter();
-        Assert.Equal(2, await RestoreCli.RunAsync(env.Backups, null, "", usage));
+        Assert.Equal(2, await RestoreCli.RunAsync(env.Backups, null, env.Paths, [], usage));
         Assert.Contains(manual.Id, usage.ToString());                    // the listing helps pick one
+        Assert.Equal(2, await RestoreCli.RunAsync(env.Backups, null, env.Paths, [manual.Id, "--force"], new StringWriter()));
+        Assert.Equal(2, await RestoreCli.RunAsync(env.Backups, null, env.Paths, [manual.Id, "second-id"], new StringWriter()));
 
         var missing = new StringWriter();
-        Assert.Equal(3, await RestoreCli.RunAsync(env.Backups, null, "000000000000", missing));
+        Assert.Equal(3, await RestoreCli.RunAsync(env.Backups, null, env.Paths, ["000000000000"], missing));
         Assert.Contains("No backup with the id", missing.ToString());
 
         var noUpgrade = new StringWriter();
-        Assert.Equal(3, await RestoreCli.RunAsync(env.Backups, null, RestoreCli.LatestPreUpgrade, noUpgrade));
+        Assert.Equal(3, await RestoreCli.RunAsync(env.Backups, null, env.Paths, [RestoreCli.LatestPreUpgrade], noUpgrade));
         Assert.Contains("No pre-upgrade backup", noUpgrade.ToString());
 
         // A path is no backup id: only ids the service resolves inside its own directory are restored.
-        Assert.Equal(3, await RestoreCli.RunAsync(env.Backups, null, "../../etc/passwd", new StringWriter()));
+        Assert.Equal(3, await RestoreCli.RunAsync(env.Backups, null, env.Paths, ["../../etc/passwd"], new StringWriter()));
         Assert.False(File.Exists(env.Paths.RestorePendingMarker));
+    }
+
+    [Theory]
+    [InlineData(null, null)]                                   // no id: the usage text, not a configuration error
+    [InlineData(RestoreCli.LatestPreUpgrade, null)]
+    [InlineData(RestoreCli.LatestPreUpgrade, RestoreCli.ForPreviousReleaseFlag)]
+    public void The_restore_options_pass_the_host_builder(string? id, string? option)
+    {
+        // Program hands the same args to WebApplication.CreateBuilder before it reaches the restore branch.
+        string[] args = [RestoreCli.Flag, .. new[] { id, option }.OfType<string>()];
+        var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder(args);
+        Assert.NotNull(builder.Configuration);
+        Assert.True(args is [RestoreCli.Flag, ..]);
     }
 
     public void Dispose()

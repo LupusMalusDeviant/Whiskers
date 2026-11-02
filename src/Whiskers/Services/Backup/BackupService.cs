@@ -338,8 +338,12 @@ public sealed class BackupService : IBackupService
         }
     }
 
-    public async Task BeginRestoreAsync(string uploadedPath, string actor, CancellationToken ct = default)
+    public Task BeginRestoreAsync(string uploadedPath, string actor, CancellationToken ct = default) =>
+        BeginRestoreAsync(uploadedPath, actor, RestoreTarget.ThisRelease, ct);
+
+    public async Task BeginRestoreAsync(string uploadedPath, string actor, RestoreTarget target, CancellationToken ct = default)
     {
+        var forward = target == RestoreTarget.ThisRelease;
         await _restoreLock.WaitAsync(ct);
         try
         {
@@ -376,9 +380,11 @@ public sealed class BackupService : IBackupService
                 StagedRestoreValidator.Validate(staging, prepared.Manifest);
                 var stagedDump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
                 var postgres = File.Exists(stagedDump);
-                if (!postgres) await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
                 // A file that is no dump is refused before the safety backup costs a full backup.
-                else await CheckPostgresDumpReadableAsync(stagedDump, ct);
+                if (postgres) await CheckPostgresDumpReadableAsync(stagedDump, ct);
+                // R1-34: for the previous release, this release's migrations are not run on the archive (the previous
+                // release starts on the schema it knows); the history checks against the manifest stay.
+                else if (forward) await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
                 // nothing has been changed at this point. On PostgreSQL it is taken BEFORE the dry run (R1-33): the dry
@@ -395,7 +401,7 @@ public sealed class BackupService : IBackupService
                     throw new InvalidOperationException(
                         $"Restore aborted: could not create a pre-restore safety backup ({ex.Message}). Nothing was changed.", ex);
                 }
-                if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, safety.Id, ct);
+                if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, safety.Id, forward, ct);
 
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker
@@ -629,7 +635,7 @@ public sealed class BackupService : IBackupService
         File.Move(tmp, sidecar, overwrite: true);
     }
 
-    private static string AppVersion()
+    internal static string AppVersion()
         => typeof(BackupService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
            ?? typeof(BackupService).Assembly.GetName().Version?.ToString()
            ?? "unknown";
@@ -710,7 +716,8 @@ public sealed class BackupService : IBackupService
     // the restore is committed, not at the start. Inside that transaction, as for SQLite (R1-32): the migration
     // histories must be the manifest's, the start's migrations must run on them, and every mapped table and column
     // must then be readable. The database is locked while the dry run holds the schema.
-    private async Task ProbePostgresRestoreAsync(string stagedDump, SelfBackupManifest manifest, string safetyBackupId, CancellationToken ct)
+    private async Task ProbePostgresRestoreAsync(string stagedDump, SelfBackupManifest manifest, string safetyBackupId,
+        bool forward, CancellationToken ct)
     {
         string connection;
         var probe = new System.Text.StringBuilder();
@@ -721,8 +728,8 @@ public sealed class BackupService : IBackupService
             connection = metrics.Database.GetConnectionString()
                          ?? throw new BackupValidationException("The PostgreSQL connection string is not known.");
             AppendPostgresProbe(probe, metrics, manifest.MetricsMigrations,
-                Microsoft.EntityFrameworkCore.Migrations.HistoryRepository.DefaultTableName);
-            AppendPostgresProbe(probe, identity, manifest.IdentityMigrations, DatabaseRegistration.IdentityMigrationsHistoryTable);
+                Microsoft.EntityFrameworkCore.Migrations.HistoryRepository.DefaultTableName, forward);
+            AppendPostgresProbe(probe, identity, manifest.IdentityMigrations, DatabaseRegistration.IdentityMigrationsHistoryTable, forward);
         }
         try
         {
@@ -748,7 +755,7 @@ public sealed class BackupService : IBackupService
     // MigrateAsync decides) and the mapped-column reads for one context. Migration ids are this build's own (the manifest
     // is a subset of them, CheckSubset); names come from the app's model; all of it quoted.
     private static void AppendPostgresProbe(System.Text.StringBuilder probe, DbContext db, IEnumerable<string> applied,
-        string historyTable)
+        string historyTable, bool forward)
     {
         static string Literal(string s) => "'" + s.Replace("'", "''") + "'";
         var expected = applied.Order(StringComparer.Ordinal).Select(Literal);
@@ -757,6 +764,8 @@ public sealed class BackupService : IBackupService
             .Append(") IS DISTINCT FROM ARRAY[").Append(string.Join(", ", expected)).Append("]::text[] THEN RAISE EXCEPTION ")
             .Append(Literal($"the migration history in {historyTable} does not match the archive's manifest"))
             .AppendLine("; END IF; END $probe$;");
+        // R1-34: a restore for the previous release checks the history only; this release's schema is not its own.
+        if (!forward) return;
         // NoTransactions: the dry run's own transaction holds it all. A future migration with DDL that cannot run in a
         // transaction (CREATE INDEX CONCURRENTLY, ALTER TYPE … ADD VALUE) would fail this probe for every older archive.
         var migrator = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db);
