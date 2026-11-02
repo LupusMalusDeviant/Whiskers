@@ -58,7 +58,7 @@ public class HostCommandExecutor : IHostCommandExecutor
             ConnectionType.Local => await ExecuteLocalAsync(command, effectiveTimeout, ct, maxOutputChars),
             // The mTLS path reads the output through the Docker API, not through ReadCappedAsync, so the cap
             // does not apply there — it is neither enforced nor needed, and nothing is truncated.
-            ConnectionType.TCP => await ExecuteViaDockerAsync(server.Id, command, effectiveTimeout),
+            ConnectionType.TCP => await ExecuteViaDockerAsync(server.Id, command, effectiveTimeout, ct),
             _ when !string.IsNullOrWhiteSpace(server.SshHost)
                 => await ExecuteSshAsync(server, command, effectiveTimeout, ct, maxOutputChars),
             _ => new CommandResult { ExitCode = -1, Error = $"No shell transport for server (ConnectionType={server.ConnectionType}, no SSH host configured)" }
@@ -82,12 +82,14 @@ public class HostCommandExecutor : IHostCommandExecutor
     // SSH-free shell for TCP+mTLS servers: drive a one-shot privileged nsenter container over the
     // mTLS Docker connection. Same host-namespace effect as ExecuteLocalAsync, but remote and
     // without any SSH key.
-    private async Task<CommandResult> ExecuteViaDockerAsync(string serverId, string command, TimeSpan timeout)
+    private async Task<CommandResult> ExecuteViaDockerAsync(string serverId, string command, TimeSpan timeout,
+        CancellationToken ct)
     {
         _logger.LogDebug("Executing host command on {ServerId} via mTLS Docker (nsenter container): {Command}", serverId, SecretRedactor.Redact(command));
         try
         {
-            var (output, error, exitCode) = await _docker.RunHostShellAsync(command, serverId, timeout);
+            // R1-38: the caller's token reaches the helper container, which is killed when it fires.
+            var (output, error, exitCode) = await _docker.RunHostShellAsync(command, serverId, timeout, ct);
             return new CommandResult { ExitCode = exitCode, Output = output, Error = error };
         }
         catch (Exception ex)

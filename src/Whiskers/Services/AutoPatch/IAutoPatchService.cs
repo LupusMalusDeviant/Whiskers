@@ -26,4 +26,11 @@ public interface IAutoPatchService
     /// <returns>False when a cycle is already running, or a container's patch failed (unknown, rolled back).</returns>
     [MutatingOperation("autopatch.run")]
     Task<bool> RunCycleAsync(bool forceDryRun, string onBehalfOf, CancellationToken ct = default);
+
+    /// <summary>R1-38 (INV-40): starts a dry-run cycle on behalf of <paramref name="onBehalfOf"/> that the service owns
+    /// — bounded by <see cref="AutoPatchService.PreviewDeadline"/>, cancelled when Whiskers stops, its failure logged —
+    /// instead of a task nobody waits for. The caller's operation scope does not flow into it: each container is decided
+    /// on the caller's authority as the cycle reaches it. False when a cycle is already running.</summary>
+    [MutatingOperation("autopatch.run")]
+    bool StartPreview(string onBehalfOf);
 }

@@ -75,7 +75,15 @@ public class ChatHistoryStore : IChatHistoryStore
 /// </summary>
 public class AiChatService : IAiChatService
 {
-    private readonly HttpClient _httpClient;
+    /// <summary>The named client from the factory (R1-38).</summary>
+    public const string HttpClientName = "aichat";
+
+    /// <summary>R1-38 (INV-40): the longest one advisor answer may take, sending and reading together.</summary>
+    public static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(90);
+
+    internal TimeSpan RequestTimeout { get; init; } = DefaultRequestTimeout;
+
+    private readonly IHttpClientFactory _httpFactory;
     private readonly IOptionsMonitor<AiChatSettings> _settings;
     private readonly IDockerService _docker;
     private readonly ILogger<AiChatService> _logger;
@@ -143,10 +151,10 @@ public class AiChatService : IAiChatService
         Always suggest concrete actions the user can perform in the UI.
         """;
 
-    public AiChatService(HttpClient httpClient, IOptionsMonitor<AiChatSettings> settings,
+    public AiChatService(IHttpClientFactory httpFactory, IOptionsMonitor<AiChatSettings> settings,
         IDockerService docker, ILogger<AiChatService> logger)
     {
-        _httpClient = httpClient;
+        _httpFactory = httpFactory;
         _settings = settings;
         _docker = docker;
         _logger = logger;
@@ -154,7 +162,8 @@ public class AiChatService : IAiChatService
 
     public bool IsEnabled => _settings.CurrentValue.Enabled && !string.IsNullOrEmpty(_settings.CurrentValue.ApiKey);
 
-    public async Task<string> ChatAsync(string userMessage, List<ChatMessage>? history = null)
+    public async Task<string> ChatAsync(string userMessage, List<ChatMessage>? history = null,
+        CancellationToken ct = default)
     {
         var config = _settings.CurrentValue;
         if (!config.Enabled || string.IsNullOrEmpty(config.ApiKey))
@@ -178,12 +187,24 @@ public class AiChatService : IAiChatService
         }
         messages.Add(new { role = "user", content = userMessage });
 
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(RequestTimeout);
         try
         {
+            var http = _httpFactory.CreateClient(HttpClientName);
             if (config.Provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase))
-                return await CallAnthropicAsync(config, messages, systemMsg);
+                return await CallAnthropicAsync(http, config, messages, systemMsg, deadline.Token);
             else
-                return await CallOpenAiAsync(config, messages);
+                return await CallOpenAiAsync(http, config, messages, deadline.Token);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;   // the chat was closed: nobody waits for an answer
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            _logger.LogWarning("AI chat timed out after {Timeout}", RequestTimeout);
+            return $"Error: the AI provider did not answer within {RequestTimeout.TotalSeconds:0} s.";
         }
         catch (Exception ex)
         {
@@ -192,11 +213,12 @@ public class AiChatService : IAiChatService
         }
     }
 
-    private async Task<string> CallOpenAiAsync(AiChatSettings config, List<object> messages)
+    private static async Task<string> CallOpenAiAsync(HttpClient http, AiChatSettings config, List<object> messages,
+        CancellationToken ct)
     {
         var url = config.ApiUrl ?? "https://api.openai.com/v1/chat/completions";
 
-        var request = new HttpRequestMessage(HttpMethod.Post, url);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
         request.Content = JsonContent.Create(new
         {
@@ -206,10 +228,10 @@ public class AiChatService : IAiChatService
             temperature = 0.3
         });
 
-        var response = await _httpClient.SendAsync(request);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
 
-        using var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
+        using var json = await response.Content.ReadFromJsonAsync<JsonDocument>(ct);
         return json?.RootElement
             .GetProperty("choices")[0]
             .GetProperty("message")
@@ -217,7 +239,8 @@ public class AiChatService : IAiChatService
             .GetString() ?? "No response.";
     }
 
-    private async Task<string> CallAnthropicAsync(AiChatSettings config, List<object> messages, string systemMsg)
+    private static async Task<string> CallAnthropicAsync(HttpClient http, AiChatSettings config, List<object> messages,
+        string systemMsg, CancellationToken ct)
     {
         var url = config.ApiUrl ?? "https://api.anthropic.com/v1/messages";
 
@@ -229,7 +252,7 @@ public class AiChatService : IAiChatService
                 return new { role = json.GetProperty("role").GetString()!, content = json.GetProperty("content").GetString()! };
             }).ToList();
 
-        var request = new HttpRequestMessage(HttpMethod.Post, url);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Headers.Add("x-api-key", config.ApiKey);
         request.Headers.Add("anthropic-version", "2023-06-01");
         request.Content = JsonContent.Create(new
@@ -240,10 +263,10 @@ public class AiChatService : IAiChatService
             max_tokens = 500
         });
 
-        var response = await _httpClient.SendAsync(request);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
 
-        using var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
+        using var json = await response.Content.ReadFromJsonAsync<JsonDocument>(ct);
         return json?.RootElement
             .GetProperty("content")[0]
             .GetProperty("text")

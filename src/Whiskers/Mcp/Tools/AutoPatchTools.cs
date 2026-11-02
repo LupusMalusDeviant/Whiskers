@@ -49,8 +49,10 @@ public class AutoPatchTools
         var caller = AutomationOwners.OfCaller(MutationScope.Current?.Principal);
         if (caller is null) return MutationScope.Fail("The preview needs a signed-in user or an API key to act for.");
 
-        // Detached on purpose: a cycle pulls one image per candidate and outlives any tool call.
-        _ = Task.Run(() => autoPatch.RunCycleAsync(forceDryRun: true, caller));
+        // A cycle pulls one image per candidate and outlives any tool call: the service owns it, bounded by a deadline
+        // and cancelled when Whiskers stops (R1-38), never a task nobody waits for.
+        if (!autoPatch.StartPreview(caller))
+            return MutationScope.Fail("An auto-patch cycle is already running — read get_auto_patch_status.");
         return "Dry run started. Nothing will be recreated. Read get_auto_patch_status in a few minutes.";
     }
 

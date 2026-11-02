@@ -642,10 +642,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `ExecutionDeadlineTests` covers stalled headers, stalled body, cancelled sessions and detached preview work.
-- [ ] Deadline/cancellation reaches execution primitives; a timed-out response cannot conceal continuing mutation.
-- [ ] Trigger slots and HTTP responses are always released.
-- [ ] Replace the singleton-captured typed chat client with factory-managed clients and bounded requests.
+- [x] `ExecutionDeadlineTests` covers stalled headers, stalled body, cancelled sessions and detached preview work.
+- [x] Deadline/cancellation reaches execution primitives; a timed-out response cannot conceal continuing mutation.
+- [x] Trigger slots and HTTP responses are always released.
+- [x] Replace the singleton-captured typed chat client with factory-managed clients and bounded requests.
 
 **Out of scope:** Shutdown reconciliation after an actual process kill.
 

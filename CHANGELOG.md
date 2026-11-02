@@ -6,6 +6,16 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-38: **Nothing waits without end.** An AI provider that sends no response, stops sending in the middle of an
+  answer or trickles on for too long is cut off (60 s for the response to start, 90 s between two lines, 10 min for
+  the whole answer) and the run ends with a timeout message instead of hanging. An unattended AI-trigger run ends after
+  15 minutes: the provider call and any tool still running are cancelled, its parallel-run slot is freed, and the
+  notification says it timed out and to check the audit log for what it had already started. The advisor chat gives up
+  after 90 s and stops when the chat is closed; it now takes its HTTP client from the factory for each answer. The
+  AutoPatch preview started from MCP is owned by the service: only one at a time, at most 2 hours, and cancelled when
+  Whiskers stops. Cancelling a host command on an mTLS server now kills its helper container. An operation stopped by
+  its deadline or its caller while it ran is reported with "its effect is unknown", not as if it had not run.
+
 - R1-37: **Every change says what was checked afterwards.** Each capability now declares how its effect is verified:
   a read-back, or "not verifiable" with a reason that the outcome and the audit row carry. Read back after the call
   are compose deployments (every container of the project runs), networks, firewall rules and the ufw status, nginx

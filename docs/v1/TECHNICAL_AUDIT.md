@@ -117,7 +117,7 @@ The area reports contain 111 findings: A 18, B 20, C 24, D 17, E 9, F 23. After 
 | TA-42 | Security | SSH user/host not charset-validated → `ssh` option injection (`-oProxyCommand`) on the Whiskers host (Admin-set) | E-02 |
 | TA-43 | Security | `execute_query` is Write level but runs arbitrary SQL as superuser (DROP, Postgres `COPY … TO PROGRAM`) — level decision needed | E-04 |
 | TA-44 | Security | Single shared mTLS client key and fixed `--allow-cn` across the whole fleet | E-06 |
-| TA-45 | Reliability | Unattended AI-trigger runs have no deadline; LLM streams have no body timeout; slots can leak | F-07 |
+| TA-45 | Reliability | Unattended AI-trigger runs have no deadline; LLM streams have no body timeout; slots can leak. **Fixed in R1-38:** provider header/idle/total timeouts, trigger run deadline with slot release, bounded factory-managed advisor client, owned AutoPatch preview, cancellation reaching the mTLS host shell, unknown-effect outcome for a call stopped while it ran (INV-40) | F-07 |
 | TA-46 | Reliability | Notification retry mostly dead code; SMTP has no effective timeout; no durable outbox | F-08 |
 | TA-47 | Security / Testing | CI: no SAST/CodeQL, dependency-vuln or secret scanning, no image build/scan on PRs, no job timeouts | F-09 |
 | TA-48 | Security | Runtime image: base images not digest-pinned; ships full `docker.io` engine + sshpass; root by default | F-10 |

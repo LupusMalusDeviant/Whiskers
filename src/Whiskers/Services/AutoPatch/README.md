@@ -31,7 +31,9 @@ Section `AutoPatch` of `/app/data/app-settings.json` (applied live): `Enabled` (
 
 - `get_auto_patch_status` (read): settings and the last cycle's report.
 - `preview_auto_patch` (write): a dry run in the background — pulls, runs every guard, puts the old tag back,
-  recreates nothing regardless of the settings. There is deliberately no tool that applies.
+  recreates nothing regardless of the settings. There is deliberately no tool that applies. The preview is owned by
+  the service (`StartPreview`, R1-38): one cycle at a time, at most `PreviewDeadline` (2 h), cancelled and awaited
+  when the host stops, and it does not run inside the calling tool's operation scope.
 
 ## Related
 

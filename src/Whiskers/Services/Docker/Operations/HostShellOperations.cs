@@ -37,8 +37,9 @@ internal sealed class HostShellOperations
     /// waited on, its logs read, and then force-removed.
     /// </summary>
     public async Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(
-        string command, string? serverId = null, TimeSpan? timeout = null)
+        string command, string? serverId = null, TimeSpan? timeout = null, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
         var client = await GetClient(serverId);
 
@@ -60,13 +61,13 @@ internal sealed class HostShellOperations
         {
             try
             {
-                await client.Images.InspectImageAsync(HostShellImage);
+                await client.Images.InspectImageAsync(HostShellImage, ct);
             }
             catch (DockerImageNotFoundException)
             {
                 await client.Images.CreateImageAsync(
                     new ImagesCreateParameters { FromImage = "alpine", Tag = "latest" },
-                    null, new Progress<JSONMessage>());
+                    null, new Progress<JSONMessage>(), ct);
             }
             _statsCache.Set(imageKey, true, TimeSpan.FromHours(1));
         }
@@ -77,33 +78,35 @@ internal sealed class HostShellOperations
             Cmd = new List<string> { "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command },
             Labels = new Dictionary<string, string> { [HostShellLabel] = "1" },
             HostConfig = new HostConfig { Privileged = true, PidMode = "host", AutoRemove = false }
-        });
+        }, ct);
         var id = create.ID;
 
+        // R1-38 (INV-40): the caller's cancellation reaches the command itself — the helper is killed, not left to
+        // run on after the caller gave up — just as the timeout does. Neither is reported as "it did not run".
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(effectiveTimeout);
         try
         {
-            await client.Containers.StartContainerAsync(id, new ContainerStartParameters());
-
             long exitCode;
-            using (var cts = new CancellationTokenSource(effectiveTimeout))
+            try
             {
-                try
-                {
-                    var wait = await client.Containers.WaitContainerAsync(id, cts.Token);
-                    exitCode = wait.StatusCode;
-                }
-                catch (OperationCanceledException)
-                {
-                    try { await client.Containers.KillContainerAsync(id, new ContainerKillParameters()); } catch { /* best effort */ }
-                    return ("", $"Command timed out after {effectiveTimeout.TotalSeconds}s", -1);
-                }
+                await client.Containers.StartContainerAsync(id, new ContainerStartParameters(), cts.Token);
+                var wait = await client.Containers.WaitContainerAsync(id, cts.Token);
+                exitCode = wait.StatusCode;
+            }
+            catch (OperationCanceledException)
+            {
+                try { await client.Containers.KillContainerAsync(id, new ContainerKillParameters(), CancellationToken.None); } catch { /* best effort */ }
+                return ("", ct.IsCancellationRequested
+                    ? "Command cancelled"
+                    : $"Command timed out after {effectiveTimeout.TotalSeconds}s", -1);
             }
 
             using var mux = await client.Containers.GetContainerLogsAsync(id, false,
-                new ContainerLogsParameters { ShowStdout = true, ShowStderr = true });
+                new ContainerLogsParameters { ShowStdout = true, ShowStderr = true }, cts.Token);
             var stdout = new MemoryStream();
             var stderr = new MemoryStream();
-            await mux.CopyOutputToAsync(Stream.Null, stdout, stderr, CancellationToken.None);
+            await mux.CopyOutputToAsync(Stream.Null, stdout, stderr, cts.Token);
             stdout.Position = 0;
             stderr.Position = 0;
             var outStr = await new StreamReader(stdout).ReadToEndAsync();
