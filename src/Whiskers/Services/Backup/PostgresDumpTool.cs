@@ -209,11 +209,40 @@ public sealed class PostgresDumpTool
         "THEN RAISE EXCEPTION 'the database dump brings functions, triggers, rules, views, policies or operators into public, which Whiskers does not create'; " +
         "END IF; END $code$;";
 
-    // A digest of every role and database setting (pg_db_role_setting), every name and operator qualified.
-    internal const string SettingsDigest =
-        "pg_catalog.md5(coalesce((SELECT pg_catalog.string_agg(s.setdatabase::pg_catalog.text OPERATOR(pg_catalog.||) ':' " +
-        "OPERATOR(pg_catalog.||) s.setrole::pg_catalog.text OPERATOR(pg_catalog.||) ':' OPERATOR(pg_catalog.||) " +
-        "s.setconfig::pg_catalog.text, ';' ORDER BY s.setdatabase, s.setrole) FROM pg_catalog.pg_db_role_setting s), ''))";
+    // A digest of what the restore may not touch outside public: every role and database setting (an ALTER ROLE/DATABASE
+    // … SET search_path would point the app at another schema) and the schemas, relations, functions, triggers, rules,
+    // policies and operators of every other non-system schema (a schema named like the role comes first in the default
+    // search path "$user", public: tables there would shadow Whiskers' own, out of reach of the public checks). An honest
+    // dump of public changes none of it. Taken after public is replaced, so objects dropped with it do not count; every
+    // name and operator qualified, since the script may set the search path and own operators.
+    internal static readonly string OutsideDigest = BuildOutsideDigest();
+
+    private static string BuildOutsideDigest()
+    {
+        const string cat = " OPERATOR(pg_catalog.||) ";
+        const string eq = " OPERATOR(pg_catalog.=) ";
+        static string Text(string column) => $"coalesce({column}::pg_catalog.text, '')";
+        static string Key(char kind, params string[] columns) => $"'{kind}'" + cat + string.Join(cat + "':'" + cat, columns.Select(Text));
+        static string Outside(string ns) =>
+            $"{ns} OPERATOR(pg_catalog.<>) ALL (ARRAY(SELECT x.oid FROM pg_catalog.pg_namespace x WHERE " +
+            "x.nspname" + eq + "ANY (ARRAY['public', 'pg_catalog', 'information_schema', 'pg_toast']::pg_catalog.name[]) " +
+            @"OR x.nspname OPERATOR(pg_catalog.~~) 'pg\_temp\_%' OR x.nspname OPERATOR(pg_catalog.~~) 'pg\_toast\_temp\_%'))";
+        static string OnRelation(string alias, string relation) =>
+            $" JOIN pg_catalog.pg_class rc ON rc.oid{eq}{alias}.{relation} WHERE {Outside("rc.relnamespace")}";
+        var parts = new[]
+        {
+            $"SELECT {Key('s', "s.setdatabase", "s.setrole", "s.setconfig")} AS k FROM pg_catalog.pg_db_role_setting s",
+            $"SELECT {Key('n', "n.oid", "n.nspname", "n.nspowner")} FROM pg_catalog.pg_namespace n WHERE {Outside("n.oid")}",
+            $"SELECT {Key('c', "c.oid", "c.relname", "c.relnamespace", "c.relkind")} FROM pg_catalog.pg_class c WHERE {Outside("c.relnamespace")}",
+            $"SELECT {Key('p', "p.oid", "pg_catalog.md5(p.prosrc)", "p.proconfig", "p.prosecdef")} FROM pg_catalog.pg_proc p WHERE {Outside("p.pronamespace")}",
+            $"SELECT {Key('t', "t.oid", "t.tgfoid", "t.tgenabled")} FROM pg_catalog.pg_trigger t" + OnRelation("t", "tgrelid"),
+            $"SELECT {Key('r', "r.oid", "r.ev_enabled", "pg_catalog.md5(r.ev_action::pg_catalog.text)")} FROM pg_catalog.pg_rewrite r" + OnRelation("r", "ev_class"),
+            $"SELECT {Key('y', "y.oid")} FROM pg_catalog.pg_policy y" + OnRelation("y", "polrelid"),
+            $"SELECT {Key('o', "o.oid", "o.oprcode")} FROM pg_catalog.pg_operator o WHERE {Outside("o.oprnamespace")}",
+        };
+        return "pg_catalog.md5(coalesce((SELECT pg_catalog.string_agg(d.k, ';' ORDER BY d.k COLLATE pg_catalog.\"C\") FROM (" +
+               string.Join(" UNION ALL ", parts) + ") d), ''))";
+    }
 
     internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct,
         Func<Task<string?>>? sourceFailure = null, TimeSpan? statementTimeout = null)
@@ -234,11 +263,10 @@ public sealed class PostgresDumpTool
         // after the script differs, and nothing more is committed. This detects such a script; what it changed before is
         // undone only by the pre-restore safety backup, which the caller takes first.
         await psql.WriteLineAsync(@"SELECT pg_catalog.txid_current() AS whiskers_xid \gset");
-        // The role and database settings (ALTER ROLE / ALTER DATABASE … SET): a script that changed them could point the
-        // app's search path at a schema of its own, outside public and outside the code-object check.
-        await psql.WriteLineAsync($@"SELECT {SettingsDigest} AS whiskers_settings \gset");
         await psql.WriteLineAsync("DROP SCHEMA IF EXISTS public CASCADE;");
         await psql.WriteLineAsync("CREATE SCHEMA public;");
+        // What lies outside public (settings, other schemas), compared after the script (OutsideDigest).
+        await psql.WriteLineAsync($@"SELECT {OutsideDigest} AS whiskers_outside \gset");
 
         // The script comes from an archive: a crafted dump could carry psql meta-commands (\! runs a shell command).
         // pg_restore since 17.6 (and 16.10, 15.14, 14.19) opens its script with \restrict, which makes psql refuse every
@@ -266,7 +294,9 @@ public sealed class PostgresDumpTool
                 await psql.WriteLineAsync(line);
                 continue;
             }
-            if (line.StartsWith("COPY ", StringComparison.Ordinal) && line.EndsWith(" FROM stdin;", StringComparison.Ordinal))
+            // Any spelling a crafted entry may use (FROM stdin WITH (…), FROM STDIN): psql reads data until "\." either way.
+            if (line.StartsWith("COPY ", StringComparison.OrdinalIgnoreCase) && line.TrimEnd().EndsWith(';')
+                && line.Contains(" FROM stdin", StringComparison.OrdinalIgnoreCase))
                 inCopy = true;
             switch (line)
             {
@@ -300,9 +330,9 @@ public sealed class PostgresDumpTool
         await psql.WriteLineAsync(
             @"SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \gset");
         await psql.WriteLineAsync(
-            $@"SELECT {SettingsDigest} OPERATOR(pg_catalog.=) :'whiskers_settings'::pg_catalog.text AS whiskers_settings_same \gset");
+            $@"SELECT {OutsideDigest} OPERATOR(pg_catalog.=) :'whiskers_outside'::pg_catalog.text AS whiskers_outside_same \gset");
         await psql.WriteLineAsync(@"\if :whiskers_same");
-        await psql.WriteLineAsync(@"\if :whiskers_settings_same");
+        await psql.WriteLineAsync(@"\if :whiskers_outside_same");
         await psql.WriteLineAsync(CodeObjectCheck);
         if (probeSql is not null)
         {
@@ -312,7 +342,7 @@ public sealed class PostgresDumpTool
         }
         await psql.WriteLineAsync(commit ? "COMMIT;" : "ROLLBACK;");
         await psql.WriteLineAsync(@"\else");
-        await psql.WriteLineAsync("DO $guard$ BEGIN RAISE EXCEPTION 'the restore script changed role or database settings'; END $guard$;");
+        await psql.WriteLineAsync("DO $guard$ BEGIN RAISE EXCEPTION 'the restore script changed role or database settings or objects outside the public schema'; END $guard$;");
         await psql.WriteLineAsync(@"\endif");
         await psql.WriteLineAsync(@"\else");
         await psql.WriteLineAsync("DO $guard$ BEGIN RAISE EXCEPTION 'the restore script ended its transaction early'; END $guard$;");

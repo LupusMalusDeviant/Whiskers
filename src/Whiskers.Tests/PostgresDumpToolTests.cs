@@ -72,8 +72,8 @@ public class PostgresDumpToolTests
         Assert.Equal(["BEGIN;", "SET LOCAL lock_timeout = '60s';"], lines[..2]);
         Assert.StartsWith("DO $check$", lines[2], StringComparison.Ordinal);
         Assert.Equal(["SELECT pg_catalog.txid_current() AS whiskers_xid \\gset",
-            $"SELECT {PostgresDumpTool.SettingsDigest} AS whiskers_settings \\gset",
-            "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[3..7]);
+            "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;",
+            $"SELECT {PostgresDumpTool.OutsideDigest} AS whiskers_outside \\gset"], lines[3..7]);
         Assert.Single(lines, l => l.StartsWith("CREATE SCHEMA", StringComparison.Ordinal));   // the dump's own left out
         Assert.DoesNotContain("SET transaction_timeout = 0;", lines);                             // older servers lack it
         Assert.Contains(lines, l => l.Contains("set_config('transaction_timeout'", StringComparison.Ordinal));
@@ -83,8 +83,8 @@ public class PostgresDumpToolTests
         // The comparison names nothing the script could shadow.
         Assert.Equal(["SET search_path = pg_catalog;",
             "SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \\gset",
-            $"SELECT {PostgresDumpTool.SettingsDigest} OPERATOR(pg_catalog.=) :'whiskers_settings'::pg_catalog.text AS whiskers_settings_same \\gset",
-            "\\if :whiskers_same", "\\if :whiskers_settings_same", PostgresDumpTool.CodeObjectCheck,
+            $"SELECT {PostgresDumpTool.OutsideDigest} OPERATOR(pg_catalog.=) :'whiskers_outside'::pg_catalog.text AS whiskers_outside_same \\gset",
+            "\\if :whiskers_same", "\\if :whiskers_outside_same", PostgresDumpTool.CodeObjectCheck,
             "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^15..^5]);
         Assert.Contains("changed role or database settings", lines[^5], StringComparison.Ordinal);
         Assert.Equal(["\\endif", "\\else"], lines[^4..^2]);
@@ -214,11 +214,13 @@ public class PostgresDumpToolTests
         Assert.Equal("fd00::5", start.Environment["PGHOST"]);
     }
 
-    [Fact]
-    public async Task Copy_rows_pass_unchanged_even_when_they_read_like_a_rewritten_statement()
+    [Theory]
+    [InlineData("COPY public.t (a, b) FROM stdin;")]
+    [InlineData("COPY public.t (a, b) FROM STDIN WITH (FORMAT text);")]
+    public async Task Copy_rows_pass_unchanged_even_when_they_read_like_a_rewritten_statement(string copy)
     {
         var wrapped = await FeedAsync(
-            "\\restrict k\nCOPY public.t (a, b) FROM stdin;\n\tSET statement_timeout = 0;\nCREATE SCHEMA public;\n\\.\n\\unrestrict k\n",
+            "\\restrict k\n" + copy + "\n\tSET statement_timeout = 0;\nCREATE SCHEMA public;\n\\.\n\\unrestrict k\n",
             null, commit: true);
         Assert.Contains("\n\tSET statement_timeout = 0;\nCREATE SCHEMA public;\n\\.\n", wrapped, StringComparison.Ordinal);
     }

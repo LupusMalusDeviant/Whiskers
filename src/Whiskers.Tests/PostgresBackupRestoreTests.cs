@@ -513,23 +513,36 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
     }
 
     [SkippableTheory]
-    [InlineData("ALTER ROLE CURRENT_USER SET search_path = evil, public;\n")]
-    [InlineData("DO $d$ BEGIN EXECUTE pg_catalog.format('ALTER DATABASE %I SET search_path = evil, public', pg_catalog.current_database()); END $d$;\n")]
-    public async Task A_dump_that_changes_role_or_database_settings_is_refused(string change)
+    // A changed default search path, pointing the app at a schema the attacker controls.
+    [InlineData("ALTER ROLE CURRENT_USER SET search_path = other, public;\n")]
+    [InlineData("DO $d$ BEGIN EXECUTE pg_catalog.format('ALTER DATABASE %I SET search_path = other, public', pg_catalog.current_database()); END $d$;\n")]
+    // A schema named like the role: first in the default search path "$user", public, its tables shadow Whiskers' own.
+    [InlineData("DO $d$ BEGIN EXECUTE pg_catalog.format('CREATE SCHEMA %I', current_user); " +
+        "EXECUTE pg_catalog.format('CREATE TABLE %I.\"Webhooks\" (id int)', current_user); END $d$;\n")]
+    // A table or trigger code added to a schema that is already there.
+    [InlineData("CREATE TABLE other.\"AspNetUsers\" (id int);\n")]
+    [InlineData("CREATE FUNCTION other.f() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';\n" +
+        "CREATE TRIGGER t_ins BEFORE INSERT ON other.keep FOR EACH ROW EXECUTE FUNCTION other.f();\n")]
+    public async Task A_dump_that_changes_settings_or_objects_outside_public_is_refused(string change)
     {
         await SkipUnlessReadyAsync();
-        // A schema of its own, found first through a changed default search path: out of reach of the public checks.
-        var target = await CreateDatabaseAsync("settings");
-        var script = "\\restrict k5\nCREATE SCHEMA evil;\nCREATE TABLE evil.t (id int);\n" + change + "\\unrestrict k5\n";
+        var target = await CreateDatabaseAsync("outside");
+        await ExecuteAsync(target, "CREATE SCHEMA other; CREATE TABLE other.keep (id int);");
+        var tools = new PostgresDumpTool(BinDir);
+        const string honest = "\\restrict k5\nCREATE TABLE public.t (id int);\n\\unrestrict k5\n";
+        await tools.ApplyScriptAsync(target, honest, commit: false);   // the other schema as it was: accepted
 
-        var ex = await Assert.ThrowsAsync<PostgresToolException>(() =>
-            new PostgresDumpTool(BinDir).ApplyScriptAsync(target, script, commit: true));
+        var script = "\\restrict k5\nCREATE TABLE public.t (id int);\n" + change + "\\unrestrict k5\n";
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() => tools.ApplyScriptAsync(target, script, commit: true));
 
-        Assert.Contains("changed role or database settings", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("outside the public schema", ex.Message, StringComparison.Ordinal);
         await using var check = new NpgsqlConnection(target);
         await check.OpenAsync();
-        await using var schemas = new NpgsqlCommand("SELECT count(*) FROM pg_namespace WHERE nspname = 'evil'", check);
-        Assert.Equal(0L, await schemas.ExecuteScalarAsync());   // nothing committed
+        await using var tables = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema')", check);
+        Assert.Equal(1L, await tables.ExecuteScalarAsync());   // only other.keep: nothing committed
+        await using var settings = new NpgsqlCommand("SELECT count(*) FROM pg_db_role_setting WHERE setconfig::text LIKE '%other%'", check);
+        Assert.Equal(0L, await settings.ExecuteScalarAsync());
     }
 
     [SkippableTheory]

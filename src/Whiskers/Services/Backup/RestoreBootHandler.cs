@@ -128,11 +128,11 @@ public static class RestoreBootHandler
         // The app reads the database settings with the data directory's JSON layers on top (AddWhiskersConfiguration).
         // The restore writes into the database those settings name now, and the app opens the one they name after the
         // swap (the archive's files): both must be the same database, or database and files would part again.
-        var live = configuration is null ? null : WithDataLayers(configuration, dataPaths.RootDir);
+        var live = configuration is null ? null : WithDataLayers(configuration, dataPaths, dataPaths.RootDir);
         var (provider, connection) = live is null ? ("", null) : Whiskers.Services.Persistence.DatabaseRegistration.Resolve(live);
         if (provider != SelfBackupFormat.ProviderPostgres || string.IsNullOrWhiteSpace(connection))
             throw new InvalidOperationException("the restore holds a PostgreSQL database, but this start is not configured for PostgreSQL");
-        var afterSwap = Whiskers.Services.Persistence.DatabaseRegistration.Resolve(WithDataLayers(configuration!, staging));
+        var afterSwap = Whiskers.Services.Persistence.DatabaseRegistration.Resolve(WithDataLayers(configuration!, dataPaths, staging));
         if (afterSwap.Provider != provider || afterSwap.ConnectionString != connection)
             throw new InvalidOperationException(
                 "the archive's settings files name another database than this start uses (Database:* in app-settings.json); " +
@@ -142,11 +142,12 @@ public static class RestoreBootHandler
         Console.Out.WriteLine("[restore] The PostgreSQL database was restored from the archive.");
     }
 
-    private static IConfiguration WithDataLayers(IConfiguration configuration, string directory)
+    // The app's layers (AddWhiskersConfiguration), named as DataPathOptions names them, read from the given directory.
+    private static IConfiguration WithDataLayers(IConfiguration configuration, DataPathOptions dataPaths, string directory)
         => new ConfigurationBuilder()
             .AddConfiguration(configuration)
-            .AddJsonFile(Path.GetFullPath(Path.Combine(directory, "agent-settings.json")), optional: true, reloadOnChange: false)
-            .AddJsonFile(Path.GetFullPath(Path.Combine(directory, "app-settings.json")), optional: true, reloadOnChange: false)
+            .AddJsonFile(Path.GetFullPath(Path.Combine(directory, Path.GetFileName(dataPaths.AgentSettingsJson))), optional: true, reloadOnChange: false)
+            .AddJsonFile(Path.GetFullPath(Path.Combine(directory, Path.GetFileName(dataPaths.AppSettingsJson))), optional: true, reloadOnChange: false)
             .Build();
 
     private static void SwapStagingOverLive(DataPathOptions dataPaths, string staging)

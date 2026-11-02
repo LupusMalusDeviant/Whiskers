@@ -158,16 +158,18 @@ that, a script that ends the transaction on its own (its own `COMMIT`) is detect
 after the script, with a pinned `search_path` and schema-qualified operators, and the archive is refused; the recovery
 from the safety backup is described in `docs/operations/backup-and-recovery.md` ("After a restore refused for an early
 commit"). A restore that leaves functions, triggers, rules, views, row policies or operators in `public`, or that
-changed role or database settings (`ALTER ROLE`/`ALTER DATABASE … SET`, which could point the app's search path at
-another schema), is refused. At the next start the schema is dropped and recreated from the dump in one transaction,
-before the files are swapped; any error rolls it back and stops the start. The restore script is piped from
-`pg_restore` to `psql` and never written to disk; it runs only when it opens with `\restrict` (client tools 17.6 or
-newer), so a crafted dump cannot run psql meta-commands such as `\!`. The connecting role must own the `public` schema
-(on PostgreSQL 15 and later the database owner does) and hold `CREATE` on the database. Use a dedicated role that is
-not a superuser, since a restore runs the archive's SQL with its rights (a superuser could be made to run `COPY … FROM
-PROGRAM` on the database host); the PostgreSQL overlay's `POSTGRES_USER` role is a superuser, and the guide shows how
-to switch to an owner role without superuser rights. The password reaches the tools through their environment, and
-only the error lines of their output are logged (lines that quote rows are left out).
+created or changed anything outside `public` (role or database settings, which could point the app's search path at
+another schema; schemas, tables, functions, triggers, rules, policies or operators elsewhere, which a schema named
+like the role would put in front of Whiskers' tables), is refused. At the next start the schema is dropped and
+recreated from the dump in one transaction, before the files are swapped; any error rolls it back and stops the start.
+The restore script is piped from `pg_restore` to `psql` and never written to disk; it runs only when it opens with
+`\restrict` (client tools 17.6 or newer), so a crafted dump cannot run psql meta-commands such as `\!`. The connecting
+role must own the `public` schema (on PostgreSQL 15 and later the database owner does) and hold `CREATE` on the
+database. Use a dedicated role that is not a superuser, since a restore runs the archive's SQL with its rights (a
+superuser could be made to run `COPY … FROM PROGRAM` on the database host); the PostgreSQL overlay's `POSTGRES_USER`
+role is a superuser, and the guide shows how to switch to an owner role without superuser rights. The password reaches
+the tools through their environment, and only the error lines of their output are logged (lines that quote rows are
+left out).
 
 ## Hardening checklist for operators
 

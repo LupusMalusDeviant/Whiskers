@@ -371,6 +371,8 @@ public sealed class BackupService : IBackupService
                 var stagedDump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
                 var postgres = File.Exists(stagedDump);
                 if (!postgres) await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
+                // A file that is no dump is refused before the safety backup costs a full backup.
+                else await CheckPostgresDumpReadableAsync(stagedDump, ct);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
                 // nothing has been changed at this point. On PostgreSQL it is taken BEFORE the dry run (R1-33): the dry
@@ -683,7 +685,21 @@ public sealed class BackupService : IBackupService
         }
     }
 
-    // R1-33: the dump is read and then applied to this server in a transaction that is rolled back — a dump this server
+    // R1-33: a file pg_restore cannot list, or a dump without Whiskers' tables in public, is no dump of this database.
+    private async Task CheckPostgresDumpReadableAsync(string stagedDump, CancellationToken ct)
+    {
+        try
+        {
+            await _pgTools.CheckReadableAsync(stagedDump, ct);
+        }
+        catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
+        {
+            _logger.LogWarning("Restore refused: the database dump cannot be read ({Reason})", ex.Message);
+            throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
+        }
+    }
+
+    // R1-33: the dump is applied to this server in a transaction that is rolled back — a dump this server
     // does not accept (a newer format, a broken file, missing rights to replace the schema) is refused here, before
     // the restore is committed, not at the start. Inside that transaction, as for SQLite (R1-32): the migration
     // histories must be the manifest's, the start's migrations must run on them, and every mapped table and column
@@ -701,15 +717,6 @@ public sealed class BackupService : IBackupService
             AppendPostgresProbe(probe, metrics, manifest.MetricsMigrations,
                 Microsoft.EntityFrameworkCore.Migrations.HistoryRepository.DefaultTableName);
             AppendPostgresProbe(probe, identity, manifest.IdentityMigrations, DatabaseRegistration.IdentityMigrationsHistoryTable);
-        }
-        try
-        {
-            await _pgTools.CheckReadableAsync(stagedDump, ct);
-        }
-        catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
-        {
-            _logger.LogWarning("Restore refused: the database dump cannot be read ({Reason})", ex.Message);
-            throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
         }
         try
         {
@@ -807,7 +814,7 @@ public sealed class BackupService : IBackupService
             _logger.LogWarning(ex, "Free space of the data volume unknown; the restore goes ahead without the check");
             return;
         }
-        var needed = extractedBytes * 3 + live * 2 + (64L << 20);   // the third copy: the SQLite migration probe (on PostgreSQL the probe runs in the server: an over-estimate there)
+        var needed = extractedBytes * 3 + live * 2 + (64L << 20);   // the third copy: the SQLite migration probe (on PostgreSQL the probe runs in the server; the safety backup's pg_dump is not estimated here — on a full volume it fails, and nothing is changed)
         if (available < needed)
             throw new BackupValidationException(
                 $"Not enough free space for this restore: it needs about {needed / (1 << 20)} MiB, the data volume has {available / (1 << 20)} MiB.");

@@ -53,7 +53,10 @@ them elsewhere) fails instead of writing an archive without the database.
   day of changes: metrics, audit events and settings. The restored database does not contain audit events written
   after the archive was taken; the pre-restore safety backup still holds them.
 - **Recovery time (RTO):** start a Whiskers container, upload the archive and wait for one restart. On PostgreSQL,
-  the database is restored during that restart, in one transaction.
+  the database is restored during that restart, in one transaction, before Whiskers answers its health check. That
+  takes about as long as the dry run did. On Kubernetes the Helm chart's startup probe allows about a minute; for a
+  larger database raise its `failureThreshold` before the restore, or the pod is restarted mid-restore, the
+  transaction rolls back and the restore repeats at every start.
 
 ## Keep a copy off the volume
 
@@ -105,7 +108,9 @@ its work, for example the dropped and recreated `public` schema. Whiskers then m
 and a restore from **Settings > Backup** fails, because it first takes a new safety backup of the damaged database.
 Recover from the pre-restore safety backup taken just before the dry run, the same way as after a lost volume:
 
-1. Stop Whiskers. Copy the newest `pre-restore-*` archive out of `backups/self/` in the data directory.
+1. Stop Whiskers. Copy the newest `pre-restore-*` archive out of `backups/self/` in the data directory. If Whiskers
+   can no longer connect at all, the script may have changed the role's own password (a role may always do that);
+   reset it as a database administrator (`ALTER ROLE … PASSWORD …`) first.
 2. Give Whiskers an empty database: point `WHISKERS_DB_CONNECTION` at a new database, or drop and recreate the
    `public` schema of the current one as its owner.
 3. Move the data directory aside and follow
@@ -171,7 +176,10 @@ webhooks and audit rows come back.
   connects as. If other roles had grants, for example a read-only reporting user, grant them again after the
   restore.
 - The dump covers the `public` schema only. Objects in other schemas of the same database are not touched unless
-  they depend on objects in `public` (a view or foreign key on Whiskers' tables is dropped with them);
+  they depend on objects in `public` (a view or foreign key on Whiskers' tables is dropped with them). A restore
+  that creates or changes anything outside `public` — a schema, a table, a function, a trigger, a rule, a policy or
+  an operator, or a role or database setting — is refused: a schema named like the role comes first in the default
+  search path and its tables would shadow Whiskers' own;
   extensions are not part of the dump (Whiskers' migrations create none; a test keeps it that way).
 - Whiskers' migrations create tables, sequences, indexes and constraints only. A dump that brings functions,
   triggers, rules, views, row policies or operators into `public` is refused, because they would run with Whiskers'
