@@ -700,6 +700,77 @@ public class ReadBackVerificationTests
         else AssertFailed(outcome, stateUnknown);
     }
 
+    [Fact]
+    public async Task A_plan_reports_its_project_and_services_for_the_read_back()
+    {
+        var plan = new ComposePlan("srv1", "shop", "/opt/shop", [], [], null, false, false,
+            [new ComposeServicePlan("web", null), new ComposeServicePlan("worker", null)], []);
+        IReadOnlyDictionary<string, string>? facts = null;
+        var gateway = Gateway(new ServiceCollection().BuildServiceProvider(),
+            new CapturingVerifier("compose.deploy", c => facts = c.ReadBackFacts));
+
+        await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName = "shop" }, Host("host")),
+            (_, _) =>
+            {
+                ComposeImpact.ReportProject(plan);
+                return Task.FromResult("deployed");
+            });
+
+        Assert.Equal("shop", facts![ComposeImpact.ProjectFact]);
+        Assert.Equal("web\nworker", facts[ComposeImpact.ServicesFact]);
+    }
+
+    [Fact]
+    public async Task An_interpolated_project_name_is_reported_empty_never_with_its_value()
+    {
+        var plan = new ComposePlan("srv1", "secret-value", "/opt/shop", [], [], null, false, false, [], [])
+            { ProjectNameSource = "${APP_NAME}" };
+        IReadOnlyDictionary<string, string>? facts = null;
+        var gateway = Gateway(new ServiceCollection().BuildServiceProvider(),
+            new CapturingVerifier("compose.deploy", c => facts = c.ReadBackFacts));
+
+        await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName = "shop" }, Host("host")),
+            (_, _) =>
+            {
+                ComposeImpact.ReportProject(plan);
+                return Task.FromResult("deployed");
+            });
+
+        Assert.Equal("", facts![ComposeImpact.ProjectFact]);
+    }
+
+    private sealed class CapturingVerifier(string capabilityId, Action<MutationContext> seen) : IMutationVerifier
+    {
+        public string CapabilityId => capabilityId;
+
+        public Task<VerificationStatus> VerifyAsync(MutationContext context, object? result, CancellationToken ct)
+        {
+            seen(context);
+            return Task.FromResult(VerificationStatus.Verified);
+        }
+    }
+
+    [Fact]
+    public async Task A_cloud_server_the_provider_no_longer_finds_stops_the_poll_with_the_state_unknown()
+    {
+        var (cloud, script) = Scripted<ICloudControlService>.Create();
+        var reads = 0;
+        script.On[nameof(ICloudControlService.ResolveWhiskers)] = _ => new ServerConfig { Id = "web", Name = "web" };
+        script.On[nameof(ICloudControlService.ResolveAsync)] = _ =>
+        {
+            reads++;
+            return Task.FromResult<Whiskers.Models.Cloud.CloudServerInfo?>(null);
+        };
+        var sp = new ServiceCollection().AddSingleton(cloud).BuildServiceProvider();
+        var gateway = Gateway(sp, new CloudPowerVerifier(sp, on: true, TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1)));
+
+        var outcome = await gateway.ExecuteAsync(Request("cloud.power_on", new { server = "web" }, new MutationTarget("server", "web")),
+            (_, _) => Task.FromResult("Power on accepted"));
+
+        AssertFailed(outcome, stateUnknown: true);
+        Assert.Equal(1, reads);
+    }
+
     // ---- Hetzner ----
 
     [Fact]

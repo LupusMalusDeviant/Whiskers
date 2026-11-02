@@ -89,7 +89,8 @@ public sealed class NetworkAttachVerifier(IServiceProvider services, bool connec
     }
 }
 
-/// <summary>compose.deploy: every container of the compose project exists and runs (a one-shot container may have exited
+/// <summary>compose.deploy: every container of the services the deployed files define, in the project the plan resolved,
+/// exists and runs (a one-shot container may have exited
 /// with 0). Calls that name no project — a page's nested calls per colliding container or for its mounts — are not
 /// verifiable on their own: the deployment they belong to is.</summary>
 public sealed partial class ComposeDeployVerifier(IServiceProvider services) : ServiceVerifier(services)
