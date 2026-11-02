@@ -350,6 +350,123 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         return ctx;
     }
 
+    /// <summary>The metrics and identity target on one connection, as the CLI builds them: the copy is one transaction.</summary>
+    private sealed class SharedTarget : IAsyncDisposable
+    {
+        private readonly SqliteConnection _connection;
+        public MetricsDbContext Metrics { get; }
+        public WhiskersIdentityDbContext Identity { get; }
+
+        public SharedTarget(string path)
+        {
+            using (NewIdentityDb(path)) { }
+            _connection = new SqliteConnection($"Data Source={path}");
+            Metrics = new MetricsDbContext(new DbContextOptionsBuilder<MetricsDbContext>().UseSqlite(_connection).Options);
+            Identity = new WhiskersIdentityDbContext(new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+                .UseSqlite(_connection, o => o.MigrationsHistoryTable("__IdentityMigrationsHistory")).Options);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Identity.DisposeAsync();
+            await Metrics.DisposeAsync();
+            await _connection.DisposeAsync();
+        }
+    }
+
+    private async Task<(string Src, string Dst)> SeedSourceWithMetricsAndUsersAsync()
+    {
+        var srcPath = NewDbPath();
+        await using (var id = NewIdentityDb(srcPath))
+        {
+            id.Users.Add(new AppUser { Id = "user-1", UserName = "admin@example.org", NormalizedUserName = "ADMIN@EXAMPLE.ORG", PasswordHash = "HASH" });
+            id.UserClaims.Add(new Microsoft.AspNetCore.Identity.IdentityUserClaim<string> { Id = 9, UserId = "user-1", ClaimType = "c", ClaimValue = "v" });
+            await id.SaveChangesAsync();
+        }
+        await using (var src = NewDb(srcPath))
+        {
+            src.ContainerMetrics.Add(new ContainerMetricEntity { ContainerId = "c1", ContainerName = "web", ServerId = "s1", Timestamp = DateTime.UtcNow });
+            src.AuditLog.Add(new AuditLogEntity { Actor = "admin", Action = "container.start" });
+            src.ScheduledTasks.Add(new ScheduledTaskEntity { TaskId = "task-abc", Name = "nightly", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.DbBackup, CreatedBy = "admin" });
+            await src.SaveChangesAsync();
+        }
+        return (srcPath, NewDbPath());
+    }
+
+    private static async Task AssertTargetEmptyAsync(string dstPath)
+    {
+        await using var metrics = NewDb(dstPath);
+        foreach (var table in SqliteToPostgresMigrator.MetricsTables)
+            Assert.False(await table.AnyAsync(metrics, default), $"{table.Name} kept rows of a failed copy");
+        await using var identity = NewIdentityDb(dstPath);
+        Assert.False(await identity.Users.AnyAsync());
+        Assert.False(await identity.UserClaims.AnyAsync());
+    }
+
+    [Theory]
+    [InlineData("AuditLog")]          // half-way through the metrics tables
+    [InlineData("Operations")]        // after the last metrics table
+    [InlineData("AspNetUsers")]       // after the users, before their claims
+    [InlineData("AspNetUserTokens")]  // after everything, just before the commit
+    public async Task A_failure_mid_copy_rolls_back_metrics_and_users_together(string failAfter)
+    {
+        var (srcPath, dstPath) = await SeedSourceWithMetricsAndUsersAsync();
+        var log = new StringWriter();
+
+        await using (var src = NewDb(srcPath))
+        await using (var idSrc = NewIdentityDb(srcPath))
+        await using (var dst = new SharedTarget(dstPath))
+        {
+            var ex = await Assert.ThrowsAsync<IOException>(() => SqliteToPostgresMigrator.MigrateDataAsync(
+                src, dst.Metrics, log, default, idSrc, dst.Identity,
+                (table, _) => table == failAfter ? throw new IOException("disk gone") : Task.CompletedTask));
+            Assert.Equal("disk gone", ex.Message);
+        }
+
+        Assert.Contains("rolled back", log.ToString());
+        await AssertTargetEmptyAsync(dstPath);
+    }
+
+    [Fact]
+    public async Task After_a_rolled_back_copy_the_tool_runs_again_into_the_same_target()
+    {
+        var (srcPath, dstPath) = await SeedSourceWithMetricsAndUsersAsync();
+        await using (var src = NewDb(srcPath))
+        await using (var idSrc = NewIdentityDb(srcPath))
+        await using (var dst = new SharedTarget(dstPath))
+            await Assert.ThrowsAsync<IOException>(() => SqliteToPostgresMigrator.MigrateDataAsync(
+                src, dst.Metrics, TextWriter.Null, default, idSrc, dst.Identity,
+                (table, _) => table == "AspNetUserClaims" ? throw new IOException("disk gone") : Task.CompletedTask));
+
+        int rc;
+        await using (var src = NewDb(srcPath))
+        await using (var idSrc = NewIdentityDb(srcPath))
+        await using (var dst = new SharedTarget(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst.Metrics, TextWriter.Null, default, idSrc, dst.Identity);
+
+        Assert.Equal(0, rc);
+        await using var check = NewDb(dstPath);
+        Assert.Equal(1, await check.ContainerMetrics.CountAsync());
+        Assert.Equal(1, await check.AuditLog.CountAsync());
+        await using var users = NewIdentityDb(dstPath);
+        Assert.Equal("user-1", (await users.Users.SingleAsync()).Id);
+        Assert.Equal(1, await users.UserClaims.CountAsync());
+    }
+
+    [Fact]
+    public async Task An_identity_target_on_another_connection_is_refused_before_anything_is_copied()
+    {
+        var (srcPath, dstPath) = await SeedSourceWithMetricsAndUsersAsync();
+        await using (var src = NewDb(srcPath))
+        await using (var idSrc = NewIdentityDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+        await using (var idDst = NewIdentityDb(dstPath))
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null, default, idSrc, idDst));
+
+        await AssertTargetEmptyAsync(dstPath);
+    }
+
     [Fact]
     public async Task Copies_local_users_with_their_ids_and_password_hashes()
     {
@@ -364,10 +481,9 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
 
         int rc;
         await using (var src = NewDb(srcPath))
-        await using (var dst = NewDb(dstPath))
         await using (var idSrc = NewIdentityDb(srcPath))
-        await using (var idDst = NewIdentityDb(dstPath))
-            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null, default, idSrc, idDst);
+        await using (var dst = new SharedTarget(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst.Metrics, TextWriter.Null, default, idSrc, dst.Identity);
 
         Assert.Equal(0, rc);
         await using var check = NewIdentityDb(dstPath);
@@ -389,10 +505,9 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         }
 
         await using var src = NewDb(srcPath);
-        await using var dst = NewDb(dstPath);
         await using var idSrc = NewIdentityDb(srcPath);
-        await using var idDst = NewIdentityDb(dstPath);
-        Assert.Equal(3, await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null, default, idSrc, idDst));
+        await using var dst = new SharedTarget(dstPath);
+        Assert.Equal(3, await SqliteToPostgresMigrator.MigrateDataAsync(src, dst.Metrics, TextWriter.Null, default, idSrc, dst.Identity));
     }
 
     public void Dispose()

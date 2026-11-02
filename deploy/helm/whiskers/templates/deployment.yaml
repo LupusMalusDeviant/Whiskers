@@ -98,21 +98,22 @@ spec:
             - name: docker-sock
               mountPath: /var/run/docker.sock
             {{- end }}
-          # Probes: startupProbe covers the first migration (up to ~60s); liveness is deliberately
-          # lazy (period 30s, threshold 5) so a busy Blazor app is not probed to death.
+          # Probes (values.probes): the startupProbe outlasts the pre-upgrade backup and the schema migrations of
+          # a new release (R1-34, default 5 min); liveness is deliberately lazy so a busy Blazor app is not probed
+          # to death.
           startupProbe:
             httpGet: { path: /healthz, port: http }
-            periodSeconds: 2
-            failureThreshold: 30
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
           readinessProbe:
             httpGet: { path: /readyz, port: http }
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           livenessProbe:
             httpGet: { path: /healthz, port: http }
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            failureThreshold: 5
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
         {{- if .Values.tailscaleSidecar.enabled }}

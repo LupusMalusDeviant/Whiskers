@@ -214,6 +214,8 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | S-06 | Health / log / CVE / cert monitors | system | — | — | — | — | no direct mutation; emits events → A-03 | — | — | INV-27 (event text → prompt) |
 | S-07 | VPN bootstrap at startup | system | — | — | — | — | `EnsureUpAsync` local | ❌ | ❌ log only | INV-41 (E-08), 45 |
 | S-08 | Retention purge of AuditLog + Agent History | system | — | — | — | — | after `Audit:RetentionDays` (default 365, at least 30), daily; both through the chain: the trail is verified first (nothing removed otherwise), an `audit.retention` event naming both counts, then the signed new start (R1-23) | — | ✅ (`audit.retention`) | — |
+| S-09 | Startup schema upgrade (R1-34) | system | — | — | — | — | before the first pending migration of an existing database a `pre-upgrade-…` self-backup; it failing stops the start with nothing migrated (opt-out `WHISKERS_UPGRADE_SKIP_BACKUP`, logged); the scheduled retention skips these backups | ✅ migration history read back by EF; a failed migration stops the start and logs the backup to restore | log only (no audit row before the schema is current) | — |
+| S-10 | CLI restore `--restore-backup <id>` or `latest-pre-upgrade` (R1-34) | host operator (shell on the container or host, the data directory) | outside the app: host access | — | — | — | the same checked path as U-25 (`BeginRestoreAsync`: archive validation, pre-restore safety backup, PostgreSQL dry run), only on-box ids from `backups/self`; applied at the next start | as U-25 | ✅ `selfbackup.restored` written at the next start, actor `cli (--restore-backup)` | INV-55 |
 
 ### 7.4 Interactive terminals
 

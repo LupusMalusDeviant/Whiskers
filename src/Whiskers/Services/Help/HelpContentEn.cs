@@ -315,6 +315,14 @@ internal static class HelpContentEn
                     your backups off the data volume: the backup guide (`docs/operations/backup-and-recovery.md`)
                     describes the recovery onto a new host.
                     """),
+                new("Updates", """
+                    When a new version brings schema migrations, Whiskers first takes a **pre-upgrade-…** backup
+                    of the database as it was. If that backup fails, the start stops before anything is migrated.
+                    The scheduled backup retention does not delete these backups; the newest three are kept. If a
+                    migration fails, the log names the backup; you go back without the UI with
+                    `--restore-backup latest-pre-upgrade`. A **downgrade** is always the previous version on that
+                    backup — see `docs/operations/backup-and-recovery.md`.
+                    """),
                 new("Damaged Settings Files", """
                     Whiskers keeps the previous version of each settings file (roles, whitelist, vault,
                     servers, permissions …) as `<file>.bak`. If a file cannot be read — cut off by a power

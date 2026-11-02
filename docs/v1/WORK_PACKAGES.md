@@ -582,10 +582,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `UpgradeRecoveryTests` proves pre-migration recovery capture and recovery without a successfully booted UI.
-- [ ] `SqliteToPostgresMigratorTests` injects a mid-copy failure and verifies atomic rollback across metrics and Identity.
-- [ ] `MigrationModelDriftTests` covers both contexts/providers and migration-name parity.
-- [ ] Startup probe budgets are configurable; downgrade requires the documented matching data restore.
+- [x] `UpgradeRecoveryTests` proves pre-migration recovery capture and recovery without a successfully booted UI.
+- [x] `SqliteToPostgresMigratorTests` injects a mid-copy failure and verifies atomic rollback across metrics and Identity.
+- [x] `MigrationModelDriftTests` covers both contexts/providers and migration-name parity.
+- [x] Startup probe budgets are configurable; downgrade requires the documented matching data restore.
 
 **Out of scope:** General-purpose database administration.
 

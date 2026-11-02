@@ -110,7 +110,7 @@ The area reports contain 111 findings: A 18, B 20, C 24, D 17, E 9, F 23. After 
 | TA-35 | Commercial readiness | Audit data: no tamper evidence, fixed 90-day hard delete, no export, visible to all Viewers | C-17, B-20 |
 | TA-36 | Security | A wrong/changed `VAULT_KEY` is not detected; legacy CBC migration with a wrong key can overwrite entries | D-03 |
 | TA-37 | Security | DataProtection key ring unencrypted at rest and included in backups (cookie-forgery credential). **Fixed in R1-31:** each key's secret is encrypted with a vault-derived key (`VaultKeyRing`), plaintext key files are encrypted in place at start; without `VAULT_KEY` the keys stay as before (reported). | D-04, A-04 |
-| TA-38 | Reliability | No pre-migration backup or downgrade path; a failed migration crash-loops; Helm startup probe ≈60 s | D-07, F-12 |
+| TA-38 | Reliability | No pre-migration backup or downgrade path; a failed migration crash-loops; Helm startup probe ≈60 s. **Fixed in R1-34:** before an existing database is migrated, a `pre-upgrade-…` self-backup is taken; when it fails the start stops with nothing migrated (opt-out `WHISKERS_UPGRADE_SKIP_BACKUP`, logged). Scheduled retention skips these backups (newest three kept). A failed migration logs the backup to restore, and `--restore-backup <id|latest-pre-upgrade>` stages it without the UI; a downgrade is the previous release on that backup (`docs/operations/backup-and-recovery.md`). Helm probe budgets are values (`probes.*`, startup 5 min); the image health check start period is 5 min. | D-07, F-12 |
 | TA-39 | Reliability | JSON stores: corruption blocks boot, no fsync before rename, some non-atomic writers. **Fixed in R1-35:** `DurableFile` (flushed own temp file, one rename) for the shared store and the CVE, image-update, agent/app-settings and chat writers; the previous generation is kept as `.bak` and used when the file is unreadable (original kept as `.corrupt-<time>`, shown on the readiness card); without a readable generation the start stops instead of defaulting; guardrails stay fail-closed without recovery. | D-09 |
 | TA-40 | Security | Rollback snapshots store full container env (secrets) in plaintext and replay it. **Fixed in R1-31:** snapshots are stored encrypted with a vault-derived key bound to container and server; without a usable vault none is kept. | D-11 |
 | TA-41 | Security | git branch not validated → option/argument injection; deploying an untrusted repo = code execution on host (by design, Admin) | E-01 |
@@ -122,7 +122,7 @@ The area reports contain 111 findings: A 18, B 20, C 24, D 17, E 9, F 23. After 
 | TA-47 | Security / Testing | CI: no SAST/CodeQL, dependency-vuln or secret scanning, no image build/scan on PRs, no job timeouts | F-09 |
 | TA-48 | Security | Runtime image: base images not digest-pinned; ships full `docker.io` engine + sshpass; root by default | F-10 |
 | TA-49 | Operations / UX | Installer defaults: `:latest`, privileged profile, no `VAULT_KEY`, no signature check, stale guidance recommending `Auth__Disabled` (**v1 blocker for the text**) | F-11 |
-| TA-50 | Testing | No migration-drift test; Postgres tests skip silently in CI; 3 UI tests; no E2E / image / upgrade / hardened-boot tests | F-13, D-08, D-16, C-23 |
+| TA-50 | Testing | No migration-drift test; Postgres tests skip silently in CI; 3 UI tests; no E2E / image / upgrade / hardened-boot tests. **Partly fixed in R1-34:** `MigrationModelDriftTests` (both contexts on both providers, migration-name parity) and upgrade tests (`UpgradeRecoveryTests`, `UpgradeBootTests`); E2E, image and hardened-boot tests remain (R1-47). | F-13, D-08, D-16, C-23 |
 | TA-51 | Security | Hardened profile: socket proxy with `POST=1` on unauthenticated host loopback `127.0.0.1:2375` | F-14 |
 | TA-52 | Reliability | Background loops: non-shutdown `OperationCanceledException` escapes; host stops on background exceptions; unbounded intervals | F-15 |
 | TA-53 | Documentation | No upgrade/rollback guide, troubleshooting, production checklist, Postgres backup guidance (**v1 blocker: upgrade + backup docs**) | F-18, D-17 |
@@ -135,7 +135,7 @@ Deny (Confirm only in `AgentSession`) · C-11 approval level source differs from
 non-unique provider ToolCallId · C-19 per-session rate limits only, unbounded pending approvals · C-20 ClaudeCodeRuntime
 fail-open rights check / fixed-key deputy · C-21 transcripts not fully redacted · C-22 approval notifications lack
 context · C-24 `SaveMcpPermissions` has no in-method Admin check · D-12 SecretRedactor coverage, not applied at logging
-layer · D-13 `VAULT_KEY` env-only, no `_FILE`, no strength check · D-15 SQLite→Postgres migrator not transactional ·
+layer · D-13 `VAULT_KEY` env-only, no `_FILE`, no strength check · D-15 SQLite→Postgres migrator not transactional (fixed in R1-34: one transaction across metrics and Identity) ·
 E-03 nginx site-name regex allows `..`/leading `-` · E-08 VPN args concatenated into one `Arguments` string ·
 E-09 kubeconfig `exec` plugins may run on host (needs verification) · F-16 shutdown semantics of mutating background
 work · F-17 no structured logs / correlation IDs / tracing · F-19 Dependabot misses 3 of 5 projects and compose/Helm

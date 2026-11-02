@@ -62,7 +62,9 @@ ingress:
 Runs under the restricted PodSecurity standard (with `localDocker.enabled=false`):
 `runAsNonRoot` (uid 10001), `readOnlyRootFilesystem` (+`emptyDir` on `/tmp`), all capabilities
 dropped, `seccompProfile: RuntimeDefault`, `fsGroup: 10001` for PVC ownership. Probes:
-`/healthz` (liveness+startup) and `/readyz` (readiness).
+`/healthz` (liveness+startup) and `/readyz` (readiness), timings under `probes.*`. The startup probe allows
+5 minutes (`probes.startup.periodSeconds` × `failureThreshold`): an upgrade takes a pre-upgrade backup and runs
+the schema migrations before Whiskers answers. Raise `probes.startup.failureThreshold` for a large database.
 
 ## Backup
 

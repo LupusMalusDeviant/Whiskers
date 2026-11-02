@@ -55,6 +55,9 @@ public sealed class BackupService : IBackupService
         _vaultKey = SecretSource.VaultKey(configuration);
     }
 
+    /// <summary>Label prefix of the backups taken before a schema upgrade (R1-34). The scheduled retention skips them.</summary>
+    public const string PreUpgradeLabelPrefix = "pre-upgrade-";
+
     private const string CommittedRestorePending =
         "A restore is already committed and is applied at the next start. Restart Whiskers first, or remove .restore-pending from the data directory to give it up.";
 
@@ -271,7 +274,10 @@ public sealed class BackupService : IBackupService
     public async Task PruneAsync(int keepNewest, CancellationToken ct = default)
     {
         if (keepNewest < 0) return;
-        var all = await ListBackupsAsync(ct);
+        // R1-34: the pre-upgrade backups are the way back from an upgrade — the scheduled retention would delete them
+        // a few nights later. UpgradeGuard keeps its own count of them.
+        var all = (await ListBackupsAsync(ct))
+            .Where(b => !b.Label.StartsWith(PreUpgradeLabelPrefix, StringComparison.Ordinal));
         foreach (var old in all.Skip(keepNewest))
         {
             try { await DeleteBackupAsync(old.Id, ct); }

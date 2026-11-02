@@ -54,9 +54,10 @@ them elsewhere) fails instead of writing an archive without the database.
   after the archive was taken; the pre-restore safety backup still holds them.
 - **Recovery time (RTO):** start a Whiskers container, upload the archive and wait for one restart. On PostgreSQL,
   the database is restored during that restart, in one transaction, before Whiskers answers its health check. That
-  takes about as long as the dry run did. On Kubernetes the Helm chart's startup probe allows about a minute; for a
-  larger database raise its `failureThreshold` before the restore, or the pod is restarted mid-restore, the
-  transaction rolls back and the restore repeats at every start.
+  takes about as long as the dry run did. On Kubernetes the Helm chart's startup probe allows five minutes
+  (`probes.startup.periodSeconds` × `probes.startup.failureThreshold`); for a larger database raise
+  `probes.startup.failureThreshold` before the restore, or the pod is restarted mid-restore, the transaction rolls
+  back and the restore repeats at every start.
 
 ## Keep a copy off the volume
 
@@ -100,6 +101,61 @@ An encrypted archive is safe to keep on another machine, because it is useless w
    from before the restore. On PostgreSQL, if the start's log already says "The PostgreSQL database was restored from
    the archive", the database is the archive's while the files are not yet: after giving up, restore the pre-restore
    safety backup so both match again.
+
+## Upgrades
+
+A new release may bring schema migrations. Whiskers runs them at the start, before it answers any request:
+
+1. When migrations are pending on an existing database, it first takes a self-backup labelled
+   `pre-upgrade-<date>`: the database (and the files) **as they were before the upgrade**. The log names its id.
+2. When that backup cannot be taken, for example for lack of space, a wrong `VAULT_KEY` or missing PostgreSQL client
+   tools, the start **stops before any migration**; the database is unchanged. Fix the cause and start again. Only if
+   you have a recovery point of your own, set `WHISKERS_UPGRADE_SKIP_BACKUP=true` to migrate without the backup (the
+   log warns about it at every such start).
+3. Then the migrations run. The log shows how long the backup and each schema took.
+
+The scheduled self-backup retention does not delete pre-upgrade backups. Whiskers keeps the newest three
+(`WHISKERS_UPGRADE_KEEP_BACKUPS`) and deletes older ones when it takes a new one. A new database gets no pre-upgrade
+backup: there is nothing in it yet.
+
+The backup and the migrations take longer as the database grows, and nothing answers the health check meanwhile.
+The image's health check waits five minutes; on Kubernetes the Helm startup probe allows five minutes
+(`probes.startup.*`). Raise both for a large database, or the orchestrator restarts the container mid-upgrade.
+
+### When a migration fails
+
+The start stops and the log says which pre-upgrade backup to restore. The database may be partly migrated. You do
+not need the UI to go back — run the restore from the command line with **this** release's image:
+
+```bash
+docker compose run --rm serverwatch --restore-backup latest-pre-upgrade
+```
+
+(`serverwatch` is the service name in the shipped compose file), or `--restore-backup <id>` for a specific archive
+(without an id it lists the archives). Outside a container it is `dotnet Whiskers.dll --restore-backup …`; on
+Kubernetes, scale the deployment to 0 and run the image once with the same volume, environment and argument. The
+command checks the
+archive like **Settings > Backup** does, takes a safety backup of the current state and stages the restore, then
+exits. The next start applies it. Then either fix the cause and start this release again, or downgrade.
+
+### Downgrade
+
+An older release does not run on a database a newer release has migrated: it does not know the newer schema, and
+its restore refuses an archive with a newer schema. A downgrade is therefore always **the previous release on the
+matching pre-upgrade backup**:
+
+1. Stop Whiskers.
+2. With the **newer** image, stage the pre-upgrade backup: `--restore-backup latest-pre-upgrade` (or its id).
+3. Start the **previous** image on the same data directory and database. It applies the restore before it opens the
+   database, and starts on the schema it knows.
+
+Data written after the upgrade is not in the pre-upgrade backup; the safety backup taken in step 2 holds it, but only
+the newer release can restore that one.
+
+On PostgreSQL, step 3 needs a previous release that restores the database at its start (the first release with
+PostgreSQL database backups, R1-33, or later). An older release only swaps the files and would start on the newer
+schema; Whiskers' own tools cannot take a PostgreSQL instance back that far, so keep a `pg_dump` of your own before
+such an upgrade.
 
 ## After a restore refused for an early commit
 

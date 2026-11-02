@@ -38,6 +38,10 @@ jobs:
           grep -q "path: /healthz" default.yaml
           grep -q "WHISKERS_DISABLE_LOCAL_DOCKER" default.yaml
           ! grep -q "docker.sock" default.yaml
+          # R1-34: the startup probe outlasts a pre-upgrade backup + migrations (5 s x 60 = 5 min) and is configurable.
+          grep -A3 "startupProbe:" default.yaml | grep -q "failureThreshold: 60"
+          helm template test deploy/helm/whiskers --set probes.startup.failureThreshold=240 \
+            | grep -A3 "startupProbe:" | grep -q "failureThreshold: 240"
 
           helm template test deploy/helm/whiskers \
             --set database.provider=postgres \

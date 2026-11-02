@@ -1,6 +1,12 @@
 #!/bin/sh
 set -e
 
+# Command-line tools (--restore-backup, --migrate-to-postgres) run once and exit: no VPN bring-up, and their
+# arguments reach the app (a normal start passes none).
+case "${1:-}" in
+    --*) exec dotnet Whiskers.dll "$@" ;;
+esac
+
 # VPN bring-up is being moved behind the in-app IVpnProvider abstraction (Services/Vpn).
 # When VPN_PROVIDER is set (Vpn__Provider), the app manages the VPN (or it runs on the host /
 # a sidecar for "none"), so this shell skips its legacy Tailscale bring-up. With VPN_PROVIDER

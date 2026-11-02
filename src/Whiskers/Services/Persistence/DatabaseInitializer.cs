@@ -102,7 +102,7 @@ public static class DatabaseInitializer
             history.GetInsertScript(new HistoryRow(baseline, ProductInfo.GetVersion())), ct);
     }
 
-    private static async Task<bool> TableExistsAsync(MetricsDbContext db, string table, CancellationToken ct)
+    internal static async Task<bool> TableExistsAsync(MetricsDbContext db, string table, CancellationToken ct)
     {
         var conn = db.Database.GetDbConnection();
         if (conn.State != ConnectionState.Open)

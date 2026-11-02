@@ -37,6 +37,14 @@ builder.AddWhiskersLogRedaction();            // R1-25: every log provider write
 
 var app = builder.Build();
 
+// R1-34 recovery CLI: `dotnet Whiskers.dll --restore-backup <id|latest-pre-upgrade>` stages an on-box self-backup and
+// exits without starting the web host or migrating anything; the next start applies it (see RestoreCli).
+if (args is [RestoreCli.Flag, ..])
+{
+    return await RestoreCli.RunAsync(app.Services.GetRequiredService<IBackupService>(),
+        app.Services.GetService<Whiskers.Services.Vault.IVaultService>(), args.Length > 1 ? args[1] : null, Console.Out);
+}
+
 app.ConfigureWhiskersHttpPipeline();           // forwarded headers → fixed auth middleware chain → endpoints
 await app.RunWhiskersStartupAsync();           // IInitializable warm-ups (in Order) + metrics-DB migration
 

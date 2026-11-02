@@ -76,8 +76,10 @@ ENV WHISKERS_PG_BIN_DIR=/usr/lib/postgresql/18/bin
 EXPOSE 8080
 
 # Container liveness probe: curl the anonymous /healthz endpoint (status word only). start-period
-# covers first-boot init + DB migration. Orchestrators like K8s use their own httpGet probes instead.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+# covers first-boot init and an upgrade's pre-upgrade backup + DB migrations (R1-34): Whiskers answers no
+# request until they are done. A success ends it early, so a normal start is healthy within seconds.
+# Orchestrators like K8s use their own httpGet probes instead (Helm: values.probes).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5m --retries=3 \
     CMD curl -fsS http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
