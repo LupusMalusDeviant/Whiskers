@@ -82,7 +82,9 @@ An encrypted archive is safe to keep on another machine, because it is useless w
      the next start.
    - Then the files are swapped.
 5. To give up a pending restore, remove `/app/data/.restore-pending`. The pre-restore safety backup holds the state
-   from before the restore.
+   from before the restore. On PostgreSQL, if the start's log already says "The PostgreSQL database was restored from
+   the archive", the database is the archive's while the files are not yet: after giving up, restore the pre-restore
+   safety backup so both match again.
 
 ## Restore after the volume is lost (off-volume recovery)
 
@@ -121,7 +123,9 @@ webhooks and audit rows come back.
   variables inherited from Whiskers' own environment are not passed on, except `PGPASSWORD` (when the connection
   string has no password) and `PGPASSFILE`, which Whiskers itself would use as well. Host, port, database, user,
   password, password file, SSL mode, root certificate, client certificate and key, target session attributes and the
-  connect timeout are taken over from the connection string; an encrypted client key (`SSL Password`) and several
+  connect timeout are taken over from the connection string. With `SSL Mode=VerifyCA` or `VerifyFull` and no root
+  certificate, the tools verify against the system's trusted roots, as Whiskers does; `Require` encrypts without
+  verifying in both. An encrypted client key (`SSL Password`) and several
   hosts in `Host` are not supported for backups. Of the tools' error output, only the error lines are logged; lines
   that quote a row or a statement, and quoted values, are left out. The restore at the start reads the database
   settings from the same places as the app (environment, `appsettings.json` and the data directory's settings
@@ -129,5 +133,6 @@ webhooks and audit rows come back.
 - The dump leaves out ownership and grants (`--no-owner --no-acl`). Restored objects belong to the role Whiskers
   connects as. If other roles had grants, for example a read-only reporting user, grant them again after the
   restore.
-- The dump covers the `public` schema only. Objects in other schemas of the same database are not touched;
+- The dump covers the `public` schema only. Objects in other schemas of the same database are not touched unless
+  they depend on objects in `public` (a view or foreign key on Whiskers' tables is dropped with them);
   extensions are not part of the dump (Whiskers' migrations create none; a test keeps it that way).

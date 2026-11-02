@@ -148,6 +148,21 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 ? "Ein geplanter Whiskers-Self-Backup-Task ist aktiv."
                 : "Kein geplanter Self-Backup-Task — unter Aufgaben einen SelfBackup-Zeitplan anlegen (manuelle Backups: Settings → Backup & Restore).",
             "tasks", "Aufgaben öffnen"));
+        // R1-33: on PostgreSQL a self-backup needs the client tools; without them every backup fails.
+        if (Whiskers.Services.Persistence.DatabaseRegistration.Resolve(_config).Provider == Whiskers.Services.Backup.SelfBackupFormat.ProviderPostgres)
+        {
+            string? version = null, problem = null;
+            try { version = await Whiskers.Services.Backup.PostgresDumpTool.FromConfiguration(_config).VersionAsync(); }
+            catch (Whiskers.Services.Backup.PostgresToolException ex) { problem = ex.Message; }
+            checks.Add(new ReadinessCheck(
+                "PostgreSQL-Client-Tools für das Self-Backup",
+                version is not null,
+                version is not null
+                    ? $"{version} — Backups enthalten die Datenbank (pg_dump)."
+                    : $"pg_dump nicht nutzbar — Self-Backups schlagen fehl: {problem} (WHISKERS_PG_BIN_DIR auf das bin-Verzeichnis der Client-Tools setzen).",
+                null, null));
+        }
+
         checks.Add(new ReadinessCheck(
             "Update-Policy gesetzt",
             hasUpdatePolicy,

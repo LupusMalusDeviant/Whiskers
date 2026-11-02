@@ -50,12 +50,14 @@ public class PostgresDumpToolTests
         => Assert.Throws<PostgresToolException>(() => PostgresDumpTool.Connect(new ProcessStartInfo("pg_dump"),
             "Host=db;Database=w;Username=u;Password=p;SSL Certificate=/c.crt;SSL Key=/c.key;SSL Password=kp"));
 
-    private static async Task<string> FeedAsync(string script, string? probe, bool commit)
+    private static async Task<string> FeedAsync(string script, string? probe, bool commit, string? sourceFailure = null,
+        MemoryStream? output = null)
     {
         using var input = new StreamReader(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(script)));
-        var output = new MemoryStream();
+        output ??= new MemoryStream();
         await using (var writer = new StreamWriter(output, new System.Text.UTF8Encoding(false), leaveOpen: true))
-            await PostgresDumpTool.FeedAsync(input, writer, probe, commit, CancellationToken.None);
+            await PostgresDumpTool.FeedAsync(input, writer, probe, commit, CancellationToken.None,
+                () => Task.FromResult(sourceFailure));
         return System.Text.Encoding.UTF8.GetString(output.ToArray());
     }
 
@@ -67,13 +69,39 @@ public class PostgresDumpToolTests
             probe: "SELECT 1", commit: false);
         var lines = wrapped.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        Assert.Equal(["BEGIN;", "SET LOCAL lock_timeout = '60s';", "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[..4]);
+        Assert.Equal("BEGIN;", lines[0]);
+        Assert.StartsWith("SET LOCAL whiskers.restore_tx = '", lines[1], StringComparison.Ordinal);
+        Assert.Equal(["SET LOCAL lock_timeout = '60s';", "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[2..5]);
+        // Checked after the script: it may not have ended the transaction on its own.
+        var marker = lines[1].Split('\'')[1];
+        Assert.Contains(lines, l => l.StartsWith("DO $guard$", StringComparison.Ordinal) && l.Contains(marker, StringComparison.Ordinal));
         Assert.Single(lines, l => l.StartsWith("CREATE SCHEMA", StringComparison.Ordinal));   // the dump's own left out
         Assert.DoesNotContain("SET transaction_timeout = 0;", lines);                             // older servers lack it
         Assert.Contains(lines, l => l.Contains("set_config('transaction_timeout'", StringComparison.Ordinal));
         Assert.Equal(["SET search_path = public;", "SELECT 1", "ROLLBACK;"], lines[^3..]);
         Assert.DoesNotContain("\r", wrapped);
-        Assert.EndsWith("COMMIT;\n", await FeedAsync("\\restrict k\nSELECT 1;\n", null, commit: true));
+        Assert.EndsWith("COMMIT;\n", await FeedAsync("\\restrict k\nSELECT 1;\n\\unrestrict k\n", null, commit: true));
+    }
+
+    [Theory]
+    [InlineData("\\restrict k\nCREATE TABLE t (id int);\n", null)]                       // cut off before its end
+    [InlineData("\\restrict k\nCREATE TABLE t (id int);\n\\unrestrict k\n", "pg_restore failed (exit code 1): read error")]
+    public async Task A_script_that_did_not_end_cleanly_is_never_committed(string script, string? sourceFailure)
+    {
+        var output = new MemoryStream();
+        await Assert.ThrowsAsync<PostgresToolException>(() => FeedAsync(script, null, commit: true, sourceFailure, output));
+        Assert.DoesNotContain("COMMIT", System.Text.Encoding.UTF8.GetString(output.ToArray()), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("VerifyFull", null, "system")]
+    [InlineData("VerifyCA", "/certs/ca.pem", "/certs/ca.pem")]
+    [InlineData("Require", null, null)]
+    public void Certificate_verification_follows_the_app(string mode, string? root, string? expected)
+    {
+        var start = new ProcessStartInfo("pg_dump");
+        PostgresDumpTool.Connect(start, $"Host=db;Database=w;Username=u;Password=p;SSL Mode={mode}" + (root is null ? "" : $";Root Certificate={root}"));
+        Assert.Equal(expected, start.Environment.TryGetValue("PGSSLROOTCERT", out var value) ? value : null);
     }
 
     [Theory]

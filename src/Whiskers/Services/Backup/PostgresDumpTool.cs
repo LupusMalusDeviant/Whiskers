@@ -73,6 +73,10 @@ public sealed class PostgresDumpTool
                 "(their schema must be public; a search path in the connection string moves them elsewhere).");
     }
 
+    /// <summary>The version line of <c>pg_dump</c> (the readiness check: without the tools no backup).</summary>
+    public async Task<string> VersionAsync(CancellationToken ct = default)
+        => (await RunAsync("pg_dump", null, ["--version"], ct)).Trim();
+
     /// <summary>Restores the dump into the database in one transaction.</summary>
     public Task RestoreAsync(string connectionString, string dumpPath, CancellationToken ct = default)
         => ApplyAsync(connectionString, dumpPath, probeSql: null, commit: true, ct);
@@ -110,7 +114,16 @@ public sealed class PostgresDumpTool
             {
                 try
                 {
-                    await FeedAsync(restore.StandardOutput, psql.StandardInput, probeSql, commit, timeout.Token);
+                    // pg_restore must have ended cleanly before anything is committed: a dump cut off on the volume
+                    // would otherwise end the script early and COMMIT half a schema.
+                    await FeedAsync(restore.StandardOutput, psql.StandardInput, probeSql, commit, timeout.Token,
+                        sourceFailure: async () =>
+                        {
+                            await restore.WaitForExitAsync(timeout.Token);
+                            return restore.ExitCode == 0
+                                ? null
+                                : $"pg_restore failed (exit code {restore.ExitCode}): {Tail(await restoreErrors)}";
+                        });
                 }
                 catch (IOException)
                 {
@@ -141,10 +154,15 @@ public sealed class PostgresDumpTool
         }
     }
 
-    internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct)
+    internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct,
+        Func<Task<string?>>? sourceFailure = null)
     {
         psql.NewLine = "\n";
+        // A marker that only this transaction holds (SET LOCAL ends with it): a script that ends the transaction early —
+        // a crafted dump with its own COMMIT — fails the check below instead of running the rest outside it.
+        var marker = Guid.NewGuid().ToString("N");
         await psql.WriteLineAsync("BEGIN;");
+        await psql.WriteLineAsync($"SET LOCAL whiskers.restore_tx = '{marker}';");
         // The drop takes every table's lock: a session that still holds one makes it fail after a minute instead of
         // waiting for the whole timeout.
         await psql.WriteLineAsync("SET LOCAL lock_timeout = '60s';");
@@ -155,8 +173,10 @@ public sealed class PostgresDumpTool
         // pg_restore since 17.6 opens its script with \restrict, which makes psql refuse every meta-command until the
         // matching \unrestrict (CVE-2025-8714); a script that does not open with it is not run.
         var restricted = false;
+        string? last = null;
         while (await script.ReadLineAsync(ct) is { } line)
         {
+            if (line.Trim().Length > 0) last = line;
             if (!restricted)
             {
                 if (line.StartsWith(@"\restrict ", StringComparison.Ordinal)) restricted = true;
@@ -179,7 +199,15 @@ public sealed class PostgresDumpTool
         }
         if (!restricted)
             throw new PostgresToolException("The database dump produced an empty restore script.");
+        // Nothing is committed unless the script reached its own end and pg_restore finished without an error.
+        if (sourceFailure is not null && await sourceFailure() is { } failure)
+            throw new PostgresToolException(failure);
+        if (last is null || !last.StartsWith(@"\unrestrict ", StringComparison.Ordinal))
+            throw new PostgresToolException("The restore script ended before its end (\\unrestrict): the dump is incomplete.");
 
+        await psql.WriteLineAsync(
+            $"DO $guard$ BEGIN IF pg_catalog.current_setting('whiskers.restore_tx', true) IS DISTINCT FROM '{marker}' THEN " +
+            "RAISE EXCEPTION 'the restore script ended its transaction early'; END IF; END $guard$;");
         if (probeSql is not null)
         {
             // The dump empties search_path; the probe names the tables unqualified, as the app does.
@@ -272,7 +300,11 @@ public sealed class PostgresDumpTool
             SslMode.VerifyFull => "verify-full",
             _ => "prefer",
         });
-        Set("PGSSLROOTCERT", builder.RootCertificate);
+        // Npgsql verifies against the system's trusted roots when no root certificate is named; libpq would look for
+        // ~/.postgresql/root.crt instead. "system" (libpq 16+) makes the tools verify like the app. Require does not
+        // verify in either (Npgsql 8+ follows libpq).
+        Set("PGSSLROOTCERT", !string.IsNullOrEmpty(builder.RootCertificate) ? builder.RootCertificate
+            : builder.SslMode is SslMode.VerifyCA or SslMode.VerifyFull ? "system" : null);
         Set("PGSSLCERT", builder.SslCertificate);
         Set("PGSSLKEY", builder.SslKey);
         Set("PGTARGETSESSIONATTRS", builder.TargetSessionAttributes);

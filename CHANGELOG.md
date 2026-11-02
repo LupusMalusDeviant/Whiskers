@@ -19,7 +19,9 @@ All notable changes to Whiskers are documented here. The format follows
   script goes from `pg_restore` straight to `psql` and never lands on disk, and it runs only with the meta-command
   protection of client tools 17.6 or newer, so a crafted dump cannot run shell commands. The role Whiskers connects
   as must own the `public` schema and should not be a superuser. A backup whose dump does not hold Whiskers' tables
-  (for example because a search path put them in another schema) fails instead of claiming the database.
+  (for example because a search path put them in another schema) fails instead of claiming the database. A restore
+  commits only when the dump was read to its end without an error. On PostgreSQL the readiness check shows whether
+  the client tools are usable.
 - R1-36: **A container action counts only when the container shows it.** After a start, stop, restart, remove,
   update or rollback — and after a single-container deployment from the Deploy page — the container is read back; one
   that is not running (or still running, still there, killed for lack of memory) makes the action **failed** — on the

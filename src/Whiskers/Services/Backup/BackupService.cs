@@ -785,7 +785,7 @@ public sealed class BackupService : IBackupService
             _logger.LogWarning(ex, "Free space of the data volume unknown; the restore goes ahead without the check");
             return;
         }
-        var needed = extractedBytes * 3 + live * 2 + (64L << 20);   // the third copy: the migration probe
+        var needed = extractedBytes * 3 + live * 2 + (64L << 20);   // the third copy: the SQLite migration probe (on PostgreSQL the probe runs in the server: an over-estimate there)
         if (available < needed)
             throw new BackupValidationException(
                 $"Not enough free space for this restore: it needs about {needed / (1 << 20)} MiB, the data volume has {available / (1 << 20)} MiB.");

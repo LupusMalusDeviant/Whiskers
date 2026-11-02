@@ -33,11 +33,12 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
     private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder(image).Build();
     private readonly List<string> _roots = [];
     private bool _up;
+    private Exception? _startFailure;
 
     public async Task InitializeAsync()
     {
         try { await _pg.StartAsync(); _up = true; }
-        catch { _up = false; } // no Docker daemon → the tests below Skip instead of failing
+        catch (Exception ex) { _up = false; _startFailure = ex; } // no Docker daemon → skipped locally, failed on CI
     }
 
     public async Task DisposeAsync()
@@ -52,6 +53,9 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
 
     private async Task SkipUnlessReadyAsync()
     {
+        // CI has Docker and the tools: there a server that does not start is a failure, not a skip.
+        if (!_up && Environment.GetEnvironmentVariable("CI") is not null)
+            throw new InvalidOperationException("The PostgreSQL test server did not start on CI.", _startFailure);
         Skip.IfNot(_up, "Docker daemon not available");
         try { await new PostgresDumpTool(BinDir).CheckReadableAsync(Path.Combine(Path.GetTempPath(), "none")); }
         catch (PostgresToolException ex) when (ex.Message.Contains("is not available", StringComparison.Ordinal))
@@ -337,6 +341,31 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(60), $"took {clock.Elapsed}");
         Assert.Contains("psql failed", ex.Message, StringComparison.Ordinal);
         Assert.Contains("owner", ex.Message, StringComparison.Ordinal);
+    }
+
+    [SkippableFact]
+    public async Task A_dump_cut_off_on_the_volume_is_not_committed_half_way()
+    {
+        await SkipUnlessReadyAsync();
+        var source = await CreateDatabaseAsync("cutoff");
+        await ExecuteAsync(source, WhiskersHistories +
+            "CREATE TABLE bulk AS SELECT g AS id, repeat(md5(g::text), 8) AS filler FROM generate_series(1, 100000) g;");
+        var target = await CreateDatabaseAsync("cutoff_target");
+        await ExecuteAsync(target, "CREATE TABLE keep (v text); INSERT INTO keep VALUES ('still here');");
+        var work = Path.Combine(Path.GetTempPath(), $"sw-pgbak-{Guid.NewGuid():N}");
+        _roots.Add(work);
+        Directory.CreateDirectory(work);
+        var dump = Path.Combine(work, "db.pgdump");
+        await new PostgresDumpTool(BinDir).DumpAsync(source, dump);
+        // The table of contents stays readable, the data ends half way.
+        await using (var file = new FileStream(dump, FileMode.Open)) file.SetLength(file.Length / 2);
+
+        await Assert.ThrowsAsync<PostgresToolException>(() => new PostgresDumpTool(BinDir).RestoreAsync(target, dump));
+
+        await using var check = new NpgsqlConnection(target);
+        await check.OpenAsync();
+        await using var read = new NpgsqlCommand("SELECT v FROM keep", check);
+        Assert.Equal("still here", await read.ExecuteScalarAsync());
     }
 
     [SkippableFact]
