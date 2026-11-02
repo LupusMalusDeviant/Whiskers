@@ -38,6 +38,13 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     private readonly IAutomationOwnerStore _owners;
 
     private int _running;
+    private readonly CancellationTokenSource _stopping = new();
+    private Task? _preview;
+    private bool _stopRequested;
+    private readonly object _previewGate = new();
+
+    /// <summary>How long a preview started from a tool may run: a dry run pulls one image per candidate.</summary>
+    public static readonly TimeSpan PreviewDeadline = TimeSpan.FromHours(2);
     private DateOnly? _lastNightlyRun;
 
     public AutoPatchService(
@@ -202,6 +209,59 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         => s.Enabled
            && utcNow.Hour == Math.Clamp(s.RunAtHourUtc, 0, 23)
            && lastRun != DateOnly.FromDateTime(utcNow);
+
+    public bool StartPreview(string onBehalfOf) => StartPreview(onBehalfOf, PreviewDeadline);
+
+    internal bool StartPreview(string onBehalfOf, TimeSpan deadline)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(onBehalfOf);
+        // Under the gate together with StopAsync: a preview either starts before the stop takes its snapshot (and is
+        // awaited) or sees the stop and does not start.
+        lock (_previewGate)
+        {
+            if (_stopRequested) return false;
+            // Claimed here, so "started" is never answered for a cycle that then does not run.
+            if (Interlocked.CompareExchange(ref _running, 1, 0) != 0) return false;
+            var actor = new AutomationActor("autopatch-preview", "AutoPatch preview", onBehalfOf);
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            cts.CancelAfter(deadline);
+            Task run;
+            // The tool's operation scope ends when the tool returns: it must not be what the cycle runs under.
+            using (ExecutionContext.SuppressFlow())
+                run = Task.Run(() => RunCycleCoreAsync(dryRun: true, actor, cts.Token));
+            _preview = run.ContinueWith(t =>
+            {
+                Volatile.Write(ref _running, 0);
+                if (t.Exception is { } ex)
+                    _logger.LogError(ex.GetBaseException(), "Auto-patch preview failed");
+                else if (cts.IsCancellationRequested && !_stopping.IsCancellationRequested)
+                    _logger.LogWarning("Auto-patch preview stopped after {Deadline}: it ran out of time", deadline);
+                cts.Dispose();
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return true;
+        }
+    }
+
+    /// <summary>The running preview, if any (tests).</summary>
+    internal Task? Preview { get { lock (_previewGate) return _preview; } }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        Task? running;
+        lock (_previewGate)
+        {
+            _stopRequested = true;
+            running = _preview;
+        }
+        // Cancelled outside the gate: cancellation callbacks may run inline.
+        await _stopping.CancelAsync();
+        await base.StopAsync(cancellationToken);
+        if (running is { } preview)
+        {
+            try { await preview.WaitAsync(cancellationToken); }
+            catch (OperationCanceledException) { /* the host stops waiting; the preview was cancelled */ }
+        }
+    }
 
     public Task<bool> RunCycleAsync(bool forceDryRun, string onBehalfOf, CancellationToken ct = default)
     {

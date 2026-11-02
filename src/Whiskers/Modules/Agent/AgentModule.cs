@@ -55,7 +55,9 @@ public sealed class AgentModule : IWhiskersModule
         services.AddVaultBackedSecrets<Whiskers.Configuration.AiChatSettings>(Whiskers.Configuration.AiChatSettings.SectionName);
         // Read from the vault first, then withheld from every log line (R1-25's known-value redaction).
         services.PostConfigure<Whiskers.Configuration.AiChatSettings>(s => Whiskers.Utils.KnownSecrets.Register(s.ApiKey));
-        services.AddHttpClient<Whiskers.Services.AiChat.AiChatService>();
+        // R1-38: a named client the singleton takes from the factory per request, so handler rotation still works
+        // (a typed client captured by a singleton would pin one handler for the process lifetime).
+        services.AddHttpClient(Whiskers.Services.AiChat.AiChatService.HttpClientName);
         services.AddSingleton<Whiskers.Services.AiChat.AiChatService>();
         services.AddSingleton<Whiskers.Services.AiChat.IAiChatService>(sp => sp.GetRequiredService<Whiskers.Services.AiChat.AiChatService>());
         services.AddSingleton<Whiskers.Services.AiChat.IChatHistoryStore, Whiskers.Services.AiChat.ChatHistoryStore>();

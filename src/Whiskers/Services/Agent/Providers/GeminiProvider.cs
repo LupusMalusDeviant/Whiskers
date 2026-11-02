@@ -12,14 +12,16 @@ public sealed class GeminiProvider : IAgentLlmProvider
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _baseEndpoint;
+    private readonly ProviderTimeouts _timeouts;
 
     public string Id => "gemini";
 
-    public GeminiProvider(HttpClient http, string apiKey, string baseEndpoint)
+    public GeminiProvider(HttpClient http, string apiKey, string baseEndpoint, ProviderTimeouts? timeouts = null)
     {
         _http = http;
         _apiKey = apiKey;
         _baseEndpoint = baseEndpoint.TrimEnd('/');
+        _timeouts = timeouts ?? ProviderTimeouts.Default;
     }
 
     public async IAsyncEnumerable<AgentStreamDelta> StreamAsync(
@@ -36,19 +38,14 @@ public sealed class GeminiProvider : IAgentLlmProvider
         if (!string.IsNullOrEmpty(_apiKey))
             httpReq.Headers.Add("x-goog-api-key", _apiKey);
 
-        using var response = await _http.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await ProviderHttp.SendAsync(_http, httpReq, _timeouts, ct);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException(
-                $"Gemini {(int)response.StatusCode}: {ProviderError.Extract(await response.Content.ReadAsStringAsync(ct))}");
+                $"Gemini {(int)response.StatusCode}: {ProviderError.Extract(await ProviderHttp.ErrorTextAsync(response, _timeouts, ct))}");
 
         var accumulator = new GeminiStreamAccumulator();
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-
-        while (true)
+        await foreach (var line in ProviderHttp.ReadLinesAsync(response, _timeouts, ct))
         {
-            var line = await reader.ReadLineAsync(ct);
-            if (line == null) break;
             if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.Ordinal))
                 continue;
 
@@ -75,11 +72,10 @@ public sealed class GeminiProvider : IAgentLlmProvider
         if (!string.IsNullOrEmpty(_apiKey))
             req.Headers.Add("x-goog-api-key", _apiKey);
 
-        using var resp = await _http.SendAsync(req, ct);
+        using var resp = await ProviderHttp.SendAsync(_http, req, _timeouts, ct);
         resp.EnsureSuccessStatusCode();
 
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        using var doc = await ProviderHttp.ReadJsonAsync(resp, _timeouts, ct);
 
         var ids = new List<string>();
         if (doc.RootElement.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array)

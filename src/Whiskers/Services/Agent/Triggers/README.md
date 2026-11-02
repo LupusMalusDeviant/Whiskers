@@ -6,6 +6,10 @@ and, for each enabled matching trigger, starts an agent run under the trigger's 
 preset. Any guardrail confirmation is **denied**, never auto-approved (no human is watching an unattended run). The
 result is sent as a notification (`agent_action`) and written to the audit log.
 
+**Deadline (R1-38, INV-40).** A run ends after `DefaultRunDeadline` (15 min): the session, its provider call and a
+running tool are cancelled, the run's slot (at most three in parallel) is released, and the summary says it timed out
+and points to the audit log for anything it had already started. A provider timeout ends up in the summary too.
+
 **Owner and grant (PC-D6, PC-D7, R1-13).** Every trigger has an owner (`OwnerId`): the Admin who created it, last
 changed its write grant, or switched it on after a suspension or while it had no owner (a takeover). The store sets
 owner and suspension itself and ignores what the page sends. A trigger may change nothing until an Admin grants it

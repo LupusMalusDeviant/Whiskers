@@ -135,8 +135,9 @@ public class DockerService : IDockerService
 
     // === Host shell ===
 
-    public Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(string command, string? serverId = null, TimeSpan? timeout = null)
-        => _hostShell.RunHostShellAsync(command, serverId, timeout);
+    public Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(string command, string? serverId = null, TimeSpan? timeout = null,
+        CancellationToken ct = default)
+        => _hostShell.RunHostShellAsync(command, serverId, timeout, ct);
 
     // === System info ===
 

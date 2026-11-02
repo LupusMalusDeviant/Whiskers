@@ -185,7 +185,8 @@ registrations are wrapped too.
    (`IApprovalGate.TryConsumeAsync`, one conditional database update since R1-14, so also across a restart); a concurrent call that already used it turns this attempt's row into **Denied**.
 8. Delegate runs inside a `MutationScope`, cancelled at the capability's deadline; an exception, the deadline or a
    reported failure (`MutationScope.Fail`, or an MCP result with `isError`) → **Failed**. A reported failure keeps
-   the delegate's value, so the caller still gets the tool's own answer.
+   the delegate's value, so the caller still gets the tool's own answer. A delegate stopped by the deadline or by
+   its caller while it ran is **Failed** with "its effect is unknown" (R1-38, INV-40), never "not executed".
 9. The capability's `IMutationVerifier`, if any → `Verified` / `Failed` / `NotVerifiable` + reason; otherwise `NotVerifiable` with the reason of its `VerificationContracts` row.
 10. The journal claim is finished (`Executed` / `Failed` with the verification; a failed write leaves it `Running`, so
     a retry after a restart is refused as outcome unknown), then the audit row is completed, with

@@ -18,5 +18,5 @@ the unreachable one silently re-baselines it on recovery.
 | `ContainerLifecycleOperations.cs` | Create from a `DeploymentRequest`, recreate-with-rename-fail-safe, and the C12 update-rollback (snapshot capture + rollback to the old image). |
 | `ImageOperations.cs` | Pull images (with robust repo/tag/digest reference parsing) and read image digests. |
 | `NetworkOperations.cs` | List/create/remove Docker networks, connect/disconnect containers. |
-| `HostShellOperations.cs` | SSH-free host shell via one-shot privileged `nsenter` helper containers, including the labelled-leftover sweep. |
+| `HostShellOperations.cs` | SSH-free host shell via one-shot privileged `nsenter` helper containers, including the labelled-leftover sweep. The timeout and the caller's token (R1-38) both kill the helper; it is always removed afterwards. |
 | `SystemInfoOperations.cs` | Per-server system info/reachability, host CPU/memory usage (Prometheus, /proc exec, or container-stats fallback). |

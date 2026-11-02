@@ -268,7 +268,7 @@ internal sealed class FakeDocker : IDockerService
     public Task RemoveNetworkAsync(string networkId, string? serverId = null) => throw new NotSupportedException();
     public Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task DisconnectContainerFromNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
-    public Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(string command, string? serverId = null, TimeSpan? timeout = null) => throw new NotSupportedException();
+    public Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(string command, string? serverId = null, TimeSpan? timeout = null, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
 /// <summary>A detector that excludes nothing — for tests about other things. The real one is exercised in

@@ -618,11 +618,20 @@ public sealed class MutationGateway : IMutationGateway
                             ApprovalId: approval?.ApprovalId) { VerificationNote = verificationNote };
                 }
             }
+            // R1-38 (INV-40): a call stopped while it ran never reads as "nothing happened" — it may have changed
+            // something before the cancellation reached it, so the reason says the effect is unknown.
             catch (OperationCanceledException ex) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
             {
                 outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
-                    $"'{capability.Id}' exceeded its deadline of {capability.Deadline}.", VerificationStatus.NotRun, ex,
+                    $"'{capability.Id}' exceeded its deadline of {capability.Deadline} and was cancelled; " +
+                    "its effect is unknown — read the current state before retrying.", VerificationStatus.NotRun, ex,
                     approval?.ApprovalId);
+            }
+            catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
+            {
+                outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
+                    $"'{capability.Id}' was cancelled while it ran; its effect is unknown — read the current state " +
+                    "before retrying.", VerificationStatus.NotRun, ex, approval?.ApprovalId);
             }
             catch (Exception ex)
             {

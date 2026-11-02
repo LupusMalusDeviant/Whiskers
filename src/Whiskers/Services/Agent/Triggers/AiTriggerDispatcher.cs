@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
+using Whiskers.Services.Agent.Providers;
 using Whiskers.Services.AuditLog;
 using Whiskers.Services.Guardrails;
 using Whiskers.Services.Notifications;
@@ -37,6 +38,13 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
     private readonly ILogger<AiTriggerDispatcher>? _logger;
     private readonly SemaphoreSlim _concurrency = new(MaxConcurrentRuns, MaxConcurrentRuns);
     private readonly ConcurrentDictionary<string, DateTime> _lastRun = new();
+
+    /// <summary>R1-38 (INV-40): the longest an unattended run may take. At the deadline the run is cancelled — the
+    /// provider call and any tool still running get the cancellation — its slot is freed, and the owner is told it
+    /// timed out.</summary>
+    public static readonly TimeSpan DefaultRunDeadline = TimeSpan.FromMinutes(15);
+
+    internal TimeSpan RunDeadline { get; init; } = DefaultRunDeadline;
 
     public AiTriggerDispatcher(
         IAiTriggerStore store, IServiceProvider sp, IOptionsMonitor<AgentSettings> settings,
@@ -141,23 +149,48 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
 
             var session = await agentService.StartSessionAsync(ctx);
             var sb = new StringBuilder();
-            await foreach (var ev in session.SendAsync(BuildTaskMessage(t, evt)))
+            using var deadline = new CancellationTokenSource(RunDeadline);
+            var completed = false;
+            try
             {
-                switch (ev)
+                await foreach (var ev in session.SendAsync(BuildTaskMessage(t, evt), ct: deadline.Token))
                 {
-                    case AgentEvent.AssistantDelta d:
-                        sb.Append(d.Text);
-                        break;
-                    case AgentEvent.ConfirmationRequired c:
-                        // An action that surfaces as Confirm is above the preset's autonomous level. No human
-                        // is watching a trigger run, so it must be denied, never auto-approved.
-                        await session.ResolveConfirmationAsync(c.Call.CorrelationId, false);
-                        sb.AppendLine($"[not allowed unattended: {c.Call.Name}]");
-                        break;
-                    case AgentEvent.Failed f:
-                        sb.Append($"\n[Error] {f.Message}");
-                        break;
+                    switch (ev)
+                    {
+                        case AgentEvent.TurnCompleted:
+                            completed = true;
+                            break;
+                        case AgentEvent.AssistantDelta d:
+                            sb.Append(d.Text);
+                            break;
+                        case AgentEvent.ConfirmationRequired c:
+                            // An action that surfaces as Confirm is above the preset's autonomous level. No human
+                            // is watching a trigger run, so it must be denied, never auto-approved.
+                            await session.ResolveConfirmationAsync(c.Call.CorrelationId, false);
+                            sb.AppendLine($"[not allowed unattended: {c.Call.Name}]");
+                            break;
+                        case AgentEvent.Failed f:
+                            sb.Append($"\n[Error] {f.Message}");
+                            break;
+                    }
                 }
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+            {
+                // Reported below; the session may also end quietly on the cancellation, without throwing.
+            }
+            catch (ProviderTimeoutException ex)
+            {
+                sb.Append($"\n[Error] {ex.Message}");
+            }
+            // A run that finished its turn just as the deadline fired was not cut off.
+            if (deadline.IsCancellationRequested && !completed)
+            {
+                // A tool that was running got the cancellation; whether it had already changed something is in
+                // its own audit entry, so the summary says that instead of guessing.
+                sb.Append($"\n[timed out after {RunDeadline.TotalMinutes:0.#} min — the run was cancelled; " +
+                          "check the audit log for any action it had already started]");
+                _logger?.LogWarning("AI trigger '{Name}' timed out after {Deadline}.", t.Name, RunDeadline);
             }
 
             // The summary is model output (and provider error text): redacted whole, then cut at a complete word

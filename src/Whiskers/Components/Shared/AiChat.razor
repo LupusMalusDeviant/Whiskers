@@ -203,7 +203,7 @@
         try
         {
             if (AgentMode) await SendAgentAsync(userMsg, run);
-            else await SendAdvisorAsync(userMsg);
+            else await SendAdvisorAsync(userMsg, run);
         }
         catch (OperationCanceledException)
         {
@@ -245,10 +245,10 @@
         _input = value ?? "";
     }
 
-    private async Task SendAdvisorAsync(string userMsg)
+    private async Task SendAdvisorAsync(string userMsg, CancellationToken run)
     {
         var recent = _messages.SkipLast(1).TakeLast(10).ToList();
-        var response = await ChatService.ChatAsync(userMsg, recent);
+        var response = await ChatService.ChatAsync(userMsg, recent, run);
         _messages.Add(new Whiskers.Services.AiChat.ChatMessage { Role = "assistant", Content = response });
     }
 
