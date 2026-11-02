@@ -310,6 +310,16 @@ public sealed class HelpContentService : IHelpContentService
                     Backups brauchen zum Entschlüsseln denselben `VAULT_KEY`; mit gesetztem `VAULT_KEY`
                     werden unverschlüsselte Backups nicht zurückgespielt.
                     """),
+                new("PostgreSQL", """
+                    Mit PostgreSQL enthält das Backup auch die **Datenbank**: einen `pg_dump` ihres Schemas,
+                    zusammen mit den Dateien aufgenommen. Bevor die Wiederherstellung festgeschrieben wird, spielt
+                    Whiskers den Dump in einer Transaktion ein und rollt sie zurück (Probelauf). Beim Neustart wird
+                    das Schema in **einer Transaktion** ersetzt, die Datenbank ist danach also die des Backups oder
+                    unverändert. Backups aus älteren Versionen enthalten nur die Dateien (**nur Dateien**) und
+                    werden nicht wiederhergestellt. Bewahre eine Kopie deiner Backups außerhalb des Datenvolumes
+                    auf: die Backup-Anleitung (`docs/operations/backup-and-recovery.md`) beschreibt die
+                    Wiederherstellung auf einem neuen Host.
+                    """),
                 new("Beschädigte Einstellungsdateien", """
                     Whiskers behält von jeder Einstellungsdatei (Rollen, Whitelist, Vault, Server,
                     Berechtigungen …) die vorige Fassung als `<datei>.bak`. Ist eine Datei unlesbar — durch

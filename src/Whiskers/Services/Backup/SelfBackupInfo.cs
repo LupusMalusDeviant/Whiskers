@@ -30,4 +30,12 @@ public sealed class SelfBackupInfo
 
     /// <summary>Backup archive format version.</summary>
     public int FormatVersion { get; set; }
+
+    /// <summary>R1-33: a PostgreSQL archive holds the database dump. An archive of a PostgreSQL instance from before
+    /// holds the files only (its sidecar has no such field) and is not restored.</summary>
+    public bool IncludesDatabase { get; set; }
+
+    /// <summary>The archive holds everything a restore needs: a SQLite archive always holds its database.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool Restorable => string.Equals(Provider, SelfBackupFormat.ProviderSqlite, StringComparison.OrdinalIgnoreCase) || IncludesDatabase;
 }

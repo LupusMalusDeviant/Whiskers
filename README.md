@@ -253,7 +253,7 @@ for you:
 
 ### Resilience
 
-- **Self-backup & restore** of Whiskers' own data — optionally VAULT_KEY-encrypted (AES-256-GCM), schedulable, crash-safe deferred-swap restore.
+- **Self-backup & restore** of Whiskers' own data, the database included (SQLite snapshot or PostgreSQL `pg_dump`) — optionally VAULT_KEY-encrypted (AES-256-GCM), schedulable, crash-safe deferred-swap restore ([backup guide](docs/operations/backup-and-recovery.md)).
 - **Image-update rollback** — a snapshot before each update; one-click revert on the dashboard.
 - **Monitoring & alerting** — historical CPU/RAM/disk metrics, health reports, and notifications (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, Email/SMTP, generic webhook) on unhealthy/stopped/OOM containers, restart loops, sustained-load anomalies, new CVEs and available image updates, with a persistent in-app feed.
 

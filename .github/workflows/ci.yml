@@ -30,6 +30,19 @@ jobs:
       - name: Build
         run: dotnet build Whiskers.slnx --no-restore --configuration Release
 
+      # R1-33: the PostgreSQL backup/restore tests drive pg_dump/pg_restore/psql against a Testcontainers
+      # server. The same client major as the image (PGDG), so CI proves what ships.
+      - name: PostgreSQL client tools
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc             | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main"             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          echo "WHISKERS_PG_BIN_DIR=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/18/bin/pg_dump --version
+
       - name: Test
         # The grep guards against a silently-empty run: with the test project missing from
         # Whiskers.slnx, `dotnet test --no-build` once exited 0 without executing any test.

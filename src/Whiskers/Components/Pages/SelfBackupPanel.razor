@@ -80,7 +80,14 @@ else
             <MudTd DataLabel="@L["SelfBackupPanel_Th_Created"]">@context.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")</MudTd>
             <MudTd DataLabel="Label">@(string.IsNullOrEmpty(context.Label) ? "-" : context.Label)</MudTd>
             <MudTd DataLabel="@L["SelfBackupPanel_Th_Size"]">@FormatBytes(context.SizeBytes)</MudTd>
-            <MudTd DataLabel="DB">@context.Provider</MudTd>
+            <MudTd DataLabel="DB">
+                @context.Provider
+                @if (!context.Restorable)
+                {
+                    @* R1-33: an archive of a PostgreSQL instance from before the database dump holds the files only. *@
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" title="@L["SelfBackupPanel_Tooltip_FilesOnly"]">@L["SelfBackupPanel_Chip_FilesOnly"]</MudChip>
+                }
+            </MudTd>
             <MudTd DataLabel="@L["SelfBackupPanel_Th_Encrypted"]">
                 @if (context.Encrypted)
                 {
@@ -95,7 +102,8 @@ else
                 <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" title="@L["SelfBackupPanel_Tooltip_Download"]"
                                OnClick="@(() => Download(context))" />
                 <MudIconButton Icon="@Icons.Material.Filled.Restore" Color="Color.Primary" Size="Size.Small"
-                               title="@L["SelfBackupPanel_Tooltip_Restore"]" OnClick="@(() => RestoreExisting(context))" Disabled="@_busy" />
+                               title="@(context.Restorable ? L["SelfBackupPanel_Tooltip_Restore"] : L["SelfBackupPanel_Tooltip_FilesOnly"])"
+                               OnClick="@(() => RestoreExisting(context))" Disabled="@(_busy || !context.Restorable)" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                title="@L["SelfBackupPanel_Tooltip_Delete"]" OnClick="@(() => DeleteBackup(context))" Disabled="@_busy" />
             </MudTd>

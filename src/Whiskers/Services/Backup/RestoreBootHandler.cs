@@ -21,6 +21,10 @@ namespace Whiskers.Services.Backup;
 /// R1-32: only the targets of <see cref="SelfBackupLayout"/> are written, and each is made equal to the archive — a
 /// target the archive does not hold is removed (the database is only replaced, the audit outbox merged, the audit
 /// checkpoint kept aside). Afterwards the key directories and the vault file are readable by the app's user only.
+///
+/// R1-33: an archive of a PostgreSQL instance carries its database dump; it is restored into the configured database
+/// first, in one transaction (<see cref="PostgresDumpTool"/>), then the files are swapped. A failure of either throws
+/// like any swap step; both are repeatable, so the next start applies the whole restore again.
 /// </summary>
 public static class RestoreBootHandler
 {
@@ -28,7 +32,8 @@ public static class RestoreBootHandler
 
     private const string SwapTempSuffix = ".__restoring";
 
-    public static void ApplyPendingRestore(DataPathOptions dataPaths)
+    public static void ApplyPendingRestore(DataPathOptions dataPaths, IConfiguration? configuration = null,
+        PostgresDumpTool? pgTools = null)
     {
         var marker = dataPaths.RestorePendingMarker;
         var staging = dataPaths.RestoreStagingDir;
@@ -58,7 +63,12 @@ public static class RestoreBootHandler
 
         // Swap each staged top-level entry over the live data. Throws on an unrecoverable failure → process
         // exits → restart retries from the (immutable) staging.
-        try { SwapStagingOverLive(dataPaths, staging); }
+        try
+        {
+            if (string.Equals(parsed.Provider, SelfBackupFormat.ProviderPostgres, StringComparison.OrdinalIgnoreCase))
+                RestoreDatabase(dataPaths, staging, configuration, pgTools);
+            SwapStagingOverLive(dataPaths, staging);
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[restore] The restore could not be applied ({Whiskers.Utils.SinkRedaction.Text(ex.Message)}). " +
@@ -105,6 +115,24 @@ public static class RestoreBootHandler
             TryDelete(note);
         else
             logger?.LogError("AUDIT ROW OF THE APPLIED RESTORE NOT WRITTEN — kept {Path} for the next start", note);
+    }
+
+    private static void RestoreDatabase(DataPathOptions dataPaths, string staging, IConfiguration? configuration,
+        PostgresDumpTool? pgTools)
+    {
+        var dump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
+        if (!File.Exists(dump))
+            throw new InvalidOperationException("the restore was made on PostgreSQL but holds no database dump");
+        var (provider, connection) = configuration is null
+            ? ("", null)
+            : Whiskers.Services.Persistence.DatabaseRegistration.Resolve(configuration);
+        if (provider != SelfBackupFormat.ProviderPostgres || string.IsNullOrWhiteSpace(connection))
+            throw new InvalidOperationException("the restore holds a PostgreSQL database, but this start is not configured for PostgreSQL");
+        // The generated script holds the data: under backups/self/.build, which the cleanup below removes.
+        var workDir = Path.Combine(dataPaths.SelfBackupsDir, ".build", "pgrestore");
+        (pgTools ?? PostgresDumpTool.FromConfiguration(configuration)).RestoreAsync(connection, dump, workDir)
+            .GetAwaiter().GetResult();
+        Console.Out.WriteLine("[restore] The PostgreSQL database was restored from the archive.");
     }
 
     private static void SwapStagingOverLive(DataPathOptions dataPaths, string staging)
@@ -156,7 +184,8 @@ public static class RestoreBootHandler
         // chain has none: the live file signs the replaced database's chain and would make the restored one look
         // tampered with (and stop it from being sealed). Kept aside, never deleted.
         var checkpointName = Path.GetFileName(dataPaths.AuditCheckpointJson);
-        if (File.Exists(Path.Combine(staging, SelfBackupFormat.DbEntryName))
+        if ((File.Exists(Path.Combine(staging, SelfBackupFormat.DbEntryName))
+             || File.Exists(Path.Combine(staging, SelfBackupFormat.PgDumpEntryName)))
             && !File.Exists(Path.Combine(staging, checkpointName))
             && File.Exists(dataPaths.AuditCheckpointJson))
         {

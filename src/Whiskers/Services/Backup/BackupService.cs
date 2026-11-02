@@ -13,7 +13,8 @@ namespace Whiskers.Services.Backup;
 /// Creates and restores consistent snapshots of Whiskers' own <c>/app/data</c> (F3). Runs IN-PROCESS
 /// (System.Formats.Tar + GZip) — unlike <see cref="VolumeBackupService"/> which shells a helper container for
 /// foreign Docker volumes — because the app can read its own data directory directly. The SQLite database is
-/// captured with <c>VACUUM INTO</c> (a consistent online snapshot with the WAL folded in), the archive is
+/// captured with <c>VACUUM INTO</c> (a consistent online snapshot with the WAL folded in), a PostgreSQL database with
+/// <c>pg_dump</c> (R1-33, <see cref="PostgresDumpTool"/>; restored at the start in one transaction), the archive is
 /// optionally AES-256-GCM encrypted with a VAULT_KEY-derived key, and restore is a crash-safe deferred swap.
 /// </summary>
 public sealed class BackupService : IBackupService
@@ -25,6 +26,7 @@ public sealed class BackupService : IBackupService
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<BackupService> _logger;
     private readonly string? _vaultKey;
+    private readonly PostgresDumpTool _pgTools;
     private readonly SemaphoreSlim _restoreLock = new(1, 1);
 
     // Backup ids and file names: must start alphanumeric, then alphanumerics plus _ . - only. Rejects any
@@ -40,9 +42,11 @@ public sealed class BackupService : IBackupService
         IConfiguration configuration,
         ILogger<BackupService> logger,
         DataPathOptions? dataPaths = null,
-        Whiskers.Services.Vault.IVaultService? vault = null)
+        Whiskers.Services.Vault.IVaultService? vault = null,
+        PostgresDumpTool? pgTools = null)
     {
         _vault = vault;
+        _pgTools = pgTools ?? PostgresDumpTool.FromConfiguration(configuration);
         _scopeFactory = scopeFactory;
         _maintenance = maintenance;
         _lifetime = lifetime;
@@ -84,6 +88,7 @@ public sealed class BackupService : IBackupService
             string[] metricsMigrations;
             string[] identityMigrations;
             string? stagedDb = null;
+            string? stagedDump = null;
 
             // R1-23: the audit checkpoint file is taken BEFORE the database. A checkpoint reaches the file only after
             // the database has it, so the restored database always reaches the restored checkpoint; taken after,
@@ -124,12 +129,21 @@ public sealed class BackupService : IBackupService
                     await metrics.Database.ExecuteSqlRawAsync($"VACUUM INTO '{escaped}'", ct);
 #pragma warning restore EF1002
                 }
+                else
+                {
+                    // R1-33: the database itself, consistent in one snapshot (pg_dump reads in one transaction); both
+                    // contexts share its public schema. A dump that fails fails the backup: an archive without the
+                    // database would claim a recovery point it does not hold.
+                    stagedDump = Path.Combine(buildDir, SelfBackupFormat.PgDumpEntryName);
+                    await _pgTools.DumpAsync(metrics.Database.GetConnectionString()
+                        ?? throw new InvalidOperationException("The PostgreSQL connection string is not known."), stagedDump, ct);
+                }
             }
 
             var createdAt = DateTime.UtcNow;
             var manifest = new SelfBackupManifest
             {
-                FormatVersion = SelfBackupFormat.CurrentVersion,
+                FormatVersion = stagedDump is null ? SelfBackupFormat.SqliteVersion : SelfBackupFormat.PostgresDumpVersion,
                 AppVersion = AppVersion(),
                 CreatedAtUtc = createdAt,
                 Label = label,
@@ -145,6 +159,8 @@ public sealed class BackupService : IBackupService
             var entries = new List<PackEntry> { new(SelfBackupFormat.ManifestEntryName, manifestPath) };
             if (stagedDb is not null)
                 entries.Add(new PackEntry(SelfBackupFormat.DbEntryName, stagedDb));
+            if (stagedDump is not null)
+                entries.Add(new PackEntry(SelfBackupFormat.PgDumpEntryName, stagedDump));
             if (stagedCheckpoint is not null)
                 entries.Add(new PackEntry(
                     Path.GetRelativePath(Path.GetFullPath(_dataPaths.RootDir), Path.GetFullPath(_dataPaths.AuditCheckpointJson))
@@ -180,7 +196,8 @@ public sealed class BackupService : IBackupService
                 Label = label,
                 Provider = provider,
                 Encrypted = encrypted,
-                FormatVersion = SelfBackupFormat.CurrentVersion
+                FormatVersion = manifest.FormatVersion,
+                IncludesDatabase = stagedDb is not null || stagedDump is not null
             };
             // The sidecar first: an archive is listed (and pruned) only through it, so a crash in between leaves a
             // sidecar whose archive is missing (skipped by the list), never an archive nobody sees.
@@ -351,7 +368,9 @@ public sealed class BackupService : IBackupService
                     throw new BackupValidationException($"Backup archive is invalid: {ex.Message}");
                 }
                 StagedRestoreValidator.Validate(staging, prepared.Manifest);
-                await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
+                var stagedDump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
+                if (File.Exists(stagedDump)) await ProbePostgresRestoreAsync(stagedDump, ct);
+                else await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
                 // nothing has been changed at this point.
@@ -488,13 +507,20 @@ public sealed class BackupService : IBackupService
                 CheckSubset(metrics.Database.GetMigrations(), manifest.MetricsMigrations, "metrics");
                 CheckSubset(idDb.Database.GetMigrations(), manifest.IdentityMigrations, "identity");
 
-                // R1-32: the database is replaced, never removed — an archive of a SQLite instance must hold it, and
-                // one of a PostgreSQL instance (whose data lives outside) must not.
+                // R1-32: the database is replaced, never removed — an archive must hold the database of its provider
+                // and no other. R1-33: a PostgreSQL archive from before the database dump holds the files only; paired
+                // with the database as it is now, they would restore a state that never existed — not restored.
                 var sqlite = string.Equals(manifest.Provider, SelfBackupFormat.ProviderSqlite, StringComparison.OrdinalIgnoreCase);
-                if (sqlite != inspection.HasDatabase)
-                    throw new BackupValidationException(sqlite
-                        ? "Backup archive is invalid: it was made on SQLite but holds no database."
-                        : "Backup archive is invalid: it was made on PostgreSQL but holds a SQLite database.");
+                if (sqlite && (!inspection.HasDatabase || inspection.HasDatabaseDump))
+                    throw new BackupValidationException(inspection.HasDatabaseDump
+                        ? "Backup archive is invalid: it was made on SQLite but holds a PostgreSQL dump."
+                        : "Backup archive is invalid: it was made on SQLite but holds no database.");
+                if (!sqlite && inspection.HasDatabase)
+                    throw new BackupValidationException("Backup archive is invalid: it was made on PostgreSQL but holds a SQLite database.");
+                if (!sqlite && !inspection.HasDatabaseDump)
+                    throw new BackupValidationException(
+                        "This backup holds the files only, not the PostgreSQL database (it was made before database dumps were included). " +
+                        "It is not restored: its files would meet a database from another time. Restore the database and the files together from a newer backup.");
             }
 
             return new PreparedRestore(tarGzPath, manifest, encrypted, decryptTemp, inspection.ExtractedBytes);
@@ -649,6 +675,32 @@ public sealed class BackupService : IBackupService
         finally
         {
             TryDeleteDir(probeDir);
+        }
+    }
+
+    // R1-33: the dump is read and then applied to this server in a transaction that is rolled back — a dump this server
+    // does not accept (a newer format, a broken file, missing rights to replace the schema) is refused here, before
+    // the restore is committed, not at the start. The database is locked while the dry run holds the schema.
+    private async Task ProbePostgresRestoreAsync(string stagedDump, CancellationToken ct)
+    {
+        string connection;
+        using (var scope = _scopeFactory.CreateScope())
+            connection = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetConnectionString()
+                         ?? throw new BackupValidationException("The PostgreSQL connection string is not known.");
+        var workDir = Path.Combine(_dataPaths.SelfBackupsDir, ".build", "pgprobe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await _pgTools.CheckReadableAsync(stagedDump, ct);
+            await _pgTools.DryRunAsync(connection, stagedDump, workDir, ct);
+        }
+        catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
+        {
+            _logger.LogWarning("Restore refused: the database dump cannot be restored into this server ({Reason})", ex.Message);
+            throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
+        }
+        finally
+        {
+            TryDeleteDir(workDir);
         }
     }
 

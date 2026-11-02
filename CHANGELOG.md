@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-33: **A backup of a PostgreSQL instance now holds the database.** The self-backup takes a `pg_dump` of the
+  database together with the files, so one archive is one recovery point for sign-in accounts, scheduled tasks,
+  webhooks, audit and settings alike. Before a restore is committed, Whiskers applies the dump in a transaction and
+  rolls it back (a dry run). The restart then replaces the schema in one transaction, so the database is either the
+  backup's or unchanged, never half of each. Backups of PostgreSQL instances from before this version hold the files
+  only: the backup list marks them **files only** and Whiskers does not restore them, because the files would no
+  longer match the database. The image ships the PostgreSQL 18 client tools; outside the image, set
+  `WHISKERS_PG_BIN_DIR`. The new backup guide `docs/operations/backup-and-recovery.md` covers the recovery onto a
+  new host after the data volume is lost. Grants of other roles are not part of the dump.
 - R1-36: **A container action counts only when the container shows it.** After a start, stop, restart, remove,
   update or rollback — and after a single-container deployment from the Deploy page — the container is read back; one
   that is not running (or still running, still there, killed for lack of memory) makes the action **failed** — on the

@@ -20,6 +20,9 @@ public sealed class BackupInspection
     /// <summary>Whether the archive holds the SQLite database.</summary>
     public bool HasDatabase { get; init; }
 
+    /// <summary>The archive holds a PostgreSQL database dump (R1-33).</summary>
+    public bool HasDatabaseDump { get; init; }
+
     /// <summary>The content bytes of the entries a restore extracts.</summary>
     public long ExtractedBytes { get; init; }
 }
@@ -109,6 +112,7 @@ public static class BackupArchiver
         var names = new List<string>();
         var skipped = new List<string>();
         var hasDatabase = false;
+        var hasDump = false;
         long extracted = 0;
         SelfBackupManifest? manifest = null;
 
@@ -120,6 +124,7 @@ public static class BackupArchiver
             if (kind is BackupEntryKind.File
                 && string.Equals(SelfBackupLayout.Normalize(entry.Name), SelfBackupFormat.DbEntryName, StringComparison.Ordinal))
                 hasDatabase = true;
+            if (kind is BackupEntryKind.DatabaseDump) hasDump = true;
             if (kind is BackupEntryKind.Manifest && entry.DataStream is { } ds)
             {
                 try
@@ -137,7 +142,7 @@ public static class BackupArchiver
 
         return new BackupInspection
         {
-            Manifest = manifest, EntryNames = names, SkippedEntries = skipped, HasDatabase = hasDatabase, ExtractedBytes = extracted,
+            Manifest = manifest, EntryNames = names, SkippedEntries = skipped, HasDatabase = hasDatabase, HasDatabaseDump = hasDump, ExtractedBytes = extracted,
         };
     }
 

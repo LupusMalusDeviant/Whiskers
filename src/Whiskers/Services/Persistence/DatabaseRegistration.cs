@@ -20,17 +20,25 @@ public static class DatabaseRegistration
     /// configuration this is byte-identical to the previous inline SQLite registration (connection string
     /// derived from <paramref name="dataPaths"/>). An unknown provider fails fast at startup.
     /// </summary>
-    public static WebApplicationBuilder AddWhiskersDatabase(this WebApplicationBuilder builder, DataPathOptions dataPaths)
+    /// <summary>The configured provider (lower case) and connection string — also read by the restore at the start,
+    /// before the container is built (R1-33).</summary>
+    public static (string Provider, string? ConnectionString) Resolve(IConfiguration configuration)
     {
-        var configured = builder.Configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>()
+        var configured = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>()
                          ?? new DatabaseOptions();
 
         // ENV aliases win over the config section. A *_FILE secret (Docker/K8s) wins over the plain env var.
-        var provider = (builder.Configuration["WHISKERS_DB_PROVIDER"] ?? configured.Provider)
+        var provider = (configuration["WHISKERS_DB_PROVIDER"] ?? configured.Provider)
             .Trim().ToLowerInvariant();
         // A WHISKERS_DB_CONNECTION_FILE that cannot be read stops the start (SecretSource, R1-28).
-        var connectionString = SecretSource.Read(builder.Configuration, "WHISKERS_DB_CONNECTION")
+        var connectionString = SecretSource.Read(configuration, "WHISKERS_DB_CONNECTION")
                                ?? configured.ConnectionString;
+        return (provider, connectionString);
+    }
+
+    public static WebApplicationBuilder AddWhiskersDatabase(this WebApplicationBuilder builder, DataPathOptions dataPaths)
+    {
+        var (provider, connectionString) = Resolve(builder.Configuration);
 
         // Publish the resolved values so services can read them via IOptions if needed.
         builder.Services.Configure<DatabaseOptions>(o =>

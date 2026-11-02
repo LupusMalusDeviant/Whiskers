@@ -1552,7 +1552,7 @@ Projekt: {4}</value>
     <value>Noch keine Selbst-Backups vorhanden.</value>
   </data>
   <data name="SelfBackupPanel_Alert_Postgres" xml:space="preserve">
-    <value>Diese Instanz nutzt PostgreSQL. Das Backup enthält Konfiguration und Secrets unter &lt;code&gt;/app/data&lt;/code&gt;, aber &lt;b&gt;nicht&lt;/b&gt; die PostgreSQL-Datenbank selbst — sichere diese separat (z. B. mit &lt;code&gt;pg_dump&lt;/code&gt;).</value>
+    <value>Diese Instanz nutzt PostgreSQL. Das Backup enthält die Datenbank (einen &lt;code&gt;pg_dump&lt;/code&gt; ihres Schemas) zusammen mit Konfiguration und Secrets unter &lt;code&gt;/app/data&lt;/code&gt;; eine Wiederherstellung ersetzt beides. Backups aus älteren Versionen enthalten nur die Dateien und werden nicht wiederhergestellt.</value>
   </data>
   <data name="SelfBackupPanel_Alert_Unencrypted" xml:space="preserve">
     <value>&lt;code&gt;VAULT_KEY&lt;/code&gt; ist nicht gesetzt — Backups werden &lt;b&gt;unverschlüsselt&lt;/b&gt; gespeichert und enthalten Klartext-Secrets (ssh-keys, mtls, API-Schlüssel, DataProtection-Ring). Setze &lt;code&gt;VAULT_KEY&lt;/code&gt; für verschlüsselte Backups oder verwahre heruntergeladene Dateien sicher.</value>
@@ -5146,5 +5146,11 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Webhook_Test_SecretUnreadable" xml:space="preserve">
     <value>Das Secret des Webhooks kann nicht gelesen werden: Der Vault ist nicht nutzbar (VAULT_KEY fehlt oder ist falsch).</value>
+  </data>
+  <data name="SelfBackupPanel_Chip_FilesOnly" xml:space="preserve">
+    <value>nur Dateien</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_FilesOnly" xml:space="preserve">
+    <value>Dieses Backup enthält nur die Dateien, nicht die PostgreSQL-Datenbank (es stammt aus der Zeit vor den Datenbank-Dumps). Es kann nicht wiederhergestellt werden.</value>
   </data>
 </root>

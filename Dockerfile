@@ -38,9 +38,16 @@ RUN . /etc/os-release \
         | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null \
     && curl -fsSL "https://pkgs.tailscale.com/stable/${ID}/${VERSION_CODENAME}.tailscale-keyring.list" \
         | tee /etc/apt/sources.list.d/tailscale.list \
+    # R1-33: PostgreSQL client tools (pg_dump/pg_restore/psql) for the self-backup of a PostgreSQL database. From the
+    # PostgreSQL project's repository: the newest client dumps every older server, the distribution's may be older
+    # than the server it has to dump.
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update -o Acquire::Retries=3 \
-    && apt-get install -y --no-install-recommends tailscale \
-    # gnupg is build-only (fetching the Tailscale repo key) — purge it. curl STAYS: it is the
+    && apt-get install -y --no-install-recommends tailscale postgresql-client-18 \
+    # gnupg is build-only (the Tailscale and PostgreSQL repository keys) — purge it. curl STAYS: it is the
     # container HEALTHCHECK probe (see below) and is small. docker.io (local container web-terminal
     # `docker exec`), openssh-client/sshpass (Tailscale-SSH terminal + SSH fallback) and tailscale
     # (legacy VPN bring-up) ARE runtime deps of the full profile and stay. ca-certificates stays (TLS).

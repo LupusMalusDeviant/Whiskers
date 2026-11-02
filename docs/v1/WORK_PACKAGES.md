@@ -567,10 +567,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] Either implement consistent PostgreSQL dump/restore or explicitly disable full self-restore for PostgreSQL and label backups “files only”.
-- [ ] `PostgresBackupRestoreTests` verifies the selected contract, including Identity and automation data.
-- [ ] Backup UI/manifest cannot claim recoverability that the archive lacks.
-- [ ] Document and test an off-volume recovery procedure with a database/files recovery point.
+- [x] Either implement consistent PostgreSQL dump/restore or explicitly disable full self-restore for PostgreSQL and label backups “files only”.
+- [x] `PostgresBackupRestoreTests` verifies the selected contract, including Identity and automation data.
+- [x] Backup UI/manifest cannot claim recoverability that the archive lacks.
+- [x] Document and test an off-volume recovery procedure with a database/files recovery point.
 
 **Out of scope:** High availability and multi-replica deployment.
 
