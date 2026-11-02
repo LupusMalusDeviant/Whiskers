@@ -15,11 +15,6 @@ public static class DatabaseRegistration
     /// <summary>The identity context's own migration history table (F1).</summary>
     public const string IdentityMigrationsHistoryTable = "__IdentityMigrationsHistory";
 
-    /// <summary>
-    /// Wires up <see cref="MetricsDbContext"/> for <c>Database:Provider</c> (sqlite | postgres). With no
-    /// configuration this is byte-identical to the previous inline SQLite registration (connection string
-    /// derived from <paramref name="dataPaths"/>). An unknown provider fails fast at startup.
-    /// </summary>
     /// <summary>The configured provider (lower case) and connection string — also read by the restore at the start,
     /// before the container is built (R1-33).</summary>
     public static (string Provider, string? ConnectionString) Resolve(IConfiguration configuration)
@@ -36,6 +31,11 @@ public static class DatabaseRegistration
         return (provider, connectionString);
     }
 
+    /// <summary>
+    /// Wires up <see cref="MetricsDbContext"/> for <c>Database:Provider</c> (sqlite | postgres). With no
+    /// configuration this is byte-identical to the previous inline SQLite registration (connection string
+    /// derived from <paramref name="dataPaths"/>). An unknown provider fails fast at startup.
+    /// </summary>
     public static WebApplicationBuilder AddWhiskersDatabase(this WebApplicationBuilder builder, DataPathOptions dataPaths)
     {
         var (provider, connectionString) = Resolve(builder.Configuration);

@@ -148,6 +148,16 @@ refuses `chmod` on a path that is too open) — remove `.restore-pending` from t
 (the start's log says so). Without `VAULT_KEY` archives are neither encrypted nor authenticated: keep them where only
 administrators can reach them.
 
+On PostgreSQL (R1-33) the archive carries a `pg_dump` of the `public` schema instead of a database file. Before the
+restore is committed the dump is applied to the live database in a transaction that is rolled back: the migration
+histories must be the manifest's, the start's migrations must run on them and every mapped table and column must be
+readable, or the archive is refused. The database is locked for that dry run. At the next start the schema is dropped
+and recreated from the dump in one transaction, before the files are swapped; any error rolls it back and stops the
+start. The restore script is piped from `pg_restore` to `psql` and never written to disk; it runs only when it opens
+with `\restrict` (client tools 17.6 or newer), so a crafted dump cannot run psql meta-commands such as `\!`. The
+connecting role must own the `public` schema. The password reaches the tools through their environment, and only the
+error lines of their output are logged (lines that quote rows are left out).
+
 ## Hardening checklist for operators
 
 - Set `AUTH_DISABLED=false` and put a real IdP (Google OAuth or OIDC) in front, or keep the app on a

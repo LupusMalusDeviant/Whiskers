@@ -194,6 +194,24 @@ public class BackupServiceTests
     }
 
     [Fact]
+    public async Task Validate_rejects_a_sqlite_archive_that_carries_a_postgres_dump()
+    {
+        // R1-33: an archive holds the database of its provider and no other.
+        var (svc, _, root, sp) = NewService(vaultKey: null);
+        try
+        {
+            var dump = Path.Combine(root, "database.pgdump");
+            await File.WriteAllTextAsync(dump, "PGDMP");
+            var archive = await CraftManifestArchive(root, new SelfBackupManifest { Provider = "sqlite" },
+                extra: [new PackEntry("database.pgdump", dump)]);
+            var result = await svc.ValidateArchiveAsync(archive);
+            Assert.False(result.Ok);
+            Assert.Contains("PostgreSQL dump", result.Error!, StringComparison.Ordinal);
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
     public async Task Validate_accepts_an_equal_or_older_schema()
     {
         var (svc, _, root, sp) = NewService(vaultKey: null);

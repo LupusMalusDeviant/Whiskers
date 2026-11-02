@@ -369,7 +369,7 @@ public sealed class BackupService : IBackupService
                 }
                 StagedRestoreValidator.Validate(staging, prepared.Manifest);
                 var stagedDump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
-                if (File.Exists(stagedDump)) await ProbePostgresRestoreAsync(stagedDump, ct);
+                if (File.Exists(stagedDump)) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, ct);
                 else await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
 
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
@@ -680,32 +680,76 @@ public sealed class BackupService : IBackupService
 
     // R1-33: the dump is read and then applied to this server in a transaction that is rolled back — a dump this server
     // does not accept (a newer format, a broken file, missing rights to replace the schema) is refused here, before
-    // the restore is committed, not at the start. The database is locked while the dry run holds the schema.
-    private async Task ProbePostgresRestoreAsync(string stagedDump, CancellationToken ct)
+    // the restore is committed, not at the start. Inside that transaction, as for SQLite (R1-32): the migration
+    // histories must be the manifest's, the start's migrations must run on them, and every mapped table and column
+    // must then be readable. The database is locked while the dry run holds the schema.
+    private async Task ProbePostgresRestoreAsync(string stagedDump, SelfBackupManifest manifest, CancellationToken ct)
     {
         string connection;
+        var probe = new System.Text.StringBuilder();
         using (var scope = _scopeFactory.CreateScope())
-            connection = scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetConnectionString()
+        {
+            var metrics = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var identity = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+            connection = metrics.Database.GetConnectionString()
                          ?? throw new BackupValidationException("The PostgreSQL connection string is not known.");
-        var workDir = Path.Combine(_dataPaths.SelfBackupsDir, ".build", "pgprobe-" + Guid.NewGuid().ToString("N"));
+            AppendPostgresProbe(probe, metrics, manifest.MetricsMigrations,
+                Microsoft.EntityFrameworkCore.Migrations.HistoryRepository.DefaultTableName);
+            AppendPostgresProbe(probe, identity, manifest.IdentityMigrations, DatabaseRegistration.IdentityMigrationsHistoryTable);
+        }
         try
         {
             await _pgTools.CheckReadableAsync(stagedDump, ct);
-            await _pgTools.DryRunAsync(connection, stagedDump, workDir, ct);
+            await _pgTools.DryRunAsync(connection, stagedDump, probe.ToString(), ct);
         }
         catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
         {
             _logger.LogWarning("Restore refused: the database dump cannot be restored into this server ({Reason})", ex.Message);
             throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
         }
-        finally
-        {
-            TryDeleteDir(workDir);
-        }
+    }
+
+    // The history check, the start's migrations (idempotent: each runs only when its history row is missing, as
+    // MigrateAsync decides) and the mapped-column reads for one context. Migration ids are this build's own (the manifest
+    // is a subset of them, CheckSubset); names come from the app's model; all of it quoted.
+    private static void AppendPostgresProbe(System.Text.StringBuilder probe, DbContext db, IEnumerable<string> applied,
+        string historyTable)
+    {
+        static string Literal(string s) => "'" + s.Replace("'", "''") + "'";
+        var expected = applied.Order(StringComparer.Ordinal).Select(Literal);
+        probe.Append("DO $probe$ BEGIN IF (SELECT coalesce(array_agg(\"MigrationId\"::text ORDER BY \"MigrationId\"::text COLLATE \"C\"), ARRAY[]::text[]) FROM ")
+            .Append(QuoteIdentifier(historyTable))
+            .Append(") IS DISTINCT FROM ARRAY[").Append(string.Join(", ", expected)).Append("]::text[] THEN RAISE EXCEPTION ")
+            .Append(Literal($"the migration history in {historyTable} does not match the archive's manifest"))
+            .AppendLine("; END IF; END $probe$;");
+        var migrator = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db);
+        probe.AppendLine(migrator.GenerateScript(options:
+            Microsoft.EntityFrameworkCore.Migrations.MigrationsSqlGenerationOptions.Idempotent
+            | Microsoft.EntityFrameworkCore.Migrations.MigrationsSqlGenerationOptions.NoTransactions));
+        foreach (var query in MappedColumnQueries(db)) probe.Append(query).AppendLine(";");
     }
 
     // SELECT of every column the model maps, per table, with no rows: fails on a table or column that is missing.
     private static async Task ReadEveryMappedColumnAsync(DbContext db, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct);
+        var connection = db.Database.GetDbConnection();
+        try
+        {
+            foreach (var query in MappedColumnQueries(db))
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = query;
+                await command.ExecuteNonQueryAsync(ct);
+            }
+        }
+        finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    private static string QuoteIdentifier(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+
+    // Names from the app's own model, quoted: no input from the archive reaches this text.
+    private static IEnumerable<string> MappedColumnQueries(DbContext db)
     {
         var tables = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var entity in db.Model.GetEntityTypes())
@@ -717,21 +761,9 @@ public sealed class BackupService : IBackupService
             foreach (var property in entity.GetProperties())
                 if (property.GetColumnName(store) is { } column) columns.Add(column);
         }
-        static string Quote(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
-        await db.Database.OpenConnectionAsync(ct);
-        var connection = db.Database.GetDbConnection();
-        try
-        {
-            foreach (var (table, columns) in tables)
-            {
-                if (columns.Count == 0) continue;
-                await using var command = connection.CreateCommand();
-                // Names from the app's own model, quoted: no input from the archive reaches this text.
-                command.CommandText = $"SELECT {string.Join(", ", columns.Select(Quote))} FROM {Quote(table)} LIMIT 0";
-                await command.ExecuteNonQueryAsync(ct);
-            }
-        }
-        finally { await db.Database.CloseConnectionAsync(); }
+        foreach (var (table, columns) in tables)
+            if (columns.Count > 0)
+                yield return $"SELECT {string.Join(", ", columns.Select(QuoteIdentifier))} FROM {QuoteIdentifier(table)} LIMIT 0";
     }
 
     // Staging takes the extracted bytes and the swap a second copy of each target beside the live one; the pre-restore

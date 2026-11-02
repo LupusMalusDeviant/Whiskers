@@ -14,7 +14,11 @@ All notable changes to Whiskers are documented here. The format follows
   only: the backup list marks them **files only** and Whiskers does not restore them, because the files would no
   longer match the database. The image ships the PostgreSQL 18 client tools; outside the image, set
   `WHISKERS_PG_BIN_DIR`. The new backup guide `docs/operations/backup-and-recovery.md` covers the recovery onto a
-  new host after the data volume is lost. Grants of other roles are not part of the dump.
+  new host after the data volume is lost. Grants of other roles are not part of the dump. The dry run also checks
+  that the migration histories match the manifest and that the next start's migrations run on the dump. The restore
+  script goes from `pg_restore` straight to `psql` and never lands on disk, and it runs only with the meta-command
+  protection of client tools 17.6 or newer, so a crafted dump cannot run shell commands. The role Whiskers connects
+  as must own the `public` schema.
 - R1-36: **A container action counts only when the container shows it.** After a start, stop, restart, remove,
   update or rollback — and after a single-container deployment from the Deploy page — the container is read back; one
   that is not running (or still running, still there, killed for lack of memory) makes the action **failed** — on the

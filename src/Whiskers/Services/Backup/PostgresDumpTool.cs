@@ -10,15 +10,19 @@ namespace Whiskers.Services.Backup;
 /// both contexts (metrics and identity) live there, each with its own migration history. A restore replaces that schema
 /// in ONE transaction: the schema is dropped, recreated and filled from the dump, and any error rolls all of it back, so
 /// the database is either the archive's or untouched. The same script run with a final <c>ROLLBACK</c> is the dry run
-/// that proves, before a restore is committed, that this server accepts the dump.
+/// that proves, before a restore is committed, that this server accepts the dump (and, with the caller's probe, that the
+/// start can migrate it).
 ///
-/// The password reaches the tools through their environment (<c>PGPASSWORD</c>), never their command line, and no
-/// output of theirs is logged unredacted.
+/// The script is piped from <c>pg_restore</c> to <c>psql</c>: it holds the data and never lands on disk. The password
+/// reaches the tools through their environment (<c>PGPASSWORD</c>), never their command line; of their error output only
+/// the error lines are kept (row data in CONTEXT/LINE/DETAIL lines is dropped) and those are redacted.
 /// </summary>
 public sealed class PostgresDumpTool
 {
     /// <summary>Directory holding the client tools; without it they are looked up on <c>PATH</c>.</summary>
     public const string BinDirKey = "WHISKERS_PG_BIN_DIR";
+
+    private static readonly UTF8Encoding Utf8 = new(false);
 
     private readonly string? _binDir;
     private readonly TimeSpan _timeout;
@@ -32,10 +36,15 @@ public sealed class PostgresDumpTool
     public static PostgresDumpTool FromConfiguration(IConfiguration? configuration)
         => new(configuration?[BinDirKey] ?? configuration?["Backup:PostgresBinDir"]);
 
-    /// <summary>Writes a custom-format dump of the <c>public</c> schema to <paramref name="outputPath"/>.</summary>
-    public Task DumpAsync(string connectionString, string outputPath, CancellationToken ct = default)
-        => RunAsync("pg_dump", connectionString,
+    /// <summary>Writes a custom-format dump of the <c>public</c> schema to <paramref name="outputPath"/> (owner-only).</summary>
+    public async Task DumpAsync(string connectionString, string outputPath, CancellationToken ct = default)
+    {
+        // pg_dump truncates an existing file and keeps its mode: created owner-only first, the data never readable by others.
+        await using (File.Create(outputPath)) { }
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(outputPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        await RunAsync("pg_dump", connectionString,
             ["--format=custom", "--no-owner", "--no-acl", "--schema=public", "--file", outputPath], ct);
+    }
 
     /// <summary>Reads the dump's table of contents: a file pg_restore cannot read is no dump.</summary>
     public async Task CheckReadableAsync(string dumpPath, CancellationToken ct = default)
@@ -45,109 +54,189 @@ public sealed class PostgresDumpTool
             throw new InvalidDataException("The database dump holds no tables.");
     }
 
-    /// <summary>Restores the dump into the database in one transaction; <paramref name="workDir"/> takes the
-    /// generated script (it holds the data: removed afterwards).</summary>
-    public Task RestoreAsync(string connectionString, string dumpPath, string workDir, CancellationToken ct = default)
-        => ApplyAsync(connectionString, dumpPath, workDir, commit: true, ct);
+    /// <summary>Restores the dump into the database in one transaction.</summary>
+    public Task RestoreAsync(string connectionString, string dumpPath, CancellationToken ct = default)
+        => ApplyAsync(connectionString, dumpPath, probeSql: null, commit: true, ct);
 
-    /// <summary>The restore, rolled back at its end: proves this server accepts the dump, changes nothing.</summary>
-    public Task DryRunAsync(string connectionString, string dumpPath, string workDir, CancellationToken ct = default)
-        => ApplyAsync(connectionString, dumpPath, workDir, commit: false, ct);
+    /// <summary>The restore, rolled back at its end: proves this server accepts the dump and changes nothing.
+    /// <paramref name="probeSql"/> runs after the dump inside the same transaction (with <c>search_path</c> set to
+    /// <c>public</c>); an error in it fails the dry run.</summary>
+    public Task DryRunAsync(string connectionString, string dumpPath, string? probeSql = null, CancellationToken ct = default)
+        => ApplyAsync(connectionString, dumpPath, probeSql, commit: false, ct);
 
-    private async Task ApplyAsync(string connectionString, string dumpPath, string workDir, bool commit, CancellationToken ct)
+    // pg_restore writes the script to stdout; it is checked and wrapped line by line on its way into psql's stdin:
+    // BEGIN; replace the schema with the dump's; [probe;] COMMIT (or ROLLBACK for the dry run).
+    private async Task ApplyAsync(string connectionString, string dumpPath, string? probeSql, bool commit, CancellationToken ct)
     {
-        Directory.CreateDirectory(workDir);
-        var script = Path.Combine(workDir, $"restore-{Guid.NewGuid():N}.sql");
-        var wrapped = Path.Combine(workDir, $"apply-{Guid.NewGuid():N}.sql");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(_timeout);
+        using var restore = Start("pg_restore", null, ["--no-owner", "--no-acl", "--file", "-", dumpPath], stdin: false);
+        Process psql;
         try
         {
-            await RunAsync("pg_restore", null, ["--no-owner", "--no-acl", "--file", script, dumpPath], ct);
-            await WrapAsync(script, wrapped, commit, ct);
             // ON_ERROR_STOP: the first failing statement ends psql, its connection and with it the open transaction.
-            await RunAsync("psql", connectionString,
-                ["--no-psqlrc", "--quiet", "--set", "ON_ERROR_STOP=1", "--file", wrapped], ct);
+            psql = Start("psql", connectionString, ["--no-psqlrc", "--quiet", "--set", "ON_ERROR_STOP=1", "--file", "-"], stdin: true);
         }
-        finally
+        catch
         {
-            TryDelete(script);
-            TryDelete(wrapped);
+            Kill(restore);
+            throw;
+        }
+        using (psql)
+        {
+            var restoreErrors = restore.StandardError.ReadToEndAsync(timeout.Token);
+            var psqlOutput = psql.StandardOutput.ReadToEndAsync(timeout.Token);
+            var psqlErrors = psql.StandardError.ReadToEndAsync(timeout.Token);
+            try
+            {
+                try
+                {
+                    await FeedAsync(restore.StandardOutput, psql.StandardInput, probeSql, commit, timeout.Token);
+                }
+                catch (IOException)
+                {
+                    // psql stopped reading (ON_ERROR_STOP): its own error says why, below.
+                }
+                try { psql.StandardInput.Close(); } catch (IOException) { /* already gone */ }
+                await restore.WaitForExitAsync(timeout.Token);
+                await psql.WaitForExitAsync(timeout.Token);
+            }
+            catch (Exception ex)
+            {
+                // A refused script, a timeout or a cancellation: psql is killed before it could see a COMMIT, the server
+                // rolls the open transaction back with the connection.
+                Kill(psql);
+                Kill(restore);
+                if (ex is OperationCanceledException && !ct.IsCancellationRequested)
+                    throw new PostgresToolException($"The restore did not finish within {_timeout.TotalMinutes:0} minutes.");
+                throw;
+            }
+            await psqlOutput;
+            if (psql.ExitCode != 0)
+                throw new PostgresToolException($"psql failed (exit code {psql.ExitCode}): {Tail(await psqlErrors)}");
+            if (restore.ExitCode != 0)
+                throw new PostgresToolException($"pg_restore failed (exit code {restore.ExitCode}): {Tail(await restoreErrors)}");
         }
     }
 
-    // BEGIN; replace the schema with the dump's; COMMIT (or ROLLBACK for the dry run). The dump may create the schema
-    // itself: that line is left out, the schema is created here. The drop takes every table's lock: a session that
-    // still holds one makes it fail after a minute instead of waiting for the whole timeout.
-    private static async Task WrapAsync(string script, string wrapped, bool commit, CancellationToken ct)
+    internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct)
     {
-        await using var output = new StreamWriter(wrapped, append: false, new UTF8Encoding(false));
-        await output.WriteLineAsync("BEGIN;");
-        await output.WriteLineAsync("SET LOCAL lock_timeout = '60s';");
-        await output.WriteLineAsync("DROP SCHEMA IF EXISTS public CASCADE;");
-        await output.WriteLineAsync("CREATE SCHEMA public;");
-        using (var input = new StreamReader(script, Encoding.UTF8))
+        psql.NewLine = "\n";
+        await psql.WriteLineAsync("BEGIN;");
+        // The drop takes every table's lock: a session that still holds one makes it fail after a minute instead of
+        // waiting for the whole timeout.
+        await psql.WriteLineAsync("SET LOCAL lock_timeout = '60s';");
+        await psql.WriteLineAsync("DROP SCHEMA IF EXISTS public CASCADE;");
+        await psql.WriteLineAsync("CREATE SCHEMA public;");
+
+        // The script comes from an archive: a crafted dump could carry psql meta-commands (\! runs a shell command).
+        // pg_restore since 17.6 opens its script with \restrict, which makes psql refuse every meta-command until the
+        // matching \unrestrict (CVE-2025-8714); a script that does not open with it is not run.
+        var restricted = false;
+        while (await script.ReadLineAsync(ct) is { } line)
         {
-            while (await input.ReadLineAsync(ct) is { } line)
+            if (!restricted)
             {
-                if (line.Trim() is "CREATE SCHEMA public;" or "CREATE SCHEMA IF NOT EXISTS public;") continue;
-                await output.WriteLineAsync(line);
+                if (line.StartsWith(@"\restrict ", StringComparison.Ordinal)) restricted = true;
+                else if (line.Length > 0 && !line.StartsWith("--", StringComparison.Ordinal))
+                    throw new PostgresToolException(
+                        @"pg_restore did not protect its script against meta-commands (\restrict): PostgreSQL client tools 17.6 or newer are needed to restore a dump.");
             }
+            switch (line.Trim())
+            {
+                // The schema is created above.
+                case "CREATE SCHEMA public;" or "CREATE SCHEMA IF NOT EXISTS public;":
+                    continue;
+                // Client 17+ writes this whatever the server; servers before 17 do not know the setting.
+                case "SET transaction_timeout = 0;":
+                    await psql.WriteLineAsync(
+                        "SELECT pg_catalog.set_config('transaction_timeout', '0', false) WHERE pg_catalog.current_setting('server_version_num')::int >= 170000;");
+                    continue;
+            }
+            await psql.WriteLineAsync(line);
         }
-        await output.WriteLineAsync(commit ? "COMMIT;" : "ROLLBACK;");
+        if (!restricted)
+            throw new PostgresToolException("The database dump produced an empty restore script.");
+
+        if (probeSql is not null)
+        {
+            // The dump empties search_path; the probe names the tables unqualified, as the app does.
+            await psql.WriteLineAsync("SET search_path = public;");
+            await psql.WriteLineAsync(probeSql);
+        }
+        await psql.WriteLineAsync(commit ? "COMMIT;" : "ROLLBACK;");
+        await psql.FlushAsync(ct);
     }
 
     private async Task<string> RunAsync(string tool, string? connectionString, IReadOnlyList<string> arguments,
         CancellationToken ct)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(_timeout);
+        using var process = Start(tool, connectionString, arguments, stdin: false);
+        var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException)
+        {
+            Kill(process);
+            if (ct.IsCancellationRequested) throw;
+            throw new PostgresToolException($"{tool} did not finish within {_timeout.TotalMinutes:0} minutes.");
+        }
+        var output = await stdout;
+        var errors = await stderr;
+        if (process.ExitCode != 0)
+            throw new PostgresToolException($"{tool} failed (exit code {process.ExitCode}): {Tail(errors)}");
+        return output;
+    }
+
+    private Process Start(string tool, string? connectionString, IReadOnlyList<string> arguments, bool stdin)
+    {
         var start = new ProcessStartInfo(_binDir is null ? tool : Path.Combine(_binDir, tool))
         {
+            RedirectStandardInput = stdin,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            StandardOutputEncoding = Utf8,
+            StandardErrorEncoding = Utf8,
         };
+        if (stdin) start.StandardInputEncoding = Utf8;
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         if (connectionString is not null) Connect(start, connectionString);
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(_timeout);
-        Process process;
-        try { process = Process.Start(start) ?? throw new InvalidOperationException($"{tool} did not start."); }
+        try { return Process.Start(start) ?? throw new PostgresToolException($"{tool} did not start."); }
         catch (System.ComponentModel.Win32Exception ex)
         {
             throw new PostgresToolException(
                 $"{tool} is not available ({ex.Message}). The PostgreSQL client tools are needed for a backup of a PostgreSQL " +
                 $"database; install them or point {BinDirKey} at their directory.");
         }
-        using (process)
-        {
-            var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
-            try { await process.WaitForExitAsync(timeout.Token); }
-            catch (OperationCanceledException)
-            {
-                try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
-                if (ct.IsCancellationRequested) throw;
-                throw new PostgresToolException($"{tool} did not finish within {_timeout.TotalMinutes:0} minutes.");
-            }
-            var output = await stdout;
-            var errors = await stderr;
-            if (process.ExitCode != 0)
-                throw new PostgresToolException($"{tool} failed (exit code {process.ExitCode}): {Tail(errors)}");
-            return output;
-        }
+    }
+
+    private static void Kill(Process process)
+    {
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* already gone */ }
     }
 
     /// <summary>The libpq environment for the connection string: the password never on the command line.</summary>
     internal static void Connect(ProcessStartInfo start, string connectionString)
     {
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        if (!string.IsNullOrEmpty(builder.SslPassword))
+            throw new PostgresToolException(
+                "The connection string sets an SSL key password, which the PostgreSQL client tools cannot take from Whiskers. Use an unencrypted client key for the backup role.");
         var env = start.Environment;
-        // Nothing from the parent's libpq environment may point the tools elsewhere.
+        // Without a password in the connection string, Npgsql reads PGPASSWORD / PGPASSFILE: the tools may too.
+        var inheritedPassword = string.IsNullOrEmpty(builder.Password) ? (env.TryGetValue("PGPASSWORD", out var pw) ? pw : null) : null;
+        var inheritedPassfile = env.TryGetValue("PGPASSFILE", out var pf) ? pf : null;
+        // Nothing else from the parent's libpq environment may point the tools elsewhere.
         foreach (var key in env.Keys.Where(k => k.StartsWith("PG", StringComparison.Ordinal)).ToList()) env.Remove(key);
         Set("PGHOST", builder.Host);
         Set("PGPORT", builder.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Set("PGDATABASE", builder.Database);
         Set("PGUSER", builder.Username);
-        Set("PGPASSWORD", builder.Password);
+        Set("PGPASSWORD", string.IsNullOrEmpty(builder.Password) ? inheritedPassword : builder.Password);
+        Set("PGPASSFILE", builder.Passfile ?? inheritedPassfile);
         Set("PGSSLMODE", builder.SslMode switch
         {
             SslMode.Disable => "disable",
@@ -158,6 +247,9 @@ public sealed class PostgresDumpTool
             _ => "prefer",
         });
         Set("PGSSLROOTCERT", builder.RootCertificate);
+        Set("PGSSLCERT", builder.SslCertificate);
+        Set("PGSSLKEY", builder.SslKey);
+        Set("PGTARGETSESSIONATTRS", builder.TargetSessionAttributes);
         Set("PGCONNECT_TIMEOUT", builder.Timeout > 0 ? builder.Timeout.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
         Set("PGAPPNAME", "whiskers-backup");
 
@@ -167,17 +259,30 @@ public sealed class PostgresDumpTool
         }
     }
 
-    // The end of the tool's error output, redacted: it names the failure, never a secret.
-    private static string Tail(string errors)
+    /// <summary>The tool's error lines, redacted: they name the failure. The lines that quote the failing statement or
+    /// row (LINE, CONTEXT, DETAIL, STATEMENT, the caret line) are left out — they can hold column values.</summary>
+    internal static string Tail(string errors)
     {
-        var text = errors.Trim();
-        if (text.Length > 1000) text = "…" + text[^1000..];
+        var kept = errors.Split('\n')
+            .Select(l => l.TrimEnd('\r'))
+            .Where(l => l.Trim().Length > 0 && !char.IsWhiteSpace(l[0]))
+            .Where(l => !ErrorDetail(l))
+            .ToList();
+        var text = string.Join(" | ", kept.TakeLast(5));
+        if (text.Length > 500) text = text[..500] + "…";
         return Whiskers.Utils.SinkRedaction.Text(text) ?? "";
-    }
 
-    private static void TryDelete(string path)
-    {
-        try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort: the staging directory goes too */ }
+        // psql prefixes server messages with "psql:<file>:<line>: "; the severity follows.
+        static bool ErrorDetail(string line)
+        {
+            var message = System.Text.RegularExpressions.Regex.Replace(line, @"^psql:\S*: ", "");
+            return message.StartsWith("LINE ", StringComparison.Ordinal)
+                   || message.StartsWith("CONTEXT:", StringComparison.Ordinal)
+                   || message.StartsWith("DETAIL:", StringComparison.Ordinal)
+                   || message.StartsWith("STATEMENT:", StringComparison.Ordinal)
+                   || message.StartsWith("QUERY:", StringComparison.Ordinal)
+                   || message.StartsWith("WHERE:", StringComparison.Ordinal);
+        }
     }
 }
 

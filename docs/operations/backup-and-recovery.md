@@ -27,6 +27,11 @@ A backup does **not** hold:
 Backups of a PostgreSQL instance made before R1-33 hold the files only. The backup list marks them **files only**,
 and Whiskers does not restore them, because their files would no longer match the current database.
 
+On PostgreSQL a restore replaces the `public` schema, so the role Whiskers connects as must be allowed to drop and
+recreate it: it must own the schema, or on PostgreSQL 15 and later own the database. A role without that right still
+takes backups, but the restore is refused at its dry run, before anything changes. Check it once after setting up
+the database, by restoring a backup.
+
 ## Recovery point and time
 
 - **Recovery point (RPO):** the newest archive you still have. With a daily *Self-backup* task you can lose up to a
@@ -56,7 +61,10 @@ An encrypted archive is safe to keep on another machine, because it is useless w
    - the stores and the key files;
    - on SQLite, it opens the database and runs the migrations on a copy;
    - on PostgreSQL, it reads the dump with `pg_restore` and does a dry run: it applies the dump to the database in a
-     transaction and rolls the transaction back. The database is locked while the dry run runs.
+     transaction and rolls the transaction back. Inside that transaction it also checks that the migration
+     histories match the archive's manifest, runs the migrations the next start would run, and reads every table and
+     column this version uses. The database is locked while the dry run runs, so metric collection pauses for that
+     time; on a large database that can take minutes.
 3. Whiskers takes a **pre-restore safety backup**, commits the restore and stops.
 4. The container restart (through the Docker restart policy, systemd or Kubernetes) applies the restore:
    - On PostgreSQL, the `public` schema is dropped and recreated from the dump in **one transaction**. If any step
@@ -91,13 +99,22 @@ webhooks and audit rows come back.
 ## PostgreSQL notes
 
 - The image ships the PostgreSQL client tools `pg_dump`, `pg_restore` and `psql` in version 18 from the PostgreSQL
-  project; they can back up and restore every server version they support. If you run Whiskers outside the image,
-  install the tools and either put them on `PATH` or set `WHISKERS_PG_BIN_DIR` (or `Backup:PostgresBinDir`) to
-  their directory. Without them, a backup of a PostgreSQL instance fails; Whiskers never writes an archive without
-  the database.
+  project. The tests restore with them into PostgreSQL 14 and 17 servers. If you run Whiskers outside the image,
+  install the tools (17.6 or newer, at least as new as the server) and either put them on `PATH` or set
+  `WHISKERS_PG_BIN_DIR` (or `Backup:PostgresBinDir`) to their directory. Without them, a backup of a PostgreSQL
+  instance fails; Whiskers never writes an archive without the database.
+- The restore script goes straight from `pg_restore` to `psql` and is never written to disk. Whiskers runs it only
+  when it opens with `\restrict`, the protection of client tools 17.6 and newer, so a crafted dump cannot run psql
+  meta-commands such as `\!` (which would run a shell command). Older tools are refused for a restore.
 - Whiskers passes the password to the tools through their environment, never on their command line. `PG*`
-  variables inherited from Whiskers' own environment are not passed on.
+  variables inherited from Whiskers' own environment are not passed on, except `PGPASSWORD` (when the connection
+  string has no password) and `PGPASSFILE`, which Whiskers itself would use as well. Host, port, database, user,
+  password, password file, SSL mode, root certificate, client certificate and key, target session attributes and the
+  connect timeout are taken over from the connection string; an encrypted client key (`SSL Password`) is not
+  supported for backups. Of the tools' error output, only the error lines are logged; lines that quote a row or a
+  statement are left out.
 - The dump leaves out ownership and grants (`--no-owner --no-acl`). Restored objects belong to the role Whiskers
   connects as. If other roles had grants, for example a read-only reporting user, grant them again after the
   restore.
-- The dump covers the `public` schema only. Objects in other schemas of the same database are not touched.
+- The dump covers the `public` schema only. Objects in other schemas of the same database are not touched, and
+  extensions are not part of the dump (Whiskers' migrations create none; a test keeps it that way).

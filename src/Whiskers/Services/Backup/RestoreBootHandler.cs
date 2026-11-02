@@ -66,7 +66,7 @@ public static class RestoreBootHandler
         try
         {
             if (string.Equals(parsed.Provider, SelfBackupFormat.ProviderPostgres, StringComparison.OrdinalIgnoreCase))
-                RestoreDatabase(dataPaths, staging, configuration, pgTools);
+                RestoreDatabase(staging, configuration, pgTools);
             SwapStagingOverLive(dataPaths, staging);
         }
         catch (Exception ex)
@@ -117,7 +117,7 @@ public static class RestoreBootHandler
             logger?.LogError("AUDIT ROW OF THE APPLIED RESTORE NOT WRITTEN — kept {Path} for the next start", note);
     }
 
-    private static void RestoreDatabase(DataPathOptions dataPaths, string staging, IConfiguration? configuration,
+    private static void RestoreDatabase(string staging, IConfiguration? configuration,
         PostgresDumpTool? pgTools)
     {
         var dump = Path.Combine(staging, SelfBackupFormat.PgDumpEntryName);
@@ -128,9 +128,7 @@ public static class RestoreBootHandler
             : Whiskers.Services.Persistence.DatabaseRegistration.Resolve(configuration);
         if (provider != SelfBackupFormat.ProviderPostgres || string.IsNullOrWhiteSpace(connection))
             throw new InvalidOperationException("the restore holds a PostgreSQL database, but this start is not configured for PostgreSQL");
-        // The generated script holds the data: under backups/self/.build, which the cleanup below removes.
-        var workDir = Path.Combine(dataPaths.SelfBackupsDir, ".build", "pgrestore");
-        (pgTools ?? PostgresDumpTool.FromConfiguration(configuration)).RestoreAsync(connection, dump, workDir)
+        (pgTools ?? PostgresDumpTool.FromConfiguration(configuration)).RestoreAsync(connection, dump)
             .GetAwaiter().GetResult();
         Console.Out.WriteLine("[restore] The PostgreSQL database was restored from the archive.");
     }

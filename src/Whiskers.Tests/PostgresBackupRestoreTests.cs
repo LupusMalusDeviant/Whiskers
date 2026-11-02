@@ -20,10 +20,17 @@ namespace Whiskers.Tests;
 /// database and an empty data directory, the refusal of a files-only archive and the all-or-nothing restore. Skipped
 /// without Docker; without the client tools skipped locally and failed on CI, which installs them.</summary>
 [Trait("Category", "RequiresDocker")]
-public sealed class PostgresBackupRestoreTests : IAsyncLifetime
+public class PostgresBackupRestoreTests() : PostgresBackupRestoreTestsBase("postgres:17-alpine");
+
+/// <summary>The same against an older server line than the image's client tools: the script of the newer client must
+/// not use settings this server lacks.</summary>
+[Trait("Category", "RequiresDocker")]
+public class PostgresBackupRestorePg14Tests() : PostgresBackupRestoreTestsBase("postgres:14-alpine");
+
+public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifetime
 {
     private const string VaultKey = "test-vault-key";
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder(image).Build();
     private readonly List<string> _roots = [];
     private bool _up;
 
@@ -186,6 +193,10 @@ public sealed class PostgresBackupRestoreTests : IAsyncLifetime
             Assert.Contains(await identity.Users.Select(u => u.UserName).ToListAsync(), n => n == "mallory");
 
         NpgsqlConnection.ClearAllPools();
+        // A start that restored the database and then stopped before the files were swapped: the next start repeats
+        // the whole restore from the unchanged staging.
+        await new PostgresDumpTool(BinDir).RestoreAsync(live.Connection,
+            Path.Combine(live.Paths.RestoreStagingDir, SelfBackupFormat.PgDumpEntryName));
         RestoreBootHandler.ApplyPendingRestore(live.Paths, live.Configuration);
 
         Assert.False(File.Exists(live.Paths.RestorePendingMarker));
@@ -259,8 +270,8 @@ public sealed class PostgresBackupRestoreTests : IAsyncLifetime
         var dump = Path.Combine(work, "db.pgdump");
         await tools.DumpAsync(source, dump);
 
-        await Assert.ThrowsAsync<PostgresToolException>(() => tools.DryRunAsync(target, dump, work));
-        await Assert.ThrowsAsync<PostgresToolException>(() => tools.RestoreAsync(target, dump, work));
+        await Assert.ThrowsAsync<PostgresToolException>(() => tools.DryRunAsync(target, dump));
+        await Assert.ThrowsAsync<PostgresToolException>(() => tools.RestoreAsync(target, dump));
 
         await using var check = new NpgsqlConnection(target);
         await check.OpenAsync();
@@ -268,7 +279,27 @@ public sealed class PostgresBackupRestoreTests : IAsyncLifetime
         Assert.Equal("still here", await read.ExecuteScalarAsync());
         await using var tables = new NpgsqlCommand("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'", check);
         Assert.Equal(1L, await tables.ExecuteScalarAsync());
-        Assert.Empty(Directory.GetFiles(work, "*.sql"));   // the generated scripts hold data: removed
+        Assert.Equal(["db.pgdump"], Directory.GetFiles(work).Select(Path.GetFileName));   // the script never lands on disk
+    }
+
+    [SkippableFact]
+    public async Task A_dump_whose_history_lags_its_tables_is_refused_before_the_commit()
+    {
+        await SkipUnlessReadyAsync();
+        using var live = await NewInstanceAsync(await CreateDatabaseAsync("lagging"));
+        await SeedAsync(live);
+        // A history behind its tables (the manifest is read from the same history, so it agrees): the start would
+        // run the missing migration against the tables that exist and stop, at every start.
+        await ExecuteAsync(live.Connection,
+            "DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = (SELECT max(\"MigrationId\") FROM \"__EFMigrationsHistory\")");
+        var info = await live.Service.CreateBackupAsync("manual");
+
+        var ex = await Assert.ThrowsAsync<BackupValidationException>(() =>
+            live.Service.BeginRestoreAsync(live.Service.ResolveArchivePath(info.Id)!, "tester"));
+        Assert.Contains("cannot be restored", ex.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(live.Paths.RestorePendingMarker));
+        await using var db = new MetricsDbContext(new DbContextOptionsBuilder<MetricsDbContext>().UseNpgsql(live.Connection).Options);
+        Assert.Equal(["deploy"], await db.Webhooks.Select(w => w.Name).ToListAsync());   // the dry run changed nothing
     }
 
     private static async Task ExecuteAsync(string connection, string sql)
