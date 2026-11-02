@@ -61,6 +61,7 @@ public static class VerificationContracts
             ["app.deploy"] = VerificationContract.ReadBack("the container the deployment returned runs."),
             ["compose.deploy"] = VerificationContract.ReadBack("every container of the compose project runs."),
             ["gitdeploy.save"] = VerificationContract.None(OwnRecord),
+            ["gitdeploy.set_token"] = VerificationContract.None(OwnRecord),
             ["gitdeploy.delete"] = VerificationContract.None(OwnRecord),
             ["gitdeploy.deploy"] = VerificationContract.None(
                 "the repository decides what is built and started; the build output is recorded, not read back."),

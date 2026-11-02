@@ -43,7 +43,9 @@ public static class McpGuardrailFilter
         var resolver = services.GetService<IAgentPrincipalResolver>();
         var guard = services.GetService<IDirectMcpCallGuard>();
         if (http is null)
-            return Refuse("Guardrails could not identify the caller; the call was not executed.");
+            return McpErrorEnvelope.Tools.Contains(call.Name)
+                ? McpErrorEnvelope.Result(McpErrorEnvelope.Denied, "Guardrails could not identify the caller; the call was not executed.")
+                : Refuse("Guardrails could not identify the caller; the call was not executed.");
         var tool = new Call(http, requestId, call.Name);
         if (resolver is null)
             return tool.Deny("Guardrails could not identify the caller; the call was not executed.");
@@ -91,6 +93,9 @@ public static class McpGuardrailFilter
         catch (Exception ex)
         {
             tool.Report(McpCallResult.Failed, "allow", null, ex.Message);
+            // Contract 0001: a read of the envelope tools fails with its code as well (redacted).
+            if (McpErrorEnvelope.Tools.Contains(call.Name) && ex is not OperationCanceledException)
+                return McpErrorEnvelope.Result(McpErrorEnvelope.Failed, Whiskers.Utils.SecretRedactor.Redact(ex.Message));
             throw;
         }
         tool.Report(result.IsError == true ? McpCallResult.Failed : McpCallResult.Executed, "allow", null,
@@ -151,6 +156,20 @@ public static class McpGuardrailFilter
         };
         tool.Report(result, verdict, outcome.OperationId, result == McpCallResult.Executed ? null : outcome.Reason);
 
+        // Contract 0001: these tools answer every error as a coded envelope — also what the gateway refused or held for
+        // approval before they ran, with the operation (and approval) a client repeats the identical call for.
+        // The tool's own answer is already an envelope; a tool exception becomes one too (redacted), except the caller's
+        // own cancellation, which the server reports as before.
+        var toolAnswered = outcome.Status == MutationStatus.Failed && outcome.Verification != VerificationStatus.Failed
+            && outcome.Error is null && outcome.Value is not null;
+        var toolThrew = outcome.Status == MutationStatus.Failed && outcome.Verification != VerificationStatus.Failed
+            && outcome.Error is { } thrown && (thrown is not OperationCanceledException || ct.IsCancellationRequested);
+        if (McpErrorEnvelope.Tools.Contains(call.Name) && outcome.Status != MutationStatus.Executed
+            && !toolAnswered && !(toolThrew && outcome.Error is OperationCanceledException))
+            return McpErrorEnvelope.Result(McpErrorEnvelope.CodeOf(outcome.Status, outcome.ReasonCode),
+                Whiskers.Utils.SecretRedactor.Redact(outcome.Reason ?? "The call was not executed."), outcome.OperationId,
+                outcome.Status == MutationStatus.PendingApproval ? outcome.ApprovalId : null);
+
         return outcome.Status switch
         {
             MutationStatus.Executed => outcome.Value!,
@@ -180,7 +199,11 @@ public static class McpGuardrailFilter
         public CallToolResult Deny(string message, string verdict = "deny")
         {
             Report(McpCallResult.Denied, verdict, null, message);
-            return Refuse(message);
+            // A read held for approval waits for a person like a write: it is pending, not refused (its approval is
+            // named in the message; reads have no operation id).
+            return McpErrorEnvelope.Tools.Contains(Tool)
+                ? McpErrorEnvelope.Result(verdict == "confirm" ? McpErrorEnvelope.PendingApproval : McpErrorEnvelope.Denied, message)
+                : Refuse(message);
         }
     }
 

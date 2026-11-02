@@ -411,9 +411,14 @@ internal sealed class McpFilterHarness : IDisposable
     }
 
     public GuardrailPolicy Policy { get; }
+    public ApprovalStore Approvals => _approvals;
     public HttpContext Http { get; set; } = new DefaultHttpContext();
     public List<IMutationVerifier> Verifiers { get; } = [];
     public DirectCallVerdict ReadVerdict { get; set; } = new(true, GuardrailVerdict.Allow, null);
+    /// <summary>The target resolver the gateway runs (R1-06); none by default, as the filter tests need none.</summary>
+    public IMutationTargetResolver? Targets { get; set; }
+    /// <summary>Who calls; the admin key <see cref="Key"/> by default.</summary>
+    public AgentPrincipal Principal { get; set; } = Key;
 
     public static readonly AgentPrincipal Key =
         new(AgentPrincipalKind.McpKey, "ops-key", McpPermissionLevels.Admin, null, McpKeyId: "k1");
@@ -440,12 +445,12 @@ internal sealed class McpFilterHarness : IDisposable
     private IServiceProvider Services()
     {
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store),
-            new AuditLogMutationSink(_db.Scopes), Verifiers, NullLogger<MutationGateway>.Instance,
+            new AuditLogMutationSink(_db.Scopes), Verifiers, NullLogger<MutationGateway>.Instance, targets: Targets,
             decisions: new DbPolicyDecisionStore(_db.Scopes), approvals: new ApprovalGate(_approvals, _store),
             journal: new DbOperationJournal(_db.Scopes));
         return new ServiceCollection()
             .AddSingleton<IHttpContextAccessor>(new HttpContextAccessor { HttpContext = Http })
-            .AddSingleton<IAgentPrincipalResolver>(new FixedResolver())
+            .AddSingleton<IAgentPrincipalResolver>(new FixedResolver(this))
             .AddSingleton<IDirectMcpCallGuard>(new FixedGuard(this))
             .AddSingleton<ICapabilityCatalog>(new CapabilityCatalog())
             .AddSingleton<IMutationGateway>(gateway)
@@ -455,9 +460,9 @@ internal sealed class McpFilterHarness : IDisposable
 
     public void Dispose() => _db.Dispose();
 
-    private sealed class FixedResolver : IAgentPrincipalResolver
+    private sealed class FixedResolver(McpFilterHarness harness) : IAgentPrincipalResolver
     {
-        public AgentPrincipal Resolve(HttpContext httpContext) => Key;
+        public AgentPrincipal Resolve(HttpContext httpContext) => harness.Principal;
     }
 
     private sealed class FixedGuard(McpFilterHarness harness) : IDirectMcpCallGuard

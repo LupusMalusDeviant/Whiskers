@@ -110,7 +110,12 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 
 | Tool | Level | Description |
 |---|---|---|
+| `create_git_deploy_app` | admin | Create a Git-deploy application (Brokkr provisioning). Whiskers clones the repository over HTTPS on the target server and runs its compose file. A private repository needs a read-only token (optional here, or later with set_git_deploy_token). An existing name is refused. Answers JSON with the new id and revision; never the token. |
+| `create_git_deploy_webhook` | admin | Create a webhook that deploys a Git-deploy application when its repository is pushed. Whiskers generates the HMAC secret; it is in this answer ONLY — put it into the repository's webhook right away (content type JSON, header X-Hub-Signature-256). Provider: github. Answers JSON with webhookId, url and secret. |
+| `get_git_deploy_app` | read | Read one Git-deploy application as JSON: id, revision, name, repository, branch, compose path, server, whether a repository token is stored (never the token), the last deploy (time, result, commit) and the ids of its webhooks. |
 | `list_git_deploy_apps` | read | List the applications Whiskers deploys from Git: repository, branch, compose path, target server, and the outcome, time and commit of the last deploy. Read-only — this cannot start a deploy. |
+| `rotate_git_deploy_webhook_secret` | admin | Replace the HMAC secret of a Git-deploy webhook with a new one Whiskers generates. The new secret is in this answer ONLY; the old one stops working at once — update the repository's webhook right away. Answers JSON with webhookId and secret. |
+| `set_git_deploy_token` | admin | Set (or with an empty string remove) the read-only repository token of a Git-deploy application. Needs the app's current revision (from get_git_deploy_app); a stale one is refused. The token is stored in the vault and never returned. Answers JSON with the new revision. |
 
 ## Module `image-updates`
 
@@ -156,7 +161,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 
 | Level | Tools |
 |---|---|
-| read | 46 |
+| read | 47 |
 | write | 13 |
-| admin | 27 |
-| **total** | **86** |
+| admin | 31 |
+| **total** | **91** |

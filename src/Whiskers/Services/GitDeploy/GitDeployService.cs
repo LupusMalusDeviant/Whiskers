@@ -70,16 +70,31 @@ public class GitDeployService : IGitDeployService
     public async Task<GitDeployApp?> GetAppAsync(string appId) =>
         (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId)?.Clone();
 
+    public async Task<GitDeployApp> SetTokenAsync(string appId, int revision, string token, string ownerId)
+    {
+        ValidateId(appId);
+        ArgumentNullException.ThrowIfNull(token);
+        var stored = await GetAppAsync(appId) ?? throw new KeyNotFoundException($"Git deployment app not found: {appId}");
+        // The caller's revision, not the one just read: a token set on a copy edited meanwhile is refused.
+        stored.Revision = revision;
+        return await SaveAppAsync(stored, token, ownerId);
+    }
+
     public async Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId)
     {
         ValidateId(app.Id);
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        // A token of blanks is no token: it removes the stored one instead of storing an empty secret as "stored".
+        if (token is not null && string.IsNullOrWhiteSpace(token)) token = "";
         // Checked again under the lock; this early check keeps a stale edit from touching the vault token.
         if ((await LoadAsync()).Apps.FirstOrDefault(a => a.Id == app.Id) is { } before && before.Revision != app.Revision)
             throw new GitDeployConflictException($"'{before.Name}' was changed meanwhile; reload and save again.");
         if (string.IsNullOrWhiteSpace(app.Name)) throw new ArgumentException("Name is required.");
         if (!app.RepoUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Only https:// repository URLs are supported.");
+        // Credentials belong in the vault (INV-52), never in the stored, displayed and returned URL.
+        if (!Uri.TryCreate(app.RepoUrl.Trim(), UriKind.Absolute, out var repoUri) || repoUri.UserInfo.Length > 0)
+            throw new ArgumentException("The repository URL must be a plain https:// URL without credentials; give the token separately.");
         if (string.IsNullOrWhiteSpace(app.Branch)) app.Branch = "main";
         if (string.IsNullOrWhiteSpace(app.ComposePath)) app.ComposePath = "docker-compose.yml";
         if (app.ComposePath.StartsWith('/') || app.ComposePath.Contains(".."))
@@ -99,6 +114,15 @@ public class GitDeployService : IGitDeployService
             // Edited from a stale copy: someone saved (or a deploy was decided on) a newer revision meanwhile.
             if (previous is not null && previous.Revision != app.Revision)
                 throw new GitDeployConflictException($"'{previous.Name}' was changed meanwhile; reload and save again.");
+            // A copy of a stored app (revision above 0) whose app was deleted meanwhile is not saved as a new one. A copy
+            // at revision 0 (an app saved before R1-08 and never since) cannot be told from a new app and passes.
+            if (previous is null && app.Revision != 0)
+                throw new GitDeployConflictException($"'{app.Name}' was deleted meanwhile; nothing was saved.");
+            // A new app, or one renamed, never takes the name of another (contract 0001). Checked here, under the lock
+            // and before the vault, so two creates at once cannot both pass; apps that already share a name keep it.
+            if ((previous is null || !string.Equals(previous.Name, app.Name, StringComparison.OrdinalIgnoreCase))
+                && data.Apps.Any(a => a.Id != app.Id && string.Equals(a.Name, app.Name, StringComparison.OrdinalIgnoreCase)))
+                throw new GitDeployConflictException($"A Git deployment app named '{app.Name}' exists already.", nameTaken: true);
 
             // Under the lock and after the revision check: the token this save replaces and the one it stores are
             // exactly what the audit describes (R1-22), and a save that loses the check never touches the vault.

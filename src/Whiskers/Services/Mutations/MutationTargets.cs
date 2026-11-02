@@ -143,7 +143,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             "dns-zone" => DnsZone(target),
             "workload" => await WorkloadAsync(target, ct),
             "git-deploy-app" => await GitAppAsync(request, capability, target, ct),
-            "webhook" => await WebhookAsync(capability, target),
+            "webhook" => await WebhookAsync(request, capability, target),
             _ => Pass(target),
         };
         return await WithMentionedContainersAsync(request, resolution, ct);
@@ -523,8 +523,9 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (app is null)
             return Refuse($"Git deployment app not found: {target.Id}", target.Id);
         if (request.Arguments.TryGetValue("revision", out var revision)
-            && (revision.ValueKind != System.Text.Json.JsonValueKind.Number || revision.GetInt32() != app.Revision))
-            return Refuse($"'{app.Name}' was changed after it was loaded; reload and try again.");
+            && (revision.ValueKind != System.Text.Json.JsonValueKind.Number || !revision.TryGetInt32(out var rev) || rev != app.Revision))
+            return new(null, $"'{app.Name}' was changed after it was loaded; reload and try again.",
+                MutationReasonCodes.TargetChanged, [app.Name]);
 
         // Saving may move the app to another server: decide on the server it will deploy to. Everything else acts
         // on the stored app, and a caller naming another server than the app's is refused.
@@ -547,14 +548,34 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     /// A webhook (R1-09): the stored webhook by its id, with its own name and the server its action runs on — never
     /// the ones the page rendered. Creating a new one resolves only the chosen server. A webhook whose server was
     /// removed meanwhile can still be managed (switched off, deleted, taken over): only its record changes; its
-    /// action is decided on the server again when it runs, and refused there.
+    /// action is decided on the server again when it runs, and refused there. A new webhook for a Git deployment app
+    /// (<c>appId</c>, contract 0001) is decided on the app's server, with the app as what it acts on.
     /// </summary>
-    private async Task<TargetResolution> WebhookAsync(Capability capability, MutationTarget target)
+    private async Task<TargetResolution> WebhookAsync(MutationRequest request, Capability capability, MutationTarget target)
     {
         if (string.IsNullOrWhiteSpace(target.Id))
         {
             if (capability.Id != "webhook.save")
                 return Refuse("The webhook is required.");
+            if (MutationTargets.String(request.Arguments, "appId") is { } appId)
+            {
+                var git = _services.GetService<Whiskers.Services.GitDeploy.IGitDeployService>();
+                if (git is null)
+                    return Refuse("Git deployments are not available.");
+                var app = await git.GetAppAsync(appId);
+                if (app is null)
+                    return Refuse($"Git deployment app not found: {appId}", appId);
+                var (appServer, appError) = ResolveServer(app.ServerId);
+                if (appServer is null) return Refuse(appError!, app.ServerId);
+                if (!string.IsNullOrWhiteSpace(target.ServerId) && ResolveServer(target.ServerId).Server?.Id != appServer.Id)
+                    return Refuse($"'{app.Name}' deploys to '{appServer.Id}', not to '{target.ServerId}'.");
+                return Pass(target with
+                {
+                    Name = target.Name ?? app.Name, ServerId = appServer.Id,
+                    Related = [app.Name, app.RepoUrl],
+                    RelatedResources = [Aliases(app.Name, app.RepoUrl)],
+                });
+            }
             var (newServer, newError) = ResolveServer(target.ServerId);
             return newServer is null ? Refuse(newError!, target.ServerId) : Pass(target with { ServerId = newServer.Id });
         }
