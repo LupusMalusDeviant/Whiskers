@@ -6,13 +6,17 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-- Dependencies: **three known high-severity flaws removed.** SignalR 10.0.14 (CVE-2026-70159, a denial of service in
-  `SignalR.Common` ≤ 10.0.12); the SQLite migrations project now ships the same `SQLitePCLRaw` 3.x bundle as the app
-  instead of 2.1.11, whose bundled SQLite is affected (GHSA-2m69-gcr7-jv3q); the test project pins SSH.NET 2026.0.0
-  over the 2025.1.0 Testcontainers pulls (GHSA-mggc-4xg6-vcxf, GHSA-q939-rpr3-3284; test-only, not in the image).
-  Also updated: Google and OpenID Connect sign-in 10.0.14, KubernetesClient 21.0.8 (kubeconfigs are now read with
+- Dependencies: **three known high-severity flaws removed.** The unused SignalR client package is gone; it pulled
+  `SignalR.Common` 10.0.10 (CVE-2026-70159 / GHSA-334f-vvp4-7g6p, a denial of service up to 10.0.12). The server-side
+  SignalR of the Blazor circuit and the container hub is part of the ASP.NET Core runtime in the base image, and the
+  release build now always pulls the current base image (`pull: true`) so a cached older runtime is never shipped.
+  The SQLite migrations project now ships the same `SQLitePCLRaw` 3.x bundle as the app instead of 2.1.11, whose
+  bundled SQLite is affected (GHSA-2m69-gcr7-jv3q); the test project pins SSH.NET 2026.0.0 over the 2025.1.0
+  Testcontainers pulls (GHSA-mggc-4xg6-vcxf, GHSA-q939-rpr3-3284; test-only, not in the image). Also updated: Google
+  and OpenID Connect sign-in 10.0.14, KubernetesClient 21.0.8 (kubeconfigs are now read with
   `KubernetesYaml.Deserialize`), Markdig 1.5.1, Blazor-ApexCharts 7.1.0, SQLitePCLRaw bundle 3.0.5, bUnit 2.13.3,
-  coverlet 10.1.0. `dotnet list package --vulnerable --include-transitive` reports no vulnerable package.
+  coverlet 10.1.0, ASP.NET Core test host 10.0.14. `dotnet list package --vulnerable --include-transitive` reports no
+  vulnerable package.
 - R1-34: **An upgrade starts from a recovery point.** When another release starts on an existing database (a new
   version, or schema migrations to run), it first takes a self-backup labelled `pre-upgrade-…` — right after the vault
   checked `VAULT_KEY` and before anything rewrites data in a newer format (server list, credential move into the

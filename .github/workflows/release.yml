@@ -63,6 +63,8 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          # Always fetch the base images: their ASP.NET Core runtime carries the server-side SignalR and Kestrel fixes.
+          pull: true
           platforms: linux/amd64
           load: true
           tags: ${{ env.IMAGE }}:scan-${{ github.sha }}
@@ -86,6 +88,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          pull: true
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
