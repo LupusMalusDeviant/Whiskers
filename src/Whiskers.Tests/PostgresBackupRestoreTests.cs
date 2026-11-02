@@ -365,6 +365,43 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
     }
 
     [SkippableFact]
+    public async Task An_upgrade_on_postgres_first_takes_a_backup_with_the_dump_of_the_schema_before_it()
+    {
+        await SkipUnlessReadyAsync();
+        using var live = await NewInstanceAsync(await CreateDatabaseAsync("upgrade"));
+        await SeedAsync(live);
+        List<string> before;
+        // The database as the release before the newest migration left it.
+        using (var scope = live.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var applied = (await db.Database.GetAppliedMigrationsAsync()).ToList();
+            await Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db).MigrateAsync(applied[^2]);
+            before = (await db.Database.GetAppliedMigrationsAsync()).ToList();
+        }
+        await File.WriteAllTextAsync(live.Paths.LastStartedVersionFile, "1.9.0");
+        var guard = new UpgradeGuard(live.Provider.GetRequiredService<IServiceScopeFactory>(), live.Service,
+            live.Configuration, live.Paths, NullLogger.Instance, "2.0.0");
+
+        var plan = await guard.PrepareAsync();
+
+        // Pending migrations are found across both history tables on PostgreSQL, and nothing was migrated yet.
+        Assert.Single(plan.PendingMetrics);
+        Assert.Empty(plan.PendingIdentity);
+        Assert.NotNull(plan.BackupId);
+        var backup = Assert.Single(await live.Service.ListBackupsAsync());
+        Assert.StartsWith(BackupService.PreUpgradeLabelPrefix, backup.Label);
+        Assert.True(backup.IncludesDatabase);
+        var manifest = (await live.Service.ValidateArchiveAsync(live.Service.ResolveArchivePath(backup.Id)!)).Manifest!;
+        Assert.Equal(before, manifest.MetricsMigrations);
+        Assert.NotEmpty(manifest.IdentityMigrations);
+        Assert.Equal(backup.Id, UpgradeGuard.ReadMarker(live.Paths)!.BackupId);
+        using (var scope = live.Provider.CreateScope())
+            Assert.Equal(before, (await scope.ServiceProvider.GetRequiredService<MetricsDbContext>()
+                .Database.GetAppliedMigrationsAsync()).ToList());
+    }
+
+    [SkippableFact]
     public async Task An_archive_from_an_older_schema_is_restored_and_brought_up_to_date_by_the_start()
     {
         await SkipUnlessReadyAsync();

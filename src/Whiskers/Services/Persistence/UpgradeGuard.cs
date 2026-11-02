@@ -169,7 +169,8 @@ public sealed class UpgradeGuard : IInitializable
         // After an unfinished upgrade whose backup is gone or unreadable, older pre-upgrade backups may be the only state
         // from before it: nothing is pruned then.
         if (unfinished)
-            _logger.LogWarning("Older pre-upgrade backups are kept: an earlier upgrade did not finish, and one of them may be the way back.");
+            _logger.LogWarning("Older pre-upgrade backups are kept: an earlier upgrade did not finish, and one of them may " +
+                "be the way back ({Older}).", await OlderPreUpgradeBackupsAsync(backup.Id, ct));
         else
             await PruneAsync(_backups, keep, backup.Id, _logger, ct);
         return plan with { BackupId = backup.Id };
@@ -199,6 +200,25 @@ public sealed class UpgradeGuard : IInitializable
     }
 
     private UpgradePendingMarker? ReadMarker() => ReadMarker(_paths, _logger);
+
+    /// <summary>The ids of the pre-upgrade backups other than <paramref name="current"/>, newest first, for the log.</summary>
+    private async Task<string> OlderPreUpgradeBackupsAsync(string current, CancellationToken ct)
+    {
+        try
+        {
+            var ids = (await _backups.ListBackupsAsync(ct))
+                .Where(b => b.Id != current && b.Label.StartsWith(BackupService.PreUpgradeLabelPrefix, StringComparison.Ordinal))
+                .OrderByDescending(b => b.CreatedAtUtc)
+                .Select(b => b.Id)
+                .ToList();
+            return ids.Count == 0 ? "there are none" : "newest first: " + string.Join(", ", ids);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The older pre-upgrade backups could not be listed.");
+            return "they could not be listed";
+        }
+    }
 
     /// <summary>The release part of two versions (before a <c>+</c> build suffix such as the commit): a rebuild of the
     /// same release is no upgrade.</summary>
@@ -247,8 +267,10 @@ public sealed class UpgradeGuard : IInitializable
         }
     }
 
-    /// <summary>Runs one migration step, timing it; on failure logs how to recover, then rethrows (the start fails).</summary>
-    public static async Task MigrateAsync(string what, UpgradePlan plan, ILogger logger, Func<Task> migrate)
+    /// <summary>Runs one migration step, timing it; on failure logs how to recover, then rethrows (the start fails).
+    /// <paramref name="pending"/> are this step's own pending migrations: only a step that had some logs its time.</summary>
+    public static async Task MigrateAsync(string what, IReadOnlyCollection<string> pending, UpgradePlan plan,
+        ILogger logger, Func<Task> migrate)
     {
         var watch = Stopwatch.StartNew();
         try
@@ -267,7 +289,7 @@ public sealed class UpgradeGuard : IInitializable
                     : "restore your own backup of the database");
             throw;
         }
-        if (plan.HasPending)
+        if (pending.Count > 0)
             logger.LogInformation("The {What} schema migration finished in {Seconds:F1} s.", what, watch.Elapsed.TotalSeconds);
     }
 }
