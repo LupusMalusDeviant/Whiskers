@@ -12,7 +12,10 @@ namespace Whiskers.Services.Mutations;
 /// <item>operations still <c>Running</c> under another process become <c>Interrupted</c> in the journal: a retry under
 /// their id stays refused as "outcome unknown", and the audit recovery settles their intent as <c>Unknown</c>;</item>
 /// <item>scheduled-task runs without an end become failed runs that say they were interrupted — the history tells an
-/// interruption apart from a success and from an ordinary failure — and their task shows that as its last result.</item>
+/// interruption apart from a success and from an ordinary failure — and their task shows that as its last result;</item>
+/// <item>AutoUpdate attempts without an end become failed updates that say they were interrupted, and the container's
+/// update policy is switched off: the same update is not tried again until an admin has checked the container and
+/// switches AutoUpdate on again.</item>
 /// </list>
 /// One notification names them all, so an admin checks the targets: whether an interrupted update, backup or command
 /// took effect is unknown.
@@ -22,6 +25,11 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService
     /// <summary>The result text of an interrupted task run (also how the history and the task page recognise one).</summary>
     public const string InterruptedResult =
         "INTERRUPTED: Whiskers stopped while this ran; whether it took effect is unknown. It was not run again.";
+
+    /// <summary>The policy result of an AutoUpdate that was cut off (R1-39).</summary>
+    public const string InterruptedUpdateResult =
+        "INTERRUPTED: Whiskers stopped while this container was being updated; whether the update took effect is " +
+        "unknown. AutoUpdate was switched off for it — check the container, then switch it on again.";
 
     private const int MaxNamed = 20;
 
@@ -96,25 +104,59 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService
         }
 
         // Task runs of an earlier process that never recorded their end.
-        var open = await db.TaskRunHistory
+        var open = await db.TaskRunHistory.AsNoTracking()
             .Where(r => r.CompletedAt == null && r.StartedAt < _processStart)
+            .OrderBy(r => r.StartedAt)
             .ToListAsync(ct);
         foreach (var run in open)
         {
-            run.CompletedAt = now;
-            run.Success = false;
-            run.Output = null;
-            run.Error = InterruptedResult;
-            var task = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == run.TaskId, ct);
-            // Its last result, unless a later run has recorded one since.
-            if (task is not null && (task.LastRun is null || task.LastRun <= run.StartedAt.AddSeconds(1)))
-            {
-                task.LastSuccess = false;
-                task.LastResult = InterruptedResult;
-            }
+            // Conditional on the run still being open: one that ended meanwhile keeps its result.
+            var closed = await db.TaskRunHistory
+                .Where(r => r.Id == run.Id && r.CompletedAt == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(r => r.CompletedAt, now)
+                    .SetProperty(r => r.Success, false)
+                    .SetProperty(r => r.Output, (string?)null)
+                    .SetProperty(r => r.Error, InterruptedResult), ct);
+            if (closed == 0) continue;
+            // Its task's last result too — only while that run is still the task's last one (a run is started with
+            // the task's LastRun set to its own start in the same save), so a later run's result is never replaced.
+            var startedAt = run.StartedAt;
+            await db.ScheduledTasks
+                .Where(t => t.TaskId == run.TaskId && t.LastRun == startedAt)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.LastSuccess, false)
+                    .SetProperty(t => t.LastResult, InterruptedResult), ct);
             marked.Add($"scheduled task {run.TaskName} (started {run.StartedAt:u})");
         }
-        if (open.Count > 0) await db.SaveChangesAsync(ct);
+
+        // AutoUpdate attempts of an earlier process that never recorded their end.
+        var updates = await db.UpdateHistory.AsNoTracking()
+            .Where(h => h.CompletedAt == null && h.StartedAt < _processStart)
+            .OrderBy(h => h.StartedAt)
+            .ToListAsync(ct);
+        foreach (var update in updates)
+        {
+            var closed = await db.UpdateHistory
+                .Where(h => h.Id == update.Id && h.CompletedAt == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(h => h.CompletedAt, now)
+                    .SetProperty(h => h.Success, false)
+                    .SetProperty(h => h.Error, InterruptedResult), ct);
+            if (closed == 0) continue;
+            // Its policy is switched off: the update stays available and would otherwise be started again at the next
+            // check — on a container that may be half replaced. Same scope as the update's own matching (server, then
+            // id or name).
+            var (name, id, server) = (update.ContainerName, update.ContainerId, update.ServerId);
+            await db.UpdatePolicies
+                .Where(p => p.AutoUpdate
+                            && (p.ServerId == null || p.ServerId == "" || p.ServerId == server)
+                            && (p.ContainerId == id || p.ContainerName == name))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.AutoUpdate, false)
+                    .SetProperty(p => p.LastUpdateResult, InterruptedUpdateResult), ct);
+            marked.Add($"auto-update of {update.ContainerName} (started {update.StartedAt:u}; AutoUpdate switched off for it)");
+        }
 
         if (marked.Count == 0) return marked;
         _logger.LogWarning("Whiskers stopped while {Count} operation(s) ran; marked as interrupted: {Work}",

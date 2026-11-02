@@ -1,10 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Cve;
 using Whiskers.Services.AutoPatch;
+using Whiskers.Services.AutoUpdate;
 using Whiskers.Services.Cve;
 using Whiskers.Services.Docker;
 using Whiskers.Services.Mutations;
@@ -192,19 +194,29 @@ public sealed class MutationShutdownTests : IDisposable
         rig.UpdateThatLaterReads(_ => Task.FromResult(("running", 0, false)));
         var service = await rig.ServiceAsync(autoRollback: false, drain: drain, second: "api");
 
-        Task? stopping = null;
+        // The recreate blocks until the test lets it go.
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
         var recreate = rig.Docker.On[nameof(IDockerService.RecreateContainerAsync)];
         rig.Docker.On[nameof(IDockerService.RecreateContainerAsync)] = args =>
         {
-            // Whiskers is told to stop while the container is being recreated.
-            stopping = drain.DrainAsync(CancellationToken.None);
+            entered.Set();
+            Assert.True(release.Wait(Wait));
             return recreate(args);
         };
 
-        await service.CheckAndUpdateAsync(CancellationToken.None);
+        var updating = Task.Run(() => service.CheckAndUpdateAsync(CancellationToken.None));
+        Assert.True(entered.Wait(Wait));
 
-        Assert.NotNull(stopping);
-        await stopping!.WaitAsync(Wait);
+        // Whiskers is told to stop while the container is being recreated: the drain waits for it.
+        var stopping = drain.DrainAsync(CancellationToken.None);
+        Assert.Equal(["auto-update of 'web'"], drain.InFlight);
+        await Task.Delay(100);
+        Assert.False(stopping.IsCompleted);
+
+        release.Set();
+        await updating.WaitAsync(Wait);
+        await stopping.WaitAsync(Wait);
         Assert.Single(rig.Docker.Calls, c => c == nameof(IDockerService.RecreateContainerAsync));   // "api" never
         using var scope = rig.Scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -270,6 +282,271 @@ public sealed class MutationShutdownTests : IDisposable
         Assert.StartsWith("Interrupted", afterCrash.LastCycle!.Error);
         Assert.Null(afterCrash.LastCycle.CompletedAt);
         Assert.True(AutoPatchService.IsDue(settings, night.AddDays(1), afterCrash.LastNightlyRun));   // the next night runs
+    }
+
+    [Fact]
+    public async Task The_host_drains_before_it_cancels_the_loops_and_waits_for_running_work()
+    {
+        var drain = Drain();
+        var worker = new HoldingWorker(drain);
+        using var host = Host(drain, worker, TimeSpan.FromSeconds(30));
+        await host.StartAsync();
+        await worker.Entered.Task.WaitAsync(Wait);
+
+        var stop = host.StopAsync();
+        await UntilAsync(() => drain.IsStopping);
+        Assert.False(worker.Token.IsCancellationRequested);   // the drain runs before the loops are cancelled
+        await Task.Delay(100);
+        Assert.False(stop.IsCompleted);                        // ... and waits for the running work
+
+        worker.Release.SetResult();
+        await stop.WaitAsync(Wait);
+        Assert.Empty(drain.InFlight);
+        Assert.True(drain.Abort.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task The_host_stops_after_the_budget_when_work_does_not_end()
+    {
+        var drain = Drain(TimeSpan.FromMilliseconds(200));
+        var worker = new HoldingWorker(drain);                 // never released: a forced stop
+        using var host = Host(drain, worker, TimeSpan.FromSeconds(2));
+        await host.StartAsync();
+        await worker.Entered.Task.WaitAsync(Wait);
+
+        await host.StopAsync().WaitAsync(Wait);
+
+        Assert.True(drain.Abort.IsCancellationRequested);
+        Assert.True(worker.Token.IsCancellationRequested);
+        Assert.Equal(["held work"], drain.InFlight);           // cut off: reconciled at the next start
+    }
+
+    [Fact]
+    public async Task Run_now_is_admitted_like_a_scheduled_run()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.SelfBackup);
+        var executor = new GatedExecutor();
+        var drain = Drain();
+        var scheduler = Scheduler(executor, drain);
+
+        var running = scheduler.RunNowAsync("t1");
+        await executor.Entered.Task.WaitAsync(Wait);
+        Assert.Null((await RunAsync("t1")).CompletedAt);
+        Assert.Equal((await RunAsync("t1")).StartedAt, (await TaskAsync("t1")).LastRun);
+
+        // Not twice at once: neither by hand nor by the schedule.
+        Assert.Equal((false, "The task is already running."), await scheduler.RunNowAsync("t1"));
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+        Assert.Equal(["t1"], executor.Ran);
+
+        var stopping = drain.DrainAsync(CancellationToken.None);
+        Assert.Equal(["scheduled task 't1' (run now)"], drain.InFlight);
+        await Task.Delay(100);
+        Assert.False(stopping.IsCompleted);
+        executor.Release.SetResult((true, "done"));
+        Assert.Equal((true, "done"), await running.WaitAsync(Wait));
+        await stopping.WaitAsync(Wait);
+        Assert.True((await RunAsync("t1")).Success);
+
+        Assert.Equal((false, "Whiskers is shutting down; the task was not started."), await scheduler.RunNowAsync("t1"));
+        Assert.Equal(["t1"], executor.Ran);
+    }
+
+    [Fact]
+    public async Task An_occurrence_due_while_the_task_runs_is_skipped_without_touching_its_last_run()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var executor = new GatedExecutor();
+        var scheduler = Scheduler(executor, Drain());
+        var running = scheduler.RunNowAsync("t1");
+        await executor.Entered.Task.WaitAsync(Wait);
+        var lastRun = (await TaskAsync("t1")).LastRun;
+
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+
+        var task = await TaskAsync("t1");
+        Assert.Equal(lastRun, task.LastRun);                   // still the running one's start
+        Assert.True(task.NextRun > DateTime.UtcNow);           // the occurrence is skipped, not queued
+        Assert.Single(await RunsAsync("t1"));
+        executor.Release.SetResult((true, "done"));
+        await running.WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task Reconciling_never_replaces_the_result_of_a_later_run()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var old = DateTime.UtcNow.AddHours(-2);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.TaskRunHistory.Add(new TaskRunHistoryEntity { TaskId = "t1", TaskName = "t1", StartedAt = old });
+            var task = await db.ScheduledTasks.SingleAsync(t => t.TaskId == "t1");
+            task.LastRun = old.AddHours(1);                    // a later run has recorded its result since
+            task.LastSuccess = true;
+            task.LastResult = "later";
+            await db.SaveChangesAsync();
+        }
+
+        await Reconciler(new FakeNotifications(), DateTime.UtcNow).ReconcileAsync();
+
+        Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await RunAsync("t1")).Error);
+        var after = await TaskAsync("t1");
+        Assert.Equal("later", after.LastResult);
+        Assert.True(after.LastSuccess);
+    }
+
+    [Fact]
+    public async Task An_interrupted_auto_update_is_not_tried_again_and_its_policy_is_switched_off()
+    {
+        using var rig = new AutoRollbackTests();
+        rig.UpdateThatLaterReads(_ => Task.FromResult(("running", 0, false)));
+        var service = await rig.ServiceAsync(autoRollback: false);
+        using (var scope = rig.Scopes.CreateScope())
+        {
+            // The earlier process recorded the attempt and was killed before its end.
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.UpdateHistory.Add(new UpdateHistoryEntity
+            {
+                ContainerId = "aaaaaaaaaaaa1111", ContainerName = "web", ServerId = "local", Image = "nginx:latest",
+                StartedAt = DateTime.UtcNow.AddMinutes(-5), Error = AutoUpdateService.InProgressResult,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Before the start-up reconciliation: the update is still available, but not started again.
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+        Assert.DoesNotContain(nameof(IDockerService.RecreateContainerAsync), rig.Docker.Calls);
+
+        var notifications = new FakeNotifications();
+        var marked = await new InterruptedWorkReconciler(rig.Scopes, new DbOperationJournal(rig.Scopes), notifications,
+            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+
+        Assert.Contains(marked, m => m.StartsWith("auto-update of web", StringComparison.Ordinal));
+        using (var scope = rig.Scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var history = await db.UpdateHistory.SingleAsync();
+            Assert.NotNull(history.CompletedAt);
+            Assert.False(history.Success);
+            Assert.Equal(InterruptedWorkReconciler.InterruptedResult, history.Error);
+            var policy = await db.UpdatePolicies.SingleAsync();
+            Assert.False(policy.AutoUpdate);
+            Assert.Equal(InterruptedWorkReconciler.InterruptedUpdateResult, policy.LastUpdateResult);
+        }
+        Assert.Contains("web", Assert.Single(notifications.Events).ImageInfo);
+
+        // After an admin switched it on again, the update runs and is recorded with its end.
+        using (var scope = rig.Scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            (await db.UpdatePolicies.SingleAsync()).AutoUpdate = true;
+            await db.SaveChangesAsync();
+        }
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+        Assert.Single(rig.Docker.Calls, c => c == nameof(IDockerService.RecreateContainerAsync));
+        using (var scope = rig.Scopes.CreateScope())
+        {
+            var latest = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().UpdateHistory
+                .OrderByDescending(h => h.Id).FirstAsync();
+            Assert.True(latest.Success);
+            Assert.NotNull(latest.CompletedAt);
+            Assert.Null(latest.Error);
+        }
+    }
+
+    [Fact]
+    public async Task A_night_whose_start_cannot_be_saved_patches_nothing()
+    {
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
+        var runner = new AutoPatchTests.RecordingRunner();
+        var service = AutoPatchTests.NewService(runner, cves, new AutoPatchSettings { Enabled = true, DryRun = false },
+            owners, () => DateTime.UtcNow, new FailingNightlyStore(), Drain(), AutoPatchTests.Compose("a"));
+
+        await service.RunNightlyRecordedAsync(CancellationToken.None);
+
+        Assert.Empty(runner.Calls);
+        Assert.Equal(AutoPatchService.NightNotRecorded, service.LastCycle!.Error);
+    }
+
+    [Fact]
+    public async Task A_night_stopped_early_still_says_why_after_a_restart()
+    {
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        cves.Set(AutoPatchTests.Scan("b", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
+        var drain = Drain();
+        Task? stopping = null;
+        var runner = new AutoPatchTests.RecordingRunner
+        {
+            AfterPatch = name => { if (name == "a") stopping = drain.DrainAsync(CancellationToken.None); },
+        };
+        var paths = new DataPathOptions(_dataDir);
+        var settings = new AutoPatchSettings { Enabled = true, DryRun = false };
+        var service = AutoPatchTests.NewService(runner, cves, settings, owners, () => DateTime.UtcNow,
+            new AutoPatchNightlyStore(paths), drain, AutoPatchTests.Compose("a"), AutoPatchTests.Compose("b"));
+
+        await service.RunNightlyRecordedAsync(CancellationToken.None);
+        await stopping!.WaitAsync(Wait);
+        Assert.Equal(["a"], runner.Calls.Select(c => c.Name));
+
+        var restarted = AutoPatchTests.NewService(new AutoPatchTests.RecordingRunner(), cves, settings, owners,
+            () => DateTime.UtcNow, new AutoPatchNightlyStore(paths), Drain());
+        await restarted.LoadNightlyAsync();
+        Assert.Contains("Stopped before b", restarted.LastCycle!.Error);
+        Assert.NotNull(restarted.LastCycle.CompletedAt);
+        Assert.False(AutoPatchService.IsDue(new AutoPatchSettings { Enabled = true, RunAtHourUtc = DateTime.UtcNow.Hour },
+            DateTime.UtcNow, restarted.LastNightlyRun));
+    }
+
+    private static IHost Host(ShutdownDrain drain, HoldingWorker worker, TimeSpan shutdownTimeout) =>
+        new HostBuilder().ConfigureServices(s =>
+        {
+            s.AddLogging();
+            s.Configure<HostOptions>(o => o.ShutdownTimeout = shutdownTimeout);
+            s.AddHostedService(_ => drain);
+            s.AddHostedService(_ => worker);
+        }).Build();
+
+    private static async Task UntilAsync(Func<bool> condition)
+    {
+        var until = DateTime.UtcNow + Wait;
+        while (!condition() && DateTime.UtcNow < until) await Task.Delay(10);
+        Assert.True(condition());
+    }
+
+    /// <summary>A loop that starts one piece of unattended work and holds it until the test releases it.</summary>
+    private sealed class HoldingWorker(IShutdownDrain drain) : BackgroundService
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public CancellationToken Token { get; private set; }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            Token = stoppingToken;
+            using var held = drain.TryEnter("held work");
+            Entered.TrySetResult();
+            await Release.Task;   // the work does not take the loop's token: the drain is what waits for it
+        }
+    }
+
+    private sealed class FailingNightlyStore : IAutoPatchNightlyStore
+    {
+        public Task<AutoPatchNightlyState> LoadAsync() => Task.FromResult(new AutoPatchNightlyState());
+        public Task SaveAsync(AutoPatchNightlyState state) => throw new IOException("disk full");
+    }
+
+    private async Task<List<TaskRunHistoryEntity>> RunsAsync(string id)
+    {
+        using var scope = _sp.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().TaskRunHistory.AsNoTracking()
+            .Where(r => r.TaskId == id).ToListAsync();
     }
 
     private static async Task WaitIdleAsync(AutoPatchService service)

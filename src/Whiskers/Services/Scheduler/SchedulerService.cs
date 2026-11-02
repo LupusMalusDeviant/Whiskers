@@ -105,29 +105,35 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                 if (draining is null)
                     break;
 
-                // Persist NextRun/LastRun BEFORE starting so a long-running task doesn't re-trigger on the
-                // next 30s tick (it's no longer "due", and the in-flight guard backs that up).
-                task.LastRun = DateTime.UtcNow;
-                task.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
-                await db.SaveChangesAsync(ct);
-
-                // Fire without blocking the loop, but never run the same task twice at once. TryAdd AFTER the
-                // save so a failed persist can't leak the in-flight guard.
+                // Never the same task twice at once: an occurrence that falls due while the task still runs (a run
+                // started by hand, or a long one) is skipped — NextRun moves on, LastRun stays the running one's.
                 if (!_running.TryAdd(task.TaskId, 0))
                 {
                     draining.Dispose();
+                    draining = null;
+                    task.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
+                    await db.SaveChangesAsync(ct);
                     continue;
                 }
 
-                // The run is on record before it starts (R1-39): a run cut off by a stop or a crash stays open and
-                // the next start marks it interrupted, never as a success.
+                // The occurrence is consumed and the run is on record in ONE save, before it starts (R1-39): a run
+                // cut off by a stop or a crash stays open and the next start marks it interrupted, never as a success;
+                // a failed save starts nothing and consumes nothing. Saved before starting, so a long-running task
+                // doesn't re-trigger on the next 30s tick either.
                 long runId;
+                var startedAt = DateTime.UtcNow;
+                var run = NewRun(task, startedAt);
                 try
                 {
-                    runId = await OpenRunAsync(db, task, task.LastRun.Value, ct);
+                    task.LastRun = startedAt;
+                    task.NextRun = cron.GetNextOccurrence(startedAt);
+                    db.TaskRunHistory.Add(run);
+                    await db.SaveChangesAsync(ct);
+                    runId = run.Id;
                 }
                 catch
                 {
+                    db.Entry(run).State = EntityState.Detached;
                     _running.TryRemove(task.TaskId, out _);
                     throw;
                 }
@@ -184,23 +190,16 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         }
     }
 
-    /// <summary>Records a run as started (no end yet) and returns its id (R1-39).</summary>
-    private static async Task<long> OpenRunAsync(MetricsDbContext db, ScheduledTaskEntity task, DateTime startedAt,
-        CancellationToken ct = default)
+    /// <summary>A run as started: no end yet (R1-39).</summary>
+    private static TaskRunHistoryEntity NewRun(ScheduledTaskEntity task, DateTime startedAt) => new()
     {
-        var run = new TaskRunHistoryEntity
-        {
-            TaskId = task.TaskId,
-            TaskName = task.Name,
-            TaskType = task.TaskType,
-            StartedAt = startedAt,
-            CompletedAt = null,
-            Success = false,
-        };
-        db.TaskRunHistory.Add(run);
-        await db.SaveChangesAsync(ct);
-        return run.Id;
-    }
+        TaskId = task.TaskId,
+        TaskName = task.Name,
+        TaskType = task.TaskType,
+        StartedAt = startedAt,
+        CompletedAt = null,
+        Success = false,
+    };
 
     /// <summary>Records the end of a run opened by <see cref="OpenRunAsync"/>, together with the tracked task's
     /// result. Not cancellable: a run that ended is recorded as such, also while Whiskers is stopping.</summary>
@@ -315,15 +314,32 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         var task = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
         if (task == null) return (false, "Task not found");
 
-        // On record before it runs (R1-39): a run a stop cuts off is reported as interrupted at the next start.
-        var runId = await OpenRunAsync(db, task, DateTime.UtcNow);
-        var (success, output) = await _executor.ExecuteAsync(task);
+        // R1-39: a run by hand is admitted like a scheduled one — not while Whiskers stops, not while the task runs —
+        // and the drain waits for it until its result is recorded.
+        using var draining = _drain.TryEnter($"scheduled task '{task.Name}' (run now)");
+        if (draining is null) return (false, "Whiskers is shutting down; the task was not started.");
+        if (!_running.TryAdd(task.TaskId, 0)) return (false, "The task is already running.");
+        try
+        {
+            // On record before it runs, together with its start: a run a stop cuts off is reported as interrupted at
+            // the next start.
+            var startedAt = DateTime.UtcNow;
+            var run = NewRun(task, startedAt);
+            task.LastRun = startedAt;
+            db.TaskRunHistory.Add(run);
+            await db.SaveChangesAsync();
 
-        task.LastRun = DateTime.UtcNow;
-        task.LastResult = success ? output : $"FEHLER: {output}";
-        task.LastSuccess = success;
-        await CloseRunAsync(db, runId, success, output);
-        return (success, output);
+            var (success, output) = await _executor.ExecuteAsync(task);
+
+            task.LastResult = success ? output : $"FEHLER: {output}";
+            task.LastSuccess = success;
+            await CloseRunAsync(db, run.Id, success, output);
+            return (success, output);
+        }
+        finally
+        {
+            _running.TryRemove(task.TaskId, out _);
+        }
     }
 
     public async Task<List<TaskRunHistoryEntity>> GetHistoryAsync(string? taskId = null, int limit = 50)

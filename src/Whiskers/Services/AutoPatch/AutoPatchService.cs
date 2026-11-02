@@ -130,36 +130,54 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         _nightlyLoaded = true;
         if (state is { StartedAt: { } started, CompletedAt: null })
         {
-            LastCycle ??= new(started, null, state.DryRun, [], [],
-                "Interrupted: Whiskers stopped while this nightly cycle ran. Containers it had not reached were not " +
-                "patched; it was not run again that night.");
+            LastCycle ??= new(started, null, state.DryRun, [], [], InterruptedNight);
             _logger.LogWarning("The nightly auto-patch cycle started {Started:u} was interrupted by a stop", started);
+        }
+        else if (state is { StartedAt: { } began, CompletedAt: { } ended, Error: { } error })
+        {
+            // A night that ended early (a stop, a suspension, an unverified rollback) still says why after a restart.
+            LastCycle ??= new(began, ended, state.DryRun, [], [], error);
         }
     }
 
-    /// <summary>The nightly cycle with its day, start and end on disk. The day is written first: a cycle that is cut
-    /// off is not repeated the same night. Internal for tests.</summary>
+    internal const string InterruptedNight =
+        "Interrupted: Whiskers stopped while this nightly cycle ran. Containers it had not reached were not patched; " +
+        "it was not run again that night.";
+
+    internal const string NightNotRecorded =
+        "Not run: the start of tonight's cycle could not be saved, so a restart could not tell that it ran. It runs " +
+        "again tomorrow night.";
+
+    /// <summary>The nightly cycle with its day, start and end on disk. The day is written first and must be saved
+    /// before anything is patched: a night a restart could not see would be run a second time (fail closed — the night
+    /// is skipped instead). Its error, if it ended early, is saved with its end. Internal for tests.</summary>
     internal async Task RunNightlyRecordedAsync(CancellationToken ct)
     {
         var now = _utcNow();
         _lastNightlyRun = DateOnly.FromDateTime(now);
         var state = new AutoPatchNightlyState { Day = _lastNightlyRun, StartedAt = now, DryRun = _settings.CurrentValue.DryRun };
-        await SaveNightlyAsync(state);
+        if (!await SaveNightlyAsync(state))
+        {
+            LastCycle = new(now, _utcNow(), state.DryRun, [], [], NightNotRecorded);
+            return;
+        }
         await RunNightlyAsync(ct);
         state.CompletedAt = _utcNow();
+        state.Error = LastCycle is { } cycle && cycle.StartedAt >= now ? cycle.Error : null;
         await SaveNightlyAsync(state);
     }
 
-    private async Task SaveNightlyAsync(AutoPatchNightlyState state)
+    private async Task<bool> SaveNightlyAsync(AutoPatchNightlyState state)
     {
         try
         {
             await _nightly.SaveAsync(state);
+            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // The night still runs once in this process (the day is in memory); only a restart would not know.
             _logger.LogError(ex, "The nightly auto-patch state could not be saved");
+            return false;
         }
     }
 

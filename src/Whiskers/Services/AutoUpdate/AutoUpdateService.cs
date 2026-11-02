@@ -126,6 +126,15 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 continue;
             }
 
+            // R1-39: an attempt on this container that never recorded its end was cut off by a stop: it is not started
+            // again — also not before the start-up reconciliation has switched its policy off.
+            if (await db.UpdateHistory.AnyAsync(h => h.CompletedAt == null && h.ContainerName == container.Name
+                                                     && h.ServerId == container.ServerId, ct))
+            {
+                _logger.LogWarning("Auto-update of {Container} skipped: an earlier attempt was interrupted", container.Name);
+                continue;
+            }
+
             // R1-39: once Whiskers is stopping no update starts; one that runs is waited for by the shutdown drain.
             // A policy left here keeps its LastChecked unsaved, so it is checked again after the restart.
             using var draining = _drain.TryEnter($"auto-update of '{container.Name}'");
@@ -164,8 +173,14 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 OldImageDigest = updateInfo.LocalDigest ?? "",
                 NewImageDigest = updateInfo.RemoteDigest ?? "",
                 Image = container.Image,
-                StartedAt = DateTime.UtcNow
+                StartedAt = DateTime.UtcNow,
+                Error = InProgressResult,
             };
+            // R1-39: the attempt is on record (without an end) before anything is changed — a save that fails starts
+            // nothing. An attempt a forced stop cuts off stays open; the next start marks it interrupted and switches
+            // the policy off, so it is never run again automatically (InterruptedWorkReconciler).
+            db.UpdateHistory.Add(history);
+            await db.SaveChangesAsync(ct);
 
             try
             {
@@ -240,6 +255,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                     throw new UpdateUnhealthyException(health.State, health.OomKilled);
 
                 history.Success = true;
+                history.Error = null;
                 history.CompletedAt = DateTime.UtcNow;
                 policy.LastUpdated = DateTime.UtcNow;
                 // R1-31: an update without a way back says so where its result is read.
@@ -291,10 +307,12 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 catch (Exception nex) { _logger.LogWarning(nex, "Auto-update failure notification failed for {Container}", container.Name); }
             }
 
-            db.UpdateHistory.Add(history);
             await db.SaveChangesAsync(ct);
         }
     }
+
+    /// <summary>The result an update attempt carries while it runs (R1-39).</summary>
+    internal const string InProgressResult = "IN PROGRESS: the update has started.";
 
     /// <summary>Tells the admins that AutoUpdate was suspended and how to take it over (R1-04). An administrative
     /// event: no container mute or update preference hides it.</summary>

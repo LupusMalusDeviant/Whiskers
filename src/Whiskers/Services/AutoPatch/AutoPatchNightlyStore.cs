@@ -11,6 +11,8 @@ public sealed class AutoPatchNightlyState
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public bool DryRun { get; set; }
+    /// <summary>Why a night that ended ended early (a stop, a suspension, an unverified rollback); safe to show.</summary>
+    public string? Error { get; set; }
 }
 
 /// <summary>
@@ -47,5 +49,5 @@ public sealed class InMemoryAutoPatchNightlyStore : IAutoPatchNightlyStore
     }
 
     private static AutoPatchNightlyState Copy(AutoPatchNightlyState s) =>
-        new() { Day = s.Day, StartedAt = s.StartedAt, CompletedAt = s.CompletedAt, DryRun = s.DryRun };
+        new() { Day = s.Day, StartedAt = s.StartedAt, CompletedAt = s.CompletedAt, DryRun = s.DryRun, Error = s.Error };
 }
