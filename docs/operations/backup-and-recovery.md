@@ -100,7 +100,8 @@ An encrypted archive is safe to keep on another machine, because it is useless w
 5. To give up a pending restore, remove `/app/data/.restore-pending`. The pre-restore safety backup holds the state
    from before the restore. On PostgreSQL, if the start's log already says "The PostgreSQL database was restored from
    the archive", the database is the archive's while the files are not yet: after giving up, restore the pre-restore
-   safety backup so both match again.
+   safety backup so both match again. Staging already reset the upgrade state (see Upgrades), so the next start takes
+   one pre-upgrade backup of the unchanged data.
 
 ## Upgrades
 
@@ -119,7 +120,7 @@ anything, Whiskers takes a self-backup labelled `pre-upgrade-<yyyyMMdd_HHmmss>` 
    tools, the start **stops before anything is changed**. Fix the cause and start again. Only if you have a recovery
    point of your own, set `WHISKERS_UPGRADE_SKIP_BACKUP=true` to upgrade without the backup (the log warns about it
    at every such start). An invalid value of either upgrade setting also stops the start, before a backup is taken.
-3. Then the migrations run. The log shows how long the backup and each schema took. When both schemas are current,
+3. Then the migrations run. The log shows how long the backup took, and each schema that had migrations pending. When both schemas are current,
    the upgrade is finished and the release is recorded as the one that last started.
 
 Until then the upgrade counts as unfinished. A start after a failed migration (or after the orchestrator killed the

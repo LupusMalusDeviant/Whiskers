@@ -41,7 +41,7 @@ public static class RestoreCli
         return rest;
     }
 
-    /// <summary><paramref name="args"/> are the ones after <see cref="Flag"/>. Returns a process exit code: 0 staged,
+    /// <summary><paramref name="args"/> are the command line without <see cref="Flag"/> (<see cref="Arguments"/>). Returns a process exit code: 0 staged,
     /// 2 usage, 3 no such backup, 4 refused by validation, 1 failed.</summary>
     public static async Task<int> RunAsync(IBackupService backups, Whiskers.Services.Vault.IVaultService? vault,
         DataPathOptions paths, IReadOnlyList<string> args, TextWriter log, CancellationToken ct = default)
