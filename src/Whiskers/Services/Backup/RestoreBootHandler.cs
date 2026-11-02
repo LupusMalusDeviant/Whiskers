@@ -138,7 +138,7 @@ public static class RestoreBootHandler
                 "the archive's settings files name another database than this start uses (Database:* in app-settings.json); " +
                 "configure the database through the environment (WHISKERS_DB_PROVIDER, WHISKERS_DB_CONNECTION)");
         configuration = live;
-        (pgTools ?? PostgresDumpTool.FromConfiguration(configuration)).RestoreAsync(connection, dump)
+        (pgTools ?? PostgresDumpTool.FromEnvironment()).RestoreAsync(connection, dump)
             .GetAwaiter().GetResult();
         Console.Out.WriteLine("[restore] The PostgreSQL database was restored from the archive.");
     }

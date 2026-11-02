@@ -72,7 +72,8 @@ public class PostgresDumpToolTests
         Assert.Equal(["BEGIN;", "SET LOCAL lock_timeout = '60s';"], lines[..2]);
         Assert.StartsWith("DO $check$", lines[2], StringComparison.Ordinal);
         Assert.Equal(["SELECT pg_catalog.txid_current() AS whiskers_xid \\gset",
-            "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[3..6]);
+            $"SELECT {PostgresDumpTool.SettingsDigest} AS whiskers_settings \\gset",
+            "DROP SCHEMA IF EXISTS public CASCADE;", "CREATE SCHEMA public;"], lines[3..7]);
         Assert.Single(lines, l => l.StartsWith("CREATE SCHEMA", StringComparison.Ordinal));   // the dump's own left out
         Assert.DoesNotContain("SET transaction_timeout = 0;", lines);                             // older servers lack it
         Assert.Contains(lines, l => l.Contains("set_config('transaction_timeout'", StringComparison.Ordinal));
@@ -82,9 +83,12 @@ public class PostgresDumpToolTests
         // The comparison names nothing the script could shadow.
         Assert.Equal(["SET search_path = pg_catalog;",
             "SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \\gset",
-            "\\if :whiskers_same", PostgresDumpTool.CodeObjectCheck, "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"],
-            lines[^10..^2]);
-        Assert.StartsWith("DO $guard$ BEGIN RAISE EXCEPTION", lines[^2], StringComparison.Ordinal);
+            $"SELECT {PostgresDumpTool.SettingsDigest} OPERATOR(pg_catalog.=) :'whiskers_settings'::pg_catalog.text AS whiskers_settings_same \\gset",
+            "\\if :whiskers_same", "\\if :whiskers_settings_same", PostgresDumpTool.CodeObjectCheck,
+            "SET search_path = public;", "SELECT 1", "ROLLBACK;", "\\else"], lines[^15..^5]);
+        Assert.Contains("changed role or database settings", lines[^5], StringComparison.Ordinal);
+        Assert.Equal(["\\endif", "\\else"], lines[^4..^2]);
+        Assert.Contains("ended its transaction early", lines[^2], StringComparison.Ordinal);
         Assert.Equal("\\endif", lines[^1]);
         Assert.DoesNotContain("\r", wrapped);
         Assert.Contains("COMMIT;\n\\else", await FeedAsync("\\restrict k\nSELECT 1;\n\\unrestrict k\n", null, commit: true));
@@ -156,6 +160,59 @@ public class PostgresDumpToolTests
         var start = new ProcessStartInfo("pg_dump");
         PostgresDumpTool.Connect(start, $"Host=db;Database=w;Username=u;Password=p;SSL Mode={mode}" + (root is null ? "" : $";Root Certificate={root}"));
         Assert.Equal(expected, start.Environment.TryGetValue("PGSSLROOTCERT", out var value) ? value : null);
+    }
+
+    [Fact]
+    public void Verify_ca_without_a_root_certificate_uses_the_system_bundle_file_which_libpq_accepts_with_it()
+    {
+        // libpq takes sslrootcert=system with verify-full only; verify-ca gets the bundle file itself.
+        var bundle = Path.GetTempFileName();
+        try
+        {
+            var start = new ProcessStartInfo("pg_dump");
+            start.Environment["SSL_CERT_FILE"] = bundle;
+            PostgresDumpTool.Connect(start, "Host=db;Database=w;Username=u;Password=p;SSL Mode=VerifyCA");
+            Assert.Equal(bundle, start.Environment["PGSSLROOTCERT"]);
+        }
+        finally { File.Delete(bundle); }
+    }
+
+    [Fact]
+    public void Certificates_and_session_attributes_inherited_from_the_environment_reach_the_tools_like_the_app()
+    {
+        var start = new ProcessStartInfo("pg_dump");
+        start.Environment["PGSSLCERT"] = "/run/secrets/client.crt";
+        start.Environment["PGSSLKEY"] = "/run/secrets/client.key";
+        start.Environment["PGSSLROOTCERT"] = "/run/secrets/ca.crt";
+        start.Environment["PGTARGETSESSIONATTRS"] = "read-write";
+        PostgresDumpTool.Connect(start, "Host=db;Database=w;Username=u;Password=p;SSL Mode=VerifyFull");
+        Assert.Equal("/run/secrets/client.crt", start.Environment["PGSSLCERT"]);
+        Assert.Equal("/run/secrets/client.key", start.Environment["PGSSLKEY"]);
+        Assert.Equal("/run/secrets/ca.crt", start.Environment["PGSSLROOTCERT"]);   // not replaced by "system"
+        Assert.Equal("read-write", start.Environment["PGTARGETSESSIONATTRS"]);
+
+        // The connection string wins.
+        start = new ProcessStartInfo("pg_dump");
+        start.Environment["PGSSLCERT"] = "/run/secrets/client.crt";
+        PostgresDumpTool.Connect(start, "Host=db;Database=w;Username=u;Password=p;SSL Certificate=/app/own.crt;SSL Key=/app/own.key");
+        Assert.Equal("/app/own.crt", start.Environment["PGSSLCERT"]);
+    }
+
+    [Fact]
+    public void A_bare_ipv6_address_is_one_host()
+    {
+        var start = new ProcessStartInfo("pg_dump");
+        PostgresDumpTool.Connect(start, "Host=fd00::5;Database=w;Username=u;Password=p");
+        Assert.Equal("fd00::5", start.Environment["PGHOST"]);
+    }
+
+    [Fact]
+    public async Task Copy_rows_pass_unchanged_even_when_they_read_like_a_rewritten_statement()
+    {
+        var wrapped = await FeedAsync(
+            "\\restrict k\nCOPY public.t (a, b) FROM stdin;\n\tSET statement_timeout = 0;\nCREATE SCHEMA public;\n\\.\n\\unrestrict k\n",
+            null, commit: true);
+        Assert.Contains("\n\tSET statement_timeout = 0;\nCREATE SCHEMA public;\n\\.\n", wrapped, StringComparison.Ordinal);
     }
 
     [Theory]

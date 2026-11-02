@@ -42,12 +42,12 @@ public sealed class PostgresDumpTool
         _timeout = timeout ?? TimeSpan.FromMinutes(30);
     }
 
-    /// <summary>The time limit from the configuration; the tools' directory from the process environment only, since
-    /// the configuration also holds the data directory's settings files (written by the UI and by a restore), which
-    /// must not choose the programs Whiskers runs.</summary>
-    public static PostgresDumpTool FromConfiguration(IConfiguration? configuration)
+    /// <summary>The tools' directory and the time limit, from the process environment only: the app's configuration
+    /// also holds the data directory's settings files (written by the UI and by a restore), which must neither choose
+    /// the programs Whiskers runs nor shorten the limit until every backup fails.</summary>
+    public static PostgresDumpTool FromEnvironment()
     {
-        var minutes = configuration?[TimeoutKey] ?? configuration?["Backup:PostgresTimeoutMinutes"];
+        var minutes = Environment.GetEnvironmentVariable(TimeoutKey);
         return new(Environment.GetEnvironmentVariable(BinDirKey),
             int.TryParse(minutes, out var m) && m > 0 ? TimeSpan.FromMinutes(m) : null);
     }
@@ -198,6 +198,12 @@ public sealed class PostgresDumpTool
         "THEN RAISE EXCEPTION 'the database dump brings functions, triggers, rules, views, policies or operators into public, which Whiskers does not create'; " +
         "END IF; END $code$;";
 
+    // A digest of every role and database setting (pg_db_role_setting), every name and operator qualified.
+    internal const string SettingsDigest =
+        "pg_catalog.md5(coalesce((SELECT pg_catalog.string_agg(s.setdatabase::pg_catalog.text OPERATOR(pg_catalog.||) ':' " +
+        "OPERATOR(pg_catalog.||) s.setrole::pg_catalog.text OPERATOR(pg_catalog.||) ':' OPERATOR(pg_catalog.||) " +
+        "s.setconfig::pg_catalog.text, ';' ORDER BY s.setdatabase, s.setrole) FROM pg_catalog.pg_db_role_setting s), ''))";
+
     internal static async Task FeedAsync(StreamReader script, StreamWriter psql, string? probeSql, bool commit, CancellationToken ct,
         Func<Task<string?>>? sourceFailure = null, TimeSpan? statementTimeout = null)
     {
@@ -217,6 +223,9 @@ public sealed class PostgresDumpTool
         // after the script differs, and nothing more is committed. This detects such a script; what it changed before is
         // undone only by the pre-restore safety backup, which the caller takes first.
         await psql.WriteLineAsync(@"SELECT pg_catalog.txid_current() AS whiskers_xid \gset");
+        // The role and database settings (ALTER ROLE / ALTER DATABASE … SET): a script that changed them could point the
+        // app's search path at a schema of its own, outside public and outside the code-object check.
+        await psql.WriteLineAsync($@"SELECT {SettingsDigest} AS whiskers_settings \gset");
         await psql.WriteLineAsync("DROP SCHEMA IF EXISTS public CASCADE;");
         await psql.WriteLineAsync("CREATE SCHEMA public;");
 
@@ -228,6 +237,7 @@ public sealed class PostgresDumpTool
         string? last = null;
         var statementLimit = $"SET statement_timeout = '{(long)(statementTimeout ?? TimeSpan.FromMinutes(30)).TotalMilliseconds}';";
         var lines = new BoundedLineReader(script);
+        var inCopy = false;
         while (await lines.ReadLineAsync(ct) is { } line)
         {
             if (line.Trim().Length > 0) last = line;
@@ -238,7 +248,16 @@ public sealed class PostgresDumpTool
                     throw new PostgresToolException(
                         @"pg_restore did not protect its script against meta-commands (\restrict): PostgreSQL client tools 17.6 or newer are needed to restore a dump.");
             }
-            switch (line.Trim())
+            // Rows of a COPY block are data up to its "\." line: passed on unchanged, whatever their text.
+            if (inCopy)
+            {
+                if (line == @"\.") inCopy = false;
+                await psql.WriteLineAsync(line);
+                continue;
+            }
+            if (line.StartsWith("COPY ", StringComparison.Ordinal) && line.EndsWith(" FROM stdin;", StringComparison.Ordinal))
+                inCopy = true;
+            switch (line)
             {
                 // The schema is created above.
                 case "CREATE SCHEMA public;" or "CREATE SCHEMA IF NOT EXISTS public;":
@@ -269,7 +288,10 @@ public sealed class PostgresDumpTool
         await psql.WriteLineAsync("SET search_path = pg_catalog;");
         await psql.WriteLineAsync(
             @"SELECT pg_catalog.txid_current() OPERATOR(pg_catalog.=) :'whiskers_xid'::pg_catalog.int8 AS whiskers_same \gset");
+        await psql.WriteLineAsync(
+            $@"SELECT {SettingsDigest} OPERATOR(pg_catalog.=) :'whiskers_settings'::pg_catalog.text AS whiskers_settings_same \gset");
         await psql.WriteLineAsync(@"\if :whiskers_same");
+        await psql.WriteLineAsync(@"\if :whiskers_settings_same");
         await psql.WriteLineAsync(CodeObjectCheck);
         if (probeSql is not null)
         {
@@ -278,6 +300,9 @@ public sealed class PostgresDumpTool
             await psql.WriteLineAsync(probeSql);
         }
         await psql.WriteLineAsync(commit ? "COMMIT;" : "ROLLBACK;");
+        await psql.WriteLineAsync(@"\else");
+        await psql.WriteLineAsync("DO $guard$ BEGIN RAISE EXCEPTION 'the restore script changed role or database settings'; END $guard$;");
+        await psql.WriteLineAsync(@"\endif");
         await psql.WriteLineAsync(@"\else");
         await psql.WriteLineAsync("DO $guard$ BEGIN RAISE EXCEPTION 'the restore script ended its transaction early'; END $guard$;");
         await psql.WriteLineAsync(@"\endif");
@@ -427,7 +452,10 @@ public sealed class PostgresDumpTool
             throw new PostgresToolException(
                 "The connection string sets Options, which the backup does not pass on. Set those server settings on the role or the database instead.");
         // libpq takes one host; Npgsql's lists and host:port forms would reach the tools as a name they cannot resolve.
-        if (builder.Host is { } host && (host.Contains(',') || host.Contains(':')))
+        // A bare IPv6 address is one host; libpq takes it as such.
+        if (builder.Host is { } host && (host.Contains(',')
+                || (host.Contains(':') && !(System.Net.IPAddress.TryParse(host, out var ip)
+                                            && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6))))
             throw new PostgresToolException(
                 "The connection string names several hosts or a host with a port; the backup needs one host in Host and the port in Port.");
         var env = start.Environment;
@@ -439,6 +467,25 @@ public sealed class PostgresDumpTool
         var inheritedPassword = string.IsNullOrEmpty(builder.Password) ? (env.TryGetValue("PGPASSWORD", out var pw) ? pw : null) : null;
         var inheritedPassfile = env.TryGetValue("PGPASSFILE", out var pf) ? pf : null;
         var inheritedUser = string.IsNullOrEmpty(builder.Username) && env.TryGetValue("PGUSER", out var pu) ? pu : null;
+        // The same for the certificates and the target session attributes, which Npgsql also reads when unset.
+        string? Inherited(string key) => env.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value) ? value : null;
+        var rootCertificate = !string.IsNullOrEmpty(builder.RootCertificate) ? builder.RootCertificate : Inherited("PGSSLROOTCERT");
+        var clientCertificate = !string.IsNullOrEmpty(builder.SslCertificate) ? builder.SslCertificate : Inherited("PGSSLCERT");
+        var clientKey = !string.IsNullOrEmpty(builder.SslKey) ? builder.SslKey : Inherited("PGSSLKEY");
+        var targetSession = !string.IsNullOrEmpty(builder.TargetSessionAttributes)
+            ? builder.TargetSessionAttributes : Inherited("PGTARGETSESSIONATTRS");
+        // Npgsql verifies against the system's trusted roots when no root certificate is named; libpq would look for
+        // ~/.postgresql/root.crt instead. "system" (libpq 16+) makes the tools verify like the app, but libpq accepts it
+        // with verify-full only: verify-ca gets the system's bundle file (SSL_CERT_FILE, else the distribution's), and
+        // without one the backup is refused instead of failing at every run. Require verifies in neither (Npgsql 8+).
+        if (rootCertificate is null && builder.SslMode == SslMode.VerifyCA)
+        {
+            rootCertificate = new[] { Inherited("SSL_CERT_FILE"), "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt" }
+                .FirstOrDefault(f => f is not null && File.Exists(f))
+                ?? throw new PostgresToolException(
+                    "SSL Mode=VerifyCA without a Root Certificate: the PostgreSQL client tools find no system certificate bundle. Name the root certificate in the connection string (Root Certificate) or use VerifyFull.");
+        }
+        if (rootCertificate is null && builder.SslMode == SslMode.VerifyFull) rootCertificate = "system";
         // Nothing else from the parent's libpq environment may point the tools elsewhere.
         foreach (var key in env.Keys.Where(k => k.StartsWith("PG", StringComparison.Ordinal)).ToList()) env.Remove(key);
         Set("PGHOST", builder.Host);
@@ -456,14 +503,10 @@ public sealed class PostgresDumpTool
             SslMode.VerifyFull => "verify-full",
             _ => "prefer",
         });
-        // Npgsql verifies against the system's trusted roots when no root certificate is named; libpq would look for
-        // ~/.postgresql/root.crt instead. "system" (libpq 16+) makes the tools verify like the app. Require does not
-        // verify in either (Npgsql 8+ follows libpq).
-        Set("PGSSLROOTCERT", !string.IsNullOrEmpty(builder.RootCertificate) ? builder.RootCertificate
-            : builder.SslMode is SslMode.VerifyCA or SslMode.VerifyFull ? "system" : null);
-        Set("PGSSLCERT", builder.SslCertificate);
-        Set("PGSSLKEY", builder.SslKey);
-        Set("PGTARGETSESSIONATTRS", builder.TargetSessionAttributes);
+        Set("PGSSLROOTCERT", rootCertificate);
+        Set("PGSSLCERT", clientCertificate);
+        Set("PGSSLKEY", clientKey);
+        Set("PGTARGETSESSIONATTRS", targetSession);
         Set("PGCHANNELBINDING", builder.ChannelBinding switch
         {
             ChannelBinding.Disable => "disable",

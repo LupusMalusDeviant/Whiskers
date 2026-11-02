@@ -461,6 +461,26 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
     }
 
     [SkippableTheory]
+    [InlineData("ALTER ROLE CURRENT_USER SET search_path = evil, public;\n")]
+    [InlineData("DO $d$ BEGIN EXECUTE pg_catalog.format('ALTER DATABASE %I SET search_path = evil, public', pg_catalog.current_database()); END $d$;\n")]
+    public async Task A_dump_that_changes_role_or_database_settings_is_refused(string change)
+    {
+        await SkipUnlessReadyAsync();
+        // A schema of its own, found first through a changed default search path: out of reach of the public checks.
+        var target = await CreateDatabaseAsync("settings");
+        var script = "\\restrict k5\nCREATE SCHEMA evil;\nCREATE TABLE evil.t (id int);\n" + change + "\\unrestrict k5\n";
+
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() =>
+            new PostgresDumpTool(BinDir).ApplyScriptAsync(target, script, commit: true));
+
+        Assert.Contains("changed role or database settings", ex.Message, StringComparison.Ordinal);
+        await using var check = new NpgsqlConnection(target);
+        await check.OpenAsync();
+        await using var schemas = new NpgsqlCommand("SELECT count(*) FROM pg_namespace WHERE nspname = 'evil'", check);
+        Assert.Equal(0L, await schemas.ExecuteScalarAsync());   // nothing committed
+    }
+
+    [SkippableTheory]
     [InlineData("CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'SELECT 1';\n")]
     [InlineData("CREATE FUNCTION evil() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';\n" +
         "CREATE TRIGGER t_ins BEFORE INSERT ON public.t FOR EACH ROW EXECUTE FUNCTION evil();\n")]

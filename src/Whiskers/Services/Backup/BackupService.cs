@@ -46,7 +46,7 @@ public sealed class BackupService : IBackupService
         PostgresDumpTool? pgTools = null)
     {
         _vault = vault;
-        _pgTools = pgTools ?? PostgresDumpTool.FromConfiguration(configuration);
+        _pgTools = pgTools ?? PostgresDumpTool.FromEnvironment();
         _scopeFactory = scopeFactory;
         _maintenance = maintenance;
         _lifetime = lifetime;

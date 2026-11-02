@@ -28,7 +28,7 @@ Backups of a PostgreSQL instance made before R1-33 hold the files only. The back
 and Whiskers does not restore them, because their files would no longer match the current database.
 
 On PostgreSQL a restore replaces the `public` schema, so the role Whiskers connects as must be allowed to drop and
-recreate it: it must own the schema, or on PostgreSQL 15 and later own the database. A role without that right still
+recreate it: it must own the database, or own the schema and hold `CREATE` on the database. A role without that right still
 takes backups, but the restore is refused at its dry run, before anything changes. Check it once after setting up
 the database, by restoring a backup.
 
@@ -110,7 +110,9 @@ Recover from the pre-restore safety backup taken just before the dry run, the sa
    `public` schema of the current one as its owner.
 3. Move the data directory aside and follow
    [Restore after the volume is lost](#restore-after-the-volume-is-lost-off-volume-recovery) with the copied archive.
-4. Delete the archive that caused the refusal, and do not restore archives from a source you do not trust
+4. If the server allows prepared transactions (`max_prepared_transactions` above 0), check `pg_prepared_xacts`: a
+   crafted script may have left one holding locks; end it with `ROLLBACK PREPARED '<gid>'`.
+5. Delete the archive that caused the refusal, and do not restore archives from a source you do not trust
    (set `VAULT_KEY`, so that only archives sealed with it are accepted).
 
 ## Restore after the volume is lost (off-volume recovery)
@@ -124,7 +126,7 @@ You need:
 1. Deploy Whiskers as before, with the same image version or a newer one; an older build refuses an archive with a
    newer schema. Use the **same `VAULT_KEY`**. On PostgreSQL, point `WHISKERS_DB_CONNECTION` at the database to
    restore into; a new, empty database is fine. The connecting role must be allowed to drop and recreate the
-   `public` schema: it must own that schema, or on PostgreSQL 15 and later own the database.
+   `public` schema: it must own the database, or own that schema and hold `CREATE` on the database.
 2. Start it once. Whiskers creates an empty data directory and migrates the new database. Complete the setup wizard
    with a throwaway admin account; the restore replaces all accounts.
 3. Sign in, open **Settings > Backup**, upload the archive and restore it. Whiskers validates it, restarts and
@@ -143,14 +145,16 @@ webhooks and audit rows come back.
   the environment variable `WHISKERS_PG_BIN_DIR` to their directory; the image sets it. It is read from the
   environment only, never from the settings files in the data directory. Without them, a backup
   of a PostgreSQL instance fails; Whiskers never writes an archive without the database. Each tool run may take
-  30 minutes; set `WHISKERS_PG_TIMEOUT_MINUTES` (or `Backup:PostgresTimeoutMinutes`) for a larger database.
+  30 minutes; set `WHISKERS_PG_TIMEOUT_MINUTES` (environment only) for a larger database.
 - The restore script goes straight from `pg_restore` to `psql` and is never written to disk. Whiskers runs it only
   when it opens with `\restrict`, the protection of client tools 17.6 and newer, so a crafted dump cannot run psql
   meta-commands such as `\!` (which would run a shell command). Older tools are refused for a restore.
 - Whiskers passes the password to the tools through their environment, never on their command line. `PG*`
   variables inherited from Whiskers' own environment are not passed on, except `PGPASSWORD` (when the connection
   string has no password), `PGUSER` (when it has no user) and `PGPASSFILE`, which Whiskers itself would use as well.
-  An inherited `PGOPTIONS` is refused like `Options`. Host, port, database, user,
+  `PGSSLCERT`, `PGSSLKEY`, `PGSSLROOTCERT` and `PGTARGETSESSIONATTRS` are passed on when the connection string
+  does not set them, as Whiskers reads them too. An inherited `PGOPTIONS` is refused like `Options`. A bare IPv6
+  address in `Host` is one host. Host, port, database, user,
   password, password file, SSL mode, root certificate, client certificate and key, target session attributes and the
   connect timeout and channel binding are taken over from the connection string; a connection string with `Options`
   is refused for backups (set those server settings on the role or the database). With `SSL Mode=VerifyCA` or `VerifyFull` and no root

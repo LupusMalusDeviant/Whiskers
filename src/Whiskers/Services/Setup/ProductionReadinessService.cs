@@ -152,7 +152,7 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         if (Whiskers.Services.Persistence.DatabaseRegistration.Resolve(_config).Provider == Whiskers.Services.Backup.SelfBackupFormat.ProviderPostgres)
         {
             string? version = null, problem = null;
-            try { version = await Whiskers.Services.Backup.PostgresDumpTool.FromConfiguration(_config).VersionAsync(); }
+            try { version = await Whiskers.Services.Backup.PostgresDumpTool.FromEnvironment().VersionAsync(); }
             catch (Whiskers.Services.Backup.PostgresToolException ex) { problem = ex.Message; }
             checks.Add(new ReadinessCheck(
                 "PostgreSQL-Client-Tools für das Self-Backup",
