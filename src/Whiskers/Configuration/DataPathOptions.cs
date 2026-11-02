@@ -120,6 +120,13 @@ public sealed class DataPathOptions
     /// database that held the restore's own event.</summary>
     public string RestoreAppliedNote => P(".restore-applied");
 
+    /// <summary>R1-34: the release that last finished its start's migrations. Another release starting is an upgrade.</summary>
+    public string LastStartedVersionFile => P(".last-started-version");
+
+    /// <summary>R1-34: an upgrade that took its pre-upgrade backup and has not finished its migrations yet. A start that
+    /// finds it keeps that backup instead of taking another of the half-migrated state.</summary>
+    public string UpgradePendingMarker => P(".upgrade-pending");
+
     // --- Mesh-VPN state (VpnSettings defaults derive from these) ---
     public string TailscaleStateDir => P("tailscale");
     public string NetbirdConfigPath => P("netbird/config.json");

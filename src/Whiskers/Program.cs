@@ -25,7 +25,9 @@ if (args is ["--migrate-to-postgres", ..])
 // A normal boot has no marker → this is a cheap no-op. After a restore it swaps the staged files into place;
 // startup below then migrates the restored DB and rebuilds every cache from the restored files. It throws on
 // an unrecoverable swap (→ process exit → restart retries) rather than booting on half-swapped state.
-RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
+// The restore CLI (R1-34) applies nothing: a restore already staged waits for a real start (the CLI refuses a second).
+var restoreCli = args is [RestoreCli.Flag, ..];
+if (!restoreCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
 builder.AddWhiskersModules();                  // Core no-op defaults + module pipeline + MCP tools + nav registry
@@ -36,6 +38,14 @@ builder.AddWhiskersMutationGateway();         // ADR-0005: gateway + scope guard
 builder.AddWhiskersLogRedaction();            // R1-25: every log provider writes redacted entries only (last)
 
 var app = builder.Build();
+
+// R1-34 recovery CLI: `dotnet Whiskers.dll --restore-backup <id|latest-pre-upgrade> [--for-previous-release]` stages
+// an on-box self-backup and exits without starting the web host or migrating anything; the next start applies it.
+if (restoreCli)
+{
+    return await RestoreCli.RunAsync(app.Services.GetRequiredService<IBackupService>(),
+        app.Services.GetService<Whiskers.Services.Vault.IVaultService>(), dataPaths, args[1..], Console.Out);
+}
 
 app.ConfigureWhiskersHttpPipeline();           // forwarded headers → fixed auth middleware chain → endpoints
 await app.RunWhiskersStartupAsync();           // IInitializable warm-ups (in Order) + metrics-DB migration

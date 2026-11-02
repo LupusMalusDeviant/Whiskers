@@ -42,6 +42,21 @@ public interface IBackupService
     /// backup, stages the decrypted contents, writes the commit marker and stops the process so the boot
     /// handler performs the swap on restart. Throws on validation failure or if the safety backup fails.</summary>
     Task BeginRestoreAsync(string uploadedPath, string actor, CancellationToken ct = default);
+
+    /// <summary>As the overload without a target, for the release that will start on the restored data (R1-34).
+    /// <see cref="RestoreTarget.PreviousRelease"/> keeps every check except running this release's migrations on the
+    /// archive: the previous release starts on the schema it knows (the way back from an upgrade whose migration fails
+    /// on the data).</summary>
+    Task BeginRestoreAsync(string uploadedPath, string actor, RestoreTarget target, CancellationToken ct = default);
+}
+
+/// <summary>Which release starts on a restored archive (R1-34).</summary>
+public enum RestoreTarget
+{
+    /// <summary>This release: its migrations must run on the archive.</summary>
+    ThisRelease,
+    /// <summary>The previous release (a downgrade): the archive is checked against its own manifest, not migrated.</summary>
+    PreviousRelease,
 }
 
 /// <summary>Outcome of <see cref="IBackupService.ValidateArchiveAsync"/>.</summary>

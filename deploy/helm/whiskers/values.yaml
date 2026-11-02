@@ -84,6 +84,23 @@ resources:
   limits:
     memory: 1Gi
 
+# Probe budgets. Whiskers answers no HTTP request until its start is done, including the pre-upgrade backup and the
+# schema migrations of a new release (R1-34), so the startup probe must outlast them: otherwise the kubelet kills the
+# pod mid-migration and it starts again into the same work. Budget = periodSeconds x failureThreshold, 5 minutes by
+# default; raise failureThreshold for a large database (the backup and the migrations both grow with it).
+probes:
+  startup:
+    periodSeconds: 5
+    failureThreshold: 60
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  # Deliberately lazy so a busy Blazor app is not probed to death.
+  liveness:
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    failureThreshold: 5
+
 # Extra environment variables (name/value pairs), e.g. OIDC settings.
 extraEnv: []
 

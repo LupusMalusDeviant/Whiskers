@@ -557,12 +557,27 @@ public static class WhiskersPipelineExtensions
         // Bring the SQLite metrics database up to the current schema via EF Core migrations. On a legacy
         // EnsureCreated database (no migration history) this baselines onto migrations without recreating
         // existing tables — see Services/Persistence/DatabaseInitializer and docs/adr/0003.
+        // R1-34: the pre-upgrade backup was taken by the UpgradeGuard warm-up (Order 45, before anything rewrote data);
+        // a failed migration logs the way back, and the upgrade counts as finished only when both schemas are current.
+        var upgradeLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Upgrade");
+        var upgradeGuard = app.Services.GetRequiredService<Whiskers.Services.Persistence.UpgradeGuard>();
+        var upgrade = upgradeGuard.Plan;
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             var dbLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInitializer");
-            await Whiskers.Services.Persistence.DatabaseInitializer.InitializeAsync(db, dbLogger);
+            await Whiskers.Services.Persistence.UpgradeGuard.MigrateAsync("metrics", upgrade, upgradeLogger,
+                () => Whiskers.Services.Persistence.DatabaseInitializer.InitializeAsync(db, dbLogger));
         }
+        // Local-auth (F1): the Identity schema in its OWN __IdentityMigrationsHistory table (kept off the metrics
+        // legacy-baseline path), right after the metrics schema, so both are covered by the same pre-upgrade backup.
+        using (var scope = app.Services.CreateScope())
+        {
+            var idDb = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+            await Whiskers.Services.Persistence.UpgradeGuard.MigrateAsync("identity", upgrade, upgradeLogger,
+                () => idDb.Database.MigrateAsync());
+        }
+        await upgradeGuard.CompleteAsync();
 
         // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis) — before
         // anything else can write an audit row.
@@ -590,15 +605,10 @@ public static class WhiskersPipelineExtensions
         // grants carry on.
         await app.Services.GetRequiredService<Whiskers.Services.Approvals.IApprovalStore>().LoadAsync(CancellationToken.None);
 
-        // Local-auth (F1): migrate the Identity schema in its OWN __IdentityMigrationsHistory table (kept off
-        // the metrics legacy-baseline path), then seed the unattended admin if configured. Brand-new tables →
-        // a straight MigrateAsync (Npgsql retry handles transient connects). Skip the seed when auth is
-        // bypassed (Auth:Disabled has no login).
+        // Local-auth (F1): the Identity schema was migrated above; seed the unattended admin if configured. Skip the
+        // seed when auth is bypassed (Auth:Disabled has no login).
         using (var scope = app.Services.CreateScope())
         {
-            var idDb = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
-            await idDb.Database.MigrateAsync();
-
             if (!app.Configuration.GetValue<bool>("Auth:Disabled"))
             {
                 var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();

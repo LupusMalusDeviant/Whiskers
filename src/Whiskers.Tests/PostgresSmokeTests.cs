@@ -295,6 +295,83 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
         }
     }
 
+    [SkippableFact]
+    public async Task A_failed_transfer_into_real_postgres_leaves_it_empty_and_runs_again()
+    {
+        SkipUnlessUp();
+        // R1-34: metrics tables and sign-in accounts are copied in one PostgreSQL transaction.
+        var root = Path.Combine(Path.GetTempPath(), $"sw-smoke-tx-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var paths = new Whiskers.Configuration.DataPathOptions(root);
+        try
+        {
+            await using (var src = Sqlite(paths.DbPath))
+            {
+                await src.Database.EnsureCreatedAsync();
+                src.AuditLog.Add(new AuditLogEntity { Actor = "admin", ActorType = "web", Action = "login", TargetType = "system" });
+                await src.SaveChangesAsync();
+            }
+            await using (var id = SqliteIdentity(paths.DbPath))
+            {
+                await id.Database.MigrateAsync();
+                id.Users.Add(new AppUser { Id = "user-1", UserName = "admin@example.org", NormalizedUserName = "ADMIN@EXAMPLE.ORG", PasswordHash = "HASH" });
+                await id.SaveChangesAsync();
+            }
+
+            await using (var connection = new Npgsql.NpgsqlConnection(_pg.GetConnectionString()))
+            await using (var target = new MetricsDbContext(new DbContextOptionsBuilder<MetricsDbContext>()
+                             .UseNpgsql(connection, o => o.MigrationsAssembly("Whiskers.Migrations.Postgres")).Options))
+            await using (var idTarget = new WhiskersIdentityDbContext(new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+                             .UseNpgsql(connection, o =>
+                             {
+                                 o.MigrationsAssembly("Whiskers.Migrations.Postgres");
+                                 o.MigrationsHistoryTable(DatabaseRegistration.IdentityMigrationsHistoryTable);
+                             }).Options))
+            await using (var src = Sqlite(paths.DbPath))
+            await using (var idSrc = SqliteIdentity(paths.DbPath))
+            {
+                await target.Database.MigrateAsync();
+                await idTarget.Database.MigrateAsync();
+                await Assert.ThrowsAsync<IOException>(() => SqliteToPostgresMigrator.MigrateDataAsync(
+                    src, target, TextWriter.Null, default, idSrc, idTarget,
+                    (table, _) => table == "AspNetUsers" ? throw new IOException("disk gone") : Task.CompletedTask));
+            }
+
+            await using (var check = Pg())
+                Assert.False(await check.AuditLog.AnyAsync());
+            await using (var idCheck = PgIdentity())
+                Assert.False(await idCheck.Users.AnyAsync());
+
+            // Nothing was left behind, so the tool simply runs again.
+            Assert.Equal(0, await SqliteToPostgresMigrator.RunAsync(paths, _pg.GetConnectionString(), TextWriter.Null));
+            await using (var check = Pg())
+                Assert.Equal(1, await check.AuditLog.CountAsync());
+            await using (var idCheck = PgIdentity())
+                Assert.Equal("user-1", (await idCheck.Users.SingleAsync()).Id);
+        }
+        finally
+        {
+            TestSqlite.ClearPools(root);
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir */ }
+        }
+    }
+
+    private WhiskersIdentityDbContext PgIdentity() =>
+        new(new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+            .UseNpgsql(_pg.GetConnectionString(), o =>
+            {
+                o.MigrationsAssembly("Whiskers.Migrations.Postgres");
+                o.MigrationsHistoryTable(DatabaseRegistration.IdentityMigrationsHistoryTable);
+            }).Options);
+
+    private static WhiskersIdentityDbContext SqliteIdentity(string path) =>
+        new(new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+            .UseSqlite($"Data Source={path}", o =>
+            {
+                o.MigrationsAssembly(DatabaseRegistration.SqliteMigrationsAssembly);
+                o.MigrationsHistoryTable(DatabaseRegistration.IdentityMigrationsHistoryTable);
+            }).Options);
+
     private static MetricsDbContext Sqlite(string path) =>
         new(new DbContextOptionsBuilder<MetricsDbContext>().UseSqlite($"Data Source={path}").Options);
 }

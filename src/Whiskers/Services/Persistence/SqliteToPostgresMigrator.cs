@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Whiskers.Configuration;
 
 namespace Whiskers.Services.Persistence;
@@ -181,9 +182,6 @@ public static class SqliteToPostgresMigrator
         var sqliteOptions = new DbContextOptionsBuilder<MetricsDbContext>()
             .UseSqlite(dataPaths.DbConnectionString, o => o.MigrationsAssembly("Whiskers.Migrations.Sqlite"))
             .Options;
-        var pgOptions = new DbContextOptionsBuilder<MetricsDbContext>()
-            .UseNpgsql(targetConnection, o => o.MigrationsAssembly("Whiskers.Migrations.Postgres"))
-            .Options;
         // Same database, own history table — mirrors DatabaseRegistration.
         var idSqliteOptions = new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
             .UseSqlite(dataPaths.DbConnectionString, o =>
@@ -192,23 +190,29 @@ public static class SqliteToPostgresMigrator
                 o.MigrationsHistoryTable("__IdentityMigrationsHistory");
             })
             .Options;
-        var idPgOptions = new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
-            .UseNpgsql(targetConnection, o =>
-            {
-                o.MigrationsAssembly("Whiskers.Migrations.Postgres");
-                o.MigrationsHistoryTable("__IdentityMigrationsHistory");
-            })
-            .Options;
-
-        // No SinkRedactionInterceptor here, on purpose: the copy must be byte-identical (the rows are copied as they
-        // were stored); a rewrite on the way would change rows the audit chain already covers.
-        await using var source = new MetricsDbContext(sqliteOptions);
-        await using var target = new MetricsDbContext(pgOptions);
-        await using var idSource = new WhiskersIdentityDbContext(idSqliteOptions);
-        await using var idTarget = new WhiskersIdentityDbContext(idPgOptions);
 
         try
         {
+            // Both target contexts share one connection, so the copy commits as one transaction (R1-34).
+            await using var targetDb = new Npgsql.NpgsqlConnection(targetConnection);
+            var pgOptions = new DbContextOptionsBuilder<MetricsDbContext>()
+                .UseNpgsql(targetDb, o => o.MigrationsAssembly("Whiskers.Migrations.Postgres"))
+                .Options;
+            var idPgOptions = new DbContextOptionsBuilder<WhiskersIdentityDbContext>()
+                .UseNpgsql(targetDb, o =>
+                {
+                    o.MigrationsAssembly("Whiskers.Migrations.Postgres");
+                    o.MigrationsHistoryTable("__IdentityMigrationsHistory");
+                })
+                .Options;
+
+            // No SinkRedactionInterceptor here, on purpose: the copy must be byte-identical (the rows are copied as they
+            // were stored); a rewrite on the way would change rows the audit chain already covers.
+            await using var source = new MetricsDbContext(sqliteOptions);
+            await using var target = new MetricsDbContext(pgOptions);
+            await using var idSource = new WhiskersIdentityDbContext(idSqliteOptions);
+            await using var idTarget = new WhiskersIdentityDbContext(idPgOptions);
+
             await log.WriteLineAsync("Bringing the target schema up to date (PostgreSQL migrate)…");
             await target.Database.MigrateAsync(ct);
             await idTarget.Database.MigrateAsync(ct);
@@ -233,12 +237,27 @@ public static class SqliteToPostgresMigrator
 
     /// <summary>Provider-agnostic core: aborts if the target holds any data, otherwise copies every metrics
     /// table (and, when both identity contexts are given, the local users) and prints a per-table row-count
-    /// report. Exposed for tests, which drive it with SQLite contexts.</summary>
-    public static async Task<int> MigrateDataAsync(MetricsDbContext source, MetricsDbContext target,
+    /// report. Exposed for tests, which drive it with SQLite contexts.
+    ///
+    /// The copy is one transaction on the target (R1-34): a failure anywhere — a metrics table or the users — leaves
+    /// the target as empty as it was, so the tool can simply run again. The identity target must therefore share the
+    /// metrics target's connection; a context on another connection is refused before anything is copied.</summary>
+    public static Task<int> MigrateDataAsync(MetricsDbContext source, MetricsDbContext target,
         TextWriter log, CancellationToken ct = default,
-        WhiskersIdentityDbContext? identitySource = null, WhiskersIdentityDbContext? identityTarget = null)
+        WhiskersIdentityDbContext? identitySource = null, WhiskersIdentityDbContext? identityTarget = null) =>
+        MigrateDataAsync(source, target, log, ct, identitySource, identityTarget, afterTable: null);
+
+    /// <summary><paramref name="afterTable"/> runs after each copied table, inside the transaction: the tests' way to
+    /// fail the copy half-way.</summary>
+    internal static async Task<int> MigrateDataAsync(MetricsDbContext source, MetricsDbContext target,
+        TextWriter log, CancellationToken ct,
+        WhiskersIdentityDbContext? identitySource, WhiskersIdentityDbContext? identityTarget,
+        Func<string, CancellationToken, Task>? afterTable)
     {
         var copyIdentity = identitySource is not null && identityTarget is not null;
+        if (copyIdentity && !ReferenceEquals(identityTarget!.Database.GetDbConnection(), target.Database.GetDbConnection()))
+            throw new InvalidOperationException(
+                "The identity target must use the metrics target's connection, so the copy commits as one transaction.");
 
         var occupied = await FirstNonEmptyTableAsync(target, ct)
                        ?? (copyIdentity ? await FirstNonEmptyIdentityTableAsync(identityTarget!, ct) : null);
@@ -249,8 +268,8 @@ public static class SqliteToPostgresMigrator
             return 3;
         }
 
-        // The source schema is checked before anything is copied: a missing table would otherwise fail half-way,
-        // after earlier tables committed. Only a known older release may lack tables, and only all of a release's
+        // The source schema is checked before anything is copied: a missing table would otherwise fail half-way
+        // through the copy (rolled back, but late). Only a known older release may lack tables, and only all of a release's
         // tables together (R1-12 added PolicyDecisions and PolicySnapshots, R1-14 Approvals, R1-18 Operations, R1-10 WebhookDeliveries); anything else is not a Whiskers
         // database this tool understands (a wrong path, a damaged file).
         var missing = new HashSet<string>(StringComparer.Ordinal);
@@ -276,28 +295,49 @@ public static class SqliteToPostgresMigrator
                     .ToListAsync(ct)).ToHashSet(),
         };
         var report = new List<(string Table, int Rows)>();
-        foreach (var table in MetricsTables)
+        // One transaction for every table and the users: disposed without a commit, it rolls everything back.
+        await using (var tx = await target.Database.BeginTransactionAsync(ct))
         {
-            if (!table.Copied)
+            if (copyIdentity)
+                await identityTarget!.Database.UseTransactionAsync(tx.GetDbTransaction(), ct);
+            try
             {
-                await log.WriteLineAsync($"Note: '{table.Name}' is not copied — the target starts a new audit chain (R1-23).");
-                continue;
-            }
-            if (missing.Contains(table.Name))
-            {
-                await log.WriteLineAsync($"Note: the source has no '{table.Name}' table (older release) — nothing to copy.");
-                report.Add((table.Name, 0));
-                continue;
-            }
-            report.Add((table.Name, await table.CopyAsync(source, target, run, ct)));
-        }
+                foreach (var table in MetricsTables)
+                {
+                    if (!table.Copied)
+                    {
+                        await log.WriteLineAsync($"Note: '{table.Name}' is not copied — the target starts a new audit chain (R1-23).");
+                        continue;
+                    }
+                    if (missing.Contains(table.Name))
+                    {
+                        await log.WriteLineAsync($"Note: the source has no '{table.Name}' table (older release) — nothing to copy.");
+                        report.Add((table.Name, 0));
+                        continue;
+                    }
+                    report.Add((table.Name, await table.CopyAsync(source, target, run, ct)));
+                    if (afterTable is not null) await afterTable(table.Name, ct);
+                }
 
-        if (copyIdentity)
-        {
-            if ((await identitySource!.Database.GetAppliedMigrationsAsync(ct)).Any())
-                report.AddRange(await CopyIdentityAsync(identitySource, identityTarget!, ct));
-            else
-                await log.WriteLineAsync("Note: the source has no local-login tables (never migrated) — no users to copy.");
+                if (copyIdentity)
+                {
+                    if ((await identitySource!.Database.GetAppliedMigrationsAsync(ct)).Any())
+                        report.AddRange(await CopyIdentityAsync(identitySource, identityTarget!, afterTable, ct));
+                    else
+                        await log.WriteLineAsync("Note: the source has no local-login tables (never migrated) — no users to copy.");
+                }
+
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                await log.WriteLineAsync("The copy failed and was rolled back — the target is as empty as before.");
+                throw;
+            }
+            finally
+            {
+                if (copyIdentity) await identityTarget!.Database.UseTransactionAsync(null, CancellationToken.None);
+            }
         }
 
         await log.WriteLineAsync("");
@@ -334,13 +374,21 @@ public static class SqliteToPostgresMigrator
     /// <summary>Users first (claims, logins and tokens reference them), ids and password hashes unchanged.
     /// Only the claims' surrogate int key is reassigned by the target.</summary>
     private static async Task<IReadOnlyList<(string Table, int Rows)>> CopyIdentityAsync(
-        WhiskersIdentityDbContext source, WhiskersIdentityDbContext target, CancellationToken ct) =>
-    [
-        ("AspNetUsers",      await CopyAsync(source.Users,      target, _ => { }, ct)),
-        ("AspNetUserClaims", await CopyAsync(source.UserClaims, target, c => c.Id = 0, ct)),
-        ("AspNetUserLogins", await CopyAsync(source.UserLogins, target, _ => { }, ct)),
-        ("AspNetUserTokens", await CopyAsync(source.UserTokens, target, _ => { }, ct)),
-    ];
+        WhiskersIdentityDbContext source, WhiskersIdentityDbContext target,
+        Func<string, CancellationToken, Task>? afterTable, CancellationToken ct)
+    {
+        var report = new List<(string Table, int Rows)>();
+        async Task Copy(string name, Func<Task<int>> copy)
+        {
+            report.Add((name, await copy()));
+            if (afterTable is not null) await afterTable(name, ct);
+        }
+        await Copy("AspNetUsers",      () => CopyAsync(source.Users,      target, _ => { }, ct));
+        await Copy("AspNetUserClaims", () => CopyAsync(source.UserClaims, target, c => c.Id = 0, ct));
+        await Copy("AspNetUserLogins", () => CopyAsync(source.UserLogins, target, _ => { }, ct));
+        await Copy("AspNetUserTokens", () => CopyAsync(source.UserTokens, target, _ => { }, ct));
+        return report;
+    }
 
     /// <summary>Streams one table from the source (never loading it whole) and inserts it into the target in
     /// batches. <paramref name="resetId"/> zeroes the surrogate PK so the target assigns a fresh identity.</summary>
