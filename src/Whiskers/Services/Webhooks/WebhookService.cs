@@ -830,6 +830,7 @@ public class WebhookService : IWebhookService
                     {
                         EnsureOwned(webhook);
                         if (plan is null) throw Unresolved(error!);
+                        ComposeImpact.ReportProject(plan);
                         (bool, string) result = (false, "The deployment did not run.");
                         await gate(plan, async () => result = await DeployCompose(webhook, plan.ProjectName, token));
                         return result;

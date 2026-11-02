@@ -40,6 +40,9 @@ public static class VerifierSupport
         };
     }
 
+    /// <summary>What the call reported for its read-back (<see cref="MutationScope.ReadBack"/>), or <c>null</c>.</summary>
+    public static string? Fact(MutationContext context, string key) => context.ReadBackFacts.GetValueOrDefault(key);
+
     /// <summary>The server the call ran on: the target the gateway resolved, else the argument.</summary>
     public static string? ServerId(MutationContext context) =>
         context.Request.Target.ServerId is { Length: > 0 } id ? id : Arg(context, "serverId");

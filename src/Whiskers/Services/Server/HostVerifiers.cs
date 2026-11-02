@@ -184,8 +184,8 @@ public sealed partial class SystemdVerifier(IServiceProvider services) : Service
         {
             case "start" or "restart":
                 var active = await UnitStateAsync(Services, server, "is-active", unit, ct);
-                if (active != "active") throw new MutationVerificationFailedException($"{unit} is '{active}', not active.");
-                break;
+                if (active == "active" || await RanToCompletionAsync(server, unit, ct)) break;
+                throw new MutationVerificationFailedException($"{unit} is '{active}', not active.");
             case "stop":
                 var stopped = await UnitStateAsync(Services, server, "is-active", unit, ct);
                 if (stopped is "active" or "activating" or "reloading")
@@ -193,12 +193,25 @@ public sealed partial class SystemdVerifier(IServiceProvider services) : Service
                 break;
             case "enable" or "disable":
                 var enabled = await UnitStateAsync(Services, server, "is-enabled", unit, ct);
+                // Units without an [Install] section, aliases and generated units are not enabled or disabled themselves.
+                if (enabled is "static" or "indirect" or "generated" or "alias" or "transient")
+                    throw new MutationNotVerifiableException($"{unit} is '{enabled}': it is not enabled or disabled itself.");
                 var want = action == "enable" ? "enabled" : "disabled";
                 if (enabled != want) throw new MutationVerificationFailedException($"{unit} is '{enabled}', not {want}.");
                 break;
             default:
                 throw new MutationNotVerifiableException($"the action '{action}' has no read-back.");
         }
+    }
+
+    /// <summary>A <c>Type=oneshot</c> unit ends inactive after a successful start: it ran, its <c>Result</c> says how.</summary>
+    private async Task<bool> RanToCompletionAsync(string server, string unit, CancellationToken ct)
+    {
+        var show = await VerifierSupport.HostOutputAsync(Services, server,
+            $"systemctl show -p Type -p Result {ShellUtils.Quote(unit)}", ct);
+        var props = show.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.Split('=', 2)).Where(p => p.Length == 2).ToDictionary(p => p[0], p => p[1]);
+        return props.GetValueOrDefault("Type") == "oneshot" && props.GetValueOrDefault("Result") == "success";
     }
 
     /// <summary>The one-word answer of <c>systemctl is-active</c> / <c>is-enabled</c>. Their exit code is not 0 for
@@ -235,7 +248,16 @@ public sealed class SslRenewVerifier(IServiceProvider services) : ServiceVerifie
         var all = string.IsNullOrWhiteSpace(name) || string.Equals(name, "all", StringComparison.OrdinalIgnoreCase);
         var certs = await Services.GetRequiredService<ISslCertService>().ListCertificatesAsync(server);
         if (certs.Count == 0 && all)
+        {
+            // The listing answers empty also when it could not be read: ask once more, so that only a certbot that
+            // ran and manages nothing (or no certbot at all) counts as nothing to renew.
+            var check = await VerifierSupport.HostReadAsync(Services, server,
+                "command -v certbot >/dev/null 2>&1 || exit 0; certbot certificates >/dev/null 2>&1", ct);
+            if (!check.Success)
+                throw new MutationVerificationFailedException(
+                    $"certbot's certificates could not be read (exit code {check.ExitCode}).", stateUnknown: true);
             throw new MutationNotVerifiableException("certbot manages no certificate on this host: there was nothing to renew.");
+        }
         if (certs.Count == 0)
             throw new MutationVerificationFailedException("certbot listed no certificate.", stateUnknown: true);
         var renewed = all ? certs : certs.Where(c => c.CertName == name).ToList();
@@ -243,8 +265,8 @@ public sealed class SslRenewVerifier(IServiceProvider services) : ServiceVerifie
             throw new MutationVerificationFailedException($"certbot lists no certificate '{name}'.");
         var stale = renewed.FirstOrDefault(c => c.DaysUntilExpiry is not { } d || d < MinDaysAfterRenewal);
         if (stale is not null)
-            throw new MutationVerificationFailedException(stale.DaysUntilExpiry is { } days
-                ? $"'{stale.CertName}' still expires in {days} day(s)."
-                : $"the expiry of '{stale.CertName}' could not be read.");
+            throw stale.DaysUntilExpiry is { } days
+                ? new MutationVerificationFailedException($"'{stale.CertName}' still expires in {days} day(s).")
+                : new MutationVerificationFailedException($"the expiry of '{stale.CertName}' could not be read.", stateUnknown: true);
     }
 }

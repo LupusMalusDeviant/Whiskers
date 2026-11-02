@@ -52,9 +52,9 @@ public sealed class CloudPowerVerifier(IServiceProvider services, bool on, TimeS
             async _ => (await ReadAsync(() => cloud.ResolveAsync(server), "the provider"))?.Status ?? "",
             Reached, Budget, Interval, ct);
         if (!Reached(status))
-            throw new MutationVerificationFailedException(status.Length == 0
-                ? "the provider no longer finds the server."
-                : $"the provider reports the server '{status}', not {(on ? "running" : "off")}.");
+            throw status.Length == 0
+                ? new MutationVerificationFailedException("the provider no longer finds the server.", stateUnknown: true)
+                : new MutationVerificationFailedException($"the provider reports the server '{status}', not {(on ? "running" : "off")}.");
     }
 
     // Hetzner: running / off; Hostinger: running / stopped.
@@ -96,7 +96,8 @@ public sealed class HetznerFlagVerifier(IServiceProvider services, string capabi
 }
 
 /// <summary>hetzner.snapshot_delete: Hetzner no longer finds the image.</summary>
-public sealed class HetznerSnapshotDeleteVerifier(IServiceProvider services) : CloudVerifier(services, null, null)
+public sealed class HetznerSnapshotDeleteVerifier(IServiceProvider services, TimeSpan? budget = null, TimeSpan? interval = null)
+    : CloudVerifier(services, budget, interval)
 {
     public override string CapabilityId => "hetzner.snapshot_delete";
 
@@ -108,7 +109,9 @@ public sealed class HetznerSnapshotDeleteVerifier(IServiceProvider services) : C
                       ?? throw new MutationNotVerifiableException("the call named no image to read back.");
         var ctx = await ReadAsync(() => cloud.HetznerContextAsync(Server(context)), "Hetzner")
                   ?? throw new MutationNotVerifiableException("the server is no Hetzner server.");
-        var image = await ReadAsync(() => hetzner.GetImageAsync(ctx.token, imageId, ct), "the image");
+        // The delete is an action: the image may still be listed for a moment.
+        var image = await VerifierSupport.PollAsync(
+            _ => ReadAsync(() => hetzner.GetImageAsync(ctx.token, imageId, ct), "the image"), i => i is null, Budget, Interval, ct);
         if (image is not null)
             throw new MutationVerificationFailedException($"image #{imageId} still exists ({image.Status}).");
     }

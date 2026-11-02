@@ -43,7 +43,11 @@ public class ReadBackVerificationTests
         }
     }
 
-    private static MutationGateway Gateway(IServiceProvider sp, params IMutationVerifier[] overrides)
+    private static MutationGateway Gateway(IServiceProvider sp, params IMutationVerifier[] overrides) =>
+        Gateway(sp, new AgentToolTestHelpers.NullMutationAudit(), overrides);
+
+    private static MutationGateway Gateway(IServiceProvider sp, AgentToolTestHelpers.NullMutationAudit audit,
+        params IMutationVerifier[] overrides)
     {
         var replaced = overrides.Select(v => v.CapabilityId).ToHashSet();
         var verifiers = MutationVerifiers.Factories.Select(f => f(sp)).Where(v => !replaced.Contains(v.CapabilityId)).Concat(overrides);
@@ -52,7 +56,7 @@ public class ReadBackVerificationTests
         policy.RequireConfirmationForWrites = false;
         return new MutationGateway(new CapabilityCatalog(),
             AgentToolTestHelpers.Policy(new AgentToolTestHelpers.FixedGuardrailStore(policy)),
-            new AgentToolTestHelpers.NullMutationAudit(), verifiers.ToList(), NullLogger<MutationGateway>.Instance);
+            audit, verifiers.ToList(), NullLogger<MutationGateway>.Instance);
     }
 
     private static MutationRequest Request(string capability, object args, MutationTarget target) =>
@@ -240,18 +244,6 @@ public class ReadBackVerificationTests
     }
 
     [Fact]
-    public async Task Renewing_all_on_a_host_without_certificates_is_not_verifiable_not_failed()
-    {
-        var gateway = Gateway(Certificates());
-
-        var outcome = await gateway.ExecuteAsync(Request("ssl.renew", new { serverId = "srv1", certName = "all" }, Host()),
-            (_, _) => Task.FromResult("SSL renewal succeeded."));
-
-        Assert.Equal(MutationStatus.Executed, outcome.Status);
-        Assert.Equal(VerificationStatus.NotVerifiable, outcome.Verification);
-    }
-
-    [Fact]
     public void Inactive_is_not_read_as_active() => Assert.False(FirewallService.Parse("Status: inactive\n").Active);
 
     [Theory]
@@ -261,7 +253,8 @@ public class ReadBackVerificationTests
     [InlineData("restart", "failed", false)]
     public async Task A_systemd_unit_must_show_the_state_its_action_leaves(string action, string state, bool verified)
     {
-        var gateway = Gateway(HostReads(("systemctl is-active 'nginx'", state == "active" ? 0 : 3, state + "\n")));
+        var gateway = Gateway(HostReads(("systemctl is-active 'nginx'", state == "active" ? 0 : 3, state + "\n"),
+            ("systemctl show -p Type -p Result 'nginx'", 0, "Type=notify\nResult=exit-code\n")));
 
         var outcome = await gateway.ExecuteAsync(Request("systemd.manage",
             new { serverId = "srv1", serviceName = "nginx", action }, Host()), (_, _) => Task.FromResult("done"));
@@ -557,6 +550,119 @@ public class ReadBackVerificationTests
 
         Assert.Equal(MutationStatus.Executed, outcome.Status);
         Assert.Equal(VerificationStatus.NotVerifiable, outcome.Verification);
+    }
+
+    [Fact]
+    public async Task The_project_the_plan_resolved_is_read_back_not_the_name_the_caller_gave()
+    {
+        // deploy_compose(projectName: "my-app") with a top-level "name: shop" runs under "shop".
+        var gateway = Gateway(Containers(Member("shop-web-1", "running", "Up")));
+
+        var outcome = await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName = "my-app" }, Host("host")),
+            (_, _) =>
+            {
+                MutationScope.ReadBack(ComposeImpact.ProjectFact, "shop");
+                return Task.FromResult("deployed");
+            });
+
+        Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+    }
+
+    [Fact]
+    public async Task A_deployment_under_an_interpolated_project_name_is_not_verifiable()
+    {
+        var gateway = Gateway(Containers(Member("shop-web-1", "running", "Up")));
+
+        var outcome = await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName = "my-app" }, Host("host")),
+            (_, _) =>
+            {
+                MutationScope.ReadBack(ComposeImpact.ProjectFact, "");
+                return Task.FromResult("deployed");
+            });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(VerificationStatus.NotVerifiable, outcome.Verification);
+    }
+
+    [Fact]
+    public async Task The_reason_a_call_is_not_verifiable_reaches_the_audit_row()
+    {
+        var audit = new AgentToolTestHelpers.NullMutationAudit();
+        var gateway = Gateway(new ServiceCollection().BuildServiceProvider(), audit);
+
+        await gateway.ExecuteAsync(Request("host.exec", new { command = "uptime" }, Host()), (_, _) => Task.FromResult("up"));
+
+        Assert.Contains(audit.Reasons, r => r is not null && r.StartsWith("Not verifiable: ", StringComparison.Ordinal)
+                                            && r.Contains(VerificationContracts.Find("host.exec")!.Reason, StringComparison.Ordinal));
+    }
+
+    // ---- more host read-backs ----
+
+    [Theory]
+    [InlineData("Type=oneshot\nResult=success\n", true)]
+    [InlineData("Type=oneshot\nResult=exit-code\n", false)]
+    [InlineData("Type=simple\nResult=success\n", false)]
+    public async Task A_oneshot_unit_that_ran_to_completion_counts_as_started(string show, bool verified)
+    {
+        var gateway = Gateway(HostReads(("systemctl is-active 'backup'", 3, "inactive\n"),
+            ("systemctl show -p Type -p Result 'backup'", 0, show)));
+
+        var outcome = await gateway.ExecuteAsync(Request("systemd.manage",
+            new { serverId = "srv1", serviceName = "backup", action = "start" }, Host()), (_, _) => Task.FromResult("done"));
+
+        if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+        else AssertFailed(outcome);
+    }
+
+    [Theory]
+    [InlineData("enable", "enabled", VerificationStatus.Verified)]
+    [InlineData("disable", "enabled", VerificationStatus.Failed)]
+    [InlineData("disable", "static", VerificationStatus.NotVerifiable)]   // no [Install] section: not disabled itself
+    public async Task Enable_and_disable_are_read_back_with_is_enabled(string action, string state, VerificationStatus expected)
+    {
+        var gateway = Gateway(HostReads(("systemctl is-enabled 'cron'", state == "enabled" ? 0 : 1, state + "\n")));
+
+        var outcome = await gateway.ExecuteAsync(Request("systemd.manage",
+            new { serverId = "srv1", serviceName = "cron", action }, Host()), (_, _) => Task.FromResult("done"));
+
+        Assert.Equal(expected, outcome.Verification);
+    }
+
+    [Theory]
+    [InlineData(0, VerificationStatus.NotVerifiable, false)]   // certbot ran and manages nothing
+    [InlineData(-1, VerificationStatus.Failed, true)]          // the host could not be read: never "nothing to renew"
+    [InlineData(1, VerificationStatus.Failed, true)]
+    public async Task An_empty_certificate_list_is_nothing_to_renew_only_when_certbot_answered(int exit,
+        VerificationStatus expected, bool stateUnknown)
+    {
+        var (ssl, script) = Scripted<ISslCertService>.Create();
+        script.On[nameof(ISslCertService.ListCertificatesAsync)] = _ => Task.FromResult(new List<SslCertificate>());
+        var (executor, host) = Scripted<IHostCommandExecutor>.Create();
+        host.On[nameof(IHostCommandExecutor.ExecuteAsync)] = _ => Task.FromResult(new CommandResult { ExitCode = exit });
+        var gateway = Gateway(new ServiceCollection().AddSingleton(ssl).AddSingleton(executor).BuildServiceProvider());
+
+        var outcome = await gateway.ExecuteAsync(Request("ssl.renew", new { serverId = "srv1", certName = "all" }, Host()),
+            (_, _) => Task.FromResult("SSL renewal succeeded."));
+
+        Assert.Equal(expected, outcome.Verification);
+        if (expected == VerificationStatus.Failed) AssertFailed(outcome, stateUnknown);
+    }
+
+    [Theory]
+    [InlineData(0, "app_1.sql.gz\napp_2.sql.gz\nother_1.sql.gz\napp-old.txt\n", true, false)]
+    [InlineData(0, "app_1.sql.gz\napp_2.sql.gz\napp_3.sql\n", false, false)]
+    [InlineData(2, "", false, true)]   // the directory could not be listed: never "nothing left"
+    public async Task A_dump_retention_must_leave_no_more_than_it_keeps(int exit, string listing, bool verified, bool stateUnknown)
+    {
+        var gateway = Gateway(new ServiceCollection()
+            .AddSingleton(HostReads(($"ls -1 '{DataPathOptions.Default.BackupsDir}'", exit, listing)).GetRequiredService<IHostCommandExecutor>())
+            .AddSingleton(DataPathOptions.Default).BuildServiceProvider());
+
+        var outcome = await gateway.ExecuteAsync(Request("db.backup_delete", new { serverId = "srv1", database = "app", keep = 2 },
+            new MutationTarget("container", "c1", null, "srv1")), (_, _) => Task.FromResult("pruned"));
+
+        if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+        else AssertFailed(outcome, stateUnknown);
     }
 
     // ---- Hetzner ----

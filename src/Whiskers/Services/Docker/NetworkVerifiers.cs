@@ -98,7 +98,10 @@ public sealed partial class ComposeDeployVerifier(IServiceProvider services) : S
 
     protected override async Task CheckAsync(MutationContext context, object? result, CancellationToken ct)
     {
-        var project = VerifierSupport.Arg(context, "projectName");
+        // The project the plan resolved, when the call reported it; else the one the call named.
+        var project = VerifierSupport.Fact(context, ComposeImpact.ProjectFact) ?? VerifierSupport.Arg(context, "projectName");
+        if (project is "")
+            throw new MutationNotVerifiableException("the project name is interpolated; its value is not kept to read back.");
         if (string.IsNullOrWhiteSpace(project))
             throw new MutationNotVerifiableException("the call named no compose project to read back.");
         // An interpolated name is recorded as its expression (never its value), and compose rewrites names outside its

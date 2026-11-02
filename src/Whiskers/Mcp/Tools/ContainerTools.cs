@@ -481,6 +481,8 @@ public class ContainerTools
         {
             return MutationScope.Fail($"Error: {ex.Message}");
         }
+        // The project compose runs under may differ from projectName (a top-level name:); the read-back needs it.
+        ComposeImpact.ReportProject(plan);
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         var deployResult = await executor.ExecuteAsync(serverId, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5));

@@ -578,6 +578,7 @@ public sealed class MutationGateway : IMutationGateway
             {
                 T value;
                 string? reported;
+                IReadOnlyDictionary<string, string> facts;
                 using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal, context.Request))
                 {
                     try
@@ -590,6 +591,7 @@ public sealed class MutationGateway : IMutationGateway
                         results = scope.Results;
                     }
                     reported = scope.FailureReason;
+                    facts = scope.ReadBackFacts;
                 }
 
                 if (reported is not null)
@@ -601,7 +603,7 @@ public sealed class MutationGateway : IMutationGateway
                 }
                 else
                 {
-                    var (verification, problem, unknown) = await VerifyAsync(context, value, deadline.Token);
+                    var (verification, problem, unknown) = await VerifyAsync(context with { ReadBackFacts = facts }, value, deadline.Token);
                     var verificationNote = verification == VerificationStatus.NotVerifiable ? problem : null;
                     // R1-36 (INV-43/44): the call completed, but its effect is not there — never a success. The status
                     // says Failed, the verification says the call itself ran; the value is withheld so no caller can

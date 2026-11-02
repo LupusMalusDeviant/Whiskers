@@ -74,7 +74,10 @@ public sealed class SelfBackupDeleteVerifier(IServiceProvider services) : Servic
     {
         var archive = VerifierSupport.Arg(context, "archive")
                       ?? throw new MutationNotVerifiableException(BackupReadBack.RunNow);
-        var id = BackupReadBack.SafeFile(archive, "archive").Split('.')[0];
+        var file = BackupReadBack.SafeFile(archive, "archive");
+        var id = file.EndsWith(".tar.gz.enc", StringComparison.Ordinal) ? file[..^".tar.gz.enc".Length]
+            : file.EndsWith(".tar.gz", StringComparison.Ordinal) ? file[..^".tar.gz".Length]
+            : file;
         if (Services.GetRequiredService<IBackupService>().ResolveArchivePath(id) is { } path && File.Exists(path))
             throw new MutationVerificationFailedException($"self-backup {id} is still on disk.");
         return Task.CompletedTask;
@@ -91,6 +94,8 @@ public sealed class SelfBackupPruneVerifier(IServiceProvider services) : Service
         var keep = VerifierSupport.LongArg(context, "keep");
         // A negative count prunes nothing (BackupService.PruneAsync): there is no effect to read back.
         if (keep is not >= 0) throw new MutationNotVerifiableException("the call named no number to keep.");
+        // A backup taken between the prune and this count can make a legitimate retention look short; accepted, as for
+        // db.backup_delete: it fails towards "check again", never towards success.
         var left = (await Services.GetRequiredService<IBackupService>().ListBackupsAsync(ct))
             .Count(b => !b.Label.StartsWith(BackupService.PreUpgradeLabelPrefix, StringComparison.Ordinal));
         if (left > keep)
@@ -138,9 +143,13 @@ public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : 
         if (!SafeDb().IsMatch(database))
             throw new MutationNotVerifiableException("the call named no valid database to read back.");
         var dir = Services.GetRequiredService<DataPathOptions>().BackupsDir;
-        var listing = await VerifierSupport.HostReadAsync(Services, RequireServer(context),
-            $"ls -1 {ShellUtils.Quote(dir)}/{database}_*.sql* 2>/dev/null", ct);
-        var left = listing.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
+        // The directory is listed as a whole (a glob that matches nothing is no error, an unreadable directory is) and
+        // filtered like the retention's glob {database}_*.sql*. A backup taken meanwhile can make a legitimate
+        // retention look short; that race is accepted: it fails towards "check again", never towards success.
+        var listing = await VerifierSupport.HostOutputAsync(Services, RequireServer(context), $"ls -1 {ShellUtils.Quote(dir)}", ct);
+        var left = listing.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Count(f => f.StartsWith(database + "_", StringComparison.Ordinal)
+                        && f.IndexOf(".sql", database.Length + 1, StringComparison.Ordinal) >= 0);
         if (left > keep)
             throw new MutationVerificationFailedException($"{left} dumps of '{database}' remain, more than the {keep} kept.");
     }

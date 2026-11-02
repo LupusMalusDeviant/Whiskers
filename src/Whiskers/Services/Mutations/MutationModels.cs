@@ -218,4 +218,8 @@ public static class MutationReasonCodes
 }
 
 /// <summary>Handed to the execution delegate: the decided request (with its resolved target) and its capability.</summary>
-public sealed record MutationContext(string OperationId, MutationRequest Request, Capability Capability);
+public sealed record MutationContext(string OperationId, MutationRequest Request, Capability Capability)
+{
+    /// <summary>R1-37: what the call reported for its read-back (<see cref="MutationScope.ReadBack"/>).</summary>
+    public IReadOnlyDictionary<string, string> ReadBackFacts { get; init; } = new Dictionary<string, string>();
+}

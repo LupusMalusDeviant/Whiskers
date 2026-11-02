@@ -157,7 +157,7 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-04 | `update_container` | write | ✅ the new container (same name) read back (R1-36); no health check; a failed snapshot is a warning, not a stop (that rule is AutoUpdate's) | GW ✅ + details | INV-43, 44, 53 |
 | M-05 | `deploy_app` | admin | ✅ the returned container read back (R1-37); a deployment that names none: `NotVerifiable` with its reason | GW ✅ + details | INV-43 (volumes checked since R1-16) |
 | M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | `NotVerifiable` + reason (the process reads the .env, R1-37) | GW ✅ + details | INV-43, 51 |
-| M-07 | `deploy_compose` | admin | ✅ every container of the project read back (R1-37); without a project name: `NotVerifiable` | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16) |
+| M-07 | `deploy_compose` | admin | ✅ every container of the project the plan resolved (a top-level `name:` included) read back (R1-37); an interpolated project name: `NotVerifiable` + reason | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16) |
 | M-08 | `execute_command` | admin | `NotVerifiable` + reason (arbitrary command; its exit code decides, R1-37) | GW ✅ + details (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
 | M-09 | `add_firewall_rule` | **admin** (R1-05; was write) | ✅ `ufw show added` read back (R1-37) | GW ✅ + details | 43 |
 | M-10 | `remove_firewall_rule` | **admin** (R1-05; was write) | `NotVerifiable` + reason (ufw renumbers after a delete, R1-37) | GW ✅ + details | 43 |
@@ -263,8 +263,8 @@ mTLS carries the server's diff.
 | U-08 | Artisan migrate / rollback / SQL file / seed | Admin | `NotVerifiable` + reason (arbitrary command, R1-37) | GW ✅ (R1-21) | — |
 | U-09 | Container detail DB backup | Admin | ✅ dump file on the host, not empty (R1-37) | GW ✅ (R1-21) | — |
 | U-10 | Deploy form / raw compose | **Admin** (WP1) | ✅ the form's container (R1-36); raw compose `NotVerifiable` + reason (no project name to read back, R1-37) | GW ✅ (R1-21) | INV-43 |
-| U-11 | App store template / registry image | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
-| U-12 | Compose editor | **Admin** (WP1) | ❌ | GW ✅ (R1-21) | INV-43 |
+| U-11 | App store template / registry image | **Admin** (WP1) | `NotVerifiable` + reason (the deployment answers with the compose output, not a container, R1-37) | GW ✅ (R1-21) | INV-43 |
+| U-12 | Compose editor | **Admin** (WP1) | ✅ every container of the project the plan resolved read back (R1-37); an interpolated project name `NotVerifiable` + reason | GW ✅ (R1-21) | INV-43 |
 | U-13 | Networks create/remove | Admin | ✅ listed with its driver / no longer listed (R1-37) | GW ✅ (R1-21) | — (MCP admin since R1-05) |
 | U-14 | Firewall enable/disable UFW | Admin | ✅ `ufw status` read back (R1-37) | GW ✅ (R1-21) | — |
 | U-15 | Firewall rule add/remove (dialog submit has no page check; the gateway requires Admin for `firewall.rule_add` since R1-05) | Admin | ✅ add: `ufw show added` read back; remove: `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-17 |
@@ -273,7 +273,7 @@ mTLS carries the server's diff.
 | U-18 | Systemd start/stop/restart | Admin | ✅ `systemctl is-active` read back (R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-19 | SSL certificate renew | Admin | ✅ certificate valid for at least 29 more days (certbot's 30-day renewal window, one day of slack) (R1-37) | GW ✅ (R1-21) | INV-43 |
 | U-20 | Servers add/update/delete (+ vault secrets: kubeconfig, cloud API key; SSH keys) | Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (versioned diff, R1-22) | INV-41 (TA-42 SSH user/host), 52 |
-| U-21 | Server onboarding (root installs) | Admin | ⚠️ result object | GW ✅ (`server.onboard`; the switchover carries the server diff, R1-22) | INV-45 |
+| U-21 | Server onboarding (root installs) | Admin | ⚠️ result object; `NotVerifiable` + reason (the next health check shows the host, R1-37) | GW ✅ (`server.onboard`; the switchover carries the server diff, R1-22) | INV-45 |
 | U-22 | Servers pause/resume checks | **markup only** (the gateway decides `checks.pause`/`checks.resume`) | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (no page row since R1-22) | INV-17 |
 | U-23 | Cloud power / snapshot | Admin | ✅ power on / shut down read back, polled; reboot, reset, snapshot `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-43, 52 |
 | U-24 | Volume backup / restore / delete | Operator / Admin / Admin | ✅ backup and delete read back; restore `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-43 |

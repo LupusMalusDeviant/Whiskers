@@ -16,7 +16,9 @@ All notable changes to Whiskers are documented here. The format follows
   with the state unknown. A capability without a read-back (an arbitrary command or query, a reboot, a rule removed
   by number) is recorded as not verifiable, never as verified. MCP tools that answered with an error text — a refused
   call, a missing DNS token, a provider error, a Hetzner action that ended in `error` — now fail the operation instead
-  of being recorded as executed. Also fixed: the firewall page showed an inactive ufw as active.
+  of being recorded as executed. A compose deployment is read back under the project the plan resolved (a top-level `name:` included), a one-shot
+  systemd unit that ran to completion counts as started, and a unit without an `[Install]` section is not verifiable
+  for enable / disable. Also fixed: the firewall page showed an inactive ufw as active.
 - R1-34 follow-up: **the recovery command is recognised in every spelling.** `--restore-backup=<id>` and the option
   after `--for-previous-release` now stage the restore; before, they started Whiskers normally on the data the restore
   was meant to replace. A restore staged from the Settings panel now resets the upgrade state like the command line,
