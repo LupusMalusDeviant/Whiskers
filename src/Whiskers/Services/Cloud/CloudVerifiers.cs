@@ -50,7 +50,8 @@ public sealed class CloudPowerVerifier(IServiceProvider services, bool on, TimeS
                      ?? throw new MutationNotVerifiableException($"'{name}' is no configured cloud server.");
         var status = await VerifierSupport.PollAsync(
             async _ => (await ReadAsync(() => cloud.ResolveAsync(server), "the provider"))?.Status ?? "",
-            Reached, Budget, Interval, ct);
+            // A server the provider no longer finds will not come back by waiting.
+            s => s.Length == 0 || Reached(s), Budget, Interval, ct);
         if (!Reached(status))
             throw status.Length == 0
                 ? new MutationVerificationFailedException("the provider no longer finds the server.", stateUnknown: true)

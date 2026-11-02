@@ -38,6 +38,7 @@ public sealed partial class FirewallRuleAddVerifier(IServiceProvider services) :
     /// (<c>10.0.0.5/24</c> → <c>10.0.0.0/24</c>). Compared as addresses; anything that is no address, as text.</summary>
     internal static bool SameSource(string listed, string asked)
     {
+        if (IsAnySource(listed) && IsAnySource(asked)) return true;
         if (Network(listed) is { } a && Network(asked) is { } b)
             return a.Prefix == b.Prefix && a.Address.Equals(b.Address);
         return string.Equals(listed, asked, StringComparison.OrdinalIgnoreCase);
@@ -54,6 +55,11 @@ public sealed partial class FirewallRuleAddVerifier(IServiceProvider services) :
         }
     }
 
+    /// <summary>Every source: <c>Anywhere</c> (which the dialog accepts), <c>any</c>, <c>0.0.0.0/0</c>, <c>::/0</c>.</summary>
+    internal static bool IsAnySource(string source) =>
+        source.Equals("anywhere", StringComparison.OrdinalIgnoreCase) || source.Equals("any", StringComparison.OrdinalIgnoreCase)
+        || source is "0.0.0.0/0" or "::/0";
+
     /// <summary>A line of <c>ufw show added</c> (<c>ufw allow 80/tcp</c>, <c>ufw allow from 10.0.0.1 to any port 22
     /// proto tcp</c>) that holds the rule.</summary>
     internal static bool Matches(string line, string action, string port, string protocol, string? from)
@@ -62,6 +68,8 @@ public sealed partial class FirewallRuleAddVerifier(IServiceProvider services) :
         if (tokens.Length < 3 || tokens[0] != "ufw" || !string.Equals(tokens[1], action, StringComparison.OrdinalIgnoreCase))
             return false;
         var anyProto = protocol is "any";
+        // A rule from every source may be listed without a source at all.
+        if (from is not null && IsAnySource(from) && Matches(line, action, port, protocol, null)) return true;
         if (from is not null)
         {
             var i = Array.IndexOf(tokens, "from");

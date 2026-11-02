@@ -78,7 +78,7 @@ public static class WhiskersMutationGatewayExtensions
         services.AddHostedService(sp => sp.GetRequiredService<AuditRecovery>());
         // R1-36 / R1-37 (INV-43/44): the read-back of every capability whose contract declares one.
         foreach (var verifier in MutationVerifiers.Factories)
-            services.AddSingleton(verifier);
+            services.AddSingleton<IMutationVerifier>(verifier);
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.
         services.AddScoped<IUiMutationRunner, UiMutationRunner>();

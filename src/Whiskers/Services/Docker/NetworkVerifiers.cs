@@ -109,9 +109,15 @@ public sealed partial class ComposeDeployVerifier(IServiceProvider services) : S
         if (!ComposeProjectName().IsMatch(project))
             throw new MutationNotVerifiableException("the project name is not the one compose labels its containers with.");
         var server = RequireServer(context);
+        var services = VerifierSupport.Fact(context, ComposeImpact.ServicesFact) is { Length: > 0 } listed
+            ? listed.Split('\n').ToHashSet(StringComparer.Ordinal)
+            : null;
         // Compose lower-cases the project name it labels its containers with.
         var containers = (await Services.GetRequiredService<IDockerService>().ListContainersAsync(true, server, ct))
-            .Where(c => string.Equals(c.ComposeProject, project, StringComparison.OrdinalIgnoreCase))
+            // The label itself: ComposeProject answers "Standalone" for a container without one.
+            .Where(c => c.Labels.TryGetValue(ProjectLabel, out var label) && string.Equals(label, project, StringComparison.OrdinalIgnoreCase))
+            // An orphan of a service the files no longer define is not started by `up`: only the deployed services count.
+            .Where(c => services is null || (c.Labels.TryGetValue(ServiceLabel, out var service) && services.Contains(service)))
             .ToList();
         if (containers.Count == 0)
             throw new MutationVerificationFailedException($"compose project '{project}' has no container.");
@@ -119,6 +125,9 @@ public sealed partial class ComposeDeployVerifier(IServiceProvider services) : S
         if (down is not null)
             throw new MutationVerificationFailedException($"container '{down.Name}' of '{project}' is '{down.Status}'.");
     }
+
+    private const string ProjectLabel = "com.docker.compose.project";
+    private const string ServiceLabel = "com.docker.compose.service";
 
     // Compose project names: letters (compose lower-cases them), digits, dash and underscore, starting with a letter or digit.
     [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_-]*$")]

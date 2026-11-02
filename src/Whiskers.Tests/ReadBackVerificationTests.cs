@@ -107,6 +107,7 @@ public class ReadBackVerificationTests
                 Assert.False(verified.Contains(c.Id), $"{c.Id} is declared not verifiable but has a verifier");
         });
         Assert.All(VerificationContracts.All.Keys, id => Assert.NotNull(catalog.Find(id)));
+        Assert.All(verified, id => Assert.NotNull(catalog.Find(id)));   // no verifier for a capability that is gone
     }
 
     [Fact]
@@ -173,6 +174,7 @@ public class ReadBackVerificationTests
     [InlineData("ufw allow from 10.0.0.1 to any port 22 proto any", "10.0.0.1", "any", true)]
     [InlineData("ufw allow from 10.0.0.1 to any port 22 proto udp", "10.0.0.1", "any", false)]
     [InlineData("ufw allow 22", null, "any", true)]
+    [InlineData("ufw allow 22/tcp", "Anywhere", "tcp", true)]   // a rule from every source is listed without one
     [InlineData("ufw allow 22/any", null, "any", true)]
     [InlineData("ufw allow 22/tcp", null, "any", false)]
     public void A_ufw_rule_line_matches_only_the_rule_asked_for(string line, string? from, string protocol, bool matches) =>
@@ -198,6 +200,9 @@ public class ReadBackVerificationTests
     [InlineData("2001:db8::1", "2001:DB8::1", true)]     // and lower-cases IPv6
     [InlineData("10.0.0.0/24", "10.0.0.5/16", false)]
     [InlineData("10.0.0.1", "10.0.0.2", false)]
+    [InlineData("Anywhere", "any", true)]
+    [InlineData("0.0.0.0/0", "Anywhere", true)]
+    [InlineData("10.0.0.1", "Anywhere", false)]
     [InlineData("10.0.0.1", "10.0.0.1/32", true)]        // a host is its /32
     public void A_source_is_compared_as_ufw_lists_it(string listed, string asked, bool same) =>
         Assert.Equal(same, FirewallRuleAddVerifier.SameSource(listed, asked));
@@ -511,10 +516,40 @@ public class ReadBackVerificationTests
 
     // ---- compose ----
 
-    private static ContainerInfo Member(string name, string state, string status) => new()
+    private static ContainerInfo Member(string name, string state, string status, string service = "web") => new()
     {
-        Name = name, State = state, Status = status, Labels = new() { ["com.docker.compose.project"] = "shop" },
+        Name = name, State = state, Status = status,
+        Labels = new() { ["com.docker.compose.project"] = "shop", ["com.docker.compose.service"] = service },
     };
+
+    [Fact]
+    public async Task Containers_without_a_compose_label_never_stand_in_for_a_project_named_standalone()
+    {
+        // ContainerInfo.ComposeProject answers "Standalone" for an unlabelled container.
+        var gateway = Gateway(Containers(new ContainerInfo { Name = "other", State = "running", Status = "Up" }));
+
+        var outcome = await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName = "standalone" }, Host("host")),
+            (_, _) => Task.FromResult("deployed"));
+
+        AssertFailed(outcome);
+    }
+
+    [Fact]
+    public async Task An_orphan_of_a_removed_service_does_not_fail_the_redeploy()
+    {
+        var gateway = Gateway(Containers(Member("shop-web-1", "running", "Up"),
+            Member("shop-old-1", "exited", "Exited (137) 2 days ago", service: "old")));
+
+        var outcome = await gateway.ExecuteAsync(Request("compose.deploy", new { serverId = "srv1", projectName = "shop" }, Host("host")),
+            (_, _) =>
+            {
+                MutationScope.ReadBack(ComposeImpact.ProjectFact, "shop");
+                MutationScope.ReadBack(ComposeImpact.ServicesFact, "web");
+                return Task.FromResult("deployed");
+            });
+
+        Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+    }
 
     private static IServiceProvider Containers(params ContainerInfo[] containers)
     {

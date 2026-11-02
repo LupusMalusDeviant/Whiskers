@@ -155,7 +155,7 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-02 | `stop_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
 | M-03 | `restart_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
 | M-04 | `update_container` | write | ✅ the new container (same name) read back (R1-36); no health check; a failed snapshot is a warning, not a stop (that rule is AutoUpdate's) | GW ✅ + details | INV-43, 44, 53 |
-| M-05 | `deploy_app` | admin | ✅ the returned container read back (R1-37); a deployment that names none: `NotVerifiable` with its reason | GW ✅ + details | INV-43 (volumes checked since R1-16) |
+| M-05 | `deploy_app` | admin | ✅ the returned container read back (R1-36); a deployment that names none: `NotVerifiable` with its reason | GW ✅ + details | INV-43 (volumes checked since R1-16) |
 | M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | `NotVerifiable` + reason (the process reads the .env, R1-37) | GW ✅ + details | INV-43, 51 |
 | M-07 | `deploy_compose` | admin | ✅ every container of the project the plan resolved (a top-level `name:` included) read back (R1-37); an interpolated project name: `NotVerifiable` + reason | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16) |
 | M-08 | `execute_command` | admin | `NotVerifiable` + reason (arbitrary command; its exit code decides, R1-37) | GW ✅ + details (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |

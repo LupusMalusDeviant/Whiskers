@@ -49,8 +49,14 @@ public static class ComposeImpact
     /// <summary>R1-37: tells the <c>compose.deploy</c> verifier the project the plan resolved (the arguments carry what the
     /// caller named, which a top-level <c>name:</c> or <c>COMPOSE_PROJECT_NAME</c> may override). An interpolated name is
     /// reported as empty: its value is not to be kept, and the verifier then records the deployment as not verifiable.</summary>
-    public static void ReportProject(ComposePlan plan) =>
+    public static void ReportProject(ComposePlan plan)
+    {
         MutationScope.ReadBack(ProjectFact, plan.ProjectNameSource is null ? plan.ProjectName : "");
+        MutationScope.ReadBack(ServicesFact, string.Join('\n', plan.Services.Select(s => s.Name)));
+    }
+
+    /// <summary>The read-back key of the services the deployed files define, one per line (R1-37).</summary>
+    public const string ServicesFact = "composeServices";
 
     /// <summary>The capability a plan's mounts are decided under (R1-16): a deployment on the server, which sees every
     /// mounted path and volume as something it touches.</summary>
