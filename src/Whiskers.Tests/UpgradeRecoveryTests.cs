@@ -198,6 +198,8 @@ public sealed class UpgradeRecoveryTests : IDisposable
         var env = NewEnv(Start.Current, lastRelease: ThisRelease);
         var current = await env.Guard().PrepareAsync();
         Assert.Null(current.BackupId);
+        // A rebuild of the same release (another commit after the "+") is no upgrade either.
+        Assert.Null((await env.Guard(version: "2.0.0+rebuilt").PrepareAsync()).BackupId);
         Assert.Empty(await env.Backups.ListBackupsAsync());
     }
 
@@ -270,6 +272,29 @@ public sealed class UpgradeRecoveryTests : IDisposable
         Assert.Equal(before, await AppliedAsync(env));
         Assert.Null(UpgradeGuard.ReadMarker(env.Paths));
     }
+
+    [Fact]
+    public async Task An_unreadable_marker_still_counts_as_an_unfinished_upgrade_and_nothing_is_pruned()
+    {
+        var env = NewEnv(Start.OneBehind, settings: new() { [UpgradeGuard.KeepEnv] = "1" });
+        var older = await env.Backups.CreateBackupAsync($"{BackupService.PreUpgradeLabelPrefix}older");
+        await Task.Delay(20);
+        await File.WriteAllTextAsync(env.Paths.UpgradePendingMarker, "{ cut off");
+
+        var plan = await env.Guard().PrepareAsync();
+
+        Assert.NotNull(plan.BackupId);
+        Assert.Contains(older.Id, (await PreUpgradeAsync(env)).Select(b => b.Id));   // may be the way back: kept
+        Assert.Equal(plan.BackupId, UpgradeGuard.ReadMarker(env.Paths)!.BackupId);
+    }
+
+    [Theory]
+    [InlineData("2.0.0+abc", "2.0.0+def", true)]
+    [InlineData("2.0.0", "2.0.0+def", true)]
+    [InlineData("1.9.0+abc", "2.0.0+abc", false)]
+    [InlineData(null, "2.0.0", false)]
+    public void A_release_is_compared_without_its_build_suffix(string? last, string current, bool same) =>
+        Assert.Equal(same, UpgradeGuard.SameRelease(last, current));
 
     [Fact]
     public async Task The_backup_is_skipped_only_when_the_operator_says_so_and_that_is_logged()
@@ -393,6 +418,8 @@ public sealed class UpgradeRecoveryTests : IDisposable
             [RestoreCli.LatestPreUpgrade, RestoreCli.ForPreviousReleaseFlag], log));
         Assert.Contains($"Backup {backupId} is staged", log.ToString());
         Assert.Null(UpgradeGuard.ReadMarker(env.Paths));
+        // The restored data is not what the last release left: the next start of a newer release backs it up again.
+        Assert.False(File.Exists(env.Paths.LastStartedVersionFile));
         Assert.Contains(await env.Backups.ListBackupsAsync(), b => b.Label.StartsWith("pre-restore-", StringComparison.Ordinal));
 
         TestSqlite.ClearPools(env.Paths.RootDir);

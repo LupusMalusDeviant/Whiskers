@@ -59,8 +59,10 @@ public static class RestoreCli
                 "(a safety backup of the current state is taken first)…");
             await backups.BeginRestoreAsync(archive, Actor,
                 forPrevious ? RestoreTarget.PreviousRelease : RestoreTarget.ThisRelease, ct);
-            // The restore ends the unfinished upgrade: the next start of a newer release is a new upgrade with its own backup.
+            // The restore ends the unfinished upgrade, and the restored data is no longer what the last release left: the
+            // next start of a newer release is a new upgrade with its own backup, also when no schema migration is pending.
             File.Delete(paths.UpgradePendingMarker);
+            File.Delete(paths.LastStartedVersionFile);
             await log.WriteLineAsync($"Backup {id} is staged. " + (forPrevious
                 ? "Start the previous release now — it applies the restore before it opens the database."
                 : "Start Whiskers now — it applies the restore before it opens the database."));

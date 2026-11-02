@@ -104,8 +104,10 @@ An encrypted archive is safe to keep on another machine, because it is useless w
 
 ## Upgrades
 
-Each start checks whether it is an upgrade: another release than the one that last finished its start, or schema
-migrations pending in the database. Before an upgrade changes anything, Whiskers takes a self-backup labelled
+Each start checks whether it is an upgrade: another release than the one that last finished its start (a rebuild of
+the same release, which differs only after the `+` of its version, is not), or schema migrations pending in the
+database. A restore staged from the command line resets this, so the next start of a newer release is an upgrade
+again. Before an upgrade changes anything, Whiskers takes a self-backup labelled
 `pre-upgrade-<date>`:
 
 1. It is taken right after the vault has checked `VAULT_KEY`, before anything rewrites data in a newer format: the
@@ -124,7 +126,9 @@ Until then the upgrade counts as unfinished. A start after a failed migration (o
 container mid-upgrade) takes **no new backup**: it keeps the one from before the upgrade, which stays the way back,
 and the log says so. The scheduled self-backup retention does not delete pre-upgrade backups; Whiskers keeps the
 newest three (`WHISKERS_UPGRADE_KEEP_BACKUPS`), deletes older ones when it takes a new one, and never the one an
-unfinished upgrade depends on. A new database gets no pre-upgrade backup: there is nothing in it yet.
+unfinished upgrade depends on, nor any while an unfinished upgrade's own backup is unknown. A new database gets no
+pre-upgrade backup: there is nothing in it yet (also when only the database file was removed from an existing data
+directory; back the directory up yourself before you do that).
 
 The backup and the migrations take longer as the database grows, and nothing answers the health check meanwhile.
 The image's health check waits five minutes; on Kubernetes the Helm startup probe allows five minutes

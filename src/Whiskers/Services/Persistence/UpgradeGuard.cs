@@ -105,13 +105,15 @@ public sealed class UpgradeGuard : IInitializable
         var plan = new UpgradePlan(pendingMetrics, pendingIdentity, fresh, BackupId: null);
         var lastVersion = ReadLastVersion();
         var marker = ReadMarker();
+        // A marker that is there but cannot be read still means an unfinished upgrade: nothing may be pruned for it.
+        var unfinished = marker is not null || File.Exists(_paths.UpgradePendingMarker);
         if (fresh)
         {
             _logger.LogInformation("New database: creating the schema ({Metrics} + {Identity} migrations).",
                 pendingMetrics.Count, pendingIdentity.Count);
             return plan;
         }
-        if (!plan.HasPending && lastVersion == _version && marker is null)
+        if (!plan.HasPending && SameRelease(lastVersion, _version) && !unfinished)
         {
             _logger.LogInformation("Database schema is current; no upgrade.");
             return plan;
@@ -164,7 +166,12 @@ public sealed class UpgradeGuard : IInitializable
             "--restore-backup {Id} --for-previous-release, then start the previous release.",
             backup.Id, watch.Elapsed.TotalSeconds, backup.Id);
 
-        await PruneAsync(_backups, keep, backup.Id, _logger, ct);
+        // After an unfinished upgrade whose backup is gone or unreadable, older pre-upgrade backups may be the only state
+        // from before it: nothing is pruned then.
+        if (unfinished)
+            _logger.LogWarning("Older pre-upgrade backups are kept: an earlier upgrade did not finish, and one of them may be the way back.");
+        else
+            await PruneAsync(_backups, keep, backup.Id, _logger, ct);
         return plan with { BackupId = backup.Id };
     }
 
@@ -175,7 +182,8 @@ public sealed class UpgradeGuard : IInitializable
         File.Delete(_paths.UpgradePendingMarker);
     }
 
-    /// <summary>The marker of an unfinished upgrade, or null. An unreadable marker is treated as none (and logged).</summary>
+    /// <summary>The marker of an unfinished upgrade, or null when there is none or it cannot be read (logged; the guard
+    /// then still treats the upgrade as unfinished and prunes nothing).</summary>
     public static UpgradePendingMarker? ReadMarker(DataPathOptions paths, ILogger? logger = null)
     {
         if (!File.Exists(paths.UpgradePendingMarker)) return null;
@@ -185,12 +193,17 @@ public sealed class UpgradeGuard : IInitializable
         }
         catch (Exception ex) when (ex is JsonException or IOException)
         {
-            logger?.LogWarning(ex, "The marker of an unfinished upgrade could not be read; it is ignored.");
+            logger?.LogWarning(ex, "The marker of an unfinished upgrade could not be read; its backup is not known.");
             return null;
         }
     }
 
     private UpgradePendingMarker? ReadMarker() => ReadMarker(_paths, _logger);
+
+    /// <summary>The release part of two versions (before a <c>+</c> build suffix such as the commit): a rebuild of the
+    /// same release is no upgrade.</summary>
+    internal static bool SameRelease(string? a, string? b) =>
+        a is not null && b is not null && string.Equals(a.Split('+')[0], b.Split('+')[0], StringComparison.Ordinal);
 
     private string? ReadLastVersion() =>
         File.Exists(_paths.LastStartedVersionFile) ? File.ReadAllText(_paths.LastStartedVersionFile).Trim() : null;
