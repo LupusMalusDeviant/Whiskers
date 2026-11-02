@@ -17,7 +17,10 @@ gateway:
 
 A tool counts as mutating when the catalog lists it (`ICapabilityCatalog.FindByMcpTool`). Webhooks and Git deploy
 (2.4) run through the gateway since R1-08 / R1-09, terminal opens (2.5, `terminal.container_open` / `terminal.host_open`)
-since R1-17; step 2.6 makes bypassing the gateway fail.
+since R1-17; step 2.6 makes bypassing the gateway fail. Brokkr provisioning (contract 0001) gives
+`gitdeploy.save`, `webhook.save` and `webhook.rotate_secret` an MCP tool each and adds `gitdeploy.set_token`
+(`set_git_deploy_token`); one MCP tool per capability, so the UI keeps running these by capability id. A new
+`webhook.save` called with an `appId` resolves its target through that Git app (its server, its name and repository).
 
 ### UI handlers
 

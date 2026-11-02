@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- Brokkr provisioning (contract 0001): **Git deployments can be set up over MCP.** Five tools let an MCP client
+  such as the Brokkr CLI create a Git deployment app (`create_git_deploy_app`), set or remove its access token
+  (`set_git_deploy_token`, its own capability `gitdeploy.set_token`), read an app back without its token
+  (`get_git_deploy_app`), create the GitHub push webhook for it (`create_git_deploy_webhook`) and rotate that
+  webhook's secret (`rotate_git_deploy_webhook_secret`). Every write is Admin, goes through the guardrails and the
+  mutation gateway (approvals included), records the calling key as owner, and is read back afterwards. Tokens are
+  never echoed, logged or shown on an approval card; a webhook secret appears once, in the tool's answer. None of the
+  five is offered to the AI agent.
+
 - R1-38: **Nothing waits without end.** An AI provider that sends no response, stops sending in the middle of an
   answer or trickles on for too long is cut off (60 s for the response to start, 90 s between two lines, 10 min for
   the whole answer) and the run ends with a timeout message instead of hanging. An unattended AI-trigger run ends after

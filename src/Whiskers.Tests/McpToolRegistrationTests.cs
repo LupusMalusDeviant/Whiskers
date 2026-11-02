@@ -30,7 +30,7 @@ public class McpToolRegistrationTests
         ["cve"]           = 4,
         ["cloud-control"] = 15,   // CloudTools 8, HetznerTools 7
         ["agent"]         = 1,
-        ["gitdeploy"]     = 1,    // Plan-0013 WP4 — read-only
+        ["gitdeploy"]     = 6,    // list + get (read); Brokkr provisioning (contract 0001): app, token, webhook, secret rotation
         ["volumebackups"] = 2,    // Plan-0013 WP4 — read-only
         ["notifications"] = 1,    // Plan-0013 WP4 — read-only
         ["image-updates"] = 4,    // GAP-6 assess_update_risk + GAP-7 get_blast_radius (read-only); auto-patch status (read) + preview (dry run, write)

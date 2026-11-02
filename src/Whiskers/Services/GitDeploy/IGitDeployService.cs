@@ -20,6 +20,13 @@ public interface IGitDeployService
     [MutatingOperation("gitdeploy.save")]
     Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId);
 
+    /// <summary>Replaces the stored app's repository token (empty string removes it) and keeps every other setting
+    /// (contract 0001). The app must still be at <paramref name="revision"/>, otherwise
+    /// <see cref="GitDeployConflictException"/>; a missing app throws <see cref="KeyNotFoundException"/>. Like a save,
+    /// whoever sets it becomes the owner (<paramref name="ownerId"/>, R1-08): the inputs a deployment runs with changed.</summary>
+    [MutatingOperation("gitdeploy.set_token")]
+    Task<GitDeployApp> SetTokenAsync(string appId, int revision, string token, string ownerId);
+
     /// <summary>Takes the app over (R1-08): sets <paramref name="ownerId"/> only while the stored owner is still
     /// <paramref name="expectedOwnerId"/> (empty = no owner). False when someone else changed it first.</summary>
     [MutatingOperation("gitdeploy.save")]

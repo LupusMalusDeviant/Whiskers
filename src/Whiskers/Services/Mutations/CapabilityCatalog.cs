@@ -98,14 +98,18 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Deployments
         yield return Tool("app.deploy", "deploy_app", A, "host", Root, Long);
         yield return Tool("compose.deploy", "deploy_compose", A, "host", Root, Long);
-        yield return Ui("gitdeploy.save", A, "git-deploy-app", Root, Short);
+        // Brokkr provisioning (contract 0001): saving an app over MCP creates one; its token has its own capability,
+        // because a capability names one MCP tool.
+        yield return Tool("gitdeploy.save", "create_git_deploy_app", A, "git-deploy-app", Root, Short);
+        // A token decides which repository content the next deployment can read.
+        yield return Tool("gitdeploy.set_token", "set_git_deploy_token", A, "git-deploy-app", Root, Short);
         yield return Ui("gitdeploy.delete", A, "git-deploy-app", Rev, Short);
         yield return Ui("gitdeploy.deploy", A, "git-deploy-app", Root, Long);
         // Webhooks (R1-09): creating one, or taking it over, lets an external caller fire restart / recreate / compose
-        // up / Git deploy as root on its owner's authority.
-        yield return Ui("webhook.save", A, "webhook", Root, Short);
+        // up / Git deploy as root on its owner's authority. Over MCP only a Git-deploy webhook for an app is created.
+        yield return Tool("webhook.save", "create_git_deploy_webhook", A, "webhook", Root, Short);
         // A new secret breaks every caller that still signs with the old one.
-        yield return Ui("webhook.rotate_secret", A, "webhook", Dis, Short);
+        yield return Tool("webhook.rotate_secret", "rotate_git_deploy_webhook_secret", A, "webhook", Dis, Short);
         yield return Ui("webhook.set_enabled", A, "webhook", Dis, Short);
         yield return Ui("webhook.delete", A, "webhook", Des, Short);
 

@@ -70,6 +70,16 @@ public class GitDeployService : IGitDeployService
     public async Task<GitDeployApp?> GetAppAsync(string appId) =>
         (await LoadAsync()).Apps.FirstOrDefault(a => a.Id == appId)?.Clone();
 
+    public async Task<GitDeployApp> SetTokenAsync(string appId, int revision, string token, string ownerId)
+    {
+        ValidateId(appId);
+        ArgumentNullException.ThrowIfNull(token);
+        var stored = await GetAppAsync(appId) ?? throw new KeyNotFoundException($"Git deployment app not found: {appId}");
+        // The caller's revision, not the one just read: a token set on a copy edited meanwhile is refused.
+        stored.Revision = revision;
+        return await SaveAppAsync(stored, token, ownerId);
+    }
+
     public async Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId)
     {
         ValidateId(app.Id);

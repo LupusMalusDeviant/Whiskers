@@ -411,6 +411,7 @@ internal sealed class McpFilterHarness : IDisposable
     }
 
     public GuardrailPolicy Policy { get; }
+    public ApprovalStore Approvals => _approvals;
     public HttpContext Http { get; set; } = new DefaultHttpContext();
     public List<IMutationVerifier> Verifiers { get; } = [];
     public DirectCallVerdict ReadVerdict { get; set; } = new(true, GuardrailVerdict.Allow, null);

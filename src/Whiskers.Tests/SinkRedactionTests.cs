@@ -526,18 +526,18 @@ public sealed partial class SinkRedactionTests
     /// <summary>Every free-text parameter of a real MCP tool: its value is withheld (length only).</summary>
     private static readonly HashSet<string> PayloadParameters = new(StringComparer.Ordinal)
     {
-        "command", "composeContent", "content", "envVars", "prompt", "query", "volumes",
+        "command", "composeContent", "composePath", "content", "envVars", "prompt", "query", "token", "volumes",
     };
 
     /// <summary>Every other text parameter: short identifiers and descriptions, redacted pattern by pattern. A new
     /// parameter fails this test until it is put in one of the two lists — the classification is a decision.</summary>
     private static readonly HashSet<string> TextParameters = new(StringComparer.Ordinal)
     {
-        "action", "appName", "certName", "container", "containerId", "containerName", "cronExpression", "database",
-        "description", "driver", "eventType", "from", "image", "minSeverity", "name", "network", "networkId",
-        "pattern", "period", "port", "ports", "priority", "projectName", "protocol", "reason", "restartPolicy",
-        "server", "serverId", "serverType", "serviceName", "severity", "siteName", "table", "tag", "targetId",
-        "taskId", "taskType", "type", "value", "volumeName", "zone",
+        "action", "appId", "appName", "branch", "certName", "container", "containerId", "containerName",
+        "cronExpression", "database", "description", "driver", "eventType", "from", "image", "minSeverity", "name",
+        "network", "networkId", "pattern", "period", "port", "ports", "priority", "projectName", "protocol", "provider",
+        "reason", "repoUrl", "restartPolicy", "server", "serverId", "serverType", "serviceName", "severity", "siteName",
+        "table", "tag", "targetId", "taskId", "taskType", "type", "value", "volumeName", "webhookId", "zone",
     };
 
     [Fact]

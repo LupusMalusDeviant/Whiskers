@@ -23,10 +23,16 @@ public sealed record AgentToolEntry(
 /// are excluded from the schema — only real tool arguments remain.</summary>
 public sealed class AgentToolRegistry : IAgentToolRegistry
 {
-    /// <summary>Tools the agent itself must NEVER call — otherwise recursion / permission loops.
-    /// instruct_agent invokes the agent; giving it to the agent would let it call itself.</summary>
+    /// <summary>Tools the agent itself must NEVER call. instruct_agent invokes the agent; giving it to the agent would
+    /// let it call itself. The Brokkr provisioning tools take a repository token or answer with a webhook secret
+    /// (contract 0001); they are for a provisioning key: a credential must never pass through the model or its
+    /// transcript.</summary>
     public static readonly IReadOnlySet<string> NonAgentTools =
-        new HashSet<string>(StringComparer.Ordinal) { "instruct_agent" };
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "instruct_agent", "create_git_deploy_app", "set_git_deploy_token", "create_git_deploy_webhook",
+            "rotate_git_deploy_webhook_secret",
+        };
 
     public IReadOnlyDictionary<string, AgentToolEntry> Tools { get; }
 

@@ -135,7 +135,9 @@ public static class McpPermissionLevels
 
         // Git deploy / volume backups / alert history — read-only for now (Plan-0013 WP4). Triggering a
         // deploy, taking or restoring a backup, and sending notifications are deliberately NOT exposed.
+        // Setting up an app, its token and its webhook is (Brokkr, contract 0001): those levels come from the catalog.
         ["list_git_deploy_apps"] = Read,
+        ["get_git_deploy_app"] = Read,
         ["list_volume_backups"] = Read,
         ["list_volumes"] = Read,
         ["list_recent_alerts"] = Read,
@@ -267,6 +269,11 @@ public static class McpPermissionLevels
         ["execute_command"] = "Admin",
         ["instruct_agent"] = "Agent",
         ["list_git_deploy_apps"] = "Git Deploy",
+        ["get_git_deploy_app"] = "Git Deploy",
+        ["create_git_deploy_app"] = "Git Deploy",
+        ["set_git_deploy_token"] = "Git Deploy",
+        ["create_git_deploy_webhook"] = "Git Deploy",
+        ["rotate_git_deploy_webhook_secret"] = "Git Deploy",
         ["list_volume_backups"] = "Volume-Backups",
         ["list_volumes"] = "Volume-Backups",
         ["list_recent_alerts"] = "Benachrichtigungen",
